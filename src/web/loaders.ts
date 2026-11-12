@@ -92,6 +92,7 @@ import {
     listRecipesFiltered,
     macrosForPerson,
     RecipeInputError,
+    RecipeUnverifiedError,
     recipeDislikeNote,
     recipeFilters,
     recipeNotices,
@@ -132,6 +133,11 @@ import {
     groupRecipeIngredientsByPlace,
     renderRecipeDetailV2Page,
 } from "./pages/v2/recipes-page.js";
+import {
+    COOK_SHEET_ID,
+    type CookSheetView,
+} from "./pages/v2/recipes-page-cook.js";
+import { guessMealType } from "./pages/v2/log-sheet.js";
 import { orderCards } from "../domain/layout.js";
 import { todayInTz, validateTz } from "../domain/tz.js";
 import { fromGrams } from "../domain/units.js";
@@ -143,7 +149,13 @@ import {
     type NutritionView,
 } from "./pages/nutrition.js";
 import { loadToday, useSoonFor } from "./loaders-today.js";
-import { listExpiring } from "../domain/stock.js";
+import {
+    listExpiring,
+    previewCookRecipe,
+    StockInputError,
+    type CookPreview,
+} from "../domain/stock.js";
+import { FoodsInputError } from "../domain/foods.js";
 import { parseTodayDateParam, renderTodayV2Page } from "./pages/v2/today.js";
 import {
     loadHouseholdNotices,
@@ -1967,6 +1979,37 @@ export async function renderRecipesListPage(
     };
 }
 
+/**
+ * What cooking `servings` portions of a recipe takes from the kitchen, as the
+ * cook sheet shows it. A recipe or ingredient the cook cannot run on is a
+ * message, not a thrown page: the sheet says so and the confirm reports it too.
+ */
+export async function loadCookPreview(
+    householdId: string,
+    recipeId: string,
+    servings: number,
+): Promise<{ preview: CookPreview | null; error?: string }> {
+    try {
+        const preview = await previewCookRecipe(
+            liveRecipesStore(),
+            liveFridgeStore(),
+            liveFoodsStore(),
+            { householdId, recipeId, totalPortions: servings },
+        );
+        return { preview };
+    } catch (err) {
+        if (
+            err instanceof StockInputError ||
+            err instanceof RecipeInputError ||
+            err instanceof RecipeUnverifiedError ||
+            err instanceof FoodsInputError
+        ) {
+            return { preview: null, error: err.message };
+        }
+        throw err;
+    }
+}
+
 export async function renderRecipeDetailRoute(
     viewerUserId: string,
     recipeId: string,
@@ -1974,6 +2017,10 @@ export async function renderRecipeDetailRoute(
         member?: string;
         error?: string;
         openModalId?: string;
+        /** v2: open the cook sheet on load (`?cook=1`, or after a failed confirm). */
+        openCook?: boolean;
+        /** v2: the stepper value a failed confirm re-renders with. */
+        cookServings?: number;
         linkProductId?: string;
         didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
     } = {},
@@ -2102,6 +2149,39 @@ export async function renderRecipeDetailRoute(
             fridge.locations,
             familyFoodMap,
         );
+        let cook: CookSheetView | undefined;
+        if (view.verification !== "unverified") {
+            const servings =
+                opts.cookServings != null &&
+                Number.isFinite(opts.cookServings) &&
+                opts.cookServings > 0
+                    ? opts.cookServings
+                    : view.yieldPortions;
+            const { preview, error: previewError } = await loadCookPreview(
+                householdId,
+                recipeId,
+                servings,
+            );
+            const open =
+                opts.openCook === true || opts.openModalId === COOK_SHEET_ID;
+            cook = {
+                recipeId,
+                recipeName: view.name,
+                servings,
+                yieldPortions: view.yieldPortions,
+                preview,
+                previewError,
+                slot: guessMealType(
+                    profile?.timezone && validateTz(profile.timezone)
+                        ? profile.timezone
+                        : "UTC",
+                ) as CookSheetView["slot"],
+                macrosPerPortion: macrosPerPortion ?? macros,
+                submitKey: crypto.randomUUID(),
+                open,
+                error: open ? opts.error : undefined,
+            };
+        }
         return {
             status: 200,
             html: renderRecipeDetailV2Page({
@@ -2121,6 +2201,7 @@ export async function renderRecipeDetailRoute(
                 })),
                 viewerId: viewerUserId,
                 portionCount: view.portionCount,
+                cook,
                 error: opts.error,
             }),
         };

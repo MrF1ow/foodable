@@ -19,6 +19,11 @@ import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { esc } from "../../components/v2/html.js";
 import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
 import { renderAppShell } from "../../shell.js";
+import {
+    renderCookSheet,
+    renderCookTrigger,
+    type CookSheetView,
+} from "./recipes-page-cook.js";
 
 export const RECIPE_NOT_IN_STOCK_ID = "__not_in_stock__";
 
@@ -48,6 +53,8 @@ export type RecipeDetailV2View = {
     members: RecipeDetailV2Member[];
     viewerId: string;
     portionCount: number;
+    /** The cook sheet. Absent when the recipe cannot be cooked (unverified). */
+    cook?: CookSheetView;
     error?: string;
 };
 
@@ -274,40 +281,6 @@ function instructionsHtml(instructions: string | null): string {
     return `<ol class="fd-recipe-steps">${steps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>`;
 }
 
-function cookForm(view: RecipeDetailV2View): string {
-    if (view.recipe.verification === "unverified") return "";
-    const recipeId = esc(view.recipe.id);
-    const memberFields = view.members
-        .map((member) => {
-            const value =
-                member.userId === view.viewerId
-                    ? String(view.portionCount)
-                    : "1";
-            return `<label class="fd-recipe-cook-field"><span class="fd-recipe-cook-field__label">${esc(member.displayName)}</span><input class="fd-recipe-cook-input" name="portion:${esc(member.userId)}" type="number" min="0" step="any" value="${esc(value)}" /></label>`;
-        })
-        .join("");
-    const err = view.error
-        ? `<p class="fd-recipe-cook-error" role="alert">${esc(view.error)}</p>`
-        : "";
-    return `${err}<form class="fd-recipe-cook" method="post" action="/recipes/${recipeId}/cook">
-${memberFields}
-<label class="fd-recipe-cook-field"><span class="fd-recipe-cook-field__label">Total portions</span><input class="fd-recipe-cook-input" name="total_portions" type="number" min="0" step="any" placeholder="${esc(String(view.recipe.yieldPortions))} for the whole recipe" /></label>
-<label class="fd-recipe-cook-field"><span class="fd-recipe-cook-field__label">Meal type</span>
-<select class="fd-recipe-cook-select" name="meal_type">
-<option value="breakfast">Breakfast</option>
-<option value="lunch">Lunch</option>
-<option value="dinner" selected>Dinner</option>
-<option value="snack">Snack</option>
-</select></label>
-<fieldset class="fd-recipe-cook-options">
-<legend class="fd-sr">Also</legend>
-<label class="fd-recipe-cook-check"><input type="checkbox" name="deduct_stock" value="1" checked /> Deduct stock</label>
-<label class="fd-recipe-cook-check"><input type="checkbox" name="log_meals" value="1" checked /> Log meals</label>
-</fieldset>
-<button type="submit" class="fd-recipe-cook-submit">Cooked it</button>
-</form>`;
-}
-
 function recipeSourceHint(sourceUrl: string | null): string {
     if (!sourceUrl?.trim()) return "";
     try {
@@ -335,8 +308,16 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
             : `${view.portionCount} portions for you`;
     const backChevron = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18 9 12 15 6"/></svg>`;
     const backRound = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18 9 12 15 6"/></svg>`;
+    // The heading id is the anchor Today's "Cook it" link has always used.
+    const actions = view.cook
+        ? `<div class="fd-recipe-actions" id="fd-recipe-cook-heading">${String(renderCookTrigger())}</div>`
+        : "";
+    const pageError =
+        view.error && !view.cook?.open
+            ? `<p class="fd-recipe-error" role="alert">${esc(view.error)}</p>`
+            : "";
     return `<div class="fd-recipe-detail">
-<p class="fd-recipe-back"><a class="fd-recipe-back__btn fd-settings-phone-back" href="/recipes" data-turbo="false" aria-label="Back to recipes">${backRound}</a><a class="fd-recipe-back__link" href="/recipes">${backChevron}<span>Recipes</span></a></p>
+${pageError}<p class="fd-recipe-back"><a class="fd-recipe-back__btn fd-settings-phone-back" href="/recipes" data-turbo="false" aria-label="Back to recipes">${backRound}</a><a class="fd-recipe-back__link" href="/recipes">${backChevron}<span>Recipes</span></a></p>
 <header class="fd-recipe-header">
 <h1 class="fd-recipe-title">${esc(view.recipe.name)}</h1>
 ${metaRow ? `<p class="fd-recipe-meta">${metaRow}</p>` : ""}
@@ -351,10 +332,6 @@ ${macrosBlock(view.macrosPerPortion, view.gapReasons)}
 <span class="fd-sr" id="fd-recipe-ingredients-heading">Ingredients</span>
 ${ingredientGroupsHtml(view.ingredientGroups)}
 </section>
-<section class="fd-recipe-section" aria-labelledby="fd-recipe-cook-heading">
-<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title" id="fd-recipe-cook-heading">Cook</h2></div>
-${cookForm(view)}
-</section>
 </div>
 <div class="fd-recipe-col fd-recipe-col--secondary">
 <section class="fd-recipe-section" aria-labelledby="fd-recipe-method-heading">
@@ -363,7 +340,9 @@ ${instructionsHtml(view.recipe.instructions)}
 </section>
 </div>
 </div>
-</div>`;
+${actions}
+</div>
+${view.cook ? renderCookSheet(view.cook) : ""}`;
 }
 
 export function renderRecipeDetailV2Page(view: RecipeDetailV2View): string {

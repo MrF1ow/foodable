@@ -536,60 +536,23 @@
     color: var(--text-primary);
 }
 
-.fd-recipe-cook {
+/* Cook: the button on the page (FigCraft 22840 bottom row, 48815 header) and
+   the sheet it opens (22962 / 27874 phone, 48994 / 57877 desktop). */
+
+.fd-recipe-actions {
     display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-12);
-}
-
-.fd-recipe-cook-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-4);
-}
-
-.fd-recipe-cook-field__label {
-    font: 500 13px/18px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-recipe-cook-input,
-.fd-recipe-cook-select {
-    width: 100%;
-    box-sizing: border-box;
-    padding: var(--fd-s-10) var(--fd-s-12);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--line);
-    background: var(--surface-panel);
-    color: var(--text-primary);
-    font: 400 15px/20px var(--font-body);
-}
-
-.fd-recipe-cook-options {
     margin: 0;
-    padding: 0;
-    border: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-7);
 }
 
-.fd-recipe-cook-check {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-7);
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-recipe-cook-submit {
-    display: flex;
+.fd-recipe-cook-btn {
+    display: inline-flex;
+    flex: 1 1 auto;
     align-items: center;
     justify-content: center;
-    width: 100%;
+    gap: var(--space-gap);
     min-height: 52px;
     margin: 0;
-    padding: var(--fd-s-12) var(--fd-s-14);
+    padding: 0 18px;
     border: 0;
     border-radius: var(--radius-pill);
     background: var(--accent-fill);
@@ -598,13 +561,176 @@
     cursor: pointer;
 }
 
-.fd-recipe-cook-submit:focus-visible {
-    outline: 2px solid var(--accent-fill);
+.fd-recipe-cook-btn .fd-icon {
+    flex: none;
+    width: 24px;
+    height: 24px;
+}
+
+.fd-recipe-cook-btn:focus-visible {
+    outline: 2px solid var(--accent-text);
     outline-offset: 2px;
 }
 
-.fd-recipe-cook-error {
+.fd-recipe-error {
+    margin: 0 0 var(--fd-s-6);
+    padding: var(--fd-s-10) var(--fd-s-12);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--status-over) 12%, transparent);
+    color: var(--status-over);
+    font: 400 14px/20px var(--font-body);
+}
+
+.fd-recipe-cook-form {
+    display: flex;
+    flex-direction: column;
+}
+
+.fd-recipe-cook-label {
     margin: 0;
+    font: 600 11px/14px var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-recipe-cook-stepper {
+    margin-top: var(--fd-s-4);
+}
+
+.fd-recipe-cook-region {
+    display: flex;
+    flex-direction: column;
+    transition: opacity 0.15s ease;
+}
+
+.fd-recipe-cook-region .fd-recipe-cook-label {
+    margin: var(--fd-s-12) 0 var(--fd-s-2);
+    padding-top: var(--fd-s-4);
+}
+
+.fd-recipe-cook-form[aria-busy="true"] .fd-recipe-cook-region {
+    opacity: 0.55;
+}
+
+.fd-recipe-cook-uses {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.fd-recipe-cook-use {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-row);
+    padding: var(--fd-s-10) 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-recipe-cook-use__name {
+    min-width: 0;
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-recipe-cook-use__change {
+    flex: none;
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+    text-align: right;
+    white-space: nowrap;
+}
+
+.fd-recipe-cook-use--short .fd-recipe-cook-use__change {
+    color: var(--status-warn);
+}
+
+.fd-recipe-cook-note {
+    margin: var(--fd-s-10) 0 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-recipe-cook-note--warn {
+    color: var(--status-warn);
+}
+
+.fd-recipe-cook-log {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-row);
+    padding: var(--fd-s-14) 0 var(--space-gutter);
+    cursor: pointer;
+}
+
+.fd-recipe-cook-log__text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-2);
+    min-width: 0;
+}
+
+.fd-recipe-cook-log__title {
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-recipe-cook-log__sub {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* A checkbox drawn as the design's toggle (46 x 28, 24 knob): it posts with
+   the form and needs no script. */
+.fd-recipe-cook-switch {
+    position: relative;
+    flex: none;
+    width: 46px;
+    height: 28px;
+    margin: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+    appearance: none;
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.fd-recipe-cook-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 24px;
+    height: 24px;
+    border-radius: var(--radius-pill);
+    background: var(--text-secondary);
+    transition: transform 0.15s ease;
+}
+
+.fd-recipe-cook-switch:checked {
+    background: var(--accent-fill);
+}
+
+.fd-recipe-cook-switch:checked::after {
+    background: var(--accent-on);
+    transform: translateX(18px);
+}
+
+.fd-recipe-cook-switch:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+/* The design's Cook button sits right under the toggle row. */
+#fd-recipe-cook-sheet .fd-sheet-actions {
+    margin-top: 0;
+}
+
+.fd-recipe-cook-error {
+    margin: 0 0 var(--fd-s-10);
     padding: var(--fd-s-10) var(--fd-s-12);
     border-radius: var(--radius-md);
     background: color-mix(in srgb, var(--status-over) 12%, transparent);
@@ -768,9 +894,43 @@
         align-items: start;
     }
 
-    .fd-recipe-cook-submit {
-        width: auto;
-        align-self: flex-start;
-        min-width: 200px;
+    /* FigCraft 48815: the title on the left, Cook on the right of its row. */
+    .fd-recipe-detail {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "back back"
+            "head act"
+            "body body";
+        align-items: end;
+    }
+
+    .fd-recipe-back {
+        grid-area: back;
+    }
+
+    .fd-recipe-header {
+        grid-area: head;
+    }
+
+    .fd-recipe-layout {
+        grid-area: body;
+    }
+
+    .fd-recipe-actions {
+        grid-area: act;
+    }
+
+    .fd-recipe-cook-btn {
+        flex: none;
+        min-height: 42px;
+        padding: 0 18px;
+        font-size: 14px;
+        line-height: 18px;
+    }
+
+    /* FigCraft 48994: a 560px centred dialog. */
+    #fd-recipe-cook-sheet.fd-sheet--confirm {
+        width: 560px;
     }
 }
