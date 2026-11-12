@@ -10108,6 +10108,54 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         );
     });
 
+    describe("grocery-list and fridge v2 resources", () => {
+        afterEach(() => resetFlagsForTests());
+
+        test.each(ERAS)(
+            "flag on reads both v2 cards and they match their assembly (%p)",
+            async (mode) => {
+                setFlagsForTests(createMemoryFlags({ "mcp-widgets-v2": true }));
+                for (const key of ["grocery-list", "fridge"] as const) {
+                    const assembled = await getWidgetHtml(key, { v2: true });
+                    const uri = widgetUri(`${key}.html`, true);
+                    await withHttpClient("u1", mode, async (client) => {
+                        const res = await client.readResource({ uri });
+                        const c = res.contents[0] as {
+                            mimeType?: string;
+                            text?: string;
+                        };
+                        expect(c.mimeType).toBe("text/html;profile=mcp-app");
+                        expect(c.text).toBe(assembled);
+                        expect(c.text).not.toBe(
+                            await getWidgetHtml(key, { v2: false }),
+                        );
+                    });
+                }
+            },
+        );
+
+        test.each(ERAS)(
+            "flag off lists neither v2 card and refuses to read them (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-widgets-v2": false }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { resources } = await client.listResources();
+                    const uris = resources.map((r) => r.uri);
+                    for (const key of ["grocery-list", "fridge"]) {
+                        const v2 = widgetUri(`${key}.html`, true);
+                        expect(uris).not.toContain(v2);
+                        expect(uris).toContain(widgetUri(`${key}.html`));
+                        await expect(
+                            client.readResource({ uri: v2 }),
+                        ).rejects.toThrow();
+                    }
+                });
+            },
+        );
+    });
+
     test.each(ERAS)(
         "input validation errors are in-band, not transport failures (%p)",
         async (mode) => {

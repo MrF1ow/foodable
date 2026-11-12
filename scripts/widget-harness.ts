@@ -221,6 +221,53 @@ function hostPage(widget: string, params: URLSearchParams): string {
     // Same rows with alcohol tracking OFF: null, not 0, everywhere.
     const mealsNoAlcohol = meals.map((m) => ({ ...m, alcohol_g: null }));
 
+    // The rows list_grocery_lines and get_fridge send, minus the optional bits.
+    const groceryLine = (
+        id: string,
+        name: string,
+        amount: number,
+        unit: string,
+        over: Record<string, unknown> = {},
+    ) => ({
+        id,
+        store_id: "st-1",
+        section_id: "sec-1",
+        display_name: name,
+        amount,
+        unit,
+        checked: false,
+        source: "manual",
+        source_fridge_item_id: null,
+        note: null,
+        already_have: null,
+        store: "Costco",
+        product_name: null,
+        usual: false,
+        product: null,
+        notices: [],
+        ...over,
+    });
+    const fridgeItem = (
+        id: string,
+        location: string,
+        name: string,
+        amount: number,
+        unit: string,
+        expiresOn: string | null,
+        daysLeft: number | null,
+    ) => ({
+        id,
+        location_id: "loc-1",
+        location,
+        kind: "food",
+        display_name: name,
+        amount,
+        unit,
+        expires_on: expiresOn,
+        days_left: daysLeft,
+        notices: [],
+    });
+
     const RESULTS: Record<string, unknown> = {
         "nutrition-summary": {
             start_date: "2026-07-09",
@@ -443,44 +490,70 @@ function hostPage(widget: string, params: URLSearchParams): string {
                 },
             ],
         },
+        // list_grocery_lines: two stores, usuals, a ticked line, a note.
         "grocery-list": {
             locale: "en",
             stores: [
                 {
                     id: "st-1",
-                    name: "Safeway",
+                    name: "Costco",
                     sections: [
                         {
                             id: "sec-dairy",
-                            name: "Dairy",
+                            name: "Dairy & eggs",
                             lines: [
-                                {
-                                    id: "ln-1",
-                                    store_id: "st-1",
-                                    section_id: "sec-dairy",
-                                    display_name: "Milk",
-                                    amount: 1,
-                                    unit: "l",
-                                    checked: false,
+                                groceryLine("ln-1", "Milk", 1, "gal", {
+                                    product_name: "Kirkland 2% milk",
+                                    usual: true,
+                                }),
+                                groceryLine("ln-2", "Eggs", 24, "each", {
+                                    product_name: "Vital Farms large eggs",
+                                    usual: true,
+                                }),
+                            ],
+                        },
+                        {
+                            id: "sec-pantry",
+                            name: "Pantry",
+                            lines: [
+                                groceryLine("ln-3", "Jasmine rice", 5, "lb", {
                                     already_have:
-                                        "already have: have 0.5 l, need 0.5 l",
-                                },
-                                {
-                                    id: "ln-2",
-                                    store_id: "st-1",
-                                    section_id: "sec-dairy",
-                                    display_name: "Cottage Cheese",
-                                    amount: 400,
-                                    unit: "g",
-                                    checked: true,
-                                    already_have: "already have",
-                                },
+                                        "already have: have 1 lb, need 4 lb",
+                                }),
+                                groceryLine(
+                                    "ln-4",
+                                    "Ranch dressing",
+                                    1,
+                                    "bottle",
+                                    {
+                                        product_name: "California Olive Ranch",
+                                        usual: true,
+                                        checked: true,
+                                    },
+                                ),
+                            ],
+                        },
+                    ],
+                },
+                {
+                    id: "st-2",
+                    name: "Trader Joe's",
+                    sections: [
+                        {
+                            id: "sec-fish",
+                            name: "Fish",
+                            lines: [
+                                groceryLine("ln-5", "Salmon", 1, "lb", {
+                                    note: "skin on",
+                                    store: "Trader Joe's",
+                                }),
                             ],
                         },
                     ],
                 },
             ],
         },
+        // get_fridge: today is 2026-07-15. Three tiles, a long list, a freezer.
         fridge: {
             locale: "en",
             locations: [
@@ -489,33 +562,88 @@ function hostPage(widget: string, params: URLSearchParams): string {
                     name: "Fridge",
                     sort_order: 0,
                     items: [
-                        {
-                            id: "it-1",
-                            location_id: "loc-1",
-                            kind: "food",
-                            display_name: "Milk",
-                            amount: 0.5,
-                            unit: "l",
-                            expires_on: "2026-07-18",
-                        },
+                        fridgeItem(
+                            "it-1",
+                            "Fridge",
+                            "Eggs",
+                            9,
+                            "each",
+                            "2026-07-22",
+                            7,
+                        ),
+                        fridgeItem(
+                            "it-2",
+                            "Fridge",
+                            "Chicken thighs",
+                            0.5,
+                            "lb",
+                            "2026-07-20",
+                            5,
+                        ),
+                        fridgeItem(
+                            "it-3",
+                            "Fridge",
+                            "Milk 2%",
+                            0.5,
+                            "gal",
+                            "2026-07-19",
+                            4,
+                        ),
+                        fridgeItem(
+                            "it-4",
+                            "Fridge",
+                            "Salmon",
+                            1,
+                            "lb",
+                            "2026-07-16",
+                            1,
+                        ),
+                        fridgeItem(
+                            "it-5",
+                            "Fridge",
+                            "Spinach",
+                            1,
+                            "bag",
+                            "2026-07-17",
+                            2,
+                        ),
+                        fridgeItem(
+                            "it-6",
+                            "Fridge",
+                            "Cooked rice",
+                            2,
+                            "cup",
+                            "2026-07-18",
+                            3,
+                        ),
+                        fridgeItem(
+                            "it-7",
+                            "Fridge",
+                            "Butter",
+                            1,
+                            "lb",
+                            null,
+                            null,
+                        ),
                     ],
                 },
                 {
                     id: "loc-2",
-                    name: "Pantry",
+                    name: "Freezer",
                     sort_order: 1,
                     items: [
-                        {
-                            id: "it-3",
-                            location_id: "loc-2",
-                            kind: "food",
-                            display_name: "Oats",
-                            amount: 500,
-                            unit: "g",
-                            expires_on: null,
-                        },
+                        fridgeItem(
+                            "it-8",
+                            "Freezer",
+                            "Peas",
+                            1,
+                            "bag",
+                            "2027-03-01",
+                            229,
+                        ),
                     ],
                 },
+                { id: "loc-3", name: "Pantry", sort_order: 2, items: [] },
             ],
         },
     };
@@ -643,6 +771,14 @@ window.addEventListener("message", (e) => {
           structuredContent: { dismissed: true },
         }});
         log("-> dismiss_notice dismissed=true for id " + d.id);
+        return;
+      }
+      if (name === "check_grocery_line") {
+        const a = d.params.arguments || {};
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: (a.checked === false ? "Unchecked " : "Checked ") + a.id + ". Fridge unchanged." }],
+        }});
+        log("-> check_grocery_line id=" + a.id + " checked=" + a.checked + " for id " + d.id);
         return;
       }
       // bulk_import_meals runs for real, server-side, against an in-memory store.

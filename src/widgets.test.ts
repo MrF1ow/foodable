@@ -157,9 +157,16 @@ test("minified widgets fit size budgets", async () => {
 });
 
 test("v2 assembly falls back to the v1 template when no v2 file exists", async () => {
-    const v1 = await getWidgetHtml("fridge");
-    const v2 = await getWidgetHtml("fridge", { v2: true });
-    expect(v2).toBe(v1);
+    // A key whose v1 file has no twin under templates/v2/.
+    const key = "__v1_only_fixture__";
+    (WIDGET_TEMPLATES as Record<string, string>)[key] = "../shared/bridge.js";
+    try {
+        const v1 = await getWidgetHtml(key);
+        const v2 = await getWidgetHtml(key, { v2: true });
+        expect(v2).toBe(v1);
+    } finally {
+        delete (WIDGET_TEMPLATES as Record<string, string>)[key];
+    }
 });
 
 test("v2-only keys resolve only through the v2 variant", () => {
@@ -2513,6 +2520,655 @@ test("attention v2: notice text is escaped", async () => {
     expect(body).not.toContain("<script>");
     expect(body).not.toContain("<img");
     expect(body).toContain("&lt;img&gt;");
+});
+
+// ---- grocery-list and fridge v2 ---------------------------------------------
+
+type TickArgs = { id: string; checked: boolean };
+
+async function mountGrocery(
+    html: string,
+    opts: {
+        data: object;
+        canCallTools?: boolean;
+        reply?: (args: TickArgs) => Promise<void> | void;
+    },
+) {
+    type Fn = (e: unknown) => void;
+    const calls: TickArgs[] = [];
+    const listeners: Fn[] = [];
+    const windowListeners: Fn[] = [];
+    const dom = widgetRootStub((fn) => listeners.push(fn));
+    const noop = () => {};
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    // Focus, as a browser keeps it: set by focus(), and lost to <body> when
+    // the mount's markup is replaced.
+    let active: { sel: string; id: string } | null = null;
+    const fakeEl = (sel: string, id: string) => {
+        const row = { getAttribute: () => id };
+        const el = {
+            closest: (s: string) =>
+                s === sel
+                    ? el
+                    : s === "[data-line-id]" && sel === "button.check"
+                      ? row
+                      : null,
+            getAttribute: (n: string) =>
+                sel === "button.chip" && n === "data-store" ? id : null,
+            focus: () => {
+                active = { sel, id };
+            },
+        };
+        return el;
+    };
+    let mountHtml = "";
+    const mount = {
+        id: "",
+        textContent: "",
+        style: {},
+        get innerHTML() {
+            return mountHtml;
+        },
+        set innerHTML(v: string) {
+            mountHtml = v;
+            active = null;
+        },
+        querySelectorAll(sel: string) {
+            const re =
+                sel === "button.chip"
+                    ? /class="chip"[^>]*data-store="([^"]+)"/g
+                    : /data-line-id="([^"]+)"[^>]*><button type="button" class="check/g;
+            return [...mountHtml.matchAll(re)].map((m) => fakeEl(sel, m[1]!));
+        },
+    };
+    dom.document.createElement = () => mount as never;
+    Object.defineProperty(dom.document, "activeElement", {
+        get: () => (active ? fakeEl(active.sel, active.id) : {}),
+    });
+    const deliver = (data: object) => {
+        for (const fn of windowListeners) fn({ source: host, data });
+    };
+    const host = {
+        postMessage(msg: {
+            id?: number;
+            method: string;
+            params: { name?: string; arguments?: TickArgs };
+        }) {
+            const { id, method, params } = msg;
+            if (method === "ui/initialize") {
+                deliver({
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                        hostCapabilities:
+                            opts.canCallTools === false
+                                ? {}
+                                : { serverTools: {} },
+                        hostContext: { theme: "light" },
+                    },
+                });
+            } else if (method === "ui/notifications/initialized") {
+                deliver({
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-result",
+                    params: { structuredContent: opts.data },
+                });
+            } else if (
+                method === "tools/call" &&
+                params.name === "check_grocery_line"
+            ) {
+                const args = structuredClone(params.arguments!);
+                calls.push(args);
+                void (async () => {
+                    try {
+                        await opts.reply?.(args);
+                        deliver({
+                            jsonrpc: "2.0",
+                            id,
+                            result: {
+                                content: [{ type: "text", text: "Checked." }],
+                            },
+                        });
+                    } catch (e) {
+                        deliver({
+                            jsonrpc: "2.0",
+                            id,
+                            error: { code: -32603, message: String(e) },
+                        });
+                    }
+                })();
+            }
+        },
+    };
+    const window: Record<string, unknown> = {
+        parent: host,
+        innerWidth: 400,
+        postMessage: (msg: unknown) =>
+            (host.postMessage as (m: unknown) => void)(msg),
+        addEventListener: (type: string, fn: Fn) => {
+            if (type === "message") windowListeners.push(fn);
+        },
+        removeEventListener: noop,
+    };
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, dom.document);
+    }
+    await tick();
+    await tick();
+    const click = (target: unknown) => {
+        for (const fn of listeners) fn({ preventDefault: noop, target });
+    };
+    return {
+        html: dom.html,
+        calls,
+        /** Tap the tick on the row for `id`, as a real click inside the row does. */
+        tapTick(id: string) {
+            click({
+                closest: (sel: string) =>
+                    sel === "button.check"
+                        ? {
+                              closest: (rowSel: string) =>
+                                  rowSel === "[data-line-id]"
+                                      ? { getAttribute: () => id }
+                                      : null,
+                          }
+                        : null,
+            });
+        },
+        /** Give keyboard focus to the tick or store chip, as Tab would. */
+        focusTick(id: string) {
+            fakeEl("button.check", id).focus();
+        },
+        focusStore(id: string) {
+            fakeEl("button.chip", id).focus();
+        },
+        /** What holds focus now: "check:<line id>", "chip:<store id>" or "body". */
+        focused: () => (active ? `${active.sel}:${active.id}` : "body"),
+        /** A later tool result reaching the card, as a re-run of the tool does. */
+        pushResult(data: object) {
+            deliver({
+                jsonrpc: "2.0",
+                method: "ui/notifications/tool-result",
+                params: { structuredContent: data },
+            });
+        },
+        tapStore(storeId: string) {
+            click({
+                closest: (sel: string) =>
+                    sel === "button.chip"
+                        ? { getAttribute: () => storeId }
+                        : null,
+            });
+        },
+        async settle() {
+            for (let i = 0; i < 10; i++) await tick();
+        },
+    };
+}
+
+function groceryLine(over: Record<string, unknown>) {
+    return {
+        id: "ln-1",
+        store_id: "st-1",
+        section_id: "sec-1",
+        display_name: "Milk",
+        amount: 1,
+        unit: "gal",
+        checked: false,
+        source: "manual",
+        source_fridge_item_id: null,
+        note: null,
+        already_have: null,
+        store: "Costco",
+        product_name: null,
+        usual: false,
+        product: null,
+        notices: [],
+        ...over,
+    };
+}
+
+const GROCERY_DATA = {
+    locale: "en",
+    stores: [
+        {
+            id: "st-1",
+            name: "Costco",
+            sections: [
+                {
+                    id: "sec-1",
+                    name: "Dairy",
+                    lines: [
+                        groceryLine({
+                            id: "ln-1",
+                            product_name: "Kirkland 2% milk",
+                            usual: true,
+                        }),
+                        groceryLine({
+                            id: "ln-2",
+                            display_name: "Eggs",
+                            amount: 24,
+                            unit: "each",
+                            checked: true,
+                        }),
+                    ],
+                },
+            ],
+        },
+        {
+            id: "st-2",
+            name: "Trader <Joe's>",
+            sections: [
+                {
+                    id: "sec-2",
+                    name: "Fish",
+                    lines: [
+                        groceryLine({
+                            id: "ln-3",
+                            store_id: "st-2",
+                            section_id: "sec-2",
+                            display_name: "Salmon",
+                            amount: 1,
+                            unit: "lb",
+                        }),
+                    ],
+                },
+            ],
+        },
+    ],
+};
+
+test("grocery-list v2: the card groups by store with usual tags, amounts and the count to get", async () => {
+    const html = await v2Widget("grocery-list");
+    const body = renderWidget(html, GROCERY_DATA);
+    expect(body).toContain('class="hd-title">Groceries<');
+    expect(body).toContain('class="hd-meta">2 to get<');
+    expect(body).toContain('aria-pressed="true" data-store="st-1">Costco');
+    // Chips count what is still to get, as the header does: one each.
+    expect(body.match(/<span class="chip-n">1<\/span>/g)?.length).toBe(2);
+    expect(body).toContain("Trader &lt;Joe&#39;s&gt;");
+    expect(body).toContain(">Kirkland 2% milk<");
+    expect(body).toContain('<span class="tag">usual</span>');
+    expect(body).toContain('class="row-end">1 gal<');
+    // "each" is the default unit: the bare count, as the design shows.
+    expect(body).toContain('class="row-end">24<');
+    expect(body).toContain('class="row done"');
+    // The second store's lines stay behind its chip.
+    expect(body).not.toContain("Salmon");
+    // The sample (no host) renders the design's list.
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain("Vital Farms large eggs");
+    expect(sample).toContain("California Olive Ranch");
+});
+
+test("grocery-list v2: without canCallTools no line can be ticked", async () => {
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+        canCallTools: false,
+    });
+    expect(w.html()).toContain(">Kirkland 2% milk<");
+    expect(w.html()).not.toContain('class="check');
+    expect(w.html()).toContain("Tick items off in the app.");
+    w.tapTick("ln-1");
+    await w.settle();
+    expect(w.calls).toEqual([]);
+});
+
+test("grocery-list v2: ticking calls check_grocery_line with the line id and updates the row", async () => {
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+    });
+    expect(w.html()).toContain('class="check"');
+    expect(w.html()).toContain('class="hd-meta">2 to get<');
+    w.tapTick("ln-1");
+    await w.settle();
+    expect(w.calls).toEqual([{ id: "ln-1", checked: true }]);
+    expect(w.html()).toContain('class="hd-meta">1 to get<');
+    expect(w.html()).not.toContain('data-busy="true"');
+    // Ticking again unticks: the tool is idempotent and takes the new state.
+    w.tapTick("ln-1");
+    await w.settle();
+    expect(w.calls[1]).toEqual({ id: "ln-1", checked: false });
+    expect(w.html()).toContain('class="hd-meta">2 to get<');
+});
+
+test("grocery-list v2: a line is disabled while its call is in flight, so a double tap sends one call", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+        reply: () => gate,
+    });
+    w.tapTick("ln-1");
+    w.tapTick("ln-1");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    expect(w.html()).toMatch(/data-busy="true"/);
+    release();
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    expect(w.html()).not.toContain('data-busy="true"');
+});
+
+test("grocery-list v2: a failed tick reverts the row and says so", async () => {
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+        reply: () => {
+            throw new Error("no such line");
+        },
+    });
+    w.tapTick("ln-1");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    expect(w.html()).toContain('class="hd-meta">2 to get<');
+    expect(w.html()).toContain("Could not update Kirkland 2% milk.");
+    expect(w.html()).not.toContain('data-busy="true"');
+});
+
+test("grocery-list v2: a store chip shows that store's lines", async () => {
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+    });
+    w.tapStore("st-2");
+    expect(w.html()).toContain(">Salmon<");
+    expect(w.html()).not.toContain("Kirkland 2% milk");
+});
+
+test("grocery-list v2: chips count the lines still to get, so they agree with the header", async () => {
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+    });
+    expect(w.html()).toContain('class="hd-meta">2 to get<');
+    expect(w.html().match(/<span class="chip-n">1<\/span>/g)?.length).toBe(2);
+    w.tapTick("ln-1");
+    await w.settle();
+    expect(w.html()).toContain('class="hd-meta">1 to get<');
+    expect(w.html()).toContain(
+        'data-store="st-1">Costco<span class="chip-n">0',
+    );
+    expect(w.html()).toContain('data-store="st-2">Trader');
+});
+
+test("grocery-list v2: a tick keeps keyboard focus on its button through the repaint", async () => {
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+    });
+    w.focusTick("ln-1");
+    expect(w.focused()).toBe("button.check:ln-1");
+    w.tapTick("ln-1");
+    // Busy repaint, then the settled one: focus survives both.
+    expect(w.focused()).toBe("button.check:ln-1");
+    await w.settle();
+    expect(w.calls).toEqual([{ id: "ln-1", checked: true }]);
+    expect(w.focused()).toBe("button.check:ln-1");
+});
+
+test("grocery-list v2: a store chip keeps keyboard focus through the repaint", async () => {
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+    });
+    w.focusStore("st-2");
+    w.tapStore("st-2");
+    expect(w.html()).toContain(">Salmon<");
+    expect(w.focused()).toBe("button.chip:st-2");
+});
+
+test("grocery-list v2: a line the fridge already covers says so in the row", async () => {
+    const body = renderWidget(await v2Widget("grocery-list"), {
+        locale: "en",
+        stores: [
+            {
+                id: "st-1",
+                name: "Costco",
+                sections: [
+                    {
+                        id: "sec-1",
+                        name: "Pantry",
+                        lines: [
+                            groceryLine({
+                                id: "ln-1",
+                                display_name: "Rice",
+                                already_have: "already have 1 lb of 5 lb <b>",
+                            }),
+                            groceryLine({ id: "ln-2", display_name: "Salt" }),
+                        ],
+                    },
+                ],
+            },
+        ],
+    });
+    expect(body).toContain(
+        '<p class="sub note">already have 1 lb of 5 lb &lt;b&gt;</p>',
+    );
+    // Visible text, not a hover title, and only on the line that has it.
+    expect(body).not.toContain("title=");
+    expect(body.match(/class="sub note"/g)?.length).toBe(1);
+});
+
+test("grocery-list v2: a tick that finishes after a new result lands on the new card", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+        reply: () => gate,
+    });
+    w.tapTick("ln-1");
+    w.pushResult(GROCERY_DATA);
+    await w.settle();
+    // The new result brought its own copy of the line, still unticked, and
+    // the call is still out, so the row stays disabled.
+    expect(w.html()).toMatch(/data-line-id="ln-1" data-busy="true"/);
+    release();
+    await w.settle();
+    expect(w.html()).toContain('class="hd-meta">1 to get<');
+    expect(w.html()).not.toContain('data-busy="true"');
+});
+
+test("grocery-list v2: a new result clears the error of a line it no longer has", async () => {
+    const w = await mountGrocery(await v2Widget("grocery-list"), {
+        data: GROCERY_DATA,
+        reply: () => {
+            throw new Error("no such line");
+        },
+    });
+    w.tapTick("ln-1");
+    await w.settle();
+    expect(w.html()).toContain("Could not update Kirkland 2% milk.");
+    // Still on the list: the error stays until the line is ticked again.
+    w.pushResult(GROCERY_DATA);
+    await w.settle();
+    expect(w.html()).toContain("Could not update Kirkland 2% milk.");
+    const without = {
+        ...GROCERY_DATA,
+        stores: [
+            {
+                ...GROCERY_DATA.stores[0]!,
+                sections: [
+                    {
+                        ...GROCERY_DATA.stores[0]!.sections[0]!,
+                        lines: [GROCERY_DATA.stores[0]!.sections[0]!.lines[1]!],
+                    },
+                ],
+            },
+        ],
+    };
+    w.pushResult(without);
+    await w.settle();
+    expect(w.html()).not.toContain("Could not update");
+    // The line coming back later does not revive the old error.
+    w.pushResult(GROCERY_DATA);
+    await w.settle();
+    expect(w.html()).not.toContain("Could not update");
+});
+
+test("grocery-list v2: an empty list says so", async () => {
+    const body = renderWidget(await v2Widget("grocery-list"), {
+        locale: "en",
+        stores: [],
+    });
+    expect(body).toContain("Nothing on the grocery list.");
+});
+
+function fridgeItem(over: Record<string, unknown>) {
+    return {
+        id: "i1",
+        location_id: "loc-1",
+        location: "Fridge",
+        kind: "food",
+        display_name: "Eggs",
+        amount: 9,
+        unit: "each",
+        expires_on: "2026-11-19",
+        days_left: 7,
+        notices: [],
+        ...over,
+    };
+}
+
+test("fridge v2: use-soon tiles take their days and tone from days_left, the rest list by location with a footer", async () => {
+    const html = await v2Widget("fridge");
+    const body = renderWidget(html, {
+        locale: "en",
+        locations: [
+            {
+                id: "loc-1",
+                name: "Fridge",
+                sort_order: 0,
+                items: [
+                    fridgeItem({ id: "a", display_name: "Eggs" }),
+                    fridgeItem({
+                        id: "b",
+                        display_name: "Salmon",
+                        amount: 1,
+                        unit: "lb",
+                        expires_on: "2026-11-13",
+                        days_left: 1,
+                    }),
+                    fridgeItem({
+                        id: "c",
+                        display_name: "Spinach",
+                        expires_on: "2026-11-14",
+                        days_left: 2,
+                    }),
+                    fridgeItem({
+                        id: "d",
+                        display_name: "Old milk",
+                        expires_on: "2026-11-10",
+                        days_left: -2,
+                    }),
+                    fridgeItem({
+                        id: "e",
+                        display_name: "Butter",
+                        expires_on: null,
+                        days_left: null,
+                    }),
+                    fridgeItem({
+                        id: "g",
+                        display_name: "Yogurt",
+                        expires_on: "2026-11-21",
+                        days_left: 9,
+                    }),
+                    fridgeItem({
+                        id: "h",
+                        display_name: "Cheese",
+                        expires_on: "2026-11-25",
+                        days_left: 13,
+                    }),
+                ],
+            },
+            {
+                id: "loc-2",
+                name: "Freezer",
+                sort_order: 1,
+                items: [fridgeItem({ id: "f", display_name: "Peas" })],
+            },
+            { id: "loc-3", name: "Pantry", sort_order: 2, items: [] },
+        ],
+    });
+    expect(body).toContain('class="hd-meta">8 items<');
+    expect(body).toContain("Use soon");
+    expect(body).toContain('class="tile-w is-over">Expired<');
+    expect(body).toContain('class="tile-w is-over">Tomorrow<');
+    expect(body).toContain('class="tile-w is-warn">2 days<');
+    // Eggs (7 days) and the undated butter are not use-soon.
+    expect((body.match(/class="tile"/g) ?? []).length).toBe(3);
+    // Rows: quantity beside the name, the date on the right.
+    expect(body).toContain('class="row-s">9<');
+    expect(body).toContain('class="row-end date">Nov 19<');
+    // Items on a tile are not listed again; the list is the soonest rest.
+    expect(body).not.toContain('data-item-id="b"');
+    // The empty pantry has no section; three rows per location, the rest in the footer.
+    expect(body).not.toContain("Pantry");
+    expect(body).toContain('class="lbl">Fridge<span class="lbl-n">4</span>');
+    expect(body).toContain('class="lbl">Freezer<span class="lbl-n">1</span>');
+    expect(body).toContain("+ 1 more in the fridge");
+    expect(body).not.toContain("Butter");
+});
+
+test("fridge v2: a past date reads red in the list when the tiles are full", async () => {
+    const expired = (id: string, days: number) =>
+        fridgeItem({
+            id,
+            display_name: `Item ${id}`,
+            expires_on: "2026-11-01",
+            days_left: days,
+        });
+    const body = renderWidget(await v2Widget("fridge"), {
+        locale: "en",
+        locations: [
+            {
+                id: "loc-1",
+                name: "Fridge",
+                sort_order: 0,
+                items: [
+                    expired("a", -5),
+                    expired("b", -4),
+                    expired("c", -3),
+                    expired("d", -2),
+                ],
+            },
+        ],
+    });
+    expect((body.match(/class="tile"/g) ?? []).length).toBe(3);
+    expect(body).toContain('class="row-end date is-over">Nov 1<');
+    expect(body).toContain('data-item-id="d"');
+});
+
+test("fridge v2: no use-soon strip when nothing expires within three days; empty fridge says so", async () => {
+    const html = await v2Widget("fridge");
+    const calm = renderWidget(html, {
+        locale: "en",
+        locations: [
+            {
+                id: "loc-1",
+                name: "Pantry",
+                sort_order: 0,
+                items: [fridgeItem({ days_left: 30 })],
+            },
+        ],
+    });
+    expect(calm).not.toContain("Use soon");
+    expect(calm).toContain('class="hd-meta">1 item<');
+    const empty = renderWidget(html, { locale: "en", locations: [] });
+    expect(empty).toContain("Nothing in the fridge.");
+    const sample = renderWidget(html, undefined);
+    expect(sample).toContain("Use soon");
+    expect(sample).toContain("Cooked rice");
+});
+
+test("fridge v2: item names reach the markup escaped", async () => {
+    const body = renderWidget(await v2Widget("fridge"), {
+        locale: "en",
+        locations: [
+            {
+                id: "loc-1",
+                name: EVIL,
+                sort_order: 0,
+                items: [fridgeItem({ display_name: EVIL, days_left: 0 })],
+            },
+        ],
+    });
+    expect(body).not.toContain("<img");
 });
 
 // ---- widget harness (v2-only keys) ------------------------------------------
