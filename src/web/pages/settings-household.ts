@@ -34,7 +34,7 @@ const WEEKDAYS = [
 ] as const;
 
 const RESTOCK_HELP =
-    "Each week at this time, food in the fridge that expires within 7 days goes on the grocery list at its usual amount and store.";
+    "On the day and time above, food that expires within 7 days and usuals whose schedule is due go on the grocery list. Any other day, usuals set to “Add when it runs low” are added once they run low. This one switch controls all of it.";
 
 export type HouseholdSettingsPageView = {
     chrome: ViewerChrome;
@@ -127,7 +127,7 @@ function readOnlyBody(
         })}
         ${panel({
             title: "Restock",
-            body: `${row({ title: "Add expiring food to the grocery list", meta: restockOn })}
+            body: `${row({ title: "Restock the grocery list", meta: restockOn })}
             ${schedule ? row({ title: "Schedule", meta: schedule }) : ""}
             <p class="muted">${escapeHtml(RESTOCK_HELP)}</p>
             <p class="muted">Only the household owner or an admin can change these settings.</p>`,
@@ -171,7 +171,7 @@ function editableBody(
             })}
             ${panel({
                 title: "Restock",
-                body: `<label><input type="checkbox" role="switch" name="restock_enabled" value="true"${restockChecked} /> Add expiring food to the grocery list</label>
+                body: `<label><input type="checkbox" role="switch" name="restock_enabled" value="true"${restockChecked} /> Restock the grocery list</label>
             ${field({
                 id: "restock_weekday",
                 label: "Check on",

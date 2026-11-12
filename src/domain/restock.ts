@@ -1,6 +1,6 @@
 import type { RestockPreferences } from "../household.js";
 import type { EffectiveFood } from "./foods.js";
-import { familyOf, usualLowLevel } from "./foods.js";
+import { familyOf, foodDisplayName, usualLowLevel } from "./foods.js";
 import type { FridgeItem } from "./fridge.js";
 import {
     pickGroceryAmount,
@@ -118,6 +118,28 @@ export type DueUsual = {
     reason: string;
     trigger: "schedule" | "low";
 };
+
+/**
+ * The `grocery.running_low` notice for a usual that has fallen below its
+ * level. The notices and the restock runner both build it here, so the
+ * dismissal key (the usual, scoped to its last restock) cannot drift between
+ * what the user dismissed and what the runner skips.
+ */
+export function runningLowNotice(food: EffectiveFood, reason: string): Notice {
+    return {
+        code: "grocery.running_low",
+        severity: NOTICE_SEVERITY["grocery.running_low"],
+        subject: { kind: "food", id: food.id },
+        related: [],
+        params: {
+            name: foodDisplayName(food),
+            foodId: food.id,
+            reason,
+            // A dismissal holds until the usual is next restocked.
+            dismissScope: food.lastRestockedOn ?? "",
+        },
+    };
+}
 
 const MS_PER_DAY = 86_400_000;
 
@@ -505,12 +527,26 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
     const sortedDue = [...(input.dueUsuals ?? [])].sort((a, b) =>
         a.food.name.localeCompare(b.food.name),
     );
-    for (const { food } of sortedDue) {
+    // A line for the usual's family counts whether or not it is ticked: a
+    // ticked line is bought but not yet put away, so the fridge still reads low.
+    const listedFamilies = new Set<string>();
+    for (const line of input.lines) {
+        if (!line.foodId) continue;
+        listedFamilies.add(familyById.get(line.foodId) ?? line.foodId);
+    }
+    for (const { food, reason, trigger } of sortedDue) {
         const alreadyListed =
-            onGroceryList({ foodId: food.id }, input.lines, input.foodsById) ||
+            listedFamilies.has(familyOf(food)) ||
             lines.some((line) => line.foodId === food.id);
         if (alreadyListed) {
             counts.skippedOnList += 1;
+            continue;
+        }
+        if (
+            trigger === "low" &&
+            isDismissedIn(runningLowNotice(food, reason), input.dismissed)
+        ) {
+            counts.skippedDismissed += 1;
             continue;
         }
         const placed = placeRestockLine(input, food, familyById);

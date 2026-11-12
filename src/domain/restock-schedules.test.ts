@@ -8,7 +8,11 @@ import {
 } from "./foods.js";
 import type { FridgeItem } from "./fridge.js";
 import { addLocation, createMemoryFridgeStore } from "./fridge.js";
-import { createMemoryGroceryStore, type GroceryLine } from "./grocery.js";
+import {
+    checkGroceryLine,
+    createMemoryGroceryStore,
+    type GroceryLine,
+} from "./grocery.js";
 import { createMemoryNoticeDismissalsStore } from "./notice-dismissals.js";
 import {
     EMPTY_HOUSEHOLD_PREFERENCES,
@@ -317,6 +321,7 @@ async function runnerWorld() {
     });
     return {
         grocery,
+        dismissals,
         deps,
         logs,
         store,
@@ -450,6 +455,83 @@ test("source schedules runs the low pass once a day", async () => {
     await runRestockCheck(w.deps("schedules"), WED);
     expect(await w.grocery.listLines(HH)).toEqual([]);
     expect(w.logs.some((l) => l.includes("already ran"))).toBe(false);
+});
+
+const THU = new Date("2026-06-04T15:00:00Z");
+const FRI = new Date("2026-06-05T15:00:00Z");
+
+async function riceLines(w: Awaited<ReturnType<typeof runnerWorld>>) {
+    return (await w.grocery.listLines(HH)).filter(
+        (l) => l.displayName === "Rice",
+    );
+}
+
+test("source schedules: a ticked low-usual line awaiting put-away is not doubled the next day", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await runRestockCheck(w.deps("schedules"), WED);
+    const [line] = await riceLines(w);
+    await checkGroceryLine(w.grocery, HH, line!.id, true, {
+        foods: w.foods,
+        today: "2026-06-03",
+    });
+    await runRestockCheck(w.deps("schedules"), THU);
+    await runRestockCheck(w.deps("schedules"), FRI);
+    const rice = await riceLines(w);
+    expect(rice.map((l) => l.checked)).toEqual([true]);
+});
+
+test("source schedules: a dismissed running-low notice keeps the low pass from re-adding the usual", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    // The notice's dismissal scope is the usual's last restock day.
+    await w.dismissals.insert({
+        householdId: HH,
+        code: "grocery.running_low",
+        subjectKind: "food",
+        subjectId: w.rice.id,
+        relatedKey: "2026-05-01",
+        dismissedBy: "u1",
+    });
+    for (const day of [WED, THU, FRI]) {
+        await runRestockCheck(w.deps("schedules"), day);
+        expect(await riceLines(w)).toEqual([]);
+    }
+    expect(w.logs[0]).toContain("skipped_dismissed=1");
+});
+
+test("source schedules: a dismissal for an older restock does not hide a low usual", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await w.dismissals.insert({
+        householdId: HH,
+        code: "grocery.running_low",
+        subjectKind: "food",
+        subjectId: w.rice.id,
+        relatedKey: "2026-04-01",
+        dismissedBy: "u1",
+    });
+    await runRestockCheck(w.deps("schedules"), WED);
+    expect(await riceLines(w)).toHaveLength(1);
+});
+
+test("source schedules: a running-low dismissal does not stop a schedule-due usual", async () => {
+    const w = await runnerWorld();
+    await w.foods.updateFoodRow({
+        ...(await w.foods.getFood(HH, w.rice.id))!,
+        restockWhenLow: true,
+        restockLowLevel: 1,
+    });
+    await w.dismissals.insert({
+        householdId: HH,
+        code: "grocery.running_low",
+        subjectKind: "food",
+        subjectId: w.rice.id,
+        relatedKey: "2026-05-01",
+        dismissedBy: "u1",
+    });
+    await runRestockCheck(w.deps("schedules"), NOW);
+    expect(await riceLines(w)).toHaveLength(1);
 });
 
 test("source schedules still adds the schedule part and expiring lines on the restock day after a weekday pass", async () => {
