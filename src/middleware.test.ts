@@ -11,6 +11,7 @@ import {
 import { setClientIpConfigForTests } from "./client-ip.js";
 import { Hono } from "hono";
 import * as actualTokens from "./db/tokens.js";
+import * as actualTokenUse from "./token-use.js";
 import * as householdDb from "./db/household.js";
 
 // Snapshot before mocking — restoring from the live namespace is a no-op
@@ -32,6 +33,28 @@ mock.module("./db/tokens.js", () => ({
     lookupBearer: async (token: string) => {
         tokenLookups++;
         if (!tokenStoreAvailable) return { status: "unavailable" };
+        // An OAuth token issued to a registered app that was never used.
+        if (token === "app-token") {
+            return {
+                status: "valid",
+                kind: "user",
+                userId: "user-1",
+                clientId: "client-1",
+                clientName: "Claude",
+                lastUsedAt: null,
+            };
+        }
+        // An OAuth token issued before clients were recorded, used a minute ago.
+        if (token === "recent-token") {
+            return {
+                status: "valid",
+                kind: "user",
+                userId: "user-1",
+                clientId: null,
+                clientName: null,
+                lastUsedAt: new Date(Date.now() - 60_000),
+            };
+        }
         return token === "valid-token"
             ? { status: "valid", kind: "user", userId: "user-1" }
             : token === "hh-token"
@@ -39,8 +62,25 @@ mock.module("./db/tokens.js", () => ({
               : { status: "invalid" };
     },
 }));
+
+// The recorder the bearer check uses, wired to a store that only counts. A
+// fresh one per test file run keeps its memory of recent writes out of other
+// suites that import token-use for real.
+const realTokenUse = { ...actualTokenUse };
+const touchedTokens: string[] = [];
+mock.module("./token-use.js", () => ({
+    ...actualTokenUse,
+    recordTokenUse: actualTokenUse.createTokenUseRecorder({
+        now: () => new Date(),
+        touch: async (token: string) => {
+            touchedTokens.push(token);
+            return true;
+        },
+    }),
+}));
 afterAll(() => {
     mock.module("./db/tokens.js", () => realTokens);
+    mock.module("./token-use.js", () => realTokenUse);
 });
 
 const testClientIpConfig = {
@@ -91,11 +131,14 @@ function buildApp() {
     app.all("/mcp", banRepeatAuthFailures, authenticateBearer, rateLimit, (c) =>
         c.json({ ok: true, auth: c.get("authContext") ?? null }),
     );
+    app.all("/client", banRepeatAuthFailures, authenticateBearer, (c) =>
+        c.json({ client: c.get("tokenClient") ?? null }),
+    );
     return { app, logs };
 }
 
-const from = (ip: string, token?: string) =>
-    new Request("http://localhost/mcp", {
+const from = (ip: string, token?: string, path = "/mcp") =>
+    new Request(`http://localhost${path}`, {
         method: "POST",
         headers: {
             "x-forwarded-for": ip,
@@ -117,6 +160,7 @@ afterAll(() => setClientIpConfigForTests(null));
 
 beforeEach(async () => {
     await _resetBuckets();
+    touchedTokens.length = 0;
     tokenLookups = 0;
     tokenStoreAvailable = true;
     setClientIpConfigForTests(testClientIpConfig);
@@ -397,4 +441,30 @@ test("two appended X-Forwarded-For headers pick the right-most trusted hop", asy
     // The strikes landed on the second header line, not the first.
     expect((await post("203.0.113.90")).status).toBe(429);
     expect((await post("1.1.1.1")).status).not.toBe(429);
+});
+
+test("an app's token names its client for the request and records its use once", async () => {
+    const { app } = buildApp();
+
+    const first = await app.fetch(from("2.2.2.2", "app-token"));
+    expect(first.status).toBe(200);
+    const named = await app.fetch(from("2.2.2.2", "app-token", "/client"));
+    expect(await named.json()).toEqual({ client: "Claude" });
+    // A second request in the same window reads "never used" again, because
+    // the write is not awaited; the recorder still writes only once.
+    expect((await app.fetch(from("2.2.2.2", "app-token"))).status).toBe(200);
+
+    expect(touchedTokens).toEqual(["app-token"]);
+});
+
+test("a token used a minute ago is not written again", async () => {
+    const { app } = buildApp();
+    expect((await app.fetch(from("2.2.2.3", "recent-token"))).status).toBe(200);
+    expect(touchedTokens).toEqual([]);
+});
+
+test("a token with no recorded client leaves the request's client unset", async () => {
+    const { app } = buildApp();
+    const res = await app.fetch(from("2.2.2.4", "recent-token", "/client"));
+    expect(await res.json()).toEqual({ client: null });
 });

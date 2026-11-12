@@ -14,6 +14,10 @@ const RUN_AS_SYSTEM_ALLOWLIST = [
     // (the security definer functions foodable_app may not call), each after
     // the route's own owner, manager or sign-up policy check.
     "src/db/household.ts",
+    // Recording a token's last use after the bearer check, and listing and
+    // disconnecting a member's AI apps: registered clients carry no
+    // per-member policy, and every query is scoped by the member's user id.
+    "src/db/tokens.ts",
     // Invite code peek and single-use redeem during sign-up.
     "src/db/invites.ts",
     // Reading an archive by its signed link, which has no session.

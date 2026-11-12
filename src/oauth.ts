@@ -7,6 +7,7 @@ import {
     storeRefreshToken,
     consumeRefreshToken,
     registerClient,
+    isRegisteredClient,
 } from "./db/tokens.js";
 import {
     signUpUser,
@@ -138,6 +139,11 @@ async function finishAuthorization(
             session.redirectUri,
             userId,
             session.codeChallenge,
+            // The deploy-wide id names no single app, so a token issued under
+            // it records no client and reads as an unknown app.
+            session.clientId === process.env.OAUTH_CLIENT_ID
+                ? null
+                : session.clientId,
         ),
     );
 
@@ -372,17 +378,25 @@ export function createOAuthRouter() {
             return c.json({ error: "invalid_redirect_uri" }, 400);
         }
 
-        // Fire-and-forget: track who registers
-        void runAsSystem("oauth client registration", async () =>
-            registerClient(body.client_name ?? null, redirectUris),
+        // The registration's own id is the client_id, so a token can name the
+        // app it was issued to. When it cannot be stored the deploy-wide id
+        // still works: registration never fails on a database hiccup.
+        const registeredId = await runAsSystem(
+            "oauth client registration",
+            async () => registerClient(body.client_name ?? null, redirectUris),
         );
 
         return c.json({
-            client_id: clientId,
+            client_id: registeredId ?? clientId,
             token_endpoint_auth_method: "none",
             redirect_uris: redirectUris,
         });
     });
+
+    // The deploy-wide client id, or the id a dynamic registration was given.
+    const isKnownClient = async (id: string): Promise<boolean> =>
+        id === clientId ||
+        runAsSystem("oauth client check", () => isRegisteredClient(id));
 
     // Authorization endpoint
     oauth.get("/authorize", async (c) => {
@@ -406,7 +420,7 @@ export function createOAuthRouter() {
                 400,
             );
         }
-        if (reqClientId !== clientId) {
+        if (!(await isKnownClient(reqClientId))) {
             return c.json({ error: "invalid_client" }, 400);
         }
 
@@ -534,9 +548,26 @@ export function createOAuthRouter() {
                 async () => {
                     const owner = await consumeRefreshToken(refreshToken);
                     if (!owner) return null;
-                    await storeToken(newAccessToken, owner);
-                    await storeRefreshToken(newRefreshToken, owner);
-                    return owner;
+                    // A refresh token belongs to the client it was issued to.
+                    if (
+                        reqClientId &&
+                        owner.clientId &&
+                        reqClientId !== owner.clientId
+                    ) {
+                        return null;
+                    }
+                    // The new tokens belong to the same app as the old one.
+                    await storeToken(
+                        newAccessToken,
+                        owner.userId,
+                        owner.clientId,
+                    );
+                    await storeRefreshToken(
+                        newRefreshToken,
+                        owner.userId,
+                        owner.clientId,
+                    );
+                    return owner.userId;
                 },
             );
             if (!userId) {
@@ -560,7 +591,7 @@ export function createOAuthRouter() {
         }
 
         // Validate client credentials if provided
-        if (reqClientId && reqClientId !== clientId) {
+        if (reqClientId && !(await isKnownClient(reqClientId))) {
             return c.json({ error: "invalid_client" }, 401);
         }
         if (reqClientSecret && reqClientSecret !== clientSecret) {
@@ -580,6 +611,15 @@ export function createOAuthRouter() {
             return c.json({ error: "invalid_request" }, 400);
         }
         if (redirectUri !== authCodeData.redirect_uri) {
+            return c.json({ error: "invalid_grant" }, 400);
+        }
+
+        // A code belongs to the client it was issued to.
+        if (
+            reqClientId &&
+            authCodeData.client_id &&
+            reqClientId !== authCodeData.client_id
+        ) {
             return c.json({ error: "invalid_grant" }, 400);
         }
 
@@ -608,8 +648,16 @@ export function createOAuthRouter() {
         const accessToken = crypto.randomUUID();
         const refreshToken = crypto.randomUUID();
         await runAsSystem("oauth token exchange", async () => {
-            await storeToken(accessToken, authCodeData.user_id);
-            await storeRefreshToken(refreshToken, authCodeData.user_id);
+            await storeToken(
+                accessToken,
+                authCodeData.user_id,
+                authCodeData.client_id,
+            );
+            await storeRefreshToken(
+                refreshToken,
+                authCodeData.user_id,
+                authCodeData.client_id,
+            );
         });
 
         return c.json({

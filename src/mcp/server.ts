@@ -217,6 +217,7 @@ async function buildMcpServer(
     baseUrl: string,
     auth: AuthContext,
     protocolEra?: "legacy" | "modern",
+    client?: string,
 ): Promise<McpServer> {
     const server = newMcpServer(baseUrl);
 
@@ -242,7 +243,7 @@ async function buildMcpServer(
               ])
             : [null, undefined, null];
     const drinkUnit = preferredDrinkUnitFromProfile(profile);
-    const flagCtx = buildFlagContext({ auth, member });
+    const flagCtx = buildFlagContext({ auth, member, client });
     const flags = await loadViewerFlags(flagCtx);
 
     registerTools(
@@ -327,6 +328,14 @@ function isAuthContext(value: unknown): value is AuthContext {
     return false;
 }
 
+/** The AI app behind the token, as handleMcp passed it down (logs-only). */
+export function clientFromExtra(
+    extra: Record<string, unknown> | undefined,
+): string | undefined {
+    const client = extra?.client;
+    return typeof client === "string" && client.length > 0 ? client : undefined;
+}
+
 function authFromExtra(
     extra: Record<string, unknown> | undefined,
 ): AuthContext | null {
@@ -359,7 +368,14 @@ const mcpHandler = createMcpHandler(
             return bare;
         }
 
-        const server = await buildMcpServer(baseUrl, auth, ctx.era);
+        const server = await buildMcpServer(
+            baseUrl,
+            auth,
+            ctx.era,
+            clientFromExtra(
+                ctx.authInfo?.extra as Record<string, unknown> | undefined,
+            ),
+        );
         if (trace) trace.server = server;
         return server;
     },
@@ -468,6 +484,7 @@ export const handleMcp = async (c: Context) => {
                 extra: {
                     auth,
                     trace,
+                    client: c.get("tokenClient"),
                 },
             },
         }),

@@ -9,6 +9,7 @@ import {
 import { maskIp } from "./net.js";
 import { resourceMetadataUrl } from "./discovery.js";
 import { getBaseUrl } from "./url.js";
+import { recordTokenUse } from "./token-use.js";
 import { getConnInfo } from "hono/bun";
 import {
     getClientIpConfig,
@@ -33,6 +34,9 @@ declare module "hono" {
         // it. Modern requests carry it in the envelope every time; 2025-era
         // requests only on `initialize`.
         mcpClient: string;
+        // The AI app the bearer token was issued to: its registered name, else
+        // its client id. Set only for an OAuth token that records a client.
+        tokenClient: string;
     }
 }
 import {
@@ -174,6 +178,16 @@ export const authenticateBearer = async (c: Context, next: Next) => {
             ? { kind: "user", userId: lookup.userId }
             : { kind: "household", householdId: lookup.householdId };
     c.set("authContext", authContext);
+    if (lookup.kind === "user") {
+        const client = lookup.clientName ?? lookup.clientId;
+        if (client) c.set("tokenClient", client.slice(0, 80));
+        // Not awaited: the write is throttled, off the request path, and its
+        // failure never reaches the caller. `undefined` is a lookup that did
+        // not read the column at all.
+        if (lookup.lastUsedAt !== undefined) {
+            void recordTokenUse(token, lookup.lastUsedAt);
+        }
+    }
     const actor = await actorForValidBearer(lookup);
     return withActor(actor, () => next());
 };

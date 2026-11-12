@@ -37,10 +37,10 @@ const CODE_CHALLENGE = base64URLEncode(
     Buffer.from(crypto.createHash("sha256").update(CODE_VERIFIER).digest()),
 );
 
-function authorizeUrl() {
+function authorizeUrl(clientId: string = process.env.OAUTH_CLIENT_ID!) {
     const params = new URLSearchParams({
         response_type: "code",
-        client_id: process.env.OAUTH_CLIENT_ID!,
+        client_id: clientId,
         redirect_uri: ALLOWED_REDIRECT,
         state: "state-two-instance",
         code_challenge: CODE_CHALLENGE,
@@ -278,6 +278,143 @@ describeDb(
                 const body = (await res.json()) as { error?: string };
                 expect(body.error).toBe("session_expired");
             }
+        });
+
+        // Runs authorize, approve and the code exchange for one client id and
+        // returns the token response.
+        async function connect(app: Hono, clientId: string) {
+            const authorizeRes = await app.request(
+                `http://localhost${authorizeUrl(clientId)}`,
+            );
+            expect(authorizeRes.status).toBe(200);
+            const approveRes = await app.request("http://localhost/approve", {
+                method: "POST",
+                headers: {
+                    "content-type": "application/x-www-form-urlencoded",
+                    "x-forwarded-for": "203.0.113.7",
+                },
+                body: new URLSearchParams({
+                    session_id: sessionIdFromLoginHtml(
+                        await authorizeRes.text(),
+                    ),
+                    email: EMAIL,
+                    password: PASSWORD,
+                }).toString(),
+                redirect: "manual",
+            });
+            expect(approveRes.status).toBe(302);
+            const code = new URL(
+                approveRes.headers.get("location")!,
+                ALLOWED_REDIRECT,
+            ).searchParams.get("code")!;
+            const tokenRes = await app.request("http://localhost/token", {
+                method: "POST",
+                headers: {
+                    "content-type": "application/x-www-form-urlencoded",
+                    "x-forwarded-for": "203.0.113.8",
+                },
+                body: new URLSearchParams({
+                    grant_type: "authorization_code",
+                    code,
+                    redirect_uri: ALLOWED_REDIRECT,
+                    code_verifier: CODE_VERIFIER,
+                    client_id: clientId,
+                }).toString(),
+            });
+            expect(tokenRes.status).toBe(200);
+            return (await tokenRes.json()) as {
+                access_token: string;
+                refresh_token: string;
+            };
+        }
+
+        test("a token issued under the deploy-wide client id records no client", async () => {
+            const { sql } = getCtx();
+            const tokens = await connect(
+                makeOAuthApp(),
+                process.env.OAUTH_CLIENT_ID!,
+            );
+            const [access] = await sql`
+                select client_id from public.oauth_tokens
+                where token = ${tokens.access_token}
+            `;
+            const [refresh] = await sql`
+                select client_id from public.refresh_tokens
+                where token = ${tokens.refresh_token}
+            `;
+            expect(access!.client_id).toBeNull();
+            expect(refresh!.client_id).toBeNull();
+        });
+
+        test("a token issued under a registered client records that client, through a refresh too", async () => {
+            const { sql } = getCtx();
+            const app = makeOAuthApp();
+            const registered = await app.request("http://localhost/register", {
+                method: "POST",
+                headers: {
+                    "content-type": "application/json",
+                    "x-forwarded-for": "203.0.113.9",
+                },
+                body: JSON.stringify({
+                    client_name: "Claude",
+                    redirect_uris: [ALLOWED_REDIRECT],
+                }),
+            });
+            const { client_id } = (await registered.json()) as {
+                client_id: string;
+            };
+            expect(client_id).not.toBe(process.env.OAUTH_CLIENT_ID);
+
+            const tokens = await connect(app, client_id);
+            const [access] = await sql`
+                select client_id from public.oauth_tokens
+                where token = ${tokens.access_token}
+            `;
+            expect(access!.client_id).toBe(client_id);
+
+            const refreshForm = (fields: Record<string, string>) =>
+                app.request("http://localhost/token", {
+                    method: "POST",
+                    headers: {
+                        "content-type": "application/x-www-form-urlencoded",
+                        "x-forwarded-for": "203.0.113.10",
+                    },
+                    body: new URLSearchParams({
+                        grant_type: "refresh_token",
+                        ...fields,
+                    }).toString(),
+                });
+
+            // Another client cannot spend this app's refresh token.
+            const stolen = await refreshForm({
+                refresh_token: tokens.refresh_token,
+                client_id: process.env.OAUTH_CLIENT_ID!,
+            });
+            expect(stolen.status).toBe(400);
+            expect(((await stolen.json()) as { error: string }).error).toBe(
+                "invalid_grant",
+            );
+
+            // Mismatch refused and the token was spent; get a fresh pair.
+            const again = await connect(app, client_id);
+            const own = await refreshForm({
+                refresh_token: again.refresh_token,
+                client_id,
+            });
+            expect(own.status).toBe(200);
+            const next = (await own.json()) as { access_token: string };
+            const [refreshed] = await sql`
+                select client_id from public.oauth_tokens
+                where token = ${next.access_token}
+            `;
+            expect(refreshed!.client_id).toBe(client_id);
+
+            // No client_id sent: unchanged behaviour, the token's client stays.
+            const bare = await connect(app, client_id);
+            const noId = await refreshForm({
+                refresh_token: bare.refresh_token,
+            });
+            expect(noId.status).toBe(200);
         });
     },
     { actor: null },
