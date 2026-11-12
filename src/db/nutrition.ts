@@ -1151,6 +1151,15 @@ export interface NutritionGoals {
     daily_caffeine_mg: number | null;
     daily_water_ml: number | null;
     target_weight_g: number | null;
+    // The name a member gives their goals ("Recomp"), a short note, and the
+    // calendar day the targets were last set (YYYY-MM-DD, in the member's
+    // timezone). Null means never given, never an empty string. Optional in
+    // the type so the many hand-built goal literals (fixtures, the preview,
+    // the Today page's sample) need not name them; every row read from the
+    // database carries all three.
+    goal_name?: string | null;
+    goal_note?: string | null;
+    goals_set_on?: string | null;
     updated_at: string;
 }
 
@@ -1165,6 +1174,10 @@ export interface NutritionGoalsInput {
     daily_caffeine_mg?: number | null;
     daily_water_ml?: number | null;
     target_weight_g?: number | null;
+    /** Omitted keeps the stored value; null clears it. */
+    goal_name?: string | null;
+    goal_note?: string | null;
+    goals_set_on?: string | null;
 }
 
 /** Per-day override writes omit target_weight_g (defaults-only). */
@@ -1234,6 +1247,10 @@ export async function upsertNutritionGoals(
     }
     if (input.target_weight_g !== undefined)
         payload.target_weight_g = input.target_weight_g;
+    if (input.goal_name !== undefined) payload.goal_name = input.goal_name;
+    if (input.goal_note !== undefined) payload.goal_note = input.goal_note;
+    if (input.goals_set_on !== undefined)
+        payload.goals_set_on = input.goals_set_on;
 
     return run(async (tx) => {
         const { row, keys } = definedColumns(payload);
@@ -1247,7 +1264,7 @@ export async function upsertNutritionGoals(
                 tx`
                     insert into ${tx.unsafe(NUTRITION_GOALS)} ${tx(row, ...patchKeys(keys))}
                     on conflict (user_id) do update set ${tx.unsafe(setClause)}
-                    returning *
+                    returning *, goals_set_on::text as goals_set_on
                 `,
                 "save goals",
             );
@@ -1264,7 +1281,7 @@ async function fetchNutritionGoals(
     return await maybeOne<NutritionGoals>(
         tx,
         tx`
-            select *
+            select *, goals_set_on::text as goals_set_on
             from ${tx.unsafe(NUTRITION_GOALS)}
             where user_id = ${userId}
         `,

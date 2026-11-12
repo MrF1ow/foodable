@@ -284,6 +284,8 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "from", required: false },
             { name: "to", required: false },
             { name: "clear", required: false },
+            { name: "goal_name", required: false },
+            { name: "goal_note", required: false },
             { name: "target_member", required: false },
         ],
         hasPhotoHint: false,

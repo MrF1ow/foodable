@@ -185,7 +185,12 @@ import type {
     WaterEntry,
     WeightEntry,
 } from "./db/nutrition.js";
-import { dateInTz, formatLocalDateTime, weekdayInTz } from "./domain/tz.js";
+import {
+    dateInTz,
+    formatLocalDateTime,
+    todayInTz,
+    weekdayInTz,
+} from "./domain/tz.js";
 import { getAppCss, getAppJs, getWidgetHtml } from "./widgets.js";
 
 function meal(over: Partial<Meal> = {}): Meal {
@@ -228,6 +233,9 @@ function goals(over: Partial<NutritionGoals> = {}): NutritionGoals {
         daily_caffeine_mg: 400,
         daily_water_ml: 2500,
         target_weight_g: null,
+        goal_name: null,
+        goal_note: null,
+        goals_set_on: null,
         updated_at: "2026-07-26T00:00:00.000Z",
         ...over,
     };
@@ -502,7 +510,16 @@ mock.module("./db/nutrition.js", () => ({
         userId: string,
         patch: Record<string, unknown>,
     ) => {
-        db.goals = { ...goals(), user_id: userId, ...patch } as NutritionGoals;
+        // The real upsert drops undefined keys (an omitted field keeps its
+        // stored value), so the stand-in must not spread them over the row.
+        const defined = Object.fromEntries(
+            Object.entries(patch).filter(([, v]) => v !== undefined),
+        );
+        db.goals = {
+            ...(db.goals ?? goals()),
+            user_id: userId,
+            ...defined,
+        } as NutritionGoals;
         return db.goals;
     },
     upsertGoalDays: async (
@@ -1642,6 +1659,129 @@ describe("set_nutrition_goals accepts a caffeine limit", () => {
             expect(db.goals!.daily_caffeine_mg).toBe(400);
             await call("set_nutrition_goals", { daily_caffeine_mg: null });
             expect(db.goals!.daily_caffeine_mg).toBeNull();
+        });
+    });
+});
+
+describe("set_nutrition_goals names the goals", () => {
+    const parsed = (r: ToolResult) =>
+        SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(r.structuredContent);
+
+    test("a name and note are stored, echoed and stamped with today's date", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "Asia/Tokyo" };
+        db.goals = null;
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                daily_calories: 2100,
+                goal_name: "  Recomp  ",
+                goal_note: "Since the October check-in",
+            });
+            expect(r.isError).toBeFalsy();
+            expect(db.goals!.goal_name).toBe("Recomp");
+            expect(db.goals!.goal_note).toBe("Since the October check-in");
+            expect(db.goals!.goals_set_on).toBe(todayInTz("Asia/Tokyo"));
+            const out = parsed(r);
+            expect(out.goals).toMatchObject({
+                goal_name: "Recomp",
+                goal_note: "Since the October check-in",
+                goals_set_on: todayInTz("Asia/Tokyo"),
+            });
+            expect(textOf(r)).toContain("Recomp");
+        });
+    });
+
+    test("a write without goal_name keeps the stored name and note", async () => {
+        db.goals = goals({
+            goal_name: "Recomp",
+            goal_note: "Slow and steady",
+            goals_set_on: "2026-10-02",
+        });
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                daily_protein_g: 150,
+            });
+            expect(r.isError).toBeFalsy();
+            expect(db.goals!.goal_name).toBe("Recomp");
+            expect(db.goals!.goal_note).toBe("Slow and steady");
+            expect(parsed(r).goals?.goal_name).toBe("Recomp");
+            // Changing a target is a save, so the date moves to today.
+            expect(db.goals!.goals_set_on).not.toBe("2026-10-02");
+        });
+    });
+
+    test("renaming alone keeps the set date; null or blank clears", async () => {
+        db.goals = goals({
+            goal_name: "Recomp",
+            goal_note: "Slow and steady",
+            goals_set_on: "2026-10-02",
+        });
+        await withTools(null, async (call) => {
+            await call("set_nutrition_goals", { goal_name: "Cut" });
+            expect(db.goals!.goal_name).toBe("Cut");
+            expect(db.goals!.goals_set_on).toBe("2026-10-02");
+            await call("set_nutrition_goals", { goal_note: null });
+            expect(db.goals!.goal_note).toBeNull();
+            await call("set_nutrition_goals", { goal_name: "   " });
+            expect(db.goals!.goal_name).toBeNull();
+            expect(db.goals!.goals_set_on).toBe("2026-10-02");
+        });
+    });
+
+    test("a 41-character name is refused, 40 is accepted", async () => {
+        db.goals = goals({ goal_name: "Recomp" });
+        await withTools(null, async (call) => {
+            const long = await call("set_nutrition_goals", {
+                goal_name: "x".repeat(41),
+            });
+            expect(long.isError).toBe(true);
+            expect(textOf(long)).toContain("at most 40 characters");
+            expect(db.goals!.goal_name).toBe("Recomp");
+            const ok = await call("set_nutrition_goals", {
+                goal_name: "x".repeat(40),
+            });
+            expect(ok.isError).toBeFalsy();
+            expect(db.goals!.goal_name).toBe("x".repeat(40));
+            const note = await call("set_nutrition_goals", {
+                goal_note: "n".repeat(281),
+            });
+            expect(note.isError).toBe(true);
+            expect(textOf(note)).toContain("at most 280 characters");
+        });
+    });
+
+    test("a name cannot be set on a per-day override", async () => {
+        db.goals = goals();
+        await withTools(null, async (call) => {
+            const r = await call("set_nutrition_goals", {
+                date: "2026-07-04",
+                daily_calories: 2800,
+                goal_name: "Rest day",
+            });
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain("default goals only");
+        });
+    });
+
+    test("get_goal_progress returns the name, note and set date", async () => {
+        db.goals = goals({
+            goal_name: "Recomp",
+            goal_note: "Slow and steady",
+            goals_set_on: "2026-10-02",
+        });
+        await withTools(null, async (call) => {
+            const r = await call("get_goal_progress", {});
+            const sc = r.structuredContent as {
+                goals: {
+                    goal_name: string | null;
+                    goal_note: string | null;
+                    goals_set_on: string | null;
+                };
+            };
+            expect(sc.goals).toMatchObject({
+                goal_name: "Recomp",
+                goal_note: "Slow and steady",
+                goals_set_on: "2026-10-02",
+            });
         });
     });
 });
@@ -8391,6 +8531,53 @@ describe("set_nutrition_goals over HTTP", () => {
                     arguments: { date: "2026-07-04" },
                 })) as ToolResult;
                 expect(textOf(prog)).toContain("2800");
+            });
+        },
+    );
+});
+
+describe("goal name over HTTP", () => {
+    test.each(ERAS)(
+        "set_nutrition_goals names the goals and refuses 41 characters (%p)",
+        async (era) => {
+            db.goals = goals({ daily_calories: 2000 });
+            await withHttpClient("u1", era, async (client) => {
+                const set = (await client.callTool({
+                    name: "set_nutrition_goals",
+                    arguments: { goal_name: "Recomp", goal_note: "Autumn" },
+                })) as ToolResult;
+                expect(set.isError).toBeFalsy();
+                const out = SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                    set.structuredContent,
+                );
+                expect(out.goals?.goal_name).toBe("Recomp");
+                expect(out.goals?.goal_note).toBe("Autumn");
+                const kept = (await client.callTool({
+                    name: "set_nutrition_goals",
+                    arguments: { daily_protein_g: 140 },
+                })) as ToolResult;
+                expect(
+                    SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                        kept.structuredContent,
+                    ).goals?.goal_name,
+                ).toBe("Recomp");
+                const long = (await client.callTool({
+                    name: "set_nutrition_goals",
+                    arguments: { goal_name: "x".repeat(41) },
+                })) as ToolResult;
+                expect(long.isError).toBe(true);
+                expect(textOf(long)).toContain("at most 40 characters");
+                const prog = (await client.callTool({
+                    name: "get_goal_progress",
+                    arguments: {},
+                })) as ToolResult;
+                expect(
+                    (
+                        prog.structuredContent as {
+                            goals: { goal_name: string };
+                        }
+                    ).goals.goal_name,
+                ).toBe("Recomp");
             });
         },
     );
