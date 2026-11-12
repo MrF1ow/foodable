@@ -302,6 +302,25 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(body).toContain("8 to get");
     });
 
+    test("Share sits in the title row and opens a sheet that posts to the share route", () => {
+        const body = renderKitchenGroceriesBody(baseView());
+        expect(body).toMatch(
+            /<div class="fd-kitchen-grocery-head"><h1[\s\S]*?<\/h1><button[^>]*fd-kitchen-grocery-share/,
+        );
+        expect(body).toContain(
+            'commandfor="fd-grocery-share-sheet" command="show-modal"',
+        );
+        expect(body).toContain('action="/kitchen/groceries/share"');
+    });
+
+    test("a refused share shows its error in the open sheet only", () => {
+        const body = renderKitchenGroceriesBody(
+            baseView({ error: "Nope.", openShare: true }),
+        );
+        expect(body).toContain("data-sheet-open-on-load");
+        expect(body.split("Nope.").length - 1).toBe(1);
+    });
+
     test("add-to-list field opens the grocery add sheet", () => {
         const body = renderKitchenGroceriesBody(baseView());
         expect(body).toContain("fd-kitchen-grocery-add");

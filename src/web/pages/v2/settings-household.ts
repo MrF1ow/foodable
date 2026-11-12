@@ -46,6 +46,10 @@ import {
     type SocialReaderId,
 } from "../../../copy/social-readers.js";
 import { STORES_PATH } from "./settings-stores.js";
+import {
+    renderSharedLinksSection,
+    type SharedLinkRow,
+} from "./settings-household-shared-links.js";
 import { sourceIcon } from "../../components/source-icon.js";
 import { lastActiveLabel } from "../../../domain/last-active.js";
 import { SOCIAL_READER_LABELS } from "../../../copy/social-readers.js";
@@ -68,6 +72,8 @@ export type SettingsHouseholdV2View = {
     lastSeen?: ReadonlyMap<string, Date | null>;
     /** The clock the last-active labels read; defaults to the real one. */
     now?: Date;
+    /** The household's active share links; absent leaves the section out. */
+    sharedLinks?: readonly SharedLinkRow[];
     noticeResult: NoticesForResult;
     duplicatePairs: PossibleDuplicatePair[];
     refCounts: ReadonlyMap<string, number>;
@@ -324,6 +330,7 @@ export function renderSettingsHouseholdV2Body(
         raw(
             `${String(sectionHeader({ title: "Grocery stores", level: 2 }))}<div class="fd-settings-household-actions">${addStoreTrigger}<a class="fd-settings-btn" href="${STORES_PATH}">Manage stores</a></div>${String(storeRows(view.stores))}`,
         ),
+        view.sharedLinks ? raw(renderSharedLinksSection(view.sharedLinks)) : "",
         raw(
             `${String(sectionHeader({ title: "Dismissed notices", level: 2 }))}${String(dismissedNoticesSection(view.noticeResult))}`,
         ),

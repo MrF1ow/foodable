@@ -166,7 +166,8 @@ describe("/app-v2.js", () => {
         // +~1.3 KB bottom sheets fit above the iOS keyboard.
         // +~0.2 KB log search waits for a tap on touch screens.
         // +~2.9 KB Product score: presets move the sliders, sliders pick Custom.
-        expect(js.length).toBeLessThan(119_000);
+        // +~3 KB Share link: copy the new link's address.
+        expect(js.length).toBeLessThan(122_500);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

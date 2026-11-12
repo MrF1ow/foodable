@@ -154,6 +154,15 @@ import {
     COOK_SHEET_ID,
     type CookSheetView,
 } from "./pages/v2/recipes-page-cook.js";
+import {
+    GROCERY_SHARE_SHEET_ID,
+    RECIPE_SHARE_SHEET_ID,
+} from "./pages/v2/share-sheet.js";
+import {
+    buildSharedLinkRows,
+    type SharedLinkRow,
+} from "./pages/v2/settings-household-shared-links.js";
+import { liveShareLinkStore } from "../db/share-links.js";
 import { guessMealType } from "./pages/v2/log-sheet.js";
 import { orderCards } from "../domain/layout.js";
 import { todayInTz, validateTz } from "../domain/tz.js";
@@ -977,6 +986,7 @@ export async function renderGroceryListPage(
                 openPutAway: opts.openPutAway,
                 putAwayDraft: opts.putAwayDraft,
                 openAdd: addStoreId != null,
+                openShare: opts.openModalId === GROCERY_SHARE_SHEET_ID,
                 addStoreId: addStoreId ?? selectedStoreId,
                 allergenNotices: opts.allergenNotices,
                 allergenRetry: opts.allergenRetry,
@@ -1675,6 +1685,22 @@ export async function renderUsualProductsPickerPage(
     };
 }
 
+/** Settings › Household's Shared links: the active links with the names they show. */
+async function loadSharedLinkRows(
+    householdId: string,
+    members: readonly { userId: string; displayName: string }[],
+): Promise<SharedLinkRow[]> {
+    const links = await liveShareLinkStore().listForHousehold(householdId);
+    const recipes = links.some((link) => link.kind === "recipe")
+        ? await liveRecipesStore().listRecipes(householdId)
+        : [];
+    return buildSharedLinkRows(
+        links,
+        new Map(members.map((m) => [m.userId, m.displayName])),
+        new Map(recipes.map((r) => [r.id, r.name])),
+    );
+}
+
 export async function renderHouseholdSettingsRoute(
     viewerUserId: string,
     opts: {
@@ -1746,6 +1772,9 @@ export async function renderHouseholdSettingsRoute(
     );
     if (chrome.flags.uiV2) {
         const pluralsSameFood = await getPluralsSameFood(householdId);
+        // No catch: this section is the only place on the web to revoke a
+        // public link, so a failed read must fail the page, not hide it.
+        const sharedLinks = await loadSharedLinkRows(householdId, members);
         // The Last active column is a nicety: if the read fails the page still renders.
         const lastSeen = await listMembersLastSeen(householdId).catch(
             () => undefined,
@@ -1777,6 +1806,7 @@ export async function renderHouseholdSettingsRoute(
                 refCounts,
                 mergePost: opts.mergePost,
                 pluralsSameFood,
+                sharedLinks,
             }),
         };
     }
@@ -2467,6 +2497,7 @@ export async function renderRecipeDetailRoute(
                     )
                 ).includes(recipeId),
                 cook,
+                share: { open: opts.openModalId === RECIPE_SHARE_SHEET_ID },
                 plan: await planSheetView(
                     householdId,
                     recipeId,

@@ -228,6 +228,55 @@ describe("renderRecipeDetailBody", () => {
         expect(html).toContain("fd-dot--protein");
     });
 
+    test("the header actions run Share, Add to plan, Cook, with Cook last", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            cook,
+            plan: {
+                recipeId: "r1",
+                recipeName: "Pancakes",
+                yieldPortions: 4,
+                today: "2026-11-12",
+                date: "2026-11-12",
+                slot: "dinner",
+                servings: 4,
+            },
+        });
+        const row = html.match(
+            /<div class="fd-recipe-actions"[\s\S]*?<\/div>/,
+        )![0];
+        const share = row.indexOf('commandfor="fd-recipe-share-sheet"');
+        const plan = row.indexOf("fd-recipe-plan-sheet");
+        const cookAt = row.indexOf('commandfor="fd-recipe-cook-sheet"');
+        expect(share).toBeGreaterThan(-1);
+        expect(plan).toBeGreaterThan(share);
+        expect(cookAt).toBeGreaterThan(plan);
+    });
+
+    test("Share opens a sheet that posts to this recipe's share route", () => {
+        const html = renderRecipeDetailBody({ ...viewBase });
+        expect(html).toContain(
+            'commandfor="fd-recipe-share-sheet" command="show-modal"',
+        );
+        expect(html).toContain('id="fd-recipe-share-sheet"');
+        expect(html).toContain('action="/recipes/r1/share"');
+        expect(html).toContain("Share recipe");
+    });
+
+    test("a refused share shows its error in the open sheet, not above the page", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            error: "Choose how long the link should work.",
+            share: { open: true },
+        });
+        expect(html).toContain('id="fd-recipe-share-sheet"');
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(html).not.toContain("fd-recipe-error");
+        expect(
+            html.split("Choose how long the link should work.").length - 1,
+        ).toBe(1);
+    });
+
     test("without a cook view there is no Cook button or sheet", () => {
         const html = renderRecipeDetailBody({ ...viewBase });
         expect(html).not.toContain("fd-recipe-cook-sheet");

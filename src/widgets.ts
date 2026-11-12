@@ -581,6 +581,7 @@ export const APP_V2_JS_SOURCES = [
     "./src/web/client/v2/kitchen.js",
     "./src/web/client/v2/stores.js",
     "./src/web/client/v2/score-settings.js",
+    "./src/web/client/v2/share-link.js",
 ] as const;
 
 const SCANNER_ZXING_ENTRY = "./src/web/client/v2/scanner-zxing-entry.js";

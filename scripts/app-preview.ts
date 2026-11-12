@@ -116,6 +116,8 @@ import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-accoun
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
+import type { SharedLinkRow } from "../src/web/pages/v2/settings-household-shared-links.js";
+import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
 import { goalsDraftFrom } from "../src/web/pages/v2/settings-goals-form.js";
@@ -180,6 +182,35 @@ const SAM = { ...ME, userId: "u2", role: "member", displayName: "Sam" };
 const JORDAN = { ...SAM, userId: "u3", displayName: "Jordan" };
 const RILEY = { ...SAM, userId: "u4", displayName: "Riley" };
 const ALEX = { ...SAM, userId: "u5", displayName: "Alex" };
+/** Settings › Household's Shared links: a recipe link that expires, the grocery
+ *  list that never does, and a recipe link whose recipe was since deleted. */
+const PREVIEW_SHARED_LINKS: SharedLinkRow[] = [
+    {
+        id: "00000000-0000-4000-8000-000000000001",
+        kind: "recipe",
+        recipeName: "Smoky red lentil soup",
+        createdByName: "Ethan Flow",
+        createdAt: "2026-11-10T18:00:00.000Z",
+        expiresAt: "2026-12-10T18:00:00.000Z",
+    },
+    {
+        id: "00000000-0000-4000-8000-000000000002",
+        kind: "grocery_list",
+        recipeName: null,
+        createdByName: "Sam Flow",
+        createdAt: "2026-11-02T09:30:00.000Z",
+        expiresAt: null,
+    },
+    {
+        id: "00000000-0000-4000-8000-000000000003",
+        kind: "recipe",
+        recipeName: null,
+        createdByName: "Ethan Flow",
+        createdAt: "2026-10-21T12:00:00.000Z",
+        expiresAt: null,
+    },
+];
+
 /** The clock the Last active column reads, so the shots do not drift by day. */
 const PREVIEW_NOW = new Date("2026-11-12T18:00:00Z");
 
@@ -1471,7 +1502,59 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         macrosPerPortion: MACROS as never,
         submitKey: "preview",
     };
-    const recipeV2 = (cook: CookSheetView, planOpen = false) =>
+    const settingsHouseholdV2 = (sharedLinks: SharedLinkRow[]) => {
+        const dupPairs = possibleDuplicates(
+            catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
+            new Map(),
+            new Set(),
+            new Set(),
+        );
+        return renderSettingsHouseholdV2Page({
+            chrome,
+            householdName: "The Flow household",
+            members: [ME, SAM, JORDAN, RILEY, ALEX] as never,
+            now: PREVIEW_NOW,
+            lastSeen: new Map<string, Date | null>([
+                [ME.userId, new Date("2026-11-12T16:20:00Z")],
+                [SAM.userId, new Date("2026-11-11T20:05:00Z")],
+                [JORDAN.userId, new Date("2026-11-09T17:40:00Z")],
+                [RILEY.userId, new Date("2026-10-21T15:00:00Z")],
+                [ALEX.userId, null],
+            ]),
+            stores: PREVIEW_STORES,
+            isOwner: true,
+            canManage: true,
+            viewerUserId: ME.userId,
+            socialReaders: EMPTY_HOUSEHOLD_PREFERENCES.socialReaders,
+            timezone: "America/Los_Angeles",
+            noticeResult: {
+                notices: previewNotices(),
+                dismissals: [],
+                subjectNames: new Map(),
+                subjectTimes: new Map(),
+                noticeFoods: new Map(),
+                catalogFoods: catalog,
+                aliasMap: new Map(),
+                barcodedIds: new Set(),
+                possibleDuplicatePairs: dupPairs,
+                recipesListPrefetch: {
+                    recipes: [],
+                    allIngredients: [],
+                    fridgeItems: [],
+                    foodsById: new Map(),
+                },
+            },
+            duplicatePairs: dupPairs,
+            refCounts: new Map(),
+            pluralsSameFood: true,
+            sharedLinks,
+        } as never);
+    };
+    const recipeV2 = (
+        cook: CookSheetView,
+        planOpen = false,
+        shareOpen = false,
+    ) =>
         renderRecipeDetailV2Page({
             chrome,
             recipe: recipeView.recipe,
@@ -1548,6 +1631,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 servings: recipeView.recipe.yieldPortions,
                 open: planOpen,
             },
+            share: { open: shareOpen },
         });
     const recipesListV2 = (
         extra: Partial<Parameters<typeof renderRecipesListV2Page>[0]> = {},
@@ -1909,6 +1993,26 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ? {
                   "recipe-cook": recipeV2({ ...cookSheet, open: true }),
                   "recipe-plan": recipeV2(cookSheet, true),
+                  "recipe-share": recipeV2(cookSheet, false, true),
+                  // The one screen that shows a new share link's address.
+                  "share-link-made": renderShareCreatedPage({
+                      chrome,
+                      url: "https://foodable.example.com/s/Qk3vZ8mXr1TnY0aLw5uHc9DfJ2bEeSgPiVoN7xRzA4M",
+                      what: "recipe",
+                      name: recipeView.recipe.name,
+                      expiresAt: "2026-12-12T10:00:00.000Z",
+                      backHref: "/recipes/r1",
+                      active: "recipes",
+                  }),
+                  "share-link-made-list": renderShareCreatedPage({
+                      chrome,
+                      url: "https://foodable.example.com/s/Qk3vZ8mXr1TnY0aLw5uHc9DfJ2bEeSgPiVoN7xRzA4M",
+                      what: "grocery list",
+                      name: null,
+                      expiresAt: null,
+                      backHref: "/kitchen/groceries",
+                      active: "grocery",
+                  }),
                   "recipes-plan-pick": recipesListV2({
                       week: previewWeekPlan(),
                       planDate: "2026-11-14",
@@ -1990,56 +2094,9 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       chrome,
                       storedTheme: null,
                   }),
-                  "settings-household-v2": (() => {
-                      const dupPairs = possibleDuplicates(
-                          catalog.filter(
-                              (f) => !f.archivedAt && !f.genericFoodId,
-                          ),
-                          new Map(),
-                          new Set(),
-                          new Set(),
-                      );
-                      return renderSettingsHouseholdV2Page({
-                          chrome,
-                          householdName: "The Flow household",
-                          members: [ME, SAM, JORDAN, RILEY, ALEX] as never,
-                          now: PREVIEW_NOW,
-                          lastSeen: new Map<string, Date | null>([
-                              [ME.userId, new Date("2026-11-12T16:20:00Z")],
-                              [SAM.userId, new Date("2026-11-11T20:05:00Z")],
-                              [JORDAN.userId, new Date("2026-11-09T17:40:00Z")],
-                              [RILEY.userId, new Date("2026-10-21T15:00:00Z")],
-                              [ALEX.userId, null],
-                          ]),
-                          stores: PREVIEW_STORES,
-                          isOwner: true,
-                          canManage: true,
-                          viewerUserId: ME.userId,
-                          socialReaders:
-                              EMPTY_HOUSEHOLD_PREFERENCES.socialReaders,
-                          timezone: "America/Los_Angeles",
-                          noticeResult: {
-                              notices: previewNotices(),
-                              dismissals: [],
-                              subjectNames: new Map(),
-                              subjectTimes: new Map(),
-                              noticeFoods: new Map(),
-                              catalogFoods: catalog,
-                              aliasMap: new Map(),
-                              barcodedIds: new Set(),
-                              possibleDuplicatePairs: dupPairs,
-                              recipesListPrefetch: {
-                                  recipes: [],
-                                  allIngredients: [],
-                                  fridgeItems: [],
-                                  foodsById: new Map(),
-                              },
-                          },
-                          duplicatePairs: dupPairs,
-                          refCounts: new Map(),
-                          pluralsSameFood: true,
-                      } as never);
-                  })(),
+                  "settings-household-v2":
+                      settingsHouseholdV2(PREVIEW_SHARED_LINKS),
+                  "settings-household-v2-empty": settingsHouseholdV2([]),
                   "settings-household-v2-member": renderSettingsMemberV2Page({
                       chrome,
                       member: SAM as never,
