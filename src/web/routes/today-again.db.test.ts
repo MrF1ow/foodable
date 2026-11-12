@@ -168,6 +168,162 @@ describeDb(pgAvailable !== null, "today again db", (getCtx) => {
         expect(countAfter[0]!.n).toBe(countBefore[0]!.n);
     });
 
+    test("again picks up edited food nutrition", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const foodId = await seedFood(sql, "Egg", 80, 6);
+        const computed = await mealWriteFromItems(householdId, [
+            { foodId, amount: 1, unit: "each" },
+        ]);
+        const { meal } = await insertMeal(userId, {
+            meal_type: "breakfast",
+            logged_at: "2026-03-01T08:00:00.000Z",
+            description: computed.description,
+            ...computed.totals,
+            items: computed.items,
+            item_digest: computed.item_digest,
+        });
+        await sql`
+            update public.foods
+            set calories = ${120}, protein_g = ${10}
+            where id = ${foodId}
+        `;
+        const res = await hono.request(`http://test/meals/${meal.id}/again`, {
+            method: "POST",
+            headers: {
+                cookie: cookie(userId),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "return_to=/&date=2026-03-15",
+        });
+        expect(res.status).toBe(303);
+        const meals = await sql`
+            select id from public.meals
+            where user_id = ${userId}
+            order by logged_at desc
+            limit 1
+        `;
+        const newest = await getMealById(userId, meals[0]!.id as string);
+        expect(newest?.calories).toBe(60);
+        expect(newest?.protein_g).toBe(5);
+    });
+
+    async function seedUsualEggs(
+        sql: import("bun").SQL,
+        plainCal: number,
+        productCal: number,
+    ): Promise<string> {
+        const plainId = await seedFood(sql, "Eggs", plainCal, 6);
+        const productId = crypto.randomUUID();
+        await sql`
+            insert into public.foods (
+                id,
+                household_id,
+                kind,
+                name,
+                normalized_name,
+                default_unit,
+                grams_per_each,
+                calories,
+                protein_g,
+                generic_food_id,
+                allergens
+            )
+            values (
+                ${productId},
+                ${householdId},
+                ${"food"},
+                ${"Cage Free Eggs"},
+                ${"cage free eggs"},
+                ${"each"},
+                ${50},
+                ${productCal},
+                ${8},
+                ${plainId},
+                ${sql.array([], "text")}
+            )
+        `;
+        await sql`
+            update public.foods
+            set usual_product_id = ${productId}
+            where id = ${plainId}
+        `;
+        return plainId;
+    }
+
+    test("again uses usual-product nutrition like a fresh log", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const plainId = await seedUsualEggs(sql, 80, 140);
+        const fresh = await mealWriteFromItems(householdId, [
+            { foodId: plainId, amount: 2, unit: "each" },
+        ]);
+        const { meal } = await insertMeal(userId, {
+            meal_type: "breakfast",
+            logged_at: "2026-03-01T08:00:00.000Z",
+            description: fresh.description,
+            ...fresh.totals,
+            items: fresh.items,
+            item_digest: fresh.item_digest,
+        });
+        const res = await hono.request(`http://test/meals/${meal.id}/again`, {
+            method: "POST",
+            headers: {
+                cookie: cookie(userId),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "return_to=/&date=2026-03-15",
+        });
+        expect(res.status).toBe(303);
+        const meals = await sql`
+            select id from public.meals
+            where user_id = ${userId}
+            order by logged_at desc
+            limit 1
+        `;
+        const newest = await getMealById(userId, meals[0]!.id as string);
+        expect(newest?.calories).toBe(fresh.totals.calories);
+    });
+
+    test("again keeps logged snapshot when the food was archived", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const foodId = await seedFood(sql, "Eggs", 80, 6);
+        const computed = await mealWriteFromItems(householdId, [
+            { foodId, amount: 1, unit: "each" },
+        ]);
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: "2026-03-01T12:00:00.000Z",
+            description: computed.description,
+            ...computed.totals,
+            items: computed.items,
+            item_digest: computed.item_digest,
+        });
+        await sql`
+            update public.foods
+            set archived_at = now(), calories = ${200}
+            where id = ${foodId}
+        `;
+        const res = await hono.request(`http://test/meals/${meal.id}/again`, {
+            method: "POST",
+            headers: {
+                cookie: cookie(userId),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "return_to=/&date=2026-03-15",
+        });
+        expect(res.status).toBe(303);
+        const meals = await sql`
+            select id from public.meals
+            where user_id = ${userId}
+            order by logged_at desc
+            limit 1
+        `;
+        const newest = await getMealById(userId, meals[0]!.id as string);
+        expect(newest?.calories).toBe(computed.totals.calories);
+    });
+
     test("another household meal id returns 404", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { meal } = await insertMeal(otherUserId, {

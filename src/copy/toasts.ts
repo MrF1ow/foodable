@@ -46,6 +46,10 @@ export const TOASTS = {
         text: "Meal restored",
     },
     "nutrition.meal.undo.noop": { kind: "info", text: "Meal already restored" },
+    "nutrition.meal.copy-yesterday.noop": {
+        kind: "info",
+        text: "Already copied from yesterday",
+    },
     "nutrition.water.logged": { kind: "success", text: "Water logged" },
     "nutrition.weight.logged": { kind: "success", text: "Weight logged" },
     "nutrition.layout.saved": {

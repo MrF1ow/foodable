@@ -244,6 +244,12 @@ describe("gated route harness on composed app", () => {
                 notFound: true,
             },
             {
+                method: "POST",
+                path: "/log/copy-yesterday",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
                 method: "GET",
                 path: "/trends",
                 flag: "ui-v2",

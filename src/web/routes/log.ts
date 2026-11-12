@@ -4,7 +4,13 @@ import type { FoodResult } from "../../foods.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveRecipesStore } from "../../db/recipes.js";
-import { getMealsInRange, searchMeals } from "../../db/nutrition.js";
+import { recentLogs } from "../../db/meals.js";
+import {
+    getMealsByDate,
+    insertMeal,
+    searchMeals,
+    type MealInput,
+} from "../../db/nutrition.js";
 import type { Meal } from "../../db/nutrition.js";
 import { getProfile } from "../../db/profiles.js";
 import { checkWebSearchRateLimit } from "../../rate-limit.js";
@@ -30,14 +36,19 @@ import {
 } from "../../domain/log-search.js";
 import { todayInTz, validateTz } from "../../domain/tz.js";
 import { findOrCreateFoodByBarcodeResult } from "../../domain/foods.js";
-import { MealItemsError, type MealItemSpec } from "../../domain/meals.js";
+import { resolveMealType } from "../../domain/today.js";
+import {
+    copyYesterdayIdempotencyKey,
+    MealItemsError,
+    type MealItemSpec,
+} from "../../domain/meals.js";
 import { toGrams } from "../../domain/food-quantity.js";
 import { unitHintsForLog } from "../../domain/log-search.js";
 import {
     foodDisplayScore,
     offHitDisplayScore,
 } from "../../domain/product-screen.js";
-import { insertMeal, insertWater, insertWeight } from "../../db/nutrition.js";
+import { insertWater, insertWeight } from "../../db/nutrition.js";
 import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
 import { MAX_CALORIES, MAX_MACRO_G } from "../../domain/import.js";
 import {
@@ -63,10 +74,10 @@ import { safeReturnPath } from "../usual-products-path.js";
 import { gatedRoute } from "../gated.js";
 import { requireMember, siteMember } from "../middleware.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
+import { mealInputForSlotRelog } from "./log-relog.js";
 
 export const logRoutes = new Hono();
 
-const RECENT_HISTORY_DAYS = 14;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
 
@@ -186,13 +197,7 @@ async function loadHistoryMeals(
     if (trimmed) {
         meals = await searchMeals(userId, [trimmed], { limit });
     } else {
-        const end = todayInTz(tz);
-        const start = recentHistoryStart(end, RECENT_HISTORY_DAYS);
-        const range = await getMealsInRange(userId, start, end, tz);
-        meals = range
-            .slice()
-            .sort((a, b) => b.logged_at.localeCompare(a.logged_at))
-            .slice(0, limit);
+        meals = await recentLogs(userId, limit);
     }
     const items = meals.map((meal) => historyItemFromMeal(meal, foodsById));
     return Promise.all(
@@ -890,6 +895,66 @@ logRoutes.post(
                 weighInError: message,
                 weighIn: prefill,
             });
+        }
+    },
+);
+
+logRoutes.post(
+    "/log/copy-yesterday",
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const member = siteMember(c);
+        const userId = member.userId;
+        const profile = await getProfile(userId);
+        const tz =
+            profile?.timezone && validateTz(profile.timezone)
+                ? profile.timezone
+                : "UTC";
+        const body = await c.req.parseBody();
+        const slot = formText(body, "slot");
+        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+        let meal_type: MealInput["meal_type"];
+        try {
+            meal_type = parseMealType(slot);
+        } catch {
+            return c.text("Choose a meal type.", 400);
+        }
+        const today = todayInTz(tz);
+        const yesterday = recentHistoryStart(today, 1);
+        const dayMeals = await getMealsByDate(userId, yesterday, tz);
+        const slotMeals = dayMeals.filter(
+            (row) => resolveMealType(row.meal_type) === meal_type,
+        );
+        if (slotMeals.length === 0) {
+            return c.text("Nothing to copy from yesterday.", 404);
+        }
+        const idempotency_key = copyYesterdayIdempotencyKey(
+            userId,
+            today,
+            meal_type,
+        );
+        try {
+            const input = await mealInputForSlotRelog(
+                member.householdId,
+                slotMeals,
+                meal_type,
+                new Date().toISOString(),
+            );
+            if (!input) {
+                return c.text("Nothing to copy from yesterday.", 404);
+            }
+            const result = await insertMeal(userId, {
+                ...input,
+                meal_type,
+                idempotency_key,
+            });
+            const msg = result.deduplicated
+                ? "nutrition.meal.copy-yesterday.noop"
+                : "nutrition.meal.logged";
+            return redirectWithToast(c, returnTo, msg);
+        } catch {
+            return c.text("Could not copy yesterday's meal.", 400);
         }
     },
 );
