@@ -88,5 +88,19 @@ export function runGroceryListStoreContract(
             });
             expect(updated).toEqual({ ...restockLine, source: "notice" });
         });
+
+        test("a plan line round-trips", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const planLine = sampleGroceryLine(c, {
+                id: crypto.randomUUID(),
+                displayName: "For the week",
+                source: "plan",
+                sourceFridgeItemId: null,
+            });
+            expect(await store.insertLine(planLine)).toEqual(planLine);
+            expect(await store.listLines(c.householdId)).toEqual([planLine]);
+        });
     });
 }
