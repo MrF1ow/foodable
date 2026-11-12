@@ -447,6 +447,24 @@ describeDb(
                 }),
                 /version 7.*version 1/,
             ],
+            // The foods table checks a unit factor > 0; a zero factor is a bad
+            // paste, not a database error while writing it.
+            ...(["grams_per_ml", "grams_per_each"] as const).map(
+                (key): [string, () => PasteCase, RegExp] => [
+                    `${key} of zero`,
+                    () => ({
+                        fetcher: null,
+                        shared: documentText({
+                            ingredients: lentils({
+                                food: { ...NO_NUTRITION, [key]: 0 },
+                            }),
+                        }),
+                    }),
+                    new RegExp(
+                        `isn't a Foodable recipe\\.[^]*ingredients\\.0\\.food\\.${key}`,
+                    ),
+                ],
+            ),
             // Postgres text cannot hold a NUL, and no other control character
             // belongs in a recipe: every text field refuses them, and the
             // paste is turned away like any other bad document.

@@ -59,6 +59,7 @@ export class ShareDocumentError extends Error {
 // text. One rule for every string, so the builder and the parser agree: a
 // field that allows a newline in one place allows it in all.
 const CONTROL_CHARACTER = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/;
+const CONTROL_CHARACTERS = new RegExp(CONTROL_CHARACTER.source, "g");
 
 /** Marks a string schema as text: no control characters beyond \t \n \r. */
 function text<T extends z.ZodString>(schema: T) {
@@ -68,6 +69,9 @@ function text<T extends z.ZodString>(schema: T) {
 }
 
 const nutrient = z.number().min(0).max(L.nutrition).nullable();
+// The foods table checks a unit factor > 0 (a nutrient only >= 0): a zero
+// factor would parse here and then be refused by the database on import.
+const unitFactor = z.number().positive().max(L.nutrition).nullable();
 
 const foodSchema = z.object({
     calories: nutrient,
@@ -79,8 +83,8 @@ const foodSchema = z.object({
     saturated_fat_g: nutrient,
     alcohol_g: nutrient,
     caffeine_mg: nutrient,
-    grams_per_ml: nutrient,
-    grams_per_each: nutrient,
+    grams_per_ml: unitFactor,
+    grams_per_each: unitFactor,
 });
 
 const ingredientSchema = z
@@ -225,6 +229,14 @@ function foodBlock(food: DocumentFoodSource): ShareDocumentFood {
     };
 }
 
+// Recipe writes accept the stray control characters pasted Word and PDF text
+// carries (vertical tab, form feed, bell). The parser refuses them, so the
+// builder removes them from every string it emits before validating, and a
+// recipe with one still has a document. Removed, not replaced: "Mix.\vBake."
+// reads "Mix.Bake.". Tab, newline and carriage return are kept.
+const plain = (value: string): string =>
+    value.replaceAll(CONTROL_CHARACTERS, "");
+
 /**
  * The document for a recipe, or null when the recipe is outside the document's
  * bounds (or would serialise past the byte cap): the route answers that like
@@ -249,18 +261,24 @@ export function recipeShareDocument(
                     ? undefined
                     : foods.get(ingredient.foodId);
             return {
-                food_name: (food?.name ?? ingredient.displayName).trim(),
+                food_name: plain(food?.name ?? ingredient.displayName).trim(),
                 amount: ingredient.quantity?.amount ?? null,
-                unit: ingredient.quantity?.unit ?? null,
+                unit:
+                    ingredient.quantity === null ||
+                    ingredient.quantity === undefined
+                        ? null
+                        : plain(ingredient.quantity.unit),
                 food: food ? foodBlock(food) : NO_FOOD,
             };
         });
     const candidate = {
         version: SHARE_DOCUMENT_VERSION,
-        name: recipe.name.trim(),
+        name: plain(recipe.name).trim(),
         portions: recipe.yieldPortions,
-        instructions: recipe.instructions,
-        tags: [...recipe.tags],
+        instructions:
+            recipe.instructions === null ? null : plain(recipe.instructions),
+        // A tag that was only control characters is no tag.
+        tags: recipe.tags.map(plain).filter((tag) => tag !== ""),
         ingredients,
     };
     const result = shareDocumentSchema.safeParse(candidate);

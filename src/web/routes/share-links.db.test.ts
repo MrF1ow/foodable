@@ -612,6 +612,39 @@ describeDb(
                 }
             });
 
+            test("a recipe with stray control characters in its text still answers a document, with the characters removed", async () => {
+                const { recipe } = await seedRecipe(
+                    householdId,
+                    ownerId,
+                    "Lentil soup",
+                );
+                // What pasted Word or PDF text leaves behind: the recipe
+                // writes accept them, the document parser does not.
+                await sql`
+                    update public.recipes
+                    set name = ${"Lentil\u000b soup"},
+                        instructions = ${"Mix.\u000bBake.\u000c\u0007Serve."},
+                        tags = ${sql.array(["so\u0007up"], "text")}
+                    where id = ${recipe.id}
+                `;
+                const { token } = await mint(
+                    householdId,
+                    ownerId,
+                    "recipe",
+                    recipe.id,
+                );
+                const html = await app().request(`/s/${token}`);
+                expect(html.status).toBe(200);
+                const res = await app().request(`/s/${token}.json`);
+                expect(res.status).toBe(200);
+                const doc = parseShareDocument(await res.text());
+                expect(doc).toMatchObject({
+                    name: "Lentil soup",
+                    instructions: "Mix.Bake.Serve.",
+                    tags: ["soup"],
+                });
+            });
+
             test("a recipe outside the document's bounds is the same 404, not a truncated document", async () => {
                 const { recipe } = await seedRecipe(
                     householdId,

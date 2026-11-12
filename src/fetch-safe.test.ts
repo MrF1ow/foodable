@@ -943,6 +943,143 @@ describe("createSafeFetcher: the connection goes to the address that was checked
         ]);
     });
 
+    // A fetch that never answers until its signal aborts, as a blackholed
+    // route does.
+    const hangs = (init?: BunFetchRequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener("abort", () =>
+                reject(new DOMException("Aborted", "AbortError")),
+            );
+        });
+
+    test("an address that never answers does not use the whole deadline: the next address is tried", async () => {
+        const seen: string[] = [];
+        const fetcher = createSafeFetcher({
+            resolve: async () => ["2606:4700::1111", "93.184.216.99"],
+            minAttemptMs: 20,
+            fetch: async (input, init) => {
+                seen.push(String(input));
+                return String(input).includes("2606:4700")
+                    ? hangs(init)
+                    : json();
+            },
+        });
+        const out = await fetcher.fetchPage(
+            `https://example.com${TOKEN_PATH}`,
+            {
+                ...JSON_PAGE,
+                timeoutMs: 400,
+            },
+        );
+        expect(out.ok).toBe(true);
+        expect(seen).toEqual([
+            `https://[2606:4700::1111]${TOKEN_PATH}`,
+            `https://93.184.216.99${TOKEN_PATH}`,
+        ]);
+    });
+
+    test("when every address hangs each is tried once and the fetch still ends on the original deadline", async () => {
+        const seen: string[] = [];
+        const fetcher = createSafeFetcher({
+            resolve: async () => [
+                "2606:4700::1111",
+                "93.184.216.98",
+                "93.184.216.99",
+            ],
+            minAttemptMs: 20,
+            fetch: async (input, init) => {
+                seen.push(String(input));
+                return hangs(init);
+            },
+        });
+        const started = performance.now();
+        const out = await fetcher.fetchPage(
+            `https://example.com${TOKEN_PATH}`,
+            {
+                ...JSON_PAGE,
+                timeoutMs: 300,
+            },
+        );
+        const elapsed = performance.now() - started;
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("timeout");
+        expect(seen.map((href) => new URL(href).hostname)).toEqual([
+            "[2606:4700::1111]",
+            "93.184.216.98",
+            "93.184.216.99",
+        ]);
+        expect(elapsed).toBeGreaterThanOrEqual(250);
+        expect(elapsed).toBeLessThan(900);
+    });
+
+    test("a single address keeps the whole deadline", async () => {
+        const seen: string[] = [];
+        const fetcher = createSafeFetcher({
+            resolve: async () => ["93.184.216.99"],
+            minAttemptMs: 20,
+            fetch: async (input, init) => {
+                seen.push(String(input));
+                return hangs(init);
+            },
+        });
+        const started = performance.now();
+        const out = await fetcher.fetchPage(
+            `https://example.com${TOKEN_PATH}`,
+            {
+                ...JSON_PAGE,
+                timeoutMs: 300,
+            },
+        );
+        const elapsed = performance.now() - started;
+        expect(out.ok).toBe(false);
+        if (out.ok) return;
+        expect(out.reason).toBe("timeout");
+        expect(seen).toHaveLength(1);
+        expect(elapsed).toBeGreaterThanOrEqual(250);
+    });
+
+    test("an attempt's slice ends with its headers: a body still arriving after it is read", async () => {
+        // Two addresses on a 600 ms deadline give the first a 300 ms slice;
+        // the body arrives at 400 ms. The slice must not reach the body.
+        const fetcher = createSafeFetcher({
+            resolve: async () => ["93.184.216.98", "93.184.216.99"],
+            minAttemptMs: 20,
+            fetch: async (_input, init) => {
+                const body = new ReadableStream<Uint8Array>({
+                    start(controller) {
+                        // oxlint-disable-next-line foodable/no-wall-clock-waits -- the body must arrive after the attempt's slice has ended; nothing else marks that moment
+                        const timer = setTimeout(() => {
+                            controller.enqueue(
+                                new TextEncoder().encode('{"ok":true}'),
+                            );
+                            controller.close();
+                        }, 400);
+                        init?.signal?.addEventListener("abort", () => {
+                            clearTimeout(timer);
+                            controller.error(
+                                new DOMException("Aborted", "AbortError"),
+                            );
+                        });
+                    },
+                });
+                return new Response(body, {
+                    status: 200,
+                    headers: { "content-type": "application/json" },
+                });
+            },
+        });
+        const out = await fetcher.fetchPage(
+            `https://example.com${TOKEN_PATH}`,
+            {
+                ...JSON_PAGE,
+                timeoutMs: 600,
+            },
+        );
+        expect(out.ok).toBe(true);
+        if (out.ok) expect(out.body).toBe('{"ok":true}');
+    });
+
     test("an IP-literal link is requested as written, with no name to pin", async () => {
         const { seen, fetch } = recorder(() => json());
         const fetcher = createSafeFetcher({

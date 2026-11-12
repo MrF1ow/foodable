@@ -14,6 +14,7 @@ import {
     storeAuthCode,
     storeRefreshToken,
     storeToken,
+    withCodeExchange,
     withRefreshExchange,
 } from "./tokens.js";
 import {
@@ -459,6 +460,80 @@ describeDb(
                 userId,
                 clientId: "client-9",
             });
+        });
+
+        test("withCodeExchange hands back what the exchange returns, with the pair stored", async () => {
+            await storeAuthCode(
+                "old-code",
+                "http://localhost/cb",
+                userId,
+                "ch",
+                "client-9",
+            );
+            const result = await withCodeExchange("old-code", async () => {
+                const code = await consumeAuthCode("old-code");
+                await storeToken("code-access", userId, code!.client_id);
+                await storeRefreshToken(
+                    "code-refresh",
+                    userId,
+                    code!.client_id,
+                );
+                return code;
+            });
+            expect(result).toMatchObject({
+                user_id: userId,
+                client_id: "client-9",
+            });
+            expect(await consumeAuthCode("old-code")).toBeNull();
+            expect(await lookupBearer("code-access")).toMatchObject({
+                status: "valid",
+                userId,
+                clientId: "client-9",
+            });
+            expect(await consumeRefreshToken("code-refresh")).not.toBeNull();
+        });
+
+        test("withCodeExchange skips the exchange for a code that is unknown or expired", async () => {
+            const { sql } = getCtx();
+            await storeAuthCode("stale-code", "http://localhost/cb", userId);
+            await sql`
+                update public.auth_codes
+                set expires_at = now() - interval '1 minute'
+                where code = 'stale-code'
+            `;
+            let called = 0;
+            const exchange = async () => {
+                called += 1;
+                return "minted";
+            };
+            expect(await withCodeExchange("nope", exchange)).toBeNull();
+            expect(await withCodeExchange("stale-code", exchange)).toBeNull();
+            expect(called).toBe(0);
+        });
+
+        test("withCodeExchange keeps a consume whose checks failed, and rolls back when the exchange throws", async () => {
+            await storeAuthCode("spent-code", "http://localhost/cb", userId);
+            await storeAuthCode("kept-code", "http://localhost/cb", userId);
+            // A refusal is a return value: the consume commits, the code is spent.
+            expect(
+                await withCodeExchange("spent-code", async () => {
+                    await consumeAuthCode("spent-code");
+                    return "refused";
+                }),
+            ).toBe("refused");
+            expect(await consumeAuthCode("spent-code")).toBeNull();
+            // A throw is an infrastructure failure: nothing is burned or stored.
+            await expect(
+                withCodeExchange("kept-code", async () => {
+                    await consumeAuthCode("kept-code");
+                    await storeToken("half-code-minted", userId, null);
+                    throw new Error("store failed");
+                }),
+            ).rejects.toThrow("store failed");
+            expect(await lookupBearer("half-code-minted")).toEqual({
+                status: "invalid",
+            });
+            expect(await consumeAuthCode("kept-code")).not.toBeNull();
         });
 
         test("concurrent auth code consume allows only one winner", async () => {

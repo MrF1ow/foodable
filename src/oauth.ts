@@ -6,6 +6,7 @@ import {
     consumeAuthCode,
     storeRefreshToken,
     consumeRefreshToken,
+    withCodeExchange,
     withRefreshExchange,
     registerClient,
     isRegisteredClient,
@@ -595,56 +596,56 @@ export function createOAuthRouter() {
             return c.json({ error: "invalid_client" }, 401);
         }
 
-        // Atomically consume the auth code
-        const authCodeData = await runAsSystem(
-            "oauth authorization code exchange",
-            () => consumeAuthCode(code),
-        );
-        if (!authCodeData) {
-            return c.json({ error: "invalid_grant" }, 400);
-        }
+        // The code is consumed, checked and exchanged for a pair in one
+        // transaction that excludes a Disconnect for the member, so an
+        // exchange racing one cannot leave a live pair behind. A failed check
+        // returns instead of throwing: the consume stays committed, so the
+        // code is spent either way.
+        const refuse = (body: Record<string, string>) =>
+            ({ ok: false, body }) as const;
+        const exchanged = await withCodeExchange(code, async () => {
+            const authCodeData = await consumeAuthCode(code);
+            if (!authCodeData) {
+                return refuse({ error: "invalid_grant" });
+            }
 
-        if (!redirectUri) {
-            return c.json({ error: "invalid_request" }, 400);
-        }
-        if (redirectUri !== authCodeData.redirect_uri) {
-            return c.json({ error: "invalid_grant" }, 400);
-        }
+            if (!redirectUri) {
+                return refuse({ error: "invalid_request" });
+            }
+            if (redirectUri !== authCodeData.redirect_uri) {
+                return refuse({ error: "invalid_grant" });
+            }
 
-        // A code belongs to the client it was issued to.
-        if (
-            reqClientId &&
-            authCodeData.client_id &&
-            reqClientId !== authCodeData.client_id
-        ) {
-            return c.json({ error: "invalid_grant" }, 400);
-        }
+            // A code belongs to the client it was issued to.
+            if (
+                reqClientId &&
+                authCodeData.client_id &&
+                reqClientId !== authCodeData.client_id
+            ) {
+                return refuse({ error: "invalid_grant" });
+            }
 
-        if (!authCodeData.code_challenge) {
-            return c.json({ error: "invalid_grant" }, 400);
-        }
-        if (!codeVerifier) {
-            return c.json(
-                {
+            if (!authCodeData.code_challenge) {
+                return refuse({ error: "invalid_grant" });
+            }
+            if (!codeVerifier) {
+                return refuse({
                     error: "invalid_request",
                     error_description: "code_verifier required",
-                },
-                400,
+                });
+            }
+            const hash = base64URLEncode(
+                Buffer.from(
+                    crypto.createHash("sha256").update(codeVerifier).digest(),
+                ),
             );
-        }
-        const hash = base64URLEncode(
-            Buffer.from(
-                crypto.createHash("sha256").update(codeVerifier).digest(),
-            ),
-        );
-        if (hash !== authCodeData.code_challenge) {
-            return c.json({ error: "invalid_grant" }, 400);
-        }
+            if (hash !== authCodeData.code_challenge) {
+                return refuse({ error: "invalid_grant" });
+            }
 
-        // Issue tokens linked to the authenticated user
-        const accessToken = crypto.randomUUID();
-        const refreshToken = crypto.randomUUID();
-        await runAsSystem("oauth token exchange", async () => {
+            // Issue tokens linked to the authenticated user
+            const accessToken = crypto.randomUUID();
+            const refreshToken = crypto.randomUUID();
             await storeToken(
                 accessToken,
                 authCodeData.user_id,
@@ -655,13 +656,20 @@ export function createOAuthRouter() {
                 authCodeData.user_id,
                 authCodeData.client_id,
             );
+            return { ok: true, accessToken, refreshToken } as const;
         });
+        if (!exchanged) {
+            return c.json({ error: "invalid_grant" }, 400);
+        }
+        if (!exchanged.ok) {
+            return c.json(exchanged.body, 400);
+        }
 
         return c.json({
-            access_token: accessToken,
+            access_token: exchanged.accessToken,
             token_type: "Bearer",
             expires_in: 365 * 24 * 60 * 60,
-            refresh_token: refreshToken,
+            refresh_token: exchanged.refreshToken,
         });
     });
 
