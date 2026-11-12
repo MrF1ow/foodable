@@ -393,6 +393,9 @@ function goals(overrides: Partial<NutritionGoals> = {}): NutritionGoals {
         daily_caffeine_mg: 400,
         daily_water_ml: 2500,
         target_weight_g: 72000,
+        goal_name: "Recomp, slow",
+        goal_note: 'Since "October"',
+        goals_set_on: "2026-06-20",
         updated_at: "2026-06-20T14:30:00.000Z",
         ...overrides,
     };
@@ -418,7 +421,7 @@ const WATER_HEADER = "id,logged_at,timezone,amount_ml,notes";
 const WEIGHT_HEADER =
     "id,logged_at,timezone,weight_g,weight_display,weight_unit,notes";
 const GOALS_HEADER =
-    "daily_calories,daily_protein_g,daily_carbs_g,daily_fat_g,daily_fiber_g,daily_sugar_g,daily_alcohol_g,daily_caffeine_mg,daily_water_ml,target_weight_g,updated_at,timezone";
+    "daily_calories,daily_protein_g,daily_carbs_g,daily_fat_g,daily_fiber_g,daily_sugar_g,daily_alcohol_g,daily_caffeine_mg,daily_water_ml,target_weight_g,goal_name,goal_note,goals_set_on,updated_at,timezone";
 const GOAL_DAYS_HEADER =
     "date,daily_calories,daily_protein_g,daily_carbs_g,daily_fat_g,daily_fiber_g,daily_sugar_g,daily_alcohol_g,daily_caffeine_mg,daily_water_ml,timezone";
 
@@ -614,6 +617,10 @@ test("every goal value lands under its own header name", () => {
         daily_caffeine_mg: "400",
         daily_water_ml: "2500",
         target_weight_g: "72000",
+        // Commas and quotes in a name or note survive the round trip.
+        goal_name: "Recomp, slow",
+        goal_note: 'Since "October"',
+        goals_set_on: "2026-06-20",
         updated_at: "2026-06-20 16:30:00",
         timezone: "Europe/Berlin",
     });
@@ -717,6 +724,9 @@ test("goals.csv leaves unset targets as empty fields", () => {
             daily_caffeine_mg: null,
             daily_water_ml: null,
             target_weight_g: null,
+            goal_name: null,
+            goal_note: null,
+            goals_set_on: null,
         }),
         "UTC",
     );

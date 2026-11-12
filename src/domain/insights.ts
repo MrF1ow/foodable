@@ -91,6 +91,11 @@ export function goalsForDate(
         daily_caffeine_mg: resolved.daily_caffeine_mg,
         daily_water_ml: resolved.daily_water_ml,
         target_weight_g: defaults?.target_weight_g ?? null,
+        // The name, note and set date describe the standing goals; a per-day
+        // override is a tweak to them, not a new goal.
+        goal_name: defaults?.goal_name ?? null,
+        goal_note: defaults?.goal_note ?? null,
+        goals_set_on: defaults?.goals_set_on ?? null,
         updated_at: defaults?.updated_at ?? override.updated_at,
     };
 }

@@ -59,6 +59,54 @@ describeDb(pgAvailable !== null, "nutrition log db", (getCtx) => {
         expect(second.daily_carbs_g).toBe(200);
     });
 
+    test("goal name, note and set date persist and read back", async () => {
+        const saved = await upsertNutritionGoals(userId, {
+            daily_calories: 2100,
+            goal_name: "Recomp",
+            goal_note: "Since the October check-in",
+            goals_set_on: "2026-10-02",
+        });
+        expect(saved.goal_name).toBe("Recomp");
+        expect(saved.goal_note).toBe("Since the October check-in");
+        expect(saved.goals_set_on).toBe("2026-10-02");
+        const read = await getNutritionGoals(userId);
+        expect(read?.goal_name).toBe("Recomp");
+        expect(read?.goal_note).toBe("Since the October check-in");
+        expect(read?.goals_set_on).toBe("2026-10-02");
+    });
+
+    test("a goals write without a name keeps the stored name, note and date", async () => {
+        await upsertNutritionGoals(userId, {
+            daily_calories: 2100,
+            goal_name: "Recomp",
+            goal_note: "Slow and steady",
+            goals_set_on: "2026-10-02",
+        });
+        const after = await upsertNutritionGoals(userId, {
+            daily_protein_g: 150,
+        });
+        expect(after.daily_protein_g).toBe(150);
+        expect(after.goal_name).toBe("Recomp");
+        expect(after.goal_note).toBe("Slow and steady");
+        expect(after.goals_set_on).toBe("2026-10-02");
+        const cleared = await upsertNutritionGoals(userId, {
+            goal_name: null,
+            goal_note: null,
+        });
+        expect(cleared.goal_name).toBeNull();
+        expect(cleared.goal_note).toBeNull();
+        expect(cleared.goals_set_on).toBe("2026-10-02");
+    });
+
+    test("a goals row with no name reads back null name, note and date", async () => {
+        const saved = await upsertNutritionGoals(userId, {
+            daily_calories: 1800,
+        });
+        expect(saved.goal_name).toBeNull();
+        expect(saved.goal_note).toBeNull();
+        expect(saved.goals_set_on).toBeNull();
+    });
+
     test("getNutritionGoals null when missing", async () => {
         expect(await getNutritionGoals(crypto.randomUUID())).toBeNull();
     });
