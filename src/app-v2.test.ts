@@ -169,7 +169,8 @@ describe("/app-v2.js", () => {
         // +~3 KB Share link: copy the new link's address.
         // +~1.9 KB Settings AI connections: copy the connect address.
         // +~1.9 KB Log sheet: Copy yesterday tile follows the chosen meal.
-        expect(js.length).toBeLessThan(127_500);
+        // +~0.6 KB Scanner: no bare BarcodeDetector, detach the video, start-up errors shown.
+        expect(js.length).toBeLessThan(128_300);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
