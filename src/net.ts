@@ -1,4 +1,5 @@
 import { isIP } from "node:net";
+import { tryDecodeURI } from "hono/utils/url";
 import { normalizeIp } from "./client-ip.js";
 
 // Coarsen a client IP before it ever reaches a log line. A full IP is personal
@@ -23,13 +24,38 @@ export function maskIp(ip: string | undefined): string {
 }
 
 /**
+ * The path the router matches: Hono's own decode of the request path
+ * (`getPath` in hono/utils/url), reproduced here because a raw path with
+ * "%73" for "s" reaches the share page too. One decode only, with "%25" kept
+ * encoded, so "%2573" stays "%2573" and routes nowhere; a malformed escape
+ * decodes piecewise instead of throwing.
+ */
+function routedPath(pathname: string): string {
+    if (!pathname.includes("%")) return pathname;
+    return tryDecodeURI(
+        pathname.includes("%25") ? pathname.replace(/%25/g, "%2525") : pathname,
+    );
+}
+
+/**
  * Strip export download tokens and share link tokens before a path hits the
  * access log. A share token is the whole credential for a public page.
+ * The match runs on the path the router sees, so a percent-encoded spelling of
+ * the first segment ("/%73/<token>") is redacted like "/s/<token>".
  */
 export function redactPathForAccessLog(pathname: string): string {
     // Collapse repeated slashes and ignore case before matching, so
-    // "//exports/<token>" or "/Exports/<token>" never logs the token either.
-    const [, first = "", ...rest] = pathname.replace(/\/{2,}/g, "/").split("/");
+    // "//exports/<token>" or "/Exports/<token>" never logs the token either
+    // (the router is stricter than this; over-redacting costs nothing).
+    let routed: string;
+    try {
+        routed = routedPath(pathname);
+    } catch {
+        // Not reachable with Hono's decoder, which never throws; if a future
+        // one does, a path we cannot read is a path we do not print.
+        return "/[redacted]";
+    }
+    const [, first = "", ...rest] = routed.replace(/\/{2,}/g, "/").split("/");
     if (first.toLowerCase() === "exports" && rest.join("/") !== "") {
         return "/exports/[redacted]";
     }

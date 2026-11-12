@@ -132,6 +132,8 @@ mock.module("../../db/grocery.js", () => ({
 mock.module("../../db/stock.js", () => ({
     ...realStock,
     liveStockStore: () => db.stockStore,
+    // No database here: the memory stores are the "transaction".
+    inStockTransaction: <T>(fn: () => Promise<T>) => fn(),
 }));
 mock.module("../../db/plans.js", () => ({
     ...realPlans,
@@ -685,6 +687,26 @@ describe("POST /recipes/:id/cook/confirm", () => {
         expect(await flourLeft()).toBe(400);
         expect(db.meals).toHaveLength(1);
         expect(toastOf(second)).toEqual({ key: "recipes.cooked.already" });
+    });
+
+    test("a double submit with the switch off cooks once", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        const body = cookSheetBody(page.html);
+        body.delete("log_serving");
+        const first = await postConfirm(body);
+        expect(first.status).toBe(303);
+        expect(toastOf(first)).toEqual({ key: "recipes.cooked" });
+        const second = await postConfirm(body);
+        expect(second.status).toBe(303);
+        expect(toastOf(second)).toEqual({ key: "recipes.cooked.already" });
+        expect(await flourLeft()).toBe(400);
+        expect(
+            (await db.stockStore.listMovements(HH)).filter(
+                (m) => m.reason === "cook",
+            ),
+        ).toHaveLength(1);
+        expect(db.meals).toHaveLength(0);
     });
 
     test("with the switch off it cooks and logs nothing", async () => {

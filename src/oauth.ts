@@ -6,6 +6,7 @@ import {
     consumeAuthCode,
     storeRefreshToken,
     consumeRefreshToken,
+    withRefreshExchange,
     registerClient,
     isRegisteredClient,
 } from "./db/tokens.js";
@@ -543,33 +544,29 @@ export function createOAuthRouter() {
             // Look up the existing user from the refresh token
             const newAccessToken = crypto.randomUUID();
             const newRefreshToken = crypto.randomUUID();
-            const userId = await runAsSystem(
-                "oauth refresh token exchange",
-                async () => {
-                    const owner = await consumeRefreshToken(refreshToken);
-                    if (!owner) return null;
-                    // A refresh token belongs to the client it was issued to.
-                    if (
-                        reqClientId &&
-                        owner.clientId &&
-                        reqClientId !== owner.clientId
-                    ) {
-                        return null;
-                    }
-                    // The new tokens belong to the same app as the old one.
-                    await storeToken(
-                        newAccessToken,
-                        owner.userId,
-                        owner.clientId,
-                    );
-                    await storeRefreshToken(
-                        newRefreshToken,
-                        owner.userId,
-                        owner.clientId,
-                    );
-                    return owner.userId;
-                },
-            );
+            // Consume and store are one transaction that excludes a
+            // Disconnect for the member, so a refresh racing one cannot leave
+            // a live pair behind.
+            const userId = await withRefreshExchange(refreshToken, async () => {
+                const owner = await consumeRefreshToken(refreshToken);
+                if (!owner) return null;
+                // A refresh token belongs to the client it was issued to.
+                if (
+                    reqClientId &&
+                    owner.clientId &&
+                    reqClientId !== owner.clientId
+                ) {
+                    return null;
+                }
+                // The new tokens belong to the same app as the old one.
+                await storeToken(newAccessToken, owner.userId, owner.clientId);
+                await storeRefreshToken(
+                    newRefreshToken,
+                    owner.userId,
+                    owner.clientId,
+                );
+                return owner.userId;
+            });
             if (!userId) {
                 return c.json({ error: "invalid_grant" }, 400);
             }

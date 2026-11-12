@@ -14,6 +14,7 @@ import {
     storeAuthCode,
     storeRefreshToken,
     storeToken,
+    withRefreshExchange,
 } from "./tokens.js";
 import {
     hashHouseholdToken,
@@ -395,6 +396,69 @@ describeDb(
                 clientId: "client-9",
             });
             expect(await consumeRefreshToken("refresh-1")).toBeNull();
+        });
+
+        test("withRefreshExchange hands back what the exchange returns, with the new pair stored", async () => {
+            await storeRefreshToken("old-refresh", userId, "client-9");
+            const result = await withRefreshExchange(
+                "old-refresh",
+                async () => {
+                    const owner = await consumeRefreshToken("old-refresh");
+                    await storeToken("new-access", userId, owner!.clientId);
+                    await storeRefreshToken(
+                        "new-refresh",
+                        userId,
+                        owner!.clientId,
+                    );
+                    return owner;
+                },
+            );
+            expect(result).toEqual({ userId, clientId: "client-9" });
+            expect(await consumeRefreshToken("old-refresh")).toBeNull();
+            expect(await lookupBearer("new-access")).toMatchObject({
+                status: "valid",
+                userId,
+                clientId: "client-9",
+            });
+            expect(await consumeRefreshToken("new-refresh")).not.toBeNull();
+        });
+
+        test("withRefreshExchange skips the exchange for a token that is unknown or expired", async () => {
+            const { sql } = getCtx();
+            await storeRefreshToken("stale-refresh", userId);
+            await sql`
+                update public.refresh_tokens
+                set expires_at = now() - interval '1 minute'
+                where token = 'stale-refresh'
+            `;
+            let called = 0;
+            const exchange = async () => {
+                called += 1;
+                return "minted";
+            };
+            expect(await withRefreshExchange("nope", exchange)).toBeNull();
+            expect(
+                await withRefreshExchange("stale-refresh", exchange),
+            ).toBeNull();
+            expect(called).toBe(0);
+        });
+
+        test("withRefreshExchange rolls back when the exchange throws, so the old token is not burned", async () => {
+            await storeRefreshToken("kept-refresh", userId, "client-9");
+            await expect(
+                withRefreshExchange("kept-refresh", async () => {
+                    await consumeRefreshToken("kept-refresh");
+                    await storeToken("half-minted", userId, "client-9");
+                    throw new Error("store failed");
+                }),
+            ).rejects.toThrow("store failed");
+            expect(await lookupBearer("half-minted")).toEqual({
+                status: "invalid",
+            });
+            expect(await consumeRefreshToken("kept-refresh")).toEqual({
+                userId,
+                clientId: "client-9",
+            });
         });
 
         test("concurrent auth code consume allows only one winner", async () => {

@@ -29,6 +29,10 @@ mock.module("./db/tokens.js", () => ({
               : { status: "invalid" },
     consumeAuthCode: async () => authCodeStub,
     consumeRefreshToken: async () => refreshStub,
+    // The real wrapper opens a database transaction; the stubs below stand in
+    // for the calls that would join it.
+    withRefreshExchange: async (_token: string, exchange: () => unknown) =>
+        exchange(),
     storeToken: async (
         _t: string,
         userId: string,
