@@ -85,6 +85,7 @@ export const WIDGET_TEMPLATES_V2: Record<string, string> = {
     "recipe-card": "recipe-card.html",
     "product-score": "product-score.html",
     "restock-nudge": "restock-nudge.html",
+    "week-plan": "week-plan.html",
 };
 
 /** Per-widget size caps for assembled MCP widget HTML (bytes = 1024). */

@@ -10467,7 +10467,7 @@ describe("plan tools over HTTP", () => {
     );
 
     test.each(ERAS)(
-        "add_plan_missing_to_groceries takes no `from` and never lists a past plan's needs (%p)",
+        "add_plan_missing_to_groceries takes an optional `from`: a later day adds that window's needs, a past day is refused, and a past plan is never listed (%p)",
         async (era) => {
             setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
             await addStore();
@@ -10478,9 +10478,10 @@ describe("plan tools over HTTP", () => {
                 )!;
                 expect(
                     Object.keys(listed.inputSchema.properties ?? {}),
-                ).toEqual([]);
-                const { recipeId } = await seedBread(call);
-                const yesterday = addUtcDays(utcTodayFromDate(), -1);
+                ).toEqual(["from"]);
+                const { recipeId, flourId } = await seedBread(call);
+                const today = utcTodayFromDate();
+                const yesterday = addUtcDays(today, -1);
                 // A plan the web would never show: stored for a past day.
                 await db.plansStore.addPlan({
                     householdId: "hh-1",
@@ -10488,18 +10489,170 @@ describe("plan tools over HTTP", () => {
                     date: yesterday,
                     slot: "dinner",
                 });
+                // Today's window does not list it.
+                const none = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(none.added).toEqual([]);
+                // A window that starts yesterday is refused.
+                expect(
+                    await refusal(call, "add_plan_missing_to_groceries", {
+                        from: yesterday,
+                    }),
+                ).toMatch(/pick today or a later day/i);
+                expect(
+                    await refusal(call, "add_plan_missing_to_groceries", {
+                        from: "soon",
+                    }),
+                ).toMatch(/date/i);
+                expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
+                // A plan ten days out is outside today's window, inside its own.
+                const later = addUtcDays(today, 10);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: later,
+                    slot: "dinner",
+                });
+                const outsideToday = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(outsideToday.added).toEqual([]);
                 const out = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
                     (
                         await call("add_plan_missing_to_groceries", {
-                            from: yesterday,
+                            from: later,
                         })
                     ).structuredContent,
                 );
-                expect(out.added).toEqual([]);
-                expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
+                expect(out.added).toHaveLength(1);
+                expect(out.added[0]).toMatchObject({
+                    food_id: flourId,
+                    display_name: "Flour",
+                });
             });
         },
     );
+
+    test.each(ERAS)(
+        "get_week_plan says the household's today whatever `from` is (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const today = utcTodayFromDate();
+                const plain = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                expect(plain.today).toBe(today);
+                expect(plain.from).toBe(today);
+                const later = addUtcDays(today, 9);
+                const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan", { from: later }))
+                        .structuredContent,
+                );
+                expect(week.from).toBe(later);
+                expect(week.today).toBe(today);
+            });
+        },
+    );
+
+    describe("widget-week-plan flag", () => {
+        const WEEK_PLAN_V2_URI = widgetUri("week-plan.html", true);
+
+        test.each(ERAS)(
+            "plan tools on and the widget flag off: get_week_plan has no ui meta and there is no week-plan resource (%p)",
+            async (era) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-plan-tools": true,
+                        "widget-week-plan": false,
+                    }),
+                );
+                await withHttpClient("u1", era, async (client) => {
+                    const { tools } = await client.listTools();
+                    const week = tools.find((t) => t.name === "get_week_plan");
+                    expect(week).toBeDefined();
+                    expect(week?._meta?.ui).toBeUndefined();
+                    expect(
+                        week?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        WEEK_PLAN_V2_URI,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "both flags on: get_week_plan links the v2 week-plan uri, which lists and reads (%p)",
+            async (era) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-plan-tools": true,
+                        "widget-week-plan": true,
+                    }),
+                );
+                const assembled = await getWidgetHtml("week-plan", {
+                    v2: true,
+                });
+                await withHttpClient("u1", era, async (client) => {
+                    const { tools } = await client.listTools();
+                    const week = tools.find((t) => t.name === "get_week_plan");
+                    expect(
+                        (week?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(WEEK_PLAN_V2_URI);
+                    expect(week?._meta?.["openai/outputTemplate"]).toBe(
+                        WEEK_PLAN_V2_URI,
+                    );
+                    // The writes the card calls carry no widget of their own.
+                    for (const name of [
+                        "unplan_recipe",
+                        "add_plan_missing_to_groceries",
+                    ]) {
+                        expect(
+                            tools.find((t) => t.name === name)?._meta?.ui,
+                        ).toBeUndefined();
+                    }
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        WEEK_PLAN_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: WEEK_PLAN_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "plan tools off: the widget flag alone adds neither the tools nor the resource (%p)",
+            async (era) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-plan-tools": false,
+                        "widget-week-plan": true,
+                    }),
+                );
+                await withHttpClient("u1", era, async (client) => {
+                    const { tools } = await client.listTools();
+                    expect(tools.map((t) => t.name)).not.toContain(
+                        "get_week_plan",
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        WEEK_PLAN_V2_URI,
+                    );
+                });
+            },
+        );
+    });
 });
 
 describe("get_household_digest", () => {

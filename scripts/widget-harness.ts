@@ -23,6 +23,10 @@
 //   ?state=stores       restock-nudge sample: costco (default), stores (due
 //                       usuals at two stores and one with none), onlist (Eggs
 //                       already on the list) or empty
+//   ?state=busy         week-plan sample: design (default: three planned days,
+//                       two foods missing), busy (two meals on one day),
+//                       future (a week starting three days after today)
+//                       or empty
 //
 // Nothing here is served by the production app; scripts/ is dev-only.
 
@@ -146,6 +150,103 @@ function restockUsuals(state: string) {
     };
 }
 
+// get_week_plan payload for the week-plan card: the design's week (three
+// planned days, two foods missing), a week with two meals on one day, a week
+// that starts three days after the household's today ("future"), or none.
+// The household's today is 2026-11-14 throughout.
+function weekPlanData(state: string) {
+    const start = state === "future" ? "2026-11-17" : "2026-11-14";
+    const weekdays = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
+    const dates: [string, string][] = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(`${start}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + i);
+        return [d.toISOString().slice(0, 10), weekdays[d.getUTCDay()]!];
+    });
+    const [d0, d1, d2] = [dates[0]![0], dates[1]![0], dates[2]![0]];
+    const entry = (
+        plan_id: string,
+        recipe_name: string,
+        slot: string,
+        kcal: number | null,
+    ) => ({
+        plan_id,
+        recipe_id: "rec-" + plan_id,
+        recipe_name,
+        slot,
+        servings: 2,
+        kcal_per_portion: kcal,
+    });
+    const need = (plan_id: string, recipe_name: string, date: string) => ({
+        plan_id,
+        recipe_id: "rec-" + plan_id,
+        recipe_name,
+        date,
+        slot: "dinner",
+    });
+    const planned: Record<string, ReturnType<typeof entry>[]> =
+        state === "empty"
+            ? {}
+            : {
+                  [d0]: [
+                      entry("plan-1", "Salmon, rice & spinach", "dinner", 640),
+                  ],
+                  [d1]: [entry("plan-2", "Beef chili", "dinner", 520)],
+                  [d2]: [entry("plan-3", "Chicken rice bowls", "dinner", 852)],
+              };
+    if (state === "busy") {
+        planned[d2] = [
+            entry("plan-4", "Overnight oats", "breakfast", 410),
+            entry("plan-3", "Chicken rice bowls", "dinner", 852),
+        ];
+    }
+    const days = dates.map(([date, weekday]) => ({
+        date,
+        weekday,
+        plans: planned[date] ?? [],
+    }));
+    return {
+        today: "2026-11-14",
+        from: start,
+        planned_count: days.reduce((n, d) => n + d.plans.length, 0),
+        days,
+        missing:
+            state === "empty"
+                ? []
+                : [
+                      {
+                          food_id: "food-spinach",
+                          display_name: "Spinach",
+                          amount: 200,
+                          unit: "g",
+                          unknown: false,
+                          unmeasured: false,
+                          needed_by: [
+                              need("plan-1", "Salmon, rice & spinach", d0),
+                          ],
+                      },
+                      {
+                          food_id: "food-lemon",
+                          display_name: "Lemon",
+                          amount: 2,
+                          unit: "each",
+                          unknown: false,
+                          unmeasured: false,
+                          needed_by: [
+                              need("plan-1", "Salmon, rice & spinach", d0),
+                          ],
+                      },
+                  ],
+    };
+}
+
 const PORT = Number(process.env.HARNESS_PORT ?? 8787);
 const KEYS = [
     ...new Set([
@@ -173,7 +274,8 @@ function indexPage(): string {
      <code>?serverTools=0</code>, <code>?tools=0</code>, <code>?delay=3000</code>,
      <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>,
      <code>?v2=1</code> (the v2 assembly), <code>?theme=dark</code> (host theme),
-     <code>?state=full|partial|none</code> (product-score sample).</p>
+     <code>?state=full|partial|none</code> (product-score sample),
+     <code>?state=design|busy|future|empty</code> (week-plan sample).</p>
   <ul>${links}</ul>
 </body></html>`;
 }
@@ -800,6 +902,8 @@ function hostPage(widget: string, params: URLSearchParams): string {
         // list_usuals: two due at Costco (one low, one on a schedule), one
         // not due (never a row). Replaced below for ?state=stores|empty.
         "restock-nudge": restockUsuals("costco"),
+        // get_week_plan: replaced below for ?state=busy|empty.
+        "week-plan": weekPlanData("design"),
         // get_recipe: one ingredient the fridge cannot cover, so Cook has a
         // shortfall to show.
         "recipe-card": {
@@ -1042,6 +1146,7 @@ function hostPage(widget: string, params: URLSearchParams): string {
     RESULTS["product-score"] =
         SCORE_STATES[params.get("state") ?? "full"] ?? SCORE_STATES.full;
     RESULTS["restock-nudge"] = restockUsuals(params.get("state") ?? "costco");
+    RESULTS["week-plan"] = weekPlanData(params.get("state") ?? "design");
     // Probe and gallery paint their own UI; anything non-null will do.
     const toolResult = RESULTS[widget] ?? { probe: true };
 
@@ -1076,6 +1181,20 @@ const CFG = {
 const TOOL_RESULT = ${JSON.stringify(toolResult)};
 // What log_recipe_portion answers: the meal-progress payload.
 const MEAL_LOGGED = ${JSON.stringify(RESULTS["meal-logged"])};
+// What get_week_plan answers after unplan_recipe calls: the card's week minus
+// the plans removed so far, with the missing lines only those plans needed
+// dropped (the server works that out; the card does not).
+const GONE = new Set();
+function weekNow() {
+  const w = TOOL_RESULT;
+  if (!w || !Array.isArray(w.days)) return w;
+  const days = w.days.map((d) => Object.assign({}, d, { plans: d.plans.filter((p) => !GONE.has(p.plan_id)) }));
+  return Object.assign({}, w, {
+    days,
+    planned_count: days.reduce((n, d) => n + d.plans.length, 0),
+    missing: w.missing.filter((m) => m.needed_by.some((n) => !GONE.has(n.plan_id))),
+  });
+}
 const frame = document.getElementById("frame");
 const logEl = document.getElementById("log");
 const log = (m) => { logEl.textContent += "\\n" + m; logEl.scrollTop = logEl.scrollHeight; };
@@ -1212,6 +1331,37 @@ window.addEventListener("message", (e) => {
           },
         }});
         log("-> add_grocery_line food_id=" + a.food_id + " for id " + d.id);
+        return;
+      }
+      if (name === "get_week_plan") {
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Week plan." }],
+          structuredContent: weekNow(),
+        }});
+        log("-> tools/call get_week_plan args=" + JSON.stringify(d.params.arguments || {}) + " for id " + d.id);
+        return;
+      }
+      if (name === "unplan_recipe") {
+        const a = d.params.arguments || {};
+        GONE.add(a.plan_id);
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Removed " + a.plan_id + " from the plan." }],
+          structuredContent: { removed: true, plan_id: a.plan_id },
+        }});
+        log("-> tools/call unplan_recipe plan_id=" + a.plan_id + " for id " + d.id);
+        return;
+      }
+      if (name === "add_plan_missing_to_groceries") {
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Added 1 to the grocery list: Spinach." }],
+          structuredContent: {
+            added: [{ line_id: "ln-spinach", food_id: "food-spinach", display_name: "Spinach",
+              amount: 200, unit: "g", store_id: "st-costco", note: null }],
+            on_list: [{ food_id: "food-lemon", display_name: "Lemon", existing_line_id: "ln-lemon" }],
+            unknown: [], skipped: [],
+          },
+        }});
+        log("-> tools/call add_plan_missing_to_groceries args=" + JSON.stringify(d.params.arguments || {}) + " for id " + d.id);
         return;
       }
       if (name === "check_grocery_line") {

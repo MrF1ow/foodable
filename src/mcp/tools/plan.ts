@@ -11,6 +11,7 @@ import { liveSettingsStore } from "../../db/settings.js";
 import { GroceryInputError } from "../../domain/grocery.js";
 import {
     checkPlanDate,
+    checkPlanDay,
     PLAN_SLOTS,
     planRecipe,
     type RecipePlan,
@@ -26,7 +27,12 @@ import {
 import { macrosForPerson } from "../../domain/recipes.js";
 import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
 import { gatedTool } from "../gated.js";
-import { type ToolContext } from "../shared.js";
+import {
+    registerV2OnlyWidgetResource,
+    uiMetaForKey,
+    type ToolContext,
+} from "../shared.js";
+import { isViewerFlagOn } from "../../viewer-flags.js";
 
 const PLAN_ENTRY_SCHEMA = z.object({
     plan_id: z.string(),
@@ -47,6 +53,8 @@ const NEEDED_BY_SCHEMA = z.object({
 });
 
 export const WEEK_PLAN_OUTPUT_SCHEMA = z.object({
+    /** The household's today, `YYYY-MM-DD`, whatever `from` is. */
+    today: z.string(),
     /** First day shown, `YYYY-MM-DD`: the household's today unless `from` was passed. */
     from: z.string(),
     planned_count: z.number().int(),
@@ -165,11 +173,6 @@ function planLine(plan: ReturnType<typeof planWire>): string {
     return `${plan.recipe_name} · ${weekdayName(plan.date)} ${plan.date} · ${plan.slot} · ${plan.servings} servings`;
 }
 
-/** The week view's window: seven days from `from`, or from the household's today. */
-function checkedFrom(from: string | undefined): string | undefined {
-    return from === undefined ? undefined : checkPlanDate(from);
-}
-
 /** Calories in one portion of each planned recipe, by recipe id. Null when unknown or incomplete. */
 function kcalPerPortionByRecipe(
     inputs: WeekPlanInputs,
@@ -197,6 +200,19 @@ function kcalPerPortionByRecipe(
 export function registerPlanTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, callerActor, analytics } = ctx;
 
+    // Only when the plan tools are on: a widget for a tool that is hidden
+    // would be a resource nothing links.
+    if (isViewerFlagOn(ctx.flags, "mcp-plan-tools")) {
+        registerV2OnlyWidgetResource(server, ctx, {
+            key: "week-plan",
+            resourceName: "week-plan",
+            title: "Week plan",
+            description:
+                "The week's planned recipes by day, with Remove and add-missing-to-groceries, for get_week_plan.",
+            flag: "widget-week-plan",
+        });
+    }
+
     gatedTool(
         server,
         ctx,
@@ -221,15 +237,22 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     ),
             }),
             outputSchema: WEEK_PLAN_OUTPUT_SCHEMA,
+            ...uiMetaForKey(ctx, "week-plan", {
+                v2: true,
+                flag: "widget-week-plan",
+            }),
         },
         async (args) =>
             withAnalytics(
                 "get_week_plan",
                 async () => {
                     const householdId = await callerHouseholdId();
+                    const today = await householdToday(householdId);
                     const inputs = await loadWeekPlanInputs(
                         householdId,
-                        checkedFrom(args.from),
+                        args.from === undefined
+                            ? today
+                            : checkPlanDate(args.from),
                     );
                     const kcal = kcalPerPortionByRecipe(inputs);
                     const nameById = new Map(
@@ -285,6 +308,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     return {
                         content: [{ type: "text" as const, text }],
                         structuredContent: {
+                            today,
                             from: inputs.today,
                             planned_count: plannedCount,
                             days,
@@ -416,23 +440,37 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Plan Missing To Groceries",
             description:
-                "Put what the week plan still needs, and the kitchen does not hold, on the grocery list: the same lines get_week_plan lists under `missing` for the seven days from the household's today. A food the list already covers is not added again, so calling it twice adds nothing new; a food whose stock could not be counted is added at the recipe's full amount and listed under `unknown`. Needs at least one store. Prefer this to add_grocery_line per missing line, which would skip those checks.",
+                "Put what the week plan still needs, and the kitchen does not hold, on the grocery list: the same lines get_week_plan lists under `missing` for the seven days from `from` (default the household's today; a day before today is refused). A food the list already covers is not added again, so calling it twice adds nothing new; a food whose stock could not be counted is added at the recipe's full amount and listed under `unknown`. Needs at least one store. Prefer this to add_grocery_line per missing line, which would skip those checks.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
                 idempotentHint: true,
                 openWorldHint: false,
             },
-            inputSchema: z.object({}),
+            inputSchema: z.object({
+                from: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "First day of the seven, YYYY-MM-DD, today or later. Defaults to the household's today.",
+                    ),
+            }),
             outputSchema: ADD_PLAN_MISSING_OUTPUT_SCHEMA,
         },
-        async () =>
+        async (args) =>
             withAnalytics(
                 "add_plan_missing_to_groceries",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    // Always the household's today, like the web app.
-                    const inputs = await loadWeekPlanInputs(householdId);
+                    // Today by default, like the web app; a later day for a
+                    // card showing a later window. Never a past one: a plan
+                    // the app would not show stays out.
+                    const today = await householdToday(householdId);
+                    const from =
+                        args.from === undefined
+                            ? today
+                            : checkPlanDay(args.from.trim(), today);
+                    const inputs = await loadWeekPlanInputs(householdId, from);
                     const lines = missingForPlan(
                         inputs.plans,
                         inputs.recipes,

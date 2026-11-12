@@ -85,6 +85,15 @@ export const FLAGS = {
         removeWhen:
             "the restock-nudge widget is on for everyone and the flag is removed.",
     },
+    "widget-week-plan": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Week plan card for get_week_plan: seven days, Remove per entry, add the missing to groceries.",
+        removeWhen:
+            "the week-plan widget is on for everyone and the flag is removed.",
+    },
     "off-lookups": {
         type: "bool",
         kind: "kill-switch",

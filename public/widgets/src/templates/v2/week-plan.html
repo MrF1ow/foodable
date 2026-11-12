@@ -1,0 +1,712 @@
+<!doctype html>
+<!--
+  Week plan card (MCP Apps), v2 look. Served for get_week_plan when the
+  widget-week-plan flag is on. No v1 twin.
+
+  One card: "This week" with the count planned, one row per day (the weekday,
+  then each recipe planned that day with its calories per portion, or
+  "Nothing planned"), and a footer line, "N ingredients missing · add to
+  groceries".
+
+  Writes, both hidden when the host cannot call tools:
+    - Remove on a planned entry calls unplan_recipe with its plan id. The entry
+      leaves the card when the call succeeds; while it is out the button is
+      disabled; a failure keeps the entry and says so. After a Remove the card
+      asks get_week_plan for the same window again and paints what it answers,
+      so the missing count is the server's, never a recount here. If that read
+      fails the entry stays gone and the footer is left out, since the count
+      would be a guess.
+    - "add to groceries" calls add_plan_missing_to_groceries once with the
+      card's own window start (`from`), and shows what it added, what the list
+      already covered, what could not be counted and what it skipped. It is
+      left out when that window starts before the household's today, which the
+      server refuses.
+  Planning a recipe on an empty day is the agent's job (plan_recipe): the card
+  has no recipe picker, so empty days have no add control.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Week plan</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            .days {
+                display: flex;
+                flex-direction: column;
+            }
+            .pd {
+                display: flex;
+                align-items: flex-start;
+                gap: 14px;
+                padding: 9px 0;
+                border-bottom: 1px solid var(--line);
+                min-width: 0;
+            }
+            .pd:last-child {
+                border-bottom: 0;
+            }
+            .pd-d {
+                flex: none;
+                width: 32px;
+                font-size: 11px;
+                line-height: 18px;
+                font-weight: 600;
+                letter-spacing: 0.9px;
+                color: var(--text-tertiary);
+            }
+            .pd-b {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                flex: 1;
+                min-width: 0;
+            }
+            .pe {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                min-width: 0;
+            }
+            .pe-t {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-size: 14px;
+                line-height: 18px;
+            }
+            .pe-s {
+                flex: none;
+                font-size: 12px;
+                line-height: 15px;
+                color: var(--text-tertiary);
+            }
+            .pe-k {
+                margin-left: auto;
+                flex: none;
+                font-size: 13px;
+                line-height: 18px;
+                color: var(--text-secondary);
+                white-space: nowrap;
+            }
+            .pe-k + .act {
+                margin-left: 0;
+            }
+            .pe-none {
+                font-size: 14px;
+                line-height: 18px;
+                color: var(--text-tertiary);
+            }
+            .act:disabled {
+                opacity: 0.55;
+                cursor: default;
+            }
+            .pf {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 13px;
+                line-height: 18px;
+                color: var(--text-secondary);
+                min-width: 0;
+            }
+            .pf .act {
+                margin-left: 0;
+                font-size: 13px;
+                line-height: 18px;
+            }
+            .s-ok {
+                --c: var(--accent-fill);
+            }
+            .pf-s {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+            .pf-s .note {
+                font-size: 12px;
+                line-height: 15px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "This week",
+                weekOf: "Week of {day}",
+                loading: "Loading the week plan…",
+                planned: "{n} planned",
+                nothing: "Nothing planned",
+                kcal: "{n} kcal",
+                remove: "Remove",
+                removeLabel: "Remove {name}",
+                removing: "Removing…",
+                removeFailed: "Could not remove {name}.",
+                missingOne: "{n} ingredient missing",
+                missingMany: "{n} ingredients missing",
+                nothingMissing: "Nothing missing",
+                addMissing: "add to groceries",
+                adding: "adding…",
+                added: "Added {n} to groceries",
+                nothingNew: "Nothing new to add",
+                onList: "{n} already on the list",
+                check: "Check what you have: {names}",
+                skipped: "Skipped: {items}",
+                addFailed: "Could not add to groceries.",
+            };
+
+            const MONTHS = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ];
+
+            const SLOT_NAMES = {
+                breakfast: "Breakfast",
+                lunch: "Lunch",
+                dinner: "Dinner",
+                snack: "Snack",
+            };
+
+            // Design sample (FigCraft Widget/Week plan): three planned days,
+            // four empty ones, two foods missing.
+            const SAMPLE = (() => {
+                const names = [
+                    ["2026-11-14", "Saturday"],
+                    ["2026-11-15", "Sunday"],
+                    ["2026-11-16", "Monday"],
+                    ["2026-11-17", "Tuesday"],
+                    ["2026-11-18", "Wednesday"],
+                    ["2026-11-19", "Thursday"],
+                    ["2026-11-20", "Friday"],
+                ];
+                const planned = {
+                    "2026-11-14": ["Salmon, rice & spinach", 640],
+                    "2026-11-15": ["Beef chili", 520],
+                    "2026-11-16": ["Chicken rice bowls", 852],
+                };
+                const need = (id, name, date) => ({
+                    plan_id: id,
+                    recipe_id: "rec-" + id,
+                    recipe_name: name,
+                    date,
+                    slot: "dinner",
+                });
+                return {
+                    today: "2026-11-14",
+                    from: "2026-11-14",
+                    planned_count: 3,
+                    days: names.map(([date, weekday], i) => ({
+                        date,
+                        weekday,
+                        plans: planned[date]
+                            ? [
+                                  {
+                                      plan_id: "plan-" + (i + 1),
+                                      recipe_id: "rec-plan-" + (i + 1),
+                                      recipe_name: planned[date][0],
+                                      slot: "dinner",
+                                      servings: 2,
+                                      kcal_per_portion: planned[date][1],
+                                  },
+                              ]
+                            : [],
+                    })),
+                    missing: [
+                        {
+                            food_id: "food-spinach",
+                            display_name: "Spinach",
+                            amount: 200,
+                            unit: "g",
+                            unknown: false,
+                            unmeasured: false,
+                            needed_by: [
+                                need(
+                                    "plan-1",
+                                    "Salmon, rice & spinach",
+                                    "2026-11-14",
+                                ),
+                            ],
+                        },
+                        {
+                            food_id: "food-lemon",
+                            display_name: "Lemon",
+                            amount: 2,
+                            unit: "each",
+                            unknown: false,
+                            unmeasured: false,
+                            needed_by: [
+                                need(
+                                    "plan-1",
+                                    "Salmon, rice & spinach",
+                                    "2026-11-14",
+                                ),
+                            ],
+                        },
+                    ],
+                };
+            })();
+
+            let MODEL = null;
+            let API = null;
+            // plan ids removed from this card, entries with a Remove in
+            // flight, and a failure line per entry.
+            const removed = new Set();
+            const busy = new Set();
+            const errors = {};
+            // add to groceries: in flight, the result (with the missing list
+            // it answered), or a failure line.
+            const grocery = { busy: false, done: null, sig: "", error: "" };
+            // get_week_plan re-reads after a Remove: the newest one wins, and
+            // a failed one leaves the missing count unknown until one lands.
+            const reread = { seq: 0, failed: false };
+
+            function plansOf(day) {
+                return day.plans.filter((p) => !removed.has(p.plan_id));
+            }
+
+            function plannedCount(data) {
+                return data.days.reduce((n, d) => n + plansOf(d).length, 0);
+            }
+
+            // "This week" when the card starts at the household's today,
+            // otherwise the day it starts on, from the payload's own dates.
+            function titleOf(data) {
+                if (!data.today || data.from === data.today) return T.title;
+                const first = data.days[0];
+                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(data.from || "");
+                if (!m) return T.title;
+                const wd = String(
+                    (first && first.weekday) ||
+                        new Date(data.from + "T00:00:00Z")
+                            .toUTCString()
+                            .slice(0, 3),
+                ).slice(0, 3);
+                return tpl(T.weekOf, {
+                    day: `${wd} ${Number(m[3])} ${MONTHS[Number(m[2]) - 1] || ""}`.trim(),
+                });
+            }
+
+            // The server refuses a window that starts before its today.
+            function canAddMissing(data) {
+                return !data.today || data.from >= data.today;
+            }
+
+            function missingSig(data) {
+                return data.missing
+                    .map((m) => String(m.food_id) + "|" + m.display_name)
+                    .join(",");
+            }
+
+            function kcalText(p) {
+                const n = Number(p.kcal_per_portion);
+                return p.kcal_per_portion == null || !Number.isFinite(n)
+                    ? ""
+                    : tpl(T.kcal, { n: Math.round(n) });
+            }
+
+            function entryRow(p, day, canWrite) {
+                const several = plansOf(day).length > 1;
+                const slot = several && SLOT_NAMES[p.slot];
+                const isBusy = busy.has(p.plan_id);
+                const kcal = kcalText(p);
+                const button = canWrite
+                    ? `<button type="button" class="act" data-act="${esc(
+                          `remove:${p.plan_id}`,
+                      )}" aria-label="${esc(
+                          tpl(T.removeLabel, { name: p.recipe_name }),
+                      )}"${isBusy ? ' disabled aria-busy="true"' : ""}>${esc(
+                          isBusy ? T.removing : T.remove,
+                      )}</button>`
+                    : "";
+                const err = errors[p.plan_id]
+                    ? `<p class="note is-warn" role="alert">${esc(errors[p.plan_id])}</p>`
+                    : "";
+                return `<div class="pe-wrap" data-plan-id="${esc(p.plan_id)}"><div class="pe"><span class="pe-t">${esc(
+                    p.recipe_name,
+                )}</span>${
+                    slot ? `<span class="pe-s">${esc(slot)}</span>` : ""
+                }${
+                    kcal
+                        ? `<span class="pe-k">${esc(kcal)}</span>`
+                        : `<span class="pe-k"></span>`
+                }${button}</div>${err}</div>`;
+            }
+
+            function dayRow(day, canWrite) {
+                const plans = plansOf(day);
+                const label = String(day.weekday || day.date || "")
+                    .slice(0, 3)
+                    .toUpperCase();
+                const body = plans.length
+                    ? plans.map((p) => entryRow(p, day, canWrite)).join("")
+                    : `<span class="pe-none">${esc(T.nothing)}</span>`;
+                return `<div class="pd"><span class="pd-d">${esc(label)}</span><div class="pd-b">${body}</div></div>`;
+            }
+
+            function groceryResult(res) {
+                const lines = [];
+                const added = res.added.length;
+                lines.push(
+                    `<span>${esc(
+                        added > 0 ? tpl(T.added, { n: added }) : T.nothingNew,
+                    )}</span>`,
+                );
+                const notes = [];
+                if (res.on_list.length > 0) {
+                    notes.push(tpl(T.onList, { n: res.on_list.length }));
+                }
+                if (res.unknown.length > 0) {
+                    notes.push(
+                        tpl(T.check, {
+                            names: res.unknown
+                                .map((u) => u.display_name)
+                                .join(", "),
+                        }),
+                    );
+                }
+                if (res.skipped.length > 0) {
+                    notes.push(
+                        tpl(T.skipped, {
+                            items: res.skipped
+                                .map((s) =>
+                                    s.reason
+                                        ? `${s.display_name} (${s.reason})`
+                                        : s.display_name,
+                                )
+                                .join("; "),
+                        }),
+                    );
+                }
+                return `<div class="pf-s"><div class="pf"><span class="dot s-ok"></span>${lines.join("")}</div>${notes
+                    .map((n) => `<p class="note">${esc(n)}</p>`)
+                    .join("")}</div>`;
+            }
+
+            function footer(data, canWrite) {
+                if (plannedCount(data) === 0) return "";
+                if (grocery.done) return groceryResult(grocery.done);
+                if (reread.failed) return "";
+                const missing = data.missing;
+                if (missing.length === 0) {
+                    return `<div class="pf">${v2Dot(
+                        undefined,
+                        "dim",
+                    )}<span>${esc(T.nothingMissing)}</span></div>`;
+                }
+                const text = tpl(
+                    missing.length === 1 ? T.missingOne : T.missingMany,
+                    { n: missing.length },
+                );
+                const action =
+                    canWrite && canAddMissing(data)
+                        ? `<span aria-hidden="true">·</span><button type="button" class="act" data-act="add-missing"${
+                              grocery.busy ? ' disabled aria-busy="true"' : ""
+                          }>${esc(grocery.busy ? T.adding : T.addMissing)}</button>`
+                        : "";
+                const err = grocery.error
+                    ? `<p class="note is-warn" role="alert">${esc(grocery.error)}</p>`
+                    : "";
+                return `<div class="pf-s"><div class="pf">${v2Dot(
+                    undefined,
+                    "warn",
+                )}<span>${esc(text)}</span>${action}</div>${err}</div>`;
+            }
+
+            function renderBody(data) {
+                const canWrite = !!(API && API.canCallTools);
+                return `<section class="card">${v2Header(
+                    titleOf(data),
+                    tpl(T.planned, { n: plannedCount(data) }),
+                )}<div class="days">${data.days
+                    .map((d) => dayRow(d, canWrite))
+                    .join("")}</div>${footer(data, canWrite)}</section>`;
+            }
+
+            // Painting replaces the card's markup, which drops keyboard focus
+            // with it; the button that had it gets it back.
+            function focusedAct() {
+                const a = document.activeElement;
+                const el = a && a.closest ? a.closest("[data-act]") : null;
+                return el ? el.getAttribute("data-act") : null;
+            }
+
+            // A plan id goes into a selector string: escape it.
+            function cssString(value) {
+                if (typeof CSS !== "undefined" && CSS && CSS.escape) {
+                    return CSS.escape(value);
+                }
+                return String(value).replace(/["\\]/g, (c) => "\\" + c);
+            }
+
+            function focusAct(act) {
+                const mount = document.getElementById("widget-mount");
+                if (!act || !mount || typeof mount.querySelector !== "function")
+                    return false;
+                const el = mount.querySelector(
+                    `[data-act="${cssString(act)}"]`,
+                );
+                if (el && !el.disabled) {
+                    el.focus();
+                    return true;
+                }
+                return false;
+            }
+
+            function paint() {
+                if (!MODEL) return;
+                const act = focusedAct();
+                v2Paint(renderBody(MODEL));
+                focusAct(act);
+            }
+
+            function render(data) {
+                const present = new Set();
+                for (const d of data.days) {
+                    for (const p of d.plans) present.add(p.plan_id);
+                }
+                for (const id of [...removed]) {
+                    if (!present.has(id)) removed.delete(id);
+                }
+                for (const key of Object.keys(errors)) delete errors[key];
+                // What add to groceries answered is stale once the server's
+                // missing list is something else.
+                if (grocery.done && grocery.sig !== missingSig(data)) {
+                    grocery.done = null;
+                }
+                grocery.error = "";
+                reread.failed = false;
+                MODEL = data;
+                paint();
+            }
+
+            // A later read of the same window: the server's entries and
+            // missing lines replace ours, other entries' failure lines stay.
+            function adopt(data) {
+                // Removed ids stay removed: a plan id never comes back, and a
+                // result the host re-sends may still list it.
+                if (grocery.done && grocery.sig !== missingSig(data)) {
+                    grocery.done = null;
+                }
+                reread.failed = false;
+                MODEL = data;
+                paint();
+            }
+
+            async function readAgain() {
+                const seq = ++reread.seq;
+                try {
+                    const res = await API.callTool("get_week_plan", {
+                        from: MODEL.from,
+                    });
+                    const data = coerce(res);
+                    if (!data) throw new Error("no week");
+                    if (seq === reread.seq) adopt(data);
+                } catch (e) {
+                    if (seq !== reread.seq) return;
+                    reread.failed = true;
+                    paint();
+                }
+            }
+
+            // Plan ids in the order the card shows them, to find the
+            // neighbour that takes focus when an entry goes.
+            function visibleIds(data) {
+                return data.days.flatMap((d) =>
+                    plansOf(d).map((p) => p.plan_id),
+                );
+            }
+
+            async function onRemove(id) {
+                if (!MODEL || !API || !API.canCallTools) return;
+                if (busy.has(id)) return;
+                const entry = MODEL.days
+                    .flatMap((d) => d.plans)
+                    .find((p) => p.plan_id === id);
+                if (!entry || removed.has(id)) return;
+                const hadFocus = focusedAct() === `remove:${id}`;
+                const order = visibleIds(MODEL);
+                delete errors[id];
+                busy.add(id);
+                paint();
+                let ok = false;
+                try {
+                    await API.callTool("unplan_recipe", { plan_id: id });
+                    removed.add(id);
+                    ok = true;
+                } catch (e) {
+                    // Gone already (removed elsewhere): the card agrees.
+                    if (
+                        e &&
+                        e.toolResult &&
+                        /plan not found/i.test(String(e.message))
+                    ) {
+                        removed.add(id);
+                        ok = true;
+                    } else {
+                        errors[id] = tpl(T.removeFailed, {
+                            name: entry.recipe_name,
+                        });
+                    }
+                } finally {
+                    busy.delete(id);
+                    paint();
+                }
+                if (hadFocus) {
+                    if (!ok) {
+                        focusAct(`remove:${id}`);
+                    } else {
+                        const i = order.indexOf(id);
+                        const rest = visibleIds(MODEL);
+                        const next =
+                            order.slice(i + 1).find((x) => rest.includes(x)) ||
+                            order
+                                .slice(0, i)
+                                .reverse()
+                                .find((x) => rest.includes(x));
+                        if (!(next && focusAct(`remove:${next}`))) {
+                            focusAct("add-missing");
+                        }
+                    }
+                }
+                if (ok) await readAgain();
+            }
+
+            async function onAddMissing() {
+                if (!MODEL || !API || !API.canCallTools) return;
+                if (grocery.busy || grocery.done) return;
+                if (!canAddMissing(MODEL) || reread.failed) return;
+                const hadFocus = focusedAct() === "add-missing";
+                grocery.error = "";
+                grocery.busy = true;
+                paint();
+                try {
+                    const res = await API.callTool(
+                        "add_plan_missing_to_groceries",
+                        { from: MODEL.from },
+                    );
+                    const sc = (res && res.structuredContent) || {};
+                    const list = (k) => (Array.isArray(sc[k]) ? sc[k] : []);
+                    grocery.done = {
+                        added: list("added"),
+                        on_list: list("on_list"),
+                        unknown: list("unknown"),
+                        skipped: list("skipped"),
+                    };
+                    grocery.sig = missingSig(MODEL);
+                } catch (e) {
+                    // A tool's own refusal ("Add a store first.") is worth
+                    // showing; a transport failure is not.
+                    const why =
+                        e && e.toolResult && e.message ? ` ${e.message}` : "";
+                    grocery.error = T.addFailed + why;
+                } finally {
+                    grocery.busy = false;
+                    paint();
+                }
+                if (hadFocus) focusAct("add-missing");
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (Array.isArray(payload.days)) {
+                    const obj = (x) => x && typeof x === "object";
+                    return {
+                        ...payload,
+                        days: payload.days
+                            .filter(
+                                (d) =>
+                                    obj(d) &&
+                                    typeof d.date === "string" &&
+                                    Array.isArray(d.plans),
+                            )
+                            .map((d) => ({
+                                ...d,
+                                plans: d.plans.filter(
+                                    (p) =>
+                                        obj(p) &&
+                                        typeof p.plan_id === "string" &&
+                                        typeof p.recipe_name === "string",
+                                ),
+                            })),
+                        missing: (Array.isArray(payload.missing)
+                            ? payload.missing
+                            : []
+                        )
+                            .filter(
+                                (m) =>
+                                    obj(m) &&
+                                    typeof m.display_name === "string",
+                            )
+                            .map((m) => ({
+                                ...m,
+                                needed_by: Array.isArray(m.needed_by)
+                                    ? m.needed_by.filter(
+                                          (n) =>
+                                              obj(n) &&
+                                              typeof n.plan_id === "string",
+                                      )
+                                    : [],
+                            })),
+                    };
+                }
+                if (payload.structuredContent)
+                    return coerce(payload.structuredContent);
+                return null;
+            }
+
+            initWidget({
+                name: "week-plan-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render: v2BridgeRender(render),
+                sample: SAMPLE,
+                onReady(api) {
+                    API = api;
+                    paint();
+                    document
+                        .getElementById("root")
+                        .addEventListener("click", (e) => {
+                            const t = e.target;
+                            const el =
+                                t && t.closest ? t.closest("[data-act]") : null;
+                            const act = el && el.getAttribute("data-act");
+                            if (!act) return;
+                            if (act.startsWith("remove:")) {
+                                e.preventDefault();
+                                onRemove(act.slice(7));
+                            } else if (act === "add-missing") {
+                                e.preventDefault();
+                                onAddMissing();
+                            }
+                        });
+                },
+            });
+        </script>
+    </body>
+</html>

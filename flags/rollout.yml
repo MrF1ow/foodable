@@ -55,6 +55,9 @@ flags:
     widget-restock-nudge:
         default: false
         rules: []
+    widget-week-plan:
+        default: false
+        rules: []
     flags-epoch:
         default: 1
         rules: []

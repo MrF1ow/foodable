@@ -732,13 +732,26 @@ function widgetRootStub(
     // ([data-act="cook"]): finds the tag in the painted markup and returns a
     // stand-in that records focus().
     const findByAttr = (html: string) => (sel: string) => {
-        const m = /^\[(data-[a-z]+)="([^"]+)"\]$/.exec(sel);
+        // A value may carry backslash-escaped characters (a quote), as
+        // CSS.escape or the widget's fallback writes them; the markup holds
+        // it HTML-escaped.
+        const m = /^\[(data-[a-z]+)="((?:[^"\\]|\\.)+)"\]$/.exec(sel);
         if (!m) return null;
-        const tag = new RegExp(`<[^>]*\\s${m[1]}="${m[2]}"[^>]*>`).exec(html);
+        const value = m[2]!.replace(/\\(.)/g, (_, c: string) => c);
+        const inMarkup = value
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;")
+            .replace(/"/g, "&quot;")
+            .replace(/'/g, "&#39;")
+            .replace(/[.*+?^${}()|[\]\\]/g, (c) => "\\" + c);
+        const tag = new RegExp(`<[^>]*\\s${m[1]}="${inMarkup}"[^>]*>`).exec(
+            html,
+        );
         if (!tag) return null;
         const el = {
             disabled: /\sdisabled/.test(tag[0]),
-            getAttribute: (n: string) => (n === m[1] ? m[2] : null),
+            getAttribute: (n: string) => (n === m[1] ? value : null),
             closest: (s: string) => (s === `[${m[1]}]` ? el : null),
             focus() {
                 active = el;
@@ -4820,4 +4833,681 @@ test("restock-nudge v2: focus stays on the Add button through its repaints", asy
     // Every repaint of the busy and failed/retry states put focus back.
     expect(w.focus.every((s) => s === '[data-act="add:st-costco"]')).toBe(true);
     expect(w.focus.length).toBeGreaterThan(0);
+});
+
+// ---- week-plan v2 -----------------------------------------------------------
+
+function planEntry(over: Record<string, unknown> = {}) {
+    return {
+        plan_id: "plan-1",
+        recipe_id: "rec-1",
+        recipe_name: "Salmon, rice & spinach",
+        slot: "dinner",
+        servings: 2,
+        kcal_per_portion: 640,
+        ...over,
+    };
+}
+
+const WEEK_DATES: [string, string][] = [
+    ["2026-11-14", "Saturday"],
+    ["2026-11-15", "Sunday"],
+    ["2026-11-16", "Monday"],
+    ["2026-11-17", "Tuesday"],
+    ["2026-11-18", "Wednesday"],
+    ["2026-11-19", "Thursday"],
+    ["2026-11-20", "Friday"],
+];
+
+function missingLine(over: Record<string, unknown> = {}) {
+    return {
+        food_id: "food-spinach",
+        display_name: "Spinach",
+        amount: 200,
+        unit: "g",
+        unknown: false,
+        unmeasured: false,
+        needed_by: [
+            {
+                plan_id: "plan-1",
+                recipe_id: "rec-1",
+                recipe_name: "Salmon, rice & spinach",
+                date: "2026-11-14",
+                slot: "dinner",
+            },
+        ],
+        ...over,
+    };
+}
+
+// The design's week: three planned days, Lemon needed by two of the plans.
+function weekData(
+    byDate: Record<string, Record<string, unknown>[]> = {
+        "2026-11-14": [planEntry()],
+        "2026-11-15": [
+            planEntry({
+                plan_id: "plan-2",
+                recipe_name: "Beef chili",
+                kcal_per_portion: 520,
+            }),
+        ],
+        "2026-11-16": [
+            planEntry({
+                plan_id: "plan-3",
+                recipe_name: "Chicken rice bowls",
+                kcal_per_portion: 852,
+            }),
+        ],
+    },
+    over: Record<string, unknown> = {},
+) {
+    const days = WEEK_DATES.map(([date, weekday]) => ({
+        date,
+        weekday,
+        plans: byDate[date] ?? [],
+    }));
+    return {
+        today: "2026-11-14",
+        from: "2026-11-14",
+        planned_count: days.reduce((n, d) => n + d.plans.length, 0),
+        days,
+        missing: [
+            missingLine(),
+            missingLine({
+                food_id: "food-lemon",
+                display_name: "Lemon",
+                amount: 2,
+                unit: "each",
+                needed_by: [
+                    {
+                        plan_id: "plan-1",
+                        recipe_id: "rec-1",
+                        recipe_name: "Salmon, rice & spinach",
+                        date: "2026-11-14",
+                        slot: "dinner",
+                    },
+                    {
+                        plan_id: "plan-3",
+                        recipe_id: "rec-3",
+                        recipe_name: "Chicken rice bowls",
+                        date: "2026-11-16",
+                        slot: "dinner",
+                    },
+                ],
+            }),
+        ],
+        ...over,
+    };
+}
+
+const planReply = (call: RecipeCall) =>
+    call.name === "unplan_recipe"
+        ? { removed: true, plan_id: call.args.plan_id }
+        : call.name === "add_plan_missing_to_groceries"
+          ? {
+                added: [
+                    {
+                        line_id: "ln-1",
+                        food_id: "food-spinach",
+                        display_name: "Spinach",
+                        amount: 200,
+                        unit: "g",
+                        store_id: "st-1",
+                        note: null,
+                    },
+                ],
+                on_list: [
+                    {
+                        food_id: "food-lemon",
+                        display_name: "Lemon",
+                        existing_line_id: "ln-0",
+                    },
+                ],
+                unknown: [],
+                skipped: [],
+            }
+          : {};
+
+// A server for the card: unplan_recipe forgets the plan, get_week_plan answers
+// the same week without the plans removed so far and, unless told otherwise,
+// with the missing lines only those plans needed dropped.
+function weekReply(
+    over: {
+        week?: () => Record<string, unknown>;
+        missing?: (gone: Set<string>) => unknown[];
+        refuse?: string;
+    } = {},
+) {
+    const gone = new Set<string>();
+    return (call: RecipeCall) => {
+        if (call.name === "unplan_recipe") {
+            if (over.refuse) throw new ToolRefusal(over.refuse);
+            gone.add(call.args.plan_id as string);
+            return planReply(call);
+        }
+        if (call.name === "get_week_plan") {
+            const week = (over.week?.() ?? weekData()) as ReturnType<
+                typeof weekData
+            >;
+            return {
+                ...week,
+                days: week.days.map((d) => ({
+                    ...d,
+                    plans: d.plans.filter((p) => !gone.has(String(p.plan_id))),
+                })),
+                missing:
+                    over.missing?.(gone) ??
+                    week.missing.filter((m) =>
+                        m.needed_by.some((n) => !gone.has(n.plan_id)),
+                    ),
+            };
+        }
+        return planReply(call);
+    };
+}
+
+test("week-plan v2 sample is the design's card: This week, 3 planned, seven days, missing footer, and no writes without a host", async () => {
+    const html = await v2Widget("week-plan");
+    const body = renderWidget(html, undefined);
+    expect(body).toContain('class="hd-title">This week<');
+    expect(body).toContain('class="hd-meta">3 planned<');
+    for (const d of ["SAT", "SUN", "MON", "TUE", "WED", "THU", "FRI"]) {
+        expect(body).toContain(`>${d}<`);
+    }
+    expect(body).toContain("Salmon, rice &amp; spinach");
+    expect(body).toContain("Beef chili");
+    expect(body).toContain("Chicken rice bowls");
+    expect(body).toContain(">640 kcal<");
+    expect(body).toContain(">520 kcal<");
+    expect(body).toContain(">852 kcal<");
+    expect((body.match(/>Nothing planned</g) ?? []).length).toBe(4);
+    expect(body).toContain("2 ingredients missing");
+    expect(body).not.toContain("data-act=");
+});
+
+test("week-plan v2: every day is a row, a planned recipe shows its kcal per portion, an unknown kcal shows none", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData({
+            "2026-11-14": [planEntry({ kcal_per_portion: null })],
+        }),
+    });
+    const body = w.html();
+    expect((body.match(/class="pd"/g) ?? []).length).toBe(7);
+    expect(body).toContain('class="hd-meta">1 planned<');
+    expect(body).toContain("Salmon, rice &amp; spinach");
+    expect(body).not.toContain("kcal");
+    expect((body.match(/>Nothing planned</g) ?? []).length).toBe(6);
+});
+
+test("week-plan v2: a day with two recipes names each one's meal, a day with one does not", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData({
+            "2026-11-14": [
+                planEntry({
+                    plan_id: "p-a",
+                    recipe_name: "Oats",
+                    slot: "breakfast",
+                }),
+                planEntry({
+                    plan_id: "p-b",
+                    recipe_name: "Stew",
+                    slot: "dinner",
+                }),
+            ],
+            "2026-11-15": [
+                planEntry({
+                    plan_id: "p-c",
+                    recipe_name: "Soup",
+                    slot: "lunch",
+                }),
+            ],
+        }),
+    });
+    const body = w.html();
+    expect(body).toContain(">Breakfast<");
+    expect(body).toContain(">Dinner<");
+    expect(body).not.toContain(">Lunch<");
+    expect(body).toContain('class="hd-meta">3 planned<');
+});
+
+test("week-plan v2: Remove sends unplan_recipe with the plan id, then reads the week again for the same window; the entry is gone, the count drops and its day says Nothing planned", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: weekReply(),
+    });
+    expect(w.html()).toContain('data-act="remove:plan-2"');
+    w.tap("remove:plan-2");
+    await w.settle();
+    expect(w.calls).toEqual([
+        { name: "unplan_recipe", args: { plan_id: "plan-2" } },
+        { name: "get_week_plan", args: { from: "2026-11-14" } },
+    ]);
+    const body = w.html();
+    expect(body).not.toContain("Beef chili");
+    expect(body).not.toContain('data-act="remove:plan-2"');
+    expect(body).toContain("Salmon, rice &amp; spinach");
+    expect(body).toContain('class="hd-meta">2 planned<');
+    expect((body.match(/>Nothing planned</g) ?? []).length).toBe(5);
+});
+
+test("week-plan v2: after a Remove the missing count is the server's: a food only that plan needed goes, one another plan also needs stays", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: weekReply(),
+    });
+    expect(w.html()).toContain("2 ingredients missing");
+    w.tap("remove:plan-1");
+    await w.settle();
+    // Spinach was only for plan-1; Lemon is also for plan-3.
+    expect(w.html()).toContain("1 ingredient missing");
+    w.tap("remove:plan-3");
+    await w.settle();
+    expect(w.html()).toContain("Nothing missing");
+    expect(w.html()).not.toContain('data-act="add-missing"');
+});
+
+test("week-plan v2: the missing count after a Remove is whatever the server answers, not a recount of the lines the card held", async () => {
+    // The server finds a third line once plan-2 is gone (an unmeasured need
+    // that a measured one had hidden) and keeps Spinach although only
+    // plan-1 named it; a recount on the card would say 2 and 1.
+    const extra = missingLine({
+        food_id: "food-salt",
+        display_name: "Salt",
+        amount: null,
+        unit: null,
+        unmeasured: true,
+        needed_by: [],
+    });
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: weekReply({
+            missing: () => [
+                missingLine(),
+                missingLine({ food_id: "f2" }),
+                extra,
+            ],
+        }),
+    });
+    w.tap("remove:plan-2");
+    await w.settle();
+    expect(w.html()).toContain("3 ingredients missing");
+    expect(w.html()).toContain('class="hd-meta">2 planned<');
+});
+
+test("week-plan v2: when the week cannot be read after a Remove the entry stays gone and the footer is left out", async () => {
+    let fail = false;
+    const serve = weekReply();
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: (call) => {
+            if (fail && call.name === "get_week_plan") {
+                throw new ToolRefusal("The week plan is not available.");
+            }
+            return serve(call);
+        },
+    });
+    fail = true;
+    w.tap("remove:plan-2");
+    await w.settle();
+    const body = w.html();
+    expect(body).not.toContain("Beef chili");
+    expect(body).toContain('class="hd-meta">2 planned<');
+    expect(body).not.toContain("ingredient");
+    expect(body).not.toContain("Nothing missing");
+    expect(body).not.toContain('data-act="add-missing"');
+    // The next Remove that gets its read through brings the footer back.
+    fail = false;
+    w.tap("remove:plan-3");
+    await w.settle();
+    expect(w.html()).toContain("ingredient");
+    expect(w.html()).toContain('data-act="add-missing"');
+});
+
+test("week-plan v2: a Remove the server answers with Plan not found is treated as already removed and reads the week again", async () => {
+    const serve = weekReply();
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: (call) => {
+            if (call.name === "unplan_recipe") {
+                throw new ToolRefusal("Plan not found.");
+            }
+            return serve(call);
+        },
+    });
+    w.tap("remove:plan-2");
+    await w.settle();
+    expect(w.calls.map((c) => c.name)).toEqual([
+        "unplan_recipe",
+        "get_week_plan",
+    ]);
+    const body = w.html();
+    expect(body).not.toContain("Beef chili");
+    expect(body).not.toContain("Could not remove");
+});
+
+test("week-plan v2: while a Remove is out its button is disabled and a second tap sends nothing", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const serve = weekReply();
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: async (call) => {
+            await gate;
+            return serve(call);
+        },
+    });
+    w.tap("remove:plan-2");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    expect(w.html()).toMatch(
+        /<button[^>]*data-act="remove:plan-2"[^>]*disabled/,
+    );
+    w.tap("remove:plan-2");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    // Another entry's Remove is not blocked.
+    w.tap("remove:plan-3");
+    await w.settle();
+    expect(w.calls.map((c) => c.args.plan_id)).toEqual(["plan-2", "plan-3"]);
+    release();
+    await w.settle();
+    expect(w.calls.map((c) => c.name)).toEqual([
+        "unplan_recipe",
+        "unplan_recipe",
+        "get_week_plan",
+        "get_week_plan",
+    ]);
+    expect(w.html()).not.toContain("Beef chili");
+    expect(w.html()).not.toContain("Chicken rice bowls");
+});
+
+test("week-plan v2: a Remove that fails keeps the entry, says which, and can be tried again", async () => {
+    let fail = true;
+    const serve = weekReply();
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: (call) => {
+            if (fail) throw new ToolRefusal("No such plan.");
+            return serve(call);
+        },
+    });
+    w.tap("remove:plan-2");
+    await w.settle();
+    expect(w.calls.map((c) => c.name)).toEqual(["unplan_recipe"]);
+    let body = w.html();
+    expect(body).toContain("Beef chili");
+    expect(body).toContain("Could not remove Beef chili.");
+    expect(body).toContain('class="hd-meta">3 planned<');
+    expect(body).not.toMatch(
+        /<button[^>]*data-act="remove:plan-2"[^>]*disabled/,
+    );
+    fail = false;
+    w.tap("remove:plan-2");
+    await w.settle();
+    body = w.html();
+    expect(body).not.toContain("Beef chili");
+    expect(body).not.toContain("Could not remove");
+});
+
+test("week-plan v2: without canCallTools there is no Remove and no add to groceries, and a tap does nothing", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        canCallTools: false,
+    });
+    const body = w.html();
+    expect(body).toContain("Beef chili");
+    expect(body).toContain("2 ingredients missing");
+    expect(body).not.toContain("data-act=");
+    expect(body).not.toContain("Remove");
+    expect(body).not.toContain("add to groceries");
+    w.tap("remove:plan-2");
+    w.tap("add-missing");
+    await w.settle();
+    expect(w.calls).toEqual([]);
+});
+
+test("week-plan v2: add to groceries calls add_plan_missing_to_groceries once with the card's from and shows what was added and what was already listed", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: planReply,
+    });
+    expect(w.html()).toContain("add to groceries");
+    w.tap("add-missing");
+    await w.settle();
+    expect(w.calls).toEqual([
+        {
+            name: "add_plan_missing_to_groceries",
+            args: { from: "2026-11-14" },
+        },
+    ]);
+    const body = w.html();
+    expect(body).toContain("Added 1 to groceries");
+    expect(body).toContain("1 already on the list");
+    expect(body).not.toContain('data-act="add-missing"');
+    // Done: another tap sends nothing.
+    w.tap("add-missing");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+});
+
+test("week-plan v2: add to groceries names the foods whose stock could not be counted and the ones it skipped, escaped", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: () => ({
+            added: [],
+            on_list: [],
+            unknown: [
+                {
+                    food_id: "f1",
+                    display_name: "Rice <b>",
+                    notice: "Stock in another unit.",
+                },
+            ],
+            skipped: [
+                {
+                    food_id: null,
+                    display_name: "Salt",
+                    reason: "no catalog food <i>",
+                },
+            ],
+        }),
+    });
+    w.tap("add-missing");
+    await w.settle();
+    const body = w.html();
+    expect(body).toContain("Nothing new to add");
+    expect(body).toContain("Check what you have: Rice &lt;b&gt;");
+    expect(body).toContain("Skipped: Salt (no catalog food &lt;i&gt;)");
+    expect(body).not.toContain("<b>");
+    expect(body).not.toContain("<i>");
+});
+
+test("week-plan v2: while add to groceries is out its button is disabled and a second tap sends nothing; a failure shows the reason and keeps the button", async () => {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    let fail = true;
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: async (call) => {
+            await gate;
+            if (fail) throw new ToolRefusal("Add a store first.");
+            return planReply(call);
+        },
+    });
+    w.tap("add-missing");
+    await w.settle();
+    expect(w.html()).toMatch(/<button[^>]*data-act="add-missing"[^>]*disabled/);
+    w.tap("add-missing");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    release();
+    await w.settle();
+    let body = w.html();
+    expect(body).toContain("Could not add to groceries. Add a store first.");
+    expect(body).toMatch(/<button[^>]*data-act="add-missing"[^>]*>/);
+    expect(body).not.toMatch(/<button[^>]*data-act="add-missing"[^>]*disabled/);
+    fail = false;
+    w.tap("add-missing");
+    await w.settle();
+    body = w.html();
+    expect(w.calls.length).toBe(2);
+    expect(body).not.toContain("Could not add");
+    expect(body).toContain("Added 1 to groceries");
+});
+
+test("week-plan v2: an empty week says Nothing planned seven times and has no footer", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData({}, { missing: [] }),
+    });
+    const body = w.html();
+    expect((body.match(/>Nothing planned</g) ?? []).length).toBe(7);
+    expect(body).toContain('class="hd-meta">0 planned<');
+    expect(body).not.toContain("ingredient");
+    expect(body).not.toContain("Nothing missing");
+    expect(body).not.toContain("data-act=");
+});
+
+test("week-plan v2: a week with everything in the kitchen says Nothing missing", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(undefined, { missing: [] }),
+    });
+    expect(w.html()).toContain("Nothing missing");
+    expect(w.html()).not.toContain('data-act="add-missing"');
+});
+
+test("week-plan v2: recipe names, weekdays and reasons reach the markup escaped", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData({
+            "2026-11-14": [
+                planEntry({
+                    plan_id: 'p"><img src=x>',
+                    recipe_name: "<script>alert(1)</script>",
+                }),
+            ],
+        }),
+    });
+    const body = w.html();
+    expect(body).not.toContain("<script>alert");
+    expect(body).not.toContain("<img");
+    expect(body).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+});
+
+test("week-plan v2: a result re-sent after a Remove keeps the entry gone", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: weekReply(),
+    });
+    w.tap("remove:plan-2");
+    await w.settle();
+    w.resend(weekData());
+    await w.settle();
+    expect(w.html()).not.toContain("Beef chili");
+    expect(w.html()).toContain('class="hd-meta">2 planned<');
+});
+
+test("week-plan v2: focus moves to the next Remove when the focused entry is removed, and back to the same one when the Remove fails", async () => {
+    let fail = false;
+    const serve = weekReply();
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+        reply: (call) => {
+            if (fail) throw new ToolRefusal("No such plan.");
+            return serve(call);
+        },
+    });
+    fail = true;
+    w.focusOn('[data-act="remove:plan-3"]');
+    w.tap("remove:plan-3");
+    await w.settle();
+    expect(w.focus.at(-1)).toBe('[data-act="remove:plan-3"]');
+    fail = false;
+    w.focus.length = 0;
+    w.focusOn('[data-act="remove:plan-2"]');
+    w.tap("remove:plan-2");
+    await w.settle();
+    expect(w.focus.at(-1)).toBe('[data-act="remove:plan-3"]');
+});
+
+test("week-plan v2: a plan id with a quote in it still gets its focus back after a failed Remove", async () => {
+    let fail = true;
+    const serve = weekReply();
+    const id = 'p"1\\x';
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData({
+            "2026-11-14": [planEntry({ plan_id: id })],
+        }),
+        reply: (call) => {
+            if (fail) throw new ToolRefusal("No such plan.");
+            return serve(call);
+        },
+    });
+    const sel = `[data-act="remove:${id.replace(/["\\]/g, (c) => "\\" + c)}"]`;
+    w.focusOn(sel);
+    w.tap(`remove:${id}`);
+    await w.settle();
+    expect(w.focus.at(-1)).toBe(sel);
+    expect(w.html()).toContain("Could not remove");
+});
+
+test("week-plan v2: a card for a later window is titled by its first day, sends that day to add to groceries, and one for the household's today says This week", async () => {
+    const later = weekData(
+        {},
+        {
+            from: "2026-11-17",
+            today: "2026-11-14",
+            days: [
+                ["2026-11-17", "Tuesday"],
+                ["2026-11-18", "Wednesday"],
+                ["2026-11-19", "Thursday"],
+                ["2026-11-20", "Friday"],
+                ["2026-11-21", "Saturday"],
+                ["2026-11-22", "Sunday"],
+                ["2026-11-23", "Monday"],
+            ].map(([date, weekday], i) => ({
+                date,
+                weekday,
+                plans:
+                    i === 0
+                        ? [
+                              planEntry({
+                                  plan_id: "plan-9",
+                                  recipe_name: "Stew",
+                              }),
+                          ]
+                        : [],
+            })),
+        },
+    );
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: later,
+        reply: planReply,
+    });
+    expect(w.html()).toContain('class="hd-title">Week of Tue 17 Nov<');
+    expect(w.html()).not.toContain(">This week<");
+    w.tap("add-missing");
+    await w.settle();
+    expect(w.calls).toEqual([
+        {
+            name: "add_plan_missing_to_groceries",
+            args: { from: "2026-11-17" },
+        },
+    ]);
+    const now = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(),
+    });
+    expect(now.html()).toContain('class="hd-title">This week<');
+});
+
+test("week-plan v2: a card whose window starts before the household's today has no add to groceries", async () => {
+    const w = await mountRecipe(await v2Widget("week-plan"), {
+        data: weekData(undefined, { today: "2026-11-15" }),
+        reply: planReply,
+    });
+    const body = w.html();
+    expect(body).toContain("2 ingredients missing");
+    expect(body).toContain('data-act="remove:plan-2"');
+    expect(body).not.toContain("add to groceries");
+    w.tap("add-missing");
+    await w.settle();
+    expect(w.calls).toEqual([]);
 });
