@@ -435,6 +435,8 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                 parenthetical.push("usual store");
                             } else if (storeReason === "list") {
                                 parenthetical.push("already on the list there");
+                            } else if (storeReason === "preferred") {
+                                parenthetical.push("default store");
                             } else if (storeReason === "default") {
                                 parenthetical.push("first store");
                             }

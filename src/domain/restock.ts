@@ -14,6 +14,7 @@ import type { NoticeDismissalsStore } from "./notice-dismissals.js";
 import { NOTICE_SEVERITY, type Notice } from "./notices.js";
 import { convertStockAmount, daysUntilExpiry, fridgeNotices } from "./stock.js";
 import type {
+    GroceryPreferences,
     GrocerySection,
     GroceryStore,
     SettingsStore,
@@ -118,6 +119,7 @@ export type RestockPlanInput = {
     stores: GroceryStore[];
     sections: GrocerySection[];
     householdId: string;
+    groceryPreferences?: GroceryPreferences;
 };
 
 export type RestockPlanResult = {
@@ -220,6 +222,7 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
             lines: input.lines,
             foodId: plainId,
             familyById,
+            prefs: input.groceryPreferences,
         });
 
         const storeSections = input.sections.filter(
@@ -444,12 +447,14 @@ export async function runRestockCheck(
                 if (!restockDue(restock, clock)) return;
 
                 const householdId = household.id;
-                const [items, lines, dismissals, stores] = await Promise.all([
-                    deps.fridge.listItems(householdId),
-                    deps.grocery.listLines(householdId),
-                    deps.dismissals.listForHousehold(householdId),
-                    deps.settings.listStores(householdId),
-                ]);
+                const [items, lines, dismissals, stores, groceryPreferences] =
+                    await Promise.all([
+                        deps.fridge.listItems(householdId),
+                        deps.grocery.listLines(householdId),
+                        deps.dismissals.listForHousehold(householdId),
+                        deps.settings.listStores(householdId),
+                        deps.settings.getGroceryPreferences(householdId),
+                    ]);
                 const sectionLists = await Promise.all(
                     stores.map((store) => deps.settings.listSections(store.id)),
                 );
@@ -484,6 +489,7 @@ export async function runRestockCheck(
                     stores,
                     sections,
                     householdId,
+                    groceryPreferences,
                 });
                 const committed = await deps.restock.commitRestockRun(
                     householdId,

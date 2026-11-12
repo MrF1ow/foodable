@@ -117,6 +117,8 @@ export async function loadHouseholdDigestInputs(
         }
     }
 
+    const groceryPreferences =
+        await settings.getGroceryPreferences(householdId);
     const restock = restockPlan({
         items,
         foodsById: foodsByIdFull,
@@ -126,6 +128,7 @@ export async function loadHouseholdDigestInputs(
         stores,
         sections,
         householdId,
+        groceryPreferences,
     });
     const stock = {
         movements,
@@ -137,6 +140,8 @@ export async function loadHouseholdDigestInputs(
         foods: listed,
         foodsById: foodsByIdFull,
         stores,
+        lines: groceryLines,
+        groceryPreferences,
     });
 
     const memberInputs = await Promise.all(
