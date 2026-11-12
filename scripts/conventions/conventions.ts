@@ -242,6 +242,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/score-settings.ts": "foods",
     "src/domain/sharing.ts": "recipes",
     "src/domain/sharing.test.ts": "recipes",
+    "src/domain/sharing-document.ts": "recipes",
+    "src/domain/sharing-document.test.ts": "recipes",
     "src/mcp/tools/sharing.ts": "recipes",
     "src/mcp/tools/sharing.db.test.ts": "recipes",
     "src/domain/product-screen.ts": "foods",

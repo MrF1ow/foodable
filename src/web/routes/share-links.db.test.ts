@@ -1,7 +1,7 @@
 // The public share page against real Postgres, driven the way a visitor
 // reaches it: no actor of its own, so the route has to bring the household
 // scope it needs, and a code path that forgot to would throw here.
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { Hono } from "hono";
 import { liveGroceryStore } from "../../db/grocery.js";
@@ -28,6 +28,7 @@ import {
     setRateLimitStore,
 } from "../../rate-limit.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
+import { parseShareDocument } from "../../domain/sharing-document.js";
 import { createShareLinksRoutes } from "./share-links.js";
 
 process.env.SESSION_SECRET ||= "01234567890123456789012345678901";
@@ -410,6 +411,225 @@ describeDb(
             expect(names).toContain("x-robots-tag");
             expect(names).toContain("referrer-policy");
             expect(names).toContain("cache-control");
+        });
+
+        describe("the portable recipe document", () => {
+            test("a live recipe token answers a document that parses, with the headers", async () => {
+                const { recipe, foodId } = await seedRecipe(
+                    householdId,
+                    ownerId,
+                    "Lentil soup",
+                    SECRET.recipeNotes,
+                );
+                await sql`update public.foods set calories = ${352}, protein_g = ${24.6}, grams_per_ml = ${0.85}, brand = ${"BRAND-9921"} where id = ${foodId}`;
+                const { token } = await mint(
+                    householdId,
+                    ownerId,
+                    "recipe",
+                    recipe.id,
+                );
+                const res = await app().request(`/s/${token}.json`);
+                expect(res.status).toBe(200);
+                expect(res.headers.get("content-type")).toContain(
+                    "application/json",
+                );
+                expect(res.headers.get("cache-control")).toBe("no-store");
+                expect(res.headers.get("x-robots-tag")).toBe("noindex");
+                expect(res.headers.get("referrer-policy")).toBe("no-referrer");
+                expect(res.headers.get("content-security-policy")).toContain(
+                    "default-src 'none'",
+                );
+                expect(
+                    res.headers.get("access-control-allow-origin"),
+                ).toBeNull();
+                const text = await res.text();
+                const doc = parseShareDocument(text);
+                expect(doc).toMatchObject({
+                    version: 1,
+                    name: "Lentil soup",
+                    portions: 4,
+                    instructions: "1. Rinse.\n2. Simmer.",
+                    tags: ["dinner"],
+                });
+                expect(doc.ingredients).toHaveLength(1);
+                expect(doc.ingredients[0]).toMatchObject({
+                    food_name: "Lentil soup lentils",
+                    amount: 300,
+                    unit: "g",
+                    food: {
+                        calories: 352,
+                        protein_g: 24.6,
+                        grams_per_ml: 0.85,
+                        fat_g: null,
+                        grams_per_each: null,
+                    },
+                });
+                for (const secret of [
+                    ...Object.values(SECRET),
+                    "BRAND-9921",
+                    householdId,
+                    ownerId,
+                    recipe.id,
+                    foodId,
+                    token,
+                ]) {
+                    expect(text).not.toContain(secret);
+                }
+            });
+
+            test("an ingredient pointed at another household's food never ships that food", async () => {
+                const { recipe } = await seedRecipe(
+                    householdId,
+                    ownerId,
+                    "Lentil soup",
+                );
+                const theirFood = await seedFood(sql, otherHouseholdId, {
+                    name: "THEIR-FOOD-NAME",
+                });
+                await sql`update public.foods set calories = ${999} where id = ${theirFood}`;
+                // Nothing in the schema stops an ingredient naming a food of
+                // another household; the load is scoped to the link's own.
+                await asUser(
+                    ownerId,
+                    () =>
+                        recipes.insertIngredient({
+                            id: crypto.randomUUID(),
+                            householdId,
+                            recipeId: recipe.id,
+                            kind: "food",
+                            displayName: "Stew base",
+                            quantity: { amount: 100, unit: "g" },
+                            foodId: theirFood,
+                            sortOrder: 1,
+                            note: null,
+                        }),
+                    householdId,
+                );
+                const { token } = await mint(
+                    householdId,
+                    ownerId,
+                    "recipe",
+                    recipe.id,
+                );
+                const res = await app().request(`/s/${token}.json`);
+                expect(res.status).toBe(200);
+                const text = await res.text();
+                expect(text).not.toContain("THEIR-FOOD-NAME");
+                expect(text).not.toContain("999");
+                const doc = parseShareDocument(text);
+                const stew = doc.ingredients.find(
+                    (i) => i.food_name === "Stew base",
+                );
+                expect(stew?.food.calories).toBeNull();
+            });
+
+            test("a grocery link, revoked, expired, unknown, malformed, deleted and flag-off all give the HTML page's 404", async () => {
+                const { recipe } = await seedRecipe(
+                    householdId,
+                    ownerId,
+                    "Lentil soup",
+                );
+                const grocery = await mint(
+                    householdId,
+                    ownerId,
+                    "grocery_list",
+                    null,
+                );
+                const revoked = await mint(
+                    householdId,
+                    ownerId,
+                    "recipe",
+                    recipe.id,
+                );
+                await asUser(
+                    ownerId,
+                    () =>
+                        revokeShareLink(
+                            links,
+                            householdId,
+                            revoked.link.id,
+                            NOW,
+                        ),
+                    householdId,
+                );
+                const expired = await mint(
+                    householdId,
+                    ownerId,
+                    "recipe",
+                    recipe.id,
+                );
+                await sql`update public.share_links set expires_at = now() - interval '1 hour' where id = ${expired.link.id}`;
+                const deleted = await seedRecipe(
+                    householdId,
+                    ownerId,
+                    "Gone soon",
+                );
+                const orphaned = await mint(
+                    householdId,
+                    ownerId,
+                    "recipe",
+                    deleted.recipe.id,
+                );
+                await sql`delete from public.recipes where id = ${deleted.recipe.id}`;
+                const live = await mint(
+                    householdId,
+                    ownerId,
+                    "recipe",
+                    recipe.id,
+                );
+
+                const shoot = async (path: string) => {
+                    const res = await app().request(path);
+                    return {
+                        status: res.status,
+                        body: await res.text(),
+                        headers: [...res.headers.entries()].sort(([a], [b]) =>
+                            a.localeCompare(b),
+                        ),
+                    };
+                };
+                const html404 = await shoot(`/s/${mintShareToken()}`);
+                expect(html404.status).toBe(404);
+                const refusals = [
+                    await shoot(`/s/${grocery.token}.json`),
+                    await shoot(`/s/${revoked.token}.json`),
+                    await shoot(`/s/${expired.token}.json`),
+                    await shoot(`/s/${orphaned.token}.json`),
+                    await shoot(`/s/${mintShareToken()}.json`),
+                    await shoot("/s/not-a-token.json"),
+                    await shoot(`/s/${live.token}.JSON`),
+                    await shoot(`/s/${live.token}.json.json`),
+                ];
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "ui-v2": false,
+                        "mcp-share-links": false,
+                    }),
+                );
+                refusals.push(await shoot(`/s/${live.token}.json`));
+                for (const refusal of refusals) {
+                    expect(refusal).toEqual(html404);
+                }
+            });
+
+            test("a recipe outside the document's bounds is the same 404, not a truncated document", async () => {
+                const { recipe } = await seedRecipe(
+                    householdId,
+                    ownerId,
+                    "Lentil soup",
+                );
+                await sql`update public.recipes set name = ${"x".repeat(250)} where id = ${recipe.id}`;
+                const { token } = await mint(
+                    householdId,
+                    ownerId,
+                    "recipe",
+                    recipe.id,
+                );
+                const html404 = await app().request(`/s/${mintShareToken()}`);
+                const res = await app().request(`/s/${token}.json`);
+                expect(res.status).toBe(404);
+                expect(await res.text()).toBe(await html404.text());
+            });
         });
 
         test("ui-v2 is judged for the member who made the link", async () => {

@@ -6,7 +6,12 @@ import {
 } from "../../domain/recipes.js";
 import { createMemorySettingsStore } from "../../domain/settings.js";
 import type { ShareLink } from "../../domain/sharing.js";
-import { loadShareView, orderGroceryLines } from "./share-links-load.js";
+import { createMemoryFoodsStore, newFood } from "../../domain/foods.js";
+import {
+    loadShareDocument,
+    loadShareView,
+    orderGroceryLines,
+} from "./share-links-load.js";
 
 const HH = "11111111-1111-4111-8111-111111111111";
 const OTHER_HH = "22222222-2222-4222-8222-222222222222";
@@ -155,5 +160,93 @@ describe("loadShareView", () => {
             },
         );
         expect(view).toBeNull();
+    });
+});
+
+describe("loadShareDocument", () => {
+    async function seed() {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const mine = await foods.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Red lentils",
+                calories: 352,
+            }),
+        );
+        const theirs = await foods.insertFood(
+            newFood({
+                householdId: OTHER_HH,
+                kind: "food",
+                name: "THEIR-FOOD-NAME",
+                calories: 999,
+            }),
+        );
+        const recipe = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: USER,
+            name: "Lentil soup",
+            yieldPortions: 4,
+            notes: "private note about grandma",
+        });
+        const add = (displayName: string, foodId: string, sortOrder: number) =>
+            recipes.insertIngredient({
+                id: crypto.randomUUID(),
+                householdId: HH,
+                recipeId: recipe.id,
+                kind: "food",
+                displayName,
+                quantity: { amount: 300, unit: "g" },
+                foodId,
+                sortOrder,
+                note: null,
+            });
+        await add("Red lentils", mine.id, 0);
+        // An ingredient pointed at another household's food (no foreign key
+        // forbids it in the memory store; the load must still not read it).
+        await add("Stew base", theirs.id, 1);
+        return { recipes, foods, recipe };
+    }
+
+    test("a recipe link becomes the document, with its own household's foods only", async () => {
+        const { recipes, foods, recipe } = await seed();
+        const doc = await loadShareDocument(
+            link({ kind: "recipe", targetId: recipe.id }),
+            { recipes, foods },
+        );
+        expect(doc?.name).toBe("Lentil soup");
+        expect(doc?.ingredients[0]?.food.calories).toBe(352);
+        expect(doc?.ingredients[1]).toMatchObject({
+            food_name: "Stew base",
+            food: { calories: null },
+        });
+        const json = JSON.stringify(doc);
+        expect(json).not.toContain("THEIR-FOOD-NAME");
+        expect(json).not.toContain("grandma");
+    });
+
+    test("a grocery link, a missing recipe and another household's recipe have no document", async () => {
+        const { recipes, foods, recipe } = await seed();
+        const stores = { recipes, foods };
+        expect(
+            await loadShareDocument(link({ kind: "grocery_list" }), stores),
+        ).toBeNull();
+        expect(
+            await loadShareDocument(
+                link({ kind: "recipe", targetId: crypto.randomUUID() }),
+                stores,
+            ),
+        ).toBeNull();
+        expect(
+            await loadShareDocument(
+                link({
+                    kind: "recipe",
+                    householdId: OTHER_HH,
+                    targetId: recipe.id,
+                }),
+                stores,
+            ),
+        ).toBeNull();
     });
 });

@@ -2,6 +2,12 @@
 // read, no account chrome. The token names one recipe or the grocery list of
 // one household and grants nothing else.
 //
+// GET /s/:token.json: the same link as a portable recipe document (see
+// domain/sharing-document.ts) for another deploy's importer. Recipe links
+// only. No credentials are involved and the token is a bearer secret, so the
+// global CORS policy (src/index.ts) is harmless here. It goes through the same
+// rate limit, token check, flag check and 404 as the page.
+//
 // Every refusal is the same 404 (same status, body and headers): an unknown,
 // malformed, expired or revoked token, a recipe that was deleted, a link whose
 // object cannot be loaded, and a deploy where the pages are not switched on.
@@ -19,6 +25,7 @@ import { rateLimitKeyForIp } from "../../client-ip.js";
 import { withActor } from "../../db/actor.js";
 import { getHouseholdMembership } from "../../db/household.js";
 import { liveGroceryStore } from "../../db/grocery.js";
+import { liveFoodsStore } from "../../db/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveShareLinkStore } from "../../db/share-links.js";
@@ -33,8 +40,9 @@ import { buildFlagContext } from "../../flags.js";
 import { clientIp } from "../../middleware.js";
 import { checkShareRateLimit } from "../../rate-limit.js";
 import { isViewerFlagOn, loadViewerFlags } from "../../viewer-flags.js";
+import type { ShareDocument } from "../../domain/sharing-document.js";
 import { renderShareViewPage } from "../pages/share-view.js";
-import { loadShareView } from "./share-links-load.js";
+import { loadShareDocument, loadShareView } from "./share-links-load.js";
 
 /** One body for every refusal, so a caller cannot tell the causes apart. */
 export const SHARE_NOT_FOUND_BODY = "Not found";
@@ -96,6 +104,12 @@ export type ShareLinksDeps = {
     links: ShareLinkStore;
     /** The view for a live link, or null when its object cannot be loaded. */
     load(link: ShareLink): Promise<ShareView | null>;
+    /**
+     * The portable recipe document for a live recipe link (`/s/:token.json`),
+     * or null when there is none: a grocery-list link, a recipe that cannot
+     * be loaded, or one outside the document's bounds.
+     */
+    loadDocument(link: ShareLink): Promise<ShareDocument | null>;
     enabled(link: ShareLink): Promise<boolean>;
     now(): Date;
     /** Per-IP budget check; false when the caller is over it. */
@@ -119,15 +133,27 @@ function liveLoad(link: ShareLink): Promise<ShareView | null> {
     );
 }
 
+function liveLoadDocument(link: ShareLink): Promise<ShareDocument | null> {
+    return withActor({ kind: "household", householdId: link.householdId }, () =>
+        loadShareDocument(link, {
+            recipes: liveRecipesStore(),
+            foods: liveFoodsStore(),
+        }),
+    );
+}
+
 function liveDeps(): ShareLinksDeps {
     return {
         links: liveShareLinkStore(),
         load: liveLoad,
+        loadDocument: liveLoadDocument,
         enabled: shareLinksEnabledFor,
         now: () => new Date(),
         allow: (c) => checkShareRateLimit(rateLimitKeyForIp(clientIp(c))),
     };
 }
+
+const DOCUMENT_SUFFIX = ".json";
 
 function notFound(c: Context) {
     return c.body(SHARE_NOT_FOUND_BODY, 404, {
@@ -151,19 +177,36 @@ export function createShareLinksRoutes(
     router.use("/s", shareHeaders);
     router.use("/s/*", shareHeaders);
 
-    router.get("/s/:token", async (c) => {
+    // One route for the page and the document: `/s/<token>` is the page and
+    // `/s/<token>.json` the portable recipe. A token is base64url, so it never
+    // holds a ".", and the suffix is stripped exactly once, only when it is
+    // exactly ".json": `<token>.JSON`, `<token>.json.json` and the like leave
+    // a non-token that resolves to nothing, the same 404 as any other.
+    router.get("/s/:file", async (c) => {
         const budget = await deps.allow(c);
         if (!budget.allowed) {
             c.header("Retry-After", String(budget.retryAfterSeconds ?? 60));
             return c.text("Too many requests", 429);
         }
-        const link = await resolveShareToken(
-            deps.links,
-            c.req.param("token"),
-            deps.now(),
-        );
+        const file = c.req.param("file");
+        const wantsDocument = file.endsWith(DOCUMENT_SUFFIX);
+        const token = wantsDocument
+            ? file.slice(0, -DOCUMENT_SUFFIX.length)
+            : file;
+        const link = await resolveShareToken(deps.links, token, deps.now());
         if (!link) return notFound(c);
         if (!(await deps.enabled(link))) return notFound(c);
+        if (wantsDocument) {
+            // Recipes only: a grocery-list link has no document.
+            if (link.kind !== "recipe") return notFound(c);
+            const doc = await deps.loadDocument(link);
+            if (!doc) return notFound(c);
+            // No credentials are involved and the token is a bearer secret,
+            // so the global CORS policy is harmless here.
+            return c.body(JSON.stringify(doc), 200, {
+                "Content-Type": "application/json; charset=utf-8",
+            });
+        }
         const view = await deps.load(link);
         if (!view) return notFound(c);
         return c.html(renderShareViewPage(view));
