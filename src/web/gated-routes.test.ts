@@ -270,6 +270,18 @@ describe("gated route harness on composed app", () => {
             },
             {
                 method: "GET",
+                path: "/settings/ai-connections",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/settings/ai-connections/disconnect",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "GET",
                 path: "/settings/saved",
                 flag: "ui-v2",
                 notFound: true,

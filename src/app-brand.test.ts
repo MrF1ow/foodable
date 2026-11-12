@@ -99,3 +99,14 @@ test("withWidgetData injects a skin as the frame's last style, only when asked",
     );
     expect(skinned).toContain('<html data-theme="dark">');
 });
+
+test("withWidgetData keeps $-patterns in the data literal", () => {
+    const html = "<html><head></head><script>initWidget({})</script></html>";
+    // A meal named "$`" or "$'" must reach the widget as that text, not as the
+    // document before / after the seed script.
+    const out = withWidgetData(html, { name: "a $` b $' c $& d" });
+    expect(out).toContain(
+        '<script>window.__WIDGET_DATA__={"name":"a $` b $\' c $& d"};initWidget({})</script>',
+    );
+    expect(out.match(/<script>/g)).toHaveLength(1);
+});

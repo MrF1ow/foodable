@@ -6,6 +6,7 @@ import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
     renderSettingsAccountPage,
+    renderSettingsAiV2Route,
     renderSettingsAccountV2Route,
     renderSettingsDisplayV2Route,
     renderSettingsExportV2Route,
@@ -17,6 +18,11 @@ import {
     renderSettingsSavedV2Route,
 } from "../loaders.js";
 import { liveExportArchiveStore } from "../../db/exports.js";
+import { revokeConnection } from "../../db/tokens.js";
+import {
+    AI_DISCONNECT_PATH,
+    UNKNOWN_APP_MARKER,
+} from "../pages/v2/settings-ai.js";
 import { exportAllData } from "../../domain/export.js";
 import { checkRateLimit } from "../../rate-limit.js";
 import { isValidDisplayTheme } from "../pages/v2/settings-display.js";
@@ -193,6 +199,52 @@ settingsRoutes.post(
             c,
             "/settings/goals",
             "settings.goals.day-cleared",
+        );
+    },
+);
+
+settingsRoutes.get(
+    "/settings/ai-connections",
+    requireSiteUser,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const page = await renderSettingsAiV2Route(c.get("userId"), {
+            mcpUrl: `${getBaseUrl(c)}/mcp`,
+        });
+        return c.html(page.html, page.status);
+    },
+);
+
+// The longest id an app can hold: a uuid, or the deploy-wide client id.
+const CLIENT_ID_MAX = 200;
+
+settingsRoutes.post(
+    AI_DISCONNECT_PATH,
+    requireMember,
+    gatedRoute("ui-v2", { notFound: true }),
+    async (c) => {
+        const userId = c.get("userId");
+        const body = await c.req.parseBody();
+        const client = formText(body, "client").trim();
+        if (client === "" || client.length > CLIENT_ID_MAX) {
+            const page = await renderSettingsAiV2Route(userId, {
+                mcpUrl: `${getBaseUrl(c)}/mcp`,
+                error: "Choose an app to disconnect.",
+            });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        // Always the caller's own tokens: the member comes from the session,
+        // never the form. The marker stands for tokens with no recorded app.
+        const revoked = await revokeConnection(
+            userId,
+            client === UNKNOWN_APP_MARKER ? null : client,
+        );
+        return redirectWithToast(
+            c,
+            "/settings/ai-connections",
+            revoked > 0
+                ? "settings.ai.disconnected"
+                : "settings.ai.already-disconnected",
         );
     },
 );

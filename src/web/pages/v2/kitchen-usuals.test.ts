@@ -6,6 +6,11 @@ import {
 } from "../../../domain/foods.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import {
+    attributeValues,
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "../../components/v2/test-helpers.js";
+import {
     USUALS_EDIT_SUBTITLE,
     USUALS_INTRO,
     kitchenUsualProductLabel,
@@ -254,6 +259,38 @@ describe("renderKitchenUsualsV2Page", () => {
         expect(html).toContain("&lt;img");
         expect(html).toContain('id="fd-usual-row-egg&quot;x"');
         expect(html).not.toContain("fd-row__body--link");
+    });
+
+    test("a product id or name made of $-patterns stays inert", async () => {
+        for (const payload of DOLLAR_PAYLOADS) {
+            const view = baseView({
+                rows: [
+                    {
+                        ...baseRow(),
+                        food: food({ id: payload, name: payload }),
+                        usual: null,
+                        products: [],
+                    },
+                ],
+                rowMeta: new Map([
+                    [
+                        payload,
+                        {
+                            productLabel: payload,
+                            storeId: null,
+                            storeName: null,
+                            amountLabel: null,
+                            onList: false,
+                        },
+                    ],
+                ]),
+            });
+            const html = renderKitchenUsualsBody(view as never);
+            expect(await injectedAttributes(html)).toEqual([]);
+            expect(
+                await attributeValues(html, "li[data-fd-usual-row]", "id"),
+            ).toEqual([`fd-usual-row-${payload}`]);
+        }
     });
 
     test("opens the edit sheet when openFoodId matches a row", () => {

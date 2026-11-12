@@ -14,10 +14,18 @@ export type SettingsV2Section =
     | "household"
     | "goals"
     | "saved"
+    | "ai"
     | "export";
 
 type MenuIcon =
-    "user" | "users" | "target" | "bookmark" | "sun" | "download" | "help";
+    | "user"
+    | "users"
+    | "target"
+    | "bookmark"
+    | "sun"
+    | "download"
+    | "help"
+    | "code";
 
 type MenuRow = {
     id: Exclude<SettingsV2Section, "home">;
@@ -34,12 +42,17 @@ const MENU_ICON_PATHS: Record<MenuIcon, string> = {
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
     download:
         '<path d="M12 5v10"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/>',
+    code: '<path d="M8 8l-4 4 4 4"/><path d="M16 8l4 4-4 4"/>',
     help: '<circle cx="12" cy="12" r="8"/><path d="M9.5 9.2a2.7 2.7 0 0 1 4.8 1.4c0 2-2.8 2.3-2.8 3.9"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/>',
 };
 
-function settingsMenuIcon(kind: MenuIcon): string {
+/** The menu's line icon; `className` is the class the caller's CSS styles it by. */
+export function settingsMenuIcon(
+    kind: MenuIcon,
+    className = "fd-settings-menu__icon",
+): string {
     const inner = MENU_ICON_PATHS[kind];
-    return `<svg class="fd-icon fd-settings-menu__icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${inner}</svg>`;
+    return `<svg class="fd-icon ${esc(className)}" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${inner}</svg>`;
 }
 
 const SETTINGS_MENU_MAIN: readonly MenuRow[] = [
@@ -69,6 +82,12 @@ const SETTINGS_MENU_PREFS: readonly MenuRow[] = [
 ];
 
 const SETTINGS_MENU_CONNECT: readonly MenuRow[] = [
+    {
+        id: "ai",
+        label: "AI connections",
+        href: "/settings/ai-connections",
+        icon: "code",
+    },
     {
         id: "export",
         label: "Export data",
@@ -349,7 +368,7 @@ export function settingsField(opts: {
 }): Html {
     const labelId = `${opts.id}-label`;
     return raw(
-        `<div class="fd-settings-field"><span class="fd-settings-field__label" id="${esc(labelId)}">${esc(opts.label)}</span>${opts.control.replace(/^(<(?:input|select|textarea)\b)/, `$1 aria-labelledby="${esc(labelId)}"`)}</div>`,
+        `<div class="fd-settings-field"><span class="fd-settings-field__label" id="${esc(labelId)}">${esc(opts.label)}</span>${opts.control.replace(/^(<(?:input|select|textarea)\b)/, (_tag, open: string) => `${open} aria-labelledby="${esc(labelId)}"`)}</div>`,
     );
 }
 

@@ -22,6 +22,11 @@ import {
     householdPersonRuleRemovedKey,
 } from "./toast-flash.js";
 import { renderBarePage } from "../shell.js";
+import {
+    attributeValues,
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "./v2/test-helpers.js";
 
 describe("toast flash codec", () => {
     test("round-trips a catalog key with params", () => {
@@ -68,6 +73,14 @@ describe("toast flash codec", () => {
         expect(
             formatToastText("recipes.added-to-grocery", { count: raw }),
         ).toBe(`Added to the grocery list (${raw})`);
+    });
+
+    test("formatToastText keeps $-patterns literal in a catalog param", () => {
+        for (const name of ["$&", "$`", "$'", "$$", "Mac $& Cheese $1"]) {
+            expect(formatToastText("notice.added", { name })).toBe(
+                `Added ${name} to the grocery list`,
+            );
+        }
     });
 
     test("toastSeedElement escapes text once for the attribute", () => {
@@ -322,6 +335,27 @@ describe("flashToastMiddleware", () => {
         expect(html).toContain('data-toast-text="Water logged"');
         expect(res.headers.get("set-cookie")).toContain(`${TOAST_COOKIE}=`);
         expect(res.headers.get("set-cookie")).toContain("Max-Age=0");
+    });
+
+    // A recipe title scraped from a web page lands in a toast; the seed goes
+    // into the page with String.replace, which reads `$\`` and `$'` in a
+    // replacement string as "paste the page before / after here".
+    test("every DOLLAR_PAYLOADS param stays text in the seed, page arrives once", async () => {
+        for (const payload of DOLLAR_PAYLOADS) {
+            const flash = encodeToastFlash({
+                key: "notice.added",
+                params: { name: payload },
+            })!;
+            const res = await appWithFlash(flash)("/page");
+            const html = await res.text();
+            expect(await injectedAttributes(html)).toEqual([]);
+            expect(
+                await attributeValues(html, "#toast-seed", "data-toast-text"),
+            ).toEqual([`Added ${payload} to the grocery list`]);
+            // The page itself arrives once, whole.
+            expect(html.match(/<\/body>/g)).toHaveLength(1);
+            expect(html.match(/<p>hi<\/p>/g)).toHaveLength(1);
+        }
     });
 
     test("does not consume on POST, 4xx, or non-HTML", async () => {

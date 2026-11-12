@@ -197,6 +197,8 @@ import type {
 } from "./pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "./pages/v2/settings-saved.js";
 import { renderSettingsExportV2Page } from "./pages/v2/settings-export.js";
+import { renderSettingsAiV2Page } from "./pages/v2/settings-ai.js";
+import { listConnections } from "../db/tokens.js";
 import { getAllGoalDays, getNutritionGoals } from "../db/nutrition.js";
 import { renderSettingsHelpV2Page } from "./pages/v2/settings-help.js";
 
@@ -1181,6 +1183,29 @@ export async function renderSettingsExportV2Route(
         status: 200,
         html: renderSettingsExportV2Page({
             chrome,
+            error: opts.error,
+        }),
+    };
+}
+
+export async function renderSettingsAiV2Route(
+    viewerUserId: string,
+    opts: { mcpUrl: string; error?: string },
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    // Only the caller's own connections: the id is the session's.
+    const connections = await listConnections(viewerUserId);
+    return {
+        status: 200,
+        html: renderSettingsAiV2Page({
+            chrome,
+            connections,
+            now: new Date(),
+            timezone: profile?.timezone?.trim() || "UTC",
+            mcpUrl: opts.mcpUrl,
             error: opts.error,
         }),
     };

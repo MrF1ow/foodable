@@ -828,9 +828,10 @@ export function withWidgetData(
     chrome?: WidgetViewerChrome,
 ): string {
     const json = JSON.stringify(data).replace(/</g, "\\u003c");
+    // A function replacement, so a `$` in the data is not a pattern.
     const seeded = html.replace(
         "<script>",
-        `<script>window.__WIDGET_DATA__=${json};`,
+        () => `<script>window.__WIDGET_DATA__=${json};`,
     );
     if (!chrome) return seeded;
     // A function replacement, so a `$` in the CSS is never read as a pattern.

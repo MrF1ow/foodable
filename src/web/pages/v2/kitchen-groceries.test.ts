@@ -21,6 +21,11 @@ import {
     FD_GROCERY_ADD_SHEET_ID,
 } from "./kitchen-groceries.js";
 import type { GroceryLineView } from "../grocery.js";
+import {
+    attributeValues,
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "../../components/v2/test-helpers.js";
 
 const HH = "hh-1";
 
@@ -500,5 +505,40 @@ describe("groceryLineRowMarkup score badge", () => {
             ),
         );
         expect(plain).not.toContain("fd-score");
+    });
+});
+
+describe("groceryLineRowMarkup with $-patterns in the line", () => {
+    test("a line id or name made of $-patterns stays inert", async () => {
+        for (const payload of DOLLAR_PAYLOADS) {
+            const row = lineView(line({ id: payload, displayName: payload }));
+            const html = String(
+                groceryLineRowMarkup(
+                    row,
+                    { lineMeta: new Map() },
+                    GROCERY_V2_RETURN_TO,
+                ),
+            );
+            expect(await injectedAttributes(html)).toEqual([]);
+            expect(
+                await attributeValues(html, "li[data-fd-grocery-row]", "id"),
+            ).toEqual([`fd-grocery-row-${payload}`]);
+            const overview = String(
+                groceryLineRowMarkup(
+                    row,
+                    { lineMeta: new Map() },
+                    GROCERY_V2_RETURN_TO,
+                    { overview: true },
+                ),
+            );
+            expect(await injectedAttributes(overview)).toEqual([]);
+            expect(
+                await attributeValues(
+                    overview,
+                    "li[data-fd-grocery-row-overview]",
+                    "id",
+                ),
+            ).toEqual([`fd-grocery-row-${payload}`]);
+        }
     });
 });

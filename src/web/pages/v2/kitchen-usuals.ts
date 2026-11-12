@@ -359,9 +359,11 @@ function usualListRow(row: UsualProductRow, view: KitchenUsualsV2View): Html {
         }),
     );
     return raw(
+        // A function replacement: a string would read `$` in an id as a pattern.
         rowHtml.replace(
             "<li ",
-            `<li id="fd-usual-row-${esc(row.food.id)}" data-fd-usual-row data-sheet-id="${esc(sheetId)}" tabindex="0" `,
+            () =>
+                `<li id="fd-usual-row-${esc(row.food.id)}" data-fd-usual-row data-sheet-id="${esc(sheetId)}" tabindex="0" `,
         ),
     );
 }

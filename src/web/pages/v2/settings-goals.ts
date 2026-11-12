@@ -327,7 +327,9 @@ function editSheet(view: SettingsGoalsV2View): string {
     ].join("");
     const error = view.draft ? String(settingsErrorBanner(view.error)) : "";
     const body = `${error}<form id="${GOALS_FORM_ID}" method="POST" action="/settings/goals" class="fd-settings-goals-form" data-turbo="false">${sections}</form>`;
-    const html = sheet({
+    // The panel takes focus on open: a text field focused first would raise
+    // the keyboard over the form on a touch screen.
+    return sheet({
         id: GOALS_EDIT_SHEET_ID,
         kind: "edit",
         title: "Edit goals",
@@ -335,13 +337,8 @@ function editSheet(view: SettingsGoalsV2View): string {
         body,
         actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${GOALS_FORM_ID}">Save</button>`,
         openOnLoad: view.draft != null,
+        focus: "panel",
     });
-    // The panel takes focus on open: a text field focused first would raise
-    // the keyboard over the form on a touch screen.
-    return html.replace(
-        `id="${GOALS_EDIT_SHEET_ID}"`,
-        `id="${GOALS_EDIT_SHEET_ID}" data-fd-sheet-focus="panel"`,
-    );
 }
 
 /** "Sat, Nov 14" for a calendar date. */
@@ -386,10 +383,8 @@ function dayRow(day: GoalDayOverride, alcohol: DrinkUnit | null): string {
         label: "Clear",
         className: "fd-settings-goaldays__clear",
         data: { "goals-clear": day.date },
-    }).replace(
-        ">Clear<",
-        ` aria-label="${esc(`Clear goals for ${label}`)}">Clear<`,
-    );
+        ariaLabel: `Clear goals for ${label}`,
+    });
     return `<li class="fd-settings-goaldays__row"><div class="fd-settings-goaldays__text"><p class="fd-settings-goaldays__date">${esc(label)}</p><p class="fd-settings-goaldays__what">${esc(daySummary(day, alcohol))}</p></div>${trigger}</li>`;
 }
 

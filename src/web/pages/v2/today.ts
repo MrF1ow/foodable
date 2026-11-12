@@ -536,9 +536,10 @@ function mealRowMarkup(row: MealRow, data: TodayPageData): Html {
         ? ""
         : ` data-fd-meal-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
+        // A function replacement: a string would read `$` in an id as a pattern.
         rowHtml.replace(
             "<li ",
-            `<li data-fd-meal-id="${esc(row.mealId)}"${attrs} `,
+            () => `<li data-fd-meal-id="${esc(row.mealId)}"${attrs} `,
         ),
     );
 }

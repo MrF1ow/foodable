@@ -128,6 +128,7 @@ import {
     STORE_DELETE_SHEET_ID,
 } from "../src/web/pages/v2/settings-stores-detail.js";
 import { renderSettingsExportV2Page } from "../src/web/pages/v2/settings-export.js";
+import { renderSettingsAiV2Page } from "../src/web/pages/v2/settings-ai.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { pageHeader } from "../src/web/components/ui.js";
@@ -252,6 +253,35 @@ const PREVIEW_NAMED_GOALS: NutritionGoals = {
     goal_note: "maintenance minus 5%",
     goals_set_on: "2026-10-02",
 };
+
+// The apps the AI connections page lists: a named one used today, a named one
+// last used days ago, one that was never used, and the tokens with no app.
+const PREVIEW_AI_CONNECTIONS = [
+    {
+        clientId: "7d3f6c2e-5b1a-4e8f-9a3d-1c2b3a4d5e6f",
+        clientName: "Claude",
+        firstConnectedAt: new Date("2026-10-03T12:00:00.000Z"),
+        lastUsedAt: new Date("2026-11-10T08:00:00.000Z"),
+    },
+    {
+        clientId: "2b1c0d9e-8f7a-4b6c-8d5e-4f3a2b1c0d9e",
+        clientName: "Grok CLI",
+        firstConnectedAt: new Date("2026-11-01T08:00:00.000Z"),
+        lastUsedAt: new Date("2026-11-08T08:00:00.000Z"),
+    },
+    {
+        clientId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        clientName: "ChatGPT",
+        firstConnectedAt: new Date("2026-11-09T18:30:00.000Z"),
+        lastUsedAt: null,
+    },
+    {
+        clientId: null,
+        clientName: null,
+        firstConnectedAt: new Date("2026-09-14T09:00:00.000Z"),
+        lastUsedAt: new Date("2026-10-20T09:00:00.000Z"),
+    },
+];
 
 const PREVIEW_GOAL_DAYS = [
     {
@@ -1962,6 +1992,28 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       searchQuery: "",
                   }),
                   "settings-export": renderSettingsExportV2Page({ chrome }),
+                  "settings-ai": renderSettingsAiV2Page({
+                      chrome,
+                      connections: PREVIEW_AI_CONNECTIONS,
+                      now: new Date("2026-11-10T15:00:00.000Z"),
+                      timezone: "UTC",
+                      mcpUrl: "https://food.flow.home/mcp",
+                  }),
+                  "settings-ai-empty": renderSettingsAiV2Page({
+                      chrome,
+                      connections: [],
+                      now: new Date("2026-11-10T15:00:00.000Z"),
+                      timezone: "UTC",
+                      mcpUrl: "https://food.flow.home/mcp",
+                  }),
+                  "settings-ai-confirm": renderSettingsAiV2Page({
+                      chrome,
+                      connections: PREVIEW_AI_CONNECTIONS,
+                      now: new Date("2026-11-10T15:00:00.000Z"),
+                      timezone: "UTC",
+                      mcpUrl: "https://food.flow.home/mcp",
+                      openClient: PREVIEW_AI_CONNECTIONS[0]!.clientId!,
+                  }),
                   "settings-stores": renderSettingsStoresV2Page({
                       chrome,
                       stores: PREVIEW_STORE_SUMMARIES,
@@ -2769,6 +2821,7 @@ if (process.argv.includes("--shots")) {
                 shotBase.startsWith("settings-goals") ||
                 shotBase === "settings-saved" ||
                 shotBase === "settings-export" ||
+                shotBase.startsWith("settings-ai") ||
                 shotBase === "help" ||
                 shotBase === "recipes" ||
                 shotBase === "recipe";

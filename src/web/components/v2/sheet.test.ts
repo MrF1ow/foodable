@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { confirmSheet, sheet, sheetTrigger } from "./sheet.js";
+import {
+    buttonLabels,
+    DOLLAR_PAYLOADS,
+    injectedAttributes,
+} from "./test-helpers.js";
 
 const edit = () =>
     sheet({
@@ -138,6 +143,80 @@ test("sheetTrigger opens the sheet with the native invoker command", () => {
     expect(sheetTrigger({ target: "t", label: "<b>" })).toContain(
         ">&lt;b&gt;</button>",
     );
+});
+
+test("sheetTrigger ariaLabel names a text button without touching its text", () => {
+    const html = sheetTrigger({
+        target: "t",
+        label: "Disconnect",
+        className: "b",
+        data: { k: "v" },
+        ariaLabel: 'Disconnect "Claude"',
+    });
+    expect(html).toBe(
+        '<button type="button" class="b" commandfor="t" command="show-modal" aria-label="Disconnect &quot;Claude&quot;" data-k="v">Disconnect</button>',
+    );
+    // An icon button keeps title from the label, but the name can still differ.
+    const icon = sheetTrigger({
+        target: "t",
+        label: "Edit",
+        icon: "<svg/>",
+        ariaLabel: "Edit Chicken",
+    });
+    expect(icon).toContain('title="Edit"');
+    expect(icon).toContain('aria-label="Edit Chicken"');
+    expect(icon).not.toContain('aria-label="Edit"');
+});
+
+test("sheet className and focus add escaped attributes after the id", () => {
+    const html = sheet({
+        id: "log-amount",
+        kind: "edit",
+        title: "T",
+        body: "",
+        className: "fd-log-amount-sheet",
+        focus: "panel",
+    });
+    expect(html).toContain(
+        '<dialog class="fd-sheet fd-sheet--edit fd-log-amount-sheet" id="log-amount" data-fd-sheet-focus="panel" aria-labelledby="log-amount-title">',
+    );
+    const plain = sheet({ id: "x", kind: "edit", title: "T", body: "" });
+    expect(plain).not.toContain("data-fd-sheet-focus");
+    expect(plain).toContain('<dialog class="fd-sheet fd-sheet--edit" id="x"');
+    const hostile = sheet({
+        id: "x",
+        kind: "edit",
+        title: "T",
+        body: "",
+        className: 'a" onclick="1',
+    });
+    expect(hostile).toContain('class="fd-sheet fd-sheet--edit a&quot; onclick');
+    expect(hostile).not.toContain('" onclick="1"');
+});
+
+test("sheet triggers and confirm sheets keep $-patterns in caller text inert", async () => {
+    for (const payload of DOLLAR_PAYLOADS) {
+        const trigger = sheetTrigger({
+            target: "t",
+            label: "Disconnect",
+            className: "b",
+            ariaLabel: `Disconnect ${payload}`,
+            data: { name: payload },
+        });
+        const confirm = confirmSheet({
+            id: "c",
+            title: `Disconnect ${payload}?`,
+            message: payload,
+            action: "/x",
+            confirmLabel: "Disconnect",
+            hiddenFields: { client: payload },
+            openOnLoad: true,
+        });
+        for (const html of [trigger, confirm]) {
+            expect(await injectedAttributes(html)).toEqual([]);
+        }
+        expect(await buttonLabels(trigger)).toEqual([`Disconnect ${payload}`]);
+    }
 });
 
 test("confirmSheet posts a form from the sticky row, with escaped hidden fields", () => {

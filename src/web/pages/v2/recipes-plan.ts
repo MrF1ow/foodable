@@ -262,14 +262,6 @@ ${String(
 )}`;
 }
 
-/** The sheet panel takes focus on open: a date field focused first would raise the keyboard over it. */
-function noAutoFocus(html: string, id: string): string {
-    return html.replace(
-        `id="${esc(id)}"`,
-        `id="${esc(id)}" data-fd-sheet-focus="panel"`,
-    );
-}
-
 export type PlanSheetView = {
     recipeId: string;
     recipeName: string;
@@ -299,18 +291,16 @@ ${err}${planFields({
         yieldPortions: view.yieldPortions,
     })}
 </form>`;
-    return noAutoFocus(
-        sheet({
-            id: PLAN_SHEET_ID,
-            kind: "confirm",
-            title: "Add to plan",
-            subtitle: view.recipeName,
-            body,
-            actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${PLAN_FORM_ID}">Add to plan</button>`,
-            openOnLoad: view.open,
-        }),
-        PLAN_SHEET_ID,
-    );
+    return sheet({
+        id: PLAN_SHEET_ID,
+        kind: "confirm",
+        title: "Add to plan",
+        subtitle: view.recipeName,
+        body,
+        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${PLAN_FORM_ID}">Add to plan</button>`,
+        openOnLoad: view.open,
+        focus: "panel",
+    });
 }
 
 const CALENDAR_ICON = raw(
@@ -366,18 +356,16 @@ ${hidden("back", back)}${err}${planFields({
 <form id="${esc(removeId)}" method="post" action="/recipes/plan/${esc(plan.id)}/remove">${hidden("back", back)}</form>`;
             const actions = `<button type="submit" class="fd-btn fd-btn--danger" form="${esc(removeId)}">Remove</button>
 <button type="submit" class="fd-btn fd-btn--primary" form="${esc(moveId)}">Save</button>`;
-            return noAutoFocus(
-                sheet({
-                    id,
-                    kind: "confirm",
-                    title: plan.recipeName,
-                    subtitle: `${planDayLabel(plan.date)} · ${PLAN_SLOT_LABEL[plan.slot].toLowerCase()}`,
-                    body,
-                    actions,
-                    openOnLoad: view.openSheet === id,
-                }),
+            return sheet({
                 id,
-            );
+                kind: "confirm",
+                title: plan.recipeName,
+                subtitle: `${planDayLabel(plan.date)} · ${PLAN_SLOT_LABEL[plan.slot].toLowerCase()}`,
+                body,
+                actions,
+                openOnLoad: view.openSheet === id,
+                focus: "panel",
+            });
         })
         .join("\n");
 }
@@ -424,18 +412,16 @@ export function renderMissingSheet(view: WeekPlanView, back: PlanBack): string {
     const body = `<form id="${MISSING_FORM_ID}" method="post" action="/recipes/plan/add-missing">
 ${hidden("back", back)}<ul class="fd-plan-missing-list">${rows}</ul>
 </form>`;
-    return noAutoFocus(
-        sheet({
-            id: PLAN_MISSING_SHEET_ID,
-            kind: "confirm",
-            title: "Missing for the plan",
-            subtitle: `${ingredientsMissingText(view.missing.length)} for the next 7 days`,
-            body,
-            actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${MISSING_FORM_ID}">Add to groceries</button>`,
-            openOnLoad: view.openSheet === PLAN_MISSING_SHEET_ID,
-        }),
-        PLAN_MISSING_SHEET_ID,
-    );
+    return sheet({
+        id: PLAN_MISSING_SHEET_ID,
+        kind: "confirm",
+        title: "Missing for the plan",
+        subtitle: `${ingredientsMissingText(view.missing.length)} for the next 7 days`,
+        body,
+        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${MISSING_FORM_ID}">Add to groceries</button>`,
+        openOnLoad: view.openSheet === PLAN_MISSING_SHEET_ID,
+        focus: "panel",
+    });
 }
 
 function planAddHref(date: string): string {

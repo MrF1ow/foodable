@@ -992,6 +992,130 @@
     cursor: pointer;
 }
 
+/* AI connections (FigCraft 23638): one card of apps, each with a Disconnect,
+ * then the address to connect a new agent. */
+.fd-settings-ai__lead {
+    margin: 0 0 14px;
+    font: 400 0.8125rem/1.4 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-settings-ai__list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-ai__row {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-12);
+    min-height: 63px;
+    padding: var(--fd-s-12) 16px;
+}
+
+.fd-settings-ai__row + .fd-settings-ai__row {
+    border-top: 1px solid var(--line);
+}
+
+.fd-settings-ai__logo {
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-sm);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+
+.fd-settings-ai__icon {
+    flex: none;
+    color: var(--text-secondary);
+}
+
+.fd-settings-ai__text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fd-settings-ai__name,
+.fd-settings-ai__meta {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.fd-settings-ai__name {
+    font: 400 0.9375rem/1.3 var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-settings-ai__meta {
+    font: 400 0.75rem/1.35 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-settings-ai__name + .fd-settings-ai__meta {
+    margin-top: 2px;
+}
+
+.fd-settings-ai__disconnect {
+    flex: none;
+    min-height: 36px;
+    padding: 0 var(--fd-s-6);
+    border: 0;
+    background: transparent;
+    color: var(--status-over);
+    font: 400 0.8125rem/1 var(--font-body);
+    cursor: pointer;
+}
+
+.fd-settings-ai__disconnect:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+.fd-settings-ai__empty {
+    margin: 0;
+    padding: var(--fd-s-14) 16px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    color: var(--text-secondary);
+    font-size: 0.9375rem;
+}
+
+.fd-settings-ai__connect-title {
+    margin-top: 22px;
+}
+
+.fd-settings-ai__address {
+    margin: 0;
+    padding: 14px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-bg);
+}
+
+.fd-settings-ai__address code {
+    display: block;
+    font: 400 0.9375rem/1.3 var(--font-body);
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+    user-select: all;
+}
+
+.fd-settings-ai__help {
+    margin: 8px 0 0;
+    padding-left: 4px;
+    font: 400 0.75rem/1.35 var(--font-body);
+    color: var(--text-secondary);
+}
+
 @media (min-width: 1024px) {
     .fd-settings {
         flex-direction: column;
@@ -1142,8 +1266,10 @@
         box-shadow: 0 4px 14px var(--overlay-shadow);
     }
 
-    /* Goals read in a 680px column beside the menu (FigCraft 49849). */
-    .fd-settings[data-fd-settings-page="goals"] .fd-settings-main {
+    /* Goals and AI connections read in a 680px column beside the menu
+     * (FigCraft 49849, 50224). */
+    .fd-settings[data-fd-settings-page="goals"] .fd-settings-main,
+    .fd-settings[data-fd-settings-page="ai"] .fd-settings-main {
         max-width: 680px;
     }
 }
