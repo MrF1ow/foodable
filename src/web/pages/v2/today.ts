@@ -39,6 +39,7 @@ import {
     iconTrash,
 } from "../../components/v2/icons.js";
 import { settingsErrorBanner } from "./settings-shared.js";
+import { goalName } from "./settings-goals-label.js";
 import {
     FD_LOG_SEARCH_SHEET_ID,
     type RenderLogSheetsOpts,
@@ -180,14 +181,17 @@ function headerMarkup(data: TodayPageData): Html {
     const weekday = formatCalendarWeekday(view.date);
     const dateLine = formatCalendarDayMonth(view.date);
     const streakPart = view.streak > 0 ? ` · ${view.streak}-day streak` : "";
-    const subtitle = `<p class="fd-today-subtitle">${esc(`${dateLine}${streakPart}`)}</p>`;
-    const deskTitle = `${weekday}, ${dateLine}${streakPart}`;
+    // The goals' own name sits in the subtitle between the date and the
+    // streak; nameless goals add nothing.
+    const name = goalName(view.goals);
+    const namePart = name != null ? ` · ${name}` : "";
+    const subtitle = `<p class="fd-today-subtitle">${esc(`${dateLine}${namePart}${streakPart}`)}</p>`;
     const peer =
         data.chrome.subjectLabel != null
             ? `<p class="fd-today-peer" role="status">${esc(`Viewing ${data.chrome.subjectLabel}`)}</p>`
             : "";
     return raw(
-        `<header class="fd-today-header"><div class="fd-today-header__text"><h1 class="fd-today-title">${esc(weekday)}</h1><p class="fd-today-title-desk">${esc(deskTitle)}</p>${subtitle}${peer}</div></header>`,
+        `<header class="fd-today-header"><div class="fd-today-header__text"><h1 class="fd-today-title">${esc(weekday)}</h1>${subtitle}${peer}</div></header>`,
     );
 }
 

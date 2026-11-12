@@ -191,12 +191,17 @@ import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "./pages/v2/settings-display.js";
 import { renderSettingsGoalsV2Page } from "./pages/v2/settings-goals.js";
+import type {
+    GoalsFormDraft,
+    GoalsFormField,
+} from "./pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "./pages/v2/settings-saved.js";
 import { renderSettingsExportV2Page } from "./pages/v2/settings-export.js";
-import { getGoalsForDate } from "../db/nutrition.js";
+import { getAllGoalDays, getNutritionGoals } from "../db/nutrition.js";
 import { renderSettingsHelpV2Page } from "./pages/v2/settings-help.js";
 
-function alcoholOf(
+/** The member's drink unit, or null when alcohol tracking is off. */
+export function alcoholOf(
     profile: Parameters<typeof alcoholTrackingEnabledFromProfile>[0],
 ): AlcoholDisplay {
     if (!alcoholTrackingEnabledFromProfile(profile)) return null;
@@ -1070,14 +1075,23 @@ export async function renderSettingsDisplayV2Route(
 
 export async function renderSettingsGoalsV2Route(
     viewerUserId: string,
+    opts: {
+        error?: string;
+        draft?: GoalsFormDraft;
+        invalid?: readonly GoalsFormField[];
+    } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const chrome = await viewerChromeWithAttention(profile, gate.viewer);
     const tz = profile?.timezone?.trim() || "UTC";
-    const goalDate = todayInTz(tz);
-    const goals = await getGoalsForDate(viewerUserId, goalDate);
+    const today = todayInTz(tz);
+    // The form edits the standing goals; a day's override is listed apart.
+    const goals = await getNutritionGoals(viewerUserId);
+    const days = (await getAllGoalDays(viewerUserId)).filter(
+        (d) => d.date >= today,
+    );
     const weightUnit = preferredWeightUnitFromProfile(profile) ?? "kg";
     const alcohol = alcoholTrackingEnabledFromProfile(profile)
         ? (preferredDrinkUnitFromProfile(profile) ?? "us")
@@ -1087,9 +1101,13 @@ export async function renderSettingsGoalsV2Route(
         html: renderSettingsGoalsV2Page({
             chrome,
             goals,
-            goalDate,
+            today,
             weightUnit,
             alcohol,
+            days,
+            draft: opts.draft,
+            error: opts.error,
+            invalid: opts.invalid,
         }),
     };
 }

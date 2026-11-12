@@ -285,6 +285,11 @@ export const TOASTS = {
         kind: "success",
         text: "Nutrition preferences saved",
     },
+    "settings.goals.saved": { kind: "success", text: "Goals saved" },
+    "settings.goals.day-cleared": {
+        kind: "success",
+        text: "Day back on your daily goals",
+    },
     "settings.profile.saved": { kind: "success", text: "Profile updated" },
     "settings.household-settings.saved": {
         kind: "success",

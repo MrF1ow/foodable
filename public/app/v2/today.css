@@ -37,11 +37,6 @@
     color: var(--text-primary);
 }
 
-.fd-today-title-desk {
-    display: none;
-    margin: 0;
-}
-
 .fd-today-subtitle,
 .fd-today-peer {
     margin: var(--fd-s-4) 0 0;
@@ -1089,26 +1084,9 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
         text-decoration: none;
     }
 
-    /* Desktop shows the combined line below; the h1 stays for assistive tech. */
     .fd-today-title {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        margin: -1px;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-    }
-
-    .fd-today-title-desk {
-        display: block;
-        font: 600 22px/28px var(--font-display);
-        letter-spacing: -0.35px;
-        color: var(--text-primary);
-    }
-
-    .fd-today-subtitle {
-        display: none;
+        font: 600 34px/41px var(--font-display);
+        letter-spacing: -0.5px;
     }
 
     .fd-today-header {

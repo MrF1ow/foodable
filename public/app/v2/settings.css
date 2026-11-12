@@ -831,6 +831,167 @@
     display: none;
 }
 
+/* The goals form: the saved name above it (FigCraft 23562), then rows with a
+   dot and a label on the left and the input on the right. */
+.fd-settings-goals-name {
+    margin: 0;
+    font: 600 22px/26px var(--font-display);
+    letter-spacing: -0.35px;
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.fd-settings-goals-since {
+    margin: var(--fd-s-4) 0 var(--fd-s-12);
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.fd-settings-goals-name:not(:has(+ .fd-settings-goals-since)) {
+    margin-bottom: var(--fd-s-12);
+}
+
+.fd-settings-goals-unit {
+    color: var(--text-tertiary);
+}
+
+/* "Edit goals": the full-width pill under the cards (FigCraft 23562). */
+.fd-settings-goals-edit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 52px;
+    margin: var(--space-gutter) 0 var(--fd-s-12);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 15px/1 var(--font-body);
+    cursor: pointer;
+}
+
+.fd-settings-goals-edit:focus-visible,
+.fd-settings-goaldays__clear:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+/* The edit sheet (FigCraft 48374): a label above each filled field. */
+.fd-settings-goals-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+    margin: 0;
+}
+
+.fd-settings-goals-form__title {
+    margin: 8px 0 0;
+    font: 600 0.6875rem/1.1 var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+
+.fd-settings-goals-form__title:first-child {
+    margin-top: 0;
+}
+
+.fd-settings-goals-form .fd-settings-field__label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.fd-sheet .fd-settings-goals-form .fd-settings-input {
+    min-height: 48px;
+    padding: 0 var(--fd-s-14);
+    border: 1px solid transparent;
+    border-radius: var(--radius-lg);
+    background: var(--surface-raised);
+    /* 16px keeps iOS from zooming the page on focus. */
+    font: 400 16px/1.25 var(--font-body);
+}
+
+.fd-sheet .fd-settings-goals-form .fd-settings-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.fd-sheet .fd-settings-goals-form .fd-settings-input:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 1px;
+}
+
+.fd-sheet .fd-settings-goals-form .fd-settings-input[aria-invalid="true"] {
+    border-color: var(--status-over);
+}
+
+/* Per-day overrides: one card, each day with a Clear that posts on its own. */
+.fd-settings-goaldays {
+    margin: 0 0 var(--fd-s-12);
+}
+
+.fd-settings-goaldays__list {
+    margin: 0;
+    padding: 0 var(--fd-s-14);
+    list-style: none;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-goaldays .fd-settings-goals-note {
+    margin: var(--fd-s-10) 0 0;
+    padding-left: 4px;
+}
+
+.fd-settings-goaldays__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    min-height: 52px;
+    padding: var(--fd-s-10) 0;
+}
+
+.fd-settings-goaldays__row + .fd-settings-goaldays__row {
+    border-top: 1px solid var(--line);
+}
+
+.fd-settings-goaldays__text {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fd-settings-goaldays__date,
+.fd-settings-goaldays__what {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+
+.fd-settings-goaldays__date {
+    font: 400 1rem/1.3 var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-settings-goaldays__what {
+    font: 400 0.8125rem/1.35 var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-settings-goaldays__clear {
+    min-height: 36px;
+    padding: 0 var(--fd-s-14);
+    border: none;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 0.875rem/1 var(--font-body);
+    cursor: pointer;
+}
+
 @media (min-width: 1024px) {
     .fd-settings {
         flex-direction: column;
@@ -979,5 +1140,10 @@
         border-radius: var(--radius-lg);
         background: var(--surface-panel);
         box-shadow: 0 4px 14px var(--overlay-shadow);
+    }
+
+    /* Goals read in a 680px column beside the menu (FigCraft 49849). */
+    .fd-settings[data-fd-settings-page="goals"] .fd-settings-main {
+        max-width: 680px;
     }
 }

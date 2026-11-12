@@ -51,6 +51,76 @@ describe("todayHref", () => {
     });
 });
 
+describe("Today header goal name", () => {
+    const today = "2026-11-10";
+    const base = buildPreviewTodayPageData(
+        {
+            theme: "light",
+            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+            attention: { count: 0, tabs: {} },
+        },
+        today,
+    );
+    function withGoals(
+        goal_name: string | null,
+        goals_set_on: string | null,
+    ): typeof base {
+        return {
+            ...base,
+            view: {
+                ...base.view,
+                goals: { ...base.view.goals!, goal_name, goals_set_on },
+            },
+        };
+    }
+    function header(html: string): string {
+        return html.match(
+            /<header class="fd-today-header">[\s\S]*?<\/header>/,
+        )![0];
+    }
+
+    test("the name sits in the subtitle between the date and the streak", () => {
+        const html = renderTodayV2Page(withGoals("Recomp", "2026-10-02"));
+        expect(header(html)).toContain(
+            '<p class="fd-today-subtitle">10 November · Recomp · 4-day streak</p>',
+        );
+        // One h1 (the day) and one subtitle, on every width: no second desktop line.
+        expect(header(html)).toContain(
+            '<h1 class="fd-today-title">Tuesday</h1>',
+        );
+        expect(header(html)).not.toContain("fd-today-title-desk");
+        // "Since" belongs to Settings › Goals only, and there is no extra line.
+        expect(header(html)).not.toContain("Since");
+        expect(header(html)).not.toContain("fd-today-goal");
+    });
+
+    test("no name leaves the subtitle as it was", () => {
+        for (const name of [null, "", "  "]) {
+            const html = renderTodayV2Page(withGoals(name, "2026-10-02"));
+            expect(header(html)).toContain(
+                '<p class="fd-today-subtitle">10 November · 4-day streak</p>',
+            );
+            expect(header(html)).not.toContain("Since");
+        }
+    });
+
+    test("no goals at all adds nothing either", () => {
+        const html = renderTodayV2Page({
+            ...base,
+            view: { ...base.view, goals: null },
+        });
+        expect(header(html)).toContain(
+            '<p class="fd-today-subtitle">10 November · 4-day streak</p>',
+        );
+    });
+
+    test("escapes the name", () => {
+        const html = renderTodayV2Page(withGoals("<i>Cut</i>", null));
+        expect(header(html)).toContain("&lt;i&gt;Cut&lt;/i&gt;");
+        expect(header(html)).not.toContain("<i>");
+    });
+});
+
 describe("renderTodayV2Page", () => {
     const today = "2026-11-10";
     const data = buildPreviewTodayPageData(
