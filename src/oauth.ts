@@ -111,6 +111,18 @@ export async function renderLoginPage(
         .replaceAll("{{APP_JS_HREF}}", () => appScriptHref());
 }
 
+/** A token-endpoint credential worth looking up: a string of printable
+ *  characters, no longer than any value this server issues. */
+function isGrantValue(value: unknown): value is string {
+    return (
+        typeof value === "string" &&
+        value.length > 0 &&
+        value.length <= 512 &&
+        // oxlint-disable-next-line no-control-regex -- refusing control characters is the point
+        !/[\u0000-\u001f\u007f]/.test(value)
+    );
+}
+
 function displayNameFromLogin(email: string): string {
     const local = email.includes("@") ? email.split("@")[0]! : email;
     const trimmed = local.trim();
@@ -536,10 +548,20 @@ export function createOAuthRouter() {
         const reqClientId = body.client_id as string | undefined;
         const reqClientSecret = body.client_secret as string | undefined;
 
+        // A credential that is not a plain short string (a multipart file, a
+        // NUL byte, a megabyte) can never match a stored one; refuse it here
+        // rather than let the database reject it as a server error.
+        if (reqClientId && !isGrantValue(reqClientId)) {
+            return c.json({ error: "invalid_client" }, 401);
+        }
+
         if (grantType === "refresh_token") {
             const refreshToken = body.refresh_token as string;
             if (!refreshToken) {
                 return c.json({ error: "invalid_request" }, 400);
+            }
+            if (!isGrantValue(refreshToken)) {
+                return c.json({ error: "invalid_grant" }, 400);
             }
 
             // Look up the existing user from the refresh token
@@ -586,6 +608,9 @@ export function createOAuthRouter() {
 
         if (!code) {
             return c.json({ error: "invalid_request" }, 400);
+        }
+        if (!isGrantValue(code)) {
+            return c.json({ error: "invalid_grant" }, 400);
         }
 
         // Validate client credentials if provided
