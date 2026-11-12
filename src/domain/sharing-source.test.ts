@@ -225,8 +225,14 @@ function liveFetcher(
             return resolve(host);
         },
         fetch: async (url, init) => {
-            seen.urls.push(String(url));
-            return handler(String(url), init);
+            // The fetcher connects to the address it checked and names the
+            // host in `Host`; read the request back as the link was written.
+            const asWritten = new URL(String(url));
+            const host = (init?.headers as Record<string, string> | undefined)
+                ?.Host;
+            if (host) asWritten.host = host;
+            seen.urls.push(asWritten.href);
+            return handler(asWritten.href, init);
         },
     });
     return { fetcher, seen };

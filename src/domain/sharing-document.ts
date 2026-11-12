@@ -24,9 +24,9 @@ export const SHARE_DOCUMENT_MAX_BYTES = 256 * 1024;
 
 /**
  * Bounds on every field. Lengths count UTF-16 code units (what Zod counts),
- * so the bounds alone do not keep a document under the byte cap (control
- * characters escape to six bytes each in JSON). The builder's byte check is
- * what keeps documents under the cap, and the parser enforces it on the text.
+ * so the bounds alone do not keep a document under the byte cap (a CJK
+ * character is three bytes per unit). The builder's byte check is what keeps
+ * documents under the cap, and the parser enforces it on the text.
  */
 export const SHARE_DOCUMENT_LIMITS = {
     name: 200,
@@ -53,6 +53,20 @@ export class ShareDocumentError extends Error {
     }
 }
 
+// Every control character in C0 except tab, newline and carriage return. The
+// NUL is what Postgres text cannot hold (a document carrying one would pass
+// the parser and fail while being written); the rest never belongs in recipe
+// text. One rule for every string, so the builder and the parser agree: a
+// field that allows a newline in one place allows it in all.
+const CONTROL_CHARACTER = /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/;
+
+/** Marks a string schema as text: no control characters beyond \t \n \r. */
+function text<T extends z.ZodString>(schema: T) {
+    return schema.refine((value) => !CONTROL_CHARACTER.test(value), {
+        message: "must not contain control characters",
+    });
+}
+
 const nutrient = z.number().min(0).max(L.nutrition).nullable();
 
 const foodSchema = z.object({
@@ -71,9 +85,9 @@ const foodSchema = z.object({
 
 const ingredientSchema = z
     .object({
-        food_name: z.string().trim().min(1).max(L.foodName),
+        food_name: text(z.string().trim().min(1).max(L.foodName)),
         amount: z.number().positive().max(L.quantity).nullable(),
-        unit: z.string().trim().min(1).max(L.unit).nullable(),
+        unit: text(z.string().trim().min(1).max(L.unit)).nullable(),
         food: foodSchema,
     })
     .superRefine((value, ctx) => {
@@ -95,10 +109,10 @@ const ingredientSchema = z
 
 export const shareDocumentSchema = z.object({
     version: z.literal(SHARE_DOCUMENT_VERSION),
-    name: z.string().trim().min(1).max(L.name),
+    name: text(z.string().trim().min(1).max(L.name)),
     portions: z.number().positive().max(L.quantity),
-    instructions: z.string().max(L.instructions).nullable(),
-    tags: z.array(z.string().min(1).max(L.tagLength)).max(L.tags),
+    instructions: text(z.string().max(L.instructions)).nullable(),
+    tags: z.array(text(z.string().min(1).max(L.tagLength))).max(L.tags),
     ingredients: z.array(ingredientSchema).max(L.ingredients),
 });
 
