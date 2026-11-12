@@ -62,6 +62,7 @@
                                 "src/db/foods",
                                 "src/db/fridge",
                                 "src/db/grocery",
+                                "src/db/grocery-stores",
                                 "src/db/household",
                                 "src/db/notice-dismissals",
                                 "src/db/profiles",

@@ -103,6 +103,18 @@ describe("settings household v2", () => {
         expect(memberAddIdx).toBeLessThan(storesIdx);
     });
 
+    test("each store links to its page and every member can open the stores page", () => {
+        for (const canManage of [true, false]) {
+            const html = renderSettingsHouseholdV2Page(
+                baseView({ canManage, isOwner: canManage }),
+            );
+            expect(html).toContain('href="/settings/household/stores/s1"');
+            expect(html).toContain(
+                'href="/settings/household/stores">Manage stores</a>',
+            );
+        }
+    });
+
     test("validation error with add-member modal does not duplicate page banner", () => {
         const html = renderSettingsHouseholdV2Page(
             baseView({

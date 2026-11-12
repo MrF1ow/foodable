@@ -159,6 +159,26 @@ export function liveSettingsStore(): SettingsStore {
                 return groceryStoreFromRow(data as never);
             });
         },
+        async updateStore(row) {
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(GROCERY_STORES)}
+                            set name = ${row.name}
+                            where id = ${row.id}
+                              and household_id = ${row.householdId}
+                            returning ${tx.unsafe(GROCERY_STORE_COLS)}
+                        `,
+                        "update grocery store",
+                    );
+                    return data ? groceryStoreFromRow(data as never) : null;
+                } catch (err) {
+                    throw pgError("update grocery store", err);
+                }
+            });
+        },
         async listSections(storeId) {
             return run(async (tx) => {
                 try {

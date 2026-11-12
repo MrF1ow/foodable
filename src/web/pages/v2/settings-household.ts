@@ -45,6 +45,7 @@ import {
     socialReaderTurnOnLabel,
     type SocialReaderId,
 } from "../../../copy/social-readers.js";
+import { STORES_PATH } from "./settings-stores.js";
 import { sourceIcon } from "../../components/source-icon.js";
 import { SOCIAL_READER_LABELS } from "../../../copy/social-readers.js";
 
@@ -168,7 +169,7 @@ function storeRows(stores: GroceryStore[]): Html {
     }
     const items = stores.map((store) =>
         raw(
-            `<li class="fd-row fd-row--store"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(store.name)}</span></span></div></div></li>`,
+            `<li class="fd-row fd-row--store"><a class="fd-row__body fd-row__body--link" href="${esc(`${STORES_PATH}/${encodeURIComponent(store.id)}`)}"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(store.name)}</span></span></div><span class="fd-row__chevron" aria-hidden="true">${String(iconChevronRight())}</span></a></li>`,
         ),
     );
     return rowList(items, {
@@ -298,7 +299,7 @@ export function renderSettingsHouseholdV2Body(
             `${String(sectionHeader({ title: "Members", level: 2 }))}${addMemberTrigger ? `<div class="fd-settings-household-actions">${addMemberTrigger}</div>` : ""}${String(rowList(memberRows(view), { label: "Members" }))}`,
         ),
         raw(
-            `${String(sectionHeader({ title: "Grocery stores", level: 2 }))}${addStoreTrigger ? `<div class="fd-settings-household-actions">${addStoreTrigger}</div>` : ""}${String(storeRows(view.stores))}`,
+            `${String(sectionHeader({ title: "Grocery stores", level: 2 }))}<div class="fd-settings-household-actions">${addStoreTrigger}<a class="fd-settings-btn" href="${STORES_PATH}">Manage stores</a></div>${String(storeRows(view.stores))}`,
         ),
         raw(
             `${String(sectionHeader({ title: "Dismissed notices", level: 2 }))}${String(dismissedNoticesSection(view.noticeResult))}`,

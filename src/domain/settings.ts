@@ -71,6 +71,8 @@ export type SettingsStore = {
     ): Promise<GroceryPreferences>;
     listStores(householdId: string): Promise<GroceryStore[]>;
     insertStore(row: GroceryStore): Promise<GroceryStore>;
+    /** Writes the store's name; null when the store is not this household's. */
+    updateStore(row: GroceryStore): Promise<GroceryStore | null>;
     listSections(storeId: string): Promise<GrocerySection[]>;
     getSection(householdId: string, id: string): Promise<GrocerySection | null>;
     insertSection(row: GrocerySection): Promise<GrocerySection>;
@@ -164,6 +166,16 @@ export function createMemorySettingsStore(): MemorySettingsStore {
         async insertStore(row) {
             stores.push({ ...row });
             return { ...row };
+        },
+        async updateStore(row) {
+            const idx = stores.findIndex(
+                (store) =>
+                    store.id === row.id &&
+                    store.householdId === row.householdId,
+            );
+            if (idx < 0) return null;
+            stores[idx] = { ...stores[idx]!, name: row.name };
+            return { ...stores[idx]! };
         },
         async listSections(storeId) {
             return sections

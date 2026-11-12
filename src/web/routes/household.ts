@@ -120,6 +120,7 @@ import {
 import { recipeFetchMemory } from "../../db/fetch-memory.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
 import { gatedRoute } from "../gated.js";
+import { householdStoresRoutes } from "./household-stores.js";
 import {
     createHouseholdInvite,
     listHouseholdInvites,
@@ -136,6 +137,9 @@ import { forbiddenDashboardHtml } from "../loaders.js";
 // TOAST_KEYS: "household.fetch-refusal.cleared"
 
 export const householdRoutes = new Hono();
+
+// Settings › Household › Stores in the new app (own file: ten routes of its own).
+householdRoutes.route("/", householdStoresRoutes);
 
 async function householdFormError(
     userId: string,

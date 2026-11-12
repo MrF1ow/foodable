@@ -109,6 +109,14 @@ import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-hous
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
 import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
+import {
+    renderSettingsStoresV2Page,
+    STORES_REORDER_SHEET_ID,
+} from "../src/web/pages/v2/settings-stores.js";
+import {
+    renderSettingsStoreV2Page,
+    STORE_DELETE_SHEET_ID,
+} from "../src/web/pages/v2/settings-stores-detail.js";
 import { renderSettingsExportV2Page } from "../src/web/pages/v2/settings-export.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
@@ -150,6 +158,58 @@ const ME = {
     displayName: "Ethan",
 };
 const SAM = { ...ME, userId: "u2", role: "member", displayName: "Sam" };
+
+// The Stores screens of the design: Costco with six sections and five lines on
+// the list, Trader Joe's, and a market with no sections yet.
+const PREVIEW_STORE_SUMMARIES = [
+    { id: "s-costco", name: "Costco", sectionCount: 6, lineCount: 5 },
+    { id: "s-trader", name: "Trader Joe's", sectionCount: 5, lineCount: 3 },
+    { id: "s-market", name: "Farmers market", sectionCount: 0, lineCount: 0 },
+];
+const PREVIEW_COSTCO_SECTIONS = [
+    ["Produce", 0],
+    ["Bakery", 0],
+    ["Meat", 1],
+    ["Dairy & eggs", 2],
+    ["Pantry", 2],
+    ["Frozen", 0],
+].map(([name, lines], index) => ({
+    section: {
+        id: `sec-${index}`,
+        householdId: H,
+        storeId: "s-costco",
+        name: String(name),
+        sortOrder: index,
+        hidden: false,
+        isOther: false,
+    },
+    lines: Number(lines),
+}));
+function previewStoreView(chrome: unknown, over: Record<string, unknown> = {}) {
+    return {
+        chrome,
+        store: {
+            id: "s-costco",
+            householdId: H,
+            name: "Costco",
+            sortOrder: 0,
+        },
+        sections: PREVIEW_COSTCO_SECTIONS.map((row) => row.section),
+        sectionLineCounts: new Map(
+            PREVIEW_COSTCO_SECTIONS.map((row) => [row.section.id, row.lines]),
+        ),
+        lineCount: 5,
+        rules: [],
+        moveTarget: {
+            id: "s-trader",
+            householdId: H,
+            name: "Trader Joe's",
+            sortOrder: 1,
+        },
+        canManage: true,
+        ...over,
+    };
+}
 
 const PREVIEW_STORES = [
     { id: "s-costco", householdId: H, name: "Costco", sortOrder: 0 },
@@ -1344,6 +1404,35 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       searchQuery: "",
                   }),
                   "settings-export": renderSettingsExportV2Page({ chrome }),
+                  "settings-stores": renderSettingsStoresV2Page({
+                      chrome,
+                      stores: PREVIEW_STORE_SUMMARIES,
+                      defaultStoreId: "s-costco",
+                      useUsualStore: true,
+                      canManage: true,
+                  }),
+                  "settings-stores-reorder": renderSettingsStoresV2Page({
+                      chrome,
+                      stores: PREVIEW_STORE_SUMMARIES,
+                      defaultStoreId: "s-costco",
+                      useUsualStore: true,
+                      canManage: true,
+                      openModalId: STORES_REORDER_SHEET_ID,
+                  }),
+                  "settings-store": renderSettingsStoreV2Page(
+                      previewStoreView(chrome) as never,
+                  ),
+                  "settings-store-delete": renderSettingsStoreV2Page(
+                      previewStoreView(chrome, {
+                          openModalId: STORE_DELETE_SHEET_ID,
+                      }) as never,
+                  ),
+                  "settings-store-delete-empty": renderSettingsStoreV2Page(
+                      previewStoreView(chrome, {
+                          lineCount: 0,
+                          openModalId: STORE_DELETE_SHEET_ID,
+                      }) as never,
+                  ),
               }
             : {}),
         household: renderHouseholdSettingsPage({
@@ -1920,7 +2009,13 @@ for (const theme of ["light", "dark"] as const) {
         `recipe-${theme}`,
         `grocery-did-you-mean-${theme}`,
         ...(V2
-            ? [`grocery-put-away-${theme}`, `kitchen-usual-edit-${theme}`]
+            ? [
+                  `grocery-put-away-${theme}`,
+                  `kitchen-usual-edit-${theme}`,
+                  `settings-stores-reorder-${theme}`,
+                  `settings-store-delete-${theme}`,
+                  `settings-store-delete-empty-${theme}`,
+              ]
             : []),
         `fridge-did-you-mean-${theme}`,
         `recipe-did-you-mean-${theme}`,

@@ -1,0 +1,502 @@
+/* Settings › Household › Stores and a store's page (flag ui-v2). Phone first;
+ * the single desktop block is last. Built from components.css rows, so only
+ * what the design adds is here: the card, the switch, the drag list. */
+
+.fd-stores {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-gap);
+}
+
+.fd-stores-intro,
+.fd-stores-hint,
+.fd-stores-empty {
+    margin: 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-stores-hint {
+    padding: 0 4px;
+}
+
+.fd-stores-empty {
+    padding: var(--fd-s-12) 0;
+}
+
+.fd-stores-back {
+    display: none;
+}
+
+/* ---- card list (the stores, and the two preferences) ----
+ * The card has no padding of its own: hairlines run edge to edge and each row
+ * insets its own content, as in the design. Scoped to .fd-stores because the
+ * Household page shares the row partials. */
+
+.fd-stores .fd-list--card {
+    padding: 0;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-stores .fd-list--card > .fd-row:last-child {
+    border-bottom: 0;
+}
+
+.fd-stores .fd-list--card > .fd-row > :is(.fd-row__body, .fd-stores-action) {
+    padding-inline: 16px;
+}
+
+.fd-stores .fd-list--stores {
+    margin-top: var(--space-gap);
+}
+
+.fd-stores .fd-list--plain {
+    margin: 0;
+}
+
+.fd-stores .fd-row--store .fd-row__body {
+    gap: 14px;
+    padding-block: 12px;
+}
+
+.fd-stores .fd-row--store .fd-row__main {
+    gap: 2px;
+}
+
+.fd-stores .fd-row--store .fd-row__lead {
+    color: var(--text-secondary);
+}
+
+.fd-stores .fd-row--store .fd-row__sub {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* "+ Add a store", "+ Add a section": a quiet accent row. */
+.fd-stores-action {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 50px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--accent-text);
+    font: 400 15px/20px var(--font-body);
+    text-align: left;
+    cursor: pointer;
+}
+
+.fd-stores-action__icon {
+    display: flex;
+    flex: none;
+    width: 24px;
+    height: 24px;
+}
+
+.fd-stores-action:focus-visible,
+.fd-order-name--button:focus-visible,
+.fd-stores-pref:focus-visible,
+.fd-stores-link:focus-visible,
+.fd-stores-delete:focus-visible,
+.fd-order-move:focus-visible,
+.fd-switch:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+.fd-stores-reorder {
+    margin: 0;
+    padding: 0 4px;
+}
+
+.fd-stores-link {
+    margin: 0;
+    padding: 6px 0;
+    border: 0;
+    background: none;
+    color: var(--accent-text);
+    font: 500 13px/18px var(--font-body);
+    cursor: pointer;
+}
+
+/* "When adding to the list": no hairline under the label on this page. */
+.fd-stores[data-fd-stores="list"] .fd-stores-head {
+    margin-top: var(--space-gutter);
+    padding: 0 4px var(--space-gap);
+    border-bottom: 0;
+}
+
+.fd-row--stores-pref {
+    border-bottom-color: var(--line);
+}
+
+.fd-stores-pref {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    min-height: 54px;
+    margin: 0;
+    padding: 10px 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+}
+
+button.fd-stores-pref {
+    cursor: pointer;
+}
+
+.fd-stores-pref__icon {
+    display: flex;
+    flex: none;
+    width: 24px;
+    height: 24px;
+    color: var(--text-secondary);
+}
+
+.fd-stores-pref__main {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.fd-stores-pref__main .fd-row__title {
+    height: auto;
+}
+
+.fd-stores-pref__main .fd-row__sub {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-stores-pref__value {
+    flex: none;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* ---- switch ---- */
+
+.fd-switch {
+    position: relative;
+    box-sizing: border-box;
+    flex: none;
+    width: 48px;
+    min-width: 48px;
+    height: 28px;
+    min-height: 28px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+    cursor: pointer;
+    transition: background 0.15s ease;
+}
+
+.fd-switch[aria-checked="true"] {
+    background: var(--accent-fill);
+}
+
+.fd-switch__knob {
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 22px;
+    height: 22px;
+    border-radius: var(--radius-pill);
+    background: var(--text-secondary);
+    transition: transform 0.15s ease;
+}
+
+.fd-switch[aria-checked="true"] .fd-switch__knob {
+    background: var(--accent-on);
+    transform: translateX(20px);
+}
+
+/* ---- name field ---- */
+
+.fd-stores-name {
+    margin: 0;
+}
+
+.fd-stores-name .fd-settings-input {
+    height: 48px;
+    padding: 0 var(--fd-s-14);
+    border-radius: var(--radius-md);
+    background: transparent;
+    font-size: 15px;
+}
+
+.fd-stores-name-static {
+    margin: 0;
+    font: 600 17px/24px var(--font-body);
+    color: var(--text-primary);
+}
+
+.fd-sr-submit {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
+    white-space: nowrap;
+}
+
+.fd-stores[data-fd-stores="store"] .fd-stores-head {
+    margin-top: var(--space-gap);
+}
+
+/* ---- drag order list ---- */
+
+.fd-order-form {
+    margin: 0;
+}
+
+.fd-order-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.fd-order-item {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 49px;
+    border-bottom: 1px solid var(--line);
+    background: transparent;
+}
+
+.fd-order-item[data-fd-dragging] {
+    z-index: 2;
+    background: var(--surface-raised);
+    box-shadow: 0 6px 18px var(--overlay-scrim);
+}
+
+.fd-order-handle {
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 32px;
+    color: var(--text-secondary);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+
+.fd-order-handle--none {
+    cursor: default;
+}
+
+.fd-order-item[data-fd-dragging] .fd-order-handle {
+    cursor: grabbing;
+}
+
+.fd-order-name {
+    flex: 1 1 auto;
+    min-width: 0;
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.fd-order-name--button {
+    min-height: 44px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    text-align: left;
+    cursor: pointer;
+}
+
+.fd-order-count {
+    flex: none;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* Up and down buttons: the keyboard and no-script path. In a section list they
+ * stay out of sight until the row is hovered or holds focus, so the rows read
+ * as in the design; the store sheet always shows them. */
+.fd-order-moves {
+    display: flex;
+    flex: none;
+}
+
+.fd-order-list:not(.fd-order-list--moves) .fd-order-moves {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+
+.fd-order-list:not(.fd-order-list--moves)
+    .fd-order-item:is(:hover, :focus-within)
+    .fd-order-moves {
+    position: static;
+    width: auto;
+    height: auto;
+    margin: 0;
+    overflow: visible;
+    clip: auto;
+    background: var(--surface-bg);
+}
+
+.fd-order-move {
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.fd-order-move:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.fd-order-list--other {
+    margin-top: 0;
+}
+
+.fd-order-item--fixed .fd-order-name {
+    color: var(--text-primary);
+}
+
+.fd-row--hidden-section .fd-row__title {
+    color: var(--text-secondary);
+}
+
+.fd-stores-inline {
+    display: contents;
+}
+
+.fd-stores-rule {
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-primary);
+    overflow-wrap: anywhere;
+}
+
+.fd-row--section-add,
+.fd-row--rule-add {
+    border-bottom: 0;
+}
+
+/* ---- delete ---- */
+
+.fd-stores-delete {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 52px;
+    margin: var(--space-gutter) 0 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 15px/1 var(--font-body);
+    cursor: pointer;
+}
+
+/* The move-or-delete dialog stacks its choices; Cancel goes last. */
+.fd-sheet-actions:has(> .fd-btn[name="mode"]) {
+    flex-direction: column;
+}
+
+.fd-sheet-actions:has(> .fd-btn[name="mode"]) > .fd-btn {
+    flex: none;
+}
+
+.fd-sheet-actions:has(> .fd-btn[name="mode"]) > .fd-btn:not([name]) {
+    order: 3;
+}
+
+/* ---- sheets ---- */
+
+.fd-stores-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+    margin: 0;
+}
+
+.fd-stores-radios {
+    display: flex;
+    flex-direction: column;
+}
+
+.fd-stores-radio {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-12);
+    min-height: 48px;
+    border-bottom: 1px solid var(--line);
+    font: 400 15px/20px var(--font-body);
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.fd-stores-radio input {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--accent-fill);
+}
+
+@media (min-width: 1024px) {
+    .fd-stores {
+        max-width: 680px;
+    }
+
+    .fd-stores-back {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        align-self: flex-start;
+        margin-bottom: var(--space-gap);
+        color: var(--text-secondary);
+        font: 400 14px/20px var(--font-body);
+        text-decoration: none;
+    }
+
+    .fd-stores {
+        gap: var(--fd-s-10);
+    }
+
+    .fd-stores
+        .fd-list--card
+        > .fd-row
+        > :is(.fd-row__body, .fd-stores-action) {
+        padding-inline: 18px;
+    }
+}

@@ -120,6 +120,12 @@ import {
 } from "./pages/v2/kitchen-usuals.js";
 import type { GroceryLineView } from "./pages/grocery.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
+import { renderSettingsStoresV2Page } from "./pages/v2/settings-stores.js";
+import { renderSettingsStoreV2Page } from "./pages/v2/settings-stores-detail.js";
+import {
+    deleteMoveTarget,
+    groceryLineCounts,
+} from "../domain/grocery-sections.js";
 import { renderSettingsMemberV2Page } from "./pages/v2/settings-member.js";
 import {
     groupRecipeIngredientsByPlace,
@@ -1579,6 +1585,100 @@ export async function renderHouseholdSettingsRoute(
             fetchRefusals,
             fetchRefusalsShowMore,
             fetchRefusalsPaged: refusalsAfter != null,
+        }),
+    };
+}
+
+export async function renderSettingsStoresV2Route(
+    viewerUserId: string,
+    opts: { error?: string; openModalId?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const settings = liveSettingsStore();
+    const [stores, prefs, lines] = await Promise.all([
+        settings.listStores(householdId),
+        settings.getGroceryPreferences(householdId),
+        liveGroceryStore().listLines(householdId),
+    ]);
+    const sectionLists = await Promise.all(
+        stores.map((row) => settings.listSections(row.id)),
+    );
+    const counts = groceryLineCounts(lines);
+    const noticeResult = await loadHouseholdNotices(householdId);
+    return {
+        status: 200,
+        html: renderSettingsStoresV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            stores: stores.map((row, index) => ({
+                id: row.id,
+                name: row.name,
+                sectionCount: sectionLists[index]!.filter((s) => !s.hidden)
+                    .length,
+                lineCount: counts.byStore.get(row.id) ?? 0,
+            })),
+            defaultStoreId: prefs.defaultStoreId,
+            useUsualStore: prefs.useUsualStore,
+            canManage: canManageHousehold(gate.viewer),
+            error: opts.error,
+            openModalId: opts.openModalId,
+        }),
+    };
+}
+
+export async function renderSettingsStoreV2Route(
+    viewerUserId: string,
+    storeId: string,
+    opts: { error?: string; openModalId?: string } = {},
+): Promise<{ status: 200 | 403 | 404; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const householdId = gate.viewer.householdId;
+    const settings = liveSettingsStore();
+    const stores = await settings.listStores(householdId);
+    const store = stores.find((row) => row.id === storeId);
+    if (!store) {
+        return {
+            status: 404,
+            html: renderBarePage("Not found", emptyState("Store not found.")),
+        };
+    }
+    const profile = await getProfile(viewerUserId);
+    const [sections, rules, prefs, lines] = await Promise.all([
+        settings.listSections(store.id),
+        liveRulesStore().listStoreRules(store.id),
+        settings.getGroceryPreferences(householdId),
+        liveGroceryStore().listLines(householdId),
+    ]);
+    const counts = groceryLineCounts(lines);
+    const noticeResult = await loadHouseholdNotices(householdId);
+    return {
+        status: 200,
+        html: renderSettingsStoreV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            store,
+            sections,
+            sectionLineCounts: counts.bySection,
+            lineCount: counts.byStore.get(store.id) ?? 0,
+            rules,
+            moveTarget: deleteMoveTarget(
+                stores,
+                store.id,
+                prefs.defaultStoreId,
+            ),
+            canManage: canManageHousehold(gate.viewer),
+            error: opts.error,
+            openModalId: opts.openModalId,
         }),
     };
 }

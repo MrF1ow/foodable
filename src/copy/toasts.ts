@@ -247,6 +247,24 @@ export const TOASTS = {
         kind: "success",
         text: "Section renamed",
     },
+    "stores.renamed": { kind: "success", text: "Store renamed" },
+    "stores.reordered": { kind: "success", text: "Store order saved" },
+    "stores.deleted": { kind: "success", text: "Store deleted" },
+    "stores.deleted-moved": {
+        kind: "success",
+        text: "Store deleted. {lines} moved to {store}",
+    },
+    "stores.preferences.saved": {
+        kind: "success",
+        text: "Store settings saved",
+    },
+    "stores.section.added": { kind: "success", text: "Section added" },
+    "stores.section.reordered": {
+        kind: "success",
+        text: "Section order saved",
+    },
+    "stores.section.hidden": { kind: "success", text: "Section hidden" },
+    "stores.section.shown": { kind: "success", text: "Section shown" },
     "settings.household.store-rule.added": {
         kind: "success",
         text: "Store rule added",
