@@ -19,6 +19,17 @@ export type NutritionSource =
 
 export type UsualAmount = { amount: number; unit: string };
 
+/** How often a usual is bought again; null on the food means no schedule. */
+export const RESTOCK_SCHEDULES = [
+    "weekly",
+    "every_n_weeks",
+    "monthly",
+] as const;
+export type RestockSchedule = (typeof RESTOCK_SCHEDULES)[number];
+
+/** The largest N a household can enter for "every N weeks" (two years). */
+export const RESTOCK_MAX_EVERY_WEEKS = 104;
+
 export type FoodQuality = {
     nutriscoreGrade: "a" | "b" | "c" | "d" | "e" | null;
     novaGroup: 1 | 2 | 3 | 4 | null;
@@ -58,12 +69,44 @@ export type Food = {
     usualProductId: string | null;
     usualStoreId: string | null;
     usualAmount: UsualAmount | null;
+    /** The usual's restock schedule; lives on the plain food, never on a product. */
+    restockSchedule: RestockSchedule | null;
+    /** N for `every_n_weeks` (required exactly then), null otherwise. */
+    restockEveryWeeks: number | null;
+    restockPaused: boolean;
+    /** Add the usual to the list when its stock is below the low level. */
+    restockWhenLow: boolean;
+    /** In the usual amount's unit; null means a quarter of the usual amount. */
+    restockLowLevel: number | null;
+    /** `YYYY-MM-DD` of the last put-away or tick-off, in the household's day. */
+    lastRestockedOn: string | null;
     offQuality: FoodQuality | null;
     createdBy: string | null;
     archivedAt: string | null;
     createdAt: string;
     updatedAt: string;
 };
+
+export type UsualScheduleKey =
+    | "restockSchedule"
+    | "restockEveryWeeks"
+    | "restockPaused"
+    | "restockWhenLow"
+    | "restockLowLevel"
+    | "lastRestockedOn";
+
+/** The six schedule fields of a usual, as stored on the plain food. */
+export type UsualScheduleFields = Pick<Food, UsualScheduleKey>;
+
+/** A usual with no schedule, never paused, not added when low, never restocked. */
+export const NO_USUAL_SCHEDULE: Readonly<UsualScheduleFields> = Object.freeze({
+    restockSchedule: null,
+    restockEveryWeeks: null,
+    restockPaused: false,
+    restockWhenLow: false,
+    restockLowLevel: null,
+    lastRestockedOn: null,
+});
 
 export type FoodPatch = {
     name?: string;
@@ -1059,6 +1102,12 @@ export function newFood(input: {
     usualProductId?: string | null;
     usualStoreId?: string | null;
     usualAmount?: UsualAmount | null;
+    restockSchedule?: RestockSchedule | null;
+    restockEveryWeeks?: number | null;
+    restockPaused?: boolean;
+    restockWhenLow?: boolean;
+    restockLowLevel?: number | null;
+    lastRestockedOn?: string | null;
     offQuality?: FoodQuality | null;
     createdBy?: string | null;
 }): Food {
@@ -1095,6 +1144,12 @@ export function newFood(input: {
         usualStoreId: input.usualStoreId ?? null,
         usualAmount:
             input.usualAmount == null ? null : { ...input.usualAmount },
+        restockSchedule: input.restockSchedule ?? null,
+        restockEveryWeeks: input.restockEveryWeeks ?? null,
+        restockPaused: input.restockPaused ?? false,
+        restockWhenLow: input.restockWhenLow ?? false,
+        restockLowLevel: input.restockLowLevel ?? null,
+        lastRestockedOn: input.lastRestockedOn ?? null,
         offQuality:
             input.offQuality == null ? null : copyQuality(input.offQuality),
         createdBy: input.createdBy ?? null,
@@ -1724,6 +1779,7 @@ export type MergedFoodFieldPick = Pick<
     | "allergens"
     | "usualStoreId"
     | "usualAmount"
+    | UsualScheduleKey
     | "offQuality"
     | "offNutrientLevels"
 >;
@@ -1753,6 +1809,7 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
                 : drop.usualAmount != null
                   ? { ...drop.usualAmount }
                   : null,
+        ...mergedUsualSchedule(keep, drop),
         offQuality: mergeOffQuality(keep.offQuality, drop.offQuality),
         offNutrientLevels: keep.offNutrientLevels ?? drop.offNutrientLevels,
     };
@@ -2646,6 +2703,293 @@ export async function setUsualPurchase(
     return saveFood(store, next);
 }
 
+const USUAL_SCHEDULE_KEYS: readonly UsualScheduleKey[] = [
+    "restockSchedule",
+    "restockEveryWeeks",
+    "restockPaused",
+    "restockWhenLow",
+    "restockLowLevel",
+    "lastRestockedOn",
+];
+
+/**
+ * A change to a usual's schedule fields. A field left out keeps the stored
+ * value; the string forms exist so a web form can pass its text through.
+ */
+export type UsualSchedulePatch = {
+    restockSchedule?: string | null;
+    restockEveryWeeks?: number | string | null;
+    restockPaused?: boolean;
+    restockWhenLow?: boolean;
+    restockLowLevel?: number | string | null;
+    lastRestockedOn?: string | null;
+};
+
+function isBlankInput(value: unknown): boolean {
+    return value == null || (typeof value === "string" && value.trim() === "");
+}
+
+function parseRestockSchedule(raw: unknown): RestockSchedule | null {
+    if (isBlankInput(raw)) return null;
+    const value = String(raw).trim();
+    if ((RESTOCK_SCHEDULES as readonly string[]).includes(value)) {
+        return value as RestockSchedule;
+    }
+    throw new FoodsInputError(
+        "Pick weekly, every N weeks, monthly, or no schedule.",
+    );
+}
+
+function parseRestockEveryWeeks(raw: unknown): number | null {
+    if (isBlankInput(raw)) return null;
+    const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+    if (!Number.isInteger(n) || n < 1 || n > RESTOCK_MAX_EVERY_WEEKS) {
+        throw new FoodsInputError(
+            `Enter a whole number of weeks from 1 to ${RESTOCK_MAX_EVERY_WEEKS}.`,
+        );
+    }
+    return n;
+}
+
+function parseRestockLowLevel(raw: unknown): number | null {
+    if (isBlankInput(raw)) return null;
+    const n = typeof raw === "number" ? raw : Number(String(raw).trim());
+    if (!Number.isFinite(n) || n < 0) {
+        throw new FoodsInputError("The low level must be zero or more.");
+    }
+    return n;
+}
+
+function parseRestockFlag(raw: unknown, label: string): boolean {
+    if (typeof raw !== "boolean") {
+        throw new FoodsInputError(`${label} must be on or off.`);
+    }
+    return raw;
+}
+
+/** A real calendar day as `YYYY-MM-DD`; anything else is rejected. */
+function parseCalendarDay(raw: unknown): string | null {
+    if (isBlankInput(raw)) return null;
+    const text = String(raw).trim();
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
+    if (match) {
+        const [y, m, d] = [
+            Number(match[1]),
+            Number(match[2]),
+            Number(match[3]),
+        ];
+        const probe = new Date(Date.UTC(y, m - 1, d));
+        if (
+            probe.getUTCFullYear() === y &&
+            probe.getUTCMonth() === m - 1 &&
+            probe.getUTCDate() === d
+        ) {
+            return text;
+        }
+    }
+    throw new FoodsInputError("Enter the date as YYYY-MM-DD.");
+}
+
+/**
+ * The schedule fields after `patch`, validated as one record: "every N weeks"
+ * needs its N and no other schedule carries one. Switching to another
+ * schedule drops the stored N unless the patch names one (which is then
+ * refused). Everything the patch does not mention is carried over unchanged.
+ */
+export function applyUsualSchedulePatch(
+    current: UsualScheduleFields,
+    patch: UsualSchedulePatch,
+): UsualScheduleFields {
+    let schedule = current.restockSchedule;
+    let everyWeeks = current.restockEveryWeeks;
+    if (patch.restockSchedule !== undefined) {
+        schedule = parseRestockSchedule(patch.restockSchedule);
+        if (
+            schedule !== "every_n_weeks" &&
+            patch.restockEveryWeeks === undefined
+        ) {
+            everyWeeks = null;
+        }
+    }
+    if (patch.restockEveryWeeks !== undefined) {
+        everyWeeks = parseRestockEveryWeeks(patch.restockEveryWeeks);
+    }
+    if (schedule === "every_n_weeks") {
+        if (everyWeeks == null) {
+            throw new FoodsInputError("Enter how many weeks between restocks.");
+        }
+    } else if (everyWeeks != null) {
+        throw new FoodsInputError(
+            "Only an every N weeks schedule takes a number of weeks.",
+        );
+    }
+    return {
+        restockSchedule: schedule,
+        restockEveryWeeks: everyWeeks,
+        restockPaused:
+            patch.restockPaused !== undefined
+                ? parseRestockFlag(patch.restockPaused, "Paused")
+                : current.restockPaused,
+        restockWhenLow:
+            patch.restockWhenLow !== undefined
+                ? parseRestockFlag(patch.restockWhenLow, "Add when low")
+                : current.restockWhenLow,
+        restockLowLevel:
+            patch.restockLowLevel !== undefined
+                ? parseRestockLowLevel(patch.restockLowLevel)
+                : current.restockLowLevel,
+        lastRestockedOn:
+            patch.lastRestockedOn !== undefined
+                ? parseCalendarDay(patch.lastRestockedOn)
+                : current.lastRestockedOn,
+    };
+}
+
+/**
+ * Sets a usual's schedule, paused flag, add-when-low switch and low level.
+ * The schedule lives on the plain food (a standalone food counts as one);
+ * a product reads its plain food's, so writing one on a product is refused.
+ * Writes are never gated, and a field the patch leaves out is kept.
+ */
+export async function setUsualSchedule(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    patch: UsualSchedulePatch,
+): Promise<Food> {
+    const current = await requireLiveFood(store, householdId, foodId);
+    assertPlainFoodTarget(current);
+    const next = applyUsualSchedulePatch(current, patch);
+    const unchanged = USUAL_SCHEDULE_KEYS.every(
+        (key) => current[key] === next[key],
+    );
+    if (unchanged) return current;
+    return saveFood(store, { ...current, ...next });
+}
+
+/**
+ * Stamps the day a usual was last restocked: call it when a grocery line of
+ * the food (or of one of its products) is ticked off or put away. `on` is the
+ * household-local day, `YYYY-MM-DD`. A product stamps its plain food, and the
+ * date only moves forward, so a late retry never rewinds it. Returns null when
+ * the food no longer exists.
+ */
+export async function markUsualRestocked(
+    store: FoodsStore,
+    householdId: string,
+    foodId: string,
+    on: string,
+): Promise<Food | null> {
+    const day = parseCalendarDay(on);
+    if (day == null) throw new FoodsInputError("Enter the date as YYYY-MM-DD.");
+    const food = await store.getFood(householdId, foodId);
+    if (!food || food.archivedAt) return null;
+    const plain = food.genericFoodId
+        ? await store.getFood(householdId, food.genericFoodId)
+        : food;
+    if (!plain || plain.archivedAt) return null;
+    if (plain.lastRestockedOn != null && plain.lastRestockedOn >= day) {
+        return plain;
+    }
+    return saveFood(store, { ...plain, lastRestockedOn: day });
+}
+
+/**
+ * The level a usual counts as running low below: the one the household set,
+ * else a quarter of the usual amount (computed here, never stored). Pass the
+ * effective food so a plain food reads its usual product's amount. Null when
+ * there is neither, so nothing is guessed.
+ */
+export function usualLowLevel(
+    food: Pick<Food, "restockLowLevel" | "usualAmount">,
+): number | null {
+    if (food.restockLowLevel != null) return food.restockLowLevel;
+    if (food.usualAmount != null) return food.usualAmount.amount / 4;
+    return null;
+}
+
+/**
+ * Merging two foods keeps the schedule that exists: the kept food's own, else
+ * the dropped one's (with its N). Paused and add-when-low come from the side
+ * whose schedule wins, so a discarded schedule never pauses the kept one; when
+ * neither side has a schedule, either side's "on" stands. The last restock
+ * date is the later of the two.
+ * A dropped low level comes along only with the dropped usual amount it is
+ * measured in.
+ */
+function mergedUsualSchedule(keep: Food, drop: Food): UsualScheduleFields {
+    const takeDrop =
+        keep.restockSchedule == null && drop.restockSchedule != null;
+    const neitherScheduled =
+        keep.restockSchedule == null && drop.restockSchedule == null;
+    // Paused and add-when-low belong with the schedule that wins: a discarded
+    // schedule must not pause the kept one. With no schedule on either side
+    // there is nothing to follow, so an "on" from either side stands.
+    const flagSource = neitherScheduled
+        ? {
+              restockPaused: keep.restockPaused || drop.restockPaused,
+              restockWhenLow: keep.restockWhenLow || drop.restockWhenLow,
+          }
+        : takeDrop
+          ? drop
+          : keep;
+    const later = [keep.lastRestockedOn, drop.lastRestockedOn]
+        .filter((day): day is string => day != null)
+        .sort()
+        .at(-1);
+    return {
+        restockSchedule: takeDrop ? drop.restockSchedule : keep.restockSchedule,
+        restockEveryWeeks: takeDrop
+            ? drop.restockEveryWeeks
+            : keep.restockEveryWeeks,
+        restockPaused: flagSource.restockPaused,
+        restockWhenLow: flagSource.restockWhenLow,
+        restockLowLevel:
+            keep.restockLowLevel ??
+            (keep.usualAmount == null ? drop.restockLowLevel : null),
+        lastRestockedOn: later ?? null,
+    };
+}
+
+function usualScheduleFromRow(row: {
+    restock_schedule?: unknown;
+    restock_every_weeks?: unknown;
+    restock_paused?: unknown;
+    restock_when_low?: unknown;
+    restock_low_level?: unknown;
+    last_restocked_on?: unknown;
+}): UsualScheduleFields {
+    const schedule = (RESTOCK_SCHEDULES as readonly unknown[]).includes(
+        row.restock_schedule,
+    )
+        ? (row.restock_schedule as RestockSchedule)
+        : null;
+    const everyWeeks =
+        row.restock_every_weeks == null
+            ? null
+            : Number(row.restock_every_weeks);
+    const lowLevel =
+        row.restock_low_level == null ? null : Number(row.restock_low_level);
+    const lastOn = row.last_restocked_on;
+    return {
+        restockSchedule: schedule,
+        restockEveryWeeks:
+            everyWeeks != null && Number.isInteger(everyWeeks) && everyWeeks > 0
+                ? everyWeeks
+                : null,
+        restockPaused: row.restock_paused === true,
+        restockWhenLow: row.restock_when_low === true,
+        restockLowLevel:
+            lowLevel != null && Number.isFinite(lowLevel) ? lowLevel : null,
+        lastRestockedOn:
+            lastOn == null || lastOn === ""
+                ? null
+                : lastOn instanceof Date
+                  ? lastOn.toISOString().slice(0, 10)
+                  : String(lastOn).slice(0, 10),
+    };
+}
+
 /**
  * Adds a product to a plain food's list. Any product counts as the food; only
  * the usual one sets its nutrition, store and amount. So adding a product
@@ -3271,6 +3615,7 @@ const FIELDS_FILLED_KEY_ORDER: (
     "usualStoreId",
     "usualAmount",
     "usualProductId",
+    "restockSchedule",
 ];
 
 function fieldsFilledKeys(
@@ -4252,6 +4597,12 @@ export function foodFromRow(row: {
     usual_store_id: unknown;
     usual_amount: unknown;
     usual_unit: unknown;
+    restock_schedule?: unknown;
+    restock_every_weeks?: unknown;
+    restock_paused?: unknown;
+    restock_when_low?: unknown;
+    restock_low_level?: unknown;
+    last_restocked_on?: unknown;
     nutriscore_grade?: unknown;
     nova_group?: unknown;
     ecoscore_grade?: unknown;
@@ -4335,6 +4686,7 @@ export function foodFromRow(row: {
                 ? row.usual_store_id
                 : null,
         usualAmount,
+        ...usualScheduleFromRow(row),
         offQuality: offQualityFromRow({
             nutriscore_grade: row.nutriscore_grade ?? null,
             nova_group: row.nova_group ?? null,
@@ -4388,6 +4740,12 @@ export function foodToRow(row: Food) {
         usual_store_id: row.usualStoreId,
         usual_amount: row.usualAmount?.amount ?? null,
         usual_unit: row.usualAmount?.unit ?? null,
+        restock_schedule: row.restockSchedule,
+        restock_every_weeks: row.restockEveryWeeks,
+        restock_paused: row.restockPaused,
+        restock_when_low: row.restockWhenLow,
+        restock_low_level: row.restockLowLevel,
+        last_restocked_on: row.lastRestockedOn,
         ...offQualityToRowFields(row.offQuality),
         created_by: row.createdBy,
         archived_at: row.archivedAt,

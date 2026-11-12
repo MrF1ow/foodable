@@ -1,4 +1,4 @@
-import type { Food } from "../../domain/foods.js";
+import { NO_USUAL_SCHEDULE, type Food } from "../../domain/foods.js";
 import type { FridgeItem, FridgeLocation } from "../../domain/fridge.js";
 import type { GroceryLine } from "../../domain/grocery.js";
 import type { Recipe, RecipeIngredient } from "../../domain/recipes.js";
@@ -62,6 +62,7 @@ export function sampleFood(
         usualProductId: null,
         usualStoreId: null,
         usualAmount: null,
+        ...NO_USUAL_SCHEDULE,
         offQuality: null,
         createdBy: null,
         archivedAt: null,

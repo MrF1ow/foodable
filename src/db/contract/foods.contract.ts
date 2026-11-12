@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
+    markUsualRestocked,
+    mergeFoods,
+    NO_USUAL_SCHEDULE,
+    setUsualPurchase,
+    setUsualSchedule,
     updateFood,
+    type Food,
     type FoodsStore,
     type MemoryFoodsStore,
+    type UsualScheduleFields,
 } from "../../domain/foods.js";
 import { sampleFood, type StoreContractCtx } from "./helpers.js";
 import {
@@ -827,6 +834,223 @@ export function runFoodsStoreContract(
             });
             expect(restored?.usualStoreId).toBe(c.storeId);
             expect(restored?.usualAmount).toEqual({ amount: 500, unit: "ml" });
+        });
+
+        describe("restock schedule on the usual record", () => {
+            const SCHEDULED: UsualScheduleFields = {
+                restockSchedule: "every_n_weeks",
+                restockEveryWeeks: 3,
+                restockPaused: true,
+                restockWhenLow: true,
+                restockLowLevel: 6.5,
+                lastRestockedOn: "2026-11-02",
+            };
+            const scheduleOf = (food: Food | null | undefined) =>
+                food == null
+                    ? null
+                    : ({
+                          restockSchedule: food.restockSchedule,
+                          restockEveryWeeks: food.restockEveryWeeks,
+                          restockPaused: food.restockPaused,
+                          restockWhenLow: food.restockWhenLow,
+                          restockLowLevel: food.restockLowLevel,
+                          lastRestockedOn: food.lastRestockedOn,
+                      } satisfies UsualScheduleFields);
+
+            test("a new food starts with no schedule", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const food = await store.insertFood(
+                    sampleFood(c.householdId, { name: "Rice" }),
+                );
+                expect(scheduleOf(food)).toEqual(NO_USUAL_SCHEDULE);
+                expect(
+                    scheduleOf(await store.getFood(c.householdId, food.id)),
+                ).toEqual(NO_USUAL_SCHEDULE);
+            });
+
+            test("every field round trips through insert, read, list and update", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const food = sampleFood(c.householdId, {
+                    name: "sched 2 eggs",
+                    normalizedName: "sched 2 eggs",
+                    ...SCHEDULED,
+                });
+                const inserted = await store.insertFood(food);
+                expect(scheduleOf(inserted)).toEqual(SCHEDULED);
+                expect(
+                    scheduleOf(await store.getFood(c.householdId, food.id)),
+                ).toEqual(SCHEDULED);
+                expect(
+                    scheduleOf(
+                        (await store.listFoods(c.householdId)).find(
+                            (f) => f.id === food.id,
+                        ),
+                    ),
+                ).toEqual(SCHEDULED);
+                expect(
+                    scheduleOf(
+                        (
+                            await store.getFoodsByIds(c.householdId, [food.id])
+                        ).get(food.id),
+                    ),
+                ).toEqual(SCHEDULED);
+
+                const changed: UsualScheduleFields = {
+                    restockSchedule: "monthly",
+                    restockEveryWeeks: null,
+                    restockPaused: false,
+                    restockWhenLow: false,
+                    restockLowLevel: 0,
+                    lastRestockedOn: "2026-12-31",
+                };
+                const updated = await store.updateFoodRow({
+                    ...inserted,
+                    ...changed,
+                });
+                expect(scheduleOf(updated)).toEqual(changed);
+
+                const cleared = await store.updateFoodRow({
+                    ...updated!,
+                    ...NO_USUAL_SCHEDULE,
+                });
+                expect(scheduleOf(cleared)).toEqual(NO_USUAL_SCHEDULE);
+            });
+
+            test("an unrelated update keeps the schedule", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const food = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "sched 3 eggs",
+                        normalizedName: "sched 3 eggs",
+                        ...SCHEDULED,
+                    }),
+                );
+                const renamed = await updateFood(
+                    store,
+                    c.householdId,
+                    food.id,
+                    { name: "sched 3 free range", allergens: ["egg"] },
+                );
+                expect(renamed.name).toBe("sched 3 free range");
+                expect(scheduleOf(renamed)).toEqual(SCHEDULED);
+                expect(
+                    scheduleOf(await store.getFood(c.householdId, food.id)),
+                ).toEqual(SCHEDULED);
+            });
+
+            test("setUsualPurchase keeps the schedule", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const food = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "sched 4 eggs",
+                        normalizedName: "sched 4 eggs",
+                        ...SCHEDULED,
+                    }),
+                );
+                const lookup = {
+                    listStores: async () => [{ id: c.storeId }],
+                };
+                const set = await setUsualPurchase(
+                    store,
+                    c.householdId,
+                    food.id,
+                    {
+                        usualStoreId: c.storeId,
+                        usualAmount: { amount: 24, unit: "each" },
+                    },
+                    { stores: lookup },
+                );
+                expect(set.usualStoreId).toBe(c.storeId);
+                expect(scheduleOf(set)).toEqual(SCHEDULED);
+                const cleared = await setUsualPurchase(
+                    store,
+                    c.householdId,
+                    food.id,
+                    { usualStoreId: null, usualAmount: null },
+                    { stores: lookup },
+                );
+                expect(cleared.usualAmount).toBeNull();
+                expect(
+                    scheduleOf(await store.getFood(c.householdId, food.id)),
+                ).toEqual(SCHEDULED);
+            });
+
+            test("setUsualSchedule and markUsualRestocked write only their fields", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const food = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "sched 5 eggs",
+                        normalizedName: "sched 5 eggs",
+                        usualStoreId: c.storeId,
+                        usualAmount: { amount: 24, unit: "each" },
+                    }),
+                );
+                const set = await setUsualSchedule(
+                    store,
+                    c.householdId,
+                    food.id,
+                    { restockSchedule: "weekly", restockWhenLow: true },
+                );
+                expect(set.restockSchedule).toBe("weekly");
+                expect(set.restockWhenLow).toBe(true);
+                expect(set.usualStoreId).toBe(c.storeId);
+                expect(set.usualAmount).toEqual({ amount: 24, unit: "each" });
+
+                const stamped = await markUsualRestocked(
+                    store,
+                    c.householdId,
+                    food.id,
+                    "2026-11-10",
+                );
+                expect(stamped?.lastRestockedOn).toBe("2026-11-10");
+                expect(
+                    scheduleOf(await store.getFood(c.householdId, food.id)),
+                ).toEqual({
+                    ...NO_USUAL_SCHEDULE,
+                    restockSchedule: "weekly",
+                    restockWhenLow: true,
+                    lastRestockedOn: "2026-11-10",
+                });
+            });
+
+            test("mergeFoods carries the dropped food's schedule to a kept food without one", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const keep = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "sched 6 eggs",
+                        normalizedName: "sched 6 eggs",
+                    }),
+                );
+                const drop = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "sched 6 egg",
+                        normalizedName: "sched 6 egg",
+                        ...SCHEDULED,
+                    }),
+                );
+                const merged = await mergeFoods(
+                    store,
+                    c.householdId,
+                    keep.id,
+                    drop.id,
+                );
+                expect(scheduleOf(merged)).toEqual(SCHEDULED);
+                expect(
+                    scheduleOf(await store.getFood(c.householdId, keep.id)),
+                ).toEqual(SCHEDULED);
+            });
         });
 
         test("updateFood with two live foods sharing a name", async () => {
