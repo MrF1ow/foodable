@@ -39,6 +39,7 @@ const EXPECTED_USER_FKS: {
     { table: "notice_dismissals", column: "dismissed_by", deltype: "n" },
     { table: "household_invites", column: "created_by", deltype: "n" },
     { table: "household_invites", column: "used_by", deltype: "n" },
+    { table: "recipe_plans", column: "created_by", deltype: "n" },
     { table: "stock_movements", column: "actor_user_id", deltype: "n" },
     { table: "export_archives", column: "user_id", deltype: "c" },
     { table: "flag_assignments", column: "user_id", deltype: "c" },
