@@ -7,6 +7,7 @@ import { findPgBin } from "./testing/pg-temp.js";
 import { setSqlForTests } from "./sql.js";
 import {
     findOrCreateFoodByBarcodeFromHit,
+    findOrCreateFoodByBarcodeResult,
     findOrCreateManualFood,
     mergeFoods,
     offNutritionPatchFromHit,
@@ -333,6 +334,57 @@ describeDb(pgAvailable !== null, "foods serving and basis", (getCtx) => {
         expect(row.nutrition_source).toBe("manual");
         expect(row.nutrition_basis).toBeNull();
         expect(Number(row.calories)).toBe(120);
+    });
+
+    test("a food an older build refreshed today gets its serving and basis on the next scan, once", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const store = liveFoodsStore();
+        const old = await store.insertFood(
+            sampleFood(householdId, {
+                name: "Half & Half",
+                normalizedName: "half & half",
+                nutritionSource: "openfoodfacts",
+                offSourceId: BARCODE,
+                offNutrientLevels: { fat: "high" },
+                calories: 133.3,
+                saturatedFatG: 6.7,
+                offQuality: {
+                    nutriscoreGrade: "d",
+                    novaGroup: 3,
+                    ecoscoreGrade: null,
+                    additives: [],
+                    allergensTags: [],
+                    tracesTags: [],
+                    ingredientsAnalysisTags: [],
+                    labelsTags: [],
+                    fetchedAt: new Date().toISOString(),
+                },
+            }),
+        );
+        await store.setBarcode(householdId, BARCODE, old.id);
+        let lookups = 0;
+        const lookup = async () => {
+            lookups++;
+            return halfAndHalf();
+        };
+        const first = await findOrCreateFoodByBarcodeResult(
+            store,
+            householdId,
+            BARCODE,
+            lookup,
+        );
+        expect(first.food.serving?.amount).toBe(30);
+        expect(first.food.nutritionBasis).toBe("100ml");
+        await findOrCreateFoodByBarcodeResult(
+            store,
+            householdId,
+            BARCODE,
+            lookup,
+        );
+        expect(lookups).toBe(1);
     });
 
     test("a hit with a negative per-100 value creates the food with that value null", async () => {

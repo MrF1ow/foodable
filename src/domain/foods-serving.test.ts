@@ -636,33 +636,33 @@ const FULL_QUALITY: FoodQuality = {
     fetchedAt: "2026-11-01T00:00:00.000Z",
 };
 
-describe("re-scanning a barcode food made before the serving and basis columns", () => {
-    // Quality, nutrient levels and saturated fat are all set, so the old
-    // refresh condition saw nothing left to fetch.
-    async function filledOldFood(
-        over: Partial<Parameters<typeof newFood>[0]> = {},
-    ) {
-        const store = createMemoryFoodsStore();
-        const old = await store.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Half & Half",
-                calories: 133.3,
-                proteinG: 3.3,
-                fatG: 10,
-                saturatedFatG: 6.7,
-                offNutrientLevels: { fat: "high" },
-                offQuality: { ...FULL_QUALITY },
-                nutritionSource: "openfoodfacts",
-                offSourceId: "0193968379117",
-                ...over,
-            }),
-        );
-        await store.setBarcode(HH, "0193968379117", old.id);
-        return store;
-    }
+// Quality, nutrient levels and saturated fat are all set, so the old
+// refresh condition saw nothing left to fetch.
+async function filledOldFood(
+    over: Partial<Parameters<typeof newFood>[0]> = {},
+) {
+    const store = createMemoryFoodsStore();
+    const old = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Half & Half",
+            calories: 133.3,
+            proteinG: 3.3,
+            fatG: 10,
+            saturatedFatG: 6.7,
+            offNutrientLevels: { fat: "high" },
+            offQuality: { ...FULL_QUALITY },
+            nutritionSource: "openfoodfacts",
+            offSourceId: "0193968379117",
+            ...over,
+        }),
+    );
+    await store.setBarcode(HH, "0193968379117", old.id);
+    return store;
+}
 
+describe("re-scanning a barcode food made before the serving and basis columns", () => {
     test("looks the barcode up again and fills the serving and basis", async () => {
         const store = await filledOldFood();
         let lookups = 0;
@@ -678,7 +678,13 @@ describe("re-scanning a barcode food made before the serving and basis columns",
         expect(lookups).toBe(1);
         expect(food.serving?.amount).toBe(30);
         expect(food.nutritionBasis).toBe("100ml");
-        expect(productNutrition(food).head.per100).toBe("Per 100 ml");
+        const nutrition = productNutrition(food);
+        expect(nutrition.head.serving).toEqual({
+            name: "Per portion",
+            amount: "30 ml",
+        });
+        expect(nutrition.table.calories.perServing).toBe("40");
+        expect(nutrition.head.per100).toBe("Per 100 ml");
     });
 
     test("a food that already has serving and basis is not looked up", async () => {
@@ -818,16 +824,20 @@ describe("a barcode food OFF gives no millilitre or gram serving", () => {
         expect(lookups).toBe(1);
     });
 
-    test("a food looked up after the serving capture shipped is not asked again", async () => {
+    test("a food an older build refreshed today still gets its serving and basis on the next scan", async () => {
         const store = createMemoryFoodsStore();
-        const fresh = await store.insertFood(
+        const refreshed = await store.insertFood(
             newFood({
                 householdId: HH,
                 kind: "food",
-                name: "Oats",
-                calories: 380,
-                saturatedFatG: 1.2,
-                offNutrientLevels: { fat: "low" },
+                name: "Half & Half",
+                calories: 133.3,
+                proteinG: 3.3,
+                fatG: 10,
+                saturatedFatG: 6.7,
+                offNutrientLevels: { fat: "high" },
+                // The old build stamped this at refresh time, with no
+                // serving and no basis stored.
                 offQuality: {
                     ...FULL_QUALITY,
                     fetchedAt: new Date().toISOString(),
@@ -836,17 +846,63 @@ describe("a barcode food OFF gives no millilitre or gram serving", () => {
                 offSourceId: "0193968379117",
             }),
         );
-        await store.setBarcode(HH, "0193968379117", fresh.id);
+        await store.setBarcode(HH, "0193968379117", refreshed.id);
         let lookups = 0;
+        const lookup = async () => {
+            lookups++;
+            return hit();
+        };
+        const { food } = await findOrCreateFoodByBarcodeResult(
+            store,
+            HH,
+            "0193968379117",
+            lookup,
+        );
+        expect(lookups).toBe(1);
+        expect(food.serving?.amount).toBe(30);
+        expect(food.nutritionBasis).toBe("100ml");
+        // The basis it now holds is the signal that the ask is done.
         await findOrCreateFoodByBarcodeResult(
+            store,
+            HH,
+            "0193968379117",
+            lookup,
+        );
+        expect(lookups).toBe(1);
+    });
+
+    test("a barcode food with typed-in values is never looked up for a basis", async () => {
+        const store = await filledOldFood({ nutritionSource: "manual" });
+        let lookups = 0;
+        const { food } = await findOrCreateFoodByBarcodeResult(
             store,
             HH,
             "0193968379117",
             async () => {
                 lookups++;
-                return NO_SERVING();
+                return hit();
             },
         );
+        expect(lookups).toBe(0);
+        expect(food.nutritionBasis).toBeNull();
+    });
+
+    test("a null lookup on an OFF empty miss does not repeat", async () => {
+        const store = await filledOldFood({
+            offQuality: offQualityMissStamp(new Date().toISOString()),
+        });
+        let lookups = 0;
+        for (let i = 0; i < 5; i++) {
+            await findOrCreateFoodByBarcodeResult(
+                store,
+                HH,
+                "0193968379117",
+                async () => {
+                    lookups++;
+                    return null;
+                },
+            );
+        }
         expect(lookups).toBe(0);
     });
 });
