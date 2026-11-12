@@ -35,7 +35,7 @@ const lightChrome = {
 test("withWidgetData seeds the existing script, not a second tag", () => {
     const html = "<html><script>initWidget({})</script></html>";
     const out = withWidgetData(html, { locale: "en" });
-    expect((out.match(/<script>/g) ?? []).length).toBe(1);
+    expect((out.match(/<script\b/gi) ?? []).length).toBe(1);
     expect(out).toContain("window.__WIDGET_DATA__=");
     expect(out).toContain('"locale":"en"');
 });
