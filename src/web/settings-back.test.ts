@@ -61,6 +61,47 @@ describe("isSafeAppBackPath", () => {
     });
 });
 
+describe("isSafeAppBackPath refuses files and machine endpoints", () => {
+    // A service worker's own fetch can carry its script URL as the referrer
+    // (seen on iOS Safari: the product page's back link went to /sw.js).
+    test("static files are not pages", () => {
+        for (const bad of [
+            "/sw.js",
+            "/app.js?v=abc",
+            "/app-v2.css",
+            "/app-v2-scanner.wasm",
+            "/manifest.webmanifest",
+            "/favicon.ico",
+            "/apple-touch-icon.png",
+            "/brand/icon-dark.svg",
+            "/fonts/Geist.woff2",
+            "/robots.txt",
+            "/%73w.js",
+        ]) {
+            expect(isSafeAppBackPath(bad), bad).toBe(false);
+        }
+    });
+
+    test("machine endpoints and public share pages are not back targets", () => {
+        for (const bad of [
+            "/api/log/search?q=x",
+            "/mcp",
+            "/s/abc",
+            "/s/abc.json",
+            "/token",
+            "/register",
+            "/.well-known/oauth-authorization-server",
+        ]) {
+            expect(isSafeAppBackPath(bad), bad).toBe(false);
+        }
+    });
+
+    test("names with a dot in an app path still count", () => {
+        expect(isSafeAppBackPath("/kitchen/usuals/Dr.%20Pepper")).toBe(true);
+        expect(isSafeAppBackPath("/recipes?q=st.%20louis")).toBe(true);
+    });
+});
+
 describe("settingsBackHref", () => {
     const origin = "http://x";
 
@@ -110,6 +151,15 @@ describe("settingsBackHref", () => {
         expect(settingsBackHref({ from: "/login", origin })).toBe("/");
         expect(settingsBackHref({ from: "/authorize", origin })).toBe("/");
         expect(settingsBackHref({ from: "/approve", origin })).toBe("/");
+    });
+
+    test("a service-worker referer falls back to home", () => {
+        expect(
+            settingsBackHref({
+                referer: "https://food.example/sw.js",
+                origin: "https://food.example",
+            }),
+        ).toBe("/");
     });
 
     test("default is home", () => {

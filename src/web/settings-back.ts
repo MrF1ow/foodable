@@ -23,6 +23,30 @@ function isBlockedPathname(pathname: string): boolean {
     );
 }
 
+// Not pages: machine endpoints and public share links. A browser can hand
+// one over as the referrer (iOS Safari sends a service worker's own script
+// URL for the navigations it forwards), so a back link must never land there.
+const MACHINE_PREFIXES = [
+    "/api",
+    "/mcp",
+    "/s",
+    "/token",
+    "/register",
+    "/.well-known",
+] as const;
+
+// A static file, by extension. Names with a dot elsewhere stay pages.
+const FILE_EXTENSION =
+    /\.(?:m?js|css|wasm|json|webmanifest|ico|png|svg|jpe?g|webp|gif|woff2?|ttf|txt|xml|map|zip|csv)$/i;
+
+function isMachinePathname(pathname: string): boolean {
+    const lower = pathname.toLowerCase();
+    if (FILE_EXTENSION.test(lower)) return true;
+    return MACHINE_PREFIXES.some(
+        (prefix) => lower === prefix || lower.startsWith(`${prefix}/`),
+    );
+}
+
 function hasDotSegment(pathname: string): boolean {
     return pathname
         .split("/")
@@ -47,6 +71,7 @@ export function isSafeAppBackPath(path: string): boolean {
         if (layer.startsWith("//") || layer.includes("\\")) return false;
         if (/[\u0000-\u001f\u007f]/.test(layer)) return false;
         if (hasDotSegment(layer) || isBlockedPathname(layer)) return false;
+        if (isMachinePathname(layer)) return false;
         let resolved: URL;
         try {
             resolved = new URL(layer, "http://local");
@@ -55,6 +80,7 @@ export function isSafeAppBackPath(path: string): boolean {
         }
         if (resolved.origin !== "http://local") return false;
         if (isBlockedPathname(resolved.pathname)) return false;
+        if (isMachinePathname(resolved.pathname)) return false;
         let decoded: string;
         try {
             decoded = decodeURIComponent(layer);

@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { searchFoodsByName } from "../../food-search.js";
 import { liveFoodsStore } from "../../db/foods.js";
@@ -21,6 +21,9 @@ import { liveGroceryStore } from "../../db/grocery.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { addGroceryFoodById, GroceryInputError } from "../../domain/grocery.js";
 import { safeReturnPath } from "../usual-products-path.js";
+import { isSafeAppBackPath } from "../settings-back.js";
+import { canonicalAppPath } from "../route-map.js";
+import { getBaseUrl } from "../../url.js";
 import { findOrCreateFoodByBarcodeResult } from "../../domain/foods.js";
 import { renderUsualProductsListPage } from "../loaders.js";
 import { USUALS_V2_RETURN_TO } from "../pages/v2/kitchen-usuals.js";
@@ -38,21 +41,26 @@ import {
 
 export const foodsRoutes = new Hono();
 
-function productBackHref(
-    from: string | undefined,
-    referer: string | null,
-): string {
+/** Where the product screen's back button goes: an explicit `from`, else a
+ *  same-origin referring page, else the fridge. The referrer must name a real
+ *  page (isSafeAppBackPath): iOS Safari sends a service worker's script URL as
+ *  the referrer of navigations it forwards, which made Back open /sw.js. */
+function productBackHref(c: Context): string {
+    const from = c.req.query("from");
     const fromPath = from?.trim() ? safeReturnPath(from, "") : "";
     if (fromPath) return fromPath;
+    const referer = c.req.header("referer");
     if (referer) {
         try {
-            const path = new URL(referer, "http://foodable.local").pathname;
-            if (path.startsWith("/") && path !== "/foods") {
-                const productPath = /^\/foods\/[^/]+$/.test(path);
-                if (!productPath) return path;
+            const url = new URL(referer);
+            if (url.origin === getBaseUrl(c)) {
+                const path = canonicalAppPath(url.pathname);
+                const isProduct =
+                    path === "/foods" || /^\/foods\/[^/]+$/.test(path);
+                if (!isProduct && isSafeAppBackPath(path)) return path;
             }
         } catch {
-            /* ignore */
+            /* ignore a malformed referer */
         }
     }
     return PRODUCT_DEFAULT_BACK;
@@ -84,10 +92,7 @@ foodsRoutes.get(
     requireSiteUser,
     gatedRoute("ui-v2", { notFound: true }),
     async (c) => {
-        const backHref = productBackHref(
-            c.req.query("from"),
-            c.req.header("referer") ?? null,
-        );
+        const backHref = productBackHref(c);
         const data = await loadProductPageData(
             c.get("userId"),
             c.req.param("id"),
@@ -125,10 +130,7 @@ foodsRoutes.post(
             const page = await loadProductPageData(
                 c.get("userId"),
                 foodId,
-                productBackHref(
-                    c.req.query("from"),
-                    c.req.header("referer") ?? null,
-                ),
+                productBackHref(c),
             );
             if (!page) return c.text("Not Found", 404);
             return c.html(
@@ -150,10 +152,7 @@ foodsRoutes.get(
     gatedRoute("ui-v2", { notFound: true }),
     async (c) => {
         const raw = c.req.param("code");
-        const backHref = productBackHref(
-            c.req.query("from"),
-            c.req.header("referer") ?? null,
-        );
+        const backHref = productBackHref(c);
         const normalized = normalizeBarcode(raw);
         if (!normalized) {
             const page = await loadProductBarcodeInvalidData(
@@ -218,10 +217,7 @@ foodsRoutes.post(
     gatedRoute("ui-v2", { notFound: true }),
     async (c) => {
         const raw = c.req.param("code");
-        const backHref = productBackHref(
-            c.req.query("from"),
-            c.req.header("referer") ?? null,
-        );
+        const backHref = productBackHref(c);
         const normalized = normalizeBarcode(raw);
         if (!normalized) {
             const page = await loadProductBarcodeInvalidData(
