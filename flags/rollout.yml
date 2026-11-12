@@ -40,6 +40,9 @@ flags:
     widget-use-soon:
         default: false
         rules: []
+    widget-recipe-card:
+        default: false
+        rules: []
     flags-epoch:
         default: 1
         rules: []

@@ -17,6 +17,7 @@
 //   ?maxHeight=600      impose hostContext.containerDimensions.maxHeight
 //   ?fail=1             answer tools/call with a JSON-RPC error
 //   ?drinkUnit=us       alcohol tracking ON for import-meals (default: off/null)
+//   ?theme=dark         host theme at initialize (default: light)
 //
 // Nothing here is served by the production app; scripts/ is dev-only.
 
@@ -77,7 +78,7 @@ function indexPage(): string {
   <p>Pick a widget. Append query flags to simulate host behaviour:
      <code>?serverTools=0</code>, <code>?tools=0</code>, <code>?delay=3000</code>,
      <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>,
-     <code>?v2=1</code> (the v2 assembly).</p>
+     <code>?v2=1</code> (the v2 assembly), <code>?theme=dark</code> (host theme).</p>
   <ul>${links}</ul>
 </body></html>`;
 }
@@ -701,6 +702,69 @@ function hostPage(widget: string, params: URLSearchParams): string {
                 fat_g: 22,
             },
         },
+        // get_recipe: one ingredient the fridge cannot cover, so Cook has a
+        // shortfall to show.
+        "recipe-card": {
+            id: "rec-1",
+            name: "Salmon, rice & spinach",
+            yield_portions: 2,
+            suggested_meal_type: "dinner",
+            creator_id: "u-1",
+            instructions: null,
+            source_url: "https://www.seriouseats.com/salmon-rice",
+            tags: [],
+            notes: null,
+            prep_minutes: 10,
+            cook_minutes: 15,
+            verification: "verified",
+            steps: [],
+            portion_count: 1,
+            macros_per_portion: {
+                calories: 640,
+                protein_g: 48,
+                carbs_g: 62,
+                fat_g: 22,
+                fiber_g: null,
+                sugar_g: null,
+                alcohol_g: null,
+                incomplete: false,
+            },
+            notices: [],
+            ingredients: [
+                ["ri-1", "Salmon fillet", 1, "lb", false],
+                ["ri-2", "Jasmine rice", 1, "cup", false],
+                ["ri-3", "Baby spinach", 0.5, "bag", false],
+                ["ri-4", "Lemon", 1, "each", true],
+            ].map(([id, name, amount, unit, missing]) => ({
+                id,
+                display_name: name,
+                amount,
+                unit,
+                note: null,
+                food_id: "food-" + id,
+                per_portion_amount: null,
+                person_amount: null,
+                product: null,
+                missing,
+            })),
+            problems: [],
+            import: null,
+            cook_preview: {
+                total_portions: 1,
+                lines: [],
+                shortfalls: [
+                    {
+                        food_id: "food-ri-4",
+                        display_name: "Lemon",
+                        amount: 1,
+                        unit: "each",
+                        unknown_factor: false,
+                    },
+                ],
+                unmeasured: [],
+                cookable: false,
+            },
+        },
     };
     // Probe and gallery paint their own UI; anything non-null will do.
     const toolResult = RESULTS[widget] ?? { probe: true };
@@ -708,8 +772,8 @@ function hostPage(widget: string, params: URLSearchParams): string {
     return `<!doctype html>
 <html><head><meta charset="utf-8"><title>host: ${widget}</title>
 <style>
-  body{font:13px/1.5 -apple-system,system-ui,sans-serif;margin:16px}
-  #frame{width:100%;height:130px;border:2px solid #888;border-radius:8px;transition:height .15s}
+  body{font:13px/1.5 -apple-system,system-ui,sans-serif;margin:16px${params.get("theme") === "dark" ? ";background:#0d0f0e;color:#ccc" : ""}}
+  #frame{box-sizing:border-box;width:100%;height:130px;border:2px solid #888;border-radius:8px;transition:height .15s}
   #log{margin-top:12px;padding:8px;background:#111;color:#0f0;border-radius:6px;
        font:11px/1.5 ui-monospace,monospace;white-space:pre-wrap;max-height:300px;overflow:auto}
   .cfg{color:#666}
@@ -731,8 +795,11 @@ const CFG = {
   delay: ${delay},
   maxHeight: ${maxHeight ? Number(maxHeight) : "null"},
   fail: ${failCalls},
+  theme: ${JSON.stringify(params.get("theme") === "dark" ? "dark" : "light")},
 };
 const TOOL_RESULT = ${JSON.stringify(toolResult)};
+// What log_recipe_portion answers: the meal-progress payload.
+const MEAL_LOGGED = ${JSON.stringify(RESULTS["meal-logged"])};
 const frame = document.getElementById("frame");
 const logEl = document.getElementById("log");
 const log = (m) => { logEl.textContent += "\\n" + m; logEl.scrollTop = logEl.scrollHeight; };
@@ -768,7 +835,7 @@ window.addEventListener("message", (e) => {
           "(clientInfo/capabilities is the MCP-core shape and is wrong here)");
       return;
     }
-    const hostContext = { theme: "light" };
+    const hostContext = { theme: CFG.theme };
     if (CFG.maxHeight) hostContext.containerDimensions = { maxHeight: CFG.maxHeight };
     const hostCapabilities = {};
     if (CFG.serverTools) hostCapabilities.serverTools = {};
@@ -811,7 +878,7 @@ window.addEventListener("message", (e) => {
   // ---- app-initiated tools/call ----
   if (d.method === "tools/call") {
     const name = d.params && d.params.name;
-    log("<- tools/call " + name + " (id " + d.id + ")");
+    log("<- tools/call " + name + " (id " + d.id + ") args=" + JSON.stringify(d.params.arguments || {}));
     if (!initialized) log("!! app called a tool before the handshake finished");
     if (!CFG.answerTools) { log("   (answerTools=0: dropping, app should time out)"); return; }
     setTimeout(async () => {
@@ -826,6 +893,31 @@ window.addEventListener("message", (e) => {
           structuredContent: { dismissed: true },
         }});
         log("-> dismiss_notice dismissed=true for id " + d.id);
+        return;
+      }
+      // Canned, schema-valid answers; the arguments are in the log above.
+      if (name === "cook_recipe") {
+        const a = d.params.arguments || {};
+        const n = Number(a.total_portions) || 1;
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Cooked " + n + " portion" + (n === 1 ? "" : "s") + "." }],
+          structuredContent: {
+            total_portions: n,
+            shortfalls: [{ food_id: "food-ri-4", display_name: "Lemon", amount: n, unit: "each" }],
+            meal_ids: [],
+            unmeasured: [],
+          },
+        }});
+        log("-> cook_recipe total_portions=" + n + " for id " + d.id);
+        return;
+      }
+      if (name === "log_recipe_portion") {
+        const a = d.params.arguments || {};
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Meal logged." }],
+          structuredContent: Object.assign({}, MEAL_LOGGED, { status: "ok", similar_foods: [] }),
+        }});
+        log("-> log_recipe_portion portions=" + a.portions + " meal_type=" + a.meal_type + " for id " + d.id);
         return;
       }
       if (name === "check_grocery_line") {

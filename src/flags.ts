@@ -58,6 +58,15 @@ export const FLAGS = {
         removeWhen:
             "the use-soon widget is on for everyone and the flag is removed.",
     },
+    "widget-recipe-card": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Recipe card for get_recipe: ingredients, what the fridge covers, and Cook with a confirm step.",
+        removeWhen:
+            "the recipe-card widget is on for everyone and the flag is removed.",
+    },
     "off-lookups": {
         type: "bool",
         kind: "kill-switch",

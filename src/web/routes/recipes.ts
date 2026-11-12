@@ -58,7 +58,7 @@ import {
 } from "../../db/nutrition.js";
 import { getProfile } from "../../db/profiles.js";
 import { mealWriteFromItems } from "../../meal-write.js";
-import { validateTz } from "../../domain/tz.js";
+import { guessMealType, validateTz } from "../../domain/tz.js";
 import {
     COOK_SHEET_ID,
     cookPreviewChanges,
@@ -66,7 +66,6 @@ import {
     renderCookPreviewRegion,
     type CookSlot,
 } from "../pages/v2/recipes-page-cook.js";
-import { guessMealType } from "../pages/v2/log-sheet.js";
 import {
     descriptionFromItems,
     itemListDigest,

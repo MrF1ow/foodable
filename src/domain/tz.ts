@@ -53,6 +53,18 @@ export function formatLocalDateTime(
     return `${get("year")}-${get("month")}-${get("day")} ${hour}:${get("minute")}:${get("second")}`;
 }
 
+/**
+ * The meal slot a log made at `now` most likely belongs to, by the local hour
+ * in `tz`: breakfast before 11, lunch before 15, snack before 17, else dinner.
+ */
+export function guessMealType(tz: string, now: Date = new Date()): string {
+    const hour = Number(formatLocalDateTime(now, tz).slice(11, 13));
+    if (hour < 11) return "breakfast";
+    if (hour < 15) return "lunch";
+    if (hour < 17) return "snack";
+    return "dinner";
+}
+
 /** Local weekday name ("Monday") of an absolute instant in the given IANA timezone. */
 export function weekdayInTz(instant: Date | string, tz: string): string {
     const d = instant instanceof Date ? instant : new Date(instant);

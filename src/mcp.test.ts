@@ -209,6 +209,7 @@ import type {
 import {
     dateInTz,
     formatLocalDateTime,
+    guessMealType,
     todayInTz,
     weekdayInTz,
 } from "./domain/tz.js";
@@ -10433,6 +10434,169 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         recipe: null,
                     });
                     expect(parsed.featured).toBeNull();
+                });
+            },
+        );
+    });
+
+    describe("widget-recipe-card flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        const RECIPE_CARD_V2_URI = widgetUri("recipe-card.html", true);
+
+        async function stockedRecipe(client: {
+            callTool: (a: {
+                name: string;
+                arguments: Record<string, unknown>;
+            }) => Promise<unknown>;
+        }) {
+            const call = async (name: string, args: Record<string, unknown>) =>
+                (await client.callTool({
+                    name,
+                    arguments: args,
+                })) as ToolResult;
+            const loc = await call("add_fridge_location", { name: "Pantry" });
+            const recipe = await call("create_recipe", {
+                name: "Rice bowl",
+                yield_portions: 2,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            const food = await call("upsert_food", { name: "Rice" });
+            const foodId = food.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: foodId,
+                amount: 100,
+                unit: "g",
+            });
+            await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id as string,
+                kind: "food",
+                food_id: foodId,
+                amount: 500,
+                unit: "g",
+            });
+            return { call, recipeId };
+        }
+
+        test.each(ERAS)(
+            "flag off leaves get_recipe without ui meta and no recipe-card resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-recipe-card": false }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const tool = tools.find((t) => t.name === "get_recipe");
+                    expect(tool?._meta?.ui).toBeUndefined();
+                    expect(
+                        tool?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        RECIPE_CARD_V2_URI,
+                    );
+                    const { call, recipeId } = await stockedRecipe(client);
+                    const got = await call("get_recipe", { id: recipeId });
+                    expect(got.isError).toBeFalsy();
+                    expect(
+                        GET_RECIPE_OUTPUT_SCHEMA.parse(got.structuredContent)
+                            .name,
+                    ).toBe("Rice bowl");
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on links the recipe-card uri and lists and reads the v2 resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-recipe-card": true }),
+                );
+                const assembled = await getWidgetHtml("recipe-card", {
+                    v2: true,
+                });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const tool = tools.find((t) => t.name === "get_recipe");
+                    expect(
+                        (tool?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(RECIPE_CARD_V2_URI);
+                    expect(tool?._meta?.["openai/outputTemplate"]).toBe(
+                        RECIPE_CARD_V2_URI,
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        RECIPE_CARD_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: RECIPE_CARD_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                    const { call, recipeId } = await stockedRecipe(client);
+                    const got = await call("get_recipe", { id: recipeId });
+                    const body = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        got.structuredContent,
+                    );
+                    expect(body.cook_preview?.cookable).toBe(true);
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "get_recipe suggests the meal slot from the viewer's timezone (%p)",
+            async (mode) => {
+                await withHttpClient("u1", mode, async (client) => {
+                    const { call, recipeId } = await stockedRecipe(client);
+                    // UTC fallback when no timezone is saved.
+                    const before = [guessMealType("UTC")];
+                    const bare = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        (await call("get_recipe", { id: recipeId }))
+                            .structuredContent,
+                    );
+                    before.push(guessMealType("UTC"));
+                    expect(before).toContain(bare.suggested_meal_type);
+                    const tz = "Pacific/Auckland";
+                    const set = await call("set_timezone", { timezone: tz });
+                    expect(set.isError).toBeFalsy();
+                    const slots = [guessMealType(tz)];
+                    const zoned = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        (await call("get_recipe", { id: recipeId }))
+                            .structuredContent,
+                    );
+                    slots.push(guessMealType(tz));
+                    expect(slots).toContain(zoned.suggested_meal_type);
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "the card's Confirm arguments are valid: cook_recipe with total_portions, then log_recipe_portion with one portion (%p)",
+            async (mode) => {
+                await withHttpClient("u1", mode, async (client) => {
+                    const { call, recipeId } = await stockedRecipe(client);
+                    const cooked = await call("cook_recipe", {
+                        recipe_id: recipeId,
+                        total_portions: 3,
+                    });
+                    expect(cooked.isError).toBeFalsy();
+                    expect(cooked.structuredContent).toMatchObject({
+                        total_portions: 3,
+                        shortfalls: [],
+                        meal_ids: [],
+                        unmeasured: [],
+                    });
+                    const logged = await call("log_recipe_portion", {
+                        recipe_id: recipeId,
+                        portions: 1,
+                    });
+                    expect(logged.isError).toBeFalsy();
+                    expect(logged.structuredContent).toMatchObject({
+                        action: "logged",
+                    });
                 });
             },
         );

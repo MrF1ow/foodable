@@ -721,9 +721,32 @@ const WIDGET_FOOTER =
     "You can enable or disable these widgets anytime — just ask to update your settings.";
 
 // #root stub: records #widget-mount and any footer nodes bridge.js appends.
-function widgetRootStub(clickSink?: (fn: (e: unknown) => void) => void) {
+function widgetRootStub(
+    clickSink?: (fn: (e: unknown) => void) => void,
+    focusLog?: string[],
+) {
     let legacyInner = "";
     let mountEl: { id: string; innerHTML: string } | null = null;
+    let active: unknown = null;
+    // querySelector for the attribute selectors a widget uses to place focus
+    // ([data-act="cook"]): finds the tag in the painted markup and returns a
+    // stand-in that records focus().
+    const findByAttr = (html: string) => (sel: string) => {
+        const m = /^\[(data-[a-z]+)="([^"]+)"\]$/.exec(sel);
+        if (!m) return null;
+        const tag = new RegExp(`<[^>]*\\s${m[1]}="${m[2]}"[^>]*>`).exec(html);
+        if (!tag) return null;
+        const el = {
+            disabled: /\sdisabled/.test(tag[0]),
+            getAttribute: (n: string) => (n === m[1] ? m[2] : null),
+            closest: (s: string) => (s === `[${m[1]}]` ? el : null),
+            focus() {
+                active = el;
+                focusLog?.push(sel);
+            },
+        };
+        return el;
+    };
     const footerText: string[] = [];
     const root = {
         get innerHTML() {
@@ -768,12 +791,24 @@ function widgetRootStub(clickSink?: (fn: (e: unknown) => void) => void) {
             },
             body: {},
             addEventListener: () => {},
-            createElement: () => ({
-                id: "",
-                innerHTML: "",
-                textContent: "",
-                style: {} as object,
-            }),
+            createElement: () => {
+                const el = {
+                    id: "",
+                    innerHTML: "",
+                    textContent: "",
+                    style: {} as object,
+                    querySelector: (sel: string) =>
+                        findByAttr(el.innerHTML)(sel),
+                };
+                return el;
+            },
+            get activeElement() {
+                return active;
+            },
+        },
+        // A user moving focus into the card, as Tab would.
+        focusOn(sel: string) {
+            findByAttr(mountEl?.innerHTML ?? "")(sel)?.focus();
         },
         html: () =>
             // A real DOM keeps whatever #root held before the mount was
@@ -3278,11 +3313,772 @@ test("use-soon v2: nothing expiring says so; names reach the markup escaped", as
     expect(evil).not.toContain("<img");
 });
 
+// ---- recipe-card v2 ---------------------------------------------------------
+
+function recipeIngredient(over: Record<string, unknown>) {
+    return {
+        id: "ri-1",
+        display_name: "Salmon fillet",
+        amount: 1,
+        unit: "lb",
+        note: null,
+        food_id: "food-1",
+        per_portion_amount: null,
+        person_amount: null,
+        product: null,
+        missing: false,
+        ...over,
+    };
+}
+
+function recipePreview(shortfalls: Record<string, unknown>[] = []) {
+    return {
+        total_portions: 1,
+        lines: [],
+        shortfalls,
+        unmeasured: [],
+        cookable: shortfalls.length === 0,
+    };
+}
+
+function recipeData(over: Record<string, unknown> = {}) {
+    return {
+        id: "rec-1",
+        name: "Salmon, rice & spinach",
+        yield_portions: 2,
+        suggested_meal_type: "dinner",
+        creator_id: "u-1",
+        instructions: null,
+        source_url: "https://www.seriouseats.com/salmon-rice",
+        tags: [],
+        notes: null,
+        prep_minutes: 10,
+        cook_minutes: 15,
+        verification: "verified",
+        steps: [],
+        portion_count: 1,
+        macros_per_portion: {
+            calories: 640,
+            protein_g: 48,
+            carbs_g: 62,
+            fat_g: 22,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            incomplete: false,
+        },
+        notices: [],
+        ingredients: [
+            recipeIngredient({}),
+            recipeIngredient({
+                id: "ri-2",
+                display_name: "Lemon",
+                amount: 1,
+                unit: "each",
+                food_id: "food-2",
+                missing: true,
+            }),
+        ],
+        problems: [],
+        import: null,
+        cook_preview: recipePreview([
+            {
+                food_id: "food-2",
+                display_name: "Lemon",
+                amount: 1,
+                unit: "each",
+                unknown_factor: false,
+            },
+        ]),
+        ...over,
+    };
+}
+
+type RecipeCall = { name: string; args: Record<string, unknown> };
+
+class ToolRefusal extends Error {}
+
+// The recipe card against a stub host: records every tools/call, answers each
+// by `reply` (which may throw or wait), and clicks by data-act the way a tap
+// inside the card reaches the delegated listener on #root.
+async function mountRecipe(
+    html: string,
+    opts: {
+        data: object;
+        canCallTools?: boolean;
+        reply?: (call: RecipeCall) => Promise<object | void> | object | void;
+    },
+) {
+    const focus: string[] = [];
+    type Fn = (e: unknown) => void;
+    const calls: RecipeCall[] = [];
+    const contexts: string[] = [];
+    const listeners: Fn[] = [];
+    const windowListeners: Fn[] = [];
+    const dom = widgetRootStub((fn) => listeners.push(fn), focus);
+    const noop = () => {};
+    const tick = () => new Promise((r) => setTimeout(r, 0));
+    const deliver = (data: object) => {
+        for (const fn of windowListeners) fn({ source: host, data });
+    };
+    const host = {
+        postMessage(msg: {
+            id?: string;
+            method: string;
+            params: {
+                name?: string;
+                arguments?: Record<string, unknown>;
+                content?: { text: string }[];
+            };
+        }) {
+            const { id, method, params } = msg;
+            if (method === "ui/initialize") {
+                deliver({
+                    jsonrpc: "2.0",
+                    id,
+                    result: {
+                        hostCapabilities:
+                            opts.canCallTools === false
+                                ? {}
+                                : { serverTools: {} },
+                        hostContext: { theme: "light" },
+                    },
+                });
+            } else if (method === "ui/notifications/initialized") {
+                deliver({
+                    jsonrpc: "2.0",
+                    method: "ui/notifications/tool-result",
+                    params: { structuredContent: opts.data },
+                });
+            } else if (method === "ui/update-model-context") {
+                contexts.push(params.content?.[0]?.text ?? "");
+                deliver({ jsonrpc: "2.0", id, result: {} });
+            } else if (method === "tools/call") {
+                const call = {
+                    name: params.name!,
+                    args: structuredClone(params.arguments!),
+                };
+                calls.push(call);
+                void (async () => {
+                    try {
+                        const structuredContent =
+                            (await opts.reply?.(call)) ?? {};
+                        deliver({
+                            jsonrpc: "2.0",
+                            id,
+                            result: {
+                                content: [{ type: "text", text: "ok" }],
+                                structuredContent,
+                            },
+                        });
+                    } catch (e) {
+                        // A tool that answers with isError, as against a
+                        // transport failure (a JSON-RPC error).
+                        if (e instanceof ToolRefusal) {
+                            deliver({
+                                jsonrpc: "2.0",
+                                id,
+                                result: {
+                                    isError: true,
+                                    content: [
+                                        { type: "text", text: e.message },
+                                    ],
+                                },
+                            });
+                            return;
+                        }
+                        deliver({
+                            jsonrpc: "2.0",
+                            id,
+                            error: { code: -32603, message: String(e) },
+                        });
+                    }
+                })();
+            }
+        },
+    };
+    const window: Record<string, unknown> = {
+        parent: host,
+        innerWidth: 400,
+        postMessage: (msg: unknown) =>
+            (host.postMessage as (m: unknown) => void)(msg),
+        addEventListener: (type: string, fn: Fn) => {
+            if (type === "message") windowListeners.push(fn);
+        },
+        removeEventListener: noop,
+    };
+    for (const script of widgetScriptBodies(html)) {
+        new Function("window", "document", script)(window, dom.document);
+    }
+    await tick();
+    await tick();
+    const tap = (act: string) => {
+        const el = { getAttribute: () => act };
+        for (const fn of listeners) {
+            fn({
+                preventDefault: noop,
+                target: {
+                    closest: (sel: string) =>
+                        sel === "[data-act]" ? el : null,
+                },
+            });
+        }
+    };
+    return {
+        html: dom.html,
+        calls,
+        contexts,
+        focus,
+        focusOn: dom.focusOn,
+        tap,
+        // The host re-sending a tool result (or the same one again).
+        resend(data: object) {
+            deliver({
+                jsonrpc: "2.0",
+                method: "ui/notifications/tool-result",
+                params: { structuredContent: data },
+            });
+        },
+        async settle() {
+            for (let i = 0; i < 10; i++) await tick();
+        },
+    };
+}
+
+const COOKED = {
+    total_portions: 3,
+    shortfalls: [
+        { food_id: "food-2", display_name: "Lemon", amount: 3, unit: "each" },
+    ],
+    meal_ids: [],
+    unmeasured: [],
+};
+
+const cookReply = (call: RecipeCall) =>
+    call.name === "cook_recipe" ? COOKED : {};
+
+test("recipe-card v2: the sample is the design's card, with no Cook when no host can run tools", async () => {
+    const html = await v2Widget("recipe-card");
+    const body = renderWidget(html, undefined);
+    expect(body).toContain('class="hd-title">Recipe<');
+    expect(body).toContain('class="hd-meta">2 servings · 25 min<');
+    expect(body).toContain("Salmon, rice &amp; spinach");
+    expect(body).toContain(">seriouseats.com<");
+    expect(body).toContain('class="rc-tile-v">640<');
+    expect(body).toContain('class="rc-tile-v">48 g<');
+    expect(body).toContain('class="rc-tile-v">62 g<');
+    expect(body).toContain('class="rc-tile-v">22 g<');
+    expect(body).toContain(">Lemon<");
+    expect(body).toContain('class="row-s is-warn">missing<');
+    expect(body).toContain("½ bag");
+    expect(body).toContain("Missing 1");
+    expect(body).not.toContain('data-act="cook"');
+});
+
+test("recipe-card v2: pressing Cook opens the confirm step and calls nothing", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: cookReply,
+    });
+    expect(w.html()).toContain('data-act="cook"');
+    expect(w.html()).not.toContain('data-step="confirm"');
+    w.tap("cook");
+    await w.settle();
+    expect(w.calls).toEqual([]);
+    expect(w.html()).toContain('data-step="confirm"');
+    expect(w.html()).toContain("Cook Salmon, rice &amp; spinach?");
+    // Default servings is the recipe's yield; the switch starts off.
+    expect(w.html()).toContain('class="rc-n" aria-live="polite">2<');
+    expect(w.html()).toContain('aria-checked="false"');
+    expect(w.html()).toContain('data-act="confirm"');
+    expect(w.calls).toEqual([]);
+});
+
+test("recipe-card v2: Confirm cooks the chosen number of servings, once", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    w.tap("inc");
+    expect(w.html()).toContain('class="rc-n" aria-live="polite">3<');
+    expect(w.calls).toEqual([]);
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls).toEqual([
+        {
+            name: "cook_recipe",
+            args: { recipe_id: "rec-1", total_portions: 3 },
+        },
+    ]);
+    // The result comes from cook_recipe's structuredContent.
+    expect(w.html()).toContain("Cooked 3 servings.");
+    expect(w.html()).toContain("Not enough: Lemon.");
+    expect(w.html()).not.toContain("Logged 1 serving");
+    // Cooked: no second Cook, and the model is told.
+    expect(w.html()).not.toContain('data-act="cook"');
+    expect(w.html()).not.toContain('data-act="confirm"');
+    expect(w.contexts).toEqual([
+        "Cooked 3 servings of Salmon, rice & spinach.",
+    ]);
+});
+
+test("recipe-card v2: servings never go below 1", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData({ yield_portions: 1 }),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    w.tap("dec");
+    w.tap("dec");
+    expect(w.html()).toContain('class="rc-n" aria-live="polite">1<');
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls[0]!.args.total_portions).toBe(1);
+});
+
+test("recipe-card v2: with the switch on, log_recipe_portion follows cook_recipe with one portion", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    w.tap("log");
+    expect(w.html()).toContain('aria-checked="true"');
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls).toEqual([
+        {
+            name: "cook_recipe",
+            args: { recipe_id: "rec-1", total_portions: 2 },
+        },
+        {
+            name: "log_recipe_portion",
+            args: { recipe_id: "rec-1", portions: 1, meal_type: "dinner" },
+        },
+    ]);
+    expect(w.html()).toContain("Logged 1 serving.");
+    expect(w.contexts[0]).toContain("One serving logged.");
+});
+
+test("recipe-card v2: Cancel leaves the card as it was and calls nothing", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    w.tap("inc");
+    w.tap("cancel");
+    await w.settle();
+    expect(w.calls).toEqual([]);
+    expect(w.html()).not.toContain('data-step="confirm"');
+    expect(w.html()).toContain('data-act="cook"');
+    // Opening it again starts from the defaults.
+    w.tap("cook");
+    expect(w.html()).toContain('class="rc-n" aria-live="polite">2<');
+});
+
+test("recipe-card v2: without canCallTools there is no Cook and a tap does nothing", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        canCallTools: false,
+    });
+    expect(w.html()).toContain(">Lemon<");
+    expect(w.html()).not.toContain('data-act="cook"');
+    w.tap("cook");
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls).toEqual([]);
+    expect(w.html()).not.toContain('data-step="confirm"');
+});
+
+test("recipe-card v2: Confirm is disabled while the cook is out, so a second tap sends nothing", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: async (call) => {
+            await gate;
+            return cookReply(call);
+        },
+    });
+    w.tap("cook");
+    w.tap("confirm");
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    expect(w.html()).toMatch(/data-act="confirm" disabled/);
+    expect(w.html()).toMatch(/data-act="cancel" disabled/);
+    // The controls are frozen too: cancel and the stepper do nothing.
+    w.tap("cancel");
+    w.tap("inc");
+    expect(w.html()).toContain('data-step="confirm"');
+    expect(w.html()).toContain('class="rc-n" aria-live="polite">2<');
+    release();
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    expect(w.html()).toContain("Cooked 3 servings.");
+});
+
+test("recipe-card v2: a failed cook says so, returns to the confirm step and is not retried", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: () => {
+            throw new ToolRefusal("recipe is unverified");
+        },
+    });
+    w.tap("cook");
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    expect(w.html()).toContain("Could not cook this recipe.");
+    expect(w.html()).toContain('data-step="confirm"');
+    expect(w.html()).not.toMatch(/data-act="confirm" disabled/);
+    expect(w.html()).not.toContain("Cooked ");
+    expect(w.contexts).toEqual([]);
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+});
+
+test("recipe-card v2: a log that fails after a good cook stays cooked and offers no second cook", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: (call) => {
+            if (call.name === "log_recipe_portion") throw new Error("nope");
+            return cookReply(call);
+        },
+    });
+    w.tap("cook");
+    w.tap("log");
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls.map((c) => c.name)).toEqual([
+        "cook_recipe",
+        "log_recipe_portion",
+    ]);
+    expect(w.html()).toContain("Cooked 3 servings.");
+    expect(w.html()).toContain("could not be logged");
+    expect(w.html()).not.toContain('data-act="cook"');
+    expect(w.html()).not.toContain('data-act="confirm"');
+    expect(w.contexts[0]).not.toContain("logged");
+});
+
+test("recipe-card v2: focus follows the step: into the stepper, back to Cook, onto the result", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    expect(w.focus.at(-1)).toBe('[data-act="dec"]');
+    w.tap("cancel");
+    expect(w.focus.at(-1)).toBe('[data-act="cook"]');
+    // At one serving the minus is dead, so the plus takes focus.
+    const one = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData({ yield_portions: 1 }),
+        reply: cookReply,
+    });
+    one.tap("cook");
+    expect(one.focus.at(-1)).toBe('[data-act="inc"]');
+    w.tap("cook");
+    w.tap("confirm");
+    // In flight Confirm is disabled, so the block around it holds focus.
+    expect(w.focus.at(-1)).toBe('[data-focus="confirm"]');
+    await w.settle();
+    expect(w.focus.at(-1)).toBe('[data-focus="result"]');
+    expect(w.html()).toContain('data-focus="result" tabindex="-1"');
+});
+
+test("recipe-card v2: a repaint keeps focus on the control that had it", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData({ yield_portions: 3 }),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    w.tap("inc");
+    expect(w.focus.at(-1)).toBe('[data-act="dec"]');
+    w.focus.length = 0;
+    // The tap on the plus left focus there, and the repaint restores it.
+    w.focusOn('[data-act="inc"]');
+    w.tap("inc");
+    expect(w.focus).toEqual(['[data-act="inc"]', '[data-act="inc"]']);
+});
+
+test("recipe-card v2: a result re-sent while confirming keeps the confirm step and its choices", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    w.tap("inc");
+    w.tap("log");
+    w.resend(recipeData());
+    await w.settle();
+    expect(w.html()).toContain('data-step="confirm"');
+    expect(w.html()).toContain('class="rc-n" aria-live="polite">3<');
+    expect(w.html()).toContain('aria-checked="true"');
+    expect(w.calls).toEqual([]);
+});
+
+test("recipe-card v2: a result re-sent after the cook keeps the result and offers no second Cook", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    w.tap("confirm");
+    await w.settle();
+    w.resend(recipeData());
+    await w.settle();
+    expect(w.html()).toContain("Cooked 3 servings.");
+    expect(w.html()).not.toContain('data-act="cook"');
+    expect(w.html()).not.toContain('data-act="confirm"');
+    expect(w.calls.length).toBe(1);
+});
+
+test("recipe-card v2: a result for another recipe re-renders an idle card", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: cookReply,
+    });
+    w.resend(recipeData({ id: "rec-2", name: "Pasta bake" }));
+    await w.settle();
+    expect(w.html()).toContain("Pasta bake");
+    expect(w.html()).not.toContain("Salmon, rice");
+    expect(w.html()).toContain('data-act="cook"');
+});
+
+test("recipe-card v2: a result for another recipe during a cook changes neither the card nor what is reported", async () => {
+    let release = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: async (call) => {
+            await gate;
+            return cookReply(call);
+        },
+    });
+    w.tap("cook");
+    w.tap("confirm");
+    w.resend(recipeData({ id: "rec-2", name: "Pasta bake" }));
+    await w.settle();
+    expect(w.html()).toContain("Salmon, rice");
+    expect(w.html()).not.toContain("Pasta bake");
+    release();
+    await w.settle();
+    expect(w.calls[0]!.args.recipe_id).toBe("rec-1");
+    expect(w.html()).toContain("Cooked 3 servings.");
+    expect(w.html()).not.toContain("Pasta bake");
+    expect(w.contexts).toEqual([
+        "Cooked 3 servings of Salmon, rice & spinach.",
+    ]);
+});
+
+test("recipe-card v2: a cook with no answer may have happened, so it says so and offers no second Confirm", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: () => {
+            throw new Error("transport closed");
+        },
+    });
+    w.tap("cook");
+    w.tap("confirm");
+    await w.settle();
+    expect(w.html()).toContain(
+        "This may have cooked — check the fridge before trying again.",
+    );
+    expect(w.html()).not.toContain('data-act="confirm"');
+    expect(w.html()).not.toContain('data-act="cook"');
+    expect(w.html()).not.toContain("Could not cook this recipe.");
+    expect(w.focus.at(-1)).toBe('[data-focus="result"]');
+    expect(w.contexts[0]).toContain("may have cooked");
+    // Nothing on the card now describes the fridge, and no tap cooks.
+    expect(w.html()).not.toContain("Missing 1");
+    w.tap("confirm");
+    w.tap("cook");
+    w.resend(recipeData());
+    await w.settle();
+    expect(w.calls.length).toBe(1);
+    expect(w.html()).toContain("may have cooked");
+});
+
+test("recipe-card v2: after a cook the card stops describing the fridge", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData(),
+        reply: cookReply,
+    });
+    expect(w.html()).toContain("Missing 1");
+    expect(w.html()).toContain('class="row-s is-warn">missing<');
+    w.tap("cook");
+    w.tap("confirm");
+    await w.settle();
+    expect(w.html()).not.toContain("Missing 1");
+    expect(w.html()).not.toContain("You have everything");
+    expect(w.html()).not.toContain('class="row-s is-warn">missing<');
+    expect(w.html()).toContain(">Lemon<");
+});
+
+test("recipe-card v2: the serving is logged under the suggested meal slot, which the switch names", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData({ suggested_meal_type: "breakfast" }),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    expect(w.html()).toContain("Log a serving as breakfast");
+    w.tap("log");
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls[1]).toEqual({
+        name: "log_recipe_portion",
+        args: { recipe_id: "rec-1", portions: 1, meal_type: "breakfast" },
+    });
+});
+
+test("recipe-card v2: with no suggested slot the switch is plain and no meal_type is sent", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData({ suggested_meal_type: undefined }),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    expect(w.html()).toContain("Log a serving<");
+    expect(w.html()).not.toContain("Log a serving as");
+    w.tap("log");
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls[1]!.args).toEqual({ recipe_id: "rec-1", portions: 1 });
+});
+
+test("recipe-card v2: the stepper tops out at the web cook sheet's 999", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData({ yield_portions: 998 }),
+        reply: cookReply,
+    });
+    w.tap("cook");
+    w.tap("inc");
+    w.tap("inc");
+    expect(w.html()).toContain('class="rc-n" aria-live="polite">999<');
+    expect(w.html()).toMatch(/data-act="inc"[^>]* disabled/);
+    w.tap("confirm");
+    await w.settle();
+    expect(w.calls[0]!.args.total_portions).toBe(999);
+});
+
+test("recipe-card v2: Missing counts distinct shortfalls, and an unknown factor reads softer", async () => {
+    const html = await v2Widget("recipe-card");
+    const short = (id: string, name: string, unknown: boolean) => ({
+        food_id: id,
+        display_name: name,
+        amount: 1,
+        unit: "each",
+        unknown_factor: unknown,
+    });
+    // Two ingredient rows on one food are both flagged, but it is one shortfall.
+    const twoRows = renderWidget(
+        html,
+        recipeData({
+            ingredients: [
+                recipeIngredient({ id: "a", food_id: "f1", missing: true }),
+                recipeIngredient({ id: "b", food_id: "f1", missing: true }),
+                recipeIngredient({
+                    id: "c",
+                    food_id: "f2",
+                    display_name: "Egg",
+                }),
+            ],
+            cook_preview: recipePreview([short("f1", "Salmon", false)]),
+        }),
+    );
+    expect(twoRows).toContain("Missing 1");
+    expect(twoRows.match(/>missing</g)?.length).toBe(2);
+    const soft = renderWidget(
+        html,
+        recipeData({
+            ingredients: [
+                recipeIngredient({ id: "a", food_id: "f1", missing: true }),
+            ],
+            cook_preview: recipePreview([short("f1", "Salmon", true)]),
+        }),
+    );
+    expect(soft).toContain("May be short 1");
+    expect(soft).not.toContain("Missing 1");
+    expect(soft).toContain(">may be short<");
+    const mixed = renderWidget(
+        html,
+        recipeData({
+            cook_preview: recipePreview([
+                short("f1", "Salmon", false),
+                short("f2", "Lemon", true),
+            ]),
+        }),
+    );
+    expect(mixed).toContain("Missing 1 · May be short 1");
+    const all = renderWidget(
+        html,
+        recipeData({
+            ingredients: [recipeIngredient({})],
+            cook_preview: recipePreview([]),
+        }),
+    );
+    expect(all).toContain("You have everything");
+    expect(all).not.toContain("missing");
+});
+
+test("recipe-card v2: unknown macros show a dash, a recipe the fridge cannot be checked for has no Cook", async () => {
+    const w = await mountRecipe(await v2Widget("recipe-card"), {
+        data: recipeData({
+            macros_per_portion: {
+                calories: 300,
+                protein_g: 20,
+                carbs_g: null,
+                fat_g: 9,
+                fiber_g: null,
+                sugar_g: null,
+                alcohol_g: null,
+                incomplete: true,
+            },
+            cook_preview: null,
+            source_url: "not a url",
+            prep_minutes: 10,
+            cook_minutes: null,
+            yield_portions: 1,
+        }),
+    });
+    const body = w.html();
+    // An incomplete total undercounts, so no tile claims a figure.
+    expect(body.match(/class="rc-tile-v">—</g)?.length).toBe(4);
+    expect(body).toContain('class="hd-meta">1 serving · Prep 10 min<');
+    expect(body).toContain("The fridge can&#39;t be checked for this recipe.");
+    expect(body).not.toContain('data-act="cook"');
+    expect(body).not.toContain("rc-src");
+    expect(body).not.toContain("You have everything");
+});
+
+test("recipe-card v2: names and the source reach the markup escaped", async () => {
+    const body = renderWidget(
+        await v2Widget("recipe-card"),
+        recipeData({
+            name: EVIL,
+            source_url: "https://evil.example/<img src=x>",
+            ingredients: [recipeIngredient({ display_name: EVIL })],
+            cook_preview: recipePreview([
+                {
+                    food_id: "food-1",
+                    display_name: EVIL,
+                    amount: 1,
+                    unit: "each",
+                    unknown_factor: false,
+                },
+            ]),
+        }),
+    );
+    expect(body).not.toContain("<img");
+});
+
 // ---- widget harness (v2-only keys) ------------------------------------------
 
 test("harnessNeedsV2 marks attention and not v1 twins", () => {
     expect(harnessNeedsV2("attention")).toBe(true);
     expect(harnessNeedsV2("use-soon")).toBe(true);
+    expect(harnessNeedsV2("recipe-card")).toBe(true);
     expect(harnessNeedsV2("trends")).toBe(false);
 });
 
@@ -3316,4 +4112,11 @@ test("harness index and widget route serve v2-only attention", async () => {
         proc.kill();
         await proc.exited;
     }
+});
+
+test("widget harness: the host frame counts its border inside its width so a screenshot is not clipped on the right", async () => {
+    const src = await Bun.file(
+        `${import.meta.dir}/../scripts/widget-harness.ts`,
+    ).text();
+    expect(src).toMatch(/#frame\{box-sizing:border-box;width:100%/);
 });

@@ -1,6 +1,7 @@
 import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { liveFridgeStore } from "../../db/fridge.js";
+import { getProfile } from "../../db/profiles.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { getHouseholdConfig } from "../../db/household.js";
@@ -42,6 +43,7 @@ import {
     resolveUnresolvedLines,
 } from "../../domain/recipes.js";
 import { sortNotices } from "../../domain/notices.js";
+import { guessMealType, validateTz } from "../../domain/tz.js";
 import type {
     RecipeImport,
     RecipeProblem,
@@ -80,6 +82,8 @@ import {
     WRITE_STATUS,
     QUANTITY_ITEM,
     recipeAllergenNoticesForView,
+    registerV2OnlyWidgetResource,
+    uiMetaForKey,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { FoodsInputError, SimilarFoodsError } from "../../domain/foods.js";
@@ -342,6 +346,8 @@ const COOK_PREVIEW_WIRE = z.object({
     cookable: z.boolean(),
 });
 
+type SuggestedMealType = "breakfast" | "lunch" | "dinner" | "snack";
+
 export const GET_RECIPE_OUTPUT_SCHEMA = z.object({
     ...RECIPE_FIELDS,
     steps: z
@@ -359,6 +365,11 @@ export const GET_RECIPE_OUTPUT_SCHEMA = z.object({
     cook_preview: COOK_PREVIEW_WIRE.nullable().describe(
         "what cooking one serving takes from the fridge; null when the recipe cannot be previewed",
     ),
+    suggested_meal_type: z
+        .enum(["breakfast", "lunch", "dinner", "snack"])
+        .describe(
+            "the meal slot it is now for the viewing member (their timezone, UTC when unset); pass it as meal_type to log_recipe_portion",
+        ),
 });
 
 /** The dry run for one serving in wire shape. */
@@ -613,6 +624,15 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
+    registerV2OnlyWidgetResource(server, ctx, {
+        key: "recipe-card",
+        resourceName: "recipe-card",
+        title: "Recipe",
+        description:
+            "A recipe with what the fridge covers and Cook behind a confirm step, for get_recipe.",
+        flag: "widget-recipe-card",
+    });
+
     server.registerTool(
         "get_recipe",
         {
@@ -630,6 +650,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 member_id: z.string().optional(),
             }),
             outputSchema: GET_RECIPE_OUTPUT_SCHEMA,
+            ...uiMetaForKey(ctx, "recipe-card", {
+                v2: true,
+                flag: "widget-recipe-card",
+            }),
         },
         async (args) =>
             withAnalytics(
@@ -717,8 +741,16 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             row.food_id ? [] : [row.display_name],
                         ),
                     );
+                    const profile = await getProfile(memberId);
+                    const tz =
+                        profile?.timezone && validateTz(profile.timezone)
+                            ? profile.timezone
+                            : "UTC";
                     const payload = {
                         ...recipeFields(view),
+                        suggested_meal_type: guessMealType(
+                            tz,
+                        ) as SuggestedMealType,
                         verification: view.verification,
                         problems: wireProblems(problems),
                         import: wireImport(importRow),

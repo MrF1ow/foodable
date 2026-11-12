@@ -1,5 +1,9 @@
 import { escapeHtml } from "../../../html.js";
-import { formatLocalDateTime, weekdayInTz } from "../../../domain/tz.js";
+import {
+    formatLocalDateTime,
+    guessMealType,
+    weekdayInTz,
+} from "../../../domain/tz.js";
 import { fromGrams, type WeightUnit } from "../../../domain/units.js";
 import { unitHintsForLog } from "../../../domain/log-search.js";
 import {
@@ -180,14 +184,6 @@ export function weighInLastSubtitle(
     const text = fromGrams(lastWeightG, unit).toFixed(1);
     const day = weekdayInTz(lastLoggedAt, tz);
     return `Last: ${text} ${unit} · ${day}`;
-}
-
-export function guessMealType(tz: string): string {
-    const hour = Number(formatLocalDateTime(new Date(), tz).slice(11, 13));
-    if (hour < 11) return "breakfast";
-    if (hour < 15) return "lunch";
-    if (hour < 17) return "snack";
-    return "dinner";
 }
 
 function mealChoiceHtml(

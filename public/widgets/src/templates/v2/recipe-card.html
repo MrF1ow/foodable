@@ -1,0 +1,897 @@
+<!doctype html>
+<!--
+  Recipe card (MCP Apps), v2 look. Served for get_recipe when the
+  widget-recipe-card flag is on. No v1 twin.
+
+  One card: a header (servings and time), the recipe name and its source host,
+  four per-serving macro tiles, the ingredients (a status dot, a "missing" tag,
+  the amount at the right), a one-line fridge status, and Cook.
+
+  Cook is a write, so it never fires on the first press. It opens a confirm
+  step inside the card (a servings stepper and a "Log a serving" switch);
+  only Confirm calls cook_recipe (and then log_recipe_portion when the switch
+  is on). Confirm is disabled while a call is out. A cook the tool refused
+  returns to the confirm step without retrying; a cook whose answer never
+  arrived (timeout, transport error) may have happened, so the card says so
+  and offers no second Confirm. A cook that worked but whose log failed
+  stays cooked: the card never offers a second cook. A result re-sent for
+  the same recipe never resets a confirm, a cook in flight or a result.
+  Without hostCapabilities.serverTools there is no Cook at all.
+
+  The design's "Add <item> to list" button is not built: the shortfall is for
+  one serving and add_grocery_line picks its own store, so a one-tap write
+  could not say what it would add.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Recipe</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            .rc-name {
+                margin: 0;
+                font-size: 19px;
+                line-height: 23px;
+                font-weight: 600;
+                letter-spacing: -0.01em;
+                overflow-wrap: anywhere;
+            }
+            .rc-src {
+                margin: 3px 0 0;
+                font-size: 13px;
+                line-height: 16px;
+                color: var(--text-secondary);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .rc-tiles {
+                display: grid;
+                grid-template-columns: repeat(4, minmax(0, 1fr));
+                gap: 8px;
+            }
+            .rc-tile {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                min-width: 0;
+                padding: 10px 12px;
+                border: 1px solid var(--line);
+                border-radius: var(--radius-sm);
+            }
+            .rc-tile-k {
+                display: flex;
+                align-items: center;
+                gap: 5px;
+                font-size: 11px;
+                line-height: 13px;
+                color: var(--text-tertiary);
+                white-space: nowrap;
+                overflow: hidden;
+            }
+            .rc-tile-v {
+                font-size: 15px;
+                line-height: 18px;
+                font-weight: 600;
+                white-space: nowrap;
+            }
+            .rc-status {
+                margin: 0;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-size: 12px;
+                line-height: 15px;
+                color: var(--text-secondary);
+            }
+            .rc-confirm {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+                padding: 14px;
+                border-radius: var(--radius-md);
+                background: var(--surface-bg);
+            }
+            .rc-confirm-t {
+                margin: 0;
+                font-size: 15px;
+                line-height: 18px;
+                font-weight: 600;
+                overflow-wrap: anywhere;
+            }
+            .rc-opt {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                gap: 12px;
+                font-size: 13px;
+                line-height: 16px;
+            }
+            .rc-stepper {
+                display: inline-flex;
+                align-items: center;
+                gap: 4px;
+            }
+            .rc-step {
+                display: grid;
+                place-items: center;
+                width: 32px;
+                height: 32px;
+                padding: 0;
+                border: 1px solid var(--line);
+                border-radius: 50%;
+                background: var(--surface-panel);
+                font-size: 17px;
+                line-height: 1;
+                cursor: pointer;
+            }
+            .rc-step:disabled,
+            .rc-confirm .btn:disabled {
+                opacity: 0.45;
+                cursor: default;
+            }
+            .rc-n {
+                min-width: 32px;
+                text-align: center;
+                font-size: 15px;
+                font-weight: 600;
+            }
+            .rc-sw {
+                position: relative;
+                flex: none;
+                width: 40px;
+                height: 24px;
+                padding: 0;
+                border: 0;
+                border-radius: var(--radius-pill);
+                background: var(--surface-track);
+                cursor: pointer;
+            }
+            .rc-sw::after {
+                content: "";
+                position: absolute;
+                top: 3px;
+                left: 3px;
+                width: 18px;
+                height: 18px;
+                border-radius: 50%;
+                background: var(--surface-panel);
+                box-shadow: 0 1px 2px var(--overlay-shadow);
+            }
+            .rc-sw[aria-checked="true"] {
+                background: var(--accent-fill);
+            }
+            .rc-sw[aria-checked="true"]::after {
+                left: 19px;
+            }
+            .rc-sw:disabled {
+                opacity: 0.45;
+                cursor: default;
+            }
+            .rc-sw:focus-visible,
+            .rc-step:focus-visible {
+                outline: 2px solid var(--accent-fill);
+                outline-offset: 2px;
+            }
+            .rc-confirm .btns {
+                margin-top: 0;
+            }
+            .rc-result {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                padding: 14px;
+                border-radius: var(--radius-md);
+                background: var(--surface-bg);
+                font-size: 13px;
+                line-height: 16px;
+            }
+            .rc-result p {
+                margin: 0;
+            }
+            .rc-result .rc-r-t {
+                font-weight: 600;
+            }
+            .rc-err {
+                margin: 0;
+                font-size: 12px;
+                line-height: 15px;
+                color: var(--status-over);
+                overflow-wrap: anywhere;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "Recipe",
+                loading: "Loading the recipe…",
+                servings: { one: "{n} serving", other: "{n} servings" },
+                minutes: "{n} min",
+                prep: "Prep {n} min",
+                cook: "Cook {n} min",
+                kcal: "kcal",
+                protein: "Protein",
+                carbs: "Carbs",
+                fat: "Fat",
+                grams: "{n} g",
+                unknown: "—",
+                missingTag: "missing",
+                shortTag: "may be short",
+                allHave: "You have everything",
+                missing: "Missing {n}",
+                maybeShort: "May be short {n}",
+                noCheck: "The fridge can't be checked for this recipe.",
+                cookBtn: "Cook",
+                confirmTitle: "Cook {name}?",
+                servingsLabel: "Servings",
+                fewer: "Fewer servings",
+                more: "More servings",
+                logLabel: "Log a serving",
+                logLabelAs: "Log a serving as {slot}",
+                confirm: "Confirm",
+                cancel: "Cancel",
+                cooking: "Cooking…",
+                failed: "Could not cook this recipe.",
+                unsure: "This may have cooked — check the fridge before trying again.",
+                cooked: {
+                    one: "Cooked {n} serving.",
+                    other: "Cooked {n} servings.",
+                },
+                taken: "The ingredients came out of the fridge.",
+                logged: "Logged 1 serving.",
+                logFailed:
+                    "The serving could not be logged. Log it from the app.",
+                short: "Not enough: {list}.",
+                notTaken: "Not taken (no amount): {list}.",
+                note: {
+                    one: "Cooked {n} serving of {name}.",
+                    other: "Cooked {n} servings of {name}.",
+                },
+                noteLogged: " One serving logged.",
+                noteUnsure:
+                    "Tried to cook {name}, but no answer came back, so it may have cooked.",
+            };
+
+            const FRACTIONS = { 0.25: "¼", 0.5: "½", 0.75: "¾" };
+            // The web cook sheet takes the same ceiling (COOK_SERVINGS_MAX).
+            const MAX_SERVINGS = 999;
+            const MEAL_SLOTS = ["breakfast", "lunch", "dinner", "snack"];
+            const SOURCE_HOST = /^https?:$/;
+
+            // Design sample (FigCraft Widget/Recipe): one ingredient missing.
+            const SAMPLE = {
+                id: "r1",
+                name: "Salmon, rice & spinach",
+                yield_portions: 2,
+                suggested_meal_type: "dinner",
+                source_url: "https://www.seriouseats.com/salmon-rice",
+                prep_minutes: 10,
+                cook_minutes: 15,
+                macros_per_portion: {
+                    calories: 640,
+                    protein_g: 48,
+                    carbs_g: 62,
+                    fat_g: 22,
+                    incomplete: false,
+                },
+                ingredients: [
+                    ing("a", "Salmon fillet", 1, "lb", false),
+                    ing("b", "Jasmine rice", 1, "cup", false),
+                    ing("c", "Baby spinach", 0.5, "bag", false),
+                    ing("d", "Lemon", 1, "each", true),
+                ],
+                cook_preview: {
+                    total_portions: 1,
+                    lines: [],
+                    shortfalls: [
+                        {
+                            food_id: "f-d",
+                            display_name: "Lemon",
+                            amount: 1,
+                            unit: "each",
+                            unknown_factor: false,
+                        },
+                    ],
+                    unmeasured: [],
+                    cookable: false,
+                },
+            };
+
+            function ing(id, name, amount, unit, missing) {
+                return {
+                    id,
+                    display_name: name,
+                    amount,
+                    unit,
+                    note: null,
+                    food_id: "f-" + id,
+                    missing,
+                };
+            }
+
+            let MODEL = null;
+            let API = null;
+            // step: "view" | "confirm" | "done" | "unsure". Everything below is
+            // UI state. "unsure" is a cook whose answer never came back.
+            const ui = {
+                step: "view",
+                servings: 1,
+                logServing: false,
+                busy: false,
+                error: "",
+                result: null,
+            };
+
+            function amountText(amount) {
+                const n = Number(amount);
+                if (amount == null || !Number.isFinite(n)) return "";
+                const whole = Math.floor(n);
+                const frac = FRACTIONS[Math.round((n - whole) * 100) / 100];
+                if (frac) return whole > 0 ? `${whole}${frac}` : frac;
+                return String(Math.round(n * 100) / 100);
+            }
+
+            function qtyText(row) {
+                const unit = row.unit && row.unit !== "each" ? row.unit : "";
+                const amount = amountText(row.amount);
+                if (!amount) return row.note ? String(row.note) : "";
+                return [amount, unit].filter(Boolean).join(" ");
+            }
+
+            function whole(v) {
+                const n = Number(v);
+                return v == null || !Number.isFinite(n) ? null : Math.round(n);
+            }
+
+            // "seriouseats.com" from a full link; nothing for a non-web value.
+            function sourceHost(url) {
+                if (!url) return "";
+                try {
+                    const u = new URL(String(url));
+                    if (!SOURCE_HOST.test(u.protocol)) return "";
+                    return u.hostname.replace(/^www\./, "");
+                } catch (_) {
+                    return "";
+                }
+            }
+
+            function metaText(r) {
+                const bits = [plural(T.servings, r.yield_portions)];
+                if (r.prep_minutes != null && r.cook_minutes != null) {
+                    bits.push(
+                        tpl(T.minutes, { n: r.prep_minutes + r.cook_minutes }),
+                    );
+                } else if (r.prep_minutes != null) {
+                    bits.push(tpl(T.prep, { n: r.prep_minutes }));
+                } else if (r.cook_minutes != null) {
+                    bits.push(tpl(T.cook, { n: r.cook_minutes }));
+                }
+                return bits.join(" · ");
+            }
+
+            // A dot in a theme colour. v2Dot's colour argument needs the macro
+            // table (shared/macros.js), which this card does not carry; the
+            // token names here are fixed strings, never data.
+            function tokenDot(token, large) {
+                return `<span class="dot${large ? " lg" : ""}" style="--c:var(--${token})"></span>`;
+            }
+
+            function tile(label, token, value) {
+                return `<div class="rc-tile"><span class="rc-tile-k">${tokenDot(
+                    token,
+                )}${esc(label)}</span><span class="rc-tile-v">${esc(
+                    value,
+                )}</span></div>`;
+            }
+
+            function tiles(m) {
+                // An incomplete total undercounts, so it shows nothing.
+                const show = (v, unit) => {
+                    const n = m.incomplete ? null : whole(v);
+                    if (n == null) return T.unknown;
+                    return unit ? tpl(T.grams, { n }) : String(n);
+                };
+                return `<div class="rc-tiles">${tile(
+                    T.kcal,
+                    "macro-calories",
+                    show(m.calories, false),
+                )}${tile(T.protein, "macro-protein", show(m.protein_g, true))}${tile(
+                    T.carbs,
+                    "macro-carbs",
+                    show(m.carbs_g, true),
+                )}${tile(T.fat, "macro-fat", show(m.fat_g, true))}</div>`;
+            }
+
+            function shortKey(foodId, name) {
+                return foodId ? "f:" + foodId : "n:" + String(name);
+            }
+
+            // The distinct shortfalls, and which of them are only "may be short".
+            function shortfallMap(preview) {
+                const map = new Map();
+                for (const s of (preview && preview.shortfalls) || []) {
+                    map.set(shortKey(s.food_id, s.display_name), s);
+                }
+                return map;
+            }
+
+            // neutral: the fridge has changed (or may have), so a row no
+            // longer says what it had.
+            function ingredientRow(row, hasPreview, shorts, neutral) {
+                const short = shorts.get(
+                    shortKey(row.food_id, row.display_name),
+                );
+                const flagged = !neutral && (!!row.missing || !!short);
+                let tag = "";
+                if (flagged) {
+                    const soft = short && short.unknown_factor;
+                    tag = `<span class="row-s is-warn">${esc(
+                        soft ? T.shortTag : T.missingTag,
+                    )}</span>`;
+                }
+                const dot = flagged
+                    ? v2Dot(undefined, "warn", true)
+                    : hasPreview && !neutral
+                      ? tokenDot("accent-fill", true)
+                      : v2Dot(undefined, "dim", true);
+                const qty = qtyText(row);
+                return `<div class="row">${dot}<span class="row-t">${esc(
+                    row.display_name,
+                )}</span>${tag}${
+                    qty ? `<span class="row-end">${esc(qty)}</span>` : ""
+                }</div>`;
+            }
+
+            function statusLine(preview, shorts) {
+                if (!preview) {
+                    return `<p class="rc-status">${v2Dot(undefined, "dim")}${esc(
+                        T.noCheck,
+                    )}</p>`;
+                }
+                let hard = 0;
+                let soft = 0;
+                for (const s of shorts.values()) {
+                    if (s.unknown_factor) soft++;
+                    else hard++;
+                }
+                if (hard === 0 && soft === 0) {
+                    return `<p class="rc-status">${tokenDot(
+                        "accent-fill",
+                    )}${esc(T.allHave)}</p>`;
+                }
+                const text = [
+                    hard > 0 ? tpl(T.missing, { n: hard }) : "",
+                    soft > 0 ? tpl(T.maybeShort, { n: soft }) : "",
+                ]
+                    .filter(Boolean)
+                    .join(" · ");
+                return `<p class="rc-status">${v2Dot(undefined, "warn")}${esc(
+                    text,
+                )}</p>`;
+            }
+
+            function confirmBlock(r) {
+                const b = ui.busy ? " disabled" : "";
+                const err = ui.error
+                    ? `<p class="rc-err" role="alert">${esc(ui.error)}</p>`
+                    : "";
+                const slot = slotOf(r);
+                const logText = slot ? tpl(T.logLabelAs, { slot }) : T.logLabel;
+                return `<div class="rc-confirm" data-step="confirm" data-focus="confirm" tabindex="-1"><h3 class="rc-confirm-t">${esc(
+                    tpl(T.confirmTitle, { name: r.name }),
+                )}</h3><div class="rc-opt"><span>${esc(
+                    T.servingsLabel,
+                )}</span><span class="rc-stepper"><button type="button" class="rc-step" data-act="dec" aria-label="${esc(
+                    T.fewer,
+                )}"${b}${ui.servings <= 1 ? " disabled" : ""}>−</button><span class="rc-n" aria-live="polite">${esc(
+                    ui.servings,
+                )}</span><button type="button" class="rc-step" data-act="inc" aria-label="${esc(
+                    T.more,
+                )}"${b}${
+                    ui.servings >= MAX_SERVINGS ? " disabled" : ""
+                }>+</button></span></div><div class="rc-opt"><span>${esc(
+                    logText,
+                )}</span><button type="button" class="rc-sw" role="switch" data-act="log" aria-checked="${
+                    ui.logServing ? "true" : "false"
+                }" aria-label="${esc(logText)}"${b}></button></div>${err}<div class="btns"><button type="button" class="btn" data-act="cancel"${b}>${esc(
+                    T.cancel,
+                )}</button><button type="button" class="btn primary" data-act="confirm"${b}>${esc(
+                    ui.busy ? T.cooking : T.confirm,
+                )}</button></div></div>`;
+            }
+
+            function slotOf(r) {
+                return MEAL_SLOTS.includes(r.suggested_meal_type)
+                    ? r.suggested_meal_type
+                    : "";
+            }
+
+            function listText(rows) {
+                return rows.map((s) => s.display_name).join(", ");
+            }
+
+            function resultBlock() {
+                const res = ui.result;
+                const cook = res.cook;
+                const lines = [
+                    `<p class="rc-r-t">${esc(
+                        plural(T.cooked, cook.total_portions),
+                    )}</p>`,
+                    `<p>${esc(T.taken)}</p>`,
+                ];
+                if (cook.shortfalls.length) {
+                    lines.push(
+                        `<p class="is-warn">${esc(
+                            tpl(T.short, { list: listText(cook.shortfalls) }),
+                        )}</p>`,
+                    );
+                }
+                if (cook.unmeasured.length) {
+                    lines.push(
+                        `<p class="is-dim">${esc(
+                            tpl(T.notTaken, {
+                                list: listText(cook.unmeasured),
+                            }),
+                        )}</p>`,
+                    );
+                }
+                if (res.logged === true) {
+                    lines.push(`<p>${esc(T.logged)}</p>`);
+                } else if (res.logged === false) {
+                    lines.push(`<p class="rc-err">${esc(T.logFailed)}</p>`);
+                }
+                return `<div class="rc-result" data-step="done" data-focus="result" tabindex="-1" role="status">${lines.join("")}</div>`;
+            }
+
+            function unsureBlock() {
+                return `<div class="rc-result" data-step="unsure" data-focus="result" tabindex="-1" role="alert"><p class="rc-err">${esc(
+                    T.unsure,
+                )}</p></div>`;
+            }
+
+            function renderBody(r) {
+                const canCook = !!(API && API.canCallTools);
+                const preview = r.cook_preview;
+                const shorts = shortfallMap(preview);
+                const host = sourceHost(r.source_url);
+                // After a cook (or one that may have happened) nothing on the
+                // card describes the fridge as it was.
+                const settled = ui.step === "done" || ui.step === "unsure";
+                const rows = r.ingredients
+                    .map((row) =>
+                        ingredientRow(row, !!preview, shorts, settled),
+                    )
+                    .join("");
+                let action = "";
+                if (ui.step === "done" && ui.result) {
+                    action = resultBlock();
+                } else if (ui.step === "unsure") {
+                    action = unsureBlock();
+                } else if (canCook && preview) {
+                    action =
+                        ui.step === "confirm"
+                            ? confirmBlock(r)
+                            : v2Buttons([
+                                  {
+                                      label: T.cookBtn,
+                                      primary: true,
+                                      attrs: { "data-act": "cook" },
+                                  },
+                              ]);
+                }
+                return `<section class="card">${v2Header(
+                    T.title,
+                    metaText(r),
+                )}<div><h3 class="rc-name">${esc(r.name)}</h3>${
+                    host ? `<p class="rc-src">${esc(host)}</p>` : ""
+                }</div>${tiles(r.macros)}<div class="rows">${rows}</div>${
+                    settled ? "" : statusLine(preview, shorts)
+                }${action}</section>`;
+            }
+
+            // What holds focus inside the card, as a selector that survives a
+            // repaint: a control by its data-act, a block by its data-focus.
+            function focusedKey() {
+                const a = document.activeElement;
+                if (!a || !a.closest) return null;
+                const act = a.closest("[data-act]");
+                if (act) return `[data-act="${act.getAttribute("data-act")}"]`;
+                const blk = a.closest("[data-focus]");
+                return blk
+                    ? `[data-focus="${blk.getAttribute("data-focus")}"]`
+                    : null;
+            }
+
+            function focusSel(sel) {
+                const mount = document.getElementById("widget-mount");
+                if (!mount || typeof mount.querySelector !== "function")
+                    return false;
+                const el = mount.querySelector(sel);
+                if (!el || el.disabled || typeof el.focus !== "function")
+                    return false;
+                el.focus();
+                return true;
+            }
+
+            // The same control if it is still there and enabled, else its
+            // stepper twin (the one that just hit its bound), else the block
+            // around it, so a repaint never drops focus on the body.
+            function restoreFocus(sel) {
+                if (!sel) return;
+                if (focusSel(sel)) return;
+                if (sel === '[data-act="dec"]' && focusSel('[data-act="inc"]'))
+                    return;
+                if (sel === '[data-act="inc"]' && focusSel('[data-act="dec"]'))
+                    return;
+                focusSel('[data-focus="confirm"]');
+            }
+
+            // The bridge empties #root before every tool result, which drops
+            // focus; what held it is remembered here for the repaint.
+            let HELD = null;
+
+            // target: where focus goes after a step change; omitted, focus
+            // stays where it was.
+            function paint(target) {
+                if (!MODEL) return;
+                const keep = target ? null : focusedKey() || HELD;
+                HELD = null;
+                v2Paint(renderBody(MODEL));
+                if (target) focusSel(target);
+                else restoreFocus(keep);
+            }
+
+            function render(data) {
+                // A household-app seed arrives raw, a chat result coerced.
+                const card = coerce(data);
+                if (!card) return;
+                // A cook is out: whatever arrives now cannot change what the
+                // card is doing.
+                if (ui.busy) {
+                    paint();
+                    return;
+                }
+                // A host re-send of the same recipe (or a changed host
+                // global) must not undo a confirm, a result or a doubt about
+                // whether it cooked.
+                if (MODEL && MODEL.id === card.id && ui.step !== "view") {
+                    MODEL = card;
+                    paint();
+                    return;
+                }
+                // Otherwise a fresh result is a fresh card: a half-open
+                // confirm would describe a recipe that may have changed.
+                MODEL = card;
+                ui.step = "view";
+                ui.result = null;
+                ui.error = "";
+                ui.logServing = false;
+                ui.servings = defaultServings(card);
+                paint();
+            }
+
+            function defaultServings(r) {
+                const n = Math.round(Number(r.yield_portions));
+                return Number.isFinite(n) && n >= 1
+                    ? Math.min(n, MAX_SERVINGS)
+                    : 1;
+            }
+
+            function openConfirm() {
+                if (!MODEL || ui.busy || ui.step !== "view") return;
+                if (!API || !API.canCallTools || !MODEL.cook_preview) return;
+                ui.step = "confirm";
+                ui.error = "";
+                ui.logServing = false;
+                ui.servings = defaultServings(MODEL);
+                // The first control that can be pressed: the minus is dead
+                // at one serving.
+                paint(
+                    ui.servings > 1 ? '[data-act="dec"]' : '[data-act="inc"]',
+                );
+            }
+
+            function cancelConfirm() {
+                if (ui.busy || ui.step !== "confirm") return;
+                ui.step = "view";
+                ui.error = "";
+                paint('[data-act="cook"]');
+            }
+
+            function bump(delta) {
+                if (ui.busy || ui.step !== "confirm") return;
+                ui.servings = Math.min(
+                    MAX_SERVINGS,
+                    Math.max(1, ui.servings + delta),
+                );
+                paint();
+            }
+
+            function toggleLog() {
+                if (ui.busy || ui.step !== "confirm") return;
+                ui.logServing = !ui.logServing;
+                paint();
+            }
+
+            function cookResult(res) {
+                const sc = (res && res.structuredContent) || {};
+                const list = (v) =>
+                    Array.isArray(v)
+                        ? v.filter((x) => x && typeof x === "object")
+                        : [];
+                const n = Number(sc.total_portions);
+                return {
+                    total_portions: Number.isFinite(n) ? n : ui.servings,
+                    shortfalls: list(sc.shortfalls),
+                    unmeasured: list(sc.unmeasured),
+                };
+            }
+
+            async function onConfirm() {
+                if (!MODEL || !API || !API.canCallTools) return;
+                if (ui.busy || ui.step !== "confirm") return;
+                // What was pressed stays what is cooked and reported, whatever
+                // a later tool result says (render() ignores one while a call
+                // is out).
+                const recipeId = MODEL.id;
+                const recipeName = MODEL.name;
+                const slot = slotOf(MODEL);
+                const servings = ui.servings;
+                const wantLog = ui.logServing;
+                ui.busy = true;
+                ui.error = "";
+                paint('[data-focus="confirm"]');
+                let cook;
+                try {
+                    cook = cookResult(
+                        await API.callTool("cook_recipe", {
+                            recipe_id: recipeId,
+                            total_portions: servings,
+                        }),
+                    );
+                } catch (e) {
+                    ui.busy = false;
+                    if (e && e.toolResult) {
+                        // The tool refused: nothing was cooked. Not retried:
+                        // back to the confirm step, the user decides.
+                        const why = e.message ? String(e.message) : "";
+                        ui.error = why ? `${T.failed} (${why})` : T.failed;
+                        paint('[data-act="confirm"]');
+                        return;
+                    }
+                    // A timeout or a transport error says nothing about the
+                    // server, which may already have taken the ingredients,
+                    // and cook_recipe is not idempotent: no second Confirm.
+                    ui.step = "unsure";
+                    paint('[data-focus="result"]');
+                    API.updateModelContext(
+                        tpl(T.noteUnsure, { name: recipeName }),
+                    );
+                    return;
+                }
+                // The fridge has changed from here on, so every path below
+                // ends on the result, never back on a Cook button.
+                let logged = null;
+                if (wantLog) {
+                    try {
+                        const args = { recipe_id: recipeId, portions: 1 };
+                        if (slot) args.meal_type = slot;
+                        await API.callTool("log_recipe_portion", args);
+                        logged = true;
+                    } catch (_) {
+                        logged = false;
+                    }
+                }
+                ui.result = { cook, logged };
+                ui.step = "done";
+                ui.busy = false;
+                paint('[data-focus="result"]');
+                API.updateModelContext(
+                    plural(T.note, cook.total_portions, { name: recipeName }) +
+                        (logged ? T.noteLogged : ""),
+                );
+            }
+
+            function clean(payload) {
+                const strOrNull = (v) => (typeof v === "string" ? v : null);
+                const numOrNull = (v) =>
+                    v != null && Number.isFinite(Number(v)) ? Number(v) : null;
+                const m = payload.macros_per_portion || {};
+                const preview = payload.cook_preview;
+                const yieldN = Number(payload.yield_portions);
+                return {
+                    id: String(payload.id),
+                    name: String(payload.name),
+                    suggested_meal_type: strOrNull(payload.suggested_meal_type),
+                    yield_portions: Number.isFinite(yieldN) ? yieldN : 1,
+                    source_url: strOrNull(payload.source_url),
+                    prep_minutes: numOrNull(payload.prep_minutes),
+                    cook_minutes: numOrNull(payload.cook_minutes),
+                    macros: {
+                        calories: m.calories,
+                        protein_g: m.protein_g,
+                        carbs_g: m.carbs_g,
+                        fat_g: m.fat_g,
+                        incomplete: !!m.incomplete,
+                    },
+                    ingredients: payload.ingredients.filter(
+                        (row) => row && typeof row === "object",
+                    ),
+                    cook_preview:
+                        preview &&
+                        typeof preview === "object" &&
+                        Array.isArray(preview.shortfalls)
+                            ? preview
+                            : null,
+                };
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                // Already the card's own shape (clean() ran).
+                if (payload.macros && Array.isArray(payload.ingredients)) {
+                    return payload;
+                }
+                if (
+                    payload.id != null &&
+                    typeof payload.name === "string" &&
+                    Array.isArray(payload.ingredients)
+                ) {
+                    return clean(payload);
+                }
+                if (payload.structuredContent)
+                    return coerce(payload.structuredContent);
+                return null;
+            }
+
+            initWidget({
+                name: "recipe-card-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render: (data) => {
+                    HELD = focusedKey();
+                    v2BridgeRender(render)(data);
+                    HELD = null;
+                },
+                sample: clean(SAMPLE),
+                onReady(api) {
+                    API = api;
+                    paint();
+                    document
+                        .getElementById("root")
+                        .addEventListener("click", (e) => {
+                            const t = e.target;
+                            const el =
+                                t && t.closest ? t.closest("[data-act]") : null;
+                            const act = el && el.getAttribute("data-act");
+                            if (!act) return;
+                            e.preventDefault();
+                            if (act === "cook") openConfirm();
+                            else if (act === "cancel") cancelConfirm();
+                            else if (act === "dec") bump(-1);
+                            else if (act === "inc") bump(1);
+                            else if (act === "log") toggleLog();
+                            else if (act === "confirm") onConfirm();
+                        });
+                },
+            });
+        </script>
+    </body>
+</html>

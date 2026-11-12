@@ -164,9 +164,8 @@ import {
     type SharedLinkRow,
 } from "./pages/v2/settings-household-shared-links.js";
 import { liveShareLinkStore } from "../db/share-links.js";
-import { guessMealType } from "./pages/v2/log-sheet.js";
 import { orderCards } from "../domain/layout.js";
-import { todayInTz, validateTz } from "../domain/tz.js";
+import { guessMealType, todayInTz, validateTz } from "../domain/tz.js";
 import { fromGrams } from "../domain/units.js";
 import { getLatestWeight } from "../db/nutrition.js";
 import type { WeighInPrefill } from "./pages/v2/log-sheet.js";
