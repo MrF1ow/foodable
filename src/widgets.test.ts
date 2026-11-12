@@ -3313,6 +3313,290 @@ test("use-soon v2: nothing expiring says so; names reach the markup escaped", as
     expect(evil).not.toContain("<img");
 });
 
+// ---- product-score v2 -------------------------------------------------------
+
+type ScoreRow = [number, string, string, "good" | "warn" | "over"];
+
+const SCORE_LABELS: Record<string, string> = {
+    nutrition: "Nutri-Score",
+    processing: "Processing",
+    additives: "Additives",
+    environment: "Green-Score",
+};
+
+// [value, display, status] per part, as rate_product words them.
+function scoreBreakdown(
+    rows: Record<string, ScoreRow | null>,
+): Record<string, unknown>[] {
+    return ["nutrition", "processing", "additives", "environment"].map(
+        (part) => {
+            const row = rows[part] ?? null;
+            return {
+                part,
+                value: row ? row[0] : null,
+                weight: row ? 0.25 : 0,
+                known: row != null,
+                source: row ? row[1] : null,
+                label: SCORE_LABELS[part],
+                display: row ? row[2] : null,
+                status: row ? row[3] : null,
+            };
+        },
+    );
+}
+
+function scoreCheck(
+    name: string,
+    verdict: "good" | "careful" | "avoid",
+    reason: string,
+    notices: unknown[] = [],
+) {
+    return { user_id: `u-${name}`, name, notices, verdict, reason };
+}
+
+function scorePayload(over: Record<string, unknown> = {}) {
+    return {
+        found: true,
+        product: {
+            food_id: "f1",
+            barcode: "5201054017463",
+            name: "Fage Total 2% Greek yogurt",
+            brand: "Fage",
+        },
+        score: 82,
+        label: "good",
+        preset: "balanced",
+        preset_label: "Balanced",
+        breakdown: scoreBreakdown({
+            nutrition: [100, "nutriscore a", "A", "good"],
+            processing: [100, "nova 1", "NOVA 1 · unprocessed", "good"],
+            additives: [100, "no additives listed", "None", "good"],
+            environment: [50, "ecoscore c", "C", "warn"],
+        }),
+        parts_used: 4,
+        parts_total: 4,
+        missing: [],
+        info_rows: [
+            { kind: "sugars", per_100g: 4, level: "low", status: "good" },
+            {
+                kind: "saturated-fat",
+                per_100g: 2,
+                level: "moderate",
+                status: "warn",
+            },
+        ],
+        checks: [],
+        ...over,
+    };
+}
+
+test("product-score v2 sample: the full card, with the score in its label colour, every part, both nutrient rows and a verdict per member", async () => {
+    const body = renderWidget(await v2Widget("product-score"), undefined);
+    expect(body).toContain("Product score");
+    expect(body).toContain('class="hd-meta">Balanced weights<');
+    expect(body).toContain("Fage Total 2% Greek yogurt");
+    expect(body).toContain("Fage · 5201054017463");
+    expect(body).toContain('class="ps-n is-ok">82<');
+    expect(body).toContain('aria-label="82 out of 100, good"');
+    expect(body).toContain(">Nutri-Score<");
+    expect(body).toContain("<span>A</span>");
+    expect(body).toContain("<span>NOVA 1 · unprocessed</span>");
+    expect(body).toContain("<span>None</span>");
+    expect(body).toContain("<span>C</span>");
+    expect(body).toContain(">Sat. fat<");
+    expect(body).toContain("<span>2 g</span>");
+    // Scored on all four: no "scored on" line.
+    expect(body).not.toContain("Scored on");
+    expect(body).toContain('class="mr-v is-ok">Good<');
+    expect(body).toContain('class="mr-v is-over">Avoid<');
+    expect(body).toContain('class="mr-v is-warn">Careful<');
+    expect(body).toContain("Contains Milk · listed as an allergy");
+    expect(body).toContain("No issues found for this product.");
+});
+
+test("product-score v2: the card draws the wire's wording and status, never its own", async () => {
+    const html = await v2Widget("product-score");
+    const body = renderWidget(
+        html,
+        scorePayload({
+            preset_label: "Zorp first",
+            breakdown: scoreBreakdown({
+                nutrition: [10, "x", "Wording A", "over"],
+                processing: [90, "y", "Wording B", "good"],
+                additives: [55, "z", "Wording C", "warn"],
+                environment: null,
+            }),
+            checks: [scoreCheck("Ann", "careful", "Reason as the app says it")],
+        }),
+    );
+    // The header, each part's value, and the member line come through verbatim.
+    expect(body).toContain('class="hd-meta">Zorp first weights<');
+    expect(body).toContain("<span>Wording A</span>");
+    expect(body).toContain("<span>Wording B</span>");
+    expect(body).toContain("<span>Wording C</span>");
+    expect(body).toContain("Reason as the app says it");
+    // The dot follows the wire status: 10 would be "over" and 90 "good"
+    // whatever the number, 55 "warn". Nothing is re-banded from the value.
+    const dots = (label: string) =>
+        body.match(new RegExp(label + "</span>(.*?)</span></div>"))?.[1] ?? "";
+    expect(dots("Nutri-Score")).toContain("over");
+    expect(dots("Processing")).toContain("accent-fill");
+    expect(dots("Additives")).toContain("warn");
+    // A status that contradicts the number wins: the card never re-derives it.
+    const flipped = renderWidget(
+        html,
+        scorePayload({
+            breakdown: scoreBreakdown({
+                nutrition: [95, "x", "Wording", "over"],
+            }),
+        }),
+    );
+    const flippedDot =
+        flipped.match(/Nutri-Score<\/span>(.*?)<\/span><\/div>/)?.[1] ?? "";
+    expect(flippedDot).toContain("over");
+    expect(flippedDot).not.toContain("accent-fill");
+});
+
+test("product-score v2: the number takes its tone from the label the tool returns", async () => {
+    const html = await v2Widget("product-score");
+    const mid = renderWidget(
+        html,
+        scorePayload({ score: 55, label: "middling" }),
+    );
+    expect(mid).toContain('class="ps-n is-warn">55<');
+    expect(mid).toContain(">Middling<");
+    const poor = renderWidget(html, scorePayload({ score: 12, label: "poor" }));
+    expect(poor).toContain('class="ps-n is-over">12<');
+    expect(poor).toContain(">Poor<");
+});
+
+test("product-score v2: a partial score says it was scored on 2 of 4 and shows the missing parts as no data", async () => {
+    const body = renderWidget(
+        await v2Widget("product-score"),
+        scorePayload({
+            score: 48,
+            label: "middling",
+            breakdown: scoreBreakdown({
+                nutrition: [50, "nutriscore c", "C", "warn"],
+                processing: [33, "nova 3", "NOVA 3 · processed", "over"],
+            }),
+            parts_used: 2,
+            missing: ["additives", "environment"],
+            info_rows: [
+                {
+                    kind: "saturated-fat",
+                    per_100g: 9,
+                    level: "high",
+                    status: "over",
+                },
+            ],
+        }),
+    );
+    expect(body).toContain("Scored on 2 of 4.");
+    expect(body).toContain("Parts with no data are left out");
+    expect(body.match(/>No data</g)).toHaveLength(2);
+    expect(body).toContain("<span>NOVA 3 · processed</span>");
+    expect(body).toContain('class="ps-n is-warn">48<');
+    // One nutrient row only: sugar is not made up.
+    expect(body).not.toContain(">Sugar<");
+    expect(body).toContain("<span>9 g</span>");
+});
+
+test("product-score v2: not enough data is a message and never a number", async () => {
+    const body = renderWidget(
+        await v2Widget("product-score"),
+        scorePayload({
+            score: null,
+            label: "not_enough_data",
+            breakdown: scoreBreakdown({}),
+            parts_used: 0,
+            missing: ["nutrition", "processing", "additives", "environment"],
+            info_rows: [],
+        }),
+    );
+    expect(body).toContain("Not enough data to score");
+    expect(body).toContain("Scored on 0 of 4.");
+    expect(body).not.toContain('class="ps-n ');
+    expect(body).not.toContain("/100");
+    expect(body).not.toMatch(/>0</);
+});
+
+test("product-score v2: a product that was not found says so, with no score or parts", async () => {
+    const body = renderWidget(
+        await v2Widget("product-score"),
+        scorePayload({
+            found: false,
+            product: { food_id: null, barcode: null, name: "", brand: null },
+            score: null,
+            label: "not_enough_data",
+        }),
+    );
+    expect(body).toContain("No product found.");
+    expect(body).not.toContain("ps-grid");
+});
+
+test("product-score v2: a member's verdict word and reason are the wire's, whatever the notices say", async () => {
+    const body = renderWidget(
+        await v2Widget("product-score"),
+        scorePayload({
+            checks: [
+                scoreCheck("Ann", "careful", "Over sugar today."),
+                scoreCheck(
+                    "Bo",
+                    "avoid",
+                    "Contains Peanuts · listed as an allergy",
+                ),
+                scoreCheck("Cy", "good", "No issues found for this product."),
+                // Notices do not decide the verdict: the wire field does.
+                scoreCheck("Di", "good", "Fits today", [
+                    { severity: "block", message: "Contains peanuts." },
+                ]),
+            ],
+        }),
+    );
+    expect(body).toMatch(/>Ann<\/span><span class="mr-why">Over sugar today\./);
+    expect(body).toMatch(
+        />Bo<\/span><span class="mr-why">Contains Peanuts · listed/,
+    );
+    expect(body).toMatch(/>Di<\/span><span class="mr-why">Fits today</);
+    expect(body).toContain('class="mr-v is-warn">Careful<');
+    expect(body).toContain('class="mr-v is-over">Avoid<');
+    expect(body.match(/class="mr-v is-ok">Good</g)).toHaveLength(2);
+});
+
+test("product-score v2: names, brand, barcode and reasons reach the markup escaped", async () => {
+    const evil = renderWidget(
+        await v2Widget("product-score"),
+        scorePayload({
+            product: { food_id: "f", barcode: EVIL, name: EVIL, brand: EVIL },
+            preset_label: EVIL,
+            breakdown: [
+                {
+                    part: "nutrition",
+                    value: 50,
+                    weight: 1,
+                    known: true,
+                    source: null,
+                    label: EVIL,
+                    display: EVIL,
+                    status: "warn",
+                },
+            ],
+            checks: [
+                {
+                    user_id: EVIL,
+                    name: EVIL,
+                    notices: [],
+                    verdict: "careful",
+                    reason: EVIL,
+                },
+            ],
+        }),
+    );
+    expect(evil).not.toContain("<img");
+    expect(evil).toContain("&lt;img");
+});
+
 // ---- recipe-card v2 ---------------------------------------------------------
 
 function recipeIngredient(over: Record<string, unknown>) {
@@ -4119,4 +4403,13 @@ test("widget harness: the host frame counts its border inside its width so a scr
         `${import.meta.dir}/../scripts/widget-harness.ts`,
     ).text();
     expect(src).toMatch(/#frame\{box-sizing:border-box;width:100%/);
+});
+
+test("widget harness: the host frame adds its own border to the height a widget reports, so the content gets exactly that height", async () => {
+    const src = await Bun.file(
+        `${import.meta.dir}/../scripts/widget-harness.ts`,
+    ).text();
+    expect(src).toContain("frame.offsetHeight - frame.clientHeight");
+    expect(src).toContain("(capped + border)");
+    expect(src).not.toContain("frame.style.height = capped");
 });

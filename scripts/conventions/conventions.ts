@@ -243,6 +243,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/product-checks.test.ts": "foods",
     "src/domain/off-nutrient-levels.ts": "foods",
     "src/domain/product-score.ts": "foods",
+    "src/domain/product-score-display.ts": "foods",
+    "src/domain/product-score-display.test.ts": "foods",
     "src/domain/score-settings.ts": "foods",
     "src/domain/sharing.ts": "recipes",
     "src/domain/sharing.test.ts": "recipes",

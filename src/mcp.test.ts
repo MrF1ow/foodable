@@ -9315,6 +9315,106 @@ describe("rate_product over HTTP", () => {
     );
 
     test.each(ERAS)(
+        "each member carries the Product screen's verdict and reason, and each part its display and status (%p)",
+        async (era) => {
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "Ann",
+                },
+                {
+                    householdId: "hh-1",
+                    userId: "u2",
+                    role: "member",
+                    displayName: "Bo",
+                },
+            ];
+            db.goals = goals({ daily_sugar_g: 30 });
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Sweet Yogurt",
+                allergens: ["milk"],
+                sugarG: 50,
+                gramsPerEach: 40,
+                offQuality: {
+                    nutriscoreGrade: "a",
+                    novaGroup: 4,
+                    ecoscoreGrade: "a-plus",
+                    additives: [
+                        { tag: "en:e330", risk: "none" },
+                        { tag: "en:e250", risk: "high" },
+                    ],
+                    allergensTags: null,
+                    tracesTags: null,
+                    ingredientsAnalysisTags: null,
+                    labelsTags: null,
+                    fetchedAt: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            await db.foodsStore.insertFood(food);
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        (
+                            (await client.callTool({
+                                name: "rate_product",
+                                arguments: { food_id: food.id },
+                            })) as ToolResult
+                        ).structuredContent,
+                    );
+                    const ann = out.checks.find((c) => c.user_id === "u1");
+                    const bo = out.checks.find((c) => c.user_id === "u2");
+                    expect(ann?.verdict).toBe("avoid");
+                    expect(ann?.reason).toBe(
+                        "Contains Milk · listed as an allergy",
+                    );
+                    expect(bo?.verdict).toBe("good");
+                    expect(bo?.reason).toBe(
+                        "Fits today · 20 g sugar toward your 50 g",
+                    );
+                    // The wire notice keeps its own sentence; the reason is
+                    // the app's line, not a copy of it.
+                    expect(bo?.notices[0]?.message).not.toBe(bo?.reason);
+
+                    expect(out.preset_label).toBe("Balanced");
+                    const part = (name: string) =>
+                        out.breakdown.find((row) => row.part === name);
+                    expect(part("nutrition")).toMatchObject({
+                        label: "Nutri-Score",
+                        display: "A",
+                        status: "good",
+                    });
+                    expect(part("processing")).toMatchObject({
+                        label: "Processing",
+                        display: "NOVA 4 · ultra-processed",
+                    });
+                    expect(part("additives")).toMatchObject({
+                        label: "Additives",
+                        display: "2 additive(s), 1 high risk",
+                    });
+                    expect(part("environment")).toMatchObject({
+                        display: "A+",
+                    });
+                    expect(
+                        out.info_rows.find((row) => row.kind === "sugars"),
+                    ).toMatchObject({ per_100g: 50, status: "over" });
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
         "scores with the caller's weights and only adds fields (%p)",
         async (era) => {
             const food = newFood({
@@ -10181,6 +10281,95 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                     expect(() =>
                         LIST_NOTICES_OUTPUT_SCHEMA.parse(sc),
                     ).not.toThrow();
+                });
+            },
+        );
+    });
+
+    describe("widget-product-score flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        const PRODUCT_SCORE_V2_URI = widgetUri("product-score.html", true);
+
+        test.each(ERAS)(
+            "rate_product on and the widget flag off: no ui meta and no product-score resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-rate-product": true,
+                        "widget-product-score": false,
+                    }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const rate = tools.find((t) => t.name === "rate_product");
+                    expect(rate).toBeDefined();
+                    expect(rate?._meta?.ui).toBeUndefined();
+                    expect(
+                        rate?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        PRODUCT_SCORE_V2_URI,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "both flags on: rate_product links the v2 product-score uri, which lists and reads (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-rate-product": true,
+                        "widget-product-score": true,
+                    }),
+                );
+                const assembled = await getWidgetHtml("product-score", {
+                    v2: true,
+                });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const rate = tools.find((t) => t.name === "rate_product");
+                    expect(
+                        (rate?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(PRODUCT_SCORE_V2_URI);
+                    expect(rate?._meta?.["openai/outputTemplate"]).toBe(
+                        PRODUCT_SCORE_V2_URI,
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        PRODUCT_SCORE_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: PRODUCT_SCORE_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "rate_product off: the widget flag alone adds neither the tool nor the resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-rate-product": false,
+                        "widget-product-score": true,
+                    }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    expect(tools.map((t) => t.name)).not.toContain(
+                        "rate_product",
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        PRODUCT_SCORE_V2_URI,
+                    );
                 });
             },
         );

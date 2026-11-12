@@ -67,6 +67,15 @@ export const FLAGS = {
         removeWhen:
             "the recipe-card widget is on for everyone and the flag is removed.",
     },
+    "widget-product-score": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Product score card for rate_product: the score, what it rests on and each member's check.",
+        removeWhen:
+            "the product-score widget is on for everyone and the flag is removed.",
+    },
     "off-lookups": {
         type: "bool",
         kind: "kill-switch",

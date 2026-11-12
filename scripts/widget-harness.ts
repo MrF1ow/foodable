@@ -18,6 +18,8 @@
 //   ?fail=1             answer tools/call with a JSON-RPC error
 //   ?drinkUnit=us       alcohol tracking ON for import-meals (default: off/null)
 //   ?theme=dark         host theme at initialize (default: light)
+//   ?state=partial      product-score sample: full (default), partial (scored
+//                       on 2 of 4) or none (not enough data to score)
 //
 // Nothing here is served by the production app; scripts/ is dev-only.
 
@@ -78,7 +80,8 @@ function indexPage(): string {
   <p>Pick a widget. Append query flags to simulate host behaviour:
      <code>?serverTools=0</code>, <code>?tools=0</code>, <code>?delay=3000</code>,
      <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>,
-     <code>?v2=1</code> (the v2 assembly), <code>?theme=dark</code> (host theme).</p>
+     <code>?v2=1</code> (the v2 assembly), <code>?theme=dark</code> (host theme),
+     <code>?state=full|partial|none</code> (product-score sample).</p>
   <ul>${links}</ul>
 </body></html>`;
 }
@@ -766,6 +769,183 @@ function hostPage(widget: string, params: URLSearchParams): string {
             },
         },
     };
+    // rate_product, in the three states the card draws: every part scored,
+    // two of four scored, and too little data to score at all.
+    // Wire shape: the notices as the tool sends them, then the verdict and
+    // the one-line reason the app's Product screen words.
+    const scoreMembers = [
+        {
+            user_id: "u-1",
+            name: "Ethan",
+            notices: [],
+            verdict: "good",
+            reason: "No issues found for this product.",
+        },
+        {
+            user_id: "u-2",
+            name: "Sam",
+            notices: [
+                {
+                    code: "food.product_allergen",
+                    severity: "block",
+                    message: "Contains milk — Sam.",
+                },
+            ],
+            verdict: "avoid",
+            reason: "Contains Milk · listed as an allergy",
+        },
+        {
+            user_id: "u-3",
+            name: "Jordan",
+            notices: [
+                {
+                    code: "food.product_trace",
+                    severity: "warn",
+                    message: "May contain traces of nuts — Jordan.",
+                },
+            ],
+            verdict: "careful",
+            reason: "May contain traces of nuts",
+        },
+    ];
+    const scoreBase = {
+        found: true,
+        product: {
+            food_id: "f-1",
+            barcode: "5201054017463",
+            name: "Fage Total 2% Greek yogurt",
+            brand: "Fage",
+        },
+        preset: "balanced",
+        preset_label: "Balanced",
+        checks: scoreMembers,
+    };
+    const scoreLabels: Record<string, string> = {
+        nutrition: "Nutri-Score",
+        processing: "Processing",
+        additives: "Additives",
+        environment: "Green-Score",
+    };
+    const scorePart = (
+        part: string,
+        value: number | null,
+        weight: number,
+        source: string | null,
+        display: string | null,
+        status: string | null,
+    ) => ({
+        part,
+        value,
+        weight,
+        known: value != null,
+        source,
+        label: scoreLabels[part],
+        display,
+        status,
+    });
+    const SCORE_STATES: Record<string, unknown> = {
+        full: {
+            ...scoreBase,
+            score: 82,
+            label: "good",
+            breakdown: [
+                scorePart("nutrition", 100, 0.4, "nutriscore a", "A", "good"),
+                scorePart(
+                    "processing",
+                    100,
+                    0.3,
+                    "nova 1",
+                    "NOVA 1 · unprocessed",
+                    "good",
+                ),
+                scorePart(
+                    "additives",
+                    100,
+                    0.2,
+                    "no additives listed",
+                    "None",
+                    "good",
+                ),
+                scorePart("environment", 50, 0.1, "ecoscore c", "C", "warn"),
+            ],
+            parts_used: 4,
+            parts_total: 4,
+            missing: [],
+            info_rows: [
+                { kind: "sugars", per_100g: 4, level: "low", status: "good" },
+                {
+                    kind: "saturated-fat",
+                    per_100g: 2,
+                    level: "moderate",
+                    status: "warn",
+                },
+            ],
+        },
+        partial: {
+            ...scoreBase,
+            product: {
+                ...scoreBase.product,
+                name: "Crunchy peanut butter",
+                brand: "Skippy",
+                barcode: null,
+            },
+            score: 48,
+            label: "middling",
+            breakdown: [
+                scorePart("nutrition", 50, 0.6, "nutriscore c", "C", "warn"),
+                scorePart(
+                    "processing",
+                    33,
+                    0.4,
+                    "nova 3",
+                    "NOVA 3 · processed",
+                    "over",
+                ),
+                scorePart("additives", null, 0, null, null, null),
+                scorePart("environment", null, 0, null, null, null),
+            ],
+            parts_used: 2,
+            parts_total: 4,
+            missing: ["additives", "environment"],
+            info_rows: [
+                {
+                    kind: "sugars",
+                    per_100g: 9,
+                    level: "moderate",
+                    status: "warn",
+                },
+                {
+                    kind: "saturated-fat",
+                    per_100g: 9,
+                    level: "high",
+                    status: "over",
+                },
+            ],
+        },
+        none: {
+            ...scoreBase,
+            product: {
+                ...scoreBase.product,
+                name: "Homemade granola",
+                brand: null,
+                barcode: null,
+            },
+            score: null,
+            label: "not_enough_data",
+            breakdown: [
+                scorePart("nutrition", null, 0, null, null, null),
+                scorePart("processing", null, 0, null, null, null),
+                scorePart("additives", null, 0, null, null, null),
+                scorePart("environment", null, 0, null, null, null),
+            ],
+            parts_used: 0,
+            parts_total: 4,
+            missing: ["nutrition", "processing", "additives", "environment"],
+            info_rows: [],
+        },
+    };
+    RESULTS["product-score"] =
+        SCORE_STATES[params.get("state") ?? "full"] ?? SCORE_STATES.full;
     // Probe and gallery paint their own UI; anything non-null will do.
     const toolResult = RESULTS[widget] ?? { probe: true };
 
@@ -860,7 +1040,11 @@ window.addEventListener("message", (e) => {
   if (d.method === "ui/notifications/size-changed") {
     const h = d.params && d.params.height;
     const capped = CFG.maxHeight ? Math.min(h, CFG.maxHeight) : h;
-    frame.style.height = capped + "px";
+    // box-sizing is border-box (the right edge stays unclipped), so the frame
+    // is the reported height plus its own vertical border: the iframe's
+    // content then gets exactly the height it asked for, with no scrollbar.
+    const border = frame.offsetHeight - frame.clientHeight;
+    frame.style.height = (capped + border) + "px";
     log("<- size-changed height=" + h + (capped !== h ? " (capped to " + capped + ")" : ""));
     return;
   }

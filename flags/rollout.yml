@@ -43,6 +43,9 @@ flags:
     widget-recipe-card:
         default: false
         rules: []
+    widget-product-score:
+        default: false
+        rules: []
     flags-epoch:
         default: 1
         rules: []
