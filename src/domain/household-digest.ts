@@ -1,6 +1,7 @@
 import type { EffectiveFood, Food } from "./foods.js";
 import { familyOf, usualProductRows } from "./foods.js";
-import type { GroceryLine } from "./grocery.js";
+import { pickGroceryStore, type GroceryLine } from "./grocery.js";
+import type { GroceryPreferences, GroceryStore } from "./settings.js";
 import type { FridgeItem } from "./fridge.js";
 import {
     type DailyBucket,
@@ -666,11 +667,15 @@ export function usualsAtZeroForDigest(input: {
     items: readonly FridgeItem[];
     foods: readonly Food[];
     foodsById: ReadonlyMap<string, EffectiveFood>;
-    stores: readonly { id: string }[];
+    stores: readonly GroceryStore[];
+    lines?: readonly GroceryLine[];
+    groceryPreferences?: GroceryPreferences;
 }): HouseholdDigestUsualAtZero[] {
     const { rows } = usualProductRows({ foods: input.foods });
     const out: HouseholdDigestUsualAtZero[] = [];
-    const defaultStore = input.stores[0]?.id ?? "";
+    const familyById = new Map(
+        input.foods.map((food) => [food.id, familyOf(food)]),
+    );
     for (const row of rows) {
         if (!row.usual) continue;
         const effective = input.foodsById.get(row.food.id) ?? row.food;
@@ -681,8 +686,17 @@ export function usualsAtZeroForDigest(input: {
         const amount = effective.usualAmount?.amount ?? 1;
         const unit =
             effective.usualAmount?.unit ?? effective.defaultUnit ?? "each";
-        const storeId = effective.usualStoreId ?? defaultStore;
-        if (!storeId) continue;
+        // The same placement a restock line gets, so the two lists agree.
+        if (input.stores.length === 0) continue;
+        const { storeId } = pickGroceryStore({
+            chosenStoreId: null,
+            usualStoreId: effective.usualStoreId ?? null,
+            stores: [...input.stores],
+            lines: [...(input.lines ?? [])],
+            foodId: row.food.id,
+            familyById,
+            prefs: input.groceryPreferences,
+        });
         out.push({
             foodId: row.food.id,
             displayName: row.food.name,

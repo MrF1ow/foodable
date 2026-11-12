@@ -1,4 +1,8 @@
 import {
+    GROCERY_DEFAULT_STORE_KEY,
+    GROCERY_USE_USUAL_STORE_KEY,
+    SettingsInputError,
+    groceryPreferencesFromJson,
     grocerySectionFromRow,
     grocerySectionToRow,
     groceryStoreFromRow,
@@ -58,6 +62,70 @@ export function liveSettingsStore(): SettingsStore {
                     `;
                 } catch (err) {
                     throw pgError("save household location", err);
+                }
+            });
+        },
+        async getGroceryPreferences(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<{ prefs: unknown }>(
+                        tx,
+                        tx`
+                            select household_preferences as prefs
+                            from ${tx.unsafe(HOUSEHOLDS)}
+                            where id = ${householdId}
+                        `,
+                        "load grocery preferences",
+                    );
+                    return groceryPreferencesFromJson(data?.prefs);
+                } catch (err) {
+                    throw pgError("load grocery preferences", err);
+                }
+            });
+        },
+        async setGroceryPreferences(householdId, prefs) {
+            return run(async (tx) => {
+                try {
+                    if (prefs.defaultStoreId !== null) {
+                        const known = await maybeOne<{ id: unknown }>(
+                            tx,
+                            tx`
+                                select id
+                                from ${tx.unsafe(GROCERY_STORES)}
+                                where id = ${prefs.defaultStoreId}
+                                  and household_id = ${householdId}
+                            `,
+                            "check default store",
+                        );
+                        if (!known)
+                            throw new SettingsInputError("Unknown store.");
+                    }
+                    const data = await maybeOne<{ prefs: unknown }>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(HOUSEHOLDS)}
+                            set household_preferences =
+                                (coalesce(household_preferences, '{}'::jsonb)
+                                    - ${GROCERY_DEFAULT_STORE_KEY}::text)
+                                || jsonb_strip_nulls(jsonb_build_object(
+                                    ${GROCERY_DEFAULT_STORE_KEY}::text,
+                                    ${prefs.defaultStoreId}::text
+                                ))
+                                || jsonb_build_object(
+                                    ${GROCERY_USE_USUAL_STORE_KEY}::text,
+                                    ${prefs.useUsualStore}::boolean
+                                )
+                            where id = ${householdId}
+                            returning household_preferences as prefs
+                        `,
+                        "save grocery preferences",
+                    );
+                    if (!data)
+                        throw new SettingsInputError("Unknown household.");
+                    return groceryPreferencesFromJson(data.prefs);
+                } catch (err) {
+                    if (err instanceof SettingsInputError) throw err;
+                    throw pgError("save grocery preferences", err);
                 }
             });
         },

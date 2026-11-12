@@ -15,6 +15,7 @@ import {
 } from "./foods.js";
 import { storedFoodUnit } from "./food-quantity.js";
 import type {
+    GroceryPreferences,
     GrocerySection,
     GroceryStore,
     SettingsStore,
@@ -47,7 +48,12 @@ export type GroceryKind = "food" | "supply";
 
 export type GroceryQuantity = { amount: number; unit: string };
 
-export type GroceryStorePickReason = "chosen" | "usual" | "list" | "default";
+/**
+ * `preferred` is the household's saved default store; `default` is the
+ * first-store fallback when nothing else decided.
+ */
+export type GroceryStorePickReason =
+    "chosen" | "usual" | "list" | "preferred" | "default";
 export type GroceryAmountPickReason = "chosen" | "usual" | "default";
 
 export type GroceryLine = {
@@ -522,6 +528,13 @@ export function pickGroceryStore(input: {
     lines: GroceryLine[];
     foodId: string | null;
     familyById?: ReadonlyMap<string, string>;
+    /**
+     * Household preferences. A saved default store always beats the first-store
+     * fallback; with `useUsualStore: true` it also beats the list history,
+     * coming right after the food's usual store. With no default store saved,
+     * the pick is what it always was.
+     */
+    prefs?: GroceryPreferences;
 }): { storeId: string; reason: GroceryStorePickReason } {
     const chosen = input.chosenStoreId?.trim();
     if (chosen) {
@@ -531,6 +544,12 @@ export function pickGroceryStore(input: {
     const usual = input.usualStoreId;
     if (usual && idSet.has(usual)) {
         return { storeId: usual, reason: "usual" };
+    }
+    const savedDefault = input.prefs?.defaultStoreId ?? null;
+    const preferred =
+        savedDefault && idSet.has(savedDefault) ? savedDefault : null;
+    if (preferred && input.prefs?.useUsualStore) {
+        return { storeId: preferred, reason: "preferred" };
     }
     if (input.foodId) {
         const fam = familyFromMap(input.foodId, input.familyById);
@@ -542,6 +561,9 @@ export function pickGroceryStore(input: {
                 return { storeId: line.storeId, reason: "list" };
             }
         }
+    }
+    if (preferred) {
+        return { storeId: preferred, reason: "preferred" };
     }
     if (input.stores.length === 0) {
         throw new GroceryInputError("Add a store first.");
@@ -931,6 +953,9 @@ export async function addGroceryFoodById(
                     lines,
                     foodId: food.id,
                     familyById,
+                    prefs: await settings.getGroceryPreferences(
+                        input.householdId,
+                    ),
                 });
                 storeId = p.storeId;
                 storeReason = p.reason;
@@ -1059,6 +1084,9 @@ export async function addGroceryFoodByBarcode(
                     lines,
                     foodId: food.id,
                     familyById,
+                    prefs: await settings.getGroceryPreferences(
+                        input.householdId,
+                    ),
                 });
                 storeId = p.storeId;
                 storeReason = p.reason;
@@ -1186,6 +1214,9 @@ export async function addGroceryManualFood(
                     lines,
                     foodId: food.id,
                     familyById,
+                    prefs: await settings.getGroceryPreferences(
+                        input.householdId,
+                    ),
                 });
                 storeId = p.storeId;
                 storeReason = p.reason;
@@ -1334,6 +1365,9 @@ export async function addGrocerySupply(
                     lines,
                     foodId: food.id,
                     familyById,
+                    prefs: await settings.getGroceryPreferences(
+                        input.householdId,
+                    ),
                 });
                 storeId = p.storeId;
                 storeReason = p.reason;

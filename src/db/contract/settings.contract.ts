@@ -24,6 +24,37 @@ export function runSettingsStoreContract(
             expect(await store.getLocation(c.householdId)).toBeNull();
         });
 
+        test("grocery preferences default off and round-trip", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            expect(await store.getGroceryPreferences(c.householdId)).toEqual({
+                defaultStoreId: null,
+                useUsualStore: false,
+            });
+            const row = sampleGroceryStoreRow(c, { name: "Pref" });
+            await store.insertStore(row);
+            const saved = await store.setGroceryPreferences(c.householdId, {
+                defaultStoreId: row.id,
+                useUsualStore: true,
+            });
+            expect(saved).toEqual({
+                defaultStoreId: row.id,
+                useUsualStore: true,
+            });
+            expect(await store.getGroceryPreferences(c.householdId)).toEqual(
+                saved,
+            );
+            await store.setGroceryPreferences(c.householdId, {
+                defaultStoreId: null,
+                useUsualStore: false,
+            });
+            expect(await store.getGroceryPreferences(c.householdId)).toEqual({
+                defaultStoreId: null,
+                useUsualStore: false,
+            });
+        });
+
         test("listStores and insertStore sort order", async () => {
             await reset();
             const c = ctx();

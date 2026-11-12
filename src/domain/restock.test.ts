@@ -16,7 +16,11 @@ import {
     type NoticesForDeps,
 } from "./notices-for.js";
 import { noticeCodeDismissible, noticeSentence } from "../copy/notices.js";
-import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
+import {
+    createGroceryStore,
+    createMemorySettingsStore,
+    type GroceryPreferences,
+} from "./settings.js";
 import { createMemoryRecipesStore } from "./recipes.js";
 import { renderGroceryPage } from "../web/pages/grocery.js";
 import {
@@ -76,6 +80,9 @@ async function planForEggs(
         usualStoreId?: string;
         usualAmount?: { amount: number; unit: string };
         productName?: string;
+        /** `defaultStoreId: "second"` stands for the store made by `secondStore`. */
+        groceryPreferences?: GroceryPreferences;
+        secondStore?: boolean;
     },
 ) {
     const foods = createMemoryFoodsStore();
@@ -98,7 +105,13 @@ async function planForEggs(
             usualAmount: opts?.usualAmount ?? plain.usualAmount,
         }),
     );
-    const { store, sections } = await seedCostco();
+    const { settings, store, sections: costcoSections } = await seedCostco();
+    const second = opts?.secondStore
+        ? await createGroceryStore(settings, HH, "Aldi")
+        : undefined;
+    const sections = second
+        ? [...costcoSections, ...(await settings.listSections(second.id))]
+        : costcoSections;
     const eff = await effectiveFoodsByIds(foods, HH, [plain.id, kirkland.id]);
     const items: FridgeItem[] = [
         fridgeFood({
@@ -120,17 +133,39 @@ async function planForEggs(
             dismissedBy: "u1",
         });
     }
-    return restockPlan({
+    const plan = restockPlan({
         items,
         foodsById: eff,
         lines: opts?.lines ?? [],
         dismissed: dismissedKeySet(await dismissals.listForHousehold(HH)),
         today: TODAY,
-        stores: [store],
+        stores: second ? [store, second] : [store],
         sections,
         householdId: HH,
+        groceryPreferences:
+            opts?.groceryPreferences?.defaultStoreId === "second"
+                ? { ...opts.groceryPreferences, defaultStoreId: second!.id }
+                : opts?.groceryPreferences,
     });
+    return { ...plan, firstStoreId: store.id, secondStoreId: second?.id };
 }
+
+test("restockPlan places a food with no usual store at the default store, switch on or off", async () => {
+    const run = (useUsualStore: boolean) =>
+        planForEggs(addDays(TODAY, 3), {
+            secondStore: true,
+            groceryPreferences: { defaultStoreId: "second", useUsualStore },
+        });
+    const off = await run(false);
+    const on = await run(true);
+    expect(off.lines).toHaveLength(1);
+    expect(on.lines).toHaveLength(1);
+    expect(off.lines[0]!.storeId).toBe(off.secondStoreId!);
+    expect(on.lines[0]!.storeId).toBe(on.secondStoreId!);
+    // With no default saved it is still the first store.
+    const none = await planForEggs(addDays(TODAY, 3), { secondStore: true });
+    expect(none.lines[0]!.storeId).toBe(none.firstStoreId);
+});
 
 test("restockPlan adds item expiring in 3 days", async () => {
     const { lines } = await planForEggs(addDays(TODAY, 3));

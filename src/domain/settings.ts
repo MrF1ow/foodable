@@ -27,9 +27,48 @@ export type GrocerySection = {
     isOther: boolean;
 };
 
+/** Keys in `households.household_preferences`; flat, dotted names. */
+export const GROCERY_DEFAULT_STORE_KEY = "grocery.default_store_id";
+export const GROCERY_USE_USUAL_STORE_KEY = "grocery.use_usual_store";
+
+/**
+ * How a grocery line with no store of its own picks one. `defaultStoreId` is
+ * the household's preferred store: it replaces the first-store fallback, and
+ * with `useUsualStore` on it also comes before the list history. Unset (the
+ * default), placement is exactly what it was before these preferences existed.
+ */
+export type GroceryPreferences = {
+    defaultStoreId: string | null;
+    useUsualStore: boolean;
+};
+
+export const DEFAULT_GROCERY_PREFERENCES: GroceryPreferences = {
+    defaultStoreId: null,
+    useUsualStore: false,
+};
+
+/** Reads the two keys out of a stored preferences object; anything else is ignored. */
+export function groceryPreferencesFromJson(raw: unknown): GroceryPreferences {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+        return { ...DEFAULT_GROCERY_PREFERENCES };
+    }
+    const record = raw as Record<string, unknown>;
+    const id = record[GROCERY_DEFAULT_STORE_KEY];
+    return {
+        defaultStoreId: typeof id === "string" && id.trim() ? id.trim() : null,
+        useUsualStore: record[GROCERY_USE_USUAL_STORE_KEY] === true,
+    };
+}
+
 export type SettingsStore = {
     getLocation(householdId: string): Promise<string | null>;
     setLocation(householdId: string, location: string | null): Promise<void>;
+    getGroceryPreferences(householdId: string): Promise<GroceryPreferences>;
+    /** Writes both preferences. A default store of another household is rejected. */
+    setGroceryPreferences(
+        householdId: string,
+        prefs: GroceryPreferences,
+    ): Promise<GroceryPreferences>;
     listStores(householdId: string): Promise<GroceryStore[]>;
     insertStore(row: GroceryStore): Promise<GroceryStore>;
     listSections(storeId: string): Promise<GrocerySection[]>;
@@ -47,12 +86,62 @@ export class SettingsInputError extends Error {
     }
 }
 
-export function createMemorySettingsStore(): SettingsStore {
+/**
+ * The memory store also exposes the two store writes that the live adapter
+ * does inside one transaction with the grocery lines (`src/db/grocery-stores.ts`),
+ * so `createMemoryStoreManagement` can compose them.
+ */
+export type MemorySettingsStore = SettingsStore & {
+    __removeStore(householdId: string, storeId: string): boolean;
+    __setStoreOrder(householdId: string, orderedIds: string[]): void;
+};
+
+export function createMemorySettingsStore(): MemorySettingsStore {
     const locations = new Map<string, string | null>();
+    const preferences = new Map<string, GroceryPreferences>();
     const stores: GroceryStore[] = [];
     const sections: GrocerySection[] = [];
 
     return {
+        async getGroceryPreferences(householdId) {
+            return {
+                ...(preferences.get(householdId) ??
+                    DEFAULT_GROCERY_PREFERENCES),
+            };
+        },
+        async setGroceryPreferences(householdId, prefs) {
+            if (
+                prefs.defaultStoreId !== null &&
+                !stores.some(
+                    (row) =>
+                        row.id === prefs.defaultStoreId &&
+                        row.householdId === householdId,
+                )
+            ) {
+                throw new SettingsInputError("Unknown store.");
+            }
+            preferences.set(householdId, { ...prefs });
+            return { ...prefs };
+        },
+        __removeStore(householdId, storeId) {
+            const idx = stores.findIndex(
+                (row) => row.id === storeId && row.householdId === householdId,
+            );
+            if (idx < 0) return false;
+            stores.splice(idx, 1);
+            for (let i = sections.length - 1; i >= 0; i--) {
+                if (sections[i]!.storeId === storeId) sections.splice(i, 1);
+            }
+            return true;
+        },
+        __setStoreOrder(householdId, orderedIds) {
+            orderedIds.forEach((id, index) => {
+                const row = stores.find(
+                    (r) => r.id === id && r.householdId === householdId,
+                );
+                if (row) row.sortOrder = index;
+            });
+        },
         async getLocation(householdId) {
             return locations.has(householdId)
                 ? (locations.get(householdId) ?? null)
