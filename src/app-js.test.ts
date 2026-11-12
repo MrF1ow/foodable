@@ -29,10 +29,24 @@ function shellPage(
     });
 }
 
+/** Inline script bodies, read with an HTML parser rather than a tag regex. */
 function scriptBodies(html: string): string[] {
-    return [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
-        .map((m) => (m[2] ?? "").trim())
-        .filter((body) => body.length > 0);
+    const bodies: string[] = [];
+    let current = "";
+    new HTMLRewriter()
+        .on("script", {
+            element(el) {
+                current = "";
+                el.onEndTag(() => {
+                    bodies.push(current.trim());
+                });
+            },
+            text(chunk) {
+                current += chunk.text;
+            },
+        })
+        .transform(html);
+    return bodies.filter((body) => body.length > 0);
 }
 
 test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
