@@ -371,7 +371,8 @@ logRoutes.get(
             );
         }
 
-        const q = c.req.query("q") ?? "";
+        // Postgres text cannot hold NUL; a typed-in one would fail the query.
+        const q = (c.req.query("q") ?? "").replaceAll("\u0000", "");
         const limit = parseLimit(c.req.query("limit"));
         const online = c.req.query("online") === "1";
         const profile = await getProfile(member.userId);
