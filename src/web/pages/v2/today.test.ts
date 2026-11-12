@@ -14,6 +14,7 @@ import {
     buildPreviewTodayPageData,
     buildPreviewTodayView,
     buildPreviewTodayViewWithRail,
+    buildPreviewTodayViewWithSuggestions,
     buildPreviewTodayViewWithYesterdayHint,
     parseTodayDateParam,
     renderTodayBody,
@@ -414,6 +415,185 @@ describe("renderTodayV2Page", () => {
     test("copy-yesterday hint hidden when slot has rows", () => {
         const html = String(renderTodayBody(data));
         expect(html).not.toContain("fd-today-yesterday");
+    });
+});
+
+describe("empty slot suggestions", () => {
+    const today = "2026-11-10";
+    const data = buildPreviewTodayPageData(
+        {
+            theme: "light",
+            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+            attention: { count: 0, tabs: {} },
+        },
+        today,
+    );
+
+    test("an empty slot shows the recipe that fits, linked to it", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        const html = String(renderTodayBody({ ...data, view }));
+        expect(html).toContain(
+            '<a class="fd-today-suggest" href="/recipes/r-salmon-rice">Salmon &amp; rice fits · uses 2 things expiring</a>',
+        );
+        // It replaces "Nothing yet" in the dinner row.
+        const dinner = html.slice(
+            html.indexOf('id="fd-today-dinner"'),
+            html.indexOf('id="fd-today-snack"'),
+        );
+        expect(dinner).not.toContain("Nothing yet");
+    });
+
+    test("it follows the copy-yesterday hint in the same slot", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        view.slotSuggestions = { breakfast: view.slotSuggestions.dinner! };
+        const html = String(renderTodayBody({ ...data, view }));
+        const breakfast = html.slice(
+            html.indexOf('id="fd-today-breakfast"'),
+            html.indexOf('id="fd-today-lunch"'),
+        );
+        const yesterday = breakfast.indexOf("fd-today-yesterday");
+        const suggest = breakfast.indexOf("fd-today-suggest");
+        expect(yesterday).toBeGreaterThan(-1);
+        expect(suggest).toBeGreaterThan(yesterday);
+    });
+
+    test("at most two lines, one per suggestion", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        const [first] = view.slotSuggestions.dinner!;
+        view.slotSuggestions = {
+            dinner: [
+                first!,
+                {
+                    ...first!,
+                    recipeId: "r2",
+                    name: "Rice bowl",
+                    usesExpiring: [],
+                },
+            ],
+        };
+        const html = String(renderTodayBody({ ...data, view }));
+        expect(html.match(/class="fd-today-suggest"/g)).toHaveLength(2);
+        expect(html).toContain("Rice bowl fits</a>");
+        expect(html).toContain("Salmon &amp; rice fits · uses 2 things");
+    });
+
+    test("one expiring item reads in the singular", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        const [first] = view.slotSuggestions.dinner!;
+        view.slotSuggestions = {
+            dinner: [
+                { ...first!, usesExpiring: first!.usesExpiring.slice(0, 1) },
+            ],
+        };
+        expect(String(renderTodayBody({ ...data, view }))).toContain(
+            "uses 1 thing expiring",
+        );
+    });
+
+    test("a slot with nothing that fits shows only Nothing yet", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        view.slotSuggestions = {};
+        const html = String(renderTodayBody({ ...data, view }));
+        expect(html).not.toContain("fd-today-suggest");
+        expect(html).toContain("Nothing yet");
+    });
+
+    test("a slot with meals never shows one", () => {
+        const view = buildPreviewTodayView(today);
+        // Breakfast has meals in the base fixture.
+        view.slotSuggestions = {
+            breakfast:
+                buildPreviewTodayViewWithSuggestions(today).slotSuggestions
+                    .dinner!,
+        };
+        expect(String(renderTodayBody({ ...data, view }))).not.toContain(
+            "fd-today-suggest",
+        );
+    });
+
+    test("a peer's day shows none", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        const peer = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+                subjectLabel: "Sam",
+            },
+            today,
+        );
+        expect(String(renderTodayBody({ ...peer, view }))).not.toContain(
+            "fd-today-suggest",
+        );
+    });
+});
+
+describe("Use soon recipe lines", () => {
+    const today = "2026-11-10";
+    const chrome = {
+        theme: "light" as const,
+        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+        attention: { count: 0, tabs: {} },
+    };
+
+    test("each expiring item with a recipe shows Use in", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        const rail = String(
+            renderTodayRail({
+                ...buildPreviewTodayPageData(chrome, today),
+                view,
+            }),
+        );
+        expect(rail.match(/<a class="fd-today-rail-row__use"/g)).toHaveLength(
+            2,
+        );
+        expect(rail).toContain(
+            '<a class="fd-today-rail-row__use" href="/recipes/r-salmon-rice">Use in: Salmon &amp; rice</a>',
+        );
+    });
+
+    test("an item no recipe uses has no line", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        view.useSoonUses = view.useSoonUses.map((use, i) =>
+            i === 0 ? { ...use, recipes: [] } : use,
+        );
+        const rail = String(
+            renderTodayRail({
+                ...buildPreviewTodayPageData(chrome, today),
+                view,
+            }),
+        );
+        expect(rail.match(/<a class="fd-today-rail-row__use"/g)).toHaveLength(
+            1,
+        );
+    });
+
+    test("no recipes at all leaves the rail as it was", () => {
+        const view = buildPreviewTodayViewWithRail(today);
+        const rail = String(
+            renderTodayRail({
+                ...buildPreviewTodayPageData(chrome, today),
+                view,
+            }),
+        );
+        expect(rail).not.toContain("Use in:");
+        expect(rail).not.toContain("fd-today-useall");
+    });
+
+    test("the card for a recipe using several items links to its cook step", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        const rail = String(
+            renderTodayRail({
+                ...buildPreviewTodayPageData(chrome, today),
+                view,
+            }),
+        );
+        expect(rail).toContain("Uses both");
+        expect(rail).toContain("25 min · 640 kcal per serving");
+        expect(rail).toContain(
+            'href="/recipes/r-salmon-rice#fd-recipe-cook-heading">Cook it</a>',
+        );
+        expect(rail).not.toContain("Plan");
     });
 });
 

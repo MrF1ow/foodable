@@ -6,6 +6,7 @@ import {
 } from "../../../domain/fridge.js";
 import type { Food } from "../../../domain/foods.js";
 import type { GroceryLine } from "../../../domain/grocery.js";
+import type { ExpiringUse } from "../../../domain/suggestions.js";
 import {
     daysUntilExpiry,
     expiryLevel,
@@ -49,6 +50,8 @@ export type KitchenFridgeV2View = FridgeSnapshot & {
     chrome: AppChromeBase;
     today: string;
     foodsById?: ReadonlyMap<string, KitchenFridgeFoodMeta>;
+    /** For each expiring item, the recipes that use it (Use soon lines). */
+    useSoonUses?: readonly ExpiringUse[];
     error?: string;
     openItemId?: string;
     openAdd?: boolean;
@@ -190,6 +193,9 @@ function useSoonStrip(view: KitchenFridgeV2View): string {
         .slice(0, Math.max(0, 5 - primary.length));
     const items = [...primary, ...extra];
     if (items.length === 0) return "";
+    const usesByItem = new Map(
+        (view.useSoonUses ?? []).map((use) => [use.item.id, use.recipes[0]]),
+    );
     const cards = items
         .map((item, index) => {
             const desktopOnly =
@@ -204,10 +210,14 @@ function useSoonStrip(view: KitchenFridgeV2View): string {
                 item.quantity.amount,
                 item.quantity.unit,
             );
+            const recipe = usesByItem.get(item.id);
+            const useIn = recipe
+                ? `<span class="fd-kitchen-use-card__use">Use in: ${esc(recipe.name)}</span>`
+                : "";
             return `<button type="button" class="fd-kitchen-use-card${desktopOnly}" commandfor="${esc(sheetId)}" command="show-modal" data-sheet-id="${esc(sheetId)}">
 <span class="fd-kitchen-use-card__when ${expiryToneClass(level)}">${esc(when)}</span>
 <span class="fd-kitchen-use-card__title">${esc(item.displayName)}</span>
-<span class="fd-kitchen-use-card__meta">${esc(qty)}</span>
+<span class="fd-kitchen-use-card__meta">${esc(qty)}</span>${useIn}
 </button>`;
         })
         .join("");
