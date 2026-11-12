@@ -1590,6 +1590,17 @@ export async function renderHouseholdMemberRoute(
             html: renderBarePage("Not found", emptyState("Page not found.")),
         };
     }
+    // A non-uuid id names no member and would fail the uuid cast (a 500).
+    if (
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+            memberUserId,
+        )
+    ) {
+        return {
+            status: 404,
+            html: renderBarePage("Not found", emptyState("Page not found.")),
+        };
+    }
     const target = await getHouseholdMembership(memberUserId);
     if (target == null || target.householdId !== gate.viewer.householdId) {
         return { status: 403, html: forbiddenDashboardHtml() };

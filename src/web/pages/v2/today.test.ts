@@ -26,6 +26,19 @@ import {
 } from "./today-rail.js";
 
 describe("parseTodayDateParam", () => {
+    test("a year outside 1970-2999 falls back to today", () => {
+        // 9999-12-31's next day is in year 10000, which broke the day maths.
+        expect(parseTodayDateParam("9999-12-31", "2026-11-10")).toBe(
+            "2026-11-10",
+        );
+        expect(parseTodayDateParam("0100-01-01", "2026-11-10")).toBe(
+            "2026-11-10",
+        );
+        expect(parseTodayDateParam("2026-03-01", "2026-11-10")).toBe(
+            "2026-03-01",
+        );
+    });
+
     test("invalid date falls back to today", () => {
         expect(parseTodayDateParam("2026-02-30", "2026-11-10")).toBe(
             "2026-11-10",

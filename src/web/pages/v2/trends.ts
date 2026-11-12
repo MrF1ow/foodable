@@ -82,6 +82,8 @@ export function parseTrendsMonthParam(
     const year = Number(s.slice(0, 4));
     const month = Number(s.slice(5, 7));
     if (month < 1 || month > 12) return fallback;
+    // Same window as the Today date: older years break the range arithmetic.
+    if (year < 1970 || year > 2999) return fallback;
     const dt = new Date(Date.UTC(year, month - 1, 1));
     if (dt.getUTCFullYear() !== year || dt.getUTCMonth() + 1 !== month) {
         return fallback;

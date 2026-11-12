@@ -132,8 +132,8 @@ describe("today meal routes", () => {
 
     test("cannot edit another member's meal", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
-        mealStore.set("m-bob", {
-            id: "m-bob",
+        mealStore.set("00000000-0000-4000-8000-0000000000b0", {
+            id: "00000000-0000-4000-8000-0000000000b0",
             user_id: BOB,
             description: "Bob meal",
             meal_type: "lunch",
@@ -150,21 +150,42 @@ describe("today meal routes", () => {
             idempotency_key: null,
             items: [],
         });
-        const res = await hono.request("http://test/meals/m-bob/edit", {
-            method: "POST",
-            headers: {
-                cookie: cookie(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
+        const res = await hono.request(
+            "http://test/meals/00000000-0000-4000-8000-0000000000b0/edit",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookie(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "meal_type=lunch&logged_time=12:00&date=2026-03-01&return_to=/",
             },
-            body: "meal_type=lunch&logged_time=12:00&date=2026-03-01&return_to=/",
-        });
+        );
         expect(res.status).toBe(404);
+    });
+
+    test("a non-uuid meal id is 404, not a uuid-cast 500", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        for (const action of ["edit", "delete"]) {
+            const res = await hono.request(
+                `http://test/meals/not-a-uuid/${action}`,
+                {
+                    method: "POST",
+                    headers: {
+                        cookie: cookie(ALICE),
+                        "content-type": "application/x-www-form-urlencoded",
+                    },
+                    body: "return_to=/&date=2026-03-01",
+                },
+            );
+            expect(res.status).toBe(404);
+        }
     });
 
     test("delete keeps toast and both undo cookies", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
-        mealStore.set("m-del", {
-            id: "m-del",
+        mealStore.set("00000000-0000-4000-8000-0000000000d1", {
+            id: "00000000-0000-4000-8000-0000000000d1",
             user_id: ALICE,
             description: "Eggs",
             meal_type: "breakfast",
@@ -181,14 +202,17 @@ describe("today meal routes", () => {
             idempotency_key: "auto:del",
             items: [],
         });
-        const res = await hono.request("http://test/meals/m-del/delete", {
-            method: "POST",
-            headers: {
-                cookie: cookie(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
+        const res = await hono.request(
+            "http://test/meals/00000000-0000-4000-8000-0000000000d1/delete",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookie(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "return_to=/?date=2026-03-01&date=2026-03-01",
             },
-            body: "return_to=/?date=2026-03-01&date=2026-03-01",
-        });
+        );
         expect(res.status).toBe(303);
         const setCookies = res.headers.getSetCookie();
         expect(setCookies.some((c) => c.startsWith(`${TOAST_COOKIE}=`))).toBe(
@@ -205,7 +229,7 @@ describe("today meal routes", () => {
 
     test("undo POST restores meal from delete cookies", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
-        const id = "m-undo-http";
+        const id = "00000000-0000-4000-8000-0000000000e2";
         const key = "auto:undo-http";
         mealStore.set(id, {
             id,

@@ -33,6 +33,7 @@ import { itemListDigest } from "../../domain/meals.js";
 import { dateInTz } from "../../domain/tz.js";
 import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
 import { nutritionRoutes } from "./nutrition.js";
+import { logRoutes } from "./log.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
 import { TOAST_COOKIE } from "../components/toast.js";
 import { UNDO_COOKIE } from "../../domain/meal-undo.js";
@@ -1276,5 +1277,32 @@ describeDb(pgAvailable !== null, "council r3 meal edit", (getCtx) => {
             item_digest: relog.item_digest,
         });
         expect(again.deduplicated).toBe(true);
+    });
+    test("hand-edited input on real Postgres is 404 / 200, not a 500", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const app = new Hono();
+        app.route("/", nutritionRoutes);
+        app.route("/", logRoutes);
+        const cookie = `${SITE_COOKIE}=${mintSiteSession(userId)}`;
+        // A non-uuid meal id used to reach the uuid cast in getMealById.
+        for (const action of ["edit", "delete"]) {
+            const res = await app.request(
+                `http://test/meals/not-a-uuid/${action}`,
+                {
+                    method: "POST",
+                    headers: {
+                        cookie,
+                        "content-type": "application/x-www-form-urlencoded",
+                    },
+                    body: "return_to=/&date=2026-03-01",
+                },
+            );
+            expect(res.status).toBe(404);
+        }
+        // Postgres text cannot hold NUL; searchMeals used to throw on it.
+        const search = await app.request("http://test/api/log/search?q=a%00b", {
+            headers: { cookie },
+        });
+        expect(search.status).toBe(200);
     });
 });
