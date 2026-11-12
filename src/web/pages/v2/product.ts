@@ -20,10 +20,11 @@ import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { APP_PATHS } from "../../route-map.js";
 import { formatBarcodeDisplay } from "./format-barcode-display.js";
 import {
-    buildProductNutritionTable,
     PRODUCT_MACRO_ROWS,
-    servingBasisLabel,
+    productNutrition,
     servingGramsForFood,
+    subtitleServingLabel,
+    type ProductNutritionHead,
     type ProductNutritionTable,
 } from "./product-nutrition.js";
 import type { ProductScoreSection } from "./product-score.js";
@@ -43,7 +44,7 @@ export type ProductPageView = {
     barcodes: string[];
     stock: ProductStockLine[];
     nutrition: ProductNutritionTable;
-    servingLabel: string | null;
+    nutritionHead: ProductNutritionHead;
     score: ProductScoreSection | null;
     backHref: string;
     error?: string;
@@ -131,10 +132,17 @@ export function productLogPickPayload(
     };
 }
 
+function productNutritionView(
+    food: Food,
+): Pick<ProductPageView, "nutrition" | "nutritionHead"> {
+    const { table, head } = productNutrition(food);
+    return { nutrition: table, nutritionHead: head };
+}
+
 function productSubtitle(food: Food, barcodes: string[]): string {
     const bits: string[] = [];
     if (food.brand?.trim()) bits.push(food.brand.trim());
-    const serving = servingBasisLabel(food);
+    const serving = subtitleServingLabel(food);
     if (serving) bits.push(serving);
     const code = barcodes[0];
     if (code) bits.push(formatBarcodeDisplay(code));
@@ -154,26 +162,32 @@ function productTopBar(backHref: string): string {
 </header>`;
 }
 
+/** "Per portion" over "30 ml"; a screen reader hears "Per portion · 30 ml". */
+function servingHeadCell(serving: { name: string; amount: string | null }) {
+    if (serving.amount == null) return `<span>${esc(serving.name)}</span>`;
+    return `<span><span class="fd-product-nutrition__head-name">${esc(serving.name)}</span><span class="visually-hidden"> · </span><span class="fd-product-nutrition__head-amount">${esc(serving.amount)}</span></span>`;
+}
+
 function nutritionSection(view: ProductPageView): string {
-    const hasServing = view.servingLabel != null;
+    const { serving, per100, servingNote } = view.nutritionHead;
+    const hasServing = serving != null;
     const head = hasServing
-        ? `<div class="fd-product-nutrition__head"><span class="fd-product-nutrition__head-spacer" aria-hidden="true"></span><span>Per 100 g</span><span>Per serving</span></div>`
-        : `<div class="fd-product-nutrition__head fd-product-nutrition__head--one"><span class="fd-product-nutrition__head-spacer" aria-hidden="true"></span><span>Per 100 g</span></div>`;
+        ? `<div class="fd-product-nutrition__head"><span class="fd-product-nutrition__head-spacer" aria-hidden="true"></span>${servingHeadCell(serving)}<span>${esc(per100)}</span></div>`
+        : `<div class="fd-product-nutrition__head fd-product-nutrition__head--one"><span class="fd-product-nutrition__head-spacer" aria-hidden="true"></span><span>${esc(per100)}</span></div>`;
     const rowClass = hasServing
         ? "fd-product-nutrition__row"
         : "fd-product-nutrition__row fd-product-nutrition__row--one";
     const rows = PRODUCT_MACRO_ROWS.map((row) => {
         const col = view.nutrition[row.key];
-        const serving = hasServing
+        const lead = hasServing
             ? `<span class="fd-product-nutrition__val">${esc(col.perServing ?? "–")}</span>`
             : "";
-        return `<div class="${rowClass}"><span class="fd-product-nutrition__label">${esc(row.label)}</span><span class="fd-product-nutrition__val">${esc(col.per100g)}</span>${serving}</div>`;
+        return `<div class="${rowClass}"><span class="fd-product-nutrition__label">${esc(row.label)}</span>${lead}<span class="fd-product-nutrition__val">${esc(col.per100g)}</span></div>`;
     }).join("");
-    const servingNote =
-        hasServing && view.servingLabel
-            ? `<p class="fd-product-nutrition__serving">${esc(view.servingLabel)}</p>`
-            : "";
-    return `${String(sectionHeader({ title: "Nutrition", level: 2 }))}<section class="fd-product-nutrition" aria-label="Nutrition">${servingNote}${head}${rows}</section>`;
+    const note = servingNote
+        ? `<p class="fd-product-nutrition__serving">${esc(servingNote)}</p>`
+        : "";
+    return `${String(sectionHeader({ title: "Nutrition", level: 2 }))}<section class="fd-product-nutrition" aria-label="Nutrition">${note}${head}${rows}</section>`;
 }
 
 function stockSection(stock: ProductStockLine[]): string {
@@ -314,8 +328,7 @@ export async function loadProductPageData(
         food,
         barcodes,
         stock,
-        nutrition: buildProductNutritionTable(food),
-        servingLabel: servingBasisLabel(food),
+        ...productNutritionView(food),
         score,
         backHref,
     };
@@ -360,8 +373,7 @@ export function buildPreviewProductPageView(
         food,
         barcodes: opts.barcodes ?? [],
         stock: opts.stock ?? [],
-        nutrition: buildProductNutritionTable(food),
-        servingLabel: servingBasisLabel(food),
+        ...productNutritionView(food),
         score: opts.score ?? null,
         backHref: opts.backHref ?? PRODUCT_DEFAULT_BACK,
     };

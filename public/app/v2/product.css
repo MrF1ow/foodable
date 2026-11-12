@@ -171,8 +171,9 @@
 
 .fd-product-nutrition__head {
     display: grid;
-    grid-template-columns: 1fr minmax(4.5rem, auto) minmax(4.5rem, auto);
-    gap: 0 16px;
+    grid-template-columns: minmax(0, 1fr) 6.5rem 6.5rem;
+    gap: 0 12px;
+    align-items: end;
     padding: 0 0 var(--fd-s-2);
     border-bottom: 1px solid var(--line);
     font: 600 11px/14px var(--font-body);
@@ -185,6 +186,16 @@
     grid-template-columns: 1fr minmax(4.5rem, auto);
 }
 
+.fd-product-nutrition__head > span {
+    min-width: 0;
+    overflow-wrap: break-word;
+}
+
+.fd-product-nutrition__head-name,
+.fd-product-nutrition__head-amount {
+    display: block;
+}
+
 .fd-product-nutrition__head-spacer {
     display: block;
 }
@@ -195,8 +206,8 @@
 
 .fd-product-nutrition__row {
     display: grid;
-    grid-template-columns: 1fr minmax(4.5rem, auto) minmax(4.5rem, auto);
-    gap: 0 16px;
+    grid-template-columns: minmax(0, 1fr) 6.5rem 6.5rem;
+    gap: 0 12px;
     align-items: center;
     min-height: 43px;
     border-bottom: 1px solid var(--line);
