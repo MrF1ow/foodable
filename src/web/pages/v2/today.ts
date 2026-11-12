@@ -42,6 +42,7 @@ import { settingsErrorBanner } from "./settings-shared.js";
 import { goalName } from "./settings-goals-label.js";
 import {
     FD_LOG_SEARCH_SHEET_ID,
+    type CopyYesterdayOpts,
     type RenderLogSheetsOpts,
 } from "./log-sheet.js";
 import { FD_LOG_HREF } from "../../shell-v2.js";
@@ -728,6 +729,24 @@ export function renderTodayBody(data: TodayPageData): Html {
     );
 }
 
+/**
+ * The log sheet's Copy yesterday tile, on the days the Today prompt can show
+ * (the member's own today): the slots with a hint, and back to this page.
+ */
+function yesterdaySheetOpts(
+    data: TodayPageData,
+): CopyYesterdayOpts | undefined {
+    const hints = data.view.yesterdayCopy;
+    const viewingToday = data.view.week.days.some(
+        (day) => day.isToday && day.isSelected,
+    );
+    if (!hints || !viewingToday || isReadOnlyPeer(data)) return undefined;
+    return {
+        slots: Object.keys(hints),
+        returnTo: todayHref({ date: data.view.date, member: data.memberQuery }),
+    };
+}
+
 export function renderTodayV2Page(data: TodayPageData): string {
     return renderAppShell({
         ...data.chrome,
@@ -735,7 +754,10 @@ export function renderTodayV2Page(data: TodayPageData): string {
         active: "nutrition",
         v2Active: "today",
         v2Timezone: data.view.timezone,
-        v2LogSheet: data.logSheet,
+        v2LogSheet: {
+            ...data.logSheet,
+            copyYesterday: yesterdaySheetOpts(data),
+        },
         body: renderTodayBody(data),
     });
 }

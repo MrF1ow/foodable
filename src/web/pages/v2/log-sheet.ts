@@ -102,8 +102,20 @@ export type WeighInPrefill = {
     lastLoggedAt?: string | null;
 };
 
+/**
+ * The Quick grid's "Copy yesterday" tile: the slots whose yesterday meals can
+ * be copied (empty today, filled yesterday: the Today prompt's own rule) and
+ * the page to come back to. Only the member's own Today knows this, so every
+ * other page renders no tile.
+ */
+export type CopyYesterdayOpts = {
+    slots: readonly string[];
+    returnTo: string;
+};
+
 export type RenderLogSheetsOpts = {
     timezone: string;
+    copyYesterday?: CopyYesterdayOpts;
     /** Reopen the amount sheet after a validation error. */
     amountOpenOnLoad?: boolean;
     /** Reopen search (preview shots). */
@@ -295,14 +307,32 @@ function quickIconScale(): string {
     return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 20h12M7 20v-2h10v2M8.5 18V10a3.5 3.5 0 0 1 7 0v8"/><path d="M10 8h4"/></svg>`;
 }
 
-function quickActionsHtml(barcodeCamera: boolean): string {
+function quickIconCopy(): string {
+    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 9h10v11H9z"/><path d="M15 9V5H5v11h4"/></svg>`;
+}
+
+/**
+ * Posts to the route behind Today's "Same as yesterday?" prompt, so a repeat
+ * is the same idempotent write. Disabled (not hidden) while the chosen meal has
+ * nothing to copy; copy-yesterday.js re-points it when the meal changes.
+ */
+function copyYesterdayTile(copy: CopyYesterdayOpts, selected: string): string {
+    const disabled = copy.slots.includes(selected) ? "" : " disabled";
+    return `<form class="fd-quick-form" method="post" action="/log/copy-yesterday" data-fd-copy-yesterday data-fd-copy-yesterday-slots="${escapeHtml(copy.slots.join(" "))}"><input type="hidden" name="slot" value="${escapeHtml(selected)}" /><input type="hidden" name="return_to" value="${escapeHtml(copy.returnTo)}" /><button type="submit" class="fd-quick-tile" data-fd-copy-yesterday-button${disabled}><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconCopy()}</span><span class="fd-quick-tile__label">Copy yesterday</span></button></form>`;
+}
+
+function quickActionsHtml(
+    barcodeCamera: boolean,
+    copy?: CopyYesterdayOpts,
+    selectedMeal = "dinner",
+): string {
     const water = `<form class="fd-quick-form" method="post" action="${FD_LOG_WATER_POST}"><input type="hidden" name="amount_ml" value="250" /><input type="hidden" name="return_to" value="/" /><button type="submit" class="fd-quick-tile"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconWater()}</span><span class="fd-quick-tile__label">Water +250 ml</span></button></form>`;
     const cal = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_QUICK_CAL_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconBolt()}</span><span class="fd-quick-tile__label">Quick calories</span></button>`;
     const weight = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_WEIGH_IN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScale()}</span><span class="fd-quick-tile__label">Weigh in</span></button>`;
     const scan = barcodeCamera
         ? `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Scan barcode</span></button>`
         : `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Enter barcode</span></button>`;
-    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${cal}${water}${weight}${scan}</div>`;
+    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${cal}${water}${weight}${scan}${copy ? copyYesterdayTile(copy, selectedMeal) : ""}</div>`;
 }
 
 function macroField(
@@ -573,7 +603,7 @@ function logSearchSheet(opts: RenderLogSheetsOpts): string {
         ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.searchError)}</p>`
         : "";
     const cameraOn = opts.barcodeCamera !== false;
-    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">Recent</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml(cameraOn)}`;
+    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">Recent</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml(cameraOn, opts.copyYesterday, meal)}`;
     const resultsBody = showResults
         ? previewResultRows()
         : `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" data-fd-log-result-list></ul>`;

@@ -1112,19 +1112,48 @@
 }
 
 .fd-settings-ai__address {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin: 0;
-    padding: 14px;
+    padding: 13px 14px;
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
     background: var(--surface-bg);
 }
 
 .fd-settings-ai__address code {
-    display: block;
+    flex: 1 1 auto;
+    min-width: 0;
     font: 400 0.9375rem/1.3 var(--font-body);
     color: var(--text-primary);
     overflow-wrap: anywhere;
     user-select: all;
+}
+
+.fd-settings-ai__copy {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm, 8px);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.fd-settings-ai__copy:hover,
+.fd-settings-ai__copy:focus-visible {
+    color: var(--text-primary);
+}
+
+.fd-settings-ai__copy .fd-icon {
+    width: 24px;
+    height: 24px;
 }
 
 .fd-settings-ai__help {

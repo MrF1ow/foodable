@@ -167,7 +167,9 @@ describe("/app-v2.js", () => {
         // +~0.2 KB log search waits for a tap on touch screens.
         // +~2.9 KB Product score: presets move the sliders, sliders pick Custom.
         // +~3 KB Share link: copy the new link's address.
-        expect(js.length).toBeLessThan(122_500);
+        // +~1.9 KB Settings AI connections: copy the connect address.
+        // +~1.9 KB Log sheet: Copy yesterday tile follows the chosen meal.
+        expect(js.length).toBeLessThan(127_500);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

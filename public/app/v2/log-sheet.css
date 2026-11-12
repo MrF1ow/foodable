@@ -258,6 +258,12 @@
     line-height: 16px;
 }
 
+/* Copy yesterday while the chosen meal has nothing to copy. */
+.fd-quick-tile:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
 .fd-log-quick-cal-form,
 .fd-log-weigh-in-form {
     display: flex;

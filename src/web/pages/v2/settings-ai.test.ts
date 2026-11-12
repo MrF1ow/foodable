@@ -54,6 +54,16 @@ function render(
     });
 }
 
+function body(connections: AiConnection[], mcpUrl = MCP_URL) {
+    return renderSettingsAiV2Body({
+        chrome,
+        connections,
+        now: NOW,
+        timezone: "UTC",
+        mcpUrl,
+    });
+}
+
 describe("lastUsedText", () => {
     const at = (iso: string) => lastUsedText(new Date(iso), NOW, "UTC");
 
@@ -160,6 +170,7 @@ describe("settings AI connections page", () => {
             expect(await buttonLabels(html)).toEqual([
                 `Disconnect ${payload}`,
                 `Disconnect x ${payload}`,
+                "Copy address",
                 "Close",
                 "Close",
             ]);
@@ -219,6 +230,34 @@ describe("settings AI connections page", () => {
         const html = render([connection()]);
         expect(html).toContain("Connect a new agent");
         expect(html).toContain(MCP_URL);
+    });
+
+    test("the address has a copy button that names what it copies", () => {
+        const html = body([connection()]);
+        const button = html.match(
+            /<button[^>]*data-fd-copy-trigger[^>]*>[\s\S]*?<\/button>/,
+        );
+        expect(button).not.toBeNull();
+        expect(button![0]).toContain('type="button"');
+        expect(button![0]).toContain('aria-label="Copy address"');
+        expect(button![0]).toContain("<svg");
+        // The module reads the address from the code element beside it, and
+        // announces the result in a live region.
+        expect(html).toMatch(
+            /data-fd-copy-source[^>]*>https:\/\/food\.example\.test\/mcp</,
+        );
+        expect(html).toMatch(
+            /role="status"[^>]*aria-live="polite"[^>]*data-fd-copy-status|data-fd-copy-status[^>]*role="status"/,
+        );
+        // Markup only: the behaviour ships in /app.js, never inline.
+        expect(html).not.toContain("<script");
+        expect(html).not.toContain("onclick");
+    });
+
+    test("an address with markup characters stays inert beside the button", () => {
+        const html = body([], '"><img src=x onerror=alert(1)>');
+        expect(html).not.toContain("<img");
+        expect(html).toContain("data-fd-copy-trigger");
     });
 
     test("shows an error under the header", () => {

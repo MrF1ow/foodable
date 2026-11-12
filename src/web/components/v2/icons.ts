@@ -74,3 +74,8 @@ export function iconDrop(): Html {
 export function iconList(): Html {
     return icon('<path d="M9 8h6M9 12h6M9 16h3M5 4h14v16H5z"/>');
 }
+
+/** Copy glyph (FigCraft Icon/copy 23674): two overlapping pages, 16x16 in the 24 box. */
+export function iconCopy(): Html {
+    return icon('<path d="M9 9h10v11H9z"/><path d="M15 9V5H5v11h4"/>');
+}
