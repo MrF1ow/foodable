@@ -726,3 +726,43 @@ describe("control characters in a document", () => {
         expect(() => parseShareDocument(doc)).toThrow(/control character/);
     });
 });
+
+describe("nutrition basis in a document", () => {
+    test("a per-100 ml food ships its basis; per-100 g and unknown ship none", () => {
+        const cream = build(
+            recipe(),
+            [ingredient()],
+            foodsById(food({ nutritionBasis: "100ml" })),
+        );
+        expect(cream?.ingredients[0]!.food.nutrition_basis).toBe("100ml");
+        for (const nutritionBasis of [null, "100g"] as const) {
+            const doc = build(
+                recipe(),
+                [ingredient()],
+                foodsById(food({ nutritionBasis })),
+            );
+            expect("nutrition_basis" in doc!.ingredients[0]!.food).toBe(false);
+        }
+    });
+
+    test("a document with a basis parses; one without still does; a bad one is refused", () => {
+        const withBasis = build(
+            recipe(),
+            [ingredient()],
+            foodsById(food({ nutritionBasis: "100ml" })),
+        )!;
+        expect(
+            parseShareDocument(JSON.stringify(withBasis)).ingredients[0]!.food
+                .nutrition_basis,
+        ).toBe("100ml");
+        const old = build(recipe(), [ingredient()], foodsById(food()))!;
+        expect(
+            parseShareDocument(JSON.stringify(old)).ingredients[0]!.food
+                .nutrition_basis,
+        ).toBeUndefined();
+        const bad = structuredClone(withBasis);
+        (bad.ingredients[0]!.food as Record<string, unknown>).nutrition_basis =
+            "100oz";
+        expect(() => parseShareDocument(JSON.stringify(bad))).toThrow();
+    });
+});

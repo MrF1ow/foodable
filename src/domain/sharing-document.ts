@@ -6,7 +6,8 @@ import type { Recipe, RecipeIngredient } from "./recipes.js";
  * The portable recipe document: a shared recipe as versioned JSON that
  * another Foodable deploy can read (`GET /s/:token.json`). Pure: no database
  * import. It carries what a stranger needs to rebuild the recipe (its text,
- * the amounts, and each food's per-100 g nutrition and unit factors) and
+ * the amounts, and each food's per-100 nutrition, per 100 g unless it says
+ * per 100 ml, and unit factors) and
  * nothing of the household: no ids, no members, no notes, no source URL, no
  * brand or barcode.
  *
@@ -85,6 +86,9 @@ const foodSchema = z.object({
     caffeine_mg: nutrient,
     grams_per_ml: unitFactor,
     grams_per_each: unitFactor,
+    // What the nutrition above is per. Absent reads as per 100 g, which is what
+    // every document before this key meant; only "100ml" is ever written.
+    nutrition_basis: z.enum(["100g", "100ml"]).optional(),
 });
 
 const ingredientSchema = z
@@ -195,6 +199,7 @@ type DocumentFoodSource = Pick<
     | "caffeineMg"
     | "gramsPerMl"
     | "gramsPerEach"
+    | "nutritionBasis"
 >;
 
 const NO_FOOD: ShareDocumentFood = {
@@ -226,6 +231,11 @@ function foodBlock(food: DocumentFoodSource): ShareDocumentFood {
         caffeine_mg: food.caffeineMg,
         grams_per_ml: food.gramsPerMl,
         grams_per_each: food.gramsPerEach,
+        // Only a per-100 ml food says so: a document without the key is per
+        // 100 g, so those stay byte-identical to what older deploys wrote.
+        ...(food.nutritionBasis === "100ml"
+            ? { nutrition_basis: "100ml" as const }
+            : {}),
     };
 }
 

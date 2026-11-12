@@ -1,5 +1,9 @@
 import { isNamedAllergen, type NamedAllergen } from "./rules.js";
-import { normalizeBarcode, type FoodResult } from "../foods.js";
+import {
+    normalizeBarcode,
+    type FoodResult,
+    type NutritionBasis,
+} from "../foods.js";
 import { additiveRisk, type AdditiveRisk } from "./additive-risk.js";
 import { filterOffNutrientLevels } from "./off-nutrient-levels.js";
 import type { NutrientLevel } from "./product-score.js";
@@ -42,6 +46,15 @@ export type FoodQuality = {
     fetchedAt: string;
 };
 
+/** The serving a packaged food lists: its label as on the pack, and its size. */
+export type FoodServing = {
+    label: string;
+    amount: number;
+    unit: "g" | "ml";
+};
+
+export type { NutritionBasis };
+
 export type Food = {
     id: string;
     householdId: string;
@@ -52,6 +65,16 @@ export type Food = {
     defaultUnit: string;
     gramsPerEach: number | null;
     gramsPerMl: number | null;
+    /** The listed serving (OFF barcode foods); null when unknown. */
+    serving: FoodServing | null;
+    /**
+     * A label for what the per-100 columns below are per (100 g or 100 ml),
+     * as Open Food Facts reported them. Null is unknown and reads as per
+     * 100 g. It does not switch how anything reads them: meals and recipes
+     * still read the columns per 100 g, so a liquid's per-100 ml figures are
+     * read as per 100 g, as they were before the label was stored.
+     */
+    nutritionBasis: NutritionBasis | null;
     calories: number | null;
     proteinG: number | null;
     carbsG: number | null;
@@ -216,10 +239,59 @@ export type FoodsStore = {
     pluralsSameFood?(householdId: string): Promise<boolean>;
 };
 
+/**
+ * What an OFF refresh may fill on an existing food. Every scalar is written
+ * only where the stored value is null; `offNutrientLevels` replaces.
+ */
 export type FoodOffNutritionPatch = {
     saturatedFatG?: number;
     offNutrientLevels?: Record<string, NutrientLevel>;
+    serving?: FoodServing;
+    nutritionBasis?: NutritionBasis;
+    calories?: number;
+    proteinG?: number;
+    carbsG?: number;
+    fatG?: number;
+    fiberG?: number;
+    sugarG?: number;
+    alcoholG?: number;
 };
+
+/** The macros a refresh fills, patch key by `catalogNutritionFromOff` key. */
+const OFF_FILL_KEYS = [
+    "calories",
+    "proteinG",
+    "carbsG",
+    "fatG",
+    "fiberG",
+    "sugarG",
+    "alcoholG",
+] as const;
+
+/**
+ * Whether a food's nutrition basis may still be set from an OFF hit: its
+ * per-100 values are OFF's own or it holds none, never typed-in numbers.
+ */
+export function basisAdoptable(
+    food: Pick<
+        Food,
+        | "nutritionSource"
+        | "saturatedFatG"
+        | "calories"
+        | "proteinG"
+        | "carbsG"
+        | "fatG"
+        | "fiberG"
+        | "sugarG"
+        | "alcoholG"
+    >,
+): boolean {
+    return (
+        food.nutritionSource === "openfoodfacts" ||
+        (food.saturatedFatG == null &&
+            OFF_FILL_KEYS.every((key) => food[key] == null))
+    );
+}
 
 export class FoodsInputError extends Error {
     readonly code = "foods_input" as const;
@@ -376,14 +448,27 @@ export function catalogNutritionFromOff(food: FoodResult): {
     saturatedFatG: number | null;
     alcoholG: number | null;
 } {
+    // Fresh hits carry OFF's per-100 values whatever their top-level fields
+    // are per, so a per-serving product still gets per-100 nutrition. Older
+    // hits fall back to the top-level fields, usable only when per 100 g.
+    const per100 = food.per_100;
+    if (per100 != null) {
+        return {
+            calories: nonNegative(per100.calories),
+            proteinG: nonNegative(per100.protein_g),
+            carbsG: nonNegative(per100.carbs_g),
+            fatG: nonNegative(per100.fat_g),
+            fiberG: nonNegative(per100.fiber_g),
+            sugarG: nonNegative(per100.sugar_g),
+            saturatedFatG: nonNegative(per100.saturated_fat_g),
+            alcoholG: nonNegative(per100.alcohol_g),
+        };
+    }
     const serving = (food.serving ?? "")
         .trim()
         .toLowerCase()
         .replace(/\s+/g, "");
     if (serving === "100g") {
-        const saturatedRaw = food.saturated_fat_g ?? null;
-        const saturatedFatG =
-            saturatedRaw != null && saturatedRaw < 0 ? null : saturatedRaw;
         return {
             calories: food.calories,
             proteinG: food.protein_g,
@@ -391,7 +476,7 @@ export function catalogNutritionFromOff(food: FoodResult): {
             fatG: food.fat_g,
             fiberG: food.fiber_g,
             sugarG: food.sugar_g,
-            saturatedFatG,
+            saturatedFatG: nonNegative(food.saturated_fat_g ?? null),
             alcoholG: food.alcohol_g,
         };
     }
@@ -404,6 +489,92 @@ export function catalogNutritionFromOff(food: FoodResult): {
         sugarG: null,
         saturatedFatG: null,
         alcoholG: null,
+    };
+}
+
+// OFF occasionally carries a negative value; that is bad data, and the
+// columns refuse it.
+function nonNegative(value: number | null): number | null {
+    return value != null && value < 0 ? null : value;
+}
+
+/**
+ * The serving a hit lists: the label as on the pack, its amount, and g or ml.
+ * Null when there is no label, no positive amount, or the unit is anything
+ * else. Never converts between g and ml: that would need a density.
+ */
+export function servingFromOff(food: {
+    serving_size?: string | null;
+    serving_quantity?: number | null;
+    serving_quantity_unit?: string | null;
+}): FoodServing | null {
+    const label = (food.serving_size ?? "").trim();
+    if (!label) return null;
+    const amount = food.serving_quantity;
+    if (amount == null || !Number.isFinite(amount) || !(amount > 0)) {
+        return null;
+    }
+    const raw = (food.serving_quantity_unit ?? "").trim().toLowerCase();
+    let unit: "g" | "ml";
+    if (raw === "g" || raw === "gr" || raw === "gram" || raw === "grams") {
+        unit = "g";
+    } else if (raw === "ml") {
+        unit = "ml";
+    } else {
+        return null;
+    }
+    return { label, amount, unit };
+}
+
+/** The nutrition of one serving, derived from the per-100 columns. */
+export type FoodServingNutrition = {
+    calories: number | null;
+    proteinG: number | null;
+    carbsG: number | null;
+    fatG: number | null;
+    fiberG: number | null;
+    sugarG: number | null;
+    saturatedFatG: number | null;
+    alcoholG: number | null;
+};
+
+/**
+ * Per-serving nutrition for a food, for display: each per-100 value times
+ * amount / 100, only when the serving's unit is the basis unit (g with per 100 g, ml with
+ * per 100 ml). Anything else is null: turning ml into g needs a density the
+ * data does not have. A null value stays null. This reads the basis label
+ * only to pick the matching serving unit; logging does not use it.
+ */
+export function perServingFromFood(
+    food: Pick<
+        Food,
+        | "serving"
+        | "nutritionBasis"
+        | "calories"
+        | "proteinG"
+        | "carbsG"
+        | "fatG"
+        | "fiberG"
+        | "sugarG"
+        | "saturatedFatG"
+        | "alcoholG"
+    >,
+): FoodServingNutrition | null {
+    const serving = food.serving;
+    if (serving == null) return null;
+    const basisUnit = (food.nutritionBasis ?? "100g") === "100ml" ? "ml" : "g";
+    if (serving.unit !== basisUnit) return null;
+    const scale = (value: number | null): number | null =>
+        value == null ? null : Math.round(value * serving.amount) / 100;
+    return {
+        calories: scale(food.calories),
+        proteinG: scale(food.proteinG),
+        carbsG: scale(food.carbsG),
+        fatG: scale(food.fatG),
+        fiberG: scale(food.fiberG),
+        sugarG: scale(food.sugarG),
+        saturatedFatG: scale(food.saturatedFatG),
+        alcoholG: scale(food.alcoholG),
     };
 }
 
@@ -425,9 +596,37 @@ export function offNutritionPatchFromHit(
 ): FoodOffNutritionPatch | null {
     const patch: FoodOffNutritionPatch = {};
     const nutrition = catalogNutritionFromOff(hit);
-    if (food.saturatedFatG == null && nutrition.saturatedFatG != null) {
-        patch.saturatedFatG = nutrition.saturatedFatG;
+    const hitBasis = hit.nutrition_basis ?? "100g";
+    // The per-100 numbers only fill in when they are per the same thing as
+    // what the food already stores. A food with a basis must match it; one
+    // without reads as per 100 g unless OFF wrote it (or it holds no per-100
+    // nutrition at all), when the hit's basis becomes the food's. Typed-in
+    // values are never relabelled, however few of them there are.
+    const adoptBasis =
+        food.nutritionBasis == null &&
+        hit.per_100 != null &&
+        basisAdoptable(food);
+    const basisMatches =
+        food.nutritionBasis != null
+            ? food.nutritionBasis === hitBasis
+            : adoptBasis || hitBasis === "100g";
+    if (adoptBasis) patch.nutritionBasis = hitBasis;
+    if (basisMatches) {
+        if (food.saturatedFatG == null && nutrition.saturatedFatG != null) {
+            patch.saturatedFatG = nutrition.saturatedFatG;
+        }
+        // Only a fresh hit (an older one has no per-100 block to fill from),
+        // and only into OFF's own numbers: once an edit made the source
+        // "manual", a blank is a value the user cleared.
+        if (hit.per_100 != null && food.nutritionSource === "openfoodfacts") {
+            for (const key of OFF_FILL_KEYS) {
+                const value = nutrition[key];
+                if (food[key] == null && value != null) patch[key] = value;
+            }
+        }
     }
+    const serving = servingFromOff(hit);
+    if (food.serving == null && serving != null) patch.serving = serving;
     const levels = offNutrientLevelsFromHit(hit);
     if (
         levels != null &&
@@ -637,6 +836,7 @@ function copyFood(row: Food): Food {
     return {
         ...row,
         allergens: [...row.allergens],
+        serving: row.serving == null ? null : { ...row.serving },
         usualAmount:
             row.usualAmount == null
                 ? null
@@ -834,6 +1034,30 @@ export function createMemoryFoodsStore(): MemoryFoodsStore {
             if (patch.offNutrientLevels != null) {
                 next.offNutrientLevels = { ...patch.offNutrientLevels };
                 changed = true;
+            }
+            if (patch.serving != null && next.serving == null) {
+                next.serving = { ...patch.serving };
+                changed = true;
+            }
+            if (
+                patch.nutritionBasis != null &&
+                next.nutritionBasis == null &&
+                basisAdoptable(row)
+            ) {
+                next.nutritionBasis = patch.nutritionBasis;
+                changed = true;
+            }
+            for (const key of OFF_FILL_KEYS) {
+                const value = patch[key];
+                if (
+                    value != null &&
+                    value >= 0 &&
+                    next[key] == null &&
+                    row.nutritionSource === "openfoodfacts"
+                ) {
+                    next[key] = value;
+                    changed = true;
+                }
             }
             if (!changed) return null;
             next.updatedAt = nowIso();
@@ -1085,6 +1309,8 @@ export function newFood(input: {
     defaultUnit?: string;
     gramsPerEach?: number | null;
     gramsPerMl?: number | null;
+    serving?: FoodServing | null;
+    nutritionBasis?: NutritionBasis | null;
     calories?: number | null;
     proteinG?: number | null;
     carbsG?: number | null;
@@ -1123,6 +1349,8 @@ export function newFood(input: {
         defaultUnit: input.defaultUnit ?? "g",
         gramsPerEach: input.gramsPerEach ?? null,
         gramsPerMl: input.gramsPerMl ?? null,
+        serving: input.serving == null ? null : { ...input.serving },
+        nutritionBasis: input.nutritionBasis ?? null,
         calories: input.calories ?? null,
         proteinG: input.proteinG ?? null,
         carbsG: input.carbsG ?? null,
@@ -1431,6 +1659,8 @@ export async function findOrCreateFoodByBarcodeFromHit(
             ...nutrition,
             offNutrientLevels: offNutrientLevelsFromHit(hit),
             gramsPerEach: gramsPerEachFromOff(hit),
+            serving: servingFromOff(hit),
+            nutritionBasis: hit.per_100 != null ? hit.nutrition_basis : null,
             nutritionSource: "openfoodfacts",
             allergens: hit.allergens ?? mapOffAllergenTags(hit.allergens_tags),
             offSourceId: normalized,
@@ -1453,9 +1683,15 @@ export async function findOrCreateFoodByBarcodeResult(
     if (existingId) {
         const existing = await store.getFood(householdId, existingId);
         if (existing && !existing.archivedAt) {
+            // A food made before the serving and basis columns has neither.
+            // Any fresh OFF hit sets the basis on a food that can adopt one,
+            // so a null basis there means "never asked": one lookup fills the
+            // serving and basis, and having a basis ends the ask. Typed-in
+            // values are never asked (nothing could label them).
             const needsNutritionFill =
                 existing.offNutrientLevels == null ||
-                existing.saturatedFatG == null;
+                existing.saturatedFatG == null ||
+                (existing.nutritionBasis == null && basisAdoptable(existing));
             const needsOffLookup =
                 existing.offQuality == null ||
                 (needsNutritionFill &&
@@ -1712,8 +1948,16 @@ export function mergeAllergens(plain: string[], usual: string[]): string[] {
 
 type NutritionBlockPick = Pick<
     Food,
-    (typeof NUTRITION_BLOCK_KEYS)[number] | "nutritionSource" | "saturatedFatG"
+    | (typeof NUTRITION_BLOCK_KEYS)[number]
+    | "nutritionSource"
+    | "saturatedFatG"
+    | "nutritionBasis"
 >;
+
+/** What a food's per-100 nutrition is per; null reads as per 100 g. */
+function basisOf(food: Pick<Food, "nutritionBasis">): NutritionBasis {
+    return food.nutritionBasis ?? "100g";
+}
 
 function nutritionBlockFrom(source: Food): NutritionBlockPick {
     return {
@@ -1727,6 +1971,7 @@ function nutritionBlockFrom(source: Food): NutritionBlockPick {
         alcoholG: source.alcoholG,
         caffeineMg: source.caffeineMg,
         nutritionSource: source.nutritionSource,
+        nutritionBasis: source.nutritionBasis,
     };
 }
 
@@ -1773,6 +2018,8 @@ export type MergedFoodFieldPick = Pick<
     | (typeof NUTRITION_BLOCK_KEYS)[number]
     | "nutritionSource"
     | "saturatedFatG"
+    | "nutritionBasis"
+    | "serving"
     | "gramsPerEach"
     | "gramsPerMl"
     | "defaultUnit"
@@ -1785,17 +2032,29 @@ export type MergedFoodFieldPick = Pick<
 >;
 
 export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
-    const nutritionBlock = usualHasAnyNutrient(keep)
-        ? nutritionBlockFrom(keep)
-        : usualHasAnyNutrient(drop)
-          ? nutritionBlockFrom(drop)
-          : nutritionBlockFrom(keep);
+    const blockFood =
+        !usualHasAnyNutrient(keep) && usualHasAnyNutrient(drop) ? drop : keep;
+    const nutritionBlock = nutritionBlockFrom(blockFood);
 
-    const saturatedFatG = keep.saturatedFatG ?? drop.saturatedFatG ?? null;
+    // The nutrition block moves together with its basis. Saturated fat is
+    // filled from either side only where it is per the block's own basis.
+    const blockBasis = basisOf(nutritionBlock);
+    const saturatedFatG =
+        (basisOf(keep) === blockBasis ? keep.saturatedFatG : null) ??
+        (basisOf(drop) === blockBasis ? drop.saturatedFatG : null) ??
+        null;
+    // The serving goes with the nutrition it was printed beside, and only
+    // where its unit is what the block is per: a gram serving on a per-100 ml
+    // block would derive nothing and mislead.
+    const blockUnit = blockBasis === "100ml" ? "ml" : "g";
+    const serving = [blockFood.serving, keep.serving, drop.serving].find(
+        (candidate) => candidate != null && candidate.unit === blockUnit,
+    );
 
     return {
         ...nutritionBlock,
         saturatedFatG,
+        serving: serving == null ? null : { ...serving },
         gramsPerEach: keep.gramsPerEach ?? drop.gramsPerEach,
         gramsPerMl: keep.gramsPerMl ?? drop.gramsPerMl,
         defaultUnit: keep.defaultUnit.trim()
@@ -1838,8 +2097,14 @@ export function effectiveFood(
     };
     const nutritionFrom = usualHasAnyNutrient(u) ? u : food;
     const block = nutritionBlockFrom(nutritionFrom);
+    // Saturated fat falls back across the pair only where it is per the same
+    // thing as the block it joins.
+    const blockBasis = basisOf(block);
     const saturatedFatG =
-        block.saturatedFatG ?? u.saturatedFatG ?? food.saturatedFatG ?? null;
+        block.saturatedFatG ??
+        (basisOf(u) === blockBasis ? u.saturatedFatG : null) ??
+        (basisOf(food) === blockBasis ? food.saturatedFatG : null) ??
+        null;
     const usualStoreId = u.usualStoreId ?? food.usualStoreId;
     const usualAmount =
         u.usualAmount != null
@@ -3267,7 +3532,7 @@ export async function buildFoodUpdate(
         Object.keys(usualPatch).length > 0
             ? await parseUsualPurchase(householdId, usualPatch, opts?.stores)
             : {};
-    return {
+    const next: Food = {
         ...current,
         name,
         normalizedName,
@@ -3336,6 +3601,21 @@ export async function buildFoodUpdate(
                   : { ...current.usualAmount },
         updatedAt: nowIso(),
     };
+    // The edit inputs are per 100 g. A changed nutrition value is therefore a
+    // per-100 g value whatever the food was before, so a stored per-100 ml
+    // basis would mislabel it. Resubmitting the stored values changes nothing.
+    // Caffeine is not one of OFF's per-100 values, so it does not count.
+    if (OFF_FILL_KEYS.some((key) => next[key] !== current[key])) {
+        next.nutritionBasis = null;
+        // The values are typed in now, so a later OFF refresh must not
+        // relabel them (it adopts a basis only for OFF-sourced nutrition).
+        if (
+            patch.nutritionSource === undefined &&
+            current.nutritionSource === "openfoodfacts"
+        )
+            next.nutritionSource = "manual";
+    }
+    return next;
 }
 
 export async function updateFood(
@@ -3575,6 +3855,9 @@ function nutritionBlockConflictReason(keep: Food, drop: Food): string | null {
     const keepHas = usualHasAnyNutrient(keep);
     const dropHas = usualHasAnyNutrient(drop);
     if (!keepHas || !dropHas) return null;
+    if (basisOf(keep) !== basisOf(drop)) {
+        return `nutrition basis differs: per ${basisOf(keep) === "100ml" ? "100 ml" : "100 g"} vs per ${basisOf(drop) === "100ml" ? "100 ml" : "100 g"}`;
+    }
     for (const key of NUTRITION_BLOCK_KEYS) {
         if (keep[key] !== drop[key]) {
             const label = DUPLICATE_NUTRITION_LABELS[key];
@@ -4329,6 +4612,30 @@ function buildMergePairPatch(
     return patch;
 }
 
+/**
+ * The basis of the kept food once the picked nutrition values are applied: the
+ * kept food's own, or the dropped food's when every conflicting nutrition
+ * value was taken from it. Picks that mix two foods per different amounts
+ * would make numbers that are per neither, so they are refused.
+ */
+function basisAfterPicks(
+    keep: Food,
+    drop: Food,
+    picks: Partial<Record<MergePairPickField, string>>,
+): NutritionBasis | null {
+    if (basisOf(keep) === basisOf(drop)) return keep.nutritionBasis;
+    const conflicts = mergePickFieldsConflict(keep, drop).filter((wire) =>
+        MERGE_PICK_NUTRITION_WIRES.has(wire),
+    );
+    if (conflicts.length === 0) return keep.nutritionBasis;
+    const fromDrop = conflicts.filter((wire) => picks[wire] === drop.id);
+    if (fromDrop.length === 0) return keep.nutritionBasis;
+    if (fromDrop.length === conflicts.length) return drop.nutritionBasis;
+    throw new FoodsInputError(
+        "Pick the nutrition from one food: the two are per different amounts.",
+    );
+}
+
 export async function mergeFoodPair(
     store: FoodsStore,
     householdId: string,
@@ -4352,6 +4659,20 @@ export async function mergeFoodPair(
         actualKeep.id,
         patch,
     );
+    // buildFoodUpdate reads a changed value as typed per 100 g, by hand. Here
+    // the values were picked from a food that has its own basis and source, so
+    // both follow the picks instead.
+    next.nutritionBasis = basisAfterPicks(actualKeep, actualDrop, picks);
+    next.nutritionSource =
+        patch.nutritionSource !== undefined
+            ? patch.nutritionSource
+            : actualKeep.nutritionSource;
+    // Saturated fat is no pick field, so it stays the kept food's unless the
+    // basis moved to the dropped food's: then it comes from that same food
+    // (null if it has none), as it is per the same amount as the picks.
+    if (basisOf(next) !== basisOf(actualKeep)) {
+        next.saturatedFatG = actualDrop.saturatedFatG;
+    }
     await store.updateFoodRow(next);
     return mergeFoods(store, householdId, actualKeep.id, actualDrop.id);
 }
@@ -4569,6 +4890,22 @@ export function offQualityToRowFields(q: FoodQuality | null): {
     };
 }
 
+function servingFromRow(row: {
+    serving_label?: unknown;
+    serving_amount?: unknown;
+    serving_unit?: unknown;
+}): FoodServing | null {
+    const amount =
+        row.serving_amount == null ? NaN : Number(row.serving_amount);
+    const unit = row.serving_unit;
+    if (!(amount > 0) || (unit !== "g" && unit !== "ml")) return null;
+    const label =
+        typeof row.serving_label === "string" && row.serving_label.trim()
+            ? row.serving_label
+            : `${amount} ${unit}`;
+    return { label, amount, unit };
+}
+
 export function foodFromRow(row: {
     id: unknown;
     household_id: unknown;
@@ -4579,6 +4916,10 @@ export function foodFromRow(row: {
     default_unit: unknown;
     grams_per_each: unknown;
     grams_per_ml: unknown;
+    serving_label?: unknown;
+    serving_amount?: unknown;
+    serving_unit?: unknown;
+    nutrition_basis?: unknown;
     calories: unknown;
     protein_g: unknown;
     carbs_g: unknown;
@@ -4654,6 +4995,11 @@ export function foodFromRow(row: {
         gramsPerEach:
             row.grams_per_each == null ? null : Number(row.grams_per_each),
         gramsPerMl: row.grams_per_ml == null ? null : Number(row.grams_per_ml),
+        serving: servingFromRow(row),
+        nutritionBasis:
+            row.nutrition_basis === "100g" || row.nutrition_basis === "100ml"
+                ? row.nutrition_basis
+                : null,
         calories: row.calories == null ? null : Number(row.calories),
         proteinG: row.protein_g == null ? null : Number(row.protein_g),
         carbsG: row.carbs_g == null ? null : Number(row.carbs_g),
@@ -4722,6 +5068,10 @@ export function foodToRow(row: Food) {
         default_unit: row.defaultUnit,
         grams_per_each: row.gramsPerEach,
         grams_per_ml: row.gramsPerMl,
+        serving_label: row.serving?.label ?? null,
+        serving_amount: row.serving?.amount ?? null,
+        serving_unit: row.serving?.unit ?? null,
+        nutrition_basis: row.nutritionBasis,
         calories: row.calories,
         protein_g: row.proteinG,
         carbs_g: row.carbsG,

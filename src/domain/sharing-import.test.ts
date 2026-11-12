@@ -794,3 +794,65 @@ describe("round trip between two households", () => {
         expect(reExported.ingredients[1]!.food.grams_per_each).toBe(60);
     });
 });
+
+describe("nutrition basis on import", () => {
+    function creamDoc(basis?: "100g" | "100ml"): ShareDocument {
+        return doc({
+            ingredients: [
+                {
+                    food_name: "Half & Half",
+                    amount: 60,
+                    unit: "ml",
+                    food: {
+                        ...NO_NUTRITION,
+                        calories: 133.33,
+                        fat_g: 10,
+                        ...(basis ? { nutrition_basis: basis } : {}),
+                    },
+                },
+            ],
+        });
+    }
+
+    test("a shipped per-100 ml basis becomes the new food's basis", async () => {
+        const s = stores();
+        const plan = await planSharedImport(s, HH_B, creamDoc("100ml"));
+        await applySharedImport(s, {
+            householdId: HH_B,
+            creatorId: USER_B,
+            plan,
+        });
+        const [created] = await s.foods.listFoods(HH_B);
+        expect(created?.nutritionBasis).toBe("100ml");
+        expect(created?.calories).toBe(133.33);
+    });
+
+    test("a document without a basis imports with none, as before", async () => {
+        const s = stores();
+        const plan = await planSharedImport(s, HH_B, creamDoc());
+        await applySharedImport(s, {
+            householdId: HH_B,
+            creatorId: USER_B,
+            plan,
+        });
+        const [created] = await s.foods.listFoods(HH_B);
+        expect(created?.nutritionBasis).toBeNull();
+    });
+
+    test("a basis on a food that ships no nutrition is ignored", async () => {
+        const s = stores();
+        const d = creamDoc("100ml");
+        d.ingredients[0]!.food = {
+            ...NO_NUTRITION,
+            nutrition_basis: "100ml",
+        };
+        const plan = await planSharedImport(s, HH_B, d);
+        await applySharedImport(s, {
+            householdId: HH_B,
+            creatorId: USER_B,
+            plan,
+        });
+        const [created] = await s.foods.listFoods(HH_B);
+        expect(created?.nutritionBasis).toBeNull();
+    });
+});

@@ -73,10 +73,32 @@ function offUserAgent(): string {
     return ua;
 }
 
+/** What a `per_100` block (and a food's stored nutrition) is measured per. */
+export type NutritionBasis = "100g" | "100ml";
+
+/**
+ * Open Food Facts' per-100 values (`*_100g` keys), whatever the top-level
+ * fields of the hit are per. Null when OFF has no value. `alcohol_g` is always
+ * null here: OFF reports alcohol as % vol, which cannot become grams per 100
+ * without a density (see resolveAlcoholGrams).
+ */
+export interface FoodPer100 {
+    calories: number | null;
+    protein_g: number | null;
+    carbs_g: number | null;
+    fat_g: number | null;
+    fiber_g: number | null;
+    sugar_g: number | null;
+    saturated_fat_g: number | null;
+    alcohol_g: number | null;
+}
+
 export interface FoodResult {
     name: string;
     brand: string | null;
     serving: string | null; // human label for the basis of the macros below
+    /** The serving as printed on the pack, even when the macros below are per 100. */
+    serving_size?: string | null;
     serving_quantity?: number | null;
     serving_quantity_unit?: string | null;
     calories: number | null;
@@ -86,6 +108,14 @@ export interface FoodResult {
     fiber_g: number | null;
     sugar_g: number | null; // TOTAL sugars, incl. naturally occurring
     saturated_fat_g?: number | null;
+    /**
+     * Per-100 values from a fresh OFF normalization; absent on older cache
+     * rows, and null on one OFF no longer returns (see
+     * stampLegacyCacheNutrientLevels).
+     */
+    per_100?: FoodPer100 | null;
+    /** Whether `per_100` is per 100 g or per 100 ml (OFF's `nutrition_data_per`). */
+    nutrition_basis?: NutritionBasis;
     nutrient_levels?: Record<string, string> | null;
     alcohol_g: number | null; // pure ethanol; often null — see resolveAlcoholGrams
     // Open Food Facts' own quality scores. Both are null when OFF hasn't
@@ -122,6 +152,8 @@ interface OFFProduct {
     product_name?: string;
     brands?: string;
     serving_size?: string;
+    // "100g" or "100ml": what the *_100g nutriments are per.
+    nutrition_data_per?: unknown;
     // OFF's machine-parsed reading of serving_size ("33 cl" -> 330 + "ml").
     serving_quantity?: unknown;
     serving_quantity_unit?: unknown;
@@ -210,6 +242,17 @@ function resolveAlcoholGrams(
     return num(gramsFromDrink(ml, abv));
 }
 
+// What OFF's `*_100g` figures are per. A liquid whose label is per serving still
+// reports them per 100 ml, so a serving parsed in ml means 100 ml too.
+function nutritionBasisOf(product: OFFProduct): NutritionBasis {
+    const per = String(product.nutrition_data_per ?? "")
+        .trim()
+        .toLowerCase();
+    if (per === "100ml") return "100ml";
+    if (per === "100g") return "100g";
+    return servingVolumeMl(product) != null ? "100ml" : "100g";
+}
+
 // Normalize an OFF product into our shape. Prefer per-serving values when the
 // product declares a serving size and a per-serving energy; otherwise fall back
 // to the always-present per-100g basis and label it as such.
@@ -228,6 +271,7 @@ function normalizeOFFProduct(
         name: product.product_name?.trim() || `Product ${barcode}`,
         brand: product.brands?.split(",")[0]?.trim() || null,
         serving: hasServing ? product.serving_size!.trim() : "100 g",
+        serving_size: product.serving_size?.trim() || null,
         serving_quantity: num(product.serving_quantity),
         serving_quantity_unit: product.serving_quantity_unit
             ? String(product.serving_quantity_unit)
@@ -245,6 +289,19 @@ function normalizeOFFProduct(
         // stored field is total sugar.
         sugar_g: pick("sugars_serving", "sugars_100g"),
         saturated_fat_g: pick("saturated-fat_serving", "saturated-fat_100g"),
+        // One decimal like every other OFF value: the edit form's inputs step
+        // by 0.1 and refuse a second decimal.
+        per_100: {
+            calories: num(n["energy-kcal_100g"]),
+            protein_g: num(n["proteins_100g"]),
+            carbs_g: num(n["carbohydrates_100g"]),
+            fat_g: num(n["fat_100g"]),
+            fiber_g: num(n["fiber_100g"]),
+            sugar_g: num(n["sugars_100g"]),
+            saturated_fat_g: num(n["saturated-fat_100g"]),
+            alcohol_g: null,
+        },
+        nutrition_basis: nutritionBasisOf(product),
         nutrient_levels: filterOffNutrientLevels(product.nutrient_levels),
         alcohol_g: resolveAlcoholGrams(product, n, hasServing),
         nutriscore_grade: normalizeNutriscoreGrade(product.nutriscore_grade),
@@ -383,17 +440,34 @@ function hydrateCachedPayload(payload: FoodResult): FoodResult {
     };
 }
 
+/**
+ * Cache rows written before per-100 values were kept lack the `per_100` key.
+ * A null one was looked up again and OFF had nothing: it counts as looked up.
+ */
+export function hasPer100(food: FoodResult): boolean {
+    return food.per_100 !== undefined;
+}
+
+// An OFF payload without `per_100` is a miss, so it refetches once instead of
+// hiding the per-100 values and serving for the rest of the TTL. `allowLegacy`
+// returns such a row anyway, for callers that would rather show stale data
+// than nothing (lookups while offline or while OFF is unreachable).
 export async function getCachedFood(
     source: string,
     sourceId: string,
     ttlMs: number,
+    opts: { allowLegacy?: boolean } = {},
 ): Promise<FoodResult | null> {
     try {
         const data = await selectFoodCacheRow(source, sourceId);
         if (!data) return null;
         const ageMs = Date.now() - new Date(data.fetched_at).getTime();
         if (ageMs > ttlMs) return null;
-        return hydrateCachedPayload(data.payload as FoodResult);
+        const food = hydrateCachedPayload(data.payload as FoodResult);
+        if (source === SOURCE_OFF && !opts.allowLegacy && !hasPer100(food)) {
+            return null;
+        }
+        return food;
     } catch {
         return null;
     }
@@ -443,10 +517,19 @@ function stampLegacyCacheNutrientLevels(
     barcode: string,
     cached: FoodResult,
 ): FoodResult {
-    if (Object.prototype.hasOwnProperty.call(cached, "nutrient_levels")) {
+    if (
+        Object.prototype.hasOwnProperty.call(cached, "nutrient_levels") &&
+        hasPer100(cached)
+    ) {
         return cached;
     }
-    const stamped: FoodResult = { ...cached, nutrient_levels: null };
+    // Both keys are stamped so a product OFF no longer returns stops being
+    // refetched on every lookup.
+    const stamped: FoodResult = {
+        ...cached,
+        nutrient_levels: cached.nutrient_levels ?? null,
+        per_100: cached.per_100 ?? null,
+    };
     void putCachedFood(SOURCE_OFF, barcode, stamped);
     return stamped;
 }
@@ -470,7 +553,11 @@ export async function lookupBarcode(
     hooks: FoodLookupHooks = {},
 ): Promise<FoodResult | null> {
     const online = await foodLookupsOnline(hooks);
-    const cached = await getCachedFood(SOURCE_OFF, barcode, OFF_TTL_MS);
+    // A row without per-100 values is refetched like a miss, but it stays the
+    // fallback: an outage must not turn a working lookup into a failure.
+    const cached = await getCachedFood(SOURCE_OFF, barcode, OFF_TTL_MS, {
+        allowLegacy: true,
+    });
     if (!online) {
         if (hooks.notice) {
             hooks.notice.message = ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE;
@@ -479,7 +566,7 @@ export async function lookupBarcode(
         if (cached) return cached;
         return null;
     }
-    if (isBarcodeCacheServable(cached)) return cached;
+    if (isBarcodeCacheServable(cached) && hasPer100(cached)) return cached;
 
     // A fresh row cached before quality data existed is refetched once so the
     // quality fills in, but it stays the fallback: an outage or a miss on the

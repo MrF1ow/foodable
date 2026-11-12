@@ -462,6 +462,25 @@ function previewProductFull(
     );
 }
 
+/** A product whose pack lists a serving in ml and whose OFF values are per 100 ml. */
+function previewProductServing(chrome: ReturnType<typeof previewChrome>) {
+    const halfAndHalf = food("f-product-serving", "Half & Half", 133.3, {
+        brand: "Member's Mark",
+        proteinG: 3.3,
+        carbsG: 4.7,
+        fatG: 10,
+        sugarG: 4.7,
+        saturatedFatG: 6.7,
+        serving: { label: "1 portion (30 ml)", amount: 30, unit: "ml" },
+        nutritionBasis: "100ml",
+    });
+    return renderProductV2Page(
+        buildPreviewProductPageView(chrome, halfAndHalf, {
+            barcodes: ["0193968379117"],
+        }),
+    );
+}
+
 function previewTrendsPage(chrome: ReturnType<typeof previewChrome>) {
     const today = "2026-11-09";
     const data = buildPreviewTrendsPageData(
@@ -1043,6 +1062,8 @@ function food(
         defaultUnit: "g",
         gramsPerEach: null,
         gramsPerMl: null,
+        serving: null,
+        nutritionBasis: null,
         calories,
         proteinG: null,
         carbsG: null,
@@ -2698,6 +2719,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       theme,
                   ),
                   "product-full": previewProductFull(chrome),
+                  "product-serving": previewProductServing(chrome),
                   "product-full-custom": previewProductFull(chrome, {
                       weights: {
                           nutrition: 0,

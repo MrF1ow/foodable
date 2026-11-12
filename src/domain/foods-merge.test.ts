@@ -1,7 +1,8 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { addLocation, createMemoryFridgeStore, listFridge } from "./fridge.js";
 import {
     createMemoryFoodsStore,
+    effectiveFood,
     findOrCreateManualFood,
     mergedFoodFields,
     mergeFoodPair,
@@ -445,6 +446,8 @@ function sampleRow(over: Partial<Food>): Food {
         defaultUnit: "g",
         gramsPerEach: null,
         gramsPerMl: null,
+        serving: null,
+        nutritionBasis: null,
         calories: null,
         proteinG: null,
         carbsG: null,
@@ -499,3 +502,226 @@ async function insertProduct(
         }),
     );
 }
+
+const HALF_AND_HALF_SERVING = {
+    label: "1 portion (30 ml)",
+    amount: 30,
+    unit: "ml",
+} as const;
+
+test("mergedFoodFields: the nutrition block carries its basis and serving", () => {
+    const keep = sampleRow({
+        name: "Half and half",
+        calories: null,
+        nutritionSource: null,
+    });
+    const drop = sampleRow({
+        calories: 133.33,
+        nutritionBasis: "100ml",
+        serving: { ...HALF_AND_HALF_SERVING },
+        nutritionSource: "openfoodfacts",
+    });
+    const merged = mergedFoodFields(keep, drop);
+    expect(merged.calories).toBe(133.33);
+    expect(merged.nutritionBasis).toBe("100ml");
+    expect(merged.serving).toEqual(HALF_AND_HALF_SERVING);
+});
+
+test("mergedFoodFields: keep's own basis stays and drop's saturated fat per another basis is not mixed in", () => {
+    const keep = sampleRow({
+        calories: 120,
+        saturatedFatG: null,
+        nutritionBasis: null,
+        nutritionSource: "manual",
+    });
+    const drop = sampleRow({
+        calories: 133.33,
+        saturatedFatG: 6.67,
+        nutritionBasis: "100ml",
+        nutritionSource: "openfoodfacts",
+        serving: { ...HALF_AND_HALF_SERVING },
+    });
+    const merged = mergedFoodFields(keep, drop);
+    expect(merged.calories).toBe(120);
+    expect(merged.nutritionBasis).toBeNull();
+    expect(merged.saturatedFatG).toBeNull();
+    // Keep's per-100 g block cannot carry drop's ml serving.
+    expect(merged.serving).toBeNull();
+});
+
+test("mergedFoodFields: same basis still fills saturated fat; null and 100g count as the same", () => {
+    const keep = sampleRow({
+        calories: 200,
+        saturatedFatG: null,
+        nutritionBasis: null,
+    });
+    const drop = sampleRow({
+        calories: 999,
+        saturatedFatG: 3.2,
+        nutritionBasis: "100g",
+    });
+    const merged = mergedFoodFields(keep, drop);
+    expect(merged.saturatedFatG).toBe(3.2);
+    expect(merged.nutritionBasis).toBeNull();
+});
+
+test("mergedFoodFields: keep's serving wins over drop's", () => {
+    const keep = sampleRow({
+        calories: 120,
+        nutritionBasis: "100ml",
+        serving: { label: "1 cup", amount: 240, unit: "ml" },
+    });
+    const drop = sampleRow({
+        calories: 133.33,
+        nutritionBasis: "100ml",
+        serving: { ...HALF_AND_HALF_SERVING },
+    });
+    expect(mergedFoodFields(keep, drop).serving).toEqual({
+        label: "1 cup",
+        amount: 240,
+        unit: "ml",
+    });
+});
+
+test("effectiveFood: the usual product's nutrition block brings its basis", () => {
+    const plain = sampleRow({
+        id: "plain",
+        name: "Cream",
+        usualProductId: "prod",
+        saturatedFatG: 1,
+    });
+    const product = sampleRow({
+        id: "prod",
+        name: "Half & Half",
+        genericFoodId: "plain",
+        calories: 133.33,
+        nutritionBasis: "100ml",
+        saturatedFatG: null,
+    });
+    const effective = effectiveFood(
+        plain,
+        new Map([
+            [plain.id, plain],
+            [product.id, product],
+        ]),
+    );
+    expect(effective.calories).toBe(133.33);
+    expect(effective.nutritionBasis).toBe("100ml");
+    // The plain food's saturated fat is per 100 g: not mixed into a 100 ml block.
+    expect(effective.saturatedFatG).toBeNull();
+});
+
+describe("mergeFoodPair keeps the basis with the nutrition picked", () => {
+    async function pair(
+        keepOver: Parameters<typeof newFood>[0] extends infer T
+            ? Partial<T>
+            : never,
+        dropOver: Parameters<typeof newFood>[0] extends infer T
+            ? Partial<T>
+            : never,
+    ) {
+        const store = createMemoryFoodsStore();
+        const keep = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Keep cream",
+                ...keepOver,
+            }),
+        );
+        const drop = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Drop cream",
+                ...dropOver,
+            }),
+        );
+        return { store, keep, drop };
+    }
+
+    test("same basis: taking the other food's values keeps the basis", async () => {
+        const { store, keep, drop } = await pair(
+            { calories: 120, nutritionBasis: "100ml" },
+            { calories: 133.33, nutritionBasis: "100ml" },
+        );
+        const merged = await mergeFoodPair(store, HH, {
+            keepId: keep.id,
+            dropId: drop.id,
+            picks: { calories: drop.id },
+        });
+        expect(merged.calories).toBe(133.33);
+        expect(merged.nutritionBasis).toBe("100ml");
+    });
+
+    test("different bases: picks from the other food bring its basis; none keep the first's", async () => {
+        const taken = await pair(
+            { calories: 120 },
+            { calories: 133.33, nutritionBasis: "100ml" },
+        );
+        const fromDrop = await mergeFoodPair(taken.store, HH, {
+            keepId: taken.keep.id,
+            dropId: taken.drop.id,
+            picks: { calories: taken.drop.id },
+        });
+        expect(fromDrop.calories).toBe(133.33);
+        expect(fromDrop.nutritionBasis).toBe("100ml");
+
+        const kept = await pair(
+            { calories: 120 },
+            { calories: 133.33, nutritionBasis: "100ml" },
+        );
+        const fromKeep = await mergeFoodPair(kept.store, HH, {
+            keepId: kept.keep.id,
+            dropId: kept.drop.id,
+        });
+        expect(fromKeep.calories).toBe(120);
+        expect(fromKeep.nutritionBasis).toBeNull();
+    });
+
+    test("different bases: picks mixed across the two foods are refused", async () => {
+        const { store, keep, drop } = await pair(
+            { calories: 120, fatG: 4 },
+            { calories: 133.33, fatG: 10, nutritionBasis: "100ml" },
+        );
+        await expect(
+            mergeFoodPair(store, HH, {
+                keepId: keep.id,
+                dropId: drop.id,
+                picks: { calories: drop.id, fat_g: keep.id },
+            }),
+        ).rejects.toThrow(/per different amounts/);
+    });
+
+    test("different bases: saturated fat follows the basis the picks move to", async () => {
+        const { store, keep, drop } = await pair(
+            { calories: 100, saturatedFatG: 5 },
+            {
+                calories: 133.3,
+                saturatedFatG: 6.7,
+                nutritionBasis: "100ml",
+            },
+        );
+        const merged = await mergeFoodPair(store, HH, {
+            keepId: keep.id,
+            dropId: drop.id,
+            picks: { calories: drop.id },
+        });
+        expect(merged.nutritionBasis).toBe("100ml");
+        expect(merged.saturatedFatG).toBe(6.7);
+    });
+
+    test("different bases: a dropped food without saturated fat leaves it unknown, not the other basis's", async () => {
+        const { store, keep, drop } = await pair(
+            { calories: 100, saturatedFatG: 5 },
+            { calories: 133.3, nutritionBasis: "100ml" },
+        );
+        const merged = await mergeFoodPair(store, HH, {
+            keepId: keep.id,
+            dropId: drop.id,
+            picks: { calories: drop.id },
+        });
+        expect(merged.nutritionBasis).toBe("100ml");
+        expect(merged.saturatedFatG).toBeNull();
+    });
+});

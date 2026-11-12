@@ -49,6 +49,8 @@ export function sampleFood(
         defaultUnit: "g",
         gramsPerEach: null,
         gramsPerMl: null,
+        serving: null,
+        nutritionBasis: null,
         calories: null,
         proteinG: null,
         carbsG: null,
