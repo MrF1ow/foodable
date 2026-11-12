@@ -252,6 +252,57 @@ describe("planSharedImport", () => {
         expect(keys[0]).toBe(keys[1]);
     });
 
+    test("Egg and Eggs in one document are one new food only when the household treats plurals as one", async () => {
+        const plan = async (plural: boolean) => {
+            const s = stores();
+            s.foods.setPluralsSameFood(HH_B, plural);
+            const lines = ["Egg", "Eggs", "egg yolks"].map(
+                (food_name, index) => ({
+                    food_name,
+                    amount: index + 1,
+                    unit: "each",
+                    food: { ...NO_NUTRITION, calories: 143 + index },
+                }),
+            );
+            return planSharedImport(s, HH_B, doc({ ingredients: lines }));
+        };
+        const on = await plan(true);
+        expect(on.newFoods.map((f) => f.name)).toEqual(["Egg", "egg yolks"]);
+        const keys = on.ingredients.map((i) =>
+            i.food.kind === "create" ? i.food.key : null,
+        );
+        expect(keys[0]).toBe(keys[1]);
+        expect(keys[2]).not.toBe(keys[0]);
+        // The first line's nutrition is the one the food is made from.
+        expect(on.newFoods[0]!.nutrition.calories).toBe(143);
+
+        const off = await plan(false);
+        expect(off.newFoods.map((f) => f.name)).toEqual([
+            "Egg",
+            "Eggs",
+            "egg yolks",
+        ]);
+    });
+
+    test("written, Egg and Eggs with plurals on make one food shared by both lines", async () => {
+        const s = stores();
+        s.foods.setPluralsSameFood(HH_B, true);
+        const lines = ["Egg", "Eggs"].map((food_name) => ({
+            food_name,
+            amount: 1,
+            unit: "each",
+            food: { ...NO_NUTRITION },
+        }));
+        const result = await importSharedRecipe(s, {
+            householdId: HH_B,
+            creatorId: USER_B,
+            document: doc({ ingredients: lines }),
+        });
+        expect(result.created).toBe(2);
+        expect(new Set(result.ingredients.map((i) => i.foodId)).size).toBe(1);
+        expect(await s.foods.listFoods(HH_B)).toHaveLength(1);
+    });
+
     test("a supply or an archived food of the same name is not a match", async () => {
         const s = stores();
         await s.foods.insertFood(

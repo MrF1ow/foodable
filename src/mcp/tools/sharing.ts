@@ -22,7 +22,7 @@ import type { ToolContext } from "../shared.js";
 import {
     importSharedRecipeForHousehold,
     sharedImportFailure,
-} from "./sharing-import.js";
+} from "../../sharing-import.js";
 
 const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

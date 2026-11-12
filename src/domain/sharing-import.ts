@@ -1,7 +1,9 @@
 import {
     findManualFood,
+    looseFoodKey,
     newFood,
     normalizeFoodName,
+    pluralFreeFoodKey,
     type FoodsStore,
 } from "./foods.js";
 import { createRecipe, type Recipe, type RecipesStore } from "./recipes.js";
@@ -118,6 +120,14 @@ export async function planSharedImport(
 ): Promise<SharedImportPlan> {
     const newFoods: PlannedNewFood[] = [];
     const keys = new Set<string>();
+    // New foods are told apart the way `findManualFood` tells them from the
+    // household's own: by loose key, and by plural-free key when the
+    // household treats singular and plural as one food.
+    const plurals =
+        (await stores.foods.pluralsSameFood?.(householdId)) ?? false;
+    const identity = (name: string) =>
+        (plurals ? pluralFreeFoodKey(name) : looseFoodKey(name)) ||
+        normalizeFoodName(name);
     const ingredients: PlannedIngredient[] = [];
     for (const line of doc.ingredients) {
         const found = await findManualFood(
@@ -130,7 +140,7 @@ export async function planSharedImport(
         if (found) {
             food = { kind: "matched", foodId: found.id, name: found.name };
         } else {
-            const key = normalizeFoodName(line.food_name);
+            const key = identity(line.food_name);
             if (!keys.has(key)) {
                 keys.add(key);
                 newFoods.push({

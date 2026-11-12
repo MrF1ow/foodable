@@ -2,11 +2,11 @@
 // real Postgres: paste a share link (the fetcher is injected) or the document's
 // JSON, land on the new recipe with a toast, or stay on Recipes with the reason.
 import { afterEach, beforeEach, expect, test } from "bun:test";
-import type { SQL } from "bun";
+import { SQL } from "bun";
 import { Hono } from "hono";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
-import { setSqlForTests } from "../../db/sql.js";
+import { pairAppSqlForTests, setSqlForTests } from "../../db/sql.js";
 import { asUser, seedHousehold } from "../../db/testing/fixtures.js";
 import { describeDb } from "../../db/testing/pg.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
@@ -18,7 +18,7 @@ import {
     resetFlagsForTests,
     setFlagsForTests,
 } from "../../flags.js";
-import { setSharedRecipeFetcherForTests } from "../../mcp/tools/sharing-import.js";
+import { setSharedRecipeFetcherForTests } from "../../sharing-import.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
 import {
     decodeToastFlash,
@@ -237,6 +237,49 @@ describeDb(
             ]);
         });
 
+        test("importing the same document at once never answers 500", async () => {
+            setSharedRecipeFetcherForTests(serving("never read"));
+            // The shared test connections are single-file; give the requests
+            // pools of their own so the imports really overlap.
+            const appUrl = new URL(getCtx().pg.url);
+            appUrl.username = "foodable_app";
+            const ownerPool = new SQL(getCtx().pg.url, {
+                prepare: false,
+                max: 6,
+            });
+            const appPool = new SQL(appUrl.toString(), {
+                prepare: false,
+                max: 6,
+            });
+            pairAppSqlForTests(ownerPool, appPool);
+            setSqlForTests(ownerPool);
+            let responses: Response[];
+            try {
+                responses = await Promise.all(
+                    Array.from({ length: 4 }, () =>
+                        post("/recipes/import-shared", {
+                            shared: documentText(),
+                        }),
+                    ),
+                );
+            } finally {
+                setSqlForTests(sql);
+                await appPool.close();
+                await ownerPool.close();
+            }
+            expect(responses.map((r) => r.status)).toEqual([
+                303, 303, 303, 303,
+            ]);
+            expect((await recipesOf()).map((r) => r.name).sort()).toEqual([
+                "Lentil soup",
+                "Lentil soup (2)",
+                "Lentil soup (3)",
+                "Lentil soup (4)",
+            ]);
+            // One food per name: the losers matched what the winner made.
+            expect(await foodNamesOf()).toEqual(["Egg", "Red lentils"]);
+        });
+
         test("a food the household already has is matched and left alone", async () => {
             const mine = await asUser(
                 me.userId,
@@ -437,6 +480,26 @@ describeDb(
                 );
             });
         }
+
+        test("a refused paste is echoed only while it is short", async () => {
+            const huge = `{"name":"${"x".repeat(1_000_000)}`;
+            const big = await post("/recipes/import-shared", { shared: huge });
+            expect(big.status).toBe(422);
+            const bigHtml = await big.text();
+            expect(bigHtml).toContain("fd-recipes-page");
+            expect(bigHtml.length).toBeLessThan(200_000);
+            expect(bigHtml).not.toContain("xxxxxxxxxx");
+            expect(bigHtml).toMatch(/fd-recipes-import-shared-error/);
+
+            const short = `{"name":"${"y".repeat(2000)}`;
+            const small = await post("/recipes/import-shared", {
+                shared: short,
+            });
+            expect(small.status).toBe(422);
+            expect(await small.text()).toContain(
+                short.replaceAll('"', "&quot;"),
+            );
+        });
 
         test("a link to a private address never reaches the fetcher", async () => {
             const fetcher = serving(documentText());

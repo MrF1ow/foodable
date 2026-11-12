@@ -4,26 +4,26 @@
 // switch. The rules are in domain/sharing-source.ts (what may be fetched) and
 // domain/sharing-import.ts (how it is matched and written).
 
-import { liveFoodsStore } from "../../db/foods.js";
-import { liveRecipesStore } from "../../db/recipes.js";
-import { run } from "../../db/sql.js";
-import { FoodsInputError } from "../../domain/foods.js";
-import { RecipeInputError } from "../../domain/recipes.js";
+import { liveFoodsStore } from "./db/foods.js";
+import { liveRecipesStore } from "./db/recipes.js";
+import { pgCode, run } from "./db/sql.js";
+import { FoodsInputError } from "./domain/foods.js";
+import { RecipeInputError } from "./domain/recipes.js";
 import {
     importSharedRecipe,
     type SharedImportResult,
-} from "../../domain/sharing-import.js";
+} from "./domain/sharing-import.js";
 import {
     parseSharedRecipeInput,
     readSharedRecipe,
     SharedRecipeImportError,
     type SharedRecipeErrorCode,
     type SharedRecipeFetcher,
-} from "../../domain/sharing-source.js";
+} from "./domain/sharing-source.js";
 import {
     recipeImportFetcher,
     recipeLinkReaderEnabled,
-} from "../../recipe-url-fetcher.js";
+} from "./recipe-url-fetcher.js";
 
 let fetcherForTests: SharedRecipeFetcher | null = null;
 
@@ -81,7 +81,16 @@ export async function importSharedRecipeForHousehold(args: {
     return importSharedRecipe(
         { foods: liveFoodsStore(), recipes: liveRecipesStore() },
         { householdId, creatorId, document },
-        { transaction: (fn) => run(async () => fn()) },
+        {
+            // One import per household at a time: the second waits, then plans
+            // against what the first committed, so a food both documents need
+            // is matched instead of colliding on the household's food names.
+            transaction: (fn) =>
+                run(async (tx) => {
+                    await tx`select pg_advisory_xact_lock(hashtextextended(${`shared-recipe-import:${householdId}`}, 0))`;
+                    return fn();
+                }),
+        },
     );
 }
 
@@ -100,5 +109,21 @@ export function sharedImportFailure(err: unknown): SharedImportFailure | null {
             message: `That recipe couldn't be imported. ${err.message}`,
         };
     }
+    if (isUniqueViolation(err)) {
+        // Something else added the same food or recipe while this ran.
+        return {
+            code: "not_recipe",
+            message:
+                "Your foods changed while that recipe was being imported. Try again.",
+        };
+    }
     return null;
+}
+
+function isUniqueViolation(err: unknown): boolean {
+    for (let e: unknown = err, depth = 0; e && depth < 4; depth += 1) {
+        if (pgCode(e) === "23505") return true;
+        e = e instanceof Error ? e.cause : undefined;
+    }
+    return false;
 }
