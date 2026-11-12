@@ -716,12 +716,113 @@ function previewFoodCatalog() {
     return { catalog, usual };
 }
 
+/** The usuals page's own catalog: seven usuals, each with a product, in every
+ *  restock state (weekly, every N weeks, monthly, when low only, paused). */
+function previewUsualsCatalog() {
+    const usualOf = (
+        id: string,
+        name: string,
+        product: string,
+        brand: string | null,
+        store: string,
+        amount: { amount: number; unit: string },
+        plain: Record<string, unknown> = {},
+    ) => [
+        food(id, name, null, {
+            usualProductId: `${id}-p`,
+            usualStoreId: store,
+            usualAmount: amount,
+            ...plain,
+        }),
+        food(`${id}-p`, product, null, {
+            genericFoodId: id,
+            brand,
+            usualStoreId: store,
+            usualAmount: amount,
+        }),
+    ];
+    const catalog = [
+        ...usualOf(
+            "u-milk",
+            "Milk",
+            "Kirkland 2% milk",
+            null,
+            "s-costco",
+            { amount: 64, unit: "fl oz" },
+            { restockSchedule: "weekly" },
+        ),
+        ...usualOf(
+            "u-eggs",
+            "Eggs",
+            "Vital Farms large",
+            null,
+            "s-costco",
+            { amount: 24, unit: "each" },
+            {
+                restockSchedule: "weekly",
+                restockWhenLow: true,
+            },
+        ),
+        ...usualOf(
+            "u-yogurt",
+            "Greek yogurt",
+            "Fage Total 2%",
+            null,
+            "s-tj",
+            { amount: 32, unit: "oz" },
+            { restockSchedule: "weekly" },
+        ),
+        ...usualOf(
+            "u-chicken",
+            "Chicken thighs",
+            "Kirkland boneless",
+            null,
+            "s-costco",
+            { amount: 4, unit: "lb" },
+            { restockSchedule: "every_n_weeks", restockEveryWeeks: 2 },
+        ),
+        ...usualOf(
+            "u-bananas",
+            "Bananas",
+            "Bananas",
+            null,
+            "s-tj",
+            { amount: 6, unit: "each" },
+            { restockWhenLow: true, restockLowLevel: 2 },
+        ),
+        ...usualOf(
+            "u-coffee",
+            "Coffee beans",
+            "Onyx Southern Weather",
+            null,
+            "s-tj",
+            { amount: 1, unit: "each" },
+            { restockSchedule: "monthly" },
+        ),
+        ...usualOf(
+            "u-oil",
+            "Olive oil",
+            "California Olive Ranch",
+            null,
+            "s-costco",
+            { amount: 1, unit: "each" },
+            { restockSchedule: "monthly", restockPaused: true },
+        ),
+    ];
+    return { catalog, usual: usualProductRows({ foods: catalog }) };
+}
+
+const PREVIEW_USUAL_STORES = [
+    { id: "s-costco", householdId: H, name: "Costco", sortOrder: 0 },
+    { id: "s-tj", householdId: H, name: "Trader Joe's", sortOrder: 1 },
+];
+
 function previewKitchenUsualsView(
     chrome: unknown,
     overrides: Partial<ReturnType<typeof buildPreviewKitchenUsualsView>> = {},
 ): ReturnType<typeof buildPreviewKitchenUsualsView> {
-    const { catalog, usual } = previewFoodCatalog();
-    const stores = PREVIEW_STORES;
+    const { catalog, usual } = previewUsualsCatalog();
+    const stores = PREVIEW_USUAL_STORES;
     const storesById = new Map(stores.map((row) => [row.id, row]));
     const foodsById = new Map(
         catalog.map((row) => [
@@ -734,7 +835,7 @@ function previewKitchenUsualsView(
             row.food.id,
             kitchenUsualRowMeta(row, {
                 storesById,
-                groceryLines: previewGroceryLines(),
+                groceryLines: [{ foodId: "u-yogurt", checked: false }],
                 foodsById,
             }),
         ]),
@@ -745,6 +846,7 @@ function previewKitchenUsualsView(
         stores,
         rowMeta,
         addable: usual.addable,
+        restockDay: "Sundays",
         openGroceriesCount: previewGroceryLines().filter((l) => !l.checked)
             .length,
         ...overrides,
@@ -1146,7 +1248,13 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   ),
                   "kitchen-usual-edit": renderKitchenUsualsV2Page(
                       previewKitchenUsualsView(chrome as never, {
-                          openFoodId: "f-eggs",
+                          openFoodId: "u-milk",
+                      }),
+                  ),
+                  "kitchen-usual-restock": renderKitchenUsualsV2Page(
+                      previewKitchenUsualsView(chrome as never, {
+                          openFoodId: "u-eggs",
+                          openRestock: true,
                       }),
                   ),
               }
@@ -2014,6 +2122,7 @@ for (const theme of ["light", "dark"] as const) {
             ? [
                   `grocery-put-away-${theme}`,
                   `kitchen-usual-edit-${theme}`,
+                  `kitchen-usual-restock-${theme}`,
                   `settings-stores-reorder-${theme}`,
                   `settings-store-delete-${theme}`,
                   `settings-store-delete-empty-${theme}`,

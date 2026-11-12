@@ -116,6 +116,7 @@ import {
 import {
     kitchenUsualRowMeta,
     renderKitchenUsualsV2Page,
+    restockWeekdayLabel,
     type KitchenUsualsRowMeta,
 } from "./pages/v2/kitchen-usuals.js";
 import type { GroceryLineView } from "./pages/grocery.js";
@@ -1301,6 +1302,7 @@ export async function renderUsualProductsListPage(
         q?: string;
         storeFilter?: string;
         openFoodId?: string;
+        openRestock?: boolean;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -1337,7 +1339,10 @@ export async function renderUsualProductsListPage(
         groceryLines,
     );
     if (chromeWithCount.flags.uiV2) {
-        const stores = await liveSettingsStore().listStores(householdId);
+        const [stores, config] = await Promise.all([
+            liveSettingsStore().listStores(householdId),
+            getHouseholdConfig(householdId),
+        ]);
         const storesById = new Map(stores.map((row) => [row.id, row]));
         const foodsById = new Map(
             foods.map((row) => [
@@ -1381,6 +1386,10 @@ export async function renderUsualProductsListPage(
                 selectedStoreId,
                 error,
                 openFoodId: knownOpen,
+                openRestock: opts.openRestock,
+                restockDay: config.preferences.restock.enabled
+                    ? restockWeekdayLabel(config.preferences.restock.weekday)
+                    : null,
                 addSearch,
                 openGroceriesCount: groceryOpenLineCount(groceryLines),
             }),

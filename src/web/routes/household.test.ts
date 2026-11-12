@@ -2024,6 +2024,214 @@ describe("kitchen usuals ui-v2", () => {
     });
 });
 
+describe("kitchen usuals restock ui-v2", () => {
+    function restockApp() {
+        const hono = new Hono();
+        hono.route("/", householdRoutes);
+        hono.route("/", foodsRoutes);
+        return hono;
+    }
+    function postSchedule(foodId: string, body: string) {
+        return restockApp().request(
+            `http://x/kitchen/usuals/${foodId}/schedule`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body,
+            },
+        );
+    }
+    async function getUsuals(path = "/kitchen/usuals") {
+        const res = await restockApp().request(`http://x${path}`, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        return { status: res.status, html: await res.text() };
+    }
+    async function seedUsual() {
+        const seeded = await seedEggsCatalog();
+        await db.foodsStore.updateFoodRow({
+            ...(await db.foodsStore.getFood(HH, seeded.eggs.id))!,
+            usualProductId: seeded.kirkland.id,
+        });
+        await db.foodsStore.updateFoodRow({
+            ...(await db.foodsStore.getFood(HH, seeded.kirkland.id))!,
+            usualAmount: { amount: 24, unit: "each" },
+        });
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        return seeded;
+    }
+    const RESTORE_RESTOCK = { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" };
+    beforeEach(() => {
+        db.household.preferences.restock = { ...RESTORE_RESTOCK };
+    });
+
+    test("POST saves the schedule, paused and low level, then the row shows them", async () => {
+        const { eggs } = await seedUsual();
+        const r = await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=every_n_weeks&restock_every_weeks=3&restock_low_level=5&return_to=%2Fkitchen%2Fusuals",
+        );
+        expect(r.status).toBe(303);
+        // Back to the edit sheet the Restock sheet sits in.
+        expect(r.headers.get("location")).toBe(
+            `/kitchen/usuals?food=${eggs.id}`,
+        );
+        expect(r.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({
+            restockSchedule: "every_n_weeks",
+            restockEveryWeeks: 3,
+            restockPaused: false,
+            restockLowLevel: 5,
+        });
+        const { html } = await getUsuals();
+        expect(html).toContain("Every 3 weeks");
+        resetFlagsForTests();
+    });
+
+    test("POST with the paused box ticked pauses, and blank clears the low level", async () => {
+        const { eggs } = await seedUsual();
+        await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=weekly&restock_low_level=5",
+        );
+        const r = await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=weekly&restock_paused=1&restock_low_level=",
+        );
+        expect(r.status).toBe(303);
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({
+            restockSchedule: "weekly",
+            restockEveryWeeks: null,
+            restockPaused: true,
+            restockLowLevel: null,
+        });
+        const { html } = await getUsuals();
+        expect(html).toContain("Paused");
+        resetFlagsForTests();
+    });
+
+    function postEdit(foodId: string, body: string) {
+        return restockApp().request(`http://x/kitchen/usuals/${foodId}`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body,
+        });
+    }
+
+    test("the edit sheet's Save commits the switch with the rest, and an unchecked box turns it off", async () => {
+        const { eggs } = await seedUsual();
+        await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=monthly&restock_low_level=",
+        );
+        const on = await postEdit(
+            eggs.id,
+            `product_food_id=&usual_amount=3&usual_unit=each&restock_when_low_present=1&restock_when_low=1&return_to=${encodeURIComponent("/kitchen/usuals?store=s1")}`,
+        );
+        expect(on.status).toBe(303);
+        expect(on.headers.get("location")).toBe("/kitchen/usuals?store=s1");
+        let food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({
+            restockSchedule: "monthly",
+            restockWhenLow: true,
+        });
+        // An unchecked checkbox posts nothing; the marker alone means off.
+        await postEdit(
+            eggs.id,
+            "product_food_id=&usual_amount=3&usual_unit=each&restock_when_low_present=1",
+        );
+        food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({
+            restockSchedule: "monthly",
+            restockWhenLow: false,
+        });
+        resetFlagsForTests();
+    });
+
+    test("an edit post without the marker (the old app) leaves when-low alone", async () => {
+        const { eggs } = await seedUsual();
+        await postEdit(
+            eggs.id,
+            "product_food_id=&usual_amount=3&usual_unit=each&restock_when_low_present=1&restock_when_low=1",
+        );
+        const r = await postEdit(
+            eggs.id,
+            "product_food_id=&usual_amount=4&usual_unit=each",
+        );
+        expect(r.status).toBe(303);
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food?.restockWhenLow).toBe(true);
+        resetFlagsForTests();
+    });
+
+    test("an invalid N re-renders 400 with the Restock sheet open and nothing saved", async () => {
+        const { eggs } = await seedUsual();
+        const r = await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=every_n_weeks&restock_every_weeks=0&return_to=%2Fkitchen%2Fusuals",
+        );
+        expect(r.status).toBe(400);
+        const html = await r.text();
+        expect(html).toContain("whole number of weeks");
+        expect(html).toMatch(
+            new RegExp(
+                `id="fd-usual-${eggs.id}-restock"[^>]*data-sheet-open-on-load`,
+            ),
+        );
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food?.restockSchedule).toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("a product is refused with a 400 and keeps its row untouched", async () => {
+        const { kirkland } = await seedUsual();
+        const r = await postSchedule(
+            kirkland.id,
+            "scope=schedule&restock_schedule=weekly",
+        );
+        expect(r.status).toBe(400);
+        expect(await r.text()).toContain("product of another food");
+        const food = await db.foodsStore.getFood(HH, kirkland.id);
+        expect(food?.restockSchedule).toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("POST is 404 when ui-v2 is off", async () => {
+        const { eggs } = await seedUsual();
+        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        const r = await postSchedule(
+            eggs.id,
+            "scope=schedule&restock_schedule=weekly",
+        );
+        expect(r.status).toBe(404);
+        const food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food?.restockSchedule).toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("the header names the household restock day only when restocking is on", async () => {
+        await seedUsual();
+        const off = await getUsuals();
+        expect(off.html).not.toContain("restock on");
+        db.household.preferences.restock = {
+            ...RESTORE_RESTOCK,
+            enabled: true,
+            weekday: 0,
+        };
+        const on = await getUsuals();
+        expect(on.html).toContain("1 usual · restock on Sundays");
+        resetFlagsForTests();
+    });
+});
+
 const PRODUCT_BARCODE = "737628064502";
 
 function productApp() {

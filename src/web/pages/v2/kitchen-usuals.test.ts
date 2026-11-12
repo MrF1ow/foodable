@@ -15,8 +15,16 @@ import {
     kitchenUsualsResolvedOpenFoodId,
     renderKitchenUsualsBody,
     renderKitchenUsualsV2Page,
+    usualRestockSheetId,
     usualSheetId,
+    formatLowLevel,
+    kitchenUsualsHeaderSubtitle,
+    restockWeekdayLabel,
+    usualRestockParts,
+    usualRestockView,
+    usualScheduleLabel,
     type KitchenUsualsRowMeta,
+    type UsualRestockView,
 } from "./kitchen-usuals.js";
 
 const HH = "hh-1";
@@ -283,5 +291,251 @@ describe("renderKitchenUsualsV2Page", () => {
             baseView({ rows: [row], rowMeta: meta }) as never,
         );
         expect(html).toContain("Any brand");
+    });
+});
+
+function scheduled(
+    over: Partial<Food>,
+    amount: { amount: number; unit: string } | null = {
+        amount: 24,
+        unit: "each",
+    },
+): UsualProductRow {
+    const row = baseRow();
+    row.usual = { ...row.usual!, usualAmount: amount };
+    row.food = { ...row.food, ...over };
+    return row;
+}
+
+function partTexts(view: UsualRestockView): string[] {
+    return usualRestockParts(view).map((part) =>
+        typeof part === "object" ? String(part.text) : String(part),
+    );
+}
+
+describe("usual restock row meta", () => {
+    test("no schedule and not when-low shows nothing", () => {
+        expect(usualRestockParts(usualRestockView(baseRow()))).toEqual([]);
+    });
+
+    test("each schedule reads as the design words it", () => {
+        const label = (over: Partial<Food>) =>
+            usualScheduleLabel(usualRestockView(scheduled(over)));
+        expect(label({ restockSchedule: "weekly" })).toBe("Every week");
+        expect(
+            label({ restockSchedule: "every_n_weeks", restockEveryWeeks: 2 }),
+        ).toBe("Every 2 weeks");
+        expect(
+            label({ restockSchedule: "every_n_weeks", restockEveryWeeks: 1 }),
+        ).toBe("Every week");
+        expect(label({ restockSchedule: "monthly" })).toBe("Every month");
+        expect(label({})).toBeNull();
+    });
+
+    test("a schedule alone names no level; when-low adds 'below N' (default a quarter)", () => {
+        expect(
+            partTexts(
+                usualRestockView(scheduled({ restockSchedule: "weekly" })),
+            ),
+        ).toEqual(["Every week"]);
+        expect(
+            partTexts(
+                usualRestockView(
+                    scheduled({
+                        restockSchedule: "weekly",
+                        restockWhenLow: true,
+                    }),
+                ),
+            ),
+        ).toEqual(["Every week", "below 6"]);
+    });
+
+    test("when-low without a schedule reads 'When low · below N' with the stored level", () => {
+        expect(
+            partTexts(
+                usualRestockView(
+                    scheduled({ restockWhenLow: true, restockLowLevel: 2 }),
+                ),
+            ),
+        ).toEqual(["When low", "below 2"]);
+    });
+
+    test("when-low with no usual amount and no level names no 'below'", () => {
+        expect(
+            partTexts(
+                usualRestockView(scheduled({ restockWhenLow: true }, null)),
+            ),
+        ).toEqual(["When low"]);
+    });
+
+    test("paused wins and is muted; paused with nothing to pause shows nothing", () => {
+        const parts = usualRestockParts(
+            usualRestockView(
+                scheduled({ restockSchedule: "monthly", restockPaused: true }),
+            ),
+        );
+        expect(parts).toEqual([{ text: "Paused", tone: "muted" }]);
+        expect(
+            usualRestockParts(
+                usualRestockView(scheduled({ restockPaused: true })),
+            ),
+        ).toEqual([]);
+    });
+
+    test("the row carries the parts after store and amount, before 'on the list'", () => {
+        const row = scheduled({ restockSchedule: "weekly" });
+        const meta = kitchenUsualRowMeta(row, {
+            storesById: new Map([["st-costco", { name: "Costco" }]]),
+            groceryLines: [{ foodId: "eggs", checked: false }],
+            foodsById: new Map([
+                ["eggs", { id: "eggs", genericFoodId: null }],
+                ["kirkland", { id: "kirkland", genericFoodId: "eggs" }],
+            ]),
+        });
+        expect(
+            kitchenUsualRowParts(meta).map((part) =>
+                typeof part === "object" ? String(part.text) : String(part),
+            ),
+        ).toEqual(["Costco", "24", "Every week", "on the list"]);
+    });
+});
+
+describe("formatLowLevel", () => {
+    test("whole numbers, fractions and decimals", () => {
+        expect(formatLowLevel(6)).toBe("6");
+        expect(formatLowLevel(0.25)).toBe("¼");
+        expect(formatLowLevel(0.5)).toBe("½");
+        expect(formatLowLevel(1.75)).toBe("1¾");
+        expect(formatLowLevel(2.333)).toBe("2.33");
+        expect(formatLowLevel(0)).toBe("0");
+    });
+});
+
+describe("header subtitle", () => {
+    test("names the restock day only when given", () => {
+        expect(kitchenUsualsHeaderSubtitle(7)).toBe("7 usuals");
+        expect(kitchenUsualsHeaderSubtitle(1, "Sundays")).toBe(
+            "1 usual · restock on Sundays",
+        );
+        expect(restockWeekdayLabel(0)).toBe("Sundays");
+        expect(restockWeekdayLabel(6)).toBe("Saturdays");
+        expect(restockWeekdayLabel(9)).toBeNull();
+    });
+});
+
+describe("edit-usual sheet restock controls", () => {
+    function bodyFor(over: Partial<Food>, extra: Record<string, unknown> = {}) {
+        const row = scheduled(over);
+        const view = baseView({
+            rows: [row],
+            rowMeta: new Map([
+                [
+                    row.food.id,
+                    {
+                        productLabel: "x",
+                        storeId: null,
+                        storeName: null,
+                        amountLabel: null,
+                        onList: false,
+                    },
+                ],
+            ]),
+            ...extra,
+        });
+        return renderKitchenUsualsBody(view as never);
+    }
+
+    test("the Restock row shows the schedule and the switch is a field of the edit form", () => {
+        const html = bodyFor({
+            restockSchedule: "every_n_weeks",
+            restockEveryWeeks: 4,
+        });
+        expect(html).toContain(
+            `commandfor="${usualRestockSheetId("eggs")}" command="show-modal"`,
+        );
+        expect(html).toContain("Every 4 weeks");
+        expect(html).toContain("Add when it runs low");
+        expect(html).toContain(`action="/kitchen/usuals/eggs/schedule"`);
+        const editForm = `fd-usual-eggs-form`;
+        // The checkbox belongs to the edit sheet's own form, next to its marker.
+        expect(html).toMatch(
+            new RegExp(
+                `role="switch" form="${editForm}" name="restock_when_low" value="1"(?! checked)`,
+            ),
+        );
+        expect(html).toMatch(
+            new RegExp(
+                `<form id="${editForm}"[^>]*>\\s*<input type="hidden" name="return_to"[^>]*/>\\s*<input type="hidden" name="restock_when_low_present" value="1" />`,
+            ),
+        );
+        expect(html).not.toContain('name="scope" value="when_low"');
+        const on = bodyFor({ restockWhenLow: true });
+        expect(on).toMatch(
+            new RegExp(
+                `form="${editForm}" name="restock_when_low" value="1" checked`,
+            ),
+        );
+        expect(on).toContain("No schedule");
+    });
+
+    test("the Restock sheet says what Paused does", () => {
+        expect(bodyFor({})).toContain(
+            "Paused: not added on schedule or when it runs low.",
+        );
+    });
+
+    test("the Restock sheet has the picker, the weeks stepper, paused and the level", () => {
+        const html = bodyFor({
+            restockSchedule: "every_n_weeks",
+            restockEveryWeeks: 3,
+            restockPaused: true,
+            restockLowLevel: 5,
+        });
+        expect(html).toContain(`id="${usualRestockSheetId("eggs")}"`);
+        for (const value of ["", "weekly", "every_n_weeks", "monthly"]) {
+            expect(html).toContain(`name="restock_schedule" value="${value}"`);
+        }
+        expect(html).toMatch(
+            /name="restock_schedule" value="every_n_weeks" checked/,
+        );
+        expect(html).toMatch(/name="restock_every_weeks"[^>]*value="3"/);
+        expect(html).toMatch(/name="restock_paused" value="1" checked/);
+        expect(html).toMatch(/name="restock_low_level"[^>]*value="5"/);
+    });
+
+    test("an unset level shows the default quarter as the placeholder", () => {
+        const html = bodyFor({});
+        expect(html).toMatch(
+            /name="restock_low_level"[^>]*value=""[^>]*placeholder="6"/,
+        );
+        expect(html).toContain("count");
+    });
+
+    test("openRestock reopens the Restock sheet and puts the error in it", () => {
+        const open = bodyFor(
+            {},
+            {
+                openFoodId: "eggs",
+                error: "Enter a whole number of weeks.",
+                openRestock: true,
+            },
+        );
+        expect(open).toMatch(
+            new RegExp(
+                `id="${usualRestockSheetId("eggs")}"[^>]*data-sheet-open-on-load`,
+            ),
+        );
+        const restockStart = open.indexOf(
+            `id="${usualRestockSheetId("eggs")}"`,
+        );
+        expect(open.indexOf("Enter a whole number")).toBeGreaterThan(
+            restockStart,
+        );
+        const mainOnly = bodyFor({}, { openFoodId: "eggs", error: "Boom." });
+        expect(mainOnly).not.toMatch(
+            new RegExp(
+                `id="${usualRestockSheetId("eggs")}"[^>]*data-sheet-open-on-load`,
+            ),
+        );
     });
 });
