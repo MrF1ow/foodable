@@ -363,6 +363,34 @@ describe("grocery routes", () => {
         expect(await groceryStore.listLines(HH)).toHaveLength(before.length);
     });
 
+    test("check POST stamps the usual's last restocked day", async () => {
+        const { lineA } = await seedGroceryLines();
+        await checkGroceryLine(groceryStore, HH, lineA.id, false);
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const oats = await findOrCreateManualFood(
+            foodsStore,
+            HH,
+            "food",
+            "Oats",
+        );
+        expect(oats.lastRestockedOn).toBeNull();
+        const res = await app.request(
+            `http://x/kitchen/groceries/lines/${lineA.id}/check`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookie(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({ checked: "1" }).toString(),
+            },
+        );
+        expect(res.status).toBe(303);
+        expect((await foodsStore.getFood(HH, oats.id))?.lastRestockedOn).toBe(
+            today,
+        );
+    });
+
     test("check POST honors return_to on the v2 tab", async () => {
         const { lineA } = await seedGroceryLines();
         await checkGroceryLine(groceryStore, HH, lineA.id, false);

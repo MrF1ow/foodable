@@ -89,6 +89,8 @@ export function liveRestockCheckDeps() {
         settings,
         dismissals,
         restock,
+        // Stays on today's behaviour until the schedules are switched on.
+        source: "legacy" as const,
         forHousehold: <T>(householdId: string, work: () => Promise<T>) =>
             withActor({ kind: "household", householdId }, work),
     };

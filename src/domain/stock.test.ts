@@ -8,6 +8,7 @@ import {
 import {
     createMemoryFoodsStore,
     findOrCreateManualFood,
+    newFood,
     updateFood,
 } from "./foods.js";
 import {
@@ -998,4 +999,95 @@ test("putAwayGroceryLines with a bad line in the middle writes nothing", async (
     expect((await listGrocery(grocery, settings, HH)).lines).toHaveLength(3);
     expect((await listFridge(fridge, HH)).items).toHaveLength(0);
     expect(await stock.listMovements(HH)).toHaveLength(0);
+});
+
+test("putAwayGroceryLines stamps the usual's last restocked day when given the day", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const store = await createGroceryStore(settings, HH, "Safeway");
+    const plain = await findOrCreateManualFood(foods, HH, "food", "Butter");
+    const product = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Kerrygold Butter",
+            genericFoodId: plain.id,
+        }),
+    );
+    const add = () =>
+        addGroceryManualFood(grocery, settings, foods, {
+            householdId: HH,
+            storeId: store.id,
+            name: "Butter",
+            amount: 1,
+            unit: "each",
+        });
+    const first = await add();
+    await putAwayGroceryLines(grocery, fridge, stock, foods, {
+        householdId: HH,
+        lineIds: [first.id],
+        locationId: loc.id,
+    });
+    expect((await foods.getFood(HH, plain.id))?.lastRestockedOn).toBeNull();
+
+    const second = await add();
+    await putAwayGroceryLines(grocery, fridge, stock, foods, {
+        householdId: HH,
+        lineIds: [second.id],
+        locationId: loc.id,
+        productFoodIds: { [second.id]: product.id },
+        restockedOn: "2026-06-06",
+    });
+    expect((await foods.getFood(HH, plain.id))?.lastRestockedOn).toBe(
+        "2026-06-06",
+    );
+    expect((await foods.getFood(HH, product.id))?.lastRestockedOn).toBeNull();
+});
+
+test("a failing stamp does not abort a put-away that already saved", async () => {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    const store = await createGroceryStore(settings, HH, "Safeway");
+    await findOrCreateManualFood(foods, HH, "food", "Butter");
+    await findOrCreateManualFood(foods, HH, "food", "Jam");
+    const add = (name: string) =>
+        addGroceryManualFood(grocery, settings, foods, {
+            householdId: HH,
+            storeId: store.id,
+            name,
+            amount: 1,
+            unit: "each",
+        });
+    const a = await add("Butter");
+    const b = await add("Jam");
+    const broken: typeof foods = {
+        ...foods,
+        updateFoodRow: async () => {
+            throw new Error("db down");
+        },
+    };
+    const original = console.error;
+    console.error = () => {};
+    let results;
+    try {
+        results = await putAwayGroceryLines(grocery, fridge, stock, broken, {
+            householdId: HH,
+            lineIds: [a.id, b.id],
+            locationId: loc.id,
+            restockedOn: "2026-06-06",
+        });
+    } finally {
+        console.error = original;
+    }
+    expect(results).toHaveLength(2);
+    expect((await listFridge(fridge, HH)).items).toHaveLength(2);
+    expect(await grocery.listLines(HH)).toHaveLength(0);
 });

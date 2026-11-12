@@ -7,6 +7,7 @@ import {
     findManualFood,
     findOrCreateManualFood,
     FoodsInputError,
+    markUsualRestocked,
     type OnSimilar,
     normalizeFoodName,
     type Food,
@@ -1413,16 +1414,38 @@ export async function addGrocerySupply(
     }
 }
 
+/**
+ * Ticks a line off or back on. Ticking a food-backed line off stamps the day
+ * its usual was last restocked when `restocked` names the foods store and the
+ * household-local day (`YYYY-MM-DD`); unticking never touches the stamp.
+ */
 export async function checkGroceryLine(
     grocery: GroceryListStore,
     householdId: string,
     lineId: string,
     checked: boolean,
+    restocked?: { foods: FoodsStore; today: string },
 ): Promise<GroceryLine | null> {
     const lines = await grocery.listLines(householdId);
     const current = lines.find((line) => line.id === lineId);
     if (!current) return null;
-    return grocery.updateLine({ ...current, checked });
+    const updated = await grocery.updateLine({ ...current, checked });
+    if (checked && restocked && current.foodId) {
+        // The tick is saved; a failed stamp only delays the next schedule.
+        try {
+            await markUsualRestocked(
+                restocked.foods,
+                householdId,
+                current.foodId,
+                restocked.today,
+            );
+        } catch (err) {
+            console.error(
+                `[restock] stamp failed: ${err instanceof Error ? err.message : String(err)}`,
+            );
+        }
+    }
+    return updated;
 }
 
 export async function clearCheckedLines(

@@ -4,6 +4,7 @@ import {
     findFoodById,
     foodsByIds,
     FoodsInputError,
+    markUsualRestocked,
     type Food,
     type FoodsStore,
     type MemoryFoodRefHolder,
@@ -912,6 +913,11 @@ export async function putAwayGroceryLines(
             string,
             { locationId?: string | null; expiresOn?: string | null }
         >;
+        /**
+         * The household-local day (`YYYY-MM-DD`). When given, each food put
+         * away stamps its usual's last restocked day.
+         */
+        restockedOn?: string;
     },
 ): Promise<PutAwayResult[]> {
     const lines = await grocery.listLines(input.householdId);
@@ -1077,6 +1083,21 @@ export async function putAwayGroceryLines(
             expiresOn: row.expiresOn,
         });
         await grocery.deleteLine(input.householdId, row.line.id);
+        if (input.restockedOn) {
+            // The put-away is saved; a failed stamp only delays the next schedule.
+            try {
+                await markUsualRestocked(
+                    foods,
+                    input.householdId,
+                    row.chosenId,
+                    input.restockedOn,
+                );
+            } catch (err) {
+                console.error(
+                    `[restock] stamp failed: ${err instanceof Error ? err.message : String(err)}`,
+                );
+            }
+        }
         results.push({
             line: row.line,
             movement: applied.movement,
