@@ -49,7 +49,7 @@ import {
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveSettingsStore } from "../../db/settings.js";
-import { liveStockStore } from "../../db/stock.js";
+import { inStockTransaction, liveStockStore } from "../../db/stock.js";
 import { effectiveFoodsByIds } from "../../domain/foods.js";
 import {
     deleteMeal,
@@ -73,7 +73,7 @@ import {
     MealItemsError,
     resolveAndBuildMeal,
 } from "../../domain/meals.js";
-import { cookRecipe } from "../../domain/stock.js";
+import { cookClaimId, cookRecipe } from "../../domain/stock.js";
 import {
     addRecipeToGroceryToastFlash,
     cookRecipeToastFlash,
@@ -628,9 +628,12 @@ recipesRoutes.get(
  * starts clean. A meal that cannot be built (an unverified recipe, say) fails
  * before anything is written.
  *
- * With the switch off there is no key to claim: stock movements carry no
- * idempotency key, so two requests for the same sheet each cook. That is a
- * known gap, not guarded here.
+ * With the switch off there is no meal to claim the submit, so the key claims
+ * the cook itself: it names the ledger rows the cook writes
+ * (`cookRecipe`'s `submitKey`), and a second request for the same sheet finds
+ * them and takes nothing. The whole cook is one transaction, so a throw part
+ * way through leaves every ingredient as it was and a request that loses the
+ * race to the same sheet is rolled back whole and answered as a repeat.
  */
 recipesRoutes.post(
     "/recipes/:id/cook/confirm",
@@ -649,6 +652,8 @@ recipesRoutes.post(
             .slice(0, 64);
         // The meal this request inserted, to take back if the cook fails.
         let insertedMealId: string | null = null;
+        // With a meal, its key claims the submit; without one the cook does.
+        const cookKey = !logServing && submitKey ? submitKey : null;
         try {
             if (!Number.isFinite(servings) || servings <= 0) {
                 throw new RecipeInputError("Enter servings greater than zero.");
@@ -705,19 +710,29 @@ recipesRoutes.post(
                 }
                 insertedMealId = inserted.meal.id;
             }
-            const cooked = await cookRecipe(
-                liveRecipesStore(),
-                liveFridgeStore(),
-                liveStockStore(),
-                liveFoodsStore(),
-                {
-                    householdId: member.householdId,
-                    recipeId,
-                    totalPortions: servings,
-                    deductStock: true,
-                    actorUserId: userId,
-                },
+            const cooked = await inStockTransaction(() =>
+                cookRecipe(
+                    liveRecipesStore(),
+                    liveFridgeStore(),
+                    liveStockStore(),
+                    liveFoodsStore(),
+                    {
+                        householdId: member.householdId,
+                        recipeId,
+                        totalPortions: servings,
+                        deductStock: true,
+                        actorUserId: userId,
+                        submitKey: cookKey,
+                    },
+                ),
             );
+            if (cooked.alreadyCooked) {
+                return redirectWithToast(
+                    c,
+                    `/recipes/${recipeId}`,
+                    "recipes.cooked.already",
+                );
+            }
             const flash = cookSheetToastFlash({
                 loggedSlot: meal ? slot : null,
                 shortfallCount: cooked.shortfalls.length,
@@ -733,6 +748,24 @@ recipesRoutes.post(
                 flash.params,
             );
         } catch (err) {
+            // A request for the same sheet that got in first has cooked by now
+            // (this one was rolled back against it): that is a repeat, not an
+            // error to show.
+            if (
+                cookKey &&
+                (await liveStockStore()
+                    .hasMovement(
+                        member.householdId,
+                        cookClaimId(member.householdId, recipeId, cookKey),
+                    )
+                    .catch(() => false))
+            ) {
+                return redirectWithToast(
+                    c,
+                    `/recipes/${recipeId}`,
+                    "recipes.cooked.already",
+                );
+            }
             if (insertedMealId) {
                 try {
                     await deleteMeal(userId, insertedMealId);

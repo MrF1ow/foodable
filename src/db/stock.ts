@@ -136,6 +136,20 @@ export function liveStockStore(): StockStore {
                 return movementFromRow(data as never);
             });
         },
+        async hasMovement(householdId, id) {
+            return run(async (tx) => {
+                const data = await rows(
+                    tx,
+                    tx`
+                        select 1 as found
+                        from ${tx.unsafe(STOCK_MOVEMENTS)}
+                        where household_id = ${householdId}
+                          and id = ${id}
+                    `,
+                );
+                return data.length > 0;
+            });
+        },
         async linkMeal(householdId, movementId, mealId) {
             return run(async (tx) => {
                 try {
@@ -165,4 +179,12 @@ export function liveStockStore(): StockStore {
             });
         },
     };
+}
+
+/**
+ * Runs `fn` as one database transaction: every store call it makes joins it,
+ * so they all commit together or, if `fn` throws, none of them does.
+ */
+export function inStockTransaction<T>(fn: () => Promise<T>): Promise<T> {
+    return run(async () => fn());
 }

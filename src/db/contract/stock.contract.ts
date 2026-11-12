@@ -82,6 +82,33 @@ export function runStockStoreContract(
             expect(byFood.map((m) => m.id)).toEqual([after.id, at.id]);
         });
 
+        test("hasMovement says whether the household's ledger holds that id", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const row = sampleMovement(c);
+            expect(await store.hasMovement(c.householdId, row.id)).toBe(false);
+            await store.insertMovement(row);
+            expect(await store.hasMovement(c.householdId, row.id)).toBe(true);
+            expect(await store.hasMovement(c.otherHouseholdId, row.id)).toBe(
+                false,
+            );
+        });
+
+        test("insertMovement refuses an id the ledger already holds", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const row = sampleMovement(c);
+            await store.insertMovement(row);
+            await expect(
+                store.insertMovement({ ...row, delta: 5 }),
+            ).rejects.toThrow();
+            const listed = await store.listMovements(c.householdId);
+            expect(listed).toHaveLength(1);
+            expect(listed[0]!.delta).toBe(1);
+        });
+
         test("household scoping on listMovements", async () => {
             await reset();
             const c = ctx();

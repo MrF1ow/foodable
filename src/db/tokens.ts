@@ -296,6 +296,58 @@ export async function consumeRefreshToken(
     }).catch(() => null);
 }
 
+/**
+ * Serialises everything that mints or revokes one member's tokens: held until
+ * the surrounding transaction ends, so a second caller for the same member
+ * waits for the first to commit. One lock per member, not per app, because a
+ * refresh knows its member before it knows anything else about the token.
+ */
+async function lockMemberTokens(tx: Tx, userId: string): Promise<void> {
+    await tx`
+        select pg_advisory_xact_lock(
+            hashtextextended(${`oauth-tokens:${userId}`}, 0)
+        )
+    `;
+}
+
+/**
+ * Runs a refresh-token exchange (`exchange` consumes the old token and stores
+ * the new pair) as one system transaction that holds the member's token lock,
+ * and returns what `exchange` returns; null when `refreshToken` names no live
+ * refresh token, without calling it. Every token-store call `exchange` makes
+ * joins that transaction, so a Disconnect (revokeConnection takes the same
+ * lock) lands wholly before the exchange, which then finds nothing to
+ * consume, or wholly after it, and deletes the pair it just stored. If
+ * `exchange` throws, the old token is not burned.
+ */
+export async function withRefreshExchange<T>(
+    refreshToken: string,
+    exchange: () => Promise<T>,
+): Promise<T | null> {
+    const now = new Date().toISOString();
+    return runAsSystem("oauth refresh token exchange", () =>
+        run(async (tx) => {
+            // Read first, lock second: the member is only known from the
+            // token. The consume inside `exchange` re-checks the token once the
+            // lock is held, so a Disconnect that won the lock has already
+            // deleted it.
+            const owner = await maybeOne<{ user_id: string }>(
+                tx,
+                tx`
+                    select user_id
+                    from ${tx.unsafe(REFRESH_TOKENS)}
+                    where token = ${refreshToken}
+                      and expires_at > ${now}
+                `,
+                "find refresh token owner",
+            );
+            if (!owner) return null;
+            await lockMemberTokens(tx, owner.user_id);
+            return exchange();
+        }),
+    );
+}
+
 // ---------- Registered clients ----------
 
 /**
@@ -451,9 +503,10 @@ export async function listConnections(userId: string): Promise<AiConnection[]> {
  * could still be exchanged afterwards. Returns how many tokens were deleted
  * (codes are not counted).
  *
- * Not covered: a refresh already in flight when this runs can still mint a
- * fresh pair after the delete, since the refresh consumes its token first.
- * Closing that needs the refresh and the revoke to serialise on the member.
+ * A refresh in flight cannot slip a fresh pair past this: the exchange
+ * (withRefreshExchange) and this delete take the same per-member lock, so one
+ * waits for the other to commit. Either the refresh finishes first and its new
+ * pair is deleted here, or this runs first and the refresh finds no token.
  */
 export async function revokeConnection(
     userId: string,
@@ -461,6 +514,7 @@ export async function revokeConnection(
 ): Promise<number> {
     return runAsSystem("revoke ai connection", () =>
         run(async (tx) => {
+            await lockMemberTokens(tx, userId);
             const access = await rows<{ token: string }>(
                 tx,
                 tx`

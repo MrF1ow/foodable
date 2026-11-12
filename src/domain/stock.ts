@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import {
     effectiveFoodsByIds,
     familyOf,
@@ -68,6 +69,8 @@ export type StockStore = {
         foodId?: string,
         since?: string,
     ): Promise<StockMovement[]>;
+    /** Whether the household's ledger holds a movement with this id. */
+    hasMovement(householdId: string, id: string): Promise<boolean>;
 };
 
 /** Memory stock ledger plus merge hook so `MemoryFoodsStore.repointFoodRefs` can retarget movements. */
@@ -96,6 +99,8 @@ export type ApplyMovementInput = {
     openedOn?: string | null;
     expiresOn?: string | null;
     now?: Date;
+    /** Names each movement row this call records; random ids by default. */
+    newMovementId?: () => string;
 };
 
 export type ApplyMovementResult = {
@@ -160,9 +165,18 @@ export function createMemoryStockStore(): MemoryStockStore {
             return counts;
         },
         async insertMovement(row) {
+            // The id is the primary key, as in the table.
+            if (movements.some((m) => m.id === row.id)) {
+                throw new Error(`stock movement ${row.id} already exists`);
+            }
             const saved = { ...row };
             movements.push(saved);
             return { ...saved };
+        },
+        async hasMovement(householdId, id) {
+            return movements.some(
+                (m) => m.householdId === householdId && m.id === id,
+            );
         },
         async linkMeal(householdId, movementId, mealId) {
             const row = movements.find(
@@ -718,6 +732,7 @@ export async function applyMovement(
     }
     const now = input.now ?? new Date();
     const signed = input.delta;
+    const newId = input.newMovementId ?? (() => crypto.randomUUID());
     const movementBase = {
         householdId: input.householdId,
         reason: input.reason,
@@ -737,7 +752,7 @@ export async function applyMovement(
         );
         const appliedSigned = changed.applied;
         const movement = await stock.insertMovement({
-            id: crypto.randomUUID(),
+            id: newId(),
             foodId: food.id,
             fridgeItemId: changed.item?.id ?? null,
             delta: appliedSigned,
@@ -775,7 +790,7 @@ export async function applyMovement(
     const rows = plannedDecrementMovements(plan, food, input.fridgeItemId);
     if (plan.applied === 0) {
         const movement = await stock.insertMovement({
-            id: crypto.randomUUID(),
+            id: newId(),
             ...rows[0]!,
             ...movementBase,
         });
@@ -796,7 +811,7 @@ export async function applyMovement(
     for (const row of rows) {
         movements.push(
             await stock.insertMovement({
-                id: crypto.randomUUID(),
+                id: newId(),
                 ...row,
                 ...movementBase,
             }),
@@ -1213,7 +1228,39 @@ export type CookRecipeResult = {
     totalPortions: number;
     shortfalls: StockShortfall[];
     unmeasured: { foodId: string | null; displayName: string }[];
+    /** Set when `submitKey` named a cook that already ran: nothing was taken. */
+    alreadyCooked?: true;
 };
+
+/**
+ * The id of the `ordinal`-th ledger row a cook records under `submitKey`.
+ * The same submit names the same rows, so a repeat collides on the ledger's
+ * primary key instead of taking the ingredients a second time.
+ */
+export function cookMovementId(
+    householdId: string,
+    recipeId: string,
+    submitKey: string,
+    ordinal: number,
+): string {
+    const hex = createHash("sha256")
+        .update(`cook\0${householdId}\0${recipeId}\0${submitKey}\0${ordinal}`)
+        .digest("hex");
+    // Shaped like a version-5 uuid so it passes for one anywhere that checks.
+    const variant = ((parseInt(hex.slice(16, 18), 16) & 0x3f) | 0x80)
+        .toString(16)
+        .padStart(2, "0");
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-${variant}${hex.slice(18, 20)}-${hex.slice(20, 32)}`;
+}
+
+/** The row whose presence says the cook under `submitKey` has already run. */
+export function cookClaimId(
+    householdId: string,
+    recipeId: string,
+    submitKey: string,
+): string {
+    return cookMovementId(householdId, recipeId, submitKey, 0);
+}
 
 /** What one ingredient asks of the fridge when a recipe is cooked. */
 export type CookStep =
@@ -1308,6 +1355,14 @@ export async function cookRecipe(
         totalPortions: number;
         deductStock?: boolean;
         actorUserId?: string | null;
+        /**
+         * One submit of the cook sheet. A second cook under the same key takes
+         * nothing and answers `alreadyCooked`: the key names the ledger rows
+         * (see {@link cookMovementId}), so it holds across requests and
+         * restarts. Run the cook in one transaction so that two submits in
+         * flight at once cannot both take the ingredients.
+         */
+        submitKey?: string | null;
     },
 ): Promise<CookRecipeResult> {
     const { recipe, ingredients } = await loadCookableRecipe(recipes, input);
@@ -1328,6 +1383,26 @@ export async function cookRecipe(
             wrapFoodsError(err);
         }
     }
+    const submitKey = input.submitKey || null;
+    if (
+        submitKey &&
+        (await stock.hasMovement(
+            input.householdId,
+            cookClaimId(input.householdId, recipe.id, submitKey),
+        ))
+    ) {
+        return {
+            totalPortions,
+            shortfalls: [],
+            unmeasured,
+            alreadyCooked: true,
+        };
+    }
+    let ordinal = 0;
+    const newMovementId = submitKey
+        ? () =>
+              cookMovementId(input.householdId, recipe.id, submitKey, ordinal++)
+        : undefined;
     const shortfalls: StockShortfall[] = [];
     for (const step of steps) {
         if (step.kind === "unlinked") {
@@ -1342,6 +1417,7 @@ export async function cookRecipe(
             reason: "cook",
             recipeId: recipe.id,
             actorUserId: input.actorUserId,
+            newMovementId,
         });
         if (applied.shortfall) shortfalls.push(applied.shortfall);
     }

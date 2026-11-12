@@ -1,4 +1,5 @@
 import { test, expect, describe } from "bun:test";
+import { Hono } from "hono";
 import { maskIp, redactPathForAccessLog } from "./net.js";
 
 // All addresses below are IETF-reserved documentation ranges (RFC 5737 for
@@ -58,6 +59,83 @@ describe("redactPathForAccessLog", () => {
         }
         expect(redactPathForAccessLog("/s")).toBe("/s");
         expect(redactPathForAccessLog("/settings/help")).toBe("/settings/help");
+    });
+
+    test("redacts a token behind a percent-encoded segment, the way the router decodes it", () => {
+        const token = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE";
+        for (const [path, redacted] of [
+            [`/%73/${token}`, "/s/[redacted]"],
+            [`/%53/${token}`, "/s/[redacted]"],
+            [`/s/%41${token}`, "/s/[redacted]"],
+            [`/%65xports/e1.abc.def.mac`, "/exports/[redacted]"],
+            [`/e%78%70orts/e1.abc.def.mac`, "/exports/[redacted]"],
+            [`/%45XPORTS/e1.abc.def.mac`, "/exports/[redacted]"],
+            [`//%73//${token}`, "/s/[redacted]"],
+            // A malformed escape elsewhere in the path decodes piecewise, as
+            // the router does, and must neither throw nor expose the token.
+            [`/%73/${token}%E0%A4%A`, "/s/[redacted]"],
+            [`/%73/%`, "/s/[redacted]"],
+        ] as const) {
+            expect(redactPathForAccessLog(path)).toBe(redacted);
+        }
+    });
+
+    test("leaves a double-encoded segment alone, because the router does not decode it twice", () => {
+        for (const path of [
+            "/%2573/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE",
+            "/%25%37%33/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE",
+            "/%2Fs/anything",
+            "/%73%2Fanything",
+        ]) {
+            expect(redactPathForAccessLog(path)).toBe(path);
+        }
+    });
+
+    test("never logs a token the router handed to a share or export handler", async () => {
+        const token = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE";
+        let reached: string | null = null;
+        const app = new Hono();
+        app.get("/s/:token", (c) => {
+            reached = c.req.param("token");
+            return c.text("share");
+        });
+        app.get("/exports/:token", (c) => {
+            reached = c.req.param("token");
+            return c.text("export");
+        });
+        const spellings = [
+            `/s/${token}`,
+            `/%73/${token}`,
+            `/%53/${token}`,
+            `/S/${token}`,
+            `/%2573/${token}`,
+            `/s%2F${token}`,
+            `/%2Fs/${token}`,
+            `//s//${token}`,
+            `/s/${token}/`,
+            `/s/%41${token}`,
+            `/s/${token}%E0`,
+            `/%73/${token}%E0%A4%A`,
+            `/exports/${token}`,
+            `/%65xports/${token}`,
+            `/e%78ports/${token}`,
+            `/%45xports/${token}`,
+            `/%2565xports/${token}`,
+            `/exports%2F${token}`,
+            `/exports/%${token}`,
+        ];
+        let routed = 0;
+        for (const path of spellings) {
+            reached = null;
+            await app.request(`http://x${path}`);
+            if (reached === null) continue;
+            routed += 1;
+            expect(
+                redactPathForAccessLog(new URL(`http://x${path}`).pathname),
+            ).not.toContain(token.slice(0, 20));
+        }
+        // The spellings that do route must include the encoded ones.
+        expect(routed).toBeGreaterThanOrEqual(9);
     });
 
     test("leaves other paths unchanged", () => {

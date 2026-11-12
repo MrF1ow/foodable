@@ -27,6 +27,8 @@ import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
 import {
     addFridgeItemAdjust,
     applyMovement,
+    cookClaimId,
+    cookMovementId,
     cookPreview,
     cookRecipe,
     createMemoryStockStore,
@@ -175,6 +177,110 @@ test("cook deducts oldest-expiry first and reports a shortfall", async () => {
             eggsFood,
         ),
     ).toBe(true);
+});
+
+async function pantryWithFlourAndRecipe() {
+    const fridge = createMemoryFridgeStore();
+    const stock = createMemoryStockStore();
+    const foods = createMemoryFoodsStore();
+    const recipes = createMemoryRecipesStore();
+    const loc = await addLocation(fridge, HH, "Pantry");
+    const flour = await findOrCreateManualFood(foods, HH, "food", "Flour");
+    await applyMovement(fridge, stock, foods, {
+        householdId: HH,
+        foodId: flour.id,
+        delta: 500,
+        unit: "g",
+        reason: "purchase",
+        locationId: loc.id,
+    });
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "u1",
+        name: "Pancakes",
+        yieldPortions: 2,
+    });
+    await addRecipeManualIngredient(recipes, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Flour",
+        amount: 100,
+        unit: "g",
+    });
+    const flourLeft = async () =>
+        (await listFridge(fridge, HH)).items.reduce(
+            (sum, item) => sum + item.quantity.amount,
+            0,
+        );
+    return { fridge, stock, foods, recipes, recipeId: recipe.id, flourLeft };
+}
+
+test("a second cook under the same submit key takes nothing", async () => {
+    const { fridge, stock, foods, recipes, recipeId, flourLeft } =
+        await pantryWithFlourAndRecipe();
+    const cook = () =>
+        cookRecipe(recipes, fridge, stock, foods, {
+            householdId: HH,
+            recipeId,
+            totalPortions: 2,
+            submitKey: "sheet-1",
+        });
+
+    const first = await cook();
+    expect(first.alreadyCooked).toBeUndefined();
+    expect(await flourLeft()).toBe(400);
+
+    const second = await cook();
+    expect(second).toEqual({
+        totalPortions: 2,
+        shortfalls: [],
+        unmeasured: [],
+        alreadyCooked: true,
+    });
+    expect(await flourLeft()).toBe(400);
+    const cooks = (await stock.listMovements(HH)).filter(
+        (m) => m.reason === "cook",
+    );
+    expect(cooks).toHaveLength(1);
+    expect(cooks[0]!.id).toBe(cookClaimId(HH, recipeId, "sheet-1"));
+});
+
+test("a cook under another submit key, or none, cooks again", async () => {
+    const { fridge, stock, foods, recipes, recipeId, flourLeft } =
+        await pantryWithFlourAndRecipe();
+    const cook = (submitKey?: string) =>
+        cookRecipe(recipes, fridge, stock, foods, {
+            householdId: HH,
+            recipeId,
+            totalPortions: 2,
+            submitKey,
+        });
+
+    await cook("sheet-1");
+    await cook("sheet-2");
+    await cook();
+    await cook();
+
+    // Four cooks of 100 g each from 500 g.
+    expect(await flourLeft()).toBe(100);
+});
+
+test("cook movement ids are stable, distinct per submit, and uuid-shaped", () => {
+    const uuid =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+    const base = cookMovementId("hh-1", "recipe-1", "sheet-1", 0);
+    expect(base).toMatch(uuid);
+    expect(cookMovementId("hh-1", "recipe-1", "sheet-1", 0)).toBe(base);
+    expect(
+        new Set([
+            base,
+            cookMovementId("hh-1", "recipe-1", "sheet-1", 1),
+            cookMovementId("hh-1", "recipe-1", "sheet-2", 0),
+            cookMovementId("hh-1", "recipe-2", "sheet-1", 0),
+            cookMovementId("hh-2", "recipe-1", "sheet-1", 0),
+        ]).size,
+    ).toBe(5);
+    expect(cookClaimId("hh-1", "recipe-1", "sheet-1")).toBe(base);
 });
 
 test("cookRecipe skips unmeasured ingredients and lists them", async () => {
