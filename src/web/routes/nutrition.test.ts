@@ -9,6 +9,8 @@ import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
 import * as actualProfiles from "../../db/profiles.js";
 import * as actualLoadersToday from "../loaders-today.js";
+import * as actualLoadersPlan from "../loaders-plan.js";
+import { buildWeekPlanView } from "../pages/v2/recipes-plan.js";
 import * as actualAttention from "../attention.js";
 import { nutritionRoutes } from "./nutrition.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
@@ -28,6 +30,7 @@ import * as actualNutrition from "../../db/nutrition.js";
 const realHousehold = { ...actualHousehold };
 const realProfiles = { ...actualProfiles };
 const realLoadersToday = { ...actualLoadersToday };
+const realLoadersPlan = { ...actualLoadersPlan };
 const realAttention = { ...actualAttention };
 const realDashboardData = { ...actualDashboardData };
 const realNutrition = { ...actualNutrition };
@@ -98,6 +101,19 @@ function todayViewForDate(date: string) {
     };
 }
 
+// This week reads the plans table; these tests do not run against one.
+mock.module("../loaders-plan.js", () => ({
+    ...realLoadersPlan,
+    loadWeekPlanView: async () =>
+        buildWeekPlanView({
+            today: "2026-11-10",
+            plans: [],
+            recipes: [],
+            stock: [],
+            foodsById: new Map(),
+        }),
+}));
+
 mock.module("../loaders-today.js", () => ({
     ...realLoadersToday,
     loadToday: async (_viewer: HouseholdMember, date?: string) =>
@@ -152,6 +168,7 @@ afterAll(() => {
     mock.module("../../db/household.js", () => realHousehold);
     mock.module("../../db/profiles.js", () => realProfiles);
     mock.module("../loaders-today.js", () => realLoadersToday);
+    mock.module("../loaders-plan.js", () => realLoadersPlan);
     mock.module("../../dashboard-data.js", () => realDashboardData);
     mock.module("../../db/nutrition.js", () => realNutrition);
     mock.module("../attention.js", () => realAttention);

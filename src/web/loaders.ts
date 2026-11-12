@@ -165,6 +165,14 @@ import {
 import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
 import { renderBarePage, type ThemePref } from "./shell.js";
 import { householdToday } from "../db/restock.js";
+import { loadWeekPlanView } from "./loaders-plan.js";
+import { isPlanDate } from "../domain/plan.js";
+import {
+    PLAN_SHEET_ID,
+    withPlanEditDraft,
+    type PlanEditDraft,
+    type PlanSheetView,
+} from "./pages/v2/recipes-plan.js";
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
 import { dismissedKeySet, isDismissedIn } from "../domain/notice-dismissals.js";
 import { groceryRestockNotices } from "../domain/restock.js";
@@ -290,6 +298,8 @@ async function memberGate(viewerUserId: string): Promise<MemberGate> {
 export type V2TodayRenderOpts = {
     openEditMealId?: string;
     editError?: string;
+    /** A plan move that failed its checks: its edit sheet opens with this. */
+    planEdit?: PlanEditDraft;
 };
 
 export async function renderDashboardPage(
@@ -364,11 +374,23 @@ export async function renderDashboardPage(
                 ? members.find((m) => m.userId === access.subject.userId)
                       ?.displayName
                 : undefined;
+        // The week plan is the household's, so a peer's read-only day has none.
+        const week = subjectLabel
+            ? undefined
+            : await loadWeekPlanView(
+                  access.viewer.householdId,
+                  view.householdDate,
+              );
+        const plan =
+            week && v2Today?.planEdit
+                ? (withPlanEditDraft(week, v2Today.planEdit) ?? week)
+                : week;
         return {
             status: 200,
             html: renderTodayV2Page({
                 chrome: { ...chrome, subjectLabel },
                 view,
+                plan,
                 today: calendarToday,
                 memberQuery: viewMemberId,
                 logSheet: mergedLogSheet,
@@ -1794,6 +1816,10 @@ export async function renderRecipesListPage(
         importRetryDisabled?: boolean;
         shareArrived?: import("../domain/share.js").ReadShareResult;
         shareArrivedOpen?: boolean;
+        /** v2: picking a recipe for this day (`?plan_date=`). */
+        planDate?: string;
+        /** v2: a plan move that failed its checks: its edit sheet opens with this. */
+        planEdit?: PlanEditDraft;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const filter = opts;
@@ -1863,6 +1889,10 @@ export async function renderRecipesListPage(
             (card) => card.flags.cookable,
         ).length;
         const filtered = applyV2RecipeListFilters(cards, v2Query, v2Filter);
+        const loadedWeek = await loadWeekPlanView(householdId);
+        const week = opts.planEdit
+            ? (withPlanEditDraft(loadedWeek, opts.planEdit) ?? loadedWeek)
+            : loadedWeek;
         return {
             status: 200,
             html: renderRecipesListV2Page({
@@ -1872,6 +1902,11 @@ export async function renderRecipesListPage(
                 cards: filtered,
                 cookableCount,
                 totalCount: recipes.length,
+                week,
+                planDate:
+                    opts.planDate && isPlanDate(opts.planDate)
+                        ? opts.planDate
+                        : undefined,
                 importError: opts.importError,
                 importPasteStep: opts.importPasteStep,
                 importUrl: opts.importUrl,
@@ -2025,6 +2060,39 @@ export async function loadCookPreview(
     }
 }
 
+async function planSheetView(
+    householdId: string,
+    recipeId: string,
+    recipe: { name: string; yieldPortions: number },
+    values: {
+        open?: boolean;
+        date?: string;
+        slot?: string;
+        servings?: number;
+    } = {},
+    error: string | undefined,
+    failed: boolean,
+): Promise<PlanSheetView> {
+    const today = await householdToday(householdId);
+    const date = values.date ?? today;
+    return {
+        recipeId,
+        recipeName: recipe.name,
+        yieldPortions: recipe.yieldPortions,
+        today,
+        date: isPlanDate(date) || failed ? date : today,
+        slot: values.slot ?? "dinner",
+        servings:
+            values.servings != null &&
+            Number.isFinite(values.servings) &&
+            values.servings > 0
+                ? values.servings
+                : recipe.yieldPortions,
+        open: values.open === true || failed,
+        error,
+    };
+}
+
 export async function renderRecipeDetailRoute(
     viewerUserId: string,
     recipeId: string,
@@ -2036,6 +2104,13 @@ export async function renderRecipeDetailRoute(
         openCook?: boolean;
         /** v2: the stepper value a failed confirm re-renders with. */
         cookServings?: number;
+        /** v2: the Add to plan sheet: open on load (`?plan=1`, or after a failed add), and the values a failed add re-renders with. */
+        plan?: {
+            open?: boolean;
+            date?: string;
+            slot?: string;
+            servings?: number;
+        };
         linkProductId?: string;
         didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
     } = {},
@@ -2223,6 +2298,14 @@ export async function renderRecipeDetailRoute(
                     )
                 ).includes(recipeId),
                 cook,
+                plan: await planSheetView(
+                    householdId,
+                    recipeId,
+                    view,
+                    opts.plan,
+                    opts.openModalId === PLAN_SHEET_ID ? opts.error : undefined,
+                    opts.openModalId === PLAN_SHEET_ID,
+                ),
                 error: opts.error,
             }),
         };

@@ -105,6 +105,7 @@
                                 "src/db/household",
                                 "src/db/notice-dismissals",
                                 "src/db/nutrition",
+                                "src/db/plans",
                                 "src/db/profiles",
                                 "src/db/recipes",
                                 "src/db/rules",

@@ -200,6 +200,30 @@ describe("gated route harness on composed app", () => {
             },
             {
                 method: "POST",
+                path: "/recipes/:id/plan",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/recipes/plan/:planId/move",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/recipes/plan/:planId/remove",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/recipes/plan/add-missing",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
                 path: "/settings/household/plurals-same-food",
                 flag: "ui-v2",
                 notFound: true,

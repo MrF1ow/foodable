@@ -46,6 +46,8 @@ import {
 import * as actualAttention from "../attention.js";
 import * as actualDashboardData from "../../dashboard-data.js";
 import * as actualLoadersToday from "../loaders-today.js";
+import * as actualLoadersPlan from "../loaders-plan.js";
+import { buildWeekPlanView } from "../pages/v2/recipes-plan.js";
 import { buildPreviewTodayView } from "../pages/v2/today.js";
 
 const realHousehold = { ...actualHousehold };
@@ -61,6 +63,7 @@ const realAttention = { ...actualAttention };
 const realFoods = { ...actualFoods };
 const realDashboardData = { ...actualDashboardData };
 const realLoadersToday = { ...actualLoadersToday };
+const realLoadersPlan = { ...actualLoadersPlan };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const BOB = "22222222-2222-4222-8222-222222222222";
@@ -413,6 +416,19 @@ mock.module("../../dashboard-data.js", () => ({
     getWeightTrendsPayload: async () => widgetStub,
 }));
 
+// This week reads the plans table; these tests do not run against one.
+mock.module("../loaders-plan.js", () => ({
+    ...realLoadersPlan,
+    loadWeekPlanView: async () =>
+        buildWeekPlanView({
+            today: "2026-11-10",
+            plans: [],
+            recipes: [],
+            stock: [],
+            foodsById: new Map(),
+        }),
+}));
+
 mock.module("../loaders-today.js", () => ({
     ...realLoadersToday,
     loadToday: async () => buildPreviewTodayView("2026-11-10"),
@@ -430,6 +446,7 @@ afterAll(() => {
     mock.module("../attention.js", () => realAttention);
     mock.module("../../dashboard-data.js", () => realDashboardData);
     mock.module("../loaders-today.js", () => realLoadersToday);
+    mock.module("../loaders-plan.js", () => realLoadersPlan);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
     mock.module("../../db/household.js", () => realHousehold);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock

@@ -25,6 +25,11 @@ import {
     renderCookTrigger,
     type CookSheetView,
 } from "./recipes-page-cook.js";
+import {
+    renderPlanSheet,
+    renderPlanTrigger,
+    type PlanSheetView,
+} from "./recipes-plan.js";
 
 export const RECIPE_NOT_IN_STOCK_ID = "__not_in_stock__";
 
@@ -58,6 +63,8 @@ export type RecipeDetailV2View = {
     favourite?: boolean;
     /** The cook sheet. Absent when the recipe cannot be cooked (unverified). */
     cook?: CookSheetView;
+    /** The Add to plan sheet. */
+    plan?: PlanSheetView;
     error?: string;
 };
 
@@ -312,11 +319,12 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
     const backChevron = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18 9 12 15 6"/></svg>`;
     const backRound = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18 9 12 15 6"/></svg>`;
     // The heading id is the anchor Today's "Cook it" link has always used.
-    const actions = view.cook
-        ? `<div class="fd-recipe-actions" id="fd-recipe-cook-heading">${String(renderCookTrigger())}</div>`
-        : "";
+    const actions =
+        view.cook || view.plan
+            ? `<div class="fd-recipe-actions" id="fd-recipe-cook-heading">${view.cook ? String(renderCookTrigger()) : ""}${view.plan ? String(renderPlanTrigger()) : ""}</div>`
+            : "";
     const pageError =
-        view.error && !view.cook?.open
+        view.error && !view.cook?.open && !view.plan?.open
             ? `<p class="fd-recipe-error" role="alert">${esc(view.error)}</p>`
             : "";
     return `<div class="fd-recipe-detail">
@@ -352,7 +360,8 @@ ${instructionsHtml(view.recipe.instructions)}
 </div>
 ${actions}
 </div>
-${view.cook ? renderCookSheet(view.cook) : ""}`;
+${view.cook ? renderCookSheet(view.cook) : ""}
+${view.plan ? renderPlanSheet(view.plan) : ""}`;
 }
 
 export function renderRecipeDetailV2Page(view: RecipeDetailV2View): string {

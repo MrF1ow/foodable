@@ -49,6 +49,12 @@ import { renderAppShell } from "../../shell.js";
 import { renderTodayEditSheets } from "./today-edit-sheet.js";
 import { todayEditSheetId } from "../../../domain/today-edit.js";
 import { renderTodayRail } from "./today-rail.js";
+import {
+    renderMissingSheet,
+    renderPlanEditSheets,
+    renderWeekPhoneSection,
+    type WeekPlanView,
+} from "./recipes-plan.js";
 import type { Notice } from "../../../domain/notices.js";
 import type { FridgeItem } from "../../../domain/fridge.js";
 
@@ -65,6 +71,8 @@ export type TodayPageData = {
     error?: string;
     openEditMealId?: string;
     editError?: string;
+    /** The household's week plan: the rail card, the phone section, their sheets. */
+    plan?: WeekPlanView;
 };
 
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"] as const;
@@ -672,10 +680,16 @@ export function renderTodayBody(data: TodayPageData): Html {
                           : undefined,
               });
     const summary = `<section class="fd-today-summary" aria-label="Day summary"><div class="fd-today-summary__layout">${gaugeMarkup(view)}<div class="fd-today-summary__side">${macroBarsMarkup(view)}${alsoTrackedMarkup(view)}</div></div></section>`;
-    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}<div class="fd-today-meals">${mealsMarkup(data)}</div>`;
+    // The week plan is the household's, not the day's: a peer's day has none.
+    const plan = isReadOnlyPeer(data) ? undefined : data.plan;
+    const planPhone = plan ? renderWeekPhoneSection(plan) : "";
+    const planSheets = plan
+        ? `${renderPlanEditSheets(plan, "today")}\n${renderMissingSheet(plan, "today")}`
+        : "";
+    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}<div class="fd-today-meals">${mealsMarkup(data)}</div>${planPhone}`;
     const rail = renderTodayRail(data);
     return raw(
-        `<div class="fd-today-page"><div class="fd-today-main">${main}</div>${rail}${sheets}</div>`,
+        `<div class="fd-today-page"><div class="fd-today-main">${main}</div>${rail}${sheets}${planSheets}</div>`,
     );
 }
 
