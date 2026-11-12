@@ -12705,6 +12705,39 @@ describe("share link tools", () => {
                 "unsupported_version",
                 /version 3/i,
             ],
+            // The foods table checks a unit factor > 0: a zero factor is a bad
+            // document, not a database error while writing it.
+            ...(["grams_per_ml", "grams_per_each"] as const).map(
+                (
+                    key,
+                ): [
+                    string,
+                    Record<string, unknown>,
+                    () => void,
+                    string,
+                    RegExp,
+                ] => [
+                    `${key} of zero`,
+                    {
+                        document: documentJson({
+                            ingredients: [
+                                {
+                                    food_name: "Lentils",
+                                    amount: 300,
+                                    unit: "g",
+                                    food: { ...NONE, [key]: 0 },
+                                },
+                            ],
+                        }),
+                    },
+                    () => {},
+                    "not_recipe",
+                    new RegExp(
+                        `isn't a Foodable recipe\\.[^]*ingredients\\.0\\.food\\.${key}`,
+                        "i",
+                    ),
+                ],
+            ),
             // A NUL cannot be stored and no other control character belongs
             // in a recipe: the tool refuses the document rather than fail
             // while writing it.

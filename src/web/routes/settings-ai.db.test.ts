@@ -1,11 +1,13 @@
 import { SQL } from "bun";
 import { afterEach, beforeEach, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { Hono } from "hono";
 import { runAsSystem } from "../../db/actor.js";
 import { setSqlForTests } from "../../db/sql.js";
 import {
     listConnections,
     lookupBearer,
+    storeAuthCode,
     storeRefreshToken,
     storeToken,
 } from "../../db/tokens.js";
@@ -114,6 +116,32 @@ function refresh(token: string) {
         headers: { "content-type": "application/x-www-form-urlencoded" },
         body: `grant_type=refresh_token&refresh_token=${token}&client_id=${CLAUDE}`,
     });
+}
+
+const CODE_VERIFIER = "v".repeat(50);
+const CODE_REDIRECT = "http://localhost/callback";
+
+async function exchangeCode(code: string): Promise<Response> {
+    return oauthApp.request("http://test/token", {
+        method: "POST",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({
+            grant_type: "authorization_code",
+            code,
+            redirect_uri: CODE_REDIRECT,
+            code_verifier: CODE_VERIFIER,
+            client_id: CLAUDE,
+        }).toString(),
+    });
+}
+
+function seedAuthCode(code: string, userId: string) {
+    const challenge = createHash("sha256")
+        .update(CODE_VERIFIER)
+        .digest("base64url");
+    return runAsSystem("seed auth code", () =>
+        storeAuthCode(code, CODE_REDIRECT, userId, challenge, CLAUDE),
+    );
 }
 
 async function lockWaiters(observer: SQL): Promise<number> {
@@ -305,6 +333,23 @@ describeDb(pgAvailable !== null, "settings AI connections", (getCtx) => {
         expect(await listConnections(userId)).toHaveLength(1);
     });
 
+    for (const [name, client] of [
+        ["a NUL", "a\u0000b"],
+        ["only a NUL", "\u0000"],
+        ["a C0 control", "a\u0007b"],
+        ["a DEL", "a\u007fb"],
+        ["a C1 control", "a\u0085b"],
+        ["a very long value", "x".repeat(201)],
+    ] as const) {
+        test(`an app id with ${name} is refused as a bad choice, not a server error`, async () => {
+            await seed("claude-tok", userId, CLAUDE, "Claude");
+            const res = await disconnect(userId, client);
+            expect(res.status).toBe(400);
+            expect(await res.text()).toContain("Choose an app to disconnect.");
+            expect(await listConnections(userId)).toHaveLength(1);
+        });
+    }
+
     test("with ui-v2 off the page and the action are 404 and nothing is revoked", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
         await seed("claude-tok", userId, CLAUDE, "Claude");
@@ -423,6 +468,101 @@ describeDb(pgAvailable !== null, "settings AI connections", (getCtx) => {
         }
     });
 
+    test("a Disconnect that lands while an authorization code is storing its pair leaves the app with no tokens", async () => {
+        const { pg, sql } = getCtx();
+        await seed("claude-tok", userId, CLAUDE, "Claude");
+        await seedAuthCode("claude-code", userId);
+        const pool = new SQL(pg.url, { prepare: false, max: 6 });
+        const holder = new SQL(pg.url, { prepare: false, max: 1 });
+        const observer = new SQL(pg.url, { prepare: false, max: 1 });
+        let release!: () => void;
+        const released = new Promise<void>((r) => (release = r));
+        let held!: () => void;
+        const isHeld = new Promise<void>((r) => (held = r));
+        // As for the refresh: the member's user row held, so the insert of the
+        // new tokens stalls between "code consumed" and "pair stored".
+        const holding = holder.begin(async (tx) => {
+            await tx`select 1 from public.users where id = ${userId} for update`;
+            held();
+            await released;
+        });
+        try {
+            await isHeld;
+            setSqlForTests(pool);
+            const exchanging = exchangeCode("claude-code");
+            await until(
+                async () => (await lockWaiters(observer)) >= 1,
+                "the exchange to reach its insert",
+            );
+            let disconnected = false;
+            const disconnecting = (async () => {
+                const res = await disconnect(userId, CLAUDE);
+                disconnected = true;
+                return res;
+            })();
+            await until(
+                async () => disconnected || (await lockWaiters(observer)) >= 2,
+                "the Disconnect to finish or to queue behind the exchange",
+            );
+            release();
+            await holding;
+            const [exchanged, disc] = await Promise.all([
+                exchanging,
+                disconnecting,
+            ]);
+
+            expect(disc.status).toBe(303);
+            expect(await tokensLeft(userId)).toEqual({ access: 0, refresh: 0 });
+            if (exchanged.status === 200) {
+                const body = (await exchanged.json()) as {
+                    access_token: string;
+                };
+                expect((await lookupBearer(body.access_token)).status).toBe(
+                    "invalid",
+                );
+            }
+        } finally {
+            release();
+            await Promise.allSettled([holding]);
+            setSqlForTests(sql);
+            await Promise.all([pool.close(), holder.close(), observer.close()]);
+        }
+    });
+
+    test("an authorization code exchanged after Disconnect is refused", async () => {
+        await seed("claude-tok", userId, CLAUDE, "Claude");
+        await seedAuthCode("claude-code", userId);
+        await disconnect(userId, CLAUDE);
+
+        const res = await exchangeCode("claude-code");
+
+        expect(res.status).toBe(400);
+        expect(await tokensLeft(userId)).toEqual({ access: 0, refresh: 0 });
+    });
+
+    test("a failed PKCE check still burns the code", async () => {
+        await seed("claude-tok", userId, CLAUDE, "Claude");
+        await seedAuthCode("claude-code", userId);
+
+        const bad = await oauthApp.request("http://test/token", {
+            method: "POST",
+            headers: { "content-type": "application/x-www-form-urlencoded" },
+            body: new URLSearchParams({
+                grant_type: "authorization_code",
+                code: "claude-code",
+                redirect_uri: CODE_REDIRECT,
+                code_verifier: "w".repeat(50),
+                client_id: CLAUDE,
+            }).toString(),
+        });
+        expect(bad.status).toBe(400);
+
+        // The code is spent: the right verifier is refused too, and nothing
+        // beyond the seeded token exists.
+        expect((await exchangeCode("claude-code")).status).toBe(400);
+        expect(await tokensLeft(userId)).toEqual({ access: 1, refresh: 0 });
+    });
+
     test("a refresh after Disconnect is refused", async () => {
         await seed("claude-tok", userId, CLAUDE, "Claude");
         await runAsSystem("seed refresh", () =>
@@ -475,6 +615,44 @@ describeDb(pgAvailable !== null, "settings AI connections", (getCtx) => {
                 expect((await disconnect(userId, CLAUDE)).status).toBe(303);
                 stopped = true;
                 await allDone;
+                const left = await tokensLeft(userId);
+                if (left.access > 0 || left.refresh > 0) survivors += 1;
+            }
+        } finally {
+            setSqlForTests(sql);
+            await pool.close();
+        }
+        expect(survivors).toBe(0);
+    });
+    test("authorization codes exchanged while a Disconnect lands never leave a pair behind", async () => {
+        const { pg, sql } = getCtx();
+        const pool = new SQL(pg.url, { prepare: false, max: 8 });
+        const TRIALS = 40;
+        const CODES = 4;
+        let survivors = 0;
+        try {
+            setSqlForTests(pool);
+            await seed("claude-tok", userId, CLAUDE, "Claude");
+            for (let trial = 0; trial < TRIALS; trial++) {
+                await sql`delete from public.oauth_tokens`;
+                await sql`delete from public.refresh_tokens`;
+                const codes = Array.from(
+                    { length: CODES },
+                    (_, n) => `code-${trial}-${n}`,
+                );
+                for (const code of codes) await seedAuthCode(code, userId);
+                // The Disconnect fires once the first exchange has answered,
+                // while the rest are already in flight.
+                const first = Promise.withResolvers<void>();
+                const exchanges = codes.map((code) =>
+                    exchangeCode(code).then((res) => {
+                        first.resolve();
+                        return res;
+                    }),
+                );
+                await first.promise;
+                expect((await disconnect(userId, CLAUDE)).status).toBe(303);
+                await Promise.all(exchanges);
                 const left = await tokensLeft(userId);
                 if (left.access > 0 || left.refresh > 0) survivors += 1;
             }

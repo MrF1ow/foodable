@@ -33,6 +33,8 @@ mock.module("./db/tokens.js", () => ({
     // for the calls that would join it.
     withRefreshExchange: async (_token: string, exchange: () => unknown) =>
         exchange(),
+    withCodeExchange: async (_code: string, exchange: () => unknown) =>
+        exchange(),
     storeToken: async (
         _t: string,
         userId: string,

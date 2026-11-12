@@ -547,6 +547,47 @@ describe("parseShareDocument", () => {
     });
 });
 
+describe("unit factors in a document", () => {
+    const valid = (): ShareDocument =>
+        build(recipe(), [ingredient()], foodsById(food()))!;
+    const withFood = (patch: Record<string, number | null>) => {
+        const d = structuredClone(valid()) as any;
+        Object.assign(d.ingredients[0].food, patch);
+        return JSON.stringify(d);
+    };
+
+    // The foods table checks grams_per_ml > 0 and grams_per_each > 0, while
+    // every nutrient only has to be >= 0. A zero factor that parsed would be
+    // refused by the database while the recipe is being written.
+    for (const key of ["grams_per_ml", "grams_per_each"]) {
+        test(`${key} of zero is refused, naming the field`, () => {
+            expect(() => parseShareDocument(withFood({ [key]: 0 }))).toThrow(
+                new RegExp(`ingredients\\.0\\.food\\.${key}: `),
+            );
+        });
+
+        test(`${key} below zero is refused`, () => {
+            expect(() => parseShareDocument(withFood({ [key]: -1 }))).toThrow(
+                ShareDocumentError,
+            );
+        });
+
+        test(`${key} null (unknown) and a positive value are read`, () => {
+            const unknown = parseShareDocument(withFood({ [key]: null }));
+            expect((unknown.ingredients[0]!.food as any)[key]).toBeNull();
+            const known = parseShareDocument(withFood({ [key]: 0.001 }));
+            expect((known.ingredients[0]!.food as any)[key]).toBe(0.001);
+        });
+    }
+
+    test("a nutrient of zero is still read (zero calories is a value, not a gap)", () => {
+        const doc = parseShareDocument(
+            withFood({ calories: 0, alcohol_g: 0, caffeine_mg: 0 }),
+        );
+        expect(doc.ingredients[0]!.food.calories).toBe(0);
+    });
+});
+
 describe("control characters in a document", () => {
     const valid = (): ShareDocument =>
         build(recipe(), [ingredient()], foodsById(food()))!;
@@ -617,36 +658,71 @@ describe("control characters in a document", () => {
         expect(parseShareDocument(JSON.stringify(doc))).toEqual(doc);
     });
 
-    test("a recipe whose text holds a control character has no document, so the builder and the parser agree", () => {
+    // Pasted Word or PDF text lands in recipes with vertical tabs, form feeds
+    // and bells, and the recipe writes accept them. The parser keeps refusing
+    // those characters; the builder removes them (no replacement, so
+    // "Mix.\u000bBake." reads "Mix.Bake.") so such a recipe still has a
+    // document, and what it builds always parses.
+    const stray = ["\u000b", "\u000c", "\u0007", "\u0000", "\u001b"];
+
+    for (const char of stray) {
+        const label = `U+${char.charCodeAt(0).toString(16).padStart(4, "0").toUpperCase()}`;
+        test(`the builder removes ${label} from every string, and the result parses`, () => {
+            const doc = build(
+                recipe({
+                    name: `So${char}up`,
+                    instructions: `Mix.${char}Bake.`,
+                    tags: [`so${char}up`, "dinner"],
+                }),
+                [
+                    ingredient({
+                        displayName: `Len${char}tils`,
+                        foodId: null,
+                        quantity: { amount: 1, unit: `g${char}` },
+                    }),
+                    ingredient({
+                        id: "77777777-7777-4777-8777-777777777777",
+                        sortOrder: 1,
+                    }),
+                ],
+                foodsById(food({ name: `Red${char}lentils` })),
+            );
+            expect(doc).not.toBeNull();
+            expect(doc!.name).toBe("Soup");
+            expect(doc!.instructions).toBe("Mix.Bake.");
+            expect(doc!.tags).toEqual(["soup", "dinner"]);
+            expect(doc!.ingredients[0]!.food_name).toBe("Lentils");
+            expect(doc!.ingredients[0]!.unit).toBe("g");
+            expect(doc!.ingredients[1]!.food_name).toBe("Redlentils");
+            expect(parseShareDocument(JSON.stringify(doc))).toEqual(doc!);
+        });
+    }
+
+    test("the builder keeps tab, newline and carriage return", () => {
+        const doc = build(
+            recipe({
+                instructions: "1. Rinse.\r\n2.\tSimmer.\n3.\u000bServe.",
+            }),
+            [],
+            foodsById(),
+        );
+        expect(doc!.instructions).toBe("1. Rinse.\r\n2.\tSimmer.\n3.Serve.");
+    });
+
+    test("a text that is only control characters has no document or no tag, never a refused one", () => {
         expect(
-            build(recipe({ name: "So\u0000up" }), [], foodsById()),
+            build(recipe({ name: "\u0007\u0000" }), [], foodsById()),
         ).toBeNull();
-        expect(
-            build(recipe({ instructions: "a\u001bb" }), [], foodsById()),
-        ).toBeNull();
-        expect(
-            build(recipe({ tags: ["x\u0007"] }), [], foodsById()),
-        ).toBeNull();
-        expect(
-            build(
-                recipe(),
-                [ingredient({ displayName: "Len\u0000tils", foodId: null })],
-                foodsById(),
-            ),
-        ).toBeNull();
-        expect(
-            build(
-                recipe(),
-                [ingredient({ quantity: { amount: 1, unit: "g\u0000" } })],
-                foodsById(food()),
-            ),
-        ).toBeNull();
-        expect(
-            build(
-                recipe(),
-                [ingredient()],
-                foodsById(food({ name: "Red\u0000lentils" })),
-            ),
-        ).toBeNull();
+        const doc = build(
+            recipe({ tags: ["\u0007", "soup"] }),
+            [],
+            foodsById(),
+        );
+        expect(doc!.tags).toEqual(["soup"]);
+    });
+
+    test("the parser still refuses what the builder removes", () => {
+        const doc = text((d) => (d.instructions = "Mix.\u000bBake."));
+        expect(() => parseShareDocument(doc)).toThrow(/control character/);
     });
 });

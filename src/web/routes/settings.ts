@@ -375,6 +375,9 @@ settingsRoutes.get(
 
 // The longest id an app can hold: a uuid, or the deploy-wide client id.
 const CLIENT_ID_MAX = 200;
+// Postgres text cannot hold a NUL, and no app id carries any control
+// character, so a value with one is a bad choice rather than a database error.
+const CONTROL_CHARACTER = /\p{Cc}/u;
 
 settingsRoutes.post(
     AI_DISCONNECT_PATH,
@@ -384,7 +387,11 @@ settingsRoutes.post(
         const userId = c.get("userId");
         const body = await c.req.parseBody();
         const client = formText(body, "client").trim();
-        if (client === "" || client.length > CLIENT_ID_MAX) {
+        if (
+            client === "" ||
+            client.length > CLIENT_ID_MAX ||
+            CONTROL_CHARACTER.test(client)
+        ) {
             const page = await renderSettingsAiV2Route(userId, {
                 mcpUrl: `${getBaseUrl(c)}/mcp`,
                 error: "Choose an app to disconnect.",

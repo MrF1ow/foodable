@@ -6,6 +6,7 @@ export const FOODABLE_USER_AGENT = `Mozilla/5.0 (compatible; Foodable/${VERSION}
 const ROBOTS_UA = "Foodable";
 
 const DEFAULT_TIMEOUT_MS = 10_000;
+const DEFAULT_MIN_ATTEMPT_MS = 2_000;
 const DEFAULT_MAX_BYTES = 3 * 1024 * 1024;
 const ROBOTS_MAX_BYTES = 512 * 1024;
 const MAX_PAGE_REDIRECTS = 3;
@@ -530,6 +531,11 @@ export function createSafeFetcher(deps?: {
     now?: () => number;
     robotsTtlMs?: number;
     defaultTimeoutMs?: number;
+    /**
+     * The least a connection attempt gets while other addresses remain
+     * (default 2 s); the shortest slice of the deadline one address is held to.
+     */
+    minAttemptMs?: number;
 }) {
     const doFetch: FetchFn = deps?.fetch ?? globalThis.fetch.bind(globalThis);
     const pinAddresses = deps?.pinAddresses !== false;
@@ -537,6 +543,7 @@ export function createSafeFetcher(deps?: {
     const now = deps?.now ?? (() => Date.now());
     const robotsTtlMs = deps?.robotsTtlMs ?? DEFAULT_ROBOTS_TTL_MS;
     const defaultTimeoutMs = deps?.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const minAttemptMs = deps?.minAttemptMs ?? DEFAULT_MIN_ATTEMPT_MS;
     const robotsCache = new Map<string, RobotsCacheEntry>();
 
     /**
@@ -547,33 +554,70 @@ export function createSafeFetcher(deps?: {
      * the TLS server name stay the original hostname, so virtual hosting, SNI
      * and certificate verification are unchanged. Addresses are tried in
      * order, so a host with a dead IPv6 route still answers over IPv4.
+     *
+     * While more than one address remains an attempt gets a slice of what is
+     * left of `deadlineAt` (the fetch's own deadline, as a Date.now() time):
+     * its share, but at least `minAttemptMs`. A blackholed first address then
+     * cannot spend the whole deadline before the next one is tried, and the
+     * whole fetch still ends on `deadlineAt`. The last address, or the only
+     * one, gets everything that is left. The slice ends with the response
+     * headers; reading the body is bound by the fetch's deadline alone.
      */
     async function fetchChecked(
         url: URL,
         addresses: string[],
         init: BunFetchRequestInit & { headers: Record<string, string> },
+        deadlineAt: number,
     ): Promise<Response> {
         if (!pinAddresses || isIpLiteralHost(url.hostname)) {
             return doFetch(url.href, init);
         }
         // SNI is a hostname, never with the root-label dot.
         const serverName = url.hostname.replace(/\.$/, "");
+        const parent = init.signal;
         let lastError: unknown;
-        for (const address of addresses) {
+        for (const [index, address] of addresses.entries()) {
+            const left = addresses.length - index;
+            const attempt = new AbortController();
+            // The fetch's own deadline (or a caller's abort) ends the attempt,
+            // and the response body after it.
+            const onParentAbort = () => attempt.abort(parent?.reason);
+            if (parent?.aborted) onParentAbort();
+            else parent?.addEventListener("abort", onParentAbort);
+            let sliceEnded = false;
+            let slice: ReturnType<typeof setTimeout> | undefined;
+            if (left > 1) {
+                const remaining = Math.max(0, deadlineAt - Date.now());
+                slice = setTimeout(
+                    () => {
+                        sliceEnded = true;
+                        attempt.abort();
+                    },
+                    Math.min(
+                        remaining,
+                        Math.max(minAttemptMs, remaining / left),
+                    ),
+                );
+            }
             try {
                 return await doFetch(addressedTo(url, address).href, {
                     ...init,
                     headers: { ...init.headers, Host: url.host },
                     tls: { serverName },
+                    signal: attempt.signal,
                 });
             } catch (err) {
+                parent?.removeEventListener("abort", onParentAbort);
                 if (
-                    init.signal?.aborted ||
-                    (err instanceof Error && err.name === "AbortError")
+                    !sliceEnded &&
+                    (parent?.aborted ||
+                        (err instanceof Error && err.name === "AbortError"))
                 ) {
                     throw err;
                 }
                 lastError = err;
+            } finally {
+                clearTimeout(slice);
             }
         }
         throw lastError;
@@ -613,24 +657,30 @@ export function createSafeFetcher(deps?: {
         let addresses = resolved.addresses;
         let redirects = 0;
         const controller = new AbortController();
+        const deadlineAt = Date.now() + opts.timeoutMs;
         const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
 
         try {
             while (true) {
                 let response: Response;
                 try {
-                    response = await fetchChecked(current, addresses, {
-                        method: "GET",
-                        redirect: "manual",
-                        headers: {
-                            "User-Agent": FOODABLE_USER_AGENT,
-                            Accept: opts.accept
-                                ? `${opts.accept.join(", ")}, */*;q=0.1`
-                                : "*/*",
-                            "Accept-Language": "en",
+                    response = await fetchChecked(
+                        current,
+                        addresses,
+                        {
+                            method: "GET",
+                            redirect: "manual",
+                            headers: {
+                                "User-Agent": FOODABLE_USER_AGENT,
+                                Accept: opts.accept
+                                    ? `${opts.accept.join(", ")}, */*;q=0.1`
+                                    : "*/*",
+                                "Accept-Language": "en",
+                            },
+                            signal: controller.signal,
                         },
-                        signal: controller.signal,
-                    });
+                        deadlineAt,
+                    );
                 } catch (err) {
                     const message =
                         err instanceof Error ? err.message : String(err);
@@ -875,6 +925,7 @@ export function createSafeFetcher(deps?: {
         let carried: CheckedAddresses | null = null;
         let redirects = 0;
         const controller = new AbortController();
+        const deadlineAt = Date.now() + opts.timeoutMs;
         const timer = setTimeout(() => controller.abort(), opts.timeoutMs);
 
         try {
@@ -904,16 +955,21 @@ export function createSafeFetcher(deps?: {
 
                 let response: Response;
                 try {
-                    response = await fetchChecked(current, resolved.addresses, {
-                        method: "GET",
-                        redirect: "manual",
-                        headers: {
-                            "User-Agent": FOODABLE_USER_AGENT,
-                            Accept: `${opts.accept.join(", ")}, */*;q=0.1`,
-                            "Accept-Language": "en",
+                    response = await fetchChecked(
+                        current,
+                        resolved.addresses,
+                        {
+                            method: "GET",
+                            redirect: "manual",
+                            headers: {
+                                "User-Agent": FOODABLE_USER_AGENT,
+                                Accept: `${opts.accept.join(", ")}, */*;q=0.1`,
+                                "Accept-Language": "en",
+                            },
+                            signal: controller.signal,
                         },
-                        signal: controller.signal,
-                    });
+                        deadlineAt,
+                    );
                 } catch (err) {
                     const message =
                         err instanceof Error ? err.message : String(err);

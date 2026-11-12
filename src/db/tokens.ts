@@ -311,6 +311,41 @@ async function lockMemberTokens(tx: Tx, userId: string): Promise<void> {
 }
 
 /**
+ * Runs `exchange` as one system transaction that holds the member's token lock
+ * and returns what it returns; null when no live row of `table` has `column`
+ * equal to `value`, without calling it. The member is only known from that
+ * row, so it is read first and the lock taken second; the consume inside
+ * `exchange` re-checks the row once the lock is held, so a Disconnect that won
+ * the lock has already deleted it.
+ */
+async function withLockedOwner<T>(
+    label: string,
+    table: string,
+    column: "token" | "code",
+    value: string,
+    exchange: () => Promise<T>,
+): Promise<T | null> {
+    const now = new Date().toISOString();
+    return runAsSystem(label, () =>
+        run(async (tx) => {
+            const owner = await maybeOne<{ user_id: string }>(
+                tx,
+                tx`
+                    select user_id
+                    from ${tx.unsafe(table)}
+                    where ${tx.unsafe(column)} = ${value}
+                      and expires_at > ${now}
+                `,
+                `find ${label} owner`,
+            );
+            if (!owner) return null;
+            await lockMemberTokens(tx, owner.user_id);
+            return exchange();
+        }),
+    );
+}
+
+/**
  * Runs a refresh-token exchange (`exchange` consumes the old token and stores
  * the new pair) as one system transaction that holds the member's token lock,
  * and returns what `exchange` returns; null when `refreshToken` names no live
@@ -324,27 +359,33 @@ export async function withRefreshExchange<T>(
     refreshToken: string,
     exchange: () => Promise<T>,
 ): Promise<T | null> {
-    const now = new Date().toISOString();
-    return runAsSystem("oauth refresh token exchange", () =>
-        run(async (tx) => {
-            // Read first, lock second: the member is only known from the
-            // token. The consume inside `exchange` re-checks the token once the
-            // lock is held, so a Disconnect that won the lock has already
-            // deleted it.
-            const owner = await maybeOne<{ user_id: string }>(
-                tx,
-                tx`
-                    select user_id
-                    from ${tx.unsafe(REFRESH_TOKENS)}
-                    where token = ${refreshToken}
-                      and expires_at > ${now}
-                `,
-                "find refresh token owner",
-            );
-            if (!owner) return null;
-            await lockMemberTokens(tx, owner.user_id);
-            return exchange();
-        }),
+    return withLockedOwner(
+        "oauth refresh token exchange",
+        REFRESH_TOKENS,
+        "token",
+        refreshToken,
+        exchange,
+    );
+}
+
+/**
+ * The same for an authorization-code exchange: `exchange` consumes the code,
+ * checks it and stores the new pair, all inside one transaction that holds the
+ * member's token lock. Null when `code` names no live code, without calling
+ * `exchange`. A check that fails inside `exchange` should return rather than
+ * throw, which commits the consume (a code that fails its checks stays spent);
+ * a throw rolls the transaction back, so the code is not burned.
+ */
+export async function withCodeExchange<T>(
+    code: string,
+    exchange: () => Promise<T>,
+): Promise<T | null> {
+    return withLockedOwner(
+        "oauth authorization code exchange",
+        AUTH_CODES,
+        "code",
+        code,
+        exchange,
     );
 }
 
