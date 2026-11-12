@@ -120,7 +120,7 @@ import {
 } from "./household.js";
 import { createMemoryFridgeStore } from "./domain/fridge.js";
 import { createMemoryStockStore, ledgerMatchesStock } from "./domain/stock.js";
-import { createMemoryFoodsStore } from "./domain/foods.js";
+import { createMemoryFoodsStore, type Food } from "./domain/foods.js";
 import {
     findOrCreateFoodByBarcode,
     findOrCreateManualFood,
@@ -6406,6 +6406,97 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("the usual tools keep the usual's schedule", async () => {
+        await withPat(async (call) => {
+            const costco = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Costco",
+            );
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const eggsId = eggs.structuredContent?.id as string;
+            const kirkland = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: "Kirkland Large Eggs",
+                brand: "Kirkland",
+                calories: 140,
+            });
+            const productId = kirkland.structuredContent?.id as string;
+            const plain = (await db.foodsStore.getFood("hh-1", eggsId))!;
+            await db.foodsStore.updateFoodRow({ ...plain, ...USUAL_SCHEDULED });
+            const keptSchedule = async () => {
+                const row = await db.foodsStore.getFood("hh-1", eggsId);
+                return {
+                    restockSchedule: row?.restockSchedule,
+                    restockEveryWeeks: row?.restockEveryWeeks,
+                    restockPaused: row?.restockPaused,
+                    restockWhenLow: row?.restockWhenLow,
+                    restockLowLevel: row?.restockLowLevel,
+                    lastRestockedOn: row?.lastRestockedOn,
+                } satisfies Partial<Food>;
+            };
+            expect(await keptSchedule()).toEqual(USUAL_SCHEDULED);
+
+            const steps: [string, Record<string, unknown>][] = [
+                [
+                    "upsert_food",
+                    {
+                        food_id: eggsId,
+                        usual_store_id: costco.id,
+                        usual_amount: 24,
+                        usual_unit: "each",
+                    },
+                ],
+                ["upsert_food", { food_id: eggsId, name: "Free range eggs" }],
+                ["upsert_food", { food_id: eggsId, allergens: ["egg"] }],
+                [
+                    "set_usual_product",
+                    {
+                        food_id: eggsId,
+                        product_food_id: productId,
+                        store_id: costco.id,
+                        amount: 18,
+                        unit: "each",
+                    },
+                ],
+                [
+                    "set_usual_product",
+                    { food_id: eggsId, product_food_id: null, amount: null },
+                ],
+                ["link_product", { product_food_id: productId, food_id: null }],
+                [
+                    "link_product",
+                    { product_food_id: productId, food_id: eggsId },
+                ],
+                [
+                    "upsert_food",
+                    {
+                        food_id: eggsId,
+                        usual_store_id: null,
+                        usual_amount: null,
+                        usual_unit: null,
+                    },
+                ],
+            ];
+            for (const [tool, args] of steps) {
+                const result = await call(tool, args);
+                expect(
+                    result.isError,
+                    `${tool} ${JSON.stringify(args)}`,
+                ).toBeFalsy();
+                expect(
+                    await keptSchedule(),
+                    `${tool} ${JSON.stringify(args)}`,
+                ).toEqual(USUAL_SCHEDULED);
+            }
+            const got = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: eggsId })).structuredContent,
+            );
+            expect(got.name).toBe("Free range eggs");
+            expect(got.usual_store_id).toBeNull();
+        });
+    });
+
     test("upsert_food with generic_food_id creates a product", async () => {
         await withPat(async (call) => {
             const eggs = await call("upsert_food", { name: "Eggs" });
@@ -7895,6 +7986,16 @@ describe("removed membership admin MCP tools", () => {
     });
 });
 
+// A usual with every schedule field set to something other than its default.
+const USUAL_SCHEDULED = {
+    restockSchedule: "every_n_weeks",
+    restockEveryWeeks: 3,
+    restockPaused: true,
+    restockWhenLow: true,
+    restockLowLevel: 6,
+    lastRestockedOn: "2026-11-02",
+} as const;
+
 // ---------- /mcp over HTTP: both protocol eras ----------
 //
 // Kept in this file rather than its own: mock.module is process-wide, and a
@@ -8010,6 +8111,55 @@ describe("household config plurals_same_food over HTTP", () => {
             expect(got.structuredContent).toMatchObject({
                 plurals_same_food: true,
             });
+        });
+    });
+});
+
+describe("usual tools keep the usual's schedule over HTTP", () => {
+    test.each(ERAS)("upsert_food and set_usual_product (%p)", async (era) => {
+        await withHttpClient("u1", era, async (client) => {
+            const costco = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                `Costco ${JSON.stringify(era)}`,
+            );
+            const call = async (name: string, args: Record<string, unknown>) =>
+                (await client.callTool({
+                    name,
+                    arguments: args,
+                })) as ToolResult;
+            const eggs = await call("upsert_food", {
+                name: `Eggs ${JSON.stringify(era)}`,
+            });
+            const eggsId = eggs.structuredContent?.id as string;
+            const product = await call("upsert_food", {
+                generic_food_id: eggsId,
+                name: `Kirkland ${JSON.stringify(era)}`,
+                calories: 140,
+            });
+            const productId = product.structuredContent?.id as string;
+            const plain = (await db.foodsStore.getFood("hh-1", eggsId))!;
+            await db.foodsStore.updateFoodRow({ ...plain, ...USUAL_SCHEDULED });
+
+            const usual = await call("upsert_food", {
+                food_id: eggsId,
+                usual_store_id: costco.id,
+                usual_amount: 24,
+                usual_unit: "each",
+            });
+            expect(usual.isError).toBeFalsy();
+            const set = await call("set_usual_product", {
+                food_id: eggsId,
+                product_food_id: productId,
+                store_id: costco.id,
+                amount: 18,
+                unit: "each",
+            });
+            expect(set.isError).toBeFalsy();
+            const row = await db.foodsStore.getFood("hh-1", eggsId);
+            expect(row).toMatchObject(USUAL_SCHEDULED);
+            expect(row?.usualProductId).toBe(productId);
+            expect(row?.usualAmount).toEqual({ amount: 24, unit: "each" });
         });
     });
 });

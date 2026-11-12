@@ -27,7 +27,7 @@ const HOUSEHOLDS = "households";
 const FOOD_BARCODES = "food_barcodes";
 const FOOD_ALIASES = "food_aliases";
 const FOOD_COLS =
-    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, saturated_fat_g, alcohol_g, caffeine_mg, nutrition_source, off_nutrient_levels, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, nutriscore_grade, nova_group, ecoscore_grade, additives_tags, allergens_tags, traces_tags, ingredients_analysis_tags, labels_tags, off_quality_fetched_at, created_by, archived_at, created_at, updated_at";
+    "id, household_id, kind, name, normalized_name, brand, default_unit, grams_per_each, grams_per_ml, calories, protein_g, carbs_g, fat_g, fiber_g, sugar_g, saturated_fat_g, alcohol_g, caffeine_mg, nutrition_source, off_nutrient_levels, allergens, off_source_id, generic_food_id, usual_product_id, usual_store_id, usual_amount, usual_unit, restock_schedule, restock_every_weeks, restock_paused, restock_when_low, restock_low_level, last_restocked_on::text as last_restocked_on, nutriscore_grade, nova_group, ecoscore_grade, additives_tags, allergens_tags, traces_tags, ingredients_analysis_tags, labels_tags, off_quality_fetched_at, created_by, archived_at, created_at, updated_at";
 
 const REF_TABLES = [
     "fridge_items",

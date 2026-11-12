@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type { Food, UsualProductRow } from "../../../domain/foods.js";
+import {
+    NO_USUAL_SCHEDULE,
+    type Food,
+    type UsualProductRow,
+} from "../../../domain/foods.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import {
     USUALS_EDIT_SUBTITLE,
@@ -43,6 +47,7 @@ function food(overrides: Partial<Food> & Pick<Food, "id" | "name">): Food {
         usualProductId: null,
         usualStoreId: null,
         usualAmount: null,
+        ...NO_USUAL_SCHEDULE,
         offQuality: null,
         createdBy: null,
         archivedAt: null,

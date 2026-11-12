@@ -126,6 +126,7 @@ import { isNutritionCard } from "../src/domain/layout.js";
 import {
     didYouMeanView,
     matchFoodsByWords,
+    NO_USUAL_SCHEDULE,
     possibleDuplicates,
     usualProductRows,
 } from "../src/domain/foods.js";
@@ -677,6 +678,7 @@ function food(
         usualProductId: null,
         usualStoreId: null,
         usualAmount: null,
+        ...NO_USUAL_SCHEDULE,
         createdBy: null,
         archivedAt: null,
         createdAt: "2026-10-01T00:00:00Z",

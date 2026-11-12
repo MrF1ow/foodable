@@ -7,6 +7,7 @@ import {
     mergeFoodPair,
     mergeFoods,
     newFood,
+    NO_USUAL_SCHEDULE,
     type Food,
 } from "./foods.js";
 import {
@@ -461,6 +462,7 @@ function sampleRow(over: Partial<Food>): Food {
         usualProductId: null,
         usualStoreId: null,
         usualAmount: null,
+        ...NO_USUAL_SCHEDULE,
         offQuality: null,
         createdBy: null,
         archivedAt: null,
