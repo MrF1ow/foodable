@@ -27,6 +27,7 @@ import {
     type Notice,
 } from "../src/domain/notices.js";
 import { renderFridgePage } from "../src/web/pages/fridge.js";
+import { renderShareViewPage } from "../src/web/pages/share-view.js";
 import { renderGroceryPage } from "../src/web/pages/grocery.js";
 import {
     renderRecipeDetailPage,
@@ -2540,6 +2541,90 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                   ),
                   "nutrition-log-scanner": await logScannerPreview(theme),
                   "trends-v2": previewTrendsPage(chrome),
+                  // The public /s/:token pages (no shell, no session).
+                  "share-recipe": renderShareViewPage(
+                      {
+                          kind: "recipe",
+                          recipe: {
+                              name: "Smoky red lentil soup",
+                              portions: 4,
+                              instructions:
+                                  "1. Soften the onion and garlic in olive oil.\n2. Stir in the lentils, smoked paprika and stock.\n3. Simmer for 25 minutes, then blend half.\n4. Finish with lemon and parsley.",
+                              tags: ["dinner", "vegan", "batch cook"],
+                              ingredients: [
+                                  {
+                                      name: "Red lentils",
+                                      amount: 300,
+                                      unit: "g",
+                                      note: null,
+                                  },
+                                  {
+                                      name: "Onion",
+                                      amount: 2,
+                                      unit: "each",
+                                      note: "finely diced",
+                                  },
+                                  {
+                                      name: "Vegetable stock",
+                                      amount: 1.2,
+                                      unit: "l",
+                                      note: null,
+                                  },
+                                  {
+                                      name: "Smoked paprika",
+                                      amount: null,
+                                      unit: null,
+                                      note: null,
+                                  },
+                              ],
+                          },
+                      },
+                      theme,
+                  ),
+                  "share-groceries": renderShareViewPage(
+                      {
+                          kind: "grocery_list",
+                          list: {
+                              stores: [
+                                  {
+                                      name: "Corner Shop",
+                                      lines: [
+                                          {
+                                              name: "Leeks",
+                                              amount: 3,
+                                              unit: "each",
+                                              checked: false,
+                                          },
+                                          {
+                                              name: "Milk",
+                                              amount: 2,
+                                              unit: "l",
+                                              checked: false,
+                                          },
+                                          {
+                                              name: "Eggs",
+                                              amount: 12,
+                                              unit: "each",
+                                              checked: true,
+                                          },
+                                      ],
+                                  },
+                                  {
+                                      name: "Market",
+                                      lines: [
+                                          {
+                                              name: "Basmati rice",
+                                              amount: 1,
+                                              unit: "kg",
+                                              checked: false,
+                                          },
+                                      ],
+                                  },
+                              ],
+                          },
+                      },
+                      theme,
+                  ),
                   "product-full": previewProductFull(chrome),
                   "product-full-custom": previewProductFull(chrome, {
                       weights: {

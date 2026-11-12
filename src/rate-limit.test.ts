@@ -16,6 +16,7 @@ import {
     BanStoreUnavailableError,
     checkAuthRateLimit,
     checkRateLimit,
+    checkShareRateLimit,
     checkWebSearchRateLimit,
     clearAuthFailures,
     createMemoryRateLimitStore,
@@ -222,6 +223,20 @@ function registerSharedRateLimitTests(bindClock: () => Clock) {
 
         clock.advance(60_000);
         expect((await checkRateLimit(user)).allowed).toBe(true);
+    });
+
+    test("checkShareRateLimit is its own per-IP bucket: 60 a minute, then blocks", async () => {
+        const ip = "203.0.113.50";
+        for (let i = 0; i < 60; i++) {
+            const result = await checkShareRateLimit(ip);
+            expect(result.allowed).toBe(true);
+        }
+        const blocked = await checkShareRateLimit(ip);
+        expect(blocked.allowed).toBe(false);
+        expect(blocked.retryAfterSeconds).toBeGreaterThan(0);
+        // not the sign-in bucket, and other IPs are untouched
+        expect((await checkAuthRateLimit(ip)).allowed).toBe(true);
+        expect((await checkShareRateLimit("203.0.113.51")).allowed).toBe(true);
     });
 
     test("checkAuthRateLimit allows 30 requests per IP per minute, then blocks", async () => {

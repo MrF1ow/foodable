@@ -47,6 +47,19 @@ describe("redactPathForAccessLog", () => {
         }
     });
 
+    test("redacts share link paths, in any spelling", () => {
+        for (const path of [
+            "/s/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE",
+            "//s//AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE",
+            "/S/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCdE",
+            "/s/anything-at-all",
+        ]) {
+            expect(redactPathForAccessLog(path)).toBe("/s/[redacted]");
+        }
+        expect(redactPathForAccessLog("/s")).toBe("/s");
+        expect(redactPathForAccessLog("/settings/help")).toBe("/settings/help");
+    });
+
     test("leaves other paths unchanged", () => {
         expect(redactPathForAccessLog("/mcp")).toBe("/mcp");
         expect(redactPathForAccessLog("/exports")).toBe("/exports");

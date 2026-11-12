@@ -22,13 +22,19 @@ export function maskIp(ip: string | undefined): string {
     return "-";
 }
 
-/** Strip export download tokens before a path hits the access log. */
+/**
+ * Strip export download tokens and share link tokens before a path hits the
+ * access log. A share token is the whole credential for a public page.
+ */
 export function redactPathForAccessLog(pathname: string): string {
     // Collapse repeated slashes and ignore case before matching, so
     // "//exports/<token>" or "/Exports/<token>" never logs the token either.
     const [, first = "", ...rest] = pathname.replace(/\/{2,}/g, "/").split("/");
     if (first.toLowerCase() === "exports" && rest.join("/") !== "") {
         return "/exports/[redacted]";
+    }
+    if (first.toLowerCase() === "s" && rest.join("/") !== "") {
+        return "/s/[redacted]";
     }
     return pathname;
 }
