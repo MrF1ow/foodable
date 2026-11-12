@@ -325,6 +325,9 @@ async function runnerWorld() {
         deps,
         logs,
         store,
+        fridge,
+        stock,
+        loc,
         milk,
         rice,
         oats,
@@ -719,4 +722,65 @@ test("source schedules: a low usual whose ticked line is older than the window i
         false,
         true,
     ]);
+});
+
+// ---- the expiring pass honours a recent tick like the low pass does
+
+async function addRiceCarton(w: Awaited<ReturnType<typeof runnerWorld>>) {
+    // One pound on hand is under the raised low level, so Rice reads low too.
+    await w.foods.updateFoodRow({
+        ...(await w.foods.getFood(HH, w.rice.id))!,
+        restockLowLevel: 5,
+    });
+    await addFridgeItemAdjust(w.fridge, w.stock, w.foods, {
+        householdId: HH,
+        foodId: w.rice.id,
+        amount: 1,
+        unit: "lb",
+        locationId: w.loc.id,
+        expiresOn: "2026-06-08",
+        actorUserId: "u1",
+    });
+}
+
+test("source schedules: an expiring carton does not double a low line ticked earlier in the week", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await addRiceCarton(w);
+    await runRestockCheck(w.deps("schedules"), WED);
+    const [line] = await riceLines(w);
+    await checkGroceryLine(w.grocery, HH, line!.id, true, {
+        foods: w.foods,
+        today: "2026-06-04",
+    });
+    // Saturday, the restock day: the carton is expiring, the tick is two days old.
+    await runRestockCheck(w.deps("schedules"), NOW);
+    expect((await riceLines(w)).map((l) => l.checked)).toEqual([true]);
+});
+
+test("source schedules: an expiring carton still gets its line when the family's ticked line is older than the window", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await addRiceCarton(w);
+    // A ticked line that was never put away, stamped well before the window.
+    await w.grocery.insertLine({
+        id: "old-ticked",
+        householdId: HH,
+        storeId: w.store.id,
+        sectionId: await createMemorySettingsStoreSections(w),
+        kind: "food",
+        displayName: "Rice",
+        quantity: { amount: 1, unit: "lb" },
+        foodId: w.rice.id,
+        checked: true,
+        source: "restock",
+        sourceFridgeItemId: null,
+        note: null,
+    });
+    await w.foods.updateFoodRow({
+        ...(await w.foods.getFood(HH, w.rice.id))!,
+        lastRestockedOn: "2026-05-20",
+    });
+    await runRestockCheck(w.deps("schedules"), NOW);
+    expect((await riceLines(w)).filter((l) => !l.checked)).toHaveLength(1);
 });

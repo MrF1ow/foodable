@@ -392,6 +392,20 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
         familyById.set(id, familyOf(food));
     }
 
+    // An unticked line for a family always covers it. A ticked line covers
+    // only a low or expiring family, and only while the tick is recent
+    // (`TICKED_COVERS_LOW_DAYS`), in the expiring and the usual loops alike.
+    const openFamilies = new Set<string>();
+    const tickedFamilies = new Set<string>();
+    for (const line of input.lines) {
+        if (!line.foodId) continue;
+        const family = familyById.get(line.foodId) ?? line.foodId;
+        (line.checked ? tickedFamilies : openFamilies).add(family);
+    }
+    const recentTickCovers = (family: string, food: EffectiveFood): boolean =>
+        tickedFamilies.has(family) &&
+        tickIsRecent(food.lastRestockedOn, input.today);
+
     const dueByFamily = new Map<
         string,
         { plainId: string; items: FridgeItem[] }
@@ -436,7 +450,12 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
         if (!plain) continue;
 
         const sample = dueItems[0]!;
-        if (onGroceryList(sample, input.lines, input.foodsById)) {
+        if (
+            onGroceryList(sample, input.lines, input.foodsById) ||
+            // Only a stamped tick counts here: an unstamped ticked line has
+            // no provable age and must not hold back an expiring item.
+            (plain.lastRestockedOn != null && recentTickCovers(plainId, plain))
+        ) {
             counts.skippedOnList += 1;
             continue;
         }
@@ -545,22 +564,11 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
     const sortedDue = [...(input.dueUsuals ?? [])].sort((a, b) =>
         a.food.name.localeCompare(b.food.name),
     );
-    // An unticked line for the usual's family always covers it. A ticked line
-    // covers only a low usual, and only while the tick is recent (`TICKED_COVERS_LOW_DAYS`).
-    const openFamilies = new Set<string>();
-    const tickedFamilies = new Set<string>();
-    for (const line of input.lines) {
-        if (!line.foodId) continue;
-        const family = familyById.get(line.foodId) ?? line.foodId;
-        (line.checked ? tickedFamilies : openFamilies).add(family);
-    }
     for (const { food, reason, trigger } of sortedDue) {
         const family = familyOf(food);
         const alreadyListed =
             openFamilies.has(family) ||
-            (trigger === "low" &&
-                tickedFamilies.has(family) &&
-                tickIsRecent(food.lastRestockedOn, input.today)) ||
+            (trigger === "low" && recentTickCovers(family, food)) ||
             lines.some((line) => line.foodId === food.id);
         if (alreadyListed) {
             counts.skippedOnList += 1;
