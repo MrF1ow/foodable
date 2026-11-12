@@ -148,6 +148,8 @@ mock.module("../../db/rules.js", () => ({
 mock.module("../../db/plans.js", () => ({
     ...realDbPlans,
     liveRecipePlansStore: () => db.plansStore,
+    // No database here: the memory stores are the "transaction".
+    planTransaction: () => (fn: () => Promise<unknown>) => fn(),
 }));
 mock.module("../../db/weigh-ins.js", () => ({
     ...realDbWeighIns,

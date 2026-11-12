@@ -275,6 +275,7 @@ function indexPage(): string {
      <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>,
      <code>?v2=1</code> (the v2 assembly), <code>?theme=dark</code> (host theme),
      <code>?state=full|partial|none</code> (product-score sample),
+     <code>?state=costco|stores|onlist|empty</code> (restock-nudge sample),
      <code>?state=design|busy|future|empty</code> (week-plan sample).</p>
   <ul>${links}</ul>
 </body></html>`;

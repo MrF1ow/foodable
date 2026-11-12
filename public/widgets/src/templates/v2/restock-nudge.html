@@ -31,6 +31,9 @@
                 flex-direction: column;
                 gap: 12px;
             }
+            .secs > .grp + .grp {
+                margin-top: 8px;
+            }
             .ur {
                 display: flex;
                 align-items: flex-start;
@@ -258,6 +261,7 @@
             }
 
             function groupBlock(g, canAdd, labelled) {
+                // One primary action per card: with several stores each Add is neutral.
                 const left = g.rows.filter(needsAdd);
                 const isBusy = busy.has(g.key);
                 const err = errors[g.key]
@@ -265,9 +269,9 @@
                     : "";
                 const button =
                     canAdd && (left.length > 0 || isBusy)
-                        ? `<div class="btns"><button type="button" class="btn primary" data-act="${esc(
-                              `add:${g.key}`,
-                          )}"${
+                        ? `<div class="btns"><button type="button" class="btn${
+                              labelled ? "" : " primary"
+                          }" data-act="${esc(`add:${g.key}`)}"${
                               isBusy ? ' disabled aria-busy="true"' : ""
                           }>${esc(
                               isBusy ? T.adding : addLabel(g, left.length),

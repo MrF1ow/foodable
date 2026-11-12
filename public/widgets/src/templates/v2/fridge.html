@@ -269,7 +269,7 @@
                     .sort(bySoonest)
                     .slice(0, SOON_TILES);
                 const strip = soon.length
-                    ? `<div class="grp">${v2Label(T.useSoon)}${v2Tiles(
+                    ? `<div class="grp grp-tiles">${v2Label(T.useSoon)}${v2Tiles(
                           soon.map((it) => ({
                               when: whenText(it.days_left),
                               tone: urgency(it.days_left),

@@ -8,10 +8,18 @@ import {
     Client,
     StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
+import { SQL } from "bun";
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Hono } from "hono";
+import { liveFoodsStore } from "../../db/foods.js";
+import { liveFridgeStore } from "../../db/fridge.js";
+import { liveGroceryStore } from "../../db/grocery.js";
+import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
 import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
-import { setSqlForTests } from "../../db/sql.js";
+import { liveRecipesStore } from "../../db/recipes.js";
+import { householdClock } from "../../db/restock.js";
+import { liveSettingsStore } from "../../db/settings.js";
+import { pairAppSqlForTests, setSqlForTests } from "../../db/sql.js";
 import {
     asUser,
     seedGroceryStore,
@@ -19,6 +27,7 @@ import {
 } from "../../db/testing/fixtures.js";
 import { describeDb } from "../../db/testing/pg.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
+import { actOnNotice } from "../../domain/notice-actions.js";
 import { planRecipe } from "../../domain/plan.js";
 import {
     createMemoryFlags,
@@ -213,6 +222,115 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
                 `;
                 expect(Number(row.n)).toBe(1);
             });
+        },
+    );
+
+    test.each(ERAS)(
+        "a notice action racing add_plan_missing_to_groceries adds each food once (%p)",
+        async (era) => {
+            const { sql } = getCtx();
+            const storeId = await seedGroceryStore(sql, householdId);
+            await sql`
+                insert into public.grocery_sections (
+                    id, household_id, store_id, name, sort_order, hidden, is_other
+                )
+                values (
+                    ${crypto.randomUUID()}, ${householdId}, ${storeId},
+                    ${"Other"}, ${0}, ${false}, ${true}
+                )
+            `;
+            // The shared test pool is one connection, which would line the
+            // calls up by itself; a race needs connections of its own.
+            const appUrl = new URL(getCtx().pg.url);
+            appUrl.username = "foodable_app";
+            const raceOwner = new SQL(getCtx().pg.url, {
+                prepare: false,
+                max: 6,
+            });
+            const raceApp = new SQL(appUrl.toString(), {
+                prepare: false,
+                max: 6,
+            });
+            pairAppSqlForTests(raceOwner, raceApp);
+            setSqlForTests(raceOwner);
+            try {
+                await withClient(ownerId, era, async (call) => {
+                    const flour = await call("upsert_food", { name: "Flour" });
+                    const flourId = flour.structuredContent!.id as string;
+                    await call("add_recipe_ingredient", {
+                        recipe_id: recipeId,
+                        food_id: flourId,
+                        amount: 200,
+                        unit: "g",
+                    });
+                    const today = (await call("get_week_plan"))
+                        .structuredContent!.today;
+                    await call("plan_recipe", {
+                        recipe_id: recipeId,
+                        date: today,
+                        slot: "lunch",
+                    });
+                    const clock = await asUser(
+                        ownerId,
+                        () => householdClock(householdId),
+                        householdId,
+                    );
+                    const act = () =>
+                        asUser(
+                            ownerId,
+                            () =>
+                                actOnNotice(
+                                    {
+                                        foods: liveFoodsStore(),
+                                        fridge: liveFridgeStore(),
+                                        recipes: liveRecipesStore(),
+                                        dismissals: liveNoticeDismissalsStore(),
+                                        grocery: liveGroceryStore(),
+                                        plans: liveRecipePlansStore(),
+                                        settings: liveSettingsStore(),
+                                        transaction: planTransaction(
+                                            "plan-missing",
+                                            householdId,
+                                        ),
+                                    },
+                                    householdId,
+                                    {
+                                        code: "plan.missing_ingredient",
+                                        subjectId: flourId,
+                                    },
+                                    clock,
+                                ),
+                            householdId,
+                        );
+                    const [acts, calls] = await Promise.all([
+                        Promise.all([act(), act(), act()]),
+                        Promise.all([
+                            call("add_plan_missing_to_groceries"),
+                            call("add_plan_missing_to_groceries"),
+                            call("add_plan_missing_to_groceries"),
+                        ]),
+                    ]);
+                    expect(calls.every((r) => !r.isError)).toBe(true);
+                    const added =
+                        acts.filter((r) => r.status === "added").length +
+                        calls.reduce(
+                            (n, r) =>
+                                n +
+                                (r.structuredContent!.added.length as number),
+                            0,
+                        );
+                    expect(added).toBe(1);
+                    const [row] = await sql`
+                    select count(*)::int as n from public.grocery_lines
+                    where household_id = ${householdId}
+                `;
+                    expect(Number(row.n)).toBe(1);
+                });
+            } finally {
+                setSqlForTests(getCtx().sql);
+                await raceApp.close();
+                await raceOwner.close();
+            }
         },
     );
 

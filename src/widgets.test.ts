@@ -4718,11 +4718,21 @@ test("restock-nudge v2: due usuals at several stores are grouped, each group wit
     expect(body).toContain(">Trader Joe&#39;s<");
     expect(body).toContain("Add 1 to the Costco list");
     expect(body).toContain("Add 1 to the Trader Joe&#39;s list");
+    // Several stores: every Add is neutral. One store keeps the primary.
+    expect(body).not.toContain("btn primary");
     w.tap("add:st-tj");
     await w.settle();
     expect(w.calls.map((c) => c.args.food_id)).toEqual(["food-salmon"]);
     expect(w.html()).toContain("Add 1 to the Costco list");
     expect(w.html()).not.toContain("Trader Joe&#39;s list");
+});
+
+test("restock-nudge v2: a single store's Add is the primary button", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([usual()]),
+        reply: addReply,
+    });
+    expect(w.html()).toContain('class="btn primary"');
 });
 
 test("restock-nudge v2: while an Add is out its button is disabled and a second tap sends nothing", async () => {

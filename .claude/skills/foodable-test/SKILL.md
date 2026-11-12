@@ -62,25 +62,25 @@ Not `bun run dev` or `bun run start`: `dev` runs `gen:all` (rewrites tracked fil
 Stop everything:
 
 ```bash
-kill "$(cat "$STACK/server.pid")"      # SIGTERM, shuts down cleanly
+kill "$(cat "$STACK/server.pid")"      # SIGTERM
 bun run db:dev stop                    # stops only the cluster in $FOODABLE_PG_DIR
-bun run db:dev status                  # prints "stopped" and exits 1 (that is expected)
+bun run db:dev status                  # "stopped", exit 1 is expected
 ```
 
 ## Which tool fits which change
 
-- **Domain / pure logic:** `bun --no-env-file test <file>`. Needs nothing.
+- **Domain / pure logic:** `bun --no-env-file test <file>`.
 - **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy, used as `foodable_app` (household owner; `src/db/testing/pg.ts`). Needs `initdb` (PATH or `PG_BIN`), else skipped.
-- **Web pages, nav, Turbo, theme chrome (both shells):** `bun run check:nav` (PASS/FAIL). Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed": another run holds them; wait until `ss -ltn` shows both free). No database.
-- **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow; long `timeout`). Clear tmp/app-preview first. Camera scans need phones. Without `--shots` it serves :4787 (`PREVIEW_PORT`). `FOODABLE_FLAGS=ui-v2:all` adds the new-shell screens (`*-v2-*.png`). Chromium; fixture data.
-- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&v2=1&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|empty`, week-plan `design|busy|future|empty`. `bun --no-env-file test src/widgets.test.ts` guards assembly.
+- **Web pages, nav, Turbo, theme chrome (both shells):** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed": another run holds them; wait until `ss -ltn` shows both free). No database.
+- **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow; long `timeout`). Clear tmp/app-preview first. Without `--shots` it serves :4787 (`PREVIEW_PORT`). `FOODABLE_FLAGS=ui-v2:all` adds the new-shell screens (`*-v2-*.png`). Chromium; fixture data.
+- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&v2=1&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. `bun --no-env-file test src/widgets.test.ts` guards assembly. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked (below).
 - **Migrations:** `bun run db:dryrun` (throwaway Postgres, never production; needs `initdb`). `bun run db:rehearse` (production copy over `railway ssh`): only when asked.
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
 - **Types, lint, format:** `bun run typecheck`, `bun run lint`, `bun run format:check` (`format` fixes).
 
-`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (the server default is the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if its registration points at the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Household › Members, then sign Grok in. Setup is manual. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
+`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (the server default is the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if its registration points at the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Household › Members, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 
 ## Never touch
 

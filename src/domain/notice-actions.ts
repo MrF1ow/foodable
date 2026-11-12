@@ -22,6 +22,7 @@ import {
     missingForPlan,
     planRecipesOf,
 } from "./plan-week.js";
+import type { PlanTransaction } from "./plan.js";
 import type { SettingsStore } from "./settings.js";
 
 /** The codes that act on a write; the weigh-in reminder opens a sheet instead. */
@@ -52,6 +53,8 @@ export type NoticeActionDeps = NoticesForDeps & {
     grocery: GroceryListStore;
     settings: SettingsStore;
     weighIns?: WeighInStore;
+    /** Runs the grocery add under the household's plan-missing lock (live stores). */
+    transaction?: PlanTransaction;
 };
 
 export type NoticeActionResult =
@@ -172,6 +175,7 @@ async function addPlanMissing(
         deps.settings,
         deps.foods,
         { householdId, lines },
+        { transaction: deps.transaction },
     );
     if (result.added.length === 0) return { status: "gone" };
     for (const entry of result.unknown) {
