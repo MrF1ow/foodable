@@ -304,8 +304,9 @@ async function refusedScorePage(
 
 settingsRoutes.get(
     SCORE_HOUSEHOLD_PATH,
-    requireManager,
+    requireSiteUser,
     gatedRoute("ui-v2", { notFound: true }),
+    requireManager,
     async (c) => {
         const page = await renderSettingsScoreHouseholdV2Route(c.get("userId"));
         return c.html(page.html, page.status);
@@ -316,8 +317,9 @@ settingsRoutes.get(
 // anyone else with 403 before this runs.
 settingsRoutes.post(
     SCORE_HOUSEHOLD_PATH,
-    requireManager,
+    requireSiteUser,
     gatedRoute("ui-v2", { notFound: true }),
+    requireManager,
     async (c) => {
         const userId = c.get("userId");
         const member = siteMember(c);

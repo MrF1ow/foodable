@@ -23,6 +23,8 @@ import * as actualHousehold from "../db/household.js";
 const realHousehold = { ...actualHousehold };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
+const BOB = "22222222-2222-4222-8222-222222222222";
+const CAROL = "33333333-3333-4333-8333-333333333333";
 
 const member: HouseholdMember = {
     userId: ALICE,
@@ -31,13 +33,21 @@ const member: HouseholdMember = {
     displayName: "Alice",
 };
 
+const plainMember: HouseholdMember = {
+    userId: BOB,
+    householdId: "hh-1",
+    role: "member",
+    displayName: "Bob",
+};
+
 let membershipLookups = 0;
 
 mock.module("../db/household.js", () => ({
     ...realHousehold,
     getHouseholdMembership: async (userId: string) => {
         membershipLookups += 1;
-        return userId === ALICE ? member : null;
+        if (userId === ALICE) return member;
+        return userId === BOB ? plainMember : null;
     },
     householdExists: async () => true,
 }));
@@ -413,6 +423,39 @@ describe("gated route harness on composed app", () => {
                 notFound: true,
             },
         ]);
+    });
+});
+
+describe("household product score, owner and admin only", () => {
+    const PATH = "http://test/settings/product-score/household";
+
+    // The role check must not answer before the flag does: with ui-v2 off the
+    // page does not exist for anyone, a plain member or a stranger included.
+    for (const [who, userId] of [
+        ["a plain member", BOB],
+        ["a user with no household", CAROL],
+    ] as const) {
+        for (const method of ["GET", "POST"] as const) {
+            test(`${method} is a 404 for ${who} while ui-v2 is off`, async () => {
+                setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+                const res = await app.request(PATH, {
+                    method,
+                    headers: { cookie: sessionCookie(userId) },
+                });
+                expect(res.status).toBe(404);
+            });
+        }
+    }
+
+    test("a plain member is still refused with 403 once ui-v2 is on", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        for (const method of ["GET", "POST"] as const) {
+            const res = await app.request(PATH, {
+                method,
+                headers: { cookie: sessionCookie(BOB) },
+            });
+            expect(res.status).toBe(403);
+        }
     });
 });
 

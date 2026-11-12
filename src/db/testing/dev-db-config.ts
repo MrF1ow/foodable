@@ -8,7 +8,7 @@ export const DEV_DATABASE_NAME = "foodable";
 
 export function defaultPgDataDir(): string {
     const fromEnv = process.env.FOODABLE_PG_DIR?.trim();
-    if (fromEnv) return fromEnv.replace(/^~(?=\/|$)/, homedir());
+    if (fromEnv) return fromEnv.replace(/^~(?=\/|$)/, () => homedir());
     return join(homedir(), ".local", "share", "foodable", "pg");
 }
 

@@ -613,10 +613,11 @@ test("foodable-theme meta syncs html data-theme before turbo body paint", () => 
     };
     const injected = SHELL_JS.replace(
         "const THEME_PAGE_BG = null;",
-        `const THEME_PAGE_BG = ${JSON.stringify({ light: "#fbfaf7", dark: "#0d0f0e" })};`,
+        () =>
+            `const THEME_PAGE_BG = ${JSON.stringify({ light: "#fbfaf7", dark: "#0d0f0e" })};`,
     ).replace(
         "const THEME_NAV_BG = null;",
-        `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_BG)};`,
+        () => `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_BG)};`,
     );
     new Function("document", "window", "Element", injected)(
         document,

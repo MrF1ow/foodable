@@ -101,12 +101,12 @@ export async function renderLoginPage(
                     <p class="auth-note">${escapeHtml(LOGIN.inviteCodeHint)}</p>`
             : "";
     return template
-        .replaceAll("{{SESSION_ID}}", escapeHtml(sessionId))
-        .replaceAll("{{ERROR}}", errorHtml)
-        .replaceAll("{{CONNECT_HINT}}", connectHint)
-        .replaceAll("{{INVITE_FIELDS}}", inviteFields)
-        .replaceAll("{{APP_CSS_HREF}}", appStylesheetHref())
-        .replaceAll("{{APP_JS_HREF}}", appScriptHref());
+        .replaceAll("{{SESSION_ID}}", () => escapeHtml(sessionId))
+        .replaceAll("{{ERROR}}", () => errorHtml)
+        .replaceAll("{{CONNECT_HINT}}", () => connectHint)
+        .replaceAll("{{INVITE_FIELDS}}", () => inviteFields)
+        .replaceAll("{{APP_CSS_HREF}}", () => appStylesheetHref())
+        .replaceAll("{{APP_JS_HREF}}", () => appScriptHref());
 }
 
 function displayNameFromLogin(email: string): string {

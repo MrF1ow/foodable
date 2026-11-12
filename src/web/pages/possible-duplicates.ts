@@ -209,7 +209,7 @@ function mergeFormBodyV2(
 ): string {
     return mergeFormBody(pair, refCounts, post).replace(
         'class="btn-danger"',
-        `class="${mergeSubmitClass(true)}"`,
+        () => `class="${mergeSubmitClass(true)}"`,
     );
 }
 

@@ -1,0 +1,10 @@
+const html = "<main></main>";
+const body = "price: $& and $` and $'";
+const name = "x";
+const a = html.replace("<main>", `<main class="${name}">`);
+const b = html.replace("<main>", body);
+const c = html.replaceAll(/main/g, body);
+const d = html.replace("<main>", "<main>" + body);
+const e = html?.replace("<main>", body);
+const f = html.replace("<main>", `a${name}`);
+export { a, b, c, d, e, f };

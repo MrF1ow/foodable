@@ -809,15 +809,15 @@ function patchFridgeItemQty(
     return html.replace(liRe, (li) => {
         let next = li.replace(
             /(<p class="fridge-item-qty row-meta">)[^<]*? · /,
-            `$1${label} · `,
+            (_match, open: string) => `${open}${label} · `,
         );
         next = next.replace(
             /data-fill-field-qty_amount="[^"]*"/g,
-            `data-fill-field-qty_amount="${escapeHtml(String(amount))}"`,
+            () => `data-fill-field-qty_amount="${escapeHtml(String(amount))}"`,
         );
         next = next.replace(
             /data-fill-field-qty_unit="[^"]*"/g,
-            `data-fill-field-qty_unit="${escapeHtml(unit)}"`,
+            () => `data-fill-field-qty_unit="${escapeHtml(unit)}"`,
         );
         return next;
     });

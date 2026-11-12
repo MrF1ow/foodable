@@ -14,6 +14,7 @@ import mcpSchemaObject from "./rules/mcp-schema-object.js";
 import noDbMockOutsideWindows from "./rules/no-db-mock-outside-windows.js";
 import noPerTestTimeout from "./rules/no-per-test-timeout.js";
 import noRestoreFromLiveImport from "./rules/no-restore-from-live-import.js";
+import noStringReplacementPatterns from "./rules/no-string-replacement-patterns.js";
 import noWallClockWaits from "./rules/no-wall-clock-waits.js";
 import skipNeedsReason from "./rules/skip-needs-reason.js";
 
@@ -25,6 +26,7 @@ export default {
         "no-db-mock-outside-windows": noDbMockOutsideWindows,
         "no-per-test-timeout": noPerTestTimeout,
         "no-restore-from-live-import": noRestoreFromLiveImport,
+        "no-string-replacement-patterns": noStringReplacementPatterns,
         "no-wall-clock-waits": noWallClockWaits,
         "skip-needs-reason": skipNeedsReason,
     },

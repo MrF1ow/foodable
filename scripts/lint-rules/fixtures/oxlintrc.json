@@ -15,6 +15,7 @@
             }
         ],
         "foodable/no-restore-from-live-import": "error",
+        "foodable/no-string-replacement-patterns": "error",
         "foodable/no-wall-clock-waits": "error",
         "foodable/no-per-test-timeout": "error",
         "foodable/skip-needs-reason": "error",

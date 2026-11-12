@@ -61,17 +61,19 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
             src = src
                 .replace(
                     "const THEME_PAGE_BG = null;",
-                    `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
+                    () =>
+                        `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
                 )
                 .replace(
                     "const THEME_NAV_BG = null;",
-                    `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
+                    () =>
+                        `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
                 );
         }
         if (path.endsWith("toast.js")) {
             src = src.replace(
                 "const TOAST_CATALOG = null;",
-                `const TOAST_CATALOG = ${JSON.stringify(TOASTS)};`,
+                () => `const TOAST_CATALOG = ${JSON.stringify(TOASTS)};`,
             );
         }
         expect(js).toContain(`(function () {\n${src}\n})();`);
