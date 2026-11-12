@@ -116,6 +116,32 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
 
     const DAY = "2099-01-02";
 
+    // The shared test pool is one connection, which lines calls up by itself and
+    // would let a race test pass without the lock. A race needs connections of
+    // its own: an owner pool and an app-role pool of six each, swapped in for
+    // the test and closed afterwards.
+    async function withRacePools<T>(run: () => Promise<T>): Promise<T> {
+        const appUrl = new URL(getCtx().pg.url);
+        appUrl.username = "foodable_app";
+        const raceOwner = new SQL(getCtx().pg.url, {
+            prepare: false,
+            max: 6,
+        });
+        const raceApp = new SQL(appUrl.toString(), {
+            prepare: false,
+            max: 6,
+        });
+        pairAppSqlForTests(raceOwner, raceApp);
+        setSqlForTests(raceOwner);
+        try {
+            return await run();
+        } finally {
+            setSqlForTests(getCtx().sql);
+            await raceApp.close();
+            await raceOwner.close();
+        }
+    }
+
     async function planCount(): Promise<number> {
         const [row] = await getCtx().sql`
             select count(*)::int as n from public.recipe_plans
@@ -148,7 +174,9 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
                     ),
                 householdId,
             );
-        const out = await Promise.all([once(), once(), once(), once()]);
+        const out = await withRacePools(() =>
+            Promise.all([once(), once(), once(), once()]),
+        );
         expect(await planCount()).toBe(1);
         expect(out.filter((o) => o?.alreadyPlanned === false)).toHaveLength(1);
         expect(new Set(out.map((o) => o?.plan.id)).size).toBe(1);
@@ -157,21 +185,27 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
     test.each(ERAS)(
         "parallel plan_recipe calls make one plan (%p)",
         async (era) => {
-            await withClient(ownerId, era, async (call) => {
-                const args = { recipe_id: recipeId, date: DAY, slot: "lunch" };
-                const out = await Promise.all(
-                    [1, 2, 3, 4].map(() => call("plan_recipe", args)),
-                );
-                expect(out.every((r) => !r.isError)).toBe(true);
-                expect(await planCount()).toBe(1);
-                expect(
-                    out.filter((r) => r.structuredContent?.already_planned)
-                        .length,
-                ).toBe(3);
-                // A different slot is a different plan.
-                await call("plan_recipe", { ...args, slot: "dinner" });
-                expect(await planCount()).toBe(2);
-            });
+            await withRacePools(() =>
+                withClient(ownerId, era, async (call) => {
+                    const args = {
+                        recipe_id: recipeId,
+                        date: DAY,
+                        slot: "lunch",
+                    };
+                    const out = await Promise.all(
+                        [1, 2, 3, 4].map(() => call("plan_recipe", args)),
+                    );
+                    expect(out.every((r) => !r.isError)).toBe(true);
+                    expect(await planCount()).toBe(1);
+                    expect(
+                        out.filter((r) => r.structuredContent?.already_planned)
+                            .length,
+                    ).toBe(3);
+                    // A different slot is a different plan.
+                    await call("plan_recipe", { ...args, slot: "dinner" });
+                    expect(await planCount()).toBe(2);
+                }),
+            );
         },
     );
 
@@ -189,39 +223,44 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
                     ${"Other"}, ${0}, ${false}, ${true}
                 )
             `;
-            await withClient(ownerId, era, async (call) => {
-                const flour = await call("upsert_food", { name: "Flour" });
-                await call("add_recipe_ingredient", {
-                    recipe_id: recipeId,
-                    food_id: flour.structuredContent!.id,
-                    amount: 200,
-                    unit: "g",
-                });
-                const today = (await call("get_week_plan")).structuredContent!
-                    .today;
-                await call("plan_recipe", {
-                    recipe_id: recipeId,
-                    date: today,
-                    slot: "lunch",
-                });
-                const out = await Promise.all(
-                    [1, 2, 3].map(() => call("add_plan_missing_to_groceries")),
-                );
-                expect(out.every((r) => !r.isError)).toBe(true);
-                // One call added Flour; the others found it on the list.
-                expect(
-                    out.reduce(
-                        (n, r) =>
-                            n + (r.structuredContent!.added.length as number),
-                        0,
-                    ),
-                ).toBe(1);
-                const [row] = await sql`
-                    select count(*)::int as n from public.grocery_lines
-                    where household_id = ${householdId}
-                `;
-                expect(Number(row.n)).toBe(1);
-            });
+            await withRacePools(() =>
+                withClient(ownerId, era, async (call) => {
+                    const flour = await call("upsert_food", { name: "Flour" });
+                    await call("add_recipe_ingredient", {
+                        recipe_id: recipeId,
+                        food_id: flour.structuredContent!.id,
+                        amount: 200,
+                        unit: "g",
+                    });
+                    const today = (await call("get_week_plan"))
+                        .structuredContent!.today;
+                    await call("plan_recipe", {
+                        recipe_id: recipeId,
+                        date: today,
+                        slot: "lunch",
+                    });
+                    const out = await Promise.all(
+                        [1, 2, 3].map(() =>
+                            call("add_plan_missing_to_groceries"),
+                        ),
+                    );
+                    expect(out.every((r) => !r.isError)).toBe(true);
+                    // One call added Flour; the others found it on the list.
+                    expect(
+                        out.reduce(
+                            (n, r) =>
+                                n +
+                                (r.structuredContent!.added.length as number),
+                            0,
+                        ),
+                    ).toBe(1);
+                    const [row] = await sql`
+                        select count(*)::int as n from public.grocery_lines
+                        where household_id = ${householdId}
+                    `;
+                    expect(Number(row.n)).toBe(1);
+                }),
+            );
         },
     );
 
@@ -239,22 +278,8 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
                     ${"Other"}, ${0}, ${false}, ${true}
                 )
             `;
-            // The shared test pool is one connection, which would line the
-            // calls up by itself; a race needs connections of its own.
-            const appUrl = new URL(getCtx().pg.url);
-            appUrl.username = "foodable_app";
-            const raceOwner = new SQL(getCtx().pg.url, {
-                prepare: false,
-                max: 6,
-            });
-            const raceApp = new SQL(appUrl.toString(), {
-                prepare: false,
-                max: 6,
-            });
-            pairAppSqlForTests(raceOwner, raceApp);
-            setSqlForTests(raceOwner);
-            try {
-                await withClient(ownerId, era, async (call) => {
+            await withRacePools(() =>
+                withClient(ownerId, era, async (call) => {
                     const flour = await call("upsert_food", { name: "Flour" });
                     const flourId = flour.structuredContent!.id as string;
                     await call("add_recipe_ingredient", {
@@ -325,12 +350,8 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
                     where household_id = ${householdId}
                 `;
                     expect(Number(row.n)).toBe(1);
-                });
-            } finally {
-                setSqlForTests(getCtx().sql);
-                await raceApp.close();
-                await raceOwner.close();
-            }
+                }),
+            );
         },
     );
 
