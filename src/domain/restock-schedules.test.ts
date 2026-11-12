@@ -642,3 +642,81 @@ async function createMemorySettingsStoreSections(w: {
     const sections = await w.deps().settings.listSections(w.store.id);
     return sections[0]!.id;
 }
+
+const SAT_2 = new Date("2026-06-13T15:00:00Z");
+const SAT_3 = new Date("2026-06-20T15:00:00Z");
+
+test("source schedules: a scheduled usual whose ticked line was never cleared is added again when due", async () => {
+    const w = await runnerWorld();
+    await runRestockCheck(w.deps("schedules"), NOW);
+    const [first] = await riceLines(w);
+    // Ticked in the store the next day; nobody clears the checked lines.
+    await checkGroceryLine(w.grocery, HH, first!.id, true, {
+        foods: w.foods,
+        today: "2026-06-07",
+    });
+    await runRestockCheck(w.deps("schedules"), SAT_2);
+    expect((await riceLines(w)).map((l) => l.checked)).toEqual([true]);
+    // Two weeks on the schedule is due again; the stale tick must not cover it.
+    await runRestockCheck(w.deps("schedules"), SAT_3);
+    expect((await riceLines(w)).map((l) => l.checked).sort()).toEqual([
+        false,
+        true,
+    ]);
+});
+
+test("source schedules: a ticked manual line from weeks ago does not block a scheduled usual", async () => {
+    const w = await runnerWorld();
+    const sectionId = await createMemorySettingsStoreSections(w);
+    await w.grocery.insertLine({
+        id: "old-ticked",
+        householdId: HH,
+        storeId: w.store.id,
+        sectionId,
+        kind: "food",
+        displayName: "Rice",
+        quantity: { amount: 1, unit: "lb" },
+        foodId: w.rice.id,
+        checked: true,
+        source: "manual",
+        sourceFridgeItemId: null,
+        note: null,
+    });
+    await runRestockCheck(w.deps("schedules"), NOW);
+    const rice = await riceLines(w);
+    expect(rice.filter((l) => !l.checked)).toHaveLength(1);
+    expect(w.logs[0]).toContain("skipped_on_list=0");
+});
+
+test("source schedules: a low usual ticked one or two days ago is not doubled", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await runRestockCheck(w.deps("schedules"), WED);
+    const [line] = await riceLines(w);
+    await checkGroceryLine(w.grocery, HH, line!.id, true, {
+        foods: w.foods,
+        today: "2026-06-04",
+    });
+    await runRestockCheck(w.deps("schedules"), FRI);
+    expect((await riceLines(w)).map((l) => l.checked)).toEqual([true]);
+});
+
+test("source schedules: a low usual whose ticked line is older than the window is added again", async () => {
+    const w = await runnerWorld();
+    await makeRiceLow(w);
+    await runRestockCheck(w.deps("schedules"), WED);
+    const [line] = await riceLines(w);
+    await checkGroceryLine(w.grocery, HH, line!.id, true, {
+        foods: w.foods,
+        today: "2026-06-03",
+    });
+    // Ticked 3 June and never put away: by 10 June the tick is stale.
+    await runRestockCheck(
+        w.deps("schedules"),
+        new Date("2026-06-10T15:00:00Z"),
+    );
+    expect((await riceLines(w)).map((l) => l.checked).sort()).toEqual([
+        false,
+        true,
+    ]);
+});

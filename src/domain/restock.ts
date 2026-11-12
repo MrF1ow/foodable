@@ -143,6 +143,24 @@ export function runningLowNotice(food: EffectiveFood, reason: string): Notice {
 
 const MS_PER_DAY = 86_400_000;
 
+/**
+ * A ticked line is bought but not yet put away, so the fridge still reads low
+ * and it covers a low usual for this many days; after that it is a stale tick
+ * and the usual may be added again.
+ */
+export const TICKED_COVERS_LOW_DAYS = 7;
+
+/**
+ * Ticking stamps the usual's `lastRestockedOn`, so a stamp older than the
+ * window means the tick is stale. No stamp means the tick's age is unknown,
+ * and it still covers: a stale line is only provable, never guessed.
+ */
+function tickIsRecent(lastRestockedOn: string | null, today: string): boolean {
+    if (lastRestockedOn == null) return true;
+    const since = daysBetween(lastRestockedOn, today);
+    return since != null && since < TICKED_COVERS_LOW_DAYS;
+}
+
 function parseDay(iso: string): number | null {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
     if (!m) return null;
@@ -527,16 +545,22 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
     const sortedDue = [...(input.dueUsuals ?? [])].sort((a, b) =>
         a.food.name.localeCompare(b.food.name),
     );
-    // A line for the usual's family counts whether or not it is ticked: a
-    // ticked line is bought but not yet put away, so the fridge still reads low.
-    const listedFamilies = new Set<string>();
+    // An unticked line for the usual's family always covers it. A ticked line
+    // covers only a low usual, and only while the tick is recent (`TICKED_COVERS_LOW_DAYS`).
+    const openFamilies = new Set<string>();
+    const tickedFamilies = new Set<string>();
     for (const line of input.lines) {
         if (!line.foodId) continue;
-        listedFamilies.add(familyById.get(line.foodId) ?? line.foodId);
+        const family = familyById.get(line.foodId) ?? line.foodId;
+        (line.checked ? tickedFamilies : openFamilies).add(family);
     }
     for (const { food, reason, trigger } of sortedDue) {
+        const family = familyOf(food);
         const alreadyListed =
-            listedFamilies.has(familyOf(food)) ||
+            openFamilies.has(family) ||
+            (trigger === "low" &&
+                tickedFamilies.has(family) &&
+                tickIsRecent(food.lastRestockedOn, input.today)) ||
             lines.some((line) => line.foodId === food.id);
         if (alreadyListed) {
             counts.skippedOnList += 1;
