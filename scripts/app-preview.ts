@@ -74,6 +74,7 @@ import {
 import {
     buildPreviewTodayPageData,
     buildPreviewTodayViewWithRail,
+    buildPreviewTodayViewWithYesterdayHint,
     renderTodayV2Page,
 } from "../src/web/pages/v2/today.js";
 import {
@@ -1567,6 +1568,15 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ? {
                   "dev-gallery-v2": renderDevGalleryV2Page(chrome),
                   "nutrition-log-search": await logSheetPreview(theme, "empty"),
+                  "nutrition-today-yesterday": renderTodayV2Page({
+                      ...buildPreviewTodayPageData(
+                          chrome as never,
+                          "2026-11-10",
+                      ),
+                      view: buildPreviewTodayViewWithYesterdayHint(
+                          "2026-11-10",
+                      ),
+                  }),
                   "nutrition-log-results": await logSheetPreview(
                       theme,
                       "results",

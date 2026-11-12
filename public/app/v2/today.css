@@ -467,6 +467,34 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
     padding: var(--fd-s-6) 0;
 }
 
+.fd-today-yesterday {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.fd-today-yesterday__btn {
+    display: block;
+    width: 100%;
+    /* The app's native button floor (44px) would stretch the desktop row. */
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    font: 400 13px/20px var(--font-body);
+    color: var(--text-tertiary);
+    cursor: pointer;
+}
+
+.fd-today-yesterday__btn:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+}
+
 .fd-today-section__add {
     color: var(--text-secondary);
 }

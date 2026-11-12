@@ -50,6 +50,10 @@ export const TOASTS = {
         kind: "info",
         text: "Already copied from yesterday",
     },
+    "nutrition.meal.copy-yesterday.none": {
+        kind: "info",
+        text: "Nothing to copy from yesterday",
+    },
     "nutrition.water.logged": { kind: "success", text: "Water logged" },
     "nutrition.weight.logged": { kind: "success", text: "Weight logged" },
     "nutrition.layout.saved": {

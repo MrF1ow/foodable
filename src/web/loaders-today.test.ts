@@ -224,6 +224,61 @@ describe("loadToday", () => {
         expect(view.streak).toBe(3);
     });
 
+    test("loads yesterday meals only when viewing today", async () => {
+        const calls: string[] = [];
+        const dinnerYesterday = meal({
+            id: "y-dinner",
+            meal_type: "dinner",
+            description: "Curry",
+            calories: 600,
+            logged_at: "2026-03-02T19:00:00.000Z",
+        });
+        const deps = fakeDeps({
+            getMealsByDate: async (_u, date) => {
+                calls.push(date);
+                if (date === "2026-03-03") return [];
+                if (date === "2026-03-02") return [dinnerYesterday];
+                return [];
+            },
+            getMealsInRangeWithoutItems: async () => [],
+        });
+        const view = await loadToday(viewer, "2026-03-03", deps);
+        expect(calls).toContain("2026-03-02");
+        expect(view.yesterdayCopy.dinner?.label).toBe("Curry");
+        expect(view.yesterdayCopy.dinner?.kcal).toBe(600);
+
+        calls.length = 0;
+        const past = await loadToday(viewer, "2026-03-01", deps);
+        expect(calls).not.toContain("2026-03-02");
+        expect(past.yesterdayCopy).toEqual({});
+    });
+
+    test("a read-only peer view skips the yesterday query and the hint", async () => {
+        const calls: string[] = [];
+        const deps = fakeDeps({
+            getMealsByDate: async (_u, date) => {
+                calls.push(date);
+                if (date === "2026-03-02") {
+                    return [
+                        meal({
+                            id: "y-dinner",
+                            meal_type: "dinner",
+                            description: "Curry",
+                            logged_at: "2026-03-02T19:00:00.000Z",
+                        }),
+                    ];
+                }
+                return [];
+            },
+            getMealsInRangeWithoutItems: async () => [],
+        });
+        const view = await loadToday(viewer, "2026-03-03", deps, {
+            readOnly: true,
+        });
+        expect(calls).not.toContain("2026-03-02");
+        expect(view.yesterdayCopy).toEqual({});
+    });
+
     test("streak ends yesterday when today has nothing logged yet", async () => {
         const meals = [
             meal({

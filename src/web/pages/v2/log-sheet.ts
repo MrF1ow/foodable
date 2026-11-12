@@ -252,6 +252,31 @@ const PREVIEW_RECENTS: Array<{
         kcal: 105,
         payload: { name: "Banana", food_id: "f-banana", kcal: 105 },
     },
+    {
+        name: "Oatmeal",
+        kcal: 150,
+        payload: { name: "Oatmeal", food_id: "f-oats", kcal: 150 },
+    },
+    {
+        name: "Avocado toast",
+        kcal: 320,
+        payload: { name: "Avocado toast", food_id: "f-avo", kcal: 320 },
+    },
+    {
+        name: "Salmon bowl",
+        kcal: 540,
+        payload: { name: "Salmon bowl", recipe_id: "r-salmon", kcal: 540 },
+    },
+    {
+        name: "Cottage cheese",
+        kcal: 110,
+        payload: { name: "Cottage cheese", food_id: "f-cottage", kcal: 110 },
+    },
+    {
+        name: "Peanut butter",
+        kcal: 190,
+        payload: { name: "Peanut butter", food_id: "f-pb", kcal: 190 },
+    },
 ];
 
 function quickIconBolt(): string {
@@ -550,7 +575,7 @@ function logSearchSheet(opts: RenderLogSheetsOpts): string {
         ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.searchError)}</p>`
         : "";
     const cameraOn = opts.barcodeCamera !== false;
-    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">RECENT</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml(cameraOn)}`;
+    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">Recent</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml(cameraOn)}`;
     const resultsBody = showResults
         ? previewResultRows()
         : `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" data-fd-log-result-list></ul>`;

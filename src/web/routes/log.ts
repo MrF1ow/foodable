@@ -107,6 +107,7 @@ function historyItemFromMeal(
     const base: LogSearchSourceItem = {
         kind: "history",
         id: meal.id,
+        meal_id: meal.id,
         name: meal.description,
         source: "meal",
         logged_at: meal.logged_at,
@@ -925,8 +926,14 @@ logRoutes.post(
         const slotMeals = dayMeals.filter(
             (row) => resolveMealType(row.meal_type) === meal_type,
         );
+        // A stale hint (yesterday's slot changed since the page loaded) goes
+        // back to the page with a toast rather than a bare error response.
         if (slotMeals.length === 0) {
-            return c.text("Nothing to copy from yesterday.", 404);
+            return redirectWithToast(
+                c,
+                returnTo,
+                "nutrition.meal.copy-yesterday.none",
+            );
         }
         const idempotency_key = copyYesterdayIdempotencyKey(
             userId,
@@ -941,7 +948,11 @@ logRoutes.post(
                 new Date().toISOString(),
             );
             if (!input) {
-                return c.text("Nothing to copy from yesterday.", 404);
+                return redirectWithToast(
+                    c,
+                    returnTo,
+                    "nutrition.meal.copy-yesterday.none",
+                );
             }
             const result = await insertMeal(userId, {
                 ...input,

@@ -14,6 +14,7 @@ import {
     buildPreviewTodayPageData,
     buildPreviewTodayView,
     buildPreviewTodayViewWithRail,
+    buildPreviewTodayViewWithYesterdayHint,
     parseTodayDateParam,
     renderTodayBody,
     renderTodayV2Page,
@@ -366,5 +367,71 @@ describe("renderTodayV2Page", () => {
         const html = String(renderTodayBody(data));
         expect(html).toMatch(/data-swipe-right="\/meals\/[^"]+\/again\tAgain"/);
         expect(html).toContain("fd-swipe-btn--accent");
+    });
+
+    test("empty slot shows copy-yesterday when hinted", () => {
+        const hinted = buildPreviewTodayViewWithYesterdayHint(today);
+        const html = String(
+            renderTodayBody({
+                ...data,
+                view: hinted,
+            }),
+        );
+        expect(html).toContain("fd-today-yesterday");
+        expect(html).toContain("/log/copy-yesterday");
+        expect(html).toContain('name="slot" value="dinner"');
+        expect(html).toContain("Same as yesterday?");
+        expect(html).toContain("Eggs &amp; toast");
+        expect(html).toContain("· 432");
+    });
+
+    test("copy-yesterday hint replaces Nothing yet in the slot row", () => {
+        const hinted = buildPreviewTodayViewWithYesterdayHint(today);
+        const html = String(renderTodayBody({ ...data, view: hinted }));
+        const row = html.match(
+            /<div class="fd-today-section__empty-row"><form class="fd-today-yesterday"[\s\S]*?<\/form><a class="fd-icon-btn fd-today-section__add"/,
+        );
+        expect(row).not.toBeNull();
+        expect(row![0]).not.toContain("Nothing yet");
+    });
+
+    test("copy-yesterday hint is hidden in a read-only peer view", () => {
+        const hinted = buildPreviewTodayViewWithYesterdayHint(today);
+        const peer = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+                subjectLabel: "Sam",
+            },
+            today,
+        );
+        const html = String(renderTodayBody({ ...peer, view: hinted }));
+        expect(html).not.toContain("fd-today-yesterday");
+        expect(html).not.toContain("/log/copy-yesterday");
+    });
+
+    test("copy-yesterday hint hidden when slot has rows", () => {
+        const html = String(renderTodayBody(data));
+        expect(html).not.toContain("fd-today-yesterday");
+    });
+});
+
+describe("today edit sheet Again", () => {
+    test("edit sheet posts Again beside save and delete", () => {
+        const today = "2026-11-10";
+        const data = buildPreviewTodayPageData(
+            {
+                theme: "light",
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                attention: { count: 0, tabs: {} },
+            },
+            today,
+        );
+        data.openEditMealId = "m3";
+        const html = renderTodayV2Page(data);
+        expect(html).toContain('action="/meals/m3/again"');
+        expect(html).toContain("fd-btn--accent");
+        expect(html).toMatch(/Again<\/span><\/button>/);
     });
 });

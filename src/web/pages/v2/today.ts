@@ -571,6 +571,23 @@ function mealSectionAddRow(readOnly: boolean): string {
     return `<a class="fd-today-section__add-food" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${iconPlus()}<span>Add food</span></a>`;
 }
 
+function yesterdayCopyMarkup(
+    mealType: MealTypeSlot,
+    data: TodayPageData,
+): string {
+    const hint = data.view.yesterdayCopy?.[mealType];
+    if (!hint) return "";
+    const returnTo = todayHref({
+        date: data.view.date,
+        member: data.memberQuery,
+    });
+    const kcal =
+        hint.kcal != null && Number.isFinite(hint.kcal)
+            ? ` · ${esc(fmtKcal(hint.kcal))}`
+            : "";
+    return `<form class="fd-today-yesterday" method="post" action="/log/copy-yesterday"><input type="hidden" name="slot" value="${esc(mealType)}" /><input type="hidden" name="return_to" value="${esc(returnTo)}" /><button type="submit" class="fd-today-yesterday__btn">Same as yesterday? ${esc(hint.label)}${kcal}</button></form>`;
+}
+
 function mealsMarkup(data: TodayPageData): Html {
     const { view } = data;
     const readOnly = isReadOnlyPeer(data);
@@ -585,6 +602,13 @@ function mealsMarkup(data: TodayPageData): Html {
             fat_g: null,
         };
         const head = mealSectionHead(mealType, rows, sub);
+        const yesterdayHint =
+            rows.length === 0 && !readOnly
+                ? yesterdayCopyMarkup(mealType, data)
+                : "";
+        const emptyLabel =
+            yesterdayHint ||
+            `<span class="fd-today-section__empty">Nothing yet</span>`;
         const list =
             rows.length > 0
                 ? rowList(
@@ -595,7 +619,7 @@ function mealsMarkup(data: TodayPageData): Html {
                   )
                 : readOnly
                   ? `<p class="fd-today-section__empty">Nothing yet</p>`
-                  : `<div class="fd-today-section__empty-row"><span class="fd-today-section__empty">Nothing yet</span><a class="fd-icon-btn fd-today-section__add" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Log food">${iconPlus()}</a></div>`;
+                  : `<div class="fd-today-section__empty-row">${emptyLabel}<a class="fd-icon-btn fd-today-section__add" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Log food">${iconPlus()}</a></div>`;
         const addFood = mealSectionAddRow(readOnly);
         return `<section class="fd-today-section" aria-labelledby="fd-today-${mealType}">${head}${list}${addFood}</section>`;
     });
@@ -868,7 +892,22 @@ export function buildPreviewTodayView(today: string): TodayView {
         expiringFridge: [],
         attention: { count: 0, notices: [], noticeFoods: new Map() },
         weight: { latest: null, series30d: [] },
+        yesterdayCopy: {},
     };
+}
+
+/** Preview: dinner empty with a copy-yesterday hint (FigCraft 19573). */
+export function buildPreviewTodayViewWithYesterdayHint(
+    today: string,
+): TodayView {
+    const view = buildPreviewTodayView(today);
+    const meals = view.meals.filter((g) => g.mealType !== "dinner");
+    view.meals = meals;
+    view.editMeals = view.editMeals.filter((m) => m.meal_type !== "dinner");
+    view.yesterdayCopy = {
+        dinner: { label: "Eggs & toast", kcal: 432 },
+    };
+    return view;
 }
 
 const PREVIEW_FRIDGE: FridgeItem[] = [

@@ -9,6 +9,8 @@ import {
     weekDates,
     weekDotState,
     weekDots,
+    yesterdayCopyHints,
+    yesterdaySlotHintLabel,
 } from "./today.js";
 
 function meal(over: Partial<Meal> & { calories?: number | null } = {}): Meal {
@@ -487,5 +489,53 @@ describe("mealRows", () => {
         expect(row.protein_g).toBeNull();
         expect(row.carbs_g).toBeNull();
         expect(row.fat_g).toBeNull();
+    });
+});
+
+describe("yesterdayCopyHints", () => {
+    test("empty today slot with yesterday logs yields a label and kcal", () => {
+        const yesterday = [
+            meal({
+                id: "y1",
+                meal_type: "dinner",
+                description: "Eggs",
+                calories: 200,
+            }),
+            meal({
+                id: "y2",
+                meal_type: "dinner",
+                description: "Toast",
+                calories: 232,
+            }),
+        ];
+        const hints = yesterdayCopyHints(true, [], yesterday);
+        expect(hints.dinner?.label).toBe("Eggs & Toast");
+        expect(hints.dinner?.kcal).toBe(432);
+    });
+
+    test("skips hints when today already has the slot", () => {
+        const todayDinner = meal({ meal_type: "dinner", description: "Soup" });
+        const yesterday = meal({
+            meal_type: "dinner",
+            description: "Pasta",
+            logged_at: "2026-03-01T18:00:00.000Z",
+        });
+        expect(
+            yesterdayCopyHints(true, [todayDinner], [yesterday]).dinner,
+        ).toBeUndefined();
+    });
+
+    test("no hints when not viewing today", () => {
+        const yesterday = meal({ meal_type: "lunch", description: "Salad" });
+        expect(yesterdayCopyHints(false, [], [yesterday])).toEqual({});
+    });
+
+    test("yesterdaySlotHintLabel shortens very long joins", () => {
+        const label = yesterdaySlotHintLabel([
+            meal({ description: "A".repeat(30) }),
+            meal({ description: "B".repeat(30) }),
+        ]);
+        expect(label!.length).toBeLessThanOrEqual(48);
+        expect(label!.endsWith("…")).toBe(true);
     });
 });

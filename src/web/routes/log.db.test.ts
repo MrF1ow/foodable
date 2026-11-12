@@ -194,7 +194,7 @@ describeDb(pgAvailable !== null, "log copy-yesterday db", (getCtx) => {
         expect(lunch[0]!.description).toBe("Leftovers");
     });
 
-    test("404 when yesterday had nothing in the slot", async () => {
+    test("stale hint: nothing yesterday redirects back with a toast", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request("http://test/log/copy-yesterday", {
             method: "POST",
@@ -204,7 +204,16 @@ describeDb(pgAvailable !== null, "log copy-yesterday db", (getCtx) => {
             },
             body: "slot=breakfast&return_to=/",
         });
-        expect(res.status).toBe(404);
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/");
+        const toastLine = res.headers
+            .getSetCookie()
+            .find((c) => c.startsWith(`${TOAST_COOKIE}=`));
+        expect(toastLine).toBeDefined();
+        const encoded = toastLine!.split(";")[0]!.split("=")[1]!;
+        expect(decodeToastFlash(decodeURIComponent(encoded))?.key).toBe(
+            "nutrition.meal.copy-yesterday.none",
+        );
     });
 
     test("copy-yesterday includes null meal_type rows in the snack slot", async () => {
