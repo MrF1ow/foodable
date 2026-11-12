@@ -524,6 +524,12 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         householdId,
                         args.id,
                         args.checked ?? true,
+                        (args.checked ?? true)
+                            ? {
+                                  foods: liveFoodsStore(),
+                                  today: await householdToday(householdId),
+                              }
+                            : undefined,
                     );
                     if (!line) {
                         throw new Error(
@@ -687,6 +693,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         product_food_id: string;
                     }[] = [];
                     const failed: { line_id: string; message: string }[] = [];
+                    const restockedOn = await householdToday(householdId);
                     for (const lineId of args.line_ids) {
                         try {
                             const results = await putAwayGroceryLines(
@@ -697,6 +704,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                 {
                                     householdId,
                                     lineIds: [lineId],
+                                    restockedOn,
                                     locationId: args.location_id,
                                     productFoodIds: args.product_food_ids,
                                     amountOverrides,

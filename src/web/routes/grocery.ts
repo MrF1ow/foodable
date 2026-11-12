@@ -30,6 +30,7 @@ import {
 import { createGroceryStore } from "../../domain/settings.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveFoodsStore } from "../../db/foods.js";
+import { householdToday } from "../../db/restock.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
@@ -308,6 +309,12 @@ groceryRoutes.post(
                 member.householdId,
                 c.req.param("id"),
                 checked,
+                checked
+                    ? {
+                          foods: liveFoodsStore(),
+                          today: await householdToday(member.householdId),
+                      }
+                    : undefined,
             );
             if (!line) {
                 // toast: none (no-op)
@@ -404,6 +411,7 @@ groceryRoutes.post(
                     householdId: member.householdId,
                     lineIds,
                     actorUserId: userId,
+                    restockedOn: await householdToday(member.householdId),
                     perLine,
                     productFoodIds:
                         Object.keys(productFoodIds).length > 0
@@ -456,6 +464,7 @@ groceryRoutes.post(
                     lineIds: [lineId],
                     locationId: formText(body, "location_id") || undefined,
                     actorUserId: userId,
+                    restockedOn: await householdToday(member.householdId),
                     productFoodIds,
                     amountOverrides:
                         putAwayAmount != null

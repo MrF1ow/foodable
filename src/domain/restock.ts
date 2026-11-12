@@ -1,6 +1,6 @@
 import type { RestockPreferences } from "../household.js";
 import type { EffectiveFood } from "./foods.js";
-import { familyOf } from "./foods.js";
+import { familyOf, usualLowLevel } from "./foods.js";
 import type { FridgeItem } from "./fridge.js";
 import {
     pickGroceryAmount,
@@ -58,9 +58,11 @@ export function localClock(
 export function restockDue(
     restock: RestockPreferences,
     nowInTz: { date: string; weekday: number; time: string },
+    /** Schedules mode runs a pass on every day, not only the restock day. */
+    anyWeekday = false,
 ): boolean {
     if (!restock.enabled) return false;
-    if (nowInTz.weekday !== restock.weekday) return false;
+    if (!anyWeekday && nowInTz.weekday !== restock.weekday) return false;
     if (nowInTz.time < restock.time) return false;
     if (restock.lastRunOn != null && restock.lastRunOn >= nowInTz.date) {
         return false;
@@ -110,6 +112,205 @@ function isDueItem(
     return true;
 }
 
+export type DueUsual = {
+    food: EffectiveFood;
+    /** Why it is due, in words: "weekly, last bought 8 days ago" / "3 left, below 6". */
+    reason: string;
+    trigger: "schedule" | "low";
+};
+
+const MS_PER_DAY = 86_400_000;
+
+function parseDay(iso: string): number | null {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
+    if (!m) return null;
+    const t = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+    return Number.isFinite(t) ? t : null;
+}
+
+/** Whole calendar days from `from` to `to`; UTC date math, so DST never shifts it. */
+function daysBetween(from: string, to: string): number | null {
+    const a = parseDay(from);
+    const b = parseDay(to);
+    if (a == null || b == null) return null;
+    return Math.round((b - a) / MS_PER_DAY);
+}
+
+/** The same day one calendar month on, clamped to the end of a shorter month (Jan 31 -> Feb 28). */
+function addCalendarMonth(iso: string): string | null {
+    const t = parseDay(iso);
+    if (t == null) return null;
+    const d = new Date(t);
+    const y = d.getUTCFullYear();
+    const m = d.getUTCMonth();
+    const day = d.getUTCDate();
+    const lastOfNext = new Date(Date.UTC(y, m + 2, 0)).getUTCDate();
+    return new Date(Date.UTC(y, m + 1, Math.min(day, lastOfNext)))
+        .toISOString()
+        .slice(0, 10);
+}
+
+function scheduleReason(label: string, since: number | null): string {
+    if (since == null) return `${label}, not bought yet`;
+    return `${label}, last bought ${since} day${since === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * The schedule half of "due": only on the household's restock day, and never
+ * while paused. Weekly is due 7 or more days after the last restock, every N
+ * weeks 7N or more, monthly once a calendar month has passed (same day of the
+ * month, clamped to the end of a shorter one). A usual never restocked is due
+ * on its first restock day. Returns the reason, or null when not due.
+ */
+function scheduleDueReason(food: EffectiveFood, today: string): string | null {
+    const last = food.lastRestockedOn;
+    const since = last == null ? null : daysBetween(last, today);
+    if (last != null && since == null) return null;
+    switch (food.restockSchedule) {
+        case "weekly":
+            return since == null || since >= 7
+                ? scheduleReason("weekly", since)
+                : null;
+        case "every_n_weeks": {
+            const n = food.restockEveryWeeks;
+            if (n == null || !Number.isInteger(n) || n < 1) return null;
+            return since == null || since >= 7 * n
+                ? scheduleReason(`every ${n} week${n === 1 ? "" : "s"}`, since)
+                : null;
+        }
+        case "monthly": {
+            if (last == null) return scheduleReason("monthly", null);
+            const next = addCalendarMonth(last);
+            return next != null && today >= next
+                ? scheduleReason("monthly", since)
+                : null;
+        }
+        default:
+            return null;
+    }
+}
+
+function formatAmount(amount: number): string {
+    return String(Math.round(amount * 100) / 100);
+}
+
+/**
+ * The low half: stock of the usual's family, summed into the unit the level is
+ * measured in (the usual amount's unit), is strictly below the level. A stock
+ * row that cannot be converted (a missing grams-per-each or per-ml) makes the
+ * total unknown, and unknown is never low. No level means nothing to compare.
+ */
+function lowReason(
+    food: EffectiveFood,
+    stock: readonly FridgeItem[],
+    foodsById: ReadonlyMap<string, EffectiveFood>,
+): string | null {
+    const level = usualLowLevel(food);
+    if (level == null) return null;
+    const unit = food.usualAmount?.unit ?? food.defaultUnit;
+    if (!unit) return null;
+    let total = 0;
+    for (const item of stock) {
+        if (item.kind !== "food" && item.kind !== "supply") continue;
+        if (!item.foodId) continue;
+        const row = foodsById.get(item.foodId);
+        const family = row ? familyOf(row) : item.foodId;
+        if (family !== food.id) continue;
+        const converted = convertStockAmount(
+            item.quantity.amount,
+            item.quantity.unit,
+            unit,
+            {
+                gramsPerEach: row?.gramsPerEach ?? food.gramsPerEach,
+                gramsPerMl: row?.gramsPerMl ?? food.gramsPerMl,
+            },
+        );
+        if (converted == null) return null;
+        total += converted;
+    }
+    total = Math.round(total * 1000) / 1000;
+    if (!(total < level)) return null;
+    return `${formatAmount(total)} left, below ${formatAmount(level)}`;
+}
+
+/**
+ * Which usuals are due for the list: by schedule on the household's restock
+ * day (`householdRestockDay`, 0 = Sunday like `dowInTz`), or any day because
+ * stock is low (only when the usual opted into add-when-low). Paused usuals
+ * are never due. `today` is the household-local `YYYY-MM-DD`. `usuals` are
+ * the plain foods' effective rows; `stock` the fridge items, matched to a
+ * usual through the family of each item's food in `foodsById`. Schedule wins
+ * over low when both apply.
+ */
+export function usualsDue(
+    usuals: readonly EffectiveFood[],
+    stock: readonly FridgeItem[],
+    today: string,
+    householdRestockDay: number,
+    foodsById: ReadonlyMap<string, EffectiveFood> = new Map(),
+): DueUsual[] {
+    const todayMs = parseDay(today);
+    if (todayMs == null) return [];
+    const isRestockDay = new Date(todayMs).getUTCDay() === householdRestockDay;
+    const out: DueUsual[] = [];
+    for (const food of usuals) {
+        if (food.restockPaused || food.archivedAt || food.genericFoodId) {
+            continue;
+        }
+        if (isRestockDay) {
+            const reason = scheduleDueReason(food, today);
+            if (reason != null) {
+                out.push({ food, reason, trigger: "schedule" });
+                continue;
+            }
+        }
+        if (food.restockWhenLow) {
+            const reason = lowReason(food, stock, foodsById);
+            if (reason != null) out.push({ food, reason, trigger: "low" });
+        }
+    }
+    return out;
+}
+
+type RestockPlacement = { storeId: string; sectionId: string };
+
+/** The store and section a restock line for `plain` lands in; null when the store has no section. */
+function placeRestockLine(
+    input: Pick<
+        RestockPlanInput,
+        "stores" | "sections" | "lines" | "groceryPreferences"
+    >,
+    plain: EffectiveFood,
+    familyById: ReadonlyMap<string, string>,
+): RestockPlacement | null {
+    const { storeId } = pickGroceryStore({
+        chosenStoreId: null,
+        usualStoreId: plain.usualStoreId,
+        stores: input.stores,
+        lines: input.lines,
+        foodId: plain.id,
+        familyById,
+        prefs: input.groceryPreferences,
+    });
+
+    const storeSections = input.sections.filter(
+        (row) => row.storeId === storeId,
+    );
+    const suggested = suggestGrocerySection({
+        sections: storeSections,
+        allSections: input.sections,
+        lines: input.lines,
+        kind: plain.kind === "supply" ? "supply" : "food",
+        foodId: plain.id,
+        displayName: plain.name,
+        familyById,
+    });
+    const other = storeSections.find((row) => row.isOther);
+    const sectionId = suggested?.id ?? other?.id;
+    if (!sectionId) return null;
+    return { storeId, sectionId };
+}
+
 export type RestockPlanInput = {
     items: FridgeItem[];
     foodsById: ReadonlyMap<string, EffectiveFood>;
@@ -120,6 +321,10 @@ export type RestockPlanInput = {
     sections: GrocerySection[];
     householdId: string;
     groceryPreferences?: GroceryPreferences;
+    /** Usuals due by schedule or low stock; empty or absent keeps the expiring lines only. */
+    dueUsuals?: readonly DueUsual[];
+    /** False skips the expiring-food lines (a low-stock-only pass); default true. */
+    expiring?: boolean;
 };
 
 export type RestockPlanResult = {
@@ -152,7 +357,7 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
         { plainId: string; items: FridgeItem[] }
     >();
 
-    for (const item of input.items) {
+    for (const item of input.expiring === false ? [] : input.items) {
         if (!isDueItem(item, input.today, windowEnd, input.dismissed)) {
             if (item.kind === "food" && item.foodId && item.expiresOn) {
                 const exp = item.expiresOn;
@@ -215,31 +420,9 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
         });
         const soonest = dueItems[0]!;
 
-        const { storeId } = pickGroceryStore({
-            chosenStoreId: null,
-            usualStoreId: plain.usualStoreId,
-            stores: input.stores,
-            lines: input.lines,
-            foodId: plainId,
-            familyById,
-            prefs: input.groceryPreferences,
-        });
-
-        const storeSections = input.sections.filter(
-            (row) => row.storeId === storeId,
-        );
-        const suggested = suggestGrocerySection({
-            sections: storeSections,
-            allSections: input.sections,
-            lines: input.lines,
-            kind: plain.kind === "supply" ? "supply" : "food",
-            foodId: plainId,
-            displayName: plain.name,
-            familyById,
-        });
-        const other = storeSections.find((row) => row.isOther);
-        const sectionId = suggested?.id ?? other?.id;
-        if (!sectionId) continue;
+        const placed = placeRestockLine(input, plain, familyById);
+        if (!placed) continue;
+        const { storeId, sectionId } = placed;
 
         let quantity = pickGroceryAmount({
             usual: plain.usualAmount,
@@ -317,10 +500,41 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
         return a.sortName.localeCompare(b.sortName);
     });
 
-    return {
-        lines: planned.map((row) => row.line),
-        counts,
-    };
+    const lines = planned.map((row) => row.line);
+
+    const sortedDue = [...(input.dueUsuals ?? [])].sort((a, b) =>
+        a.food.name.localeCompare(b.food.name),
+    );
+    for (const { food } of sortedDue) {
+        const alreadyListed =
+            onGroceryList({ foodId: food.id }, input.lines, input.foodsById) ||
+            lines.some((line) => line.foodId === food.id);
+        if (alreadyListed) {
+            counts.skippedOnList += 1;
+            continue;
+        }
+        const placed = placeRestockLine(input, food, familyById);
+        if (!placed) continue;
+        lines.push({
+            id: crypto.randomUUID(),
+            householdId: input.householdId,
+            storeId: placed.storeId,
+            sectionId: placed.sectionId,
+            kind: food.kind === "supply" ? "supply" : "food",
+            displayName: food.name,
+            quantity: pickGroceryAmount({
+                usual: food.usualAmount,
+                food: { defaultUnit: food.defaultUnit },
+            }).quantity,
+            foodId: food.id,
+            checked: false,
+            source: "restock",
+            sourceFridgeItemId: null,
+            note: null,
+        });
+    }
+
+    return { lines, counts };
 }
 
 export function groceryRestockNotices(
@@ -406,6 +620,8 @@ export function createMemoryRestockStore(
     };
 }
 
+export type RestockSource = "legacy" | "schedules";
+
 export type RestockCheckDeps = {
     listEnabled: () => Promise<
         Array<{ id: string; preferences: HouseholdPreferences }>
@@ -419,6 +635,11 @@ export type RestockCheckDeps = {
     settings: SettingsStore;
     dismissals: NoticeDismissalsStore;
     restock: RestockStore;
+    /**
+     * Where the lines come from: `legacy` is the expiring-food lines alone;
+     * `schedules` adds the usuals that are due. Absent means `legacy`.
+     */
+    source?: RestockSource;
     logger?: { log: (msg: string) => void };
     /** Runs one household's check; the live runner acts as that household. */
     forHousehold?: <T>(
@@ -444,7 +665,10 @@ export async function runRestockCheck(
                 const tz = householdTimezone(household.preferences, owner);
                 const clock = localClock(now, tz);
                 const restock = household.preferences.restock;
-                if (!restockDue(restock, clock)) return;
+                // Schedules mode checks once a day (the same lastRunOn marker):
+                // low usuals any day, expiring food and schedules on the restock day.
+                const schedules = deps.source === "schedules";
+                if (!restockDue(restock, clock, schedules)) return;
 
                 const householdId = household.id;
                 const [items, lines, dismissals, stores, groceryPreferences] =
@@ -467,6 +691,18 @@ export async function runRestockCheck(
                     if (line.foodId) foodIds.add(line.foodId);
                 }
                 const listed = await deps.foods.listFoods(householdId);
+                const usualIds = schedules
+                    ? listed
+                          .filter(
+                              (f) =>
+                                  !f.genericFoodId &&
+                                  !f.archivedAt &&
+                                  (f.restockSchedule != null ||
+                                      f.restockWhenLow),
+                          )
+                          .map((f) => f.id)
+                    : [];
+                for (const id of usualIds) foodIds.add(id);
                 const families = new Set<string>();
                 for (const id of foodIds) {
                     const row = listed.find((f) => f.id === id);
@@ -480,6 +716,17 @@ export async function runRestockCheck(
                     householdId,
                     [...foodIds],
                 );
+                const dueUsuals = schedules
+                    ? usualsDue(
+                          usualIds
+                              .map((id) => foodsById.get(id))
+                              .filter((f): f is EffectiveFood => f != null),
+                          items,
+                          clock.date,
+                          restock.weekday,
+                          foodsById,
+                      )
+                    : undefined;
                 const plan = restockPlan({
                     items,
                     foodsById,
@@ -490,6 +737,8 @@ export async function runRestockCheck(
                     sections,
                     householdId,
                     groceryPreferences,
+                    dueUsuals,
+                    expiring: !schedules || clock.weekday === restock.weekday,
                 });
                 const committed = await deps.restock.commitRestockRun(
                     householdId,
@@ -503,7 +752,7 @@ export async function runRestockCheck(
                     return;
                 }
                 log(
-                    `[restock] household=${id8} date=${clock.date} added=${plan.lines.length} skipped_on_list=${plan.counts.skippedOnList} skipped_fresh=${plan.counts.skippedFresh} skipped_dismissed=${plan.counts.skippedDismissed}`,
+                    `[restock] household=${id8} date=${clock.date} added=${plan.lines.length} skipped_on_list=${plan.counts.skippedOnList} skipped_fresh=${plan.counts.skippedFresh} skipped_dismissed=${plan.counts.skippedDismissed}${dueUsuals ? ` due_usuals=${dueUsuals.length}` : ""}`,
                 );
             });
         } catch (err) {
