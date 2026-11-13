@@ -95,6 +95,27 @@ describe("/app-v2.css", () => {
         expect(shell.match(/\b(?:rgba?|hsla?|oklch)\(/g)).toBeNull();
     });
 
+    test("round icon buttons opt out of the old app's 44px button floor", async () => {
+        // /app.css gives every `.native button` min-height: 44px (zero
+        // specificity). A circle that only sets width and height 32px renders
+        // 32 x 44: a tall oval. Each one resets both minimums and stays square.
+        const css = (await getAppV2Css()).replace(/\/\*[\s\S]*?\*\//g, "");
+        for (const selector of [
+            ".fd-sheet .fd-sheet-close",
+            ".fd-icon-btn",
+            ".fd-scanner-icon-btn",
+            ".fd-star",
+            ".fd-shell .modal-close",
+        ]) {
+            const at = css.indexOf(`${selector} {`);
+            expect(at, selector).toBeGreaterThanOrEqual(0);
+            const block = css.slice(at, css.indexOf("}", at));
+            expect(block, selector).toMatch(/min-height:\s*0\b/);
+            expect(block, selector).toMatch(/min-width:\s*0\b/);
+            expect(block, selector).toMatch(/aspect-ratio:\s*1\b/);
+        }
+    });
+
     test("one breakpoint: a single 1024px media query", () => {
         const shell = readFileSync("./public/app/v2/shell.css", "utf8");
         expect(shell.match(/@media \(min-width: 1024px\)/g)?.length).toBe(1);
@@ -121,13 +142,15 @@ describe("/app-v2.css", () => {
                             "toast-region",
                             "dash-head",
                             "dash-head-title-row",
+                            "modal-close",
                         ].includes(c) &&
                         !/^\d/.test(c),
                 ),
         );
         // app-main and toast-region belong to the old stylesheet and are
         // restyled here; dash-head and its title row (components/ui.ts
-        // pageHeader) are kept clear of the account chip. Nothing else may
+        // pageHeader) are kept clear of the account chip; modal-close is the
+        // old dialog's close, shown round on v2 pages. Nothing else may
         // leak in.
         expect([...foreign]).toEqual([]);
     });

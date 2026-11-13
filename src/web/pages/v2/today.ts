@@ -232,7 +232,12 @@ function weekStripMarkup(data: TodayPageData): Html {
             const selectedClass = day.isSelected
                 ? " fd-today-week__day--selected"
                 : "";
-            return `<a class="fd-today-week__day${todayClass}${selectedClass}" href="${esc(href)}"${current}><span class="fd-today-week__num">${esc(dayNumber(day.date))}</span><span class="fd-today-week__dot"${weekDotAttr(state)} aria-hidden="true"></span></a>`;
+            // The highlighted number already marks the day; a dot under it
+            // would say the same thing twice.
+            const dot = day.isSelected
+                ? ""
+                : `<span class="fd-today-week__dot"${weekDotAttr(state)} aria-hidden="true"></span>`;
+            return `<a class="fd-today-week__day${todayClass}${selectedClass}" href="${esc(href)}"${current}><span class="fd-today-week__num">${esc(dayNumber(day.date))}</span>${dot}</a>`;
         })
         .join("");
     return raw(

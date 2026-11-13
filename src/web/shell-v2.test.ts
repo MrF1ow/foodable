@@ -291,6 +291,19 @@ describe("flag on: the new shell", () => {
         );
     });
 
+    test("settings pages have no account chip; every other page keeps it", () => {
+        expect(v2Html({ active: "household" })).not.toContain(
+            "fd-account-chip",
+        );
+        expect(
+            v2Html({ active: "household", v2Active: "settings" }),
+        ).not.toContain("fd-account-chip");
+        expect(v2Html({ active: "nutrition" })).toContain("fd-account-chip");
+        expect(v2Html({ active: "household", v2Active: "kitchen" })).toContain(
+            "fd-account-chip",
+        );
+    });
+
     test("account chip links to Settings, with the viewer's initials", () => {
         const html = v2Html();
         const chip = between(html, /<a class="fd-account-chip"/, "</a>");

@@ -179,6 +179,22 @@ describe("renderTodayV2Page", () => {
         expect(body).toContain('data-fd-dot="empty"');
     });
 
+    test("the selected day shows no dot; every other day does", () => {
+        const body = String(renderTodayBody(data));
+        const days = [
+            ...body.matchAll(
+                /<a class="fd-today-week__day[^"]*"[^>]*>[\s\S]*?<\/a>/g,
+            ),
+        ].map((m) => m[0]);
+        expect(days.length).toBe(7);
+        const selected = days.filter((d) => d.includes('aria-current="date"'));
+        expect(selected.length).toBe(1);
+        expect(selected[0]).not.toContain("fd-today-week__dot");
+        for (const d of days.filter((d) => !selected.includes(d))) {
+            expect(d).toContain("fd-today-week__dot");
+        }
+    });
+
     test("null macros render as em dash", () => {
         const view = buildPreviewTodayView(today);
         const meal: Meal = {

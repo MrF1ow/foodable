@@ -129,6 +129,11 @@
     place-items: center;
     width: 32px;
     height: 32px;
+    /* /app.css floors every .native button at min-height: 44px, which turns
+       this circle into a tall oval. */
+    min-width: 0;
+    min-height: 0;
+    aspect-ratio: 1;
     margin: 0;
     padding: 0;
     border: 0;

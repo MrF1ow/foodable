@@ -267,7 +267,8 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
 /** The account chip, top right (design: Header › Account chip). It sits over
  *  the page's title row, absolutely positioned inside <main>; shell.css keeps
  *  the title and its actions clear of it. Hidden from 1024 px, where the
- *  sidebar's Account row replaces it. */
+ *  sidebar's Account row replaces it. Settings pages leave it out: they are
+ *  where it points, and they carry the profile card and a back link. */
 function accountChip(chrome: AppChrome): string {
     const name = chrome.identity?.viewerName ?? "";
     const label = name ? `Settings, signed in as ${name}` : "Settings";
@@ -321,7 +322,7 @@ ${appHeadV2(chrome.title, chrome.theme)}
 ${sidebar(chrome, active)}
 <div class="fd-column">
 ${topBar(chrome)}
-<main class="app-main native fd-main">${accountChip(chrome)}${active === "kitchen" ? withKitchenTabs(chrome.body, chrome) : chrome.body}</main>
+<main class="app-main native fd-main">${active === "settings" ? "" : accountChip(chrome)}${active === "kitchen" ? withKitchenTabs(chrome.body, chrome) : chrome.body}</main>
 </div>
 ${phoneTabs(chrome, active)}
 </div>

@@ -76,7 +76,8 @@ describe("settings home v2", () => {
             expect(html).toContain(needle);
         }
         expect(html).not.toContain("nav subnav");
-        expect(html).toContain("fd-account-chip");
+        // Settings is where the chip points: it is left out of its own pages.
+        expect(html).not.toContain("fd-account-chip");
     });
 
     test("desktop home pane is hidden on phone in settings.css", () => {
