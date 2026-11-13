@@ -779,6 +779,14 @@ describe("today edit sheet Again", () => {
         data.openEditMealId = "m3";
         const html = renderTodayV2Page(data);
         expect(html).toContain('action="/meals/m3/again"');
+        // Each rendered Again form carries its own submit key.
+        const keys = [
+            ...html.matchAll(
+                /\/meals\/m3\/again"[^]*?name="submit_key" value="([^"]+)"/g,
+            ),
+        ].map((m) => m[1]);
+        expect(keys.length).toBeGreaterThan(0);
+        expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
         expect(html).toContain("fd-btn--accent");
         expect(html).toMatch(/Again<\/span><\/button>/);
     });

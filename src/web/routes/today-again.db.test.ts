@@ -11,6 +11,7 @@ import { describeDb } from "../../db/testing/pg.js";
 import { seedHousehold } from "../../db/testing/fixtures.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { setSqlForTests } from "../../db/sql.js";
+import { dateInTz } from "../../domain/tz.js";
 import { mealWriteFromItems } from "../../meal-write.js";
 import { nutritionRoutes } from "./nutrition.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
@@ -139,6 +140,50 @@ describeDb(pgAvailable !== null, "today again db", (getCtx) => {
         expect(newest?.items).toHaveLength(1);
         expect(newest?.items?.[0]?.label).toBe(computed.items![0]!.label);
         expect(newest?.calories).toBe(computed.totals.calories);
+    });
+
+    test("the same Again tapped twice logs one meal, a fresh tap logs another", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const { sql } = getCtx();
+        const foodId = await seedFood(sql, "Egg", 80, 6);
+        const computed = await mealWriteFromItems(householdId, [
+            { foodId, amount: 2, unit: "each" },
+        ]);
+        const { meal } = await insertMeal(userId, {
+            meal_type: "lunch",
+            logged_at: "2026-03-01T12:00:00.000Z",
+            description: computed.description,
+            ...computed.totals,
+            items: computed.items,
+            item_digest: computed.item_digest,
+        });
+        const count = async () =>
+            (
+                await sql`
+                    select count(*)::int as n from public.meals
+                    where user_id = ${userId}
+                `
+            )[0]!.n as number;
+        // Today logs at the moment of the tap, so only a key can tell a double tap.
+        const today = dateInTz(new Date(), "America/Los_Angeles");
+        const again = (key: string) =>
+            hono.request(`http://test/meals/${meal.id}/again`, {
+                method: "POST",
+                headers: {
+                    cookie: cookie(userId),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: `return_to=/&date=${today}&submit_key=${key}`,
+            });
+        const before = await count();
+        // Two taps on one rendered form arrive together, then a late third.
+        const taps = await Promise.all([again("tap-1"), again("tap-1")]);
+        expect(taps.map((r) => r.status)).toEqual([303, 303]);
+        expect((await again("tap-1")).status).toBe(303);
+        expect(await count()).toBe(before + 1);
+        // The page re-rendered after the redirect carries a new key.
+        expect((await again("tap-2")).status).toBe(303);
+        expect(await count()).toBe(before + 2);
     });
 
     test("again 404 without flag and does not write", async () => {

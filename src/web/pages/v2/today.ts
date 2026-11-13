@@ -515,6 +515,7 @@ function mealRowMarkup(row: MealRow, data: TodayPageData): Html {
                               fields: {
                                   return_to: returnTo,
                                   date: data.view.date,
+                                  submit_key: crypto.randomUUID(),
                               },
                           },
                       },

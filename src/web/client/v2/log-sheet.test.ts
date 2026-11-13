@@ -278,6 +278,13 @@ test("a recent single-food log picks the food; a multi-item log is logged again 
     expect(multi).toContain('action="/meals/meal-2/again"');
     expect(multi).toContain('name="return_to" value="/?date=2026-11-10"');
     expect(multi).toContain('name="date" value="2026-11-10"');
+    expect(multi).toMatch(/name="submit_key" value="[^"]{8,}"/);
+    // A second render is a second key: one key is one tap.
+    expect(
+        api
+            .recentChipHtml({ id: "meal-2", meal_id: "meal-2", name: "Eggs" })
+            .match(/name="submit_key" value="([^"]+)"/)?.[1],
+    ).not.toBe(multi.match(/name="submit_key" value="([^"]+)"/)?.[1]);
     expect(multi).toContain("Eggs &amp; toast");
     expect(multi).toContain("432");
     expect(multi).not.toContain("data-fd-log-pick");

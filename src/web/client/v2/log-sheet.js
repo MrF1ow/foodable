@@ -305,6 +305,15 @@ function againDate() {
     return new URLSearchParams(window.location.search).get("date") ?? "";
 }
 
+// One key per rendered Again form: the server logs a key once, so a double tap
+// on the same chip adds one meal.
+function againSubmitKey() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return window.crypto.randomUUID();
+    }
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+}
+
 function recentChipHtml(item) {
     const relivable = logItemIsRelivable(item);
     const mealId = String(item.meal_id ?? "").trim();
@@ -319,7 +328,7 @@ function recentChipHtml(item) {
             : "";
     if (!relivable) {
         // Several items or free text: log the whole meal again as it was.
-        return `<form class="fd-log-recent-form" method="post" action="/meals/${encodeURIComponent(mealId)}/again"><input type="hidden" name="return_to" value="${esc(againReturnPath())}" /><input type="hidden" name="date" value="${esc(againDate())}" /><button type="submit" class="fd-chip fd-log-recent"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button></form>`;
+        return `<form class="fd-log-recent-form" method="post" action="/meals/${encodeURIComponent(mealId)}/again"><input type="hidden" name="return_to" value="${esc(againReturnPath())}" /><input type="hidden" name="date" value="${esc(againDate())}" /><input type="hidden" name="submit_key" value="${esc(againSubmitKey())}" /><button type="submit" class="fd-chip fd-log-recent"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button></form>`;
     }
     const payload = { ...item, kind: item.kind || "history" };
     return `<button type="button" class="fd-chip fd-log-recent" data-fd-log-pick="${esc(JSON.stringify(payload))}"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button>`;

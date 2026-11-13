@@ -193,7 +193,7 @@ export function renderTodayEditSheet(
         `<label class="fd-today-edit-field"><span class="fd-today-edit-field__label">Time</span><input type="time" name="logged_time" value="${esc(mealLocalTimeValue(meal.logged_at, opts.day, opts.tz))}" required /></label>`,
         mealTypeChoice("meal_type", resolveMealType(meal.meal_type)),
         `</form>`,
-        `<form id="${esc(sheetId)}-again" class="fd-inline-form" method="post" action="/meals/${esc(meal.id)}/again"><input type="hidden" name="return_to" value="${esc(returnTo)}" /><input type="hidden" name="date" value="${esc(opts.day)}" /></form>`,
+        `<form id="${esc(sheetId)}-again" class="fd-inline-form" method="post" action="/meals/${esc(meal.id)}/again"><input type="hidden" name="return_to" value="${esc(returnTo)}" /><input type="hidden" name="date" value="${esc(opts.day)}" /><input type="hidden" name="submit_key" value="${esc(crypto.randomUUID())}" /></form>`,
         `<form id="${esc(sheetId)}-delete" class="fd-inline-form" method="post" action="/meals/${esc(meal.id)}/delete" hidden><input type="hidden" name="return_to" value="${esc(returnTo)}" /><input type="hidden" name="date" value="${esc(opts.day)}" /></form>`,
     );
     const actions = `<button type="submit" class="fd-btn fd-btn--accent" form="${esc(sheetId)}-again">${iconRepeat()}<span>Again</span></button><button type="submit" class="fd-btn fd-btn--danger" form="${esc(sheetId)}-delete">Delete</button><button type="submit" class="fd-btn fd-btn--primary" form="${esc(sheetId)}-form">Save</button>`;
