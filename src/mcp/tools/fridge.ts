@@ -43,7 +43,6 @@ import {
 } from "../../domain/meals.js";
 import { insertMeal, snapshotToMealItemWrite } from "../../db/nutrition.js";
 import { liveRecipesStore } from "../../db/recipes.js";
-import { WIDGET_LOCALE } from "../../routes.js";
 import {
     registerV2OnlyWidgetResource,
     registerWidgetResource,
@@ -86,7 +85,6 @@ const fridgeItemSchema = z.object({
 });
 
 export const GET_FRIDGE_OUTPUT_SCHEMA = z.object({
-    locale: z.string(),
     locations: z.array(
         z.object({
             id: z.string(),
@@ -191,7 +189,6 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                     );
                     const groceryCtx = { lines: groceryLines, foodsById };
                     const payload = {
-                        locale: WIDGET_LOCALE,
                         locations: locations.map((row) => ({
                             id: row.id,
                             name: row.name,

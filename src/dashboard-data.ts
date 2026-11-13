@@ -49,7 +49,6 @@ export async function getGoalProgressPayload(
         getLatestWeight(userId),
     ]);
     const unit = preferredWeightUnitFromProfile(profile) ?? "kg";
-    const locale = "en";
     const totals = sumMeals(meals);
     totals.water_ml = water.reduce((n, e) => n + e.amount_ml, 0);
     const present = nutrientPresence(meals);
@@ -58,7 +57,6 @@ export async function getGoalProgressPayload(
         meal_count: meals.length,
         water_entries: water.length,
         drink_unit: alcohol,
-        locale,
         goals: goalsPayloadOf(goals, alcohol),
         totals: totalsPayloadOf(totals, alcohol, present.caffeine_mg),
         weight:
@@ -88,7 +86,6 @@ export async function getNutritionSummaryPayload(
 ) {
     const profile = await getProfile(userId);
     const tz = tzOf(profile);
-    const locale = "en";
     const endDate = todayInTz(tz);
     const startDate = shiftLocalDate(endDate, -(days - 1));
     const daysInRange = Math.max(1, dateDiffDays(startDate, endDate) + 1);
@@ -106,7 +103,6 @@ export async function getNutritionSummaryPayload(
             logged_days: 0,
             days_in_range: daysInRange,
             drink_unit: alcohol,
-            locale,
             goals: goalsPayload,
             averages: totalsPayloadOf(empty, alcohol, false),
             recorded_days: {
@@ -160,7 +156,6 @@ export async function getNutritionSummaryPayload(
         logged_days: dayRows.length,
         days_in_range: daysInRange,
         drink_unit: alcohol,
-        locale,
         goals: goalsPayload,
         averages: totalsPayloadOf(
             rawAverages,
@@ -184,7 +179,6 @@ export async function getTrendsPayload(
 ) {
     const profile = await getProfile(userId);
     const tz = tzOf(profile);
-    const locale = "en";
     const endDate = todayInTz(tz);
     const startDate = shiftLocalDate(endDate, -29);
     const [meals, water, { forDate }] = await Promise.all([
@@ -197,7 +191,6 @@ export async function getTrendsPayload(
         end_date: endDate,
         default_range: 7,
         drink_unit: alcohol,
-        locale,
         goals: goalsPayloadOf(forDate(endDate), alcohol),
         days: buckets.map((b) => trendsDayPayloadOf(b, alcohol)),
     };
@@ -207,7 +200,6 @@ export async function getWeightTrendsPayload(userId: string) {
     const profile = await getProfile(userId);
     const tz = tzOf(profile);
     const unit = preferredWeightUnitFromProfile(profile) ?? "kg";
-    const locale = "en";
     const endDate = todayInTz(tz);
     const fetchStart = shiftLocalDate(endDate, -29);
     const [entries, goals] = await Promise.all([
@@ -234,7 +226,6 @@ export async function getWeightTrendsPayload(userId: string) {
         unit,
         target: targetG != null ? fromGrams(targetG, unit) : null,
         default_range: 7,
-        locale,
         days,
     };
 }

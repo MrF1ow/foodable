@@ -11,6 +11,3 @@ export const LOCALE_NAMES: Record<SiteLocale, string> = {
 export const HTML_LANG: Record<SiteLocale, string> = {
     en: "en",
 };
-
-/** Widget structuredContent.locale is always English. */
-export const WIDGET_LOCALE: SiteLocale = "en";

@@ -15,7 +15,6 @@ import {
 } from "../../db/profiles.js";
 import { withAnalytics } from "../../analytics.js";
 import { todayInTz, shiftLocalDate, dateInTz } from "../../domain/tz.js";
-import { WIDGET_LOCALE } from "../../routes.js";
 import {
     buildDailyBuckets,
     computeTrends,
@@ -301,9 +300,6 @@ export function registerNutritionReadTools(
                 // client cannot tell a full month from a fortnight of gaps.
                 days_in_range: z.number(),
                 drink_unit: DRINK_UNIT_FIELD,
-                // Widgets are English-only. z.string() so the existing
-                // structuredContent contract stays stable.
-                locale: z.string(),
                 goals: GOALS_ITEM.nullable(),
                 averages: TOTALS_ITEM,
                 // How many of `logged_days` actually record each of the
@@ -346,7 +342,6 @@ export function registerNutritionReadTools(
                         dateDiffDays(start_date, end_date) + 1,
                     );
                     const tz = await getUserTimezone(userId);
-                    const locale = WIDGET_LOCALE;
                     const [meals, water, { forDate }] = await Promise.all([
                         getMealsInRange(userId, start_date, end_date, tz),
                         getWaterInRange(userId, start_date, end_date, tz),
@@ -372,7 +367,6 @@ export function registerNutritionReadTools(
                                 logged_days: 0,
                                 days_in_range: daysInRange,
                                 drink_unit: alcohol,
-                                locale,
                                 goals: goalsPayload,
                                 averages: totalsPayloadOf(
                                     emptyTotals(),
@@ -521,7 +515,6 @@ export function registerNutritionReadTools(
                             logged_days: days.length,
                             days_in_range: daysInRange,
                             drink_unit: alcohol,
-                            locale,
                             goals: goalsPayload,
                             averages,
                             recorded_days: {
@@ -587,10 +580,6 @@ export function registerNutritionInsightTools(
                 // Which toggle the widget opens on (nearest of 7/14/30).
                 default_range: z.number(),
                 drink_unit: DRINK_UNIT_FIELD,
-                // The widget's UI language — see the identical field on
-                // get_nutrition_summary's outputSchema for why this is
-                // Widgets are English-only.
-                locale: z.string(),
                 goals: GOALS_ITEM.nullable(),
                 // Up to 30 days of daily series; the widget slices to 7/14/30.
                 days: z.array(TRENDS_DAY_ITEM),
@@ -605,7 +594,6 @@ export function registerNutritionInsightTools(
                     const userId = await actorUserId(user_id, "read");
                     const profile = await getProfile(userId);
                     const tz = timezoneFromProfile(profile) ?? "UTC";
-                    const locale = WIDGET_LOCALE;
                     const endDate = end_date ?? todayInTz(tz);
                     const windowDays = days ?? 30;
                     // The widget's toggle always offers up to 30 days, so build
@@ -653,7 +641,6 @@ export function registerNutritionInsightTools(
                                 ? windowDays
                                 : 30,
                             drink_unit: alcohol,
-                            locale,
                             goals: goalsPayload,
                             // Rounded through trendsDayPayloadOf, which nulls
                             // out fiber/sugar/alcohol on days that didn't

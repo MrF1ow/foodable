@@ -419,7 +419,7 @@ mock.module("../attention.js", () => ({
     },
 }));
 
-const widgetStub = { locale: "en" };
+const widgetStub = {};
 mock.module("../../dashboard-data.js", () => ({
     ...realDashboardData,
     getNutritionSummaryPayload: async () => widgetStub,

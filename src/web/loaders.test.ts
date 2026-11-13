@@ -34,21 +34,21 @@ const lightChrome = {
 
 test("withWidgetData seeds the existing script, not a second tag", () => {
     const html = "<html><script>initWidget({})</script></html>";
-    const out = withWidgetData(html, { locale: "en" });
+    const out = withWidgetData(html, { unit: "kg" });
     expect((out.match(/<script\b/gi) ?? []).length).toBe(1);
     expect(out).toContain("window.__WIDGET_DATA__=");
-    expect(out).toContain('"locale":"en"');
+    expect(out).toContain('"unit":"kg"');
 });
 
 test("withWidgetData stamps an explicit viewer theme and never overrides the accent", () => {
     const html =
         '<html data-theme="light"><head></head><script>initWidget({})</script></html>';
-    const dark = withWidgetData(html, { locale: "en" }, { theme: "dark" });
+    const dark = withWidgetData(html, {}, { theme: "dark" });
     expect(dark).toContain('<html data-theme="dark">');
     expect(dark).not.toContain("viewer-accent");
     expect(dark).not.toContain("--accent");
 
-    const system = withWidgetData(html, { locale: "en" }, { theme: "system" });
+    const system = withWidgetData(html, {}, { theme: "system" });
     expect(system).toContain("<html>");
     expect(system).not.toContain("data-theme");
 });
@@ -57,10 +57,10 @@ test("self dashboard reuses widget iframes and has no household facts", async ()
     const html = await renderDashboardHtml({
         access: { ok: true, mode: "self", viewer: alice, subject: alice },
         members: [alice, bob],
-        summary: { locale: "en", drink_unit: null },
-        goals: { locale: "en" },
-        trends: { locale: "en" },
-        weight: { locale: "en", unit: "kg" },
+        summary: { drink_unit: null },
+        goals: {},
+        trends: {},
+        weight: { unit: "kg" },
         chrome: lightChrome,
         cardOrder: defaultCardOrder,
     });
@@ -106,10 +106,10 @@ function widgetFrameTag(html: string, key: string): string {
 
 test("dashboard frames round-trip widget data and cannot break out of the attribute", async () => {
     const nasty = `Tom & "Jerry"><script>alert(1)</script></iframe></script>`;
-    const summary = { locale: "en", meals: [{ name: nasty }] };
-    const goals = { locale: "en", note: nasty };
-    const trends = { locale: "en", label: "a < b" };
-    const weight = { locale: "en", unit: "kg", name: nasty };
+    const summary = { meals: [{ name: nasty }] };
+    const goals = { note: nasty };
+    const trends = { label: "a < b" };
+    const weight = { unit: "kg", name: nasty };
     const html = await renderDashboardHtml({
         access: { ok: true, mode: "self", viewer: alice, subject: alice },
         members: [alice],
@@ -164,10 +164,10 @@ test("log-weight form follows the viewer's weight unit", async () => {
     const base: NutritionView = {
         access: { ok: true, mode: "self", viewer: alice, subject: alice },
         members: [alice],
-        summary: { locale: "en" },
-        goals: { locale: "en" },
-        trends: { locale: "en" },
-        weight: { locale: "en" },
+        summary: {},
+        goals: {},
+        trends: {},
+        weight: {},
         chrome: lightChrome,
         cardOrder: defaultCardOrder,
     };
@@ -182,10 +182,10 @@ test("self dashboard logs through header modals", async () => {
     const html = await renderDashboardHtml({
         access: { ok: true, mode: "self", viewer: alice, subject: alice },
         members: [alice],
-        summary: { locale: "en" },
-        goals: { locale: "en" },
-        trends: { locale: "en" },
-        weight: { locale: "en" },
+        summary: {},
+        goals: {},
+        trends: {},
+        weight: {},
         chrome: lightChrome,
         cardOrder: defaultCardOrder,
     });
@@ -206,10 +206,10 @@ test("owner self dashboard has no add-member form", async () => {
     const html = await renderDashboardHtml({
         access: { ok: true, mode: "self", viewer: alice, subject: alice },
         members: [alice],
-        summary: { locale: "en" },
-        goals: { locale: "en" },
-        trends: { locale: "en" },
-        weight: { locale: "en" },
+        summary: {},
+        goals: {},
+        trends: {},
+        weight: {},
         chrome: lightChrome,
         cardOrder: defaultCardOrder,
     });
@@ -222,10 +222,10 @@ test("member self dashboard has no add form", async () => {
     const html = await renderDashboardHtml({
         access: { ok: true, mode: "self", viewer: bob, subject: bob },
         members: [alice, bob],
-        summary: { locale: "en" },
-        goals: { locale: "en" },
-        trends: { locale: "en" },
-        weight: { locale: "en" },
+        summary: {},
+        goals: {},
+        trends: {},
+        weight: {},
         chrome: lightChrome,
         cardOrder: defaultCardOrder,
     });
@@ -238,10 +238,10 @@ test("peer dashboard is read-only", async () => {
     const html = await renderDashboardHtml({
         access: { ok: true, mode: "peer", viewer: alice, subject: bob },
         members: [alice, bob],
-        summary: { locale: "en" },
-        goals: { locale: "en" },
-        trends: { locale: "en" },
-        weight: { locale: "en" },
+        summary: {},
+        goals: {},
+        trends: {},
+        weight: {},
         chrome: lightChrome,
         cardOrder: defaultCardOrder,
     });

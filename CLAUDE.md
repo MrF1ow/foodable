@@ -130,7 +130,7 @@ In-chat UI uses **MCP Apps** (the official 2026-01-26 MCP extension), which rend
 
 A second marker, `/*@inlinets src/domain/csv.ts@*/`, transpiles a TypeScript module from `src/` into the widget as plain JS. It lets a widget run **tested** server-side code instead of a hand-copied twin; it only works for modules with no runtime imports, and strips module syntax because a bare `export` in a `<script>` is a syntax error.
 
-UI copy is English only. Each template carries a small `const T = { … }` with only the strings that widget uses; shared partials embed their own copy (`MACRO_COPY` in `shared/macros.js`, `CHART_COPY` in `shared/trend-chart.js`, `MONTHS` in `shared/date.js`). `shared/util.js` supplies `tpl()` and `plural()` for count-sensitive phrases. Tool `structuredContent` still carries `locale: "en"` (`WIDGET_LOCALE` in `src/routes.ts`); widgets ignore it. There is no `set_language` tool.
+UI copy is English only. Each template carries a small `const T = { … }` with only the strings that widget uses; shared partials embed their own copy (`MACRO_COPY` in `shared/macros.js`, `CHART_COPY` in `shared/trend-chart.js`, `MONTHS` in `shared/date.js`). `shared/util.js` supplies `tpl()` and `plural()` for count-sensitive phrases. There is no `set_language` tool.
 
 **Every widget except dev-only `component-gallery` is fully wired end-to-end.** Two texts are deliberately not UI copy: `import-meals`'s `diagnosticsBlock()` dump (operator-facing) and `api.updateModelContext`'s finished-import summary (model-facing).
 

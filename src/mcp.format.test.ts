@@ -1036,7 +1036,6 @@ describe("start_meal_import payload", () => {
         tz: "Europe/Kyiv",
         tzConfigured: true,
         widgetsEnabled: true,
-        locale: "en",
         userId: "u1",
     };
 

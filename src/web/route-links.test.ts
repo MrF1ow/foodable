@@ -100,10 +100,10 @@ describe("rendered pages have no legacy links", () => {
         const html = await renderNutritionPage({
             access: { ok: true, mode: "self", viewer: ME, subject: ME },
             members: [ME],
-            summary: { locale: "en" },
-            goals: { locale: "en" },
-            trends: { locale: "en" },
-            weight: { locale: "en" },
+            summary: {},
+            goals: {},
+            trends: {},
+            weight: {},
             chrome,
             cardOrder: [
                 "nutrition-summary",

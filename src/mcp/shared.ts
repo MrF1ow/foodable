@@ -834,10 +834,6 @@ export const MEAL_PROGRESS_OUTPUT_SCHEMA = z.object({
     similar_foods: z.array(SIMILAR_FOODS_ENTRY),
     date: z.string(),
     drink_unit: DRINK_UNIT_FIELD,
-    // The widget's UI language — see the identical field on
-    // get_nutrition_summary's outputSchema for why this is z.string() and
-    // Widgets are English-only; always the literal "en".
-    locale: z.string(),
     logged_meal: z
         .object({
             description: z.string(),

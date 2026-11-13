@@ -2687,7 +2687,6 @@ describe("get_nutrition_summary discloses its logged-day denominator", () => {
         logged_days: number;
         days_in_range: number;
         averages: Record<string, number>;
-        locale: string;
     }
 
     const summarize = async (call: CallTool) =>
@@ -2748,21 +2747,39 @@ describe("get_nutrition_summary discloses its logged-day denominator", () => {
             expect(sc.logged_days).toBe(0);
             expect(sc.days_in_range).toBe(30);
             // The empty-range branch has its own structuredContent literal,
-            // separate from the populated one below — both must carry the
-            // widget's resolved locale, not just the common case.
-            expect(sc.locale).toBe("en");
+            // separate from the populated one below — neither carries a locale.
+            expect(sc).not.toHaveProperty("locale");
         });
     });
 
-    // Widgets are English-only; structuredContent.locale stays "en".
-    test("structuredContent locale is English", async () => {
+    // Widgets are English-only and never read a locale, so neither the payload
+    // nor the advertised outputSchema carries one.
+    test("structuredContent and outputSchema have no locale", async () => {
         stage(1);
         db.profile = PROFILE_BASE;
         await withTools(null, async (call) => {
             const sc = (await summarize(call))
                 .structuredContent as unknown as SummaryPayload;
-            expect(sc.locale).toBe("en");
+            expect(sc).not.toHaveProperty("locale");
         });
+        const server = new McpServer(
+            { name: "t", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(server, { kind: "user", userId: "u1" }, true, null);
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "c", version: "0.0.0" });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        const { tools } = await client.listTools();
+        const withSchema = tools.filter((t) => t.outputSchema);
+        expect(withSchema.length).toBeGreaterThan(0);
+        for (const t of withSchema) {
+            expect(t.outputSchema?.properties ?? {}).not.toHaveProperty(
+                "locale",
+            );
+        }
+        await client.close();
+        await server.close();
     });
 
     // A single-day range is 1 day, not 0 — an off-by-one here would make the

@@ -129,12 +129,11 @@ mock.module("../loaders-today.js", () => ({
 mock.module("../../dashboard-data.js", () => ({
     ...realDashboardData,
     getNutritionSummaryPayload: async () => ({
-        locale: "en",
         drink_unit: null,
     }),
-    getGoalProgressPayload: async () => ({ locale: "en" }),
-    getTrendsPayload: async () => ({ locale: "en" }),
-    getWeightTrendsPayload: async () => ({ locale: "en", unit: "kg" }),
+    getGoalProgressPayload: async () => ({}),
+    getTrendsPayload: async () => ({}),
+    getWeightTrendsPayload: async () => ({ unit: "kg" }),
 }));
 
 mock.module("../../db/nutrition.js", () => ({
@@ -307,10 +306,10 @@ describe("GET /", () => {
         const legacyHtml = await renderNutritionPage({
             access: { ok: true, mode: "self", viewer: owner, subject: owner },
             members: [owner, member],
-            summary: { locale: "en", drink_unit: null },
-            goals: { locale: "en" },
-            trends: { locale: "en" },
-            weight: { locale: "en", unit: "kg" },
+            summary: { drink_unit: null },
+            goals: {},
+            trends: {},
+            weight: { unit: "kg" },
             chrome: {
                 theme: "light",
                 attention: { count: 0, tabs: {} },

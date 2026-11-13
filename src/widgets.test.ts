@@ -1111,7 +1111,6 @@ function summaryPayload(day: object, goals: object | null, date = isoDay()) {
         logged_days: 1,
         days_in_range: 1,
         drink_unit: null,
-        locale: "en",
         goals,
         averages: day,
         days: [{ date, meal_count: 1, ...day }],
@@ -1125,7 +1124,6 @@ function progressPayload(totals: object, goals: object | null, extra = {}) {
         meal_count: 1,
         water_entries: 2,
         drink_unit: null,
-        locale: "en",
         goals,
         totals,
         weight: {
@@ -1146,7 +1144,6 @@ function mealPayload(totals: object, goals: object | null, extra = {}) {
         similar_foods: [],
         date: isoDay(),
         drink_unit: null,
-        locale: "en",
         logged_meal: { ...V2_MEALS[0] },
         has_goals: goals != null,
         goals,
@@ -1392,7 +1389,6 @@ function trendsPayload(extra: Record<string, unknown> = {}) {
         end_date: TRENDS_END,
         default_range: 7,
         drink_unit: "us",
-        locale: "en",
         goals: TRENDS_GOALS,
         days,
         ...extra,
@@ -1551,7 +1547,6 @@ function weightPayload(extra: Record<string, unknown> = {}) {
         unit: "lb",
         target: 175,
         default_range: 30,
-        locale: "en",
         days: readings.map(([ago, weight]) => ({
             date: shiftIso(TRENDS_END, -ago),
             weight,
@@ -2802,7 +2797,6 @@ function groceryLine(over: Record<string, unknown>) {
 }
 
 const GROCERY_DATA = {
-    locale: "en",
     stores: [
         {
             id: "st-1",
@@ -2988,7 +2982,6 @@ test("grocery-list v2: a store chip keeps keyboard focus through the repaint", a
 
 test("grocery-list v2: a line the fridge already covers says so in the row", async () => {
     const body = renderWidget(await v2Widget("grocery-list"), {
-        locale: "en",
         stores: [
             {
                 id: "st-1",
@@ -3076,7 +3069,6 @@ test("grocery-list v2: a new result clears the error of a line it no longer has"
 
 test("grocery-list v2: an empty list says so", async () => {
     const body = renderWidget(await v2Widget("grocery-list"), {
-        locale: "en",
         stores: [],
     });
     expect(body).toContain("Nothing on the grocery list.");
@@ -3101,7 +3093,6 @@ function fridgeItem(over: Record<string, unknown>) {
 test("fridge v2: use-soon tiles take their days and tone from days_left, the rest list by location with a footer", async () => {
     const html = await v2Widget("fridge");
     const body = renderWidget(html, {
-        locale: "en",
         locations: [
             {
                 id: "loc-1",
@@ -3187,7 +3178,6 @@ test("fridge v2: a past date reads red in the list when the tiles are full", asy
             days_left: days,
         });
     const body = renderWidget(await v2Widget("fridge"), {
-        locale: "en",
         locations: [
             {
                 id: "loc-1",
@@ -3210,7 +3200,6 @@ test("fridge v2: a past date reads red in the list when the tiles are full", asy
 test("fridge v2: no use-soon strip when nothing expires within three days; empty fridge says so", async () => {
     const html = await v2Widget("fridge");
     const calm = renderWidget(html, {
-        locale: "en",
         locations: [
             {
                 id: "loc-1",
@@ -3222,7 +3211,7 @@ test("fridge v2: no use-soon strip when nothing expires within three days; empty
     });
     expect(calm).not.toContain("Use soon");
     expect(calm).toContain('class="hd-meta">1 item<');
-    const empty = renderWidget(html, { locale: "en", locations: [] });
+    const empty = renderWidget(html, { locations: [] });
     expect(empty).toContain("Nothing in the fridge.");
     const sample = renderWidget(html, undefined);
     expect(sample).toContain("Use soon");
@@ -3231,7 +3220,6 @@ test("fridge v2: no use-soon strip when nothing expires within three days; empty
 
 test("fridge v2: item names reach the markup escaped", async () => {
     const body = renderWidget(await v2Widget("fridge"), {
-        locale: "en",
         locations: [
             {
                 id: "loc-1",

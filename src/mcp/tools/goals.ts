@@ -29,7 +29,6 @@ import {
     dateDiffDays,
     isCalendarDate,
 } from "../../domain/insights.js";
-import { WIDGET_LOCALE } from "../../routes.js";
 import { toGrams, formatWeight, fromGrams } from "../../domain/units.js";
 import { MAX_CALORIES } from "../../domain/import.js";
 import {
@@ -555,10 +554,6 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                 meal_count: z.number(),
                 water_entries: z.number(),
                 drink_unit: DRINK_UNIT_FIELD,
-                // The widget's UI language — see the identical field on
-                // get_nutrition_summary's outputSchema for why this is
-                // Widgets are English-only.
-                locale: z.string(),
                 goals: GOALS_ITEM.nullable(),
                 totals: TOTALS_ITEM,
                 weight: z
@@ -591,7 +586,6 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         ]);
                     const unit =
                         preferredWeightUnitFromProfile(profile) ?? "kg";
-                    const locale = WIDGET_LOCALE;
                     const totals = sumMeals(meals);
                     totals.water_ml = sumWater(water);
                     const present = nutrientPresence(meals);
@@ -666,7 +660,6 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         structuredContent: {
                             date: targetDate,
                             drink_unit: alcohol,
-                            locale,
                             meal_count: meals.length,
                             water_entries: water.length,
                             goals: goalsPayload,
