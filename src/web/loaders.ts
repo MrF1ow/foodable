@@ -4,7 +4,7 @@ import {
     dashboardAccess,
     type HouseholdMember,
 } from "../household.js";
-import { type AlcoholDisplay } from "../dashboard-data.js";
+import { type AlcoholDisplay } from "../mcp/shared.js";
 import {
     alcoholTrackingEnabledFromProfile,
     getProfile,

@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
-import { NUTRITION_CARDS } from "../domain/layout.js";
 import { THEME_COLOR } from "../tokens.js";
 import { getAppCss, getAppJs, getAppV2Css, getAppV2Js } from "../widgets.js";
 import { FD_ICON_PATHS } from "./components/fd-icons.js";
@@ -489,7 +488,7 @@ describe("the shell", () => {
 
     test("fragments name real targets on the nutrition page", () => {
         expect(FD_LOG_MEAL_HASH).toBe("nutrition-log-meal");
-        expect(NUTRITION_CARDS as readonly string[]).toContain(FD_TRENDS_HASH);
+        expect(FD_TRENDS_HASH).toBe("trends");
         expect(FD_TABS.find((t) => t.id === "trends")?.href).toBe(
             FD_TRENDS_HREF,
         );

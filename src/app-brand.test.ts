@@ -1,11 +1,5 @@
 import { test, expect } from "bun:test";
-import {
-    getAppCss,
-    getEmbedCss,
-    getWidgetHtml,
-    WIDGET_TEMPLATES,
-    withWidgetData,
-} from "./widgets.js";
+import { getAppCss, getWidgetHtml, WIDGET_TEMPLATES } from "./widgets.js";
 
 // v1 chat widgets keep the NEUTRAL palette; v2 widgets use the Theme palette
 // with a system font. The household app carries Geist and Bricolage in brand.css
@@ -38,7 +32,6 @@ test("the v2 widget token partial carries no web fonts", async () => {
 test("the household app never loads widget v2 partials", async () => {
     for (const [label, css] of [
         ["getAppCss", await getAppCss()],
-        ["getEmbedCss", await getEmbedCss()],
         ["brand.css", await Bun.file("./public/app/brand.css").text()],
     ] as const) {
         expect(css, label).not.toContain("shared/v2/");
@@ -69,44 +62,4 @@ test("the brand layer never redefines the accent or a nutrient colour", async ()
     ]) {
         expect(brand, token).not.toContain(token);
     }
-});
-
-test("the embed skin is the brand layer plus a transparent frame", async () => {
-    const skin = await getEmbedCss();
-    expect(skin).not.toContain("/*@include");
-    expect(skin).toContain(
-        (await Bun.file("./public/app/brand.css").text()).trim(),
-    );
-    expect(skin).toMatch(/background:\s*transparent/);
-});
-
-test("withWidgetData injects a skin as the frame's last style, only when asked", () => {
-    const html =
-        "<html><head><style>:root{--bg:#000}</style></head><script>initWidget({})</script></html>";
-    const plain = withWidgetData(html, {}, { theme: "system" });
-    expect(plain).not.toContain("<style>body");
-
-    const skinned = withWidgetData(
-        html,
-        {},
-        { theme: "dark", skin: "body{content:'$&'}" },
-    );
-    // Last style in <head>, so it wins over the widget's own tokens; `$&`
-    // survives literally rather than being read as a replacement pattern.
-    expect(skinned).toContain("<style>body{content:'$&'}</style></head>");
-    expect(skinned.indexOf("--bg:#000")).toBeLessThan(
-        skinned.indexOf("body{content"),
-    );
-    expect(skinned).toContain('<html data-theme="dark">');
-});
-
-test("withWidgetData keeps $-patterns in the data literal", () => {
-    const html = "<html><head></head><script>initWidget({})</script></html>";
-    // A meal named "$`" or "$'" must reach the widget as that text, not as the
-    // document before / after the seed script.
-    const out = withWidgetData(html, { name: "a $` b $' c $& d" });
-    expect(out).toContain(
-        '<script>window.__WIDGET_DATA__={"name":"a $` b $\' c $& d"};initWidget({})</script>',
-    );
-    expect(out.match(/<script\b/gi)).toHaveLength(1);
 });

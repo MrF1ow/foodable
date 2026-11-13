@@ -49,7 +49,6 @@ import {
     _resetBuckets,
 } from "../../rate-limit.js";
 import * as actualAttention from "../attention.js";
-import * as actualDashboardData from "../../dashboard-data.js";
 import * as actualLoadersToday from "../loaders-today.js";
 import * as actualLoadersPlan from "../loaders-plan.js";
 import { buildWeekPlanView } from "../pages/v2/recipes-plan.js";
@@ -67,7 +66,6 @@ const realFoodSearch = { ...actualFoodSearch };
 // Snapshots taken before mock.module: Bun patches the namespace in place.
 const realAttention = { ...actualAttention };
 const realFoods = { ...actualFoods };
-const realDashboardData = { ...actualDashboardData };
 const realLoadersToday = { ...actualLoadersToday };
 const realLoadersPlan = { ...actualLoadersPlan };
 
@@ -417,15 +415,6 @@ mock.module("../attention.js", () => ({
     },
 }));
 
-const widgetStub = {};
-mock.module("../../dashboard-data.js", () => ({
-    ...realDashboardData,
-    getNutritionSummaryPayload: async () => widgetStub,
-    getGoalProgressPayload: async () => widgetStub,
-    getTrendsPayload: async () => widgetStub,
-    getWeightTrendsPayload: async () => widgetStub,
-}));
-
 // This week reads the plans table; these tests do not run against one.
 mock.module("../loaders-plan.js", () => ({
     ...realLoadersPlan,
@@ -454,7 +443,6 @@ mock.module("../../foods.js", () => ({
 afterAll(() => {
     mock.module("../../foods.js", () => realFoods);
     mock.module("../attention.js", () => realAttention);
-    mock.module("../../dashboard-data.js", () => realDashboardData);
     mock.module("../loaders-today.js", () => realLoadersToday);
     mock.module("../loaders-plan.js", () => realLoadersPlan);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock

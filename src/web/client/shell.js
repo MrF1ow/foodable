@@ -1,4 +1,4 @@
-// Client bootstrap: FoodableApp.onLoad registry, Turbo lifecycle, motion, widgets.
+// Client bootstrap: FoodableApp.onLoad registry, Turbo lifecycle, motion.
 window.FoodableApp = window.FoodableApp || {
     _hooks: [],
     onLoad(fn) {
@@ -178,67 +178,6 @@ document.addEventListener("turbo:render", onTurboThemeSync);
 document.addEventListener("turbo:load", onTurboThemeSync);
 document.addEventListener("turbo:morph", onTurboThemeSync);
 
-// Fitted height lives on the iframe's inline style. A morph replaces the
-// element from server HTML, which has no inline height, so every morphed
-// frame would dip to the CSS min-height until it reloads; the height is put
-// back after the morph. A same-src frame also keeps painting the previous
-// payload, because changing data-widget-data does not navigate an iframe.
-const widgetFramesToReload = new WeakSet();
-const widgetFrameHeight = new WeakMap();
-
-function widgetFrameAttr(el, name) {
-    return el.getAttribute(name) || "";
-}
-
-// Re-setting src navigates the frame again and is served from the HTTP cache
-// (the ?v= URL is immutable). location.reload() would revalidate and, with no
-// ETag on the route, re-download the whole document.
-function reloadWidgetFrame(frame) {
-    const src = frame.getAttribute("src");
-    if (src) frame.setAttribute("src", src);
-}
-
-document.addEventListener("turbo:before-morph-element", (event) => {
-    const { currentElement, newElement } = event.detail || {};
-    if (
-        !(currentElement instanceof HTMLIFrameElement) ||
-        !currentElement.classList.contains("widget-frame") ||
-        !(newElement instanceof HTMLIFrameElement)
-    ) {
-        return;
-    }
-    const srcSame =
-        widgetFrameAttr(currentElement, "src") ===
-        widgetFrameAttr(newElement, "src");
-    const dataSame =
-        widgetFrameAttr(currentElement, "data-widget-data") ===
-        widgetFrameAttr(newElement, "data-widget-data");
-    const themeSame =
-        widgetFrameAttr(currentElement, "data-theme") ===
-        widgetFrameAttr(newElement, "data-theme");
-    if (srcSame && dataSame && themeSame) {
-        event.preventDefault();
-        return;
-    }
-    widgetFrameHeight.set(currentElement, currentElement.style.height || "");
-    if (srcSame) widgetFramesToReload.add(currentElement);
-});
-
-document.addEventListener("turbo:morph-element", (event) => {
-    const frame = event.detail && event.detail.currentElement;
-    if (!frame || !widgetFrameHeight.has(frame)) return;
-    const height = widgetFrameHeight.get(frame);
-    widgetFrameHeight.delete(frame);
-    // Restore before the browser paints the morphed tree. A changed src is
-    // already navigating; a same-src frame reloads so the seed script reads
-    // the new data-widget-data / data-theme. initWidgetFrames refits on load.
-    if (height) frame.style.height = height;
-    if (widgetFramesToReload.has(frame)) {
-        widgetFramesToReload.delete(frame);
-        reloadWidgetFrame(frame);
-    }
-});
-
 // html.fx is set inside a frame, never under prefers-reduced-motion, so a
 // renderer that never ticks keeps the static page. Guard matchMedia: tests
 // run this script against a fake window without it. The pointer glow on
@@ -268,44 +207,6 @@ if (mq("(hover: hover) and (pointer: fine)")) {
         { passive: true },
     );
 }
-
-const widgetFramesInit = new WeakSet();
-
-function initWidgetFrames(root) {
-    root.querySelectorAll(".widget-frame").forEach((frame) => {
-        if (widgetFramesInit.has(frame)) return;
-        widgetFramesInit.add(frame);
-        const fit = () => {
-            try {
-                const doc = frame.contentDocument;
-                if (!doc) return;
-                const el = doc.documentElement;
-                const prev = el.style.height;
-                el.style.height = "max-content";
-                const height = Math.ceil(el.getBoundingClientRect().height);
-                el.style.height = prev;
-                if (height) frame.style.height = height + "px";
-            } catch (_) {}
-        };
-        fit();
-        frame.addEventListener("load", fit);
-        window.addEventListener("message", (e) => {
-            if (e.source !== frame.contentWindow) return;
-            const d = e.data;
-            if (
-                d &&
-                d.method &&
-                String(d.method).endsWith("size-changed") &&
-                d.params &&
-                d.params.height
-            ) {
-                frame.style.height = d.params.height + "px";
-            }
-        });
-    });
-}
-
-window.FoodableApp.onLoad(initWidgetFrames);
 
 // iOS Safari zooms the page into any focused text field whose font is under
 // 16px and stays zoomed afterwards; the v2 sheets focus their first field on

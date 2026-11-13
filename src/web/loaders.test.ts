@@ -1,27 +1,5 @@
 import { test, expect } from "bun:test";
-import { withWidgetData } from "../widgets.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "./loaders.js";
-
-test("withWidgetData seeds the existing script, not a second tag", () => {
-    const html = "<html><script>initWidget({})</script></html>";
-    const out = withWidgetData(html, { unit: "kg" });
-    expect((out.match(/<script\b/gi) ?? []).length).toBe(1);
-    expect(out).toContain("window.__WIDGET_DATA__=");
-    expect(out).toContain('"unit":"kg"');
-});
-
-test("withWidgetData stamps an explicit viewer theme and never overrides the accent", () => {
-    const html =
-        '<html data-theme="light"><head></head><script>initWidget({})</script></html>';
-    const dark = withWidgetData(html, {}, { theme: "dark" });
-    expect(dark).toContain('<html data-theme="dark">');
-    expect(dark).not.toContain("viewer-accent");
-    expect(dark).not.toContain("--accent");
-
-    const system = withWidgetData(html, {}, { theme: "system" });
-    expect(system).toContain("<html>");
-    expect(system).not.toContain("data-theme");
-});
 
 test("create-household form posts name fields and has no widgets", () => {
     const html = createHouseholdFormHtml();

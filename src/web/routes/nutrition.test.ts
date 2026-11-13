@@ -17,7 +17,6 @@ import {
 } from "../../domain/today.js";
 import { shiftLocalDate } from "../../domain/tz.js";
 import { renderDashboardPage } from "../loaders.js";
-import * as actualDashboardData from "../../dashboard-data.js";
 import * as actualNutrition from "../../db/nutrition.js";
 
 const realHousehold = { ...actualHousehold };
@@ -25,7 +24,6 @@ const realProfiles = { ...actualProfiles };
 const realLoadersToday = { ...actualLoadersToday };
 const realLoadersPlan = { ...actualLoadersPlan };
 const realAttention = { ...actualAttention };
-const realDashboardData = { ...actualDashboardData };
 const realNutrition = { ...actualNutrition };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -118,16 +116,6 @@ mock.module("../loaders-today.js", () => ({
     },
 }));
 
-mock.module("../../dashboard-data.js", () => ({
-    ...realDashboardData,
-    getNutritionSummaryPayload: async () => ({
-        drink_unit: null,
-    }),
-    getGoalProgressPayload: async () => ({}),
-    getTrendsPayload: async () => ({}),
-    getWeightTrendsPayload: async () => ({ unit: "kg" }),
-}));
-
 mock.module("../../db/nutrition.js", () => ({
     ...realNutrition,
     getLatestWeight: async () => null,
@@ -167,7 +155,6 @@ afterAll(() => {
     mock.module("../../db/profiles.js", () => realProfiles);
     mock.module("../loaders-today.js", () => realLoadersToday);
     mock.module("../loaders-plan.js", () => realLoadersPlan);
-    mock.module("../../dashboard-data.js", () => realDashboardData);
     mock.module("../../db/nutrition.js", () => realNutrition);
     mock.module("../attention.js", () => realAttention);
 });

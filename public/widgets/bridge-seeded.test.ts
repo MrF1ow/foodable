@@ -1,7 +1,6 @@
 // The bridge appends a "just ask to update your settings" footer under every
-// painted widget. That copy is for chat hosts. The household web app seeds the
-// data itself (window.__WIDGET_DATA__, see withWidgetData in src/widgets.ts),
-// and there the footer is wrong.
+// painted widget. That copy is for chat hosts. A page that seeds the data itself
+// (window.__WIDGET_DATA__) is not a chat host, and there the footer is wrong.
 //
 // Same technique as macros.test.ts: evaluate the real shared source with just
 // enough window/document to run initWidget once.

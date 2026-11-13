@@ -708,20 +708,13 @@ try {
             dataTheme: string | null;
             meta: string | null;
             bg: string;
-            widgetTheme: string | null;
             marker: string | null;
             hasMain: boolean;
         }>(`(() => {
-            const frame = document.querySelector(".widget-frame");
-            let widgetTheme = null;
-            try {
-                widgetTheme = frame?.contentDocument?.documentElement?.getAttribute("data-theme") ?? null;
-            } catch (_) {}
             return {
                 dataTheme: document.documentElement.getAttribute("data-theme"),
                 meta: document.querySelector('meta[name="foodable-theme"]')?.getAttribute("content") ?? null,
                 bg: getComputedStyle(document.body).getPropertyValue("--bg").trim(),
-                widgetTheme,
                 marker: window.__marker ?? null,
                 hasMain: !!document.querySelector("main.app-main"),
             };

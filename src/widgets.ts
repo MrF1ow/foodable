@@ -18,7 +18,6 @@
 
 import { fileURLToPath } from "node:url";
 import { TOASTS } from "./copy/toasts.js";
-import { isNutritionCard, NUTRITION_CARDS } from "./domain/layout.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
 
 const SRC_DIR = "./public/widgets/src";
@@ -732,140 +731,16 @@ export async function getAppV2Js(): Promise<string> {
     return appV2Js;
 }
 
-export type WidgetViewerChrome = {
-    theme: "light" | "dark" | "system";
-    // CSS appended as the frame's last <style> (the app's embed skin, see
-    // getEmbedCss). Chat hosts never pass one.
-    skin?: string;
-};
-
-// The skin the household app injects into the widgets it embeds: the app's
-// brand layer (palette, fonts) on top of the widget's own tokens, so an
-// embedded card matches the page while the same widget served over MCP keeps
-// its neutral look. Assembled like app.css, cached and warmed at boot.
-export const EMBED_CSS_SOURCE = "./public/app/embed.css";
-// Per instance by design: embed skin CSS for dashboard widget iframes; warmed at boot.
-let embedCss: string | undefined;
-
-export async function getEmbedCss(): Promise<string> {
-    if (embedCss !== undefined) return embedCss;
-    const file = Bun.file(EMBED_CSS_SOURCE);
-    if (!(await file.exists())) {
-        throw new Error(`embed skin source not found: ${EMBED_CSS_SOURCE}`);
-    }
-    embedCss = await resolveIncludes(await file.text(), EMBED_CSS_SOURCE, [
-        EMBED_CSS_SOURCE,
-    ]);
-    return embedCss;
-}
-
-// First script in the dashboard frame, before any <style>, so an explicit
-// theme is on <html> before the first paint. Same-origin, so frameElement is
-// the page's <iframe> and dataset.widgetData is the per-request JSON. Opened
-// directly, frameElement is null and __WIDGET_DATA__ stays unset: the bridge
-// then paints its sample, as a chat widget opened on its own does today.
-const WIDGET_FRAME_SEED = `<script>
-(function () {
-    const frame = window.frameElement;
-    if (!frame) return;
-    const raw = frame.dataset.widgetData;
-    if (raw) {
-        try {
-            window.__WIDGET_DATA__ = JSON.parse(raw);
-        } catch (_) {}
-    }
-    const theme = frame.getAttribute("data-theme");
-    if (theme === "light" || theme === "dark") {
-        document.documentElement.setAttribute("data-theme", theme);
-    }
-})();
-</script>`;
-
-// The document GET /app/widgets/:key serves: assembled widget, seed script,
-// embed skin. No per-request data and no theme stamp — those ride on the
-// framing element. getWidgetHtml (the MCP ui:// resource) never comes through
-// here, so chat widgets stay skin-free and unseeded.
-export function embedWidgetDocument(html: string, skin: string): string {
-    const unthemed = html.replace(/\sdata-theme="[^"]*"/g, "");
-    const seeded = unthemed.replace(
-        /<head\b[^>]*>/i,
-        (open) => `${open}\n${WIDGET_FRAME_SEED}`,
-    );
-    // A function replacement, so a `$` in the CSS is never read as a pattern.
-    return seeded.replace("</head>", () => `<style>${skin}</style></head>`);
-}
-
-// Per instance by design: dashboard embed documents keyed by widget; warmed at boot, no cross-instance sharing needed.
-const embedWidgetCache = new Map<string, { html: string; hash: string }>();
-
-export async function getEmbedWidgetHtml(
-    key: string,
-): Promise<{ html: string; hash: string }> {
-    const cached = embedWidgetCache.get(key);
-    if (cached) return cached;
-    if (!isNutritionCard(key)) {
-        throw new Error(`widget is not embedded on the dashboard: ${key}`);
-    }
-    const html = embedWidgetDocument(
-        await getWidgetHtml(key),
-        await getEmbedCss(),
-    );
-    const entry = { html, hash: await shortContentHash(html) };
-    embedWidgetCache.set(key, entry);
-    return entry;
-}
-
-// withWidgetData still seeds a self-contained document for callers that embed
-// via srcdoc. The dashboard does not: it frames /app/widgets/:key and puts
-// the JSON on the iframe. An explicit viewer theme is stamped on the widget's
-// <html>; "system" leaves the attribute off and the widget follows
-// prefers-color-scheme, as the page does. The accent is never overridden:
-// there is one brand green.
-function applyViewerTheme(html: string, chrome: WidgetViewerChrome): string {
-    const withoutTheme = html.replace(/\sdata-theme="[^"]*"/g, "");
-    if (chrome.theme === "system") return withoutTheme;
-    return withoutTheme.replace(
-        /<html\b/i,
-        () => `<html data-theme="${chrome.theme}"`,
-    );
-}
-
-export function withWidgetData(
-    html: string,
-    data: unknown,
-    chrome?: WidgetViewerChrome,
-): string {
-    const json = JSON.stringify(data).replace(/</g, "\\u003c");
-    // A function replacement, so a `$` in the data is not a pattern.
-    const seeded = html.replace(
-        "<script>",
-        () => `<script>window.__WIDGET_DATA__=${json};`,
-    );
-    if (!chrome) return seeded;
-    // A function replacement, so a `$` in the CSS is never read as a pattern.
-    const skinned = chrome.skin
-        ? seeded.replace(
-              "</head>",
-              () => `<style>${chrome.skin}</style></head>`,
-          )
-        : seeded;
-    return applyViewerTheme(skinned, chrome);
-}
-
-// Assemble every widget, the app stylesheet, the embed skin, and the app
+// Assemble every widget, the app stylesheet and the app
 // client bundle once, so a broken partial or marker fails fast at startup
 // rather than on a client's first request.
 export async function warmWidgets(): Promise<void> {
     await Promise.all([
         ...widgetAssemblies().map(({ key, v2 }) => getWidgetHtml(key, { v2 })),
         getAppCss(),
-        getEmbedCss(),
         getAppJs(),
         getAppV2Css(),
         getAppV2Js(),
         warmScannerAssets(),
     ]);
-    // Hashes of the framed documents. After the widgets and the skin are
-    // cached, so boot does not assemble them twice.
-    await Promise.all(NUTRITION_CARDS.map((key) => getEmbedWidgetHtml(key)));
 }

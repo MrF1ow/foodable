@@ -7,8 +7,8 @@
 // palette and type. scripts/gen-tokens.ts writes both stylesheets from here:
 //
 //   public/widgets/src/shared/tokens.css   NEUTRAL, the shared base
-//   public/app/brand.css                   APP, included by app.css and the
-//                                          embed skin, never by a widget
+//   public/app/brand.css                   APP, included by app.css, never by
+//                                          a widget
 //   public/app/v2/tokens.css               FigCraft-aligned v2 shell palette
 //   public/widgets/src/shared/v2/tokens.css
 //                                          MCP widgets v2 Theme palette
@@ -359,9 +359,8 @@ export function renderBrandCss(): string {
  * there, then run \`bun run gen:tokens\`; never edit this file.
  *
  * The household app's brand layer: palette and type, app-only. Included by
- * public/app/app.css after shared/tokens.css, and by public/app/embed.css,
- * the skin withWidgetData() injects into the widgets the app embeds. Never
- * included by a widget template, so chat widgets keep the neutral look. Each
+ * public/app/app.css after shared/tokens.css. Never included by a widget
+ * template, so chat widgets keep the neutral look. Each
  * block mirrors a tokens.css block with the same selector and wins by coming
  * later. The accent and the nutrient colours are not redefined here. */
 

@@ -38,7 +38,7 @@ import {
 } from "./pages/v2/log-sheet.js";
 
 /** The log-meal fragment (`#nutrition-log-meal`) and the Trends card key
- *  (`trends`, one of `NUTRITION_CARDS`). Search, Scan and Log food link to the
+ *  (`trends`). Search, Scan and Log food link to the
  *  log-meal fragment; the Trends tab links to `FD_TRENDS_PATH` (`/trends`).
  *  v2/shell.js acts on the log-meal fragment only. A test pins both. */
 export const FD_LOG_MEAL_HASH = "nutrition-log-meal";
