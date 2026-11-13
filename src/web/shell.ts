@@ -76,6 +76,12 @@ export function resolveTheme(theme: string | null | undefined): ThemePref {
     return theme === "light" || theme === "dark" ? theme : "system";
 }
 
+export function viewerChromeFromProfile(
+    profile: { theme?: string | null } | null,
+): ViewerChrome {
+    return { theme: resolveTheme(profile?.theme) };
+}
+
 /** The `<html>` opener. An explicit theme stamps data-theme, which the token
  *  blocks in tokens.css prefer over prefers-color-scheme in both directions;
  *  "system" leaves it off so the media query decides. */
@@ -86,8 +92,8 @@ export function htmlOpen(theme: ThemePref): string {
 
 export type ThemeChromeKind = "page" | "nav";
 
-/** Browser chrome meta tags. Tabbed app pages use the bottom-nav surface; login
- *  and bare pages use the page background (--bg). */
+/** Browser chrome meta tags. "nav" (the default) uses the nav surface the app pages sit
+ *  on; login and bare pages pass "page" for the page background (--bg). */
 export function themeColorMeta(
     theme: ThemePref,
     kind: ThemeChromeKind = "nav",
@@ -100,17 +106,15 @@ export function themeColorMeta(
 <meta name="theme-color" content="${colors.dark}" media="(prefers-color-scheme: dark)" />`;
 }
 
-export type AppBarVariant = "app" | "settings" | "gate";
+export type AppBarVariant = "app" | "gate";
 
 // Settings uses page theme chrome and the tabs use nav chrome. Turbo's head
 // merge replaces a theme-color meta whose colour differs, and iOS Safari only
-// retints its toolbar on a page load, so every link between the two (the gear,
-// Back, and the Settings logo) opts out of Turbo.
+// retints its toolbar on a page load, so the gear opts out of Turbo.
 export function appBar(
     variant: AppBarVariant,
     attention?: AttentionChrome,
 ): string {
-    const logoTurbo = variant === "settings" ? ' data-turbo="false"' : "";
     const countBadge =
         variant === "app" && attention && attention.count > 0
             ? `<a class="pill app-bar-attention" href="/needs-attention" aria-label="Needs attention: ${attention.count}">${attention.count}</a>`
@@ -121,7 +125,7 @@ export function appBar(
             : variant === "gate"
               ? `<a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a>`
               : "";
-    return `<header class="app-bar"><a class="app-bar-logo" href="/"${logoTurbo}><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a>${action}</header>`;
+    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a>${action}</header>`;
 }
 
 /** Everything in `<head>` before the stylesheet and script tags, which differ
@@ -177,29 +181,6 @@ ${appHead(title, theme, "page")}
 <body>
 ${appBar("gate")}
 <main class="app-main native">${body}</main>
-<div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
-</body>
-</html>`;
-}
-
-export type SettingsPageShell = {
-    title: string;
-    theme: ThemePref;
-    backHref: string;
-    body: string;
-};
-
-/** Bare Settings / Help chrome: back link, no bottom nav, page theme meta.
- *  Back skips Turbo for the same reason as the gear (see appBar). */
-export function renderSettingsPage(shell: SettingsPageShell): string {
-    return `<!doctype html>
-${htmlOpen(shell.theme)}
-<head>
-${appHead(shell.title, shell.theme, "page")}
-</head>
-<body>
-${appBar("settings")}
-<main class="app-main native"><a class="settings-back" href="${escapeHtml(shell.backHref)}" data-turbo="false">‹ Back</a>${shell.body}</main>
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;

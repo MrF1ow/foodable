@@ -15,7 +15,6 @@ import {
     recheckRecipe,
     resolveUnresolvedLines,
     safeSourceUrl,
-    recipeDisplaySource,
     recipeImportFromRow,
     recipeImportToRow,
     sweepUnverifiedRecipes,
@@ -1903,26 +1902,15 @@ describe("source links", () => {
         "   ",
     ])("safeSourceUrl refuses %p", (raw) => {
         expect(safeSourceUrl(raw)).toBeNull();
-        expect(recipeDisplaySource({ sourceUrl: raw }, null)).toBeNull();
-    });
-
-    test("an import row's javascript: link is not displayed", () => {
-        expect(
-            recipeDisplaySource(
-                { sourceUrl: null },
-                { sourceKind: "website", sourceUrl: "javascript:alert(1)" },
-            ),
-        ).toBeNull();
     });
 
     test("a bare host gets https and an http(s) link is kept", () => {
         expect(safeSourceUrl("example.com/soup")?.href).toBe(
             "https://example.com/soup",
         );
-        expect(
-            recipeDisplaySource({ sourceUrl: "http://example.com/a" }, null)
-                ?.url,
-        ).toBe("http://example.com/a");
+        expect(safeSourceUrl("http://example.com/a")?.href).toBe(
+            "http://example.com/a",
+        );
     });
 
     test("create and update refuse a javascript: source", async () => {

@@ -16,7 +16,6 @@ import {
     getHouseholdConfig,
     getPluralsSameFood,
     getHouseholdMembership,
-    getHouseholdOwnerProfile,
     householdExists,
     listHouseholdMembers,
 } from "../db/household.js";
@@ -51,11 +50,6 @@ import { liveRecipesStore } from "../db/recipes.js";
 import { liveSocialReaderStatusStore } from "../db/social-readers.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveSettingsStore } from "../db/settings.js";
-import { type GroceryAllergenRetry } from "./pages/grocery.js";
-import {
-    ownerTimezoneLabelForSelect,
-    renderHouseholdSettingsPrefsPage,
-} from "./pages/settings-household.js";
 import {
     effectiveFoodsByIds,
     isUsualGroceryLine,
@@ -100,6 +94,8 @@ import {
     groceryOpenLineCount,
     addStoreIdFromModal,
     renderKitchenGroceriesV2Page,
+    type GroceryAllergenRetry,
+    type GroceryLineView,
     type KitchenGroceriesLineMeta,
     type PutAwayDraft,
 } from "./pages/v2/kitchen-groceries.js";
@@ -109,7 +105,6 @@ import {
     restockWeekdayLabel,
     type KitchenUsualsRowMeta,
 } from "./pages/v2/kitchen-usuals.js";
-import type { GroceryLineView } from "./pages/grocery.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
 import { renderSettingsStoresV2Page } from "./pages/v2/settings-stores.js";
 import { renderSettingsStoreV2Page } from "./pages/v2/settings-stores-detail.js";
@@ -139,7 +134,6 @@ import { guessMealType, todayInTz, validateTz } from "../domain/tz.js";
 import { fromGrams } from "../domain/units.js";
 import { getLatestWeight } from "../db/nutrition.js";
 import type { WeighInPrefill } from "./pages/v2/log-sheet.js";
-import { viewerChromeFromProfile } from "./pages/nutrition.js";
 import { loadToday, useSoonFor } from "./loaders-today.js";
 import {
     listExpiring,
@@ -296,8 +290,6 @@ export async function renderDashboardPage(
     viewerUserId: string,
     requestedMember: string | undefined,
     error?: string,
-    /** Ignored: Today opens its sheets from `v2LogSheet`. */
-    _openModalId?: string,
     v2LogSheet?: Omit<
         import("./pages/v2/log-sheet.js").RenderLogSheetsOpts,
         "timezone"
@@ -1186,41 +1178,6 @@ export async function renderSettingsHelpRoute(
     };
 }
 
-export async function renderSettingsHouseholdRoute(
-    viewerUserId: string,
-    opts: {
-        backHref?: string;
-        error?: string;
-        draft?: {
-            timezone: string | null;
-            restockEnabled: boolean;
-            restockWeekday: string;
-            restockTime: string;
-        };
-    } = {},
-): Promise<{ status: 200 | 403; html: string }> {
-    const gate = await memberGate(viewerUserId);
-    if ("html" in gate) return { status: gate.status, html: gate.html };
-    const profile = await getProfile(viewerUserId);
-    const householdId = gate.viewer.householdId;
-    const [config, ownerProfile] = await Promise.all([
-        getHouseholdConfig(householdId),
-        getHouseholdOwnerProfile(householdId),
-    ]);
-    return {
-        status: 200,
-        html: renderHouseholdSettingsPrefsPage({
-            chrome: viewerChromeFromProfile(profile),
-            backHref: opts.backHref ?? "/",
-            member: gate.viewer,
-            preferences: config.preferences,
-            ownerTimezoneLabel: ownerTimezoneLabelForSelect(ownerProfile),
-            draft: opts.draft,
-            error: opts.error,
-        }),
-    };
-}
-
 export async function renderUsualProductsListPage(
     viewerUserId: string,
     opts: {
@@ -1350,7 +1307,6 @@ export async function renderHouseholdSettingsRoute(
         error?: string;
         issuedToken?: string;
         openModalId?: string;
-        refusalsAfter?: string | null;
         mergePost?: {
             foodA: string;
             foodB: string;
@@ -1570,11 +1526,6 @@ export async function renderRecipesListPage(
     viewerUserId: string,
     opts: {
         error?: string;
-        openModalId?: string;
-        tag?: string;
-        canMakeNow?: boolean;
-        safeFor?: string;
-        verification?: string;
         q?: string;
         filter?: string;
         importUrl?: string;
@@ -1591,8 +1542,6 @@ export async function renderRecipesListPage(
         importWebsiteUrl?: string;
         importShowRetry?: boolean;
         importRetryDisabled?: boolean;
-        shareArrived?: import("../domain/share.js").ReadShareResult;
-        shareArrivedOpen?: boolean;
         /** v2: a recipe pasted from another Foodable that could not be imported. */
         sharedImport?: { error?: string; input?: string };
         /** v2: picking a recipe for this day (`?plan_date=`). */

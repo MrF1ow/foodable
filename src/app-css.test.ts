@@ -24,7 +24,9 @@ const APP_PARTIALS = ["base.css", "form.css", "table.css", "seg.css"];
 test("app.css assembles with no unresolved include markers", async () => {
     const css = await getAppCss();
     expect(css.match(/\/\*@include/g)).toBeNull();
-    expect(css).toContain(".bottom-nav");
+    expect(css).toContain(".app-main");
+    // No live page renders the old bottom nav, so its rules are gone.
+    expect(css).not.toContain(".bottom-nav");
 });
 
 test("app.css inlines tokens from the shared partial and app-owned partials in full", async () => {

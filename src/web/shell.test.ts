@@ -8,12 +8,10 @@ import {
     renderAppShell,
     parseAppearanceInput,
     renderBarePage,
-    renderSettingsPage,
     resolveTheme,
     themeColorMeta,
 } from "./shell.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
-import { bottomNav } from "./components/bottom-nav.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
@@ -34,7 +32,7 @@ function shellPage(
 
 const SHELL_JS = readFileSync(join(import.meta.dir, "client/shell.js"), "utf8");
 
-test("bottom nav hrefs and tab order", () => {
+test("app tab hrefs and order", () => {
     expect(APP_TABS.map((tab) => tab.id)).toEqual([
         "fridge",
         "grocery",
@@ -56,36 +54,6 @@ test("bottom nav hrefs and tab order", () => {
         "Recipes",
         "Household",
     ]);
-
-    const html = bottomNav("nutrition");
-    const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
-    expect(hrefs).toEqual([
-        "/kitchen/fridge",
-        "/kitchen/groceries",
-        "/",
-        "/recipes",
-        "/settings/household",
-    ]);
-    expect(html).toContain('href="/" aria-current="page"');
-    expect(html).not.toContain('href="/kitchen/fridge" aria-current="page"');
-    expect(html.match(/<svg\b/g)?.length).toBe(5);
-    expect([...html.matchAll(/\stitle="([^"]+)"/g)].map((m) => m[1])).toEqual([
-        "Fridge",
-        "Groceries",
-        "Nutrition",
-        "Recipes",
-        "Household",
-    ]);
-    // Parsed, not stripped with a regex: every visible character is text.
-    let text = "";
-    new HTMLRewriter()
-        .on("*", {
-            text(chunk) {
-                text += chunk.text;
-            },
-        })
-        .transform(html);
-    expect(text.trim()).toBe("");
 });
 
 test("unset theme follows the system", () => {
@@ -173,23 +141,12 @@ test("appHead emits foodable-theme for every preference", () => {
     );
 });
 
-test("settings chrome full-loads into and out of tabs", () => {
-    const settings = renderSettingsPage({
-        title: "Settings",
-        theme: "light",
-        backHref: "/kitchen/fridge",
-        body: "<h1>Settings</h1>",
-    });
-    expect(settings).toContain(
-        'class="settings-back" href="/kitchen/fridge" data-turbo="false"',
-    );
-    expect(settings).toContain(
-        'class="app-bar-logo" href="/" data-turbo="false"',
-    );
+test("the gear opts out of Turbo so the toolbar retints on a page load", () => {
+    expect(appBar("app")).toContain('href="/settings" data-turbo="false"');
+    expect(appBar("app")).toContain('class="app-bar-logo" href="/"');
     expect(appBar("app")).not.toContain(
         'class="app-bar-logo" href="/" data-turbo="false"',
     );
-    expect(appBar("app")).toContain('href="/settings" data-turbo="false"');
 });
 
 test("bare pages get the top bar and can stamp a real data-theme", () => {
@@ -693,4 +650,15 @@ test("one passive pointermove listener sets --mx and --my on the panel", () => {
         clientY: 80,
     });
     expect(panel.style.props).toEqual({ "--mx": "30px", "--my": "60px" });
+});
+
+test("the toast region has one plain rule, with no bottom-nav variant", () => {
+    const css = readFileSync(
+        join(import.meta.dir, "../../public/app/app.css"),
+        "utf8",
+    );
+    expect(css).not.toContain("has-bottom-nav");
+    expect(css).toMatch(
+        /\n\.toast-region \{[^}]*bottom: calc\(16px \+ env\(safe-area-inset-bottom, 0px\)\);/,
+    );
 });

@@ -7,11 +7,10 @@
 //    does not reopen it). On any other page that link navigates to `/`, and the
 //    same code runs after the visit.
 // 2. ⌘K / Ctrl+K opens the log search sheet (log-sheet.js handles it).
-// 3. The tapped nav entry becomes current right away, as app.js does for the
-//    old nav, so it fades up while the visit loads. (Not fragment links,
-//    which stay on the same page.)
+// 3. The tapped nav entry becomes current right away, so it fades up while the
+//    visit loads. (Not fragment links, which stay on the same page.)
 // 4. Login HTML coming back during an in-app visit full-loads instead of
-//    morphing into app chrome (the old shell's guard looks for nav.bottom-nav).
+//    morphing into app chrome.
 
 const LOG_MEAL_ID = "nutrition-log-meal";
 const TRENDS_CARD = "trends";

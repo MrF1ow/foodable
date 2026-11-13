@@ -37,13 +37,8 @@ import {
 } from "../src/web/pages/v2/recipes-page.js";
 import type { CookSheetView } from "../src/web/pages/v2/recipes-page-cook.js";
 import { renderNeedsAttentionPage } from "../src/web/pages/needs-attention.js";
-import { renderHouseholdSettingsPrefsPage } from "../src/web/pages/settings-household.js";
 import { renderHouseholdInvitesPage } from "../src/web/pages/v2/settings-household-invites.js";
-import {
-    DEFAULT_RESTOCK,
-    EMPTY_HOUSEHOLD_PREFERENCES,
-} from "../src/household.js";
-import { viewerChromeFromProfile } from "../src/web/pages/nutrition.js";
+import { EMPTY_HOUSEHOLD_PREFERENCES } from "../src/household.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
@@ -115,7 +110,7 @@ import { SCORE_PRESETS } from "../src/domain/product-score.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { pageHeader } from "../src/web/components/ui.js";
-import { renderAppShell } from "../src/web/shell.js";
+import { renderAppShell, viewerChromeFromProfile } from "../src/web/shell.js";
 import {
     NO_USUAL_SCHEDULE,
     possibleDuplicates,
@@ -1678,7 +1673,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                     import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
                 > => {
                     const legacy = groceryView(chrome) as never as {
-                        stores: import("../src/web/pages/grocery.js").GroceryStoreView[];
+                        stores: import("../src/web/pages/v2/kitchen-groceries.js").GroceryStoreView[];
                         locations: { id: string; name: string }[];
                     };
                     const checked = legacy.stores.flatMap((s) =>
@@ -1731,7 +1726,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                     import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
                 > => {
                     const legacy = groceryView(chrome) as never as {
-                        stores: import("../src/web/pages/grocery.js").GroceryStoreView[];
+                        stores: import("../src/web/pages/v2/kitchen-groceries.js").GroceryStoreView[];
                         locations: { id: string; name: string }[];
                     };
                     const checked = legacy.stores
@@ -2196,27 +2191,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             } as never);
         })(),
-        "settings-household": renderHouseholdSettingsPrefsPage({
-            chrome,
-            backHref: "/kitchen/fridge",
-            member: { ...ME, role: "owner" },
-            preferences: {
-                ...EMPTY_HOUSEHOLD_PREFERENCES,
-                timezone: null,
-                restock: { ...DEFAULT_RESTOCK, enabled: true },
-            },
-            ownerTimezoneLabel: "America/Los_Angeles",
-        }),
-        "settings-household-member": renderHouseholdSettingsPrefsPage({
-            chrome,
-            backHref: "/kitchen/fridge",
-            member: { ...SAM, role: "member" },
-            preferences: {
-                ...EMPTY_HOUSEHOLD_PREFERENCES,
-                restock: { ...DEFAULT_RESTOCK, enabled: true },
-            },
-            ownerTimezoneLabel: "America/Los_Angeles",
-        }),
         "settings-household-invites": renderHouseholdInvitesPage({
             chrome,
             flags: PREVIEW_FLAGS,

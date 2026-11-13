@@ -1,10 +1,8 @@
 import type { ReadShareResult } from "../domain/share.js";
 import { recipeSource } from "../domain/recipe-link.js";
 import type { RecipeSourceKind } from "../domain/recipe-import.js";
-import { IMPORT_RECIPE_MODAL_ID } from "./pages/recipes.js";
 
 export type ShareImportPrefill = {
-    openModalId: string;
     importUrl?: string;
     importError?: string;
     importPasteStep?: boolean;
@@ -20,7 +18,6 @@ const NOTHING_MESSAGE =
 
 export function shareImportPrefill(share: ReadShareResult): ShareImportPrefill {
     const base = {
-        openModalId: IMPORT_RECIPE_MODAL_ID,
         importTextOrigin: "shared" as const,
     };
 

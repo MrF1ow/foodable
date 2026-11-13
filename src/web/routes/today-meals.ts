@@ -83,7 +83,6 @@ async function todayEditError(
         member,
         undefined,
         undefined,
-        undefined,
         date,
         { openEditMealId: mealId, editError: error },
     );

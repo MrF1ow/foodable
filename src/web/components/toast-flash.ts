@@ -8,7 +8,7 @@ export type ToastFlashChoice = {
     params?: ToastParams;
 };
 
-/** POST /recipes/:id/cook — omit flash when neither stock nor meals were requested. */
+/** Omit the flash when neither stock nor meals were requested. */
 export function cookRecipeToastFlash(
     deductStock: boolean,
     logMeals: boolean,
@@ -84,18 +84,6 @@ export function cookSheetToastFlash(opts: {
         return { key: "recipes.cooked.logged", params: { slot } };
     }
     return { key: "recipes.cooked" };
-}
-
-export function addRecipeToGroceryToastFlash(
-    addedCount: number,
-): ToastFlashChoice {
-    if (addedCount > 0) {
-        return {
-            key: "recipes.added-to-grocery",
-            params: { count: addedCount },
-        };
-    }
-    return { key: "recipes.add-to-grocery.nothing" };
 }
 
 /** Listed so toast.test finds every recipes.import.* key (R4 URL import). */

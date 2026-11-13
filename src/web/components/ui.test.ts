@@ -13,15 +13,6 @@ import {
     panel,
     row,
 } from "./ui.js";
-import { renderFridgePage } from "../pages/fridge.js";
-import { utcTodayFromDate } from "../../domain/stock.js";
-import { renderGroceryPage } from "../pages/grocery.js";
-import { renderRecipesPage } from "../pages/recipes.js";
-import { renderSettingsPage } from "../pages/settings.js";
-import { renderFoodsSettingsPage } from "../pages/foods.js";
-import { renderHouseholdSettingsPage } from "../pages/household.js";
-import { renderSettingsHelpPage } from "../pages/settings-help.js";
-import { renderNutritionPage } from "../pages/nutrition.js";
 import { renderAppShell } from "../shell.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "../loaders.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
@@ -377,7 +368,7 @@ test("no page module contains a raw <h1", () => {
         .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
         .map((name) => join(pagesDir, name));
     files.push(join(pagesDir, "../loaders.ts"));
-    expect(files.length).toBeGreaterThan(6);
+    expect(files.length).toBeGreaterThan(4);
     for (const file of files) {
         const src = readFileSync(file, "utf8");
         expect(src, file).not.toContain("<h1");
@@ -385,97 +376,8 @@ test("no page module contains a raw <h1", () => {
     }
 });
 
-test("every page's h1 comes from pageHeader once", async () => {
-    const chrome = { theme: "light" as const };
-    const appChrome = {
-        theme: "light" as const,
-        attention: { count: 0, tabs: {} },
-        flags: FIXTURE_APP_CHROME_FLAGS,
-    };
-    const member = {
-        householdId: "hh",
-        userId: "u1",
-        role: "owner" as const,
-        displayName: "Alice",
-    };
-    const nutrition = await renderNutritionPage({
-        access: {
-            ok: true,
-            mode: "self",
-            viewer: member,
-            subject: member,
-        },
-        members: [member],
-        summary: {},
-        goals: {},
-        trends: {},
-        weight: {},
-        chrome: appChrome,
-        cardOrder: [
-            "nutrition-summary",
-            "goal-progress",
-            "trends",
-            "weight-trends",
-        ],
-    });
+test("every page's h1 comes from pageHeader once", () => {
     const pages: Array<[string, string]> = [
-        ["nutrition", nutrition],
-        [
-            "fridge",
-            renderFridgePage({
-                today: utcTodayFromDate(),
-                locations: [],
-                items: [],
-                chrome: appChrome,
-            }),
-        ],
-        ["grocery", renderGroceryPage({ chrome: appChrome, stores: [] })],
-        [
-            "recipes",
-            renderRecipesPage({
-                chrome: appChrome,
-                recipes: [],
-                members: [],
-                viewerId: "u1",
-            }),
-        ],
-        [
-            "settings",
-            renderSettingsPage({
-                chrome,
-                backHref: "/",
-                displayName: "Alice",
-                timezone: "",
-                weightUnit: "",
-                widgetsEnabled: true,
-                alcoholTrackingEnabled: false,
-                drinkUnit: "",
-            }),
-        ],
-        [
-            "foods",
-            renderFoodsSettingsPage({
-                chrome: appChrome,
-                foods: [],
-                stores: [],
-            }),
-        ],
-        [
-            "household",
-            renderHouseholdSettingsPage({
-                chrome: appChrome,
-                householdName: "House",
-                location: "",
-                members: [],
-                stores: [],
-                memberRules: [],
-                isOwner: true,
-                canManage: true,
-                viewerUserId: "u1",
-                unverifiedRecipeExpiryDays: null,
-            }),
-        ],
-        ["help", renderSettingsHelpPage({ chrome, backHref: "/" })],
         ["create-household", createHouseholdFormHtml()],
         ["app-shell", shellPage()],
     ];
@@ -485,34 +387,5 @@ test("every page's h1 comes from pageHeader once", async () => {
         expect(html, name).toContain(headings[0]!);
         assertNoNestedForms(html);
     }
-    expect(nutrition).toContain(pageHeader({ title: "Alice" }));
-    const withError = await renderNutritionPage({
-        access: {
-            ok: true,
-            mode: "self",
-            viewer: member,
-            subject: member,
-        },
-        members: [],
-        summary: {},
-        goals: {},
-        trends: {},
-        weight: {},
-        chrome: appChrome,
-        cardOrder: [
-            "nutrition-summary",
-            "goal-progress",
-            "trends",
-            "weight-trends",
-        ],
-        error: "Enter a meal description or add a food.",
-        openModalId: "nutrition-log-meal",
-    });
-    expect(withError.indexOf("<h1>Alice</h1>")).toBeLessThan(
-        withError.indexOf("error-banner"),
-    );
-    expect(withError).toContain(
-        errorBanner("Enter a meal description or add a food."),
-    );
     expect(forbiddenDashboardHtml()).not.toContain("<h1");
 });

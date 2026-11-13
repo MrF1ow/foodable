@@ -3,9 +3,8 @@ import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js"
 import {
     GLOSSARY,
     HELP_GLOSSARY_IDS,
-    renderSettingsGlossaryHtml,
-} from "../settings-help.js";
-import { renderSettingsHelpV2Page } from "./settings-help.js";
+    renderSettingsHelpV2Page,
+} from "./settings-help.js";
 
 const chrome = {
     theme: "light" as const,
@@ -45,16 +44,43 @@ describe("settings help v2", () => {
         expect(prompt[3]).toContain("data-copy-target");
     });
 
-    test("both Help pages render from the structured GLOSSARY entries", () => {
-        expect(GLOSSARY.map((e) => e.id)).toEqual([...HELP_GLOSSARY_IDS]);
-        const v2 = renderSettingsHelpV2Page({ chrome });
-        const legacy = renderSettingsGlossaryHtml();
+    test("no entry describes a control the new app does not have", () => {
+        const text = (id: string) => GLOSSARY.find((e) => e.id === id)!.answer;
+        // Card arranging is gone with the old Nutrition page.
+        expect(HELP_GLOSSARY_IDS).not.toContain("nutrition-arrange");
+        // Locations and restock are set by asking the assistant, not in a form.
+        expect(text("locations")).toContain("add_fridge_location");
+        expect(text("locations")).not.toContain("Add location");
+        expect(text("restock")).toContain("update_household_config");
+        expect(text("restock")).not.toContain("Settings › Household");
+        // The attention indicator is a dot, not a number beside Settings.
+        expect(text("needs-attention")).toContain("A dot on a tab");
+        expect(text("needs-attention")).not.toContain("The number beside");
+        // The old fridge and recipe controls are gone with the old pages.
         for (const entry of GLOSSARY) {
-            expect(v2).toContain(entry.answer);
-            expect(legacy).toContain(entry.answer);
+            for (const gone of [
+                "pencil",
+                "Add household item",
+                "Household › Usual",
+                "Log a portion",
+                "Expiring soon",
+            ]) {
+                expect(entry.answer, `${entry.id}: ${gone}`).not.toContain(
+                    gone,
+                );
+            }
+        }
+        expect(text("usual-products")).toContain("Kitchen › Usuals");
+    });
+
+    test("the Help page renders from the structured GLOSSARY entries", () => {
+        expect(GLOSSARY.map((e) => e.id)).toEqual([...HELP_GLOSSARY_IDS]);
+        const html = renderSettingsHelpV2Page({ chrome });
+        for (const entry of GLOSSARY) {
+            expect(html).toContain(entry.answer);
         }
         // Answers are HTML (a paragraph, plus the prompt block on one entry);
-        // titles are plain text, escaped by each renderer.
+        // titles are plain text, escaped by the renderer.
         expect(GLOSSARY.every((e) => e.answer.startsWith("<p>"))).toBe(true);
         expect(GLOSSARY.some((e) => e.title.includes("<"))).toBe(false);
         expect(

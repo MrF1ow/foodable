@@ -3,10 +3,7 @@ import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import { NUTRITION_CARDS } from "../domain/layout.js";
 import { THEME_COLOR } from "../tokens.js";
 import { getAppCss, getAppJs, getAppV2Css, getAppV2Js } from "../widgets.js";
-import { renderSettingsHelpPage } from "./pages/settings-help.js";
-import { renderHouseholdSettingsPrefsPage } from "./pages/settings-household.js";
 import { FD_ICON_PATHS } from "./components/fd-icons.js";
-import { NUTRITION_LOG_MEAL_MODAL_ID } from "./pages/nutrition.js";
 import {
     FD_LOG_HREF,
     FD_LOG_MEAL_HASH,
@@ -491,7 +488,7 @@ describe("the shell", () => {
     });
 
     test("fragments name real targets on the nutrition page", () => {
-        expect(FD_LOG_MEAL_HASH).toBe(NUTRITION_LOG_MEAL_MODAL_ID);
+        expect(FD_LOG_MEAL_HASH).toBe("nutrition-log-meal");
         expect(NUTRITION_CARDS as readonly string[]).toContain(FD_TRENDS_HASH);
         expect(FD_TABS.find((t) => t.id === "trends")?.href).toBe(
             FD_TRENDS_HREF,
@@ -601,38 +598,5 @@ describe("head and theme chrome", () => {
                 new RegExp(`/${href.replace(".", "\\.")}\\?v=[0-9a-f]{12}"`),
             );
         }
-    });
-});
-
-describe("Settings sub-nav", () => {
-    const view = {
-        chrome: { theme: "dark" as const },
-        backHref: "/kitchen/fridge",
-    };
-    const labels = (html: string) =>
-        [
-            ...between(html, /<nav class="subnav"/, "</nav>").matchAll(
-                /<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g,
-            ),
-        ].map((m) => `${m[2]} ${m[1]}`);
-
-    test("the settings pages list Account, Household, Members and Help", () => {
-        const expected = [
-            "Account /settings?from=%2Fkitchen%2Ffridge",
-            "Household /settings/household-settings?from=%2Fkitchen%2Ffridge",
-            "Members /settings/household?from=%2Fkitchen%2Ffridge",
-            "Help /settings/help?from=%2Fkitchen%2Ffridge",
-        ];
-        expect(labels(renderSettingsHelpPage(view))).toEqual(expected);
-        const prefs = renderHouseholdSettingsPrefsPage({
-            ...view,
-            member: { userId: "u1", householdId: "h1", role: "owner" } as never,
-            preferences: {
-                timezone: null,
-                restock: { enabled: false, weekday: 0, time: "09:00" },
-            } as never,
-            ownerTimezoneLabel: "UTC",
-        });
-        expect(labels(prefs)).toEqual(expected);
     });
 });

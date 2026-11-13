@@ -17,11 +17,11 @@ import {
     renderGroceryOverviewSections,
     renderKitchenGroceriesBody,
     renderKitchenGroceriesV2Page,
+    type GroceryLineView,
     type KitchenGroceriesLineMeta,
     type KitchenGroceriesV2View,
     FD_GROCERY_ADD_SHEET_ID,
 } from "./kitchen-groceries.js";
-import type { GroceryLineView } from "../grocery.js";
 import {
     attributeValues,
     DOLLAR_PAYLOADS,

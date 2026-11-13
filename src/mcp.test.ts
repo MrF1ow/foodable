@@ -129,7 +129,7 @@ import {
     HouseholdAlreadyExistsError,
     type HouseholdConfig,
 } from "./household.js";
-import { createMemoryFridgeStore } from "./domain/fridge.js";
+import { addLocation, createMemoryFridgeStore } from "./domain/fridge.js";
 import { createMemoryStockStore, ledgerMatchesStock } from "./domain/stock.js";
 import { createMemoryFoodsStore, type Food } from "./domain/foods.js";
 import {
@@ -173,6 +173,7 @@ import { fridgeExpiryLine } from "./copy/notices.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import {
     createMemoryRecipesStore,
+    addRecipeManualIngredient,
     createRecipe,
     importRecipeFromText,
 } from "./domain/recipes.js";
@@ -339,7 +340,6 @@ const PROFILE_BASE: actualProfiles.Profile = {
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
     theme: null,
-    nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
 };
@@ -13184,35 +13184,9 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain('class="facts"');
     });
 
-    test("POST /kitchen/fridge/locations adds Pantry for any member", async () => {
-        const r = await siteApp.request("http://x/kitchen/fridge/locations", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(bob),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=Pantry",
-        });
-        expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/kitchen/fridge");
-        const page = await siteApp.request("http://x/kitchen/fridge", {
-            headers: { cookie: cookieFor(alice) },
-        });
-        const html = await page.text();
-        expect(html).toContain("Pantry");
-    });
-
     test("POST /kitchen/fridge/items adds a supply with the entered unit", async () => {
-        await siteApp.request("http://x/kitchen/fridge/locations", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=Pantry",
-        });
-        const listed = await db.fridgeStore.listLocations("hh-1");
-        const locationId = listed[0]!.id;
+        const locationId = (await addLocation(db.fridgeStore, "hh-1", "Pantry"))
+            .id;
         const add = await siteApp.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
@@ -13261,15 +13235,8 @@ describe("authenticated dashboard HTTP", () => {
             source_name: "openfoodfacts",
             barcode: "070852010016",
         };
-        await siteApp.request("http://x/kitchen/fridge/locations", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=Fridge",
-        });
-        const locationId = (await db.fridgeStore.listLocations("hh-1"))[0]!.id;
+        const locationId = (await addLocation(db.fridgeStore, "hh-1", "Fridge"))
+            .id;
         const add = await siteApp.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
@@ -13288,25 +13255,8 @@ describe("authenticated dashboard HTTP", () => {
     });
 
     test("POST /kitchen/fridge/items/:id updates quantity and move, then delete removes it", async () => {
-        await siteApp.request("http://x/kitchen/fridge/locations", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=Fridge",
-        });
-        await siteApp.request("http://x/kitchen/fridge/locations", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=Pantry",
-        });
-        const locations = await db.fridgeStore.listLocations("hh-1");
-        const fridge = locations.find((l) => l.name === "Fridge")!;
-        const pantry = locations.find((l) => l.name === "Pantry")!;
+        const fridge = await addLocation(db.fridgeStore, "hh-1", "Fridge");
+        const pantry = await addLocation(db.fridgeStore, "hh-1", "Pantry");
         await siteApp.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {
@@ -13757,31 +13707,20 @@ describe("authenticated dashboard HTTP", () => {
         );
     });
 
-    test("POST /recipes creates, member delete is refused, owner deletes member recipe", async () => {
-        const create = await siteApp.request("http://x/recipes", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=Mac&yield_portions=4",
+    test("POST /recipes/:id/delete: a member is refused, the owner deletes a member's recipe", async () => {
+        const { id: recipeId } = await createRecipe(db.recipesStore, {
+            householdId: "hh-1",
+            creatorId: alice,
+            name: "Mac",
+            yieldPortions: 4,
         });
-        expect(create.status).toBe(303);
-        const loc = create.headers.get("location") ?? "";
-        expect(loc.startsWith("/recipes/")).toBe(true);
-        const recipeId = loc.slice("/recipes/".length);
-        const addIng = await siteApp.request(
-            `http://x/recipes/${recipeId}/ingredients`,
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(alice),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "food_name=Pasta&qty_amount=400",
-            },
-        );
-        expect(addIng.status).toBe(303);
+        await addRecipeManualIngredient(db.recipesStore, db.foodsStore, {
+            householdId: "hh-1",
+            recipeId,
+            name: "Pasta",
+            amount: 400,
+            unit: "",
+        });
         const detail = await siteApp.request(`http://x/recipes/${recipeId}`, {
             headers: { cookie: cookieFor(alice) },
         });
@@ -13803,17 +13742,12 @@ describe("authenticated dashboard HTTP", () => {
         );
         expect(await db.recipesStore.listRecipes("hh-1")).toHaveLength(1);
 
-        const bobCreate = await siteApp.request("http://x/recipes", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(bob),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=Salad&yield_portions=1",
+        const { id: bobId } = await createRecipe(db.recipesStore, {
+            householdId: "hh-1",
+            creatorId: bob,
+            name: "Salad",
+            yieldPortions: 1,
         });
-        const bobId = (bobCreate.headers.get("location") ?? "").slice(
-            "/recipes/".length,
-        );
         // From the Settings › Saved page, Delete returns there.
         const ownerDel = await siteApp.request(
             `http://x/recipes/${bobId}/delete`,
@@ -13847,6 +13781,49 @@ describe("authenticated dashboard HTTP", () => {
         expect(offsite.headers.get("location")).toBe("/recipes");
     });
 
+    test("the retired forms with no page behind them answer 404 and write nothing", async () => {
+        const recipeId = (
+            await createRecipe(db.recipesStore, {
+                householdId: "hh-1",
+                creatorId: alice,
+                name: "Retired forms",
+                yieldPortions: 2,
+            })
+        ).id;
+        for (const path of [
+            "/kitchen/fridge/locations",
+            "/kitchen/fridge/locations/loc-1/delete",
+            "/settings/household/sections/sec-1",
+            "/settings/household/stores/store-1/rules",
+            "/recipes",
+            `/recipes/${recipeId}`,
+            `/recipes/${recipeId}/instructions`,
+            `/recipes/${recipeId}/ingredients`,
+            `/recipes/${recipeId}/ingredients/ing-1`,
+            `/recipes/${recipeId}/ingredients/ing-1/delete`,
+            `/recipes/${recipeId}/ingredients/ing-1/move`,
+            `/recipes/${recipeId}/portions`,
+            `/recipes/${recipeId}/log-portion`,
+            `/recipes/${recipeId}/cook`,
+            `/recipes/${recipeId}/add-to-grocery`,
+            `/recipes/${recipeId}/unresolved`,
+            `/recipes/${recipeId}/verify`,
+        ]) {
+            const res = await siteApp.request(`http://x${path}`, {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "name=Pantry&yield_portions=3&portions=1",
+            });
+            expect(res.status, path).toBe(404);
+        }
+        expect(await db.fridgeStore.listLocations("hh-1")).toHaveLength(0);
+        const recipes = await db.recipesStore.listRecipes("hh-1");
+        expect(recipes.map((row) => row.name)).toEqual(["Retired forms"]);
+    });
+
     test("GET /recipes is 403 for a non-member", async () => {
         const r = await siteApp.request("http://x/recipes", {
             headers: { cookie: cookieFor(outsider) },
@@ -13857,44 +13834,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).not.toContain("<h1>Recipes</h1>");
     });
 
-    test("POST add-to-grocery redirects when recipe is unverified", async () => {
-        const imported = await importRecipeFromText(
-            db.recipesStore,
-            db.foodsStore,
-            {
-                householdId: "hh-1",
-                creatorId: alice,
-                text: "paste",
-                instructions: "",
-                name: "Unverified web",
-                ingredients: [{ name: "Flour", amount: 50, unit: "g" }],
-            },
-            { lookup: async () => null },
-        );
-        const store = await createGroceryStore(
-            db.settingsStore,
-            "hh-1",
-            "Shop",
-        );
-        const res = await siteApp.request(
-            `http://x/recipes/${imported.recipe.id}/add-to-grocery`,
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(alice),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: `store_id=${store.id}&total_portions=1`,
-            },
-        );
-        expect(res.status).toBe(303);
-        expect(res.headers.get("location")).toBe(
-            `/recipes/${imported.recipe.id}`,
-        );
-        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
-    });
-
-    test("POST cook redirects when recipe is unverified", async () => {
+    test("POST cook/confirm redirects when recipe is unverified", async () => {
         const imported = await importRecipeFromText(
             db.recipesStore,
             db.foodsStore,
@@ -13908,117 +13848,26 @@ describe("authenticated dashboard HTTP", () => {
             },
             { lookup: async () => null },
         );
-        const res = await siteApp.request(
-            `http://x/recipes/${imported.recipe.id}/cook`,
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(alice),
-                    "content-type": "application/x-www-form-urlencoded",
+        for (const extra of ["", "&log_serving=1"]) {
+            const res = await siteApp.request(
+                `http://x/recipes/${imported.recipe.id}/cook/confirm`,
+                {
+                    method: "POST",
+                    headers: {
+                        cookie: cookieFor(alice),
+                        "content-type": "application/x-www-form-urlencoded",
+                    },
+                    body: `servings=1&meal_type=dinner${extra}`,
                 },
-                body: "total_portions=1",
-            },
-        );
-        expect(res.status).toBe(303);
-        expect(res.headers.get("location")).toBe(
-            `/recipes/${imported.recipe.id}`,
-        );
-        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
-    });
-
-    test("POST log-portion redirects when recipe is unverified", async () => {
-        const imported = await importRecipeFromText(
-            db.recipesStore,
-            db.foodsStore,
-            {
-                householdId: "hh-1",
-                creatorId: alice,
-                text: "paste",
-                instructions: "",
-                name: "Unverified log",
-                ingredients: [{ name: "Flour", amount: 50, unit: "g" }],
-            },
-            { lookup: async () => null },
-        );
-        const res = await siteApp.request(
-            `http://x/recipes/${imported.recipe.id}/log-portion`,
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(alice),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "portions=1&meal_type=lunch",
-            },
-        );
-        expect(res.status).toBe(303);
-        expect(res.headers.get("location")).toBe(
-            `/recipes/${imported.recipe.id}`,
-        );
-        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
-    });
-
-    test("POST unresolved marks a line handled and rechecks", async () => {
-        const recipe = await db.recipesStore.insertRecipe({
-            id: crypto.randomUUID(),
-            householdId: "hh-1",
-            creatorId: alice,
-            name: "Line soup",
-            yieldPortions: 1,
-            instructions: "Simmer.",
-            sourceUrl: null,
-            tags: [],
-            notes: null,
-            prepMinutes: null,
-            cookMinutes: null,
-            verification: "unverified",
-            updatedAt: new Date().toISOString(),
-        });
-        await db.recipesStore.upsertImport({
-            recipeId: recipe.id,
-            householdId: "hh-1",
-            sourceKind: "text",
-            sourceUrl: null,
-            sourceText: "x",
-            sourceTextOrigin: "pasted",
-            transcript: null,
-            credit: null,
-            unresolvedLines: ["2 eggs 1 cup flour", "keep me"],
-            problems: [],
-            importedAt: new Date().toISOString(),
-        });
-        const res = await siteApp.request(
-            `http://x/recipes/${recipe.id}/unresolved`,
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(alice),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: new URLSearchParams({
-                    line: "2 eggs 1 cup flour",
-                }).toString(),
-            },
-        );
-        expect(res.status).toBe(303);
-        expect(res.headers.get("location")).toBe(`/recipes/${recipe.id}`);
-        expect(
-            (await db.recipesStore.getImport("hh-1", recipe.id))
-                ?.unresolvedLines,
-        ).toEqual(["keep me"]);
-    });
-
-    test("POST verify on unknown recipe redirects to list with toast", async () => {
-        const res = await siteApp.request(
-            `http://x/recipes/${crypto.randomUUID()}/verify`,
-            {
-                method: "POST",
-                headers: { cookie: cookieFor(alice) },
-            },
-        );
-        expect(res.status).toBe(303);
-        expect(res.headers.get("location")).toBe("/recipes");
-        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+            );
+            expect(res.status).toBe(303);
+            expect(res.headers.get("location")).toBe(
+                `/recipes/${imported.recipe.id}`,
+            );
+            expect(res.headers.get("set-cookie") ?? "").toContain(
+                "foodable_toast",
+            );
+        }
     });
 
     test("POST /kitchen/groceries/lines adds a supply and checking it does not insert fridge stock", async () => {
@@ -14137,51 +13986,6 @@ describe("authenticated dashboard HTTP", () => {
         const html = await r.text();
         expect(html).toContain("household membership");
         expect(html).not.toContain("fd-kitchen-groceries-page");
-    });
-
-    test("POST /kitchen/groceries/stores as owner adds Corner on the grocery page", async () => {
-        const add = await siteApp.request("http://x/kitchen/groceries/stores", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=Corner",
-        });
-        expect(add.status).toBe(303);
-        expect(add.headers.get("location")).toBe("/kitchen/groceries");
-        const stores = await db.settingsStore.listStores("hh-1");
-        expect(stores.map((row) => row.name)).toEqual(["Corner"]);
-    });
-
-    test("POST /kitchen/groceries/stores with an empty name re-renders grocery with the error", async () => {
-        const add = await siteApp.request("http://x/kitchen/groceries/stores", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(alice),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=",
-        });
-        expect(add.status).toBe(400);
-        expect(add.headers.get("location")).toBeNull();
-        const html = await add.text();
-        expect(html).toContain("Enter a store name.");
-        expect(await db.settingsStore.listStores("hh-1")).toEqual([]);
-    });
-
-    test("POST /kitchen/groceries/stores as a member is refused", async () => {
-        const add = await siteApp.request("http://x/kitchen/groceries/stores", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(bob),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "name=Corner",
-        });
-        expect(add.status).toBe(403);
-        expect(await add.text()).toContain("household membership");
-        expect(await db.settingsStore.listStores("hh-1")).toEqual([]);
     });
 
     test("GET /settings is the account page, not a stub", async () => {
@@ -14306,45 +14110,6 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(303);
         expect(r.headers.get("location")).toBe("/");
-    });
-
-    test("POST /nutrition/layout moves a card for the signed-in viewer", async () => {
-        db.profile = {
-            ...PROFILE_BASE,
-            user_id: alice,
-            nutrition_layout: null,
-        };
-        const move = await postForm(
-            "/nutrition/layout",
-            alice,
-            "card=goal-progress&direction=up",
-        );
-        expect(move.status).toBe(303);
-        expect(move.headers.get("location")).toBe("/");
-        expect(db.profile?.nutrition_layout).toEqual([
-            "goal-progress",
-            "nutrition-summary",
-            "trends",
-            "weight-trends",
-        ]);
-    });
-
-    test("POST /nutrition/layout saves a full order list", async () => {
-        db.profile = {
-            ...PROFILE_BASE,
-            user_id: alice,
-            nutrition_layout: null,
-        };
-        const order =
-            "order=weight-trends&order=nutrition-summary&order=goal-progress&order=trends";
-        const save = await postForm("/nutrition/layout", alice, order);
-        expect(save.status).toBe(303);
-        expect(db.profile?.nutrition_layout).toEqual([
-            "weight-trends",
-            "nutrition-summary",
-            "goal-progress",
-            "trends",
-        ]);
     });
 
     test("POST /settings persists dark theme for the next GET", async () => {

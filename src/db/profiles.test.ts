@@ -9,7 +9,6 @@ import {
     getWidgetsEnabled,
     preferredDrinkUnitFromProfile,
     preferredWeightUnitFromProfile,
-    setNutritionLayout,
     timezoneFromProfile,
     upsertProfile,
     widgetsEnabledFromProfile,
@@ -64,12 +63,20 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
         expect(updated.preferred_weight_unit).toBe("lb");
     });
 
-    test("setNutritionLayout stores text[]", async () => {
-        const layout = ["calories", "protein", "water"];
-        const saved = await setNutritionLayout(userId, layout);
-        expect(saved.nutrition_layout).toEqual(layout);
-        const loaded = await getProfile(userId);
-        expect(loaded?.nutrition_layout).toEqual(layout);
+    test("upsertProfile leaves the retired nutrition_layout column alone", async () => {
+        await upsertProfile(userId, { timezone: "America/New_York" });
+        await getCtx().sql`
+            update profiles
+            set nutrition_layout = ${getCtx().sql.array(["trends", "goal-progress"], "text")}
+            where user_id = ${userId}
+        `;
+        const updated = await upsertProfile(userId, {
+            timezone: "Europe/Kyiv",
+            theme: "dark",
+        });
+        expect(updated.timezone).toBe("Europe/Kyiv");
+        expect(updated.theme).toBe("dark");
+        expect(updated.nutrition_layout).toEqual(["trends", "goal-progress"]);
     });
 
     test("preference wrappers without a row", async () => {

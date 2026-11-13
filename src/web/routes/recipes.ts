@@ -6,54 +6,23 @@ import {
     renderRecipesListPage,
 } from "../loaders.js";
 
-import {
-    formAmount,
-    formOptionalNumber,
-    formRecipeIngredientAmount,
-    formText,
-} from "../form.js";
+import { formAmount, formOptionalNumber, formText } from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
-import { fridgeBarcodeLookup } from "./fridge.js";
-import { listFridge } from "../../domain/fridge.js";
 import {
-    addRecipeIngredientById,
-    addRecipeManualIngredient,
-    addRecipeToGrocery,
-    createRecipe,
     deleteRecipe,
     RecipeForbiddenError,
     RecipeInputError,
     RecipeUnverifiedError,
-    recheckRecipe,
-    resolveUnresolvedLines,
-    removeRecipeIngredient,
-    reorderRecipeIngredients,
-    setPersonPortion,
-    updateRecipe,
-    updateRecipeIngredient,
-    resolveTotalPortions,
 } from "../../domain/recipes.js";
-import {
-    getHouseholdConfig,
-    listHouseholdMembers,
-} from "../../db/household.js";
+import { getHouseholdConfig } from "../../db/household.js";
 import { liveSocialReaderStatusStore } from "../../db/social-readers.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
-import {
-    findOrCreateFoodByBarcodeResult,
-    linkProductPromptPath,
-} from "../../domain/foods.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { inStockTransaction, liveStockStore } from "../../db/stock.js";
-import { effectiveFoodsByIds } from "../../domain/foods.js";
-import {
-    deleteMeal,
-    insertMeal,
-    snapshotToMealItemWrite,
-} from "../../db/nutrition.js";
+import { deleteMeal, insertMeal } from "../../db/nutrition.js";
 import { getProfile } from "../../db/profiles.js";
 import { mealWriteFromItems } from "../../meal-write.js";
 import { guessMealType, validateTz } from "../../domain/tz.js";
@@ -64,27 +33,11 @@ import {
     renderCookPreviewRegion,
     type CookSlot,
 } from "../pages/v2/recipes-page-cook.js";
-import {
-    descriptionFromItems,
-    itemListDigest,
-    MealItemsError,
-    resolveAndBuildMeal,
-} from "../../domain/meals.js";
+import { MealItemsError } from "../../domain/meals.js";
 import { cookClaimId, cookRecipe } from "../../domain/stock.js";
-import {
-    addRecipeToGroceryToastFlash,
-    cookRecipeToastFlash,
-    cookSheetToastFlash,
-} from "../components/toast-flash.js";
+import { cookSheetToastFlash } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
 import { safeReturnPath } from "../usual-products-path.js";
-import { buildDidYouMeanModal } from "../components/did-you-mean.js";
-import {
-    recipeIngredientRetryFields,
-    isSimilarFoodsError,
-    manualOnSimilar,
-    rememberAliasIfRequested,
-} from "../form.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
 import {
     importOutcomeMessage,
@@ -107,7 +60,6 @@ import {
     recipeLinkReaderEnabled,
 } from "../../recipe-url-fetcher.js";
 import { run } from "../../db/sql.js";
-import { IMPORT_RECIPE_MODAL_ID } from "../pages/recipes.js";
 import { looksLikeSharedRecipeLink } from "../../domain/sharing-source.js";
 import { viewerFlagsFor } from "../attention.js";
 import { answerSharedRecipeImport } from "./recipes-shared-import.js";
@@ -180,25 +132,11 @@ function redirectIfUnverified(
     return null;
 }
 
-function formMemberIds(
-    body: Record<string, string | File | (string | File)[]>,
-): string[] {
-    const raw = body.member_ids;
-    if (Array.isArray(raw)) {
-        return raw.filter(
-            (value): value is string => typeof value === "string",
-        );
-    }
-    if (typeof raw === "string" && raw) return [raw];
-    return [];
-}
-
 async function recipeFormError(
     userId: string,
-    recipeId: string | null,
+    recipeId: string,
     err: unknown,
     opts: {
-        member?: string;
         openModalId?: string;
         servings?: number;
         plan?: { date?: string; slot?: string; servings?: number };
@@ -212,31 +150,18 @@ async function recipeFormError(
             : err instanceof Error
               ? err.message
               : "Could not update the recipe.";
-    if (recipeId) {
-        const page = await renderRecipeDetailRoute(userId, recipeId, {
-            member: opts.member,
-            error: message,
-            openModalId: opts.openModalId,
-            cookServings: opts.servings,
-            plan: opts.plan,
-        });
-        const status =
-            err instanceof RecipeForbiddenError ? 403 : (400 as const);
-        return { html: page.html, status: status as 400 | 403 };
-    }
-    const page = await renderRecipesListPage(userId, {
+    const page = await renderRecipeDetailRoute(userId, recipeId, {
         error: message,
         openModalId: opts.openModalId,
+        cookServings: opts.servings,
+        plan: opts.plan,
     });
-    return { html: page.html, status: 400 as const };
+    const status = err instanceof RecipeForbiddenError ? 403 : (400 as const);
+    return { html: page.html, status: status as 400 | 403 };
 }
 
 recipesRoutes.get("/recipes", requireSiteUser, async (c) => {
     const page = await renderRecipesListPage(c.get("userId"), {
-        tag: c.req.query("tag") ?? "",
-        canMakeNow: c.req.query("can_make_now") === "1",
-        safeFor: c.req.query("safe_for") ?? "",
-        verification: c.req.query("verification") ?? "",
         q: c.req.query("q") ?? "",
         filter: c.req.query("filter") ?? "",
         planDate: c.req.query("plan_date") ?? "",
@@ -270,7 +195,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                 : null;
             if (pinKind === "pinterest") {
                 const page = await renderRecipesListPage(userId, {
-                    openModalId: IMPORT_RECIPE_MODAL_ID,
                     importUrl: cleanedPinUrl,
                     importPasteStep: true,
                     importPasteText: text,
@@ -305,7 +229,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             : null;
         if (pinKind === "pinterest") {
             const page = await renderRecipesListPage(userId, {
-                openModalId: IMPORT_RECIPE_MODAL_ID,
                 importUrl: cleanedPinUrl,
                 importError: "Paste the recipe website link or the recipe.",
                 importPasteStep: true,
@@ -357,7 +280,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             );
         }
         const page = await renderRecipesListPage(userId, {
-            openModalId: IMPORT_RECIPE_MODAL_ID,
             importError: importOutcomeMessage(outcome),
             importPasteStep: true,
             importPasteText: text,
@@ -385,7 +307,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             ? recipeSource(importLinkValidated.url)
             : null;
         const page = await renderRecipesListPage(userId, {
-            openModalId: IMPORT_RECIPE_MODAL_ID,
             importUrl: pausedUrl,
             importError: RECIPE_LINK_READER_PAUSED_WEB_MESSAGE,
             importPasteStep: true,
@@ -438,7 +359,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             outcome.status !== "duplicate"
         ) {
             const page = await renderRecipesListPage(userId, {
-                openModalId: IMPORT_RECIPE_MODAL_ID,
                 importUrl: cleanedPinUrl,
                 importPasteStep: true,
                 importPasteText: text,
@@ -481,7 +401,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     }
     if (outcome.status === "duplicate") {
         const page = await renderRecipesListPage(userId, {
-            openModalId: IMPORT_RECIPE_MODAL_ID,
             importUrl: pinOrPageUrl,
             importDuplicateRecipeId: outcome.recipeId ?? undefined,
         });
@@ -495,7 +414,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         !importOutcomeShowsPasteStep(outcome.status)
     ) {
         const page = await renderRecipesListPage(userId, {
-            openModalId: IMPORT_RECIPE_MODAL_ID,
             importUrl: textOnly ? pinOrPageUrl : cleanedPinUrl,
             importError: importOutcomeMessage(outcome),
             importPasteStep: true,
@@ -512,7 +430,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     const pasteRender = importOutcomeShowsPasteStep(outcome.status);
     const pasteLinkUrl = outcome.source?.url ?? cleanedPinUrl;
     const page = await renderRecipesListPage(userId, {
-        openModalId: IMPORT_RECIPE_MODAL_ID,
         importUrl: pasteRender ? pasteLinkUrl : pinOrPageUrl,
         importError: importOutcomeMessage(outcome),
         importPasteStep: pasteRender,
@@ -525,26 +442,6 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         ...importOriginPrefill(textOrigin),
     });
     return c.html(page.html, 422);
-});
-
-recipesRoutes.post("/recipes", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const body = await c.req.parseBody();
-    try {
-        const recipe = await createRecipe(liveRecipesStore(), {
-            householdId: member.householdId,
-            creatorId: userId,
-            name: formText(body, "name"),
-            yieldPortions: formAmount(body, "yield_portions"),
-        });
-        return redirectWithToast(c, `/recipes/${recipe.id}`, "recipes.created");
-    } catch (err) {
-        const page = await recipeFormError(userId, null, err, {
-            openModalId: "recipe-new",
-        });
-        return c.html(page.html, page.status);
-    }
 });
 
 recipesRoutes.get("/recipes/:id", requireSiteUser, async (c) => {
@@ -944,7 +841,6 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
                       undefined,
                       undefined,
                       undefined,
-                      undefined,
                       { planEdit: draft },
                   )
                 : await renderRecipesListPage(userId, { planEdit: draft });
@@ -1021,311 +917,6 @@ recipesRoutes.post("/recipes/plan/add-missing", requireMember, async (c) => {
     }
 });
 
-recipesRoutes.post("/recipes/:id/log-portion", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const recipeId = c.req.param("id");
-    const body = await c.req.parseBody();
-    const portions = formAmount(body, "portions");
-    const mealTypeRaw = formText(body, "meal_type").trim().toLowerCase();
-    const meal_type =
-        mealTypeRaw === "breakfast" ||
-        mealTypeRaw === "lunch" ||
-        mealTypeRaw === "dinner" ||
-        mealTypeRaw === "snack"
-            ? mealTypeRaw
-            : "snack";
-    try {
-        const { built, specs } = await resolveAndBuildMeal({
-            householdId: member.householdId,
-            foods: liveFoodsStore(),
-            recipes: liveRecipesStore(),
-            items: [{ recipeId, portions }],
-        });
-        await insertMeal(userId, {
-            description: descriptionFromItems(built.items),
-            meal_type,
-            calories: built.totals.calories ?? undefined,
-            protein_g: built.totals.protein_g ?? undefined,
-            carbs_g: built.totals.carbs_g ?? undefined,
-            fat_g: built.totals.fat_g ?? undefined,
-            fiber_g: built.totals.fiber_g ?? undefined,
-            sugar_g: built.totals.sugar_g ?? undefined,
-            alcohol_g: built.totals.alcohol_g ?? undefined,
-            caffeine_mg: built.totals.caffeine_mg ?? undefined,
-            items: built.items.map((item) =>
-                snapshotToMealItemWrite(item, member.householdId),
-            ),
-            item_digest: itemListDigest(specs),
-        });
-        return redirectWithToast(c, "/", "recipes.portion.logged");
-    } catch (err) {
-        const blocked = redirectIfUnverified(c, recipeId, err);
-        if (blocked) return blocked;
-        const page = await recipeFormError(
-            userId,
-            recipeId,
-            err instanceof MealItemsError ? err : err,
-            { member: formText(body, "member") || undefined },
-        );
-        return c.html(page.html, page.status);
-    }
-});
-
-recipesRoutes.post("/recipes/:id/cook", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const recipeId = c.req.param("id");
-    const body = await c.req.parseBody();
-    const mealTypeRaw = formText(body, "meal_type").trim().toLowerCase();
-    const meal_type =
-        mealTypeRaw === "breakfast" ||
-        mealTypeRaw === "lunch" ||
-        mealTypeRaw === "dinner" ||
-        mealTypeRaw === "snack"
-            ? mealTypeRaw
-            : "dinner";
-    const deductStock = formText(body, "deduct_stock") === "1";
-    const logMeals = formText(body, "log_meals") === "1";
-    try {
-        const householdMembers = await listHouseholdMembers(member.householdId);
-        const portions: { userId: string; portions: number }[] = [];
-        for (const person of householdMembers) {
-            const raw = formText(body, `portion:${person.userId}`).trim();
-            if (!raw) continue;
-            const count = Number(raw);
-            if (!Number.isFinite(count) || count <= 0) continue;
-            portions.push({ userId: person.userId, portions: count });
-        }
-        const totalPortions = resolveTotalPortions(
-            portions.reduce((sum, row) => sum + row.portions, 0),
-            formOptionalNumber(body, "total_portions"),
-        );
-        const cooked = await cookRecipe(
-            liveRecipesStore(),
-            liveFridgeStore(),
-            liveStockStore(),
-            liveFoodsStore(),
-            {
-                householdId: member.householdId,
-                recipeId,
-                totalPortions,
-                deductStock,
-                actorUserId: userId,
-            },
-        );
-        if (logMeals) {
-            for (const row of portions) {
-                const { built, specs } = await resolveAndBuildMeal({
-                    householdId: member.householdId,
-                    foods: liveFoodsStore(),
-                    recipes: liveRecipesStore(),
-                    items: [{ recipeId, portions: row.portions }],
-                });
-                await insertMeal(row.userId, {
-                    description: descriptionFromItems(built.items),
-                    meal_type,
-                    calories: built.totals.calories ?? undefined,
-                    protein_g: built.totals.protein_g ?? undefined,
-                    carbs_g: built.totals.carbs_g ?? undefined,
-                    fat_g: built.totals.fat_g ?? undefined,
-                    fiber_g: built.totals.fiber_g ?? undefined,
-                    sugar_g: built.totals.sugar_g ?? undefined,
-                    alcohol_g: built.totals.alcohol_g ?? undefined,
-                    caffeine_mg: built.totals.caffeine_mg ?? undefined,
-                    items: built.items.map((item) =>
-                        snapshotToMealItemWrite(item, member.householdId),
-                    ),
-                    item_digest: itemListDigest(specs),
-                });
-            }
-        }
-        const flash = cookRecipeToastFlash(
-            deductStock,
-            logMeals,
-            cooked.shortfalls.length,
-            cooked.unmeasured.map((row) => row.displayName),
-        );
-        if (!flash) {
-            // toast: none (no-op)
-            return c.redirect(`/recipes/${recipeId}`, 303);
-        }
-        return redirectWithToast(
-            c,
-            `/recipes/${recipeId}`,
-            flash.key,
-            flash.params,
-        );
-    } catch (err) {
-        const blocked = redirectIfUnverified(c, recipeId, err);
-        if (blocked) return blocked;
-        const page = await recipeFormError(userId, recipeId, err, {
-            openModalId: `recipe-cook-${recipeId}`,
-        });
-        return c.html(page.html, page.status);
-    }
-});
-
-recipesRoutes.post("/recipes/:id", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const recipeId = c.req.param("id");
-    const body = await c.req.parseBody();
-    try {
-        const prepRaw = formText(body, "prep_minutes").trim();
-        const cookRaw = formText(body, "cook_minutes").trim();
-        await updateRecipe(liveRecipesStore(), member.householdId, recipeId, {
-            name: formText(body, "name"),
-            yieldPortions: formAmount(body, "yield_portions"),
-            // Steps have their own form (/instructions); a form without
-            // the field must not clear them.
-            instructions:
-                "instructions" in body
-                    ? formText(body, "instructions")
-                    : undefined,
-            sourceUrl: formText(body, "source_url"),
-            tags: formText(body, "tags").split(","),
-            notes: formText(body, "notes"),
-            prepMinutes: prepRaw === "" ? null : Number(prepRaw),
-            cookMinutes: cookRaw === "" ? null : Number(cookRaw),
-        });
-    } catch (err) {
-        const page = await recipeFormError(userId, recipeId, err, {
-            openModalId: `recipe-edit-${recipeId}`,
-        });
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, `/recipes/${recipeId}`, "recipes.updated");
-});
-
-recipesRoutes.post("/recipes/:id/instructions", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const recipeId = c.req.param("id");
-    const body = await c.req.parseBody();
-    try {
-        await updateRecipe(liveRecipesStore(), member.householdId, recipeId, {
-            instructions: formText(body, "instructions"),
-        });
-    } catch (err) {
-        const page = await recipeFormError(userId, recipeId, err, {
-            openModalId: `recipe-method-${recipeId}`,
-        });
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, `/recipes/${recipeId}`, "recipes.steps.saved");
-});
-
-recipesRoutes.post(
-    "/recipes/:id/ingredients/:ingredientId/delete",
-    requireMember,
-    async (c) => {
-        const userId = c.get("userId");
-        const member = siteMember(c);
-        const recipeId = c.req.param("id");
-        try {
-            await removeRecipeIngredient(
-                liveRecipesStore(),
-                member.householdId,
-                recipeId,
-                c.req.param("ingredientId"),
-            );
-        } catch (err) {
-            const page = await recipeFormError(userId, recipeId, err, {
-                openModalId: `recipe-delete-ingredient-${c.req.param("ingredientId")}`,
-            });
-            return c.html(page.html, page.status);
-        }
-        return redirectWithToast(
-            c,
-            `/recipes/${recipeId}`,
-            "recipes.ingredient.removed",
-        );
-    },
-);
-
-recipesRoutes.post(
-    "/recipes/:id/ingredients/:ingredientId/move",
-    requireMember,
-    async (c) => {
-        const userId = c.get("userId");
-        const member = siteMember(c);
-        const recipeId = c.req.param("id");
-        const ingredientId = c.req.param("ingredientId");
-        const body = await c.req.parseBody();
-        try {
-            const store = liveRecipesStore();
-            const ingredients = await store.listIngredients(
-                member.householdId,
-                recipeId,
-            );
-            const index = ingredients.findIndex(
-                (row) => row.id === ingredientId,
-            );
-            if (index < 0) throw new RecipeInputError("Unknown ingredient.");
-            const direction = formText(body, "direction");
-            const swapWith = direction === "up" ? index - 1 : index + 1;
-            if (swapWith < 0 || swapWith >= ingredients.length) {
-                // toast: none (no-op)
-                return c.redirect(`/recipes/${recipeId}`, 303);
-            }
-            const ids = ingredients.map((row) => row.id);
-            const tmp = ids[index]!;
-            ids[index] = ids[swapWith]!;
-            ids[swapWith] = tmp;
-            await reorderRecipeIngredients(
-                store,
-                member.householdId,
-                recipeId,
-                ids,
-            );
-        } catch (err) {
-            const page = await recipeFormError(userId, recipeId, err);
-            return c.html(page.html, page.status);
-        }
-        return redirectWithToast(
-            c,
-            `/recipes/${recipeId}`,
-            "recipes.ingredient.reordered",
-        );
-    },
-);
-
-recipesRoutes.post(
-    "/recipes/:id/ingredients/:ingredientId",
-    requireMember,
-    async (c) => {
-        const userId = c.get("userId");
-        const member = siteMember(c);
-        const recipeId = c.req.param("id");
-        const body = await c.req.parseBody();
-        try {
-            await updateRecipeIngredient(
-                liveRecipesStore(),
-                member.householdId,
-                recipeId,
-                c.req.param("ingredientId"),
-                {
-                    amount: formRecipeIngredientAmount(body, "ing_amount"),
-                    unit: formText(body, "ing_unit"),
-                    note: formText(body, "note"),
-                },
-                liveFoodsStore(),
-            );
-        } catch (err) {
-            const page = await recipeFormError(userId, recipeId, err, {
-                openModalId: `recipe-edit-ingredient-${c.req.param("ingredientId")}`,
-            });
-            return c.html(page.html, page.status);
-        }
-        return redirectWithToast(
-            c,
-            `/recipes/${recipeId}`,
-            "recipes.ingredient.updated",
-        );
-    },
-);
-
 recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
@@ -1350,246 +941,4 @@ recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {
         return c.html(page.html, page.status);
     }
     return redirectWithToast(c, returnTo, "recipes.deleted");
-});
-
-recipesRoutes.post("/recipes/:id/ingredients", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const recipeId = c.req.param("id");
-    const body = await c.req.parseBody();
-    const amount = formRecipeIngredientAmount(body, "qty_amount");
-    try {
-        if (formText(body, "food_id")) {
-            const foodId = formText(body, "food_id");
-            await addRecipeIngredientById(
-                liveRecipesStore(),
-                liveFoodsStore(),
-                {
-                    householdId: member.householdId,
-                    recipeId,
-                    foodId,
-                    amount,
-                    unit: formText(body, "qty_unit"),
-                },
-            );
-            await rememberAliasIfRequested(
-                liveFoodsStore(),
-                member.householdId,
-                body,
-                foodId,
-            );
-        } else if (formText(body, "barcode")) {
-            const foods = liveFoodsStore();
-            const { food, created } = await findOrCreateFoodByBarcodeResult(
-                foods,
-                member.householdId,
-                formText(body, "barcode"),
-                (barcode) => fridgeBarcodeLookup(barcode, member.householdId),
-            );
-            await addRecipeIngredientById(liveRecipesStore(), foods, {
-                householdId: member.householdId,
-                recipeId,
-                foodId: food.id,
-                amount,
-                unit: formText(body, "qty_unit"),
-            });
-            if (created) {
-                const catalog = await foods.listFoods(member.householdId);
-                const prompt = linkProductPromptPath(
-                    food,
-                    catalog,
-                    `/recipes/${recipeId}`,
-                );
-                if (prompt) {
-                    // toast: none (link-product prompt on destination)
-                    return c.redirect(prompt, 303);
-                }
-            }
-        } else {
-            await addRecipeManualIngredient(
-                liveRecipesStore(),
-                liveFoodsStore(),
-                {
-                    householdId: member.householdId,
-                    recipeId,
-                    name: formText(body, "food_name"),
-                    amount,
-                    unit: formText(body, "qty_unit"),
-                    onSimilar: manualOnSimilar(body),
-                },
-            );
-        }
-    } catch (err) {
-        if (isSimilarFoodsError(err)) {
-            const modalId = `recipe-add-ingredient-${recipeId}`;
-            const didYouMean = buildDidYouMeanModal(
-                err,
-                recipeIngredientRetryFields(body),
-                modalId,
-                `/recipes/${recipeId}/ingredients`,
-            );
-            if (didYouMean) {
-                const page = await renderRecipeDetailRoute(userId, recipeId, {
-                    openModalId: modalId,
-                    didYouMean,
-                });
-                return c.html(page.html, 409);
-            }
-        }
-        const page = await recipeFormError(userId, recipeId, err, {
-            openModalId: `recipe-add-ingredient-${recipeId}`,
-        });
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(
-        c,
-        `/recipes/${recipeId}`,
-        "recipes.ingredient.added",
-    );
-});
-
-recipesRoutes.post("/recipes/:id/portions", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const recipeId = c.req.param("id");
-    const body = await c.req.parseBody();
-    try {
-        await setPersonPortion(liveRecipesStore(), {
-            householdId: member.householdId,
-            recipeId,
-            userId,
-            portionCount: formAmount(body, "portion_count"),
-        });
-    } catch (err) {
-        const page = await recipeFormError(userId, recipeId, err);
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(
-        c,
-        `/recipes/${recipeId}`,
-        "recipes.portion.saved",
-    );
-});
-
-recipesRoutes.post("/recipes/:id/add-to-grocery", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const recipeId = c.req.param("id");
-    const body = await c.req.parseBody({ all: true });
-    const selected = formMemberIds(body);
-    const storeId = formText(body as Record<string, string | File>, "store_id");
-    try {
-        const householdMembers = await listHouseholdMembers(member.householdId);
-        const allowed = new Set(householdMembers.map((row) => row.userId));
-        const memberIds = selected.filter((id) => allowed.has(id));
-        const recipes = liveRecipesStore();
-        const portionCounts = await Promise.all(
-            memberIds.map(async (id) => {
-                const portion = await recipes.getPortion(
-                    member.householdId,
-                    recipeId,
-                    id,
-                );
-                return portion?.portionCount ?? 1;
-            }),
-        );
-        const fridge = await listFridge(liveFridgeStore(), member.householdId);
-        const foods = await effectiveFoodsByIds(
-            liveFoodsStore(),
-            member.householdId,
-            [
-                ...(
-                    await recipes.listIngredients(member.householdId, recipeId)
-                ).map((row) => row.foodId),
-                ...fridge.items.map((item) => item.foodId),
-            ],
-        );
-        const added = await addRecipeToGrocery({
-            recipes,
-            grocery: liveGroceryStore(),
-            settings: liveSettingsStore(),
-            fridgeItems: fridge.items.map((item) => ({
-                quantity: item.quantity,
-                foodId: item.foodId,
-            })),
-            householdId: member.householdId,
-            recipeId,
-            storeId,
-            portionCounts,
-            totalPortions: formOptionalNumber(
-                body as Record<string, string | File>,
-                "total_portions",
-            ),
-            foodsById: foods,
-            foods: liveFoodsStore(),
-        });
-        const flash = addRecipeToGroceryToastFlash(added.added.length);
-        return redirectWithToast(
-            c,
-            "/kitchen/groceries",
-            flash.key,
-            flash.params,
-        );
-    } catch (err) {
-        const blocked = redirectIfUnverified(c, recipeId, err);
-        if (blocked) return blocked;
-        const page = await recipeFormError(userId, recipeId, err);
-        return c.html(page.html, page.status);
-    }
-});
-
-recipesRoutes.post("/recipes/:id/unresolved", requireMember, async (c) => {
-    const member = siteMember(c);
-    const recipeId = c.req.param("id");
-    const body = await c.req.parseBody();
-    try {
-        const checked = await resolveUnresolvedLines(
-            liveRecipesStore(),
-            member.householdId,
-            recipeId,
-            [formText(body, "line")],
-        );
-        return redirectWithToast(
-            c,
-            `/recipes/${recipeId}`,
-            checked.verified
-                ? "recipes.verify.passed"
-                : "recipes.unresolved.cleared",
-        );
-    } catch (err) {
-        if (err instanceof RecipeInputError) {
-            return redirectWithToast(c, "/recipes", "recipes.not_found");
-        }
-        throw err;
-    }
-});
-
-recipesRoutes.post("/recipes/:id/verify", requireMember, async (c) => {
-    const member = siteMember(c);
-    const recipeId = c.req.param("id");
-    try {
-        const checked = await recheckRecipe(
-            liveRecipesStore(),
-            member.householdId,
-            recipeId,
-        );
-        if (checked.verified) {
-            return redirectWithToast(
-                c,
-                `/recipes/${recipeId}`,
-                "recipes.verify.passed",
-            );
-        }
-        return redirectWithToast(
-            c,
-            `/recipes/${recipeId}`,
-            "recipes.verify.failed",
-            { count: String(checked.problems.length) },
-        );
-    } catch (err) {
-        if (err instanceof RecipeInputError) {
-            return redirectWithToast(c, "/recipes", "recipes.not_found");
-        }
-        throw err;
-    }
 });

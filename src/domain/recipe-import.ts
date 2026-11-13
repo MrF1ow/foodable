@@ -599,20 +599,6 @@ export function importOutcomeShowsPasteStep(
     return PASTE_STEP_STATUSES.has(status);
 }
 
-export function recipeDisplaySource(
-    recipe: Pick<Recipe, "sourceUrl">,
-    importRow: Pick<RecipeImport, "sourceKind" | "sourceUrl"> | null,
-): { kind: RecipeSourceKind; label: string; url: string } | null {
-    const url = safeSourceUrl(importRow?.sourceUrl ?? recipe.sourceUrl);
-    if (!url) return null;
-    const info = recipeSource(url);
-    return {
-        kind: importRow?.sourceKind ?? info.kind,
-        label: info.label,
-        url: url.href,
-    };
-}
-
 function normalizeImportText(text: string | null | undefined): string | null {
     const trimmed = text?.trim() ?? "";
     if (!trimmed) return null;

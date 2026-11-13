@@ -9,7 +9,6 @@ import {
     type DidYouMeanModal,
 } from "../../components/did-you-mean.js";
 import type { Notice } from "../../../domain/notices.js";
-import type { GroceryAllergenRetry } from "../grocery.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
 import {
     groceryRow,
@@ -23,7 +22,9 @@ import {
     iconChevronRight,
     iconPlus,
 } from "../../components/v2/icons.js";
-import type { GroceryLineView, GroceryStoreView } from "../grocery.js";
+import type { AlreadyHaveTag } from "../../../domain/linking.js";
+import type { StoreRule } from "../../../domain/rules.js";
+import type { GrocerySection, GroceryStore } from "../../../domain/settings.js";
 import { renderAppShell } from "../../shell.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 import { renderKitchenHead } from "./kitchen-head.js";
@@ -34,6 +35,31 @@ import {
     renderShareSheet,
     renderShareTrigger,
 } from "./share-sheet.js";
+
+export type GroceryLineView = GroceryLine & {
+    notices?: Notice[];
+    alreadyHave: AlreadyHaveTag | null;
+    lastLocationId?: string | null;
+    usualProductName?: string | null;
+    usualPickerHref?: string | null;
+    putAwayProducts?: Array<{ id: string; label: string }> | null;
+    putAwayProductId?: string | null;
+};
+
+export type GrocerySectionView = GrocerySection & {
+    lines: GroceryLineView[];
+};
+
+export type GroceryStoreView = GroceryStore & {
+    sections: GrocerySectionView[];
+    rules: StoreRule[];
+};
+
+/** Fields to replay on "Add anyway" after a blocking allergen warning. */
+export type GroceryAllergenRetry = {
+    storeId: string;
+    fields: Record<string, string>;
+};
 
 export const GROCERY_V2_RETURN_TO = "/kitchen/groceries";
 export const FD_GROCERY_PUT_AWAY_SHEET_ID = "fd-grocery-put-away";

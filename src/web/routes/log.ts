@@ -64,8 +64,12 @@ import {
     resolveWriteWeightUnit,
 } from "../../weight-write.js";
 import { toGrams as weightToGrams, isWeightUnit } from "../../domain/units.js";
-import { formAmount, formOptionalNumber, formText } from "../form.js";
-import { logWaterFromForm } from "../pages/nutrition.js";
+import {
+    formAmount,
+    formOptionalNumber,
+    formText,
+    logWaterFromForm,
+} from "../form.js";
 import { redirectWithToast } from "../components/toast.js";
 import { renderDashboardPage, weighInPrefillForUser } from "../loaders.js";
 import {
@@ -574,13 +578,7 @@ async function logSheetErrorPage(
     userId: string,
     sheet: LogSheetRerender,
 ): Promise<Response> {
-    const page = await renderDashboardPage(
-        userId,
-        undefined,
-        undefined,
-        undefined,
-        sheet,
-    );
+    const page = await renderDashboardPage(userId, undefined, undefined, sheet);
     return new Response(page.html, {
         status: page.status === 200 ? 400 : page.status,
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -595,17 +593,11 @@ async function logErrorPage(
 ): Promise<Response> {
     // The error shows inside the reopened amount sheet only, not as a second
     // page-level banner too.
-    const page = await renderDashboardPage(
-        userId,
-        undefined,
-        undefined,
-        undefined,
-        {
-            amountOpenOnLoad: true,
-            amountError: error,
-            amount: prefill,
-        },
-    );
+    const page = await renderDashboardPage(userId, undefined, undefined, {
+        amountOpenOnLoad: true,
+        amountError: error,
+        amount: prefill,
+    });
     return new Response(page.html, {
         status: page.status === 200 ? 400 : page.status,
         headers: { "content-type": "text/html; charset=utf-8" },

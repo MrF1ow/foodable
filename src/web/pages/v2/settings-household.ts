@@ -27,7 +27,7 @@ import {
     manageFill,
     memberActionsTemplate,
     renderHouseholdV2OwnerModals,
-} from "../household.js";
+} from "./settings-household-modals.js";
 import {
     DUP_MERGE_MODAL_ID,
     renderPossibleDuplicatesBlock,
@@ -302,15 +302,7 @@ export function renderSettingsHouseholdV2Body(
         { v2: true },
     );
 
-    const modals = renderHouseholdV2OwnerModals({
-        ...view,
-        location: "",
-        members: view.members,
-        stores: [],
-        memberRules: [],
-        unverifiedRecipeExpiryDays: null,
-        socialReaders: view.socialReaders,
-    });
+    const modals = renderHouseholdV2OwnerModals(view);
 
     const pluralsBlock = view.canManage
         ? pluralsSameFoodBlock(view)

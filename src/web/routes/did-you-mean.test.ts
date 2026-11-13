@@ -29,10 +29,7 @@ import {
 } from "../../domain/foods.js";
 import { addLocation, createMemoryFridgeStore } from "../../domain/fridge.js";
 import { createMemoryGroceryStore } from "../../domain/grocery.js";
-import {
-    createMemoryRecipesStore,
-    createRecipe,
-} from "../../domain/recipes.js";
+import { createMemoryRecipesStore } from "../../domain/recipes.js";
 import {
     createGroceryStore,
     createMemorySettingsStore,
@@ -70,7 +67,6 @@ const PROFILE: actualDbProfiles.Profile = {
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
     theme: "light",
-    nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
 };
@@ -536,164 +532,6 @@ describe("did-you-mean web forms", () => {
             }),
         });
         expect(tofu.status).toBe(303);
-    });
-
-    test("recipe ingredient manual add", async () => {
-        const eggs = await seedEggs();
-        const recipe = await createRecipe(db.recipesStore, {
-            householdId: HH,
-            creatorId: ALICE,
-            name: "Omelette",
-            yieldPortions: 1,
-        });
-        const path = `/recipes/${recipe.id}/ingredients`;
-        const base = {
-            food_name: "chicken egg",
-            qty_amount: "1",
-            qty_unit: "each",
-        };
-        const ask = await app().request(`http://x${path}`, {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formBody(base),
-        });
-        // The recipe page has no ingredient dialog to ask in, so the refusal
-        // is the status and nothing written.
-        expect(ask.status).toBe(409);
-        expect(await db.foodsStore.listFoods(HH)).toHaveLength(1);
-        expect(await db.recipesStore.listIngredients(HH, recipe.id)).toEqual(
-            [],
-        );
-
-        // new_food=1 before any alias exists: the flag alone creates the row.
-        const createNew = await app().request(`http://x${path}`, {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formBody({ ...base, new_food: "1" }),
-        });
-        expect(createNew.status).toBe(303);
-        const created = (await db.foodsStore.listFoods(HH)).find(
-            (f) => f.name === "chicken egg",
-        );
-        expect(created).toBeDefined();
-        const added = await db.recipesStore.listIngredients(HH, recipe.id);
-        expect(added).toHaveLength(1);
-        expect(added[0]!.foodId).toBe(created!.id);
-        await db.recipesStore.deleteIngredient(HH, added[0]!.id);
-        await archiveFoodNamed("chicken egg");
-
-        const pick = await app().request(`http://x${path}`, {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formBody({
-                ...base,
-                food_id: eggs.id,
-                alias_name: "chicken egg",
-            }),
-        });
-        expect(pick.status).toBe(303);
-        let ings = await db.recipesStore.listIngredients(HH, recipe.id);
-        expect(ings).toHaveLength(1);
-        expect(ings[0]!.foodId).toBe(eggs.id);
-        await db.recipesStore.deleteIngredient(HH, ings[0]!.id);
-
-        const remember = await app().request(`http://x${path}`, {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formBody({
-                ...base,
-                food_id: eggs.id,
-                alias_name: "chicken egg",
-                remember_alias: "1",
-            }),
-        });
-        expect(remember.status).toBe(303);
-        const direct = await app().request(`http://x${path}`, {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formBody(base),
-        });
-        expect(direct.status).toBe(303);
-
-        const newFood = await app().request(`http://x${path}`, {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formBody({ ...base, new_food: "1" }),
-        });
-        expect(newFood.status).toBe(303);
-
-        const tofu = await app().request(`http://x${path}`, {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formBody({
-                food_name: "tofu",
-                qty_amount: "50",
-                qty_unit: "g",
-            }),
-        });
-        expect(tofu.status).toBe(303);
-        ings = await db.recipesStore.listIngredients(HH, recipe.id);
-        const tofuFood = await findManualFood(
-            db.foodsStore,
-            HH,
-            "food",
-            "tofu",
-        );
-        expect(ings.some((row) => row.foodId === tofuFood?.id)).toBe(true);
-    });
-
-    test("recipe alias is not saved when ingredient add fails", async () => {
-        const eggs = await seedEggs();
-        const recipe = await createRecipe(db.recipesStore, {
-            householdId: HH,
-            creatorId: ALICE,
-            name: "Omelette",
-            yieldPortions: 1,
-        });
-        const path = `/recipes/${recipe.id}/ingredients`;
-        const fail = await app().request(`http://x${path}`, {
-            method: "POST",
-            headers: {
-                Cookie: cookieFor(ALICE),
-                "Content-Type": "application/x-www-form-urlencoded",
-            },
-            body: formBody({
-                food_id: eggs.id,
-                food_name: "chicken egg",
-                alias_name: "chicken egg",
-                remember_alias: "1",
-                qty_amount: "0",
-                qty_unit: "each",
-            }),
-        });
-        expect(fail.status).toBeGreaterThanOrEqual(400);
-        expect(fail.status).toBeLessThan(500);
-        const aliasMap = await db.foodsStore.listAllAliases(HH);
-        expect([...aliasMap.values()].flat()).not.toContain("chicken egg");
-        expect(
-            (await db.recipesStore.listIngredients(HH, recipe.id)).length,
-        ).toBe(0);
     });
 });
 

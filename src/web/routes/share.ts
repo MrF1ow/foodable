@@ -21,11 +21,7 @@ function shareQuery(c: { req: { query: (k: string) => string | undefined } }) {
 shareRoutes.get("/share", requireSiteUser, async (c) => {
     const share = shareQuery(c);
     const prefill = shareImportPrefill(share);
-    const page = await renderRecipesListPage(c.get("userId"), {
-        ...prefill,
-        shareArrived: share,
-        shareArrivedOpen: false,
-    });
+    const page = await renderRecipesListPage(c.get("userId"), prefill);
     return c.html(page.html, page.status);
 });
 

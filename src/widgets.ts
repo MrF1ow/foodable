@@ -469,13 +469,9 @@ export const APP_JS_SOURCES = [
     "./src/web/client/shell.js",
     "./src/web/client/toast.js",
     "./src/web/client/food-picker.js",
-    "./src/web/client/nutrition-log.js",
-    "./src/web/client/grocery.js",
-    "./src/web/client/usual-buy.js",
     // Before modal.js so a shared dialog is filled before focus moves.
     "./src/web/client/dialog-fill.js",
     "./src/web/client/modal.js",
-    "./src/web/client/arrange.js",
     "./src/web/client/copy-prompt.js",
     "./src/web/client/busy-submit.js",
     "./src/web/client/sw-register.js",

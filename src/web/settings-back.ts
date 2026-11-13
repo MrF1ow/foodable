@@ -124,8 +124,3 @@ export function settingsUrlWithBack(backHref: string): string {
     if (backHref === "/") return "/settings";
     return `/settings?from=${encodeURIComponent(backHref)}`;
 }
-
-export function householdSettingsUrlWithBack(backHref: string): string {
-    if (backHref === "/") return "/settings/household-settings";
-    return `/settings/household-settings?from=${encodeURIComponent(backHref)}`;
-}

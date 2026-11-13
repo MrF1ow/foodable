@@ -18,9 +18,9 @@ import {
     settingsErrorBanner,
     settingsPageHeader,
 } from "./settings-shared.js";
-import { FOODS_MERGE_MODAL_ID } from "../foods.js";
 import { selectMode } from "./select-mode.js";
 
+export const FOODS_MERGE_MODAL_ID = "foods-merge";
 export const SETTINGS_SAVED_MERGE_SHEET_ID = FOODS_MERGE_MODAL_ID;
 
 export function savedFoodDeleteSheetId(foodId: string): string {

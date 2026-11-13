@@ -2730,34 +2730,6 @@ export function foodHasNoNutrition(
     return !NUTRITION_BLOCK_KEYS.some((key) => food[key] != null);
 }
 
-export function suggestFoodFor(
-    productName: string,
-    foods: readonly Food[],
-): Food | null {
-    const productTokens = new Set(foodNameTokens(productName));
-    const productNorm = normalizeFoodName(productName);
-    const candidates: Food[] = [];
-    for (const food of foods) {
-        if (food.archivedAt) continue;
-        if (food.genericFoodId) continue;
-        if (normalizeFoodName(food.name) === productNorm) continue;
-        const tokens = foodNameTokens(food.name);
-        if (tokens.length === 0) continue;
-        if (!tokens.every((token) => productTokens.has(token))) continue;
-        candidates.push(food);
-    }
-    candidates.sort((a, b) => {
-        const aCount = foodNameTokens(a.name).length;
-        const bCount = foodNameTokens(b.name).length;
-        if (bCount !== aCount) return bCount - aCount;
-        if (a.name.length !== b.name.length) {
-            return a.name.length - b.name.length;
-        }
-        return a.name.localeCompare(b.name);
-    });
-    return candidates[0] ?? null;
-}
-
 export type UsualProductRow = {
     food: Food;
     products: Food[];
@@ -2807,24 +2779,6 @@ export function usualProductRows(input: {
     rows.sort((a, b) => byName(a.food, b.food));
     addable.sort(byName);
     return { rows, addable };
-}
-
-export function linkProductPromptPath(
-    product: Food,
-    foods: readonly Food[],
-    returnPath: string,
-): string | null {
-    if (product.genericFoodId) return null;
-    const plains = foods.filter(
-        (row) =>
-            !row.archivedAt &&
-            !row.genericFoodId &&
-            row.kind === product.kind &&
-            row.id !== product.id,
-    );
-    if (!suggestFoodFor(product.name, plains)) return null;
-    const sep = returnPath.includes("?") ? "&" : "?";
-    return `${returnPath}${sep}link_product=${encodeURIComponent(product.id)}`;
 }
 
 /** Build effective foods from an already-listed household catalog (no per-id loads). */

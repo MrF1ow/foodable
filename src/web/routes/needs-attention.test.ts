@@ -68,7 +68,6 @@ const PROFILE: actualDbProfiles.Profile = {
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
     theme: "light",
-    nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
 };
@@ -825,38 +824,6 @@ describe("needs-attention routes", () => {
         expect(freshAt).toBeGreaterThanOrEqual(0);
         expect(oldAt).toBeGreaterThanOrEqual(0);
         expect(freshAt).toBeLessThan(oldAt);
-    });
-
-    test("deleting a fridge location cleans dismissals for its items", async () => {
-        const loc = await addLocation(db.fridgeStore, HH, "Door");
-        const item = await addManualFood(db.fridgeStore, db.foodsStore, {
-            householdId: HH,
-            locationId: loc.id,
-            name: "Juice",
-            amount: 1,
-            unit: "g",
-        });
-        await db.dismissalsStore.insert({
-            householdId: HH,
-            code: "fridge.expiring",
-            subjectKind: "fridge_item",
-            subjectId: item.id,
-            relatedKey: "",
-            dismissedBy: ALICE,
-        });
-        await app().request(
-            `http://x/kitchen/fridge/locations/${loc.id}/delete`,
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "",
-            },
-        );
-        const rows = await db.dismissalsStore.listForHousehold(HH);
-        expect(rows.some((r) => r.subjectId === item.id)).toBe(false);
     });
 });
 

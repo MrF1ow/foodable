@@ -2,6 +2,7 @@ import { PRODUCT_DEFAULT_BACK } from "../pages/v2/product.js";
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
 import { legacyRedirects } from "../legacy-redirects.js";
+import { legacyRedirectTarget } from "../route-map.js";
 import * as actualDbFoods from "../../db/foods.js";
 import * as actualDbFridge from "../../db/fridge.js";
 import * as actualDbGrocery from "../../db/grocery.js";
@@ -83,7 +84,6 @@ const PROFILE: actualDbProfiles.Profile = {
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
     theme: "light",
-    nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
 };
@@ -343,7 +343,7 @@ beforeEach(() => {
     ];
 });
 
-describe("settings household routes", () => {
+describe("retired household preferences page", () => {
     function settingsApp() {
         const hono = new Hono();
         hono.route("/", householdRoutes);
@@ -351,57 +351,17 @@ describe("settings household routes", () => {
         return hono;
     }
 
-    beforeEach(() => {
+    test("GET /settings/household-settings is not a legacy redirect but lands on the household page", async () => {
+        expect(legacyRedirectTarget("/settings/household-settings")).toBeNull();
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+        );
+        expect(r.status).toBe(301);
+        expect(r.headers.get("location")).toBe("/settings/household");
+    });
+
+    test("POST /settings/household-settings is gone and writes nothing", async () => {
         db.configWrites = 0;
-        db.pluralsSameFood = false;
-        db.household = {
-            name: "Home",
-            recipeSearchPlaces: [],
-            preferences: {
-                ...EMPTY_HOUSEHOLD_PREFERENCES,
-                restock: { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" },
-            },
-        };
-    });
-
-    test("GET /settings/household-settings is not a legacy redirect", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            { headers: { cookie: cookieFor(ALICE) } },
-        );
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).toContain('aria-current="page">Household</a>');
-    });
-
-    test("member GET is read-only", async () => {
-        db.members = [
-            {
-                householdId: HH,
-                userId: ALICE,
-                role: "member",
-                displayName: "Alice",
-            },
-        ] as HouseholdMember[];
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            { headers: { cookie: cookieFor(ALICE) } },
-        );
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).not.toContain("<form");
-        expect(html).not.toContain('name="restock_enabled"');
-    });
-
-    test("member POST is forbidden", async () => {
-        db.members = [
-            {
-                householdId: HH,
-                userId: ALICE,
-                role: "member",
-                displayName: "Alice",
-            },
-        ] as HouseholdMember[];
         const r = await settingsApp().request(
             "http://x/settings/household-settings",
             {
@@ -410,140 +370,11 @@ describe("settings household routes", () => {
                     cookie: cookieFor(ALICE),
                     "content-type": "application/x-www-form-urlencoded",
                 },
-                body: "restock_enabled=true&restock_weekday=6&restock_time=07:00&timezone=",
+                body: "timezone=&restock_enabled=true&restock_weekday=3&restock_time=18:00",
             },
         );
-        expect(r.status).toBe(403);
+        expect(r.status).toBe(404);
         expect(db.configWrites).toBe(0);
-    });
-
-    test("owner save preserves lastRunOn", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "restock_enabled=true&restock_weekday=1&restock_time=08:00&timezone=Europe%2FKyiv&from=%2F",
-            },
-        );
-        expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/settings/household-settings");
-        expect(db.configWrites).toBe(1);
-        expect(db.household.preferences.restock.lastRunOn).toBe("2026-09-15");
-        expect(db.household.preferences.restock.enabled).toBe(true);
-        expect(db.household.preferences.timezone).toBe("Europe/Kyiv");
-    });
-
-    test("admin can save", async () => {
-        db.members = [
-            {
-                householdId: HH,
-                userId: ALICE,
-                role: "admin",
-                displayName: "Alice",
-            },
-        ] as HouseholdMember[];
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "restock_enabled=true&restock_weekday=0&restock_time=09:00&timezone=",
-            },
-        );
-        expect(r.status).toBe(303);
-        expect(db.configWrites).toBe(1);
-    });
-
-    test("invalid POST re-renders with error and does not write", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "timezone=&restock_enabled=true&restock_weekday=6&restock_time=24%3A00",
-            },
-        );
-        expect(r.status).toBe(400);
-        expect(db.configWrites).toBe(0);
-        const html = await r.text();
-        expect(html).toContain("Enter a time as HH:MM");
-        expect(html).toContain('value="24:00"');
-        // A time input would blank "24:00"; text keeps it visible and re-posted.
-        expect(html).toMatch(
-            /<input type="text" id="restock_time"[^>]*value="24:00"/,
-        );
-    });
-
-    test("blank or missing weekday POST returns 400 without write", async () => {
-        for (const body of [
-            "timezone=&restock_enabled=true&restock_time=07%3A00",
-            "timezone=&restock_enabled=true&restock_weekday=&restock_time=07%3A00",
-            "timezone=&restock_enabled=true&restock_weekday=%20%20&restock_time=07%3A00",
-        ]) {
-            db.configWrites = 0;
-            const r = await settingsApp().request(
-                "http://x/settings/household-settings",
-                {
-                    method: "POST",
-                    headers: {
-                        cookie: cookieFor(ALICE),
-                        "content-type": "application/x-www-form-urlencoded",
-                    },
-                    body,
-                },
-            );
-            expect(r.status).toBe(400);
-            expect(db.configWrites).toBe(0);
-            const html = await r.text();
-            expect(html).toContain("Pick a day from Sunday to Saturday");
-        }
-    });
-
-    test("invalid timezone POST keeps submitted timezone selected", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "timezone=Mars%2FPhobos&restock_enabled=true&restock_weekday=1&restock_time=07%3A00",
-            },
-        );
-        expect(r.status).toBe(400);
-        expect(db.configWrites).toBe(0);
-        const html = await r.text();
-        expect(html).toContain('value="Mars/Phobos" selected');
-    });
-
-    test("invalid weekday POST keeps submitted weekday selected, not Sunday", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "timezone=&restock_enabled=true&restock_weekday=9&restock_time=07%3A00",
-            },
-        );
-        expect(r.status).toBe(400);
-        expect(db.configWrites).toBe(0);
-        const html = await r.text();
-        expect(html).toContain('value="9" selected');
-        expect(html).not.toMatch(/value="0"[^>]*selected/);
     });
 });
 
@@ -793,137 +624,6 @@ describe("household usual products and items routes", () => {
         expect(plain?.usualProductId).toBeTruthy();
     });
 
-    test("POST link and unlink product", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-                brand: "Kirkland",
-            }),
-        );
-        const link = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&from=/settings/household/items`,
-        );
-        expect(link.status).toBe(303);
-        expect((await db.foodsStore.getFood(HH, solo.id))?.genericFoodId).toBe(
-            eggs.id,
-        );
-        const unlink = await post(
-            `/settings/household/items/${solo.id}/link`,
-            "food_id=&from=/settings/household/items",
-        );
-        expect(unlink.status).toBe(303);
-        expect(
-            (await db.foodsStore.getFood(HH, solo.id))?.genericFoodId,
-        ).toBeNull();
-    });
-
-    test("POST link with make_usual sets usual on plain food", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&make_usual=1&from=/settings/household/items`,
-        );
-        expect(r.status).toBe(303);
-        const plain = await db.foodsStore.getFood(HH, eggs.id);
-        expect(plain?.usualProductId).toBe(solo.id);
-    });
-
-    test("POST link validation error reopens prompt with fields on items", async () => {
-        await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${solo.id}&from=/settings/household/items`,
-        );
-        expect(r.status).toBe(400);
-        expect(await db.foodsStore.getFood(HH, solo.id)).toMatchObject({
-            genericFoodId: null,
-        });
-    });
-
-    test("POST link from recipe returns to recipe on success", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const recipe = await db.recipesStore.insertRecipe({
-            id: "r1",
-            householdId: HH,
-            creatorId: ALICE,
-            name: "Test",
-            yieldPortions: 1,
-            instructions: null,
-            prepMinutes: null,
-            cookMinutes: null,
-            sourceUrl: null,
-            tags: [],
-            notes: null,
-            verification: "verified",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-        });
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&from=/recipes/${recipe.id}`,
-        );
-        expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe(`/recipes/${recipe.id}`);
-    });
-
-    test("POST link rejects unsafe from and falls back to items", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&from=${encodeURIComponent("//evil.com")}`,
-        );
-        expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/settings/household/items");
-    });
-
-    test("POST link rejects https evil from and falls back to items", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&from=${encodeURIComponent("https://evil.com/x")}`,
-        );
-        expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/settings/household/items");
-    });
-
     test("POST items archive keeps nutrition and archives (v2 saved delete)", async () => {
         try {
             const store = db.foodsStore;
@@ -1138,60 +838,7 @@ describe("household usual products and items routes", () => {
         expect(await db.foodsStore.getFood(HH, eggs.id)).toEqual(before);
     });
 
-    test("POST link error from recipe reopens link prompt", async () => {
-        await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        await db.recipesStore.insertRecipe({
-            id: "r1",
-            householdId: HH,
-            creatorId: ALICE,
-            name: "Test",
-            yieldPortions: 1,
-            instructions: null,
-            prepMinutes: null,
-            cookMinutes: null,
-            sourceUrl: null,
-            tags: [],
-            notes: null,
-            verification: "verified",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-        });
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${solo.id}&from=/recipes/r1`,
-        );
-        expect(r.status).toBe(400);
-        expect(await db.foodsStore.getFood(HH, solo.id)).toMatchObject({
-            genericFoodId: null,
-        });
-    });
-
-    test("POST link error from fridge reopens link prompt", async () => {
-        await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${solo.id}&from=/kitchen/fridge`,
-        );
-        expect(r.status).toBe(400);
-        expect(await db.foodsStore.getFood(HH, solo.id)).toMatchObject({
-            genericFoodId: null,
-        });
-    });
-
-    test("fridge barcode create with plain match redirects with link_product", async () => {
+    test("fridge barcode create with a plain-food match goes back to the fridge with no link prompt", async () => {
         await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "Eggs" }),
         );
@@ -1223,7 +870,7 @@ describe("household usual products and items routes", () => {
             "kind=food&location_id=loc1&barcode=9990001112222&qty_amount=6&qty_unit=each",
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toMatch(/link_product=/);
+        expect(r.headers.get("location")).toBe("/kitchen/fridge");
     });
 
     test("fridge barcode create with no plain suggestion skips link_product", async () => {

@@ -68,7 +68,6 @@ mock.module("../../db/profiles.js", () => ({
         alcohol_tracking_enabled: false,
         preferred_drink_unit: null,
         theme: "light",
-        nutrition_layout: null,
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",
     }),
@@ -276,33 +275,36 @@ describe("GET /", () => {
         expect(res.status).toBe(403);
     });
 
-    test("v2 POST log-meal validation error shows page banner", async () => {
-        const res = await hono.request("http://test/log-meal", {
-            method: "POST",
-            headers: {
-                cookie: cookie(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "description=&meal_type=lunch",
-        });
-        expect(res.status).toBe(400);
-        const html = await res.text();
-        expect(html).toContain("fd-today-page");
-        expect(html).toContain("fd-settings-error");
-        expect(html).toContain("meal description");
+    test("the retired Nutrition page forms are gone: POST log-meal, log-water, log-weight and card layout answer 404", async () => {
+        for (const path of [
+            "/log-meal",
+            "/log-water",
+            "/log-weight",
+            "/nutrition/layout",
+        ]) {
+            const res = await hono.request(`http://test${path}`, {
+                method: "POST",
+                headers: {
+                    cookie: cookie(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "description=&meal_type=lunch",
+            });
+            expect(res.status).toBe(404);
+        }
+    });
+
+    test("a bookmarked /nutrition/layout lands on Today", async () => {
+        const res = await hono.request("http://test/nutrition/layout");
+        expect(res.status).toBe(301);
+        expect(res.headers.get("location")).toBe("/");
     });
 
     test("v2 log sheet validation error re-renders today with sheet open", async () => {
-        const page = await renderDashboardPage(
-            ALICE,
-            undefined,
-            undefined,
-            undefined,
-            {
-                amountOpenOnLoad: true,
-                amountError: "Enter a valid amount",
-            },
-        );
+        const page = await renderDashboardPage(ALICE, undefined, undefined, {
+            amountOpenOnLoad: true,
+            amountError: "Enter a valid amount",
+        });
         expect(page.html).toContain("fd-today-page");
         expect(page.html).toContain('id="fd-log-amount"');
         expect(page.html).toContain("Enter a valid amount");

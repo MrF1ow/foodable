@@ -1,6 +1,10 @@
 import type { AppChromeBase } from "../../attention.js";
-import { DRINK_UNITS, type DrinkUnit } from "../../../alcohol.js";
-import { WEIGHT_UNITS, type WeightUnit } from "../../../domain/units.js";
+import { DRINK_UNITS, isDrinkUnit, type DrinkUnit } from "../../../alcohol.js";
+import {
+    WEIGHT_UNITS,
+    isWeightUnit,
+    type WeightUnit,
+} from "../../../domain/units.js";
 import { esc } from "../../components/v2/html.js";
 import {
     renderSettingsV2Page,
@@ -21,6 +25,48 @@ export type SettingsAccountV2View = {
     drinkUnit: DrinkUnit | "";
     error?: string;
 };
+
+export type NutritionPrefsPatch = {
+    timezone?: string;
+    preferred_weight_unit?: WeightUnit | null;
+    widgets_enabled?: boolean;
+    alcohol_tracking_enabled?: boolean;
+    preferred_drink_unit?: DrinkUnit | null;
+};
+
+export function parseNutritionPrefsInput(input: {
+    timezone?: unknown;
+    preferred_weight_unit?: unknown;
+    widgets_enabled?: unknown;
+    alcohol_tracking_enabled?: unknown;
+    preferred_drink_unit?: unknown;
+}): NutritionPrefsPatch {
+    const patch: NutritionPrefsPatch = {};
+    if (typeof input.timezone === "string") {
+        patch.timezone = input.timezone.trim();
+    }
+    if (typeof input.preferred_weight_unit === "string") {
+        const unit = input.preferred_weight_unit.trim();
+        patch.preferred_weight_unit = isWeightUnit(unit) ? unit : null;
+    }
+    if (input.widgets_enabled !== undefined) {
+        patch.widgets_enabled =
+            input.widgets_enabled === "on" ||
+            input.widgets_enabled === "true" ||
+            input.widgets_enabled === true;
+    }
+    if (input.alcohol_tracking_enabled !== undefined) {
+        patch.alcohol_tracking_enabled =
+            input.alcohol_tracking_enabled === "on" ||
+            input.alcohol_tracking_enabled === "true" ||
+            input.alcohol_tracking_enabled === true;
+    }
+    if (typeof input.preferred_drink_unit === "string") {
+        const unit = input.preferred_drink_unit.trim();
+        patch.preferred_drink_unit = isDrinkUnit(unit) ? unit : null;
+    }
+    return patch;
+}
 
 function optionList(
     values: readonly string[],

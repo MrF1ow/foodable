@@ -4,14 +4,31 @@ import { APP_JS_SOURCES, getAppJs } from "./widgets.js";
 import { TOASTS } from "./copy/toasts.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
 import { renderAppShell } from "./web/shell.js";
-import { renderFridgePage } from "./web/pages/fridge.js";
-import { renderGroceryPage } from "./web/pages/grocery.js";
-import { renderNutritionPage } from "./web/pages/nutrition.js";
-import { renderRecipesPage } from "./web/pages/recipes.js";
-import type { HouseholdMember } from "./household.js";
-import { utcTodayFromDate } from "./domain/stock.js";
+import {
+    buildPreviewKitchenFridgeView,
+    renderKitchenFridgeV2Page,
+} from "./web/pages/v2/kitchen-fridge.js";
+import {
+    buildPreviewKitchenGroceriesView,
+    renderKitchenGroceriesV2Page,
+} from "./web/pages/v2/kitchen-groceries.js";
+import { renderRecipesListV2Page } from "./web/pages/v2/recipes-list.js";
+import {
+    buildPreviewTodayPageData,
+    renderTodayV2Page,
+} from "./web/pages/v2/today.js";
 
-const FRIDGE_PAGE_TODAY = utcTodayFromDate();
+const PAGE_CHROME = {
+    theme: "light" as const,
+    attention: { count: 0, tabs: {} },
+    flags: FIXTURE_APP_CHROME_FLAGS,
+    identity: {
+        viewerName: "Alice",
+        viewerRole: "owner" as const,
+        householdName: "Test household",
+        memberCount: 1,
+    },
+};
 
 // A bare tab page: the shell around one heading, with no tab content.
 function shellPage(
@@ -54,12 +71,8 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
         "./src/web/client/shell.js",
         "./src/web/client/toast.js",
         "./src/web/client/food-picker.js",
-        "./src/web/client/nutrition-log.js",
-        "./src/web/client/grocery.js",
-        "./src/web/client/usual-buy.js",
         "./src/web/client/dialog-fill.js",
         "./src/web/client/modal.js",
-        "./src/web/client/arrange.js",
         "./src/web/client/copy-prompt.js",
         "./src/web/client/busy-submit.js",
         "./src/web/client/sw-register.js",
@@ -67,8 +80,10 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     const js = await getAppJs();
     expect(js).toContain("Turbo");
     expect(js).toContain("FoodableApp.onLoad");
-    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(12);
+    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(8);
     expect(js).toContain("data-busy-form");
+    // The old bottom nav is gone with its click handler and login guard.
+    expect(js).not.toContain("nav.bottom-nav");
     for (const path of APP_JS_SOURCES) {
         let src = (await Bun.file(path).text()).trim();
         if (path.endsWith("shell.js")) {
@@ -146,134 +161,35 @@ test("getAppJs client IIFEs evaluate without ReferenceError when stubbed", async
     ).not.toThrow();
 });
 
-test("no app page HTML contains a script with a body except widget frames", async () => {
-    const fridge = renderFridgePage({
-        today: FRIDGE_PAGE_TODAY,
-        locations: [
-            {
-                id: "loc-1",
-                householdId: "hh-1",
-                name: "Pantry",
-                sortOrder: 0,
-            },
-            {
-                id: "loc-2",
-                householdId: "hh-1",
-                name: "Fridge",
-                sortOrder: 1,
-            },
-        ],
-        items: [],
-        chrome: {
-            theme: "light",
-            attention: { count: 0, tabs: {} },
-            flags: FIXTURE_APP_CHROME_FLAGS,
-        },
-    });
-    const grocery = renderGroceryPage({
-        chrome: {
-            theme: "light",
-            attention: { count: 0, tabs: {} },
-            flags: FIXTURE_APP_CHROME_FLAGS,
-        },
-        stores: [
-            {
-                id: "st-1",
-                householdId: "hh-1",
-                name: "Safeway",
-                sortOrder: 0,
-                rules: [],
-                sections: [
-                    {
-                        id: "sec-other",
-                        householdId: "hh-1",
-                        storeId: "st-1",
-                        name: "Other",
-                        sortOrder: 8,
-                        hidden: false,
-                        isOther: true,
-                        lines: [],
-                    },
-                ],
-            },
-        ],
-    });
-    const recipes = renderRecipesPage({
-        chrome: {
-            theme: "light",
-            attention: { count: 0, tabs: {} },
-            flags: FIXTURE_APP_CHROME_FLAGS,
-        },
-        recipes: [],
-        members: [],
-        viewerId: "11111111-1111-4111-8111-111111111111",
-    });
-    const member: HouseholdMember = {
-        householdId: "hh-1",
-        userId: "11111111-1111-4111-8111-111111111111",
-        role: "owner",
-        displayName: "Alice",
-    };
-    const nutrition = await renderNutritionPage({
-        access: {
-            ok: true,
-            mode: "self",
-            viewer: member,
-            subject: member,
-        },
-        members: [member],
-        summary: {},
-        goals: {},
-        trends: {},
-        weight: {},
-        chrome: {
-            theme: "light",
-            attention: { count: 0, tabs: {} },
-            flags: FIXTURE_APP_CHROME_FLAGS,
-        },
-        cardOrder: [
-            "nutrition-summary",
-            "goal-progress",
-            "trends",
-            "weight-trends",
-        ],
-    });
-    for (const html of [shellPage(), fridge, grocery, recipes, nutrition]) {
+test("no app page HTML contains a script with a body", () => {
+    const today = renderTodayV2Page(
+        buildPreviewTodayPageData(PAGE_CHROME as never, "2026-11-10"),
+    );
+    const fridge = renderKitchenFridgeV2Page(
+        buildPreviewKitchenFridgeView(PAGE_CHROME as never, "2026-11-10"),
+    );
+    const grocery = renderKitchenGroceriesV2Page(
+        buildPreviewKitchenGroceriesView(PAGE_CHROME as never),
+    );
+    const recipes = renderRecipesListV2Page({
+        chrome: PAGE_CHROME,
+        query: "",
+        filter: "",
+        totalCount: 0,
+        cards: [],
+    } as never);
+    for (const html of [shellPage(), today, fridge, grocery, recipes]) {
         expect(html).toMatch(
             /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
         );
         expect(scriptBodies(html)).toEqual([]);
     }
-    expect(nutrition).toContain("widget-frame");
-    expect(nutrition).not.toContain("srcdoc");
-    expect(nutrition).toContain('src="/app/widgets/');
-    expect(nutrition).not.toContain("&lt;script&gt;");
 });
 
-test("the Fridge page ships the picker logic once", async () => {
-    const html = renderFridgePage({
-        today: FRIDGE_PAGE_TODAY,
-        locations: [
-            {
-                id: "loc-1",
-                householdId: "hh-1",
-                name: "Pantry",
-                sortOrder: 0,
-            },
-            {
-                id: "loc-2",
-                householdId: "hh-1",
-                name: "Fridge",
-                sortOrder: 1,
-            },
-        ],
-        items: [],
-        chrome: {
-            theme: "light",
-            attention: { count: 0, tabs: {} },
-            flags: FIXTURE_APP_CHROME_FLAGS,
-        },
-    });
+test("the Groceries page ships the picker logic once", async () => {
+    const html = renderKitchenGroceriesV2Page(
+        buildPreviewKitchenGroceriesView(PAGE_CHROME as never),
+    );
     expect((html.match(/data-food-picker/g) ?? []).length).toBe(1);
     expect(html).not.toContain("/api/foods/search");
     const picker = (

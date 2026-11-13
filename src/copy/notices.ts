@@ -35,7 +35,6 @@ export type NoticeCopy = {
      * the dismissal's related key.
      */
     dismissScope?: (notice: Notice) => string;
-    badgeTone?: "bad" | "warn" | "dim";
 };
 
 export const ON_GROCERY_LIST_TEXT = "on the grocery list";
@@ -256,7 +255,6 @@ export function formatMissingNutrientList(
 export const NOTICE_COPY: Record<NoticeCode, NoticeCopy> = {
     "fridge.expired": {
         badge: "Expired",
-        badgeTone: "bad",
         sentence: fridgeExpiredSentence,
         action: {
             label: "Add to grocery list",

@@ -19,7 +19,6 @@ import {
 } from "../src/web/pages/v2/kitchen-groceries.js";
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
-import { viewerChromeFromProfile } from "../src/web/pages/nutrition.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
@@ -46,6 +45,7 @@ import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
+import { viewerChromeFromProfile } from "../src/web/shell.js";
 
 const OUT = "./tmp/app-preview";
 const PORT = 4791;

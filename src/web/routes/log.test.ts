@@ -216,7 +216,6 @@ mock.module("../../db/profiles.js", () => ({
                 widgets_enabled: true,
                 alcohol_tracking_enabled: false,
                 preferred_drink_unit: null,
-                nutrition_layout: null,
                 created_at: "2026-01-01T00:00:00.000Z",
                 updated_at: "2026-01-01T00:00:00.000Z",
             };
@@ -230,7 +229,6 @@ mock.module("../../db/profiles.js", () => ({
                 widgets_enabled: true,
                 alcohol_tracking_enabled: false,
                 preferred_drink_unit: null,
-                nutrition_layout: null,
                 created_at: "2026-01-01T00:00:00.000Z",
                 updated_at: "2026-01-01T00:00:00.000Z",
             };

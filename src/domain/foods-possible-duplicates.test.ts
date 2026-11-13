@@ -37,7 +37,7 @@ import { utcTodayFromDate } from "./stock.js";
 
 const NOTICE_TODAY = utcTodayFromDate();
 import { needsAttentionCount, tabDotsFromNotices } from "./notices.js";
-import { HELP_GLOSSARY_IDS } from "../web/pages/settings-help.js";
+import { HELP_GLOSSARY_IDS } from "../web/pages/v2/settings-help.js";
 
 function pairListed(
     pairs: readonly PossibleDuplicatePair[],

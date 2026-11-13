@@ -33,14 +33,12 @@ import {
     addAllergen,
     addDislike,
     addPersonRule,
-    addStoreRule,
     removePersonRuleRow,
     RulesInputError,
     type PersonRuleKind,
 } from "../../domain/rules.js";
 import {
     createGroceryStore,
-    renameSection,
     setHouseholdLocation,
     SettingsInputError,
 } from "../../domain/settings.js";
@@ -86,9 +84,6 @@ import {
 } from "../../domain/foods.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
 import {
-    renderFridgeInventoryPage,
-    renderGroceryListPage,
-    renderRecipeDetailRoute,
     renderUsualProductsListPage,
     renderPossibleDuplicatesRoute,
     renderSettingsSavedV2Route,
@@ -108,10 +103,12 @@ import {
     HOUSEHOLD_ADD_STORE_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
-} from "../pages/household.js";
+} from "../pages/v2/settings-household-modals.js";
 import { SOCIAL_READER_LABELS } from "../../copy/social-readers.js";
-import { FOODS_MERGE_MODAL_ID } from "../pages/foods.js";
-import { savedFoodDeleteSheetId } from "../pages/v2/settings-saved.js";
+import {
+    FOODS_MERGE_MODAL_ID,
+    savedFoodDeleteSheetId,
+} from "../pages/v2/settings-saved.js";
 import { DUP_MERGE_MODAL_ID } from "../pages/possible-duplicates.js";
 import { householdPersonRuleRemovedKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
@@ -411,77 +408,6 @@ householdRoutes.post(
         }
         // toast: none. The list shows the product is gone.
         return c.redirect(usualProductsPickerHref(foodId, from), 303);
-    },
-);
-
-async function linkProductFormError(
-    userId: string,
-    from: string | undefined,
-    err: unknown,
-) {
-    const message =
-        err instanceof FoodsInputError
-            ? err.message
-            : err instanceof Error
-              ? err.message
-              : "Could not link that food.";
-    const back = safeReturnPath(from, "/settings/household/items");
-    if (back.startsWith("/kitchen/groceries")) {
-        const page = await renderGroceryListPage(userId, {
-            error: message,
-        });
-        return { html: page.html, status: 400 as const };
-    }
-    if (back.startsWith("/kitchen/fridge")) {
-        const page = await renderFridgeInventoryPage(userId, message);
-        return { html: page.html, status: 400 as const };
-    }
-    if (back.startsWith("/recipes/")) {
-        const recipeId = back.slice("/recipes/".length).split("?")[0]!;
-        const page = await renderRecipeDetailRoute(userId, recipeId, {
-            error: message,
-        });
-        return { html: page.html, status: 400 as const };
-    }
-    const page = await renderSettingsSavedV2Route(userId, {
-        error: message,
-    });
-    return { html: page.html, status: 400 as const };
-}
-
-householdRoutes.post(
-    "/settings/household/items/:id/link",
-    requireMember,
-    async (c) => {
-        const userId = c.get("userId");
-        const member = siteMember(c);
-        const productId = c.req.param("id");
-        const body = await c.req.parseBody();
-        const from = formText(body, "from");
-        const plainRaw = formText(body, "food_id");
-        const plainId = plainRaw.trim() === "" ? null : plainRaw.trim();
-        const makeUsual = formText(body, "make_usual") === "1";
-        const store = liveFoodsStore();
-        try {
-            await linkProduct(store, member.householdId, productId, plainId);
-            if (makeUsual && plainId) {
-                await setUsualProduct(
-                    store,
-                    member.householdId,
-                    plainId,
-                    productId,
-                    { stores: liveSettingsStore() },
-                );
-            }
-        } catch (err) {
-            const page = await linkProductFormError(userId, from, err);
-            return c.html(page.html, page.status);
-        }
-        // toast: none (return path after link)
-        return c.redirect(
-            safeReturnPath(from, "/settings/household/items"),
-            303,
-        );
     },
 );
 
@@ -790,62 +716,6 @@ householdRoutes.post(
             c,
             "/settings/household",
             "settings.household.store.added",
-        );
-    },
-);
-
-householdRoutes.post(
-    "/settings/household/sections/:id",
-    requireManager,
-    async (c) => {
-        const userId = c.get("userId");
-        const manager = siteMember(c);
-        const body = await c.req.parseBody();
-        try {
-            await renameSection(
-                liveSettingsStore(),
-                manager.householdId,
-                c.req.param("id"),
-                formText(body, "name"),
-            );
-        } catch (err) {
-            const page = await householdFormError(userId, err);
-            return c.html(page.html, page.status);
-        }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.section.renamed",
-        );
-    },
-);
-
-householdRoutes.post(
-    "/settings/household/stores/:id/rules",
-    requireManager,
-    async (c) => {
-        const userId = c.get("userId");
-        const manager = siteMember(c);
-        const body = await c.req.parseBody();
-        const storeId = c.req.param("id");
-        try {
-            await addStoreRule(liveRulesStore(), {
-                householdId: manager.householdId,
-                storeId,
-                body: formText(body, "body"),
-            });
-        } catch (err) {
-            const page = await householdFormError(
-                userId,
-                err,
-                `household-store-rule-${storeId}`,
-            );
-            return c.html(page.html, page.status);
-        }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.store-rule.added",
         );
     },
 );

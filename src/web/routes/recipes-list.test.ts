@@ -99,7 +99,6 @@ const db = {
         alcohol_tracking_enabled: false,
         preferred_drink_unit: null,
         theme: "light",
-        nutrition_layout: null,
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",
     },
@@ -270,19 +269,6 @@ function recipesApp() {
     return hono;
 }
 
-function movementFingerprint(
-    rows: Awaited<ReturnType<typeof db.stockStore.listMovements>>,
-) {
-    return rows
-        .filter((row) => row.reason === "cook")
-        .map((row) => ({
-            foodId: row.foodId,
-            delta: row.delta,
-            unit: row.unit,
-            reason: row.reason,
-        }));
-}
-
 beforeEach(async () => {
     resetFlagsForTests();
     db.foodsStore = createMemoryFoodsStore();
@@ -374,18 +360,6 @@ function cookFormBodyFromHtml(html: string): string {
         if (selected) params.append(name, selected[1]!);
     }
     return params.toString();
-}
-
-async function restockFlour() {
-    const loc = await addLocation(db.fridgeStore, HH, "Pantry");
-    await addFridgeItemAdjust(db.fridgeStore, db.stockStore, db.foodsStore, {
-        householdId: HH,
-        foodId: db.flourId,
-        amount: 500,
-        unit: "g",
-        locationId: loc.id,
-        actorUserId: ALICE,
-    });
 }
 
 describe("renderRecipesListPage", () => {
@@ -546,50 +520,6 @@ async function flourLeft(): Promise<number> {
         .filter((i) => i.foodId === db.flourId)
         .reduce((sum, i) => sum + i.quantity.amount, 0);
 }
-
-describe("POST /recipes/:id/cook", () => {
-    test("the legacy cook route still cooks the same movements as the sheet's confirm", async () => {
-        const legacy = await recipesApp().request(
-            `http://x/recipes/${db.recipeId}/cook`,
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: new URLSearchParams({
-                    [`portion:${ALICE}`]: "2",
-                    meal_type: "dinner",
-                    deduct_stock: "1",
-                }).toString(),
-            },
-        );
-        expect(legacy.status).toBe(303);
-        const viaLegacy = movementFingerprint(
-            await db.stockStore.listMovements(HH),
-        );
-
-        db.fridgeStore = createMemoryFridgeStore();
-        db.stockStore = createMemoryStockStore();
-        db.foodsStore.linkRefs(db.stockStore);
-        await restockFlour();
-
-        const sheet = await postConfirm(
-            new URLSearchParams({
-                servings: "2",
-                meal_type: "dinner",
-                submit_key: "k",
-            }),
-        );
-        expect(sheet.status).toBe(303);
-        const viaSheet = movementFingerprint(
-            await db.stockStore.listMovements(HH),
-        );
-        expect(viaSheet).toEqual(viaLegacy);
-        expect(viaSheet.length).toBeGreaterThan(0);
-        expect(db.meals).toHaveLength(0);
-    });
-});
 
 describe("GET /recipes/:id/cook/preview", () => {
     function get(servings: string, cookie = cookieFor(ALICE)) {

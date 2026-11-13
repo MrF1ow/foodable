@@ -5,7 +5,6 @@ export const APP_PATHS = {
     recipes: "/recipes",
     settings: "/settings",
     settingsHelp: "/settings/help",
-    settingsHouseholdPrefs: "/settings/household-settings",
     needsAttention: "/needs-attention",
     createHousehold: "/create-household",
     share: "/share",
@@ -16,10 +15,6 @@ export const APP_PATHS = {
     settingsHouseholdItems: "/settings/household/items",
     settingsHouseholdPossibleDuplicates:
         "/settings/household/possible-duplicates",
-    logMeal: "/log-meal",
-    logWater: "/log-water",
-    logWeight: "/log-weight",
-    nutritionLayout: "/nutrition/layout",
     product: "/foods",
 } as const;
 

@@ -35,8 +35,6 @@ import * as actualNoticeDismissals from "../../db/notice-dismissals.js";
 import * as actualAttention from "../attention.js";
 import { createMemoryNoticeDismissalsStore } from "../../domain/notice-dismissals.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
-import { renderGroceryPage, type GroceryPageView } from "../pages/grocery.js";
-import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const HH = "hh-1";
@@ -67,16 +65,6 @@ let foodsStore = createMemoryFoodsStore();
 let fridgeStore = createMemoryFridgeStore();
 let stockStore = createMemoryStockStore();
 const today = "2026-11-10";
-
-const legacyGroceryHtml = renderGroceryPage({
-    chrome: {
-        theme: "light",
-        attention: { count: 0, tabs: {} },
-        flags: FIXTURE_APP_CHROME_FLAGS,
-    },
-    stores: [],
-    locations: [],
-} satisfies GroceryPageView);
 
 async function seedGroceryLines() {
     groceryStore = createMemoryGroceryStore();
@@ -150,7 +138,6 @@ mock.module("../../db/profiles.js", () => ({
         alcohol_tracking_enabled: false,
         preferred_drink_unit: null,
         theme: "light",
-        nutrition_layout: null,
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",
     }),
