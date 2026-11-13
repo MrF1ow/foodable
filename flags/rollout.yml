@@ -38,7 +38,7 @@ flags:
         default: false
         rules: []
     mcp-widgets-v2:
-        default: false
+        default: true
         rules: []
     widget-attention:
         default: false
