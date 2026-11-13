@@ -99,16 +99,14 @@ begin
         raise exception 'bootstrap_household still exists';
     end if;
 
-    if not exists (
+    if exists (
         select 1
         from information_schema.columns
         where table_schema = 'public'
           and table_name = 'profiles'
           and column_name = 'nutrition_layout'
-          and udt_name = '_text'
-          and is_nullable = 'YES'
     ) then
-        raise exception 'profiles.nutrition_layout missing or not nullable text[]';
+        raise exception 'profiles.nutrition_layout still exists';
     end if;
 
     if (select count(*) from auth.users) <>
