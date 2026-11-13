@@ -14,7 +14,7 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 
 - [ ] The Railway project has a **Postgres** service next to the app, with backups turned on.
 - [ ] `DATABASE_URL` on the app service is the reference `${{Postgres.DATABASE_URL}}`, so it uses the private network.
-- [ ] The app service's pre-deploy command is `bun run db:migrate`. The first deploy applies every migration in `db/migrations/` to the empty database.
+- [ ] The app service's pre-deploy command is `bun run db:migrate`, set by `.railway/railway.ts` once `railway config apply` has run. The first deploy applies every migration in `db/migrations/` to the empty database.
 - [ ] Moving data from an older database? Do it before anyone signs in, with a temporary TCP proxy on the Railway Postgres: `bun run db:import-postgres --from "$OLD_DATABASE_URL" --to "$RAILWAY_PROXY_URL" --check-only`, then the same without `--check-only`. Both databases must be at the same migration version and the target must be empty. Remove the proxy afterwards.
 - [ ] Before each later deploy that adds a migration: `bun run db:dryrun`, and for real data, `bun run db:dryrun --data prod-data.sql --pending-from <version>` (see [self-hosting.md](./self-hosting.md#upgrading-an-existing-deploy)).
 - [ ] No security-definer function in `public` is executable by a client role. Every row must be `f` / `f`:
