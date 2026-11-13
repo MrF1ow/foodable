@@ -216,7 +216,7 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
         // ---- fixtures read from disk
         {
             when: /^src\/domain\/fixtures\//,
-            tests: /^src\/(domain\/(recipe-text|recipe-import|recipe-jsonld|social-readers)|db\/recipes|mcp)\.test\.ts$/,
+            tests: /^src\/(domain\/(recipe-text|recipe-import|recipe-jsonld|recipe-mentions|social-readers)|db\/recipes|mcp)\.test\.ts$/,
         },
         {
             when: /^src\/domain\/__fixtures__\/off\//,
