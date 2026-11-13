@@ -121,6 +121,37 @@ describe("renderTrendsV2Page", () => {
         expect(html).toContain("fd-trends-bars-wrap");
     });
 
+    test("range picker labels are numbers only; 365 is the desktop-only fourth segment", () => {
+        const today = "2026-08-15";
+        const html = renderTrendsV2Page(
+            buildPreviewTrendsPageData(
+                {
+                    theme: "light",
+                    flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                    attention: { count: 0, tabs: {} },
+                },
+                fixtureDays(today),
+                goalsResolver(baseGoals, []),
+                [],
+                today,
+                "kg",
+            ),
+        );
+        const buttons = [
+            ...html.matchAll(
+                /<button[^>]*data-fd-trends-range="(\d+)"([^>]*)>([^<]*)<\/button>/g,
+            ),
+        ].map((m) => ({ range: m[1], attrs: m[2], label: m[3] }));
+        expect(buttons.map((b) => b.label)).toEqual(["7", "30", "90", "365"]);
+        expect(buttons.map((b) => b.range)).toEqual(["7", "30", "90", "365"]);
+        // Phone shows 7 · 30 · 90; only the 365 segment is desktop-only.
+        expect(html.match(/fd-seg-btn--desktop-only/g)?.length).toBe(1);
+        expect(html).toContain(
+            'class="fd-seg-btn fd-seg-btn--desktop-only" data-fd-trends-range="365"',
+        );
+        expect(html).toContain("How the last 30 days went");
+    });
+
     test("member subject label is shown when set", () => {
         const today = "2026-08-15";
         const data = buildPreviewTrendsPageData(

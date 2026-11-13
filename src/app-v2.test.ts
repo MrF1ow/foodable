@@ -116,6 +116,35 @@ describe("/app-v2.css", () => {
         }
     });
 
+    test("the Trends range picker is a compact pill with the year on desktop only", () => {
+        const css = readFileSync("./public/app/v2/trends.css", "utf8").replace(
+            /\/\*[\s\S]*?\*\//g,
+            "",
+        );
+        const at = css.indexOf(".fd-trends-page .fd-seg-btn {");
+        expect(at).toBeGreaterThanOrEqual(0);
+        const block = css.slice(at, css.indexOf("}", at));
+        expect(block).toMatch(/min-height:\s*0\b/);
+        expect(block).toMatch(/height:\s*24px/);
+        expect(css).toMatch(/\.fd-seg-btn--desktop-only\s*{\s*display:\s*none/);
+        // The year shows on the phone while it is the active range, so the
+        // pill never has no highlighted segment (?range=365).
+        expect(css).toMatch(
+            /\.fd-seg-btn--desktop-only\.fd-seg-btn--on[^{]*{\s*display:\s*inline-block/,
+        );
+        expect(css).toMatch(
+            /\.fd-seg-btn--desktop-only\[aria-pressed="true"\]\s*{\s*display:\s*inline-block/,
+        );
+        // Regular labels (the design's weight) and the overlay/shadow token.
+        expect(block).toMatch(/font:\s*400 12px/);
+        expect(css).toMatch(
+            /\.fd-trends-page \.fd-seg {[^}]*box-shadow:\s*0 4px 14px var\(--overlay-shadow\)/,
+        );
+        // The single desktop block stays last; no max-width queries.
+        expect(css.match(/@media \(min-width: 1024px\)/g)?.length).toBe(1);
+        expect(css).not.toMatch(/@media[^{]*max-width/);
+    });
+
     test("one breakpoint: a single 1024px media query", () => {
         const shell = readFileSync("./public/app/v2/shell.css", "utf8");
         expect(shell.match(/@media \(min-width: 1024px\)/g)?.length).toBe(1);
