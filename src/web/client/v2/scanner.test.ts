@@ -52,9 +52,11 @@ class FakeEl {
         }
         return null;
     }
-    setAttribute() {}
-    getAttribute() {
-        return null;
+    setAttribute(name: string, value: string) {
+        this.attrs[name] = value;
+    }
+    getAttribute(name: string) {
+        return this.attrs[name] ?? null;
     }
     closest() {
         return null;
@@ -499,5 +501,112 @@ describe("scanner without a BarcodeDetector global (iOS Safari)", () => {
         ctx.dialog.close();
         expect(video.srcObject).toBeNull();
         expect(ctx.tracks.every((t) => t.stopped)).toBe(true);
+    });
+});
+
+describe("scanner target", () => {
+    async function typeAndGo(
+        ctx: Awaited<ReturnType<typeof loadScannerModule>>,
+        digits: string,
+    ) {
+        ctx.dialog.typeInput.value = digits;
+        ctx.dialog.fire("click", {
+            preventDefault: () => {},
+            target: {
+                closest: (sel: string) =>
+                    sel === "[data-fd-scanner-submit]"
+                        ? ctx.dialog.submitBtn
+                        : null,
+            },
+        });
+        await flushPromises();
+    }
+
+    function openerClick(
+        ctx: Awaited<ReturnType<typeof loadScannerModule>>,
+        attrs: Record<string, string>,
+    ) {
+        const opener = {
+            getAttribute: (name: string) => attrs[name] ?? null,
+        };
+        for (const fn of ctx.docListeners.click ?? []) {
+            fn({
+                target: {
+                    closest: (sel: string) =>
+                        sel === "[data-fd-open-sheet]" ? opener : null,
+                },
+            });
+        }
+    }
+
+    test("goes to the product page by default", async () => {
+        const ctx = await loadScannerModule();
+        await typeAndGo(ctx, "0193968379117");
+        expect(ctx.assigns).toEqual(["/foods/by-barcode/0193968379117"]);
+    });
+
+    test("an opener's target applies to that open only", async () => {
+        const ctx = await loadScannerModule();
+        openerClick(ctx, {
+            "data-fd-open-sheet": "fd-barcode-scan",
+            "data-fd-scanner-target":
+                "/kitchen/usuals/add/barcode/{code}?store=st-1",
+        });
+        await typeAndGo(ctx, "0193968379117");
+        expect(ctx.assigns).toEqual([
+            "/kitchen/usuals/add/barcode/0193968379117?store=st-1",
+        ]);
+    });
+
+    test("closing the scanner drops an opener's target", async () => {
+        const ctx = await loadScannerModule();
+        openerClick(ctx, {
+            "data-fd-open-sheet": "fd-barcode-scan",
+            "data-fd-scanner-target": "/kitchen/usuals/add/barcode/{code}",
+        });
+        ctx.dialog.close();
+        await typeAndGo(ctx, "0193968379117");
+        expect(ctx.assigns).toEqual(["/foods/by-barcode/0193968379117"]);
+    });
+
+    test("another opener without a target resets to the default", async () => {
+        const ctx = await loadScannerModule();
+        openerClick(ctx, {
+            "data-fd-open-sheet": "fd-barcode-scan",
+            "data-fd-scanner-target": "/kitchen/usuals/add/barcode/{code}",
+        });
+        openerClick(ctx, { "data-fd-open-sheet": "fd-barcode-scan" });
+        await typeAndGo(ctx, "0193968379117");
+        expect(ctx.assigns).toEqual(["/foods/by-barcode/0193968379117"]);
+    });
+
+    test("an opener for some other sheet leaves the target alone", async () => {
+        const ctx = await loadScannerModule();
+        openerClick(ctx, {
+            "data-fd-open-sheet": "fd-barcode-scan",
+            "data-fd-scanner-target": "/kitchen/usuals/add/barcode/{code}",
+        });
+        openerClick(ctx, { "data-fd-open-sheet": "fd-log-search" });
+        await typeAndGo(ctx, "0193968379117");
+        expect(ctx.assigns).toEqual([
+            "/kitchen/usuals/add/barcode/0193968379117",
+        ]);
+    });
+
+    test("a target that is not a path on this site with {code} is ignored", async () => {
+        for (const bad of [
+            "https://evil.example/{code}",
+            "//evil.example/{code}",
+            "/kitchen/usuals/add/barcode/",
+            "javascript:alert({code})",
+        ]) {
+            const ctx = await loadScannerModule();
+            openerClick(ctx, {
+                "data-fd-open-sheet": "fd-barcode-scan",
+                "data-fd-scanner-target": bad,
+            });
+            await typeAndGo(ctx, "0193968379117");
+            expect(ctx.assigns).toEqual(["/foods/by-barcode/0193968379117"]);
+        }
     });
 });

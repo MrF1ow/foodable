@@ -406,11 +406,10 @@ test("manageRow without actions renders no empty actions slot; `after` stays ins
     expect(html).toEndWith(`<ul class="nested"></ul></li>`);
 });
 
-test("a selectable row carries a checkbox named after the item, in every variant", () => {
+test("a selectable row carries a checkbox named after the item, in every selectable variant", () => {
     const select = { name: "ids[]", value: "id-1", label: "Eggs" };
     const rows = [
         manageRow({ title: "Eggs", select }),
-        groceryRow({ title: "Eggs", select }),
         fridgeRow({ title: "Eggs", select }),
         usualRow({ title: "Eggs", select }),
     ];
@@ -425,36 +424,6 @@ test("a selectable row carries a checkbox named after the item, in every variant
             `<span class="fd-row__select-box" aria-hidden="true">`,
         );
     }
-});
-
-test("a grocery line keeps its tick in sight beside the box, and only a grocery line does", () => {
-    const select = { name: "ids[]", value: "id-1", label: "Eggs" };
-    const ticked = groceryRow({ title: "Eggs", checked: true, select });
-    expect(ticked).toContain(
-        `<span class="fd-check fd-check--on fd-row__select-state" role="img" aria-label="Already checked off">`,
-    );
-    const open = groceryRow({ title: "Eggs", select });
-    expect(open).toContain(
-        `<span class="fd-check fd-row__select-state" aria-hidden="true"></span>`,
-    );
-    expect(open).not.toContain("fd-check--on fd-row__select-state");
-    // The state follows the box, before the row's own lead.
-    expect(ticked.indexOf("fd-row__select-box")).toBeLessThan(
-        ticked.indexOf("fd-row__select-state"),
-    );
-    expect(ticked.indexOf("fd-row__select-state")).toBeLessThan(
-        ticked.indexOf("fd-row__lead"),
-    );
-    for (const row of [
-        manageRow({ title: "Eggs", select }),
-        fridgeRow({ title: "Eggs", select }),
-        usualRow({ title: "Eggs", select }),
-    ]) {
-        expect(row).not.toContain("fd-row__select-state");
-    }
-    expect(groceryRow({ title: "Eggs", checked: true })).not.toContain(
-        "fd-row__select-state",
-    );
 });
 
 test("the checkbox is the first thing inside the row body, so a nested list never moves it", () => {

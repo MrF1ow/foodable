@@ -3,21 +3,21 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { selectMode } from "./select-mode.js";
 
-const GROCERIES = selectMode({
-    scope: "groceries",
-    returnTo: "/kitchen/groceries?store=s1",
+const THINGS = selectMode({
+    scope: "things",
+    returnTo: "/kitchen/things?store=s1",
     actions: [
         {
             kind: "submit",
             key: "check",
             label: "Check off",
-            action: "/kitchen/groceries/bulk/check",
+            action: "/kitchen/things/bulk/check",
         },
         {
             kind: "confirm",
             key: "remove",
             label: "Delete",
-            action: "/kitchen/groceries/bulk/remove",
+            action: "/kitchen/things/bulk/remove",
             title: "Delete items",
             one: "Delete 1 item?",
             many: "Delete {n} items?",
@@ -27,20 +27,20 @@ const GROCERIES = selectMode({
 });
 
 test("the root attribute names the list the toggle and the rows belong to", () => {
-    expect(GROCERIES.rootAttrs).toBe(' data-fd-select="groceries"');
+    expect(THINGS.rootAttrs).toBe(' data-fd-select="things"');
 });
 
 test("the Select toggle is a plain button naming its list", () => {
-    expect(GROCERIES.toggle).toContain(`data-fd-select-toggle="groceries"`);
-    expect(GROCERIES.toggle).toContain(">Select</button>");
-    expect(GROCERIES.toggle).toContain('type="button"');
-    expect(GROCERIES.tools).toContain("fd-select-tools");
-    expect(GROCERIES.tools).toContain(GROCERIES.toggle);
+    expect(THINGS.toggle).toContain(`data-fd-select-toggle="things"`);
+    expect(THINGS.toggle).toContain(">Select</button>");
+    expect(THINGS.toggle).toContain('type="button"');
+    expect(THINGS.tools).toContain("fd-select-tools");
+    expect(THINGS.tools).toContain(THINGS.toggle);
 });
 
 test("the bar starts hidden with a live count, Cancel, and a disabled-until-picked action each", () => {
-    const bar = GROCERIES.bar;
-    expect(bar).toContain('data-fd-select-bar="groceries"');
+    const bar = THINGS.bar;
+    expect(bar).toContain('data-fd-select-bar="things"');
     expect(bar).toMatch(/<div class="fd-select-bar"[^>]* hidden>/);
     expect(bar).toContain('role="region"');
     expect(bar).toContain('aria-label="Selected items"');
@@ -55,36 +55,36 @@ test("the bar starts hidden with a live count, Cancel, and a disabled-until-pick
 
 test("a plain action posts its own form, which takes the picked ids when it is sent", () => {
     // The form is outside the rows; the client adds the picked ids on submit.
-    expect(GROCERIES.bar).toContain(
-        `<form id="fd-select-groceries-check" method="post" action="/kitchen/groceries/bulk/check" data-fd-select-form hidden><input type="hidden" name="return_to" value="/kitchen/groceries?store=s1"></form>`,
+    expect(THINGS.bar).toContain(
+        `<form id="fd-select-things-check" method="post" action="/kitchen/things/bulk/check" data-fd-select-form hidden><input type="hidden" name="return_to" value="/kitchen/things?store=s1"></form>`,
     );
-    expect(GROCERIES.bar).toContain(
-        `<button type="submit" class="fd-btn fd-btn--primary" form="fd-select-groceries-check" data-fd-select-action>Check off</button>`,
+    expect(THINGS.bar).toContain(
+        `<button type="submit" class="fd-btn fd-btn--primary" form="fd-select-things-check" data-fd-select-action>Check off</button>`,
     );
 });
 
 test("a confirm action opens a sheet that states the count, and its form takes the ids", () => {
-    expect(GROCERIES.bar).toContain(
-        `commandfor="fd-select-groceries-remove" command="show-modal"`,
+    expect(THINGS.bar).toContain(
+        `commandfor="fd-select-things-remove" command="show-modal"`,
     );
-    expect(GROCERIES.bar).toContain("data-fd-select-action");
-    const sheets = GROCERIES.sheets;
+    expect(THINGS.bar).toContain("data-fd-select-action");
+    const sheets = THINGS.sheets;
     expect(sheets).toContain(`<dialog class="fd-sheet fd-sheet--confirm`);
-    expect(sheets).toContain('id="fd-select-groceries-remove"');
+    expect(sheets).toContain('id="fd-select-things-remove"');
     expect(sheets).toContain(
         `<p class="fd-sheet-message" data-fd-select-message data-one="Delete 1 item?" data-many="Delete {n} items?">Delete the selected items?</p>`,
     );
     expect(sheets).toContain(
-        `<form id="fd-select-groceries-remove-form" method="post" action="/kitchen/groceries/bulk/remove" data-fd-select-form>`,
+        `<form id="fd-select-things-remove-form" method="post" action="/kitchen/things/bulk/remove" data-fd-select-form>`,
     );
     expect(sheets).toContain(
-        `<input type="hidden" name="return_to" value="/kitchen/groceries?store=s1">`,
+        `<input type="hidden" name="return_to" value="/kitchen/things?store=s1">`,
     );
     expect(sheets).toContain(
-        `<button type="button" class="fd-btn" command="close" commandfor="fd-select-groceries-remove">Cancel</button>`,
+        `<button type="button" class="fd-btn" command="close" commandfor="fd-select-things-remove">Cancel</button>`,
     );
     expect(sheets).toContain(
-        `<button type="submit" class="fd-btn fd-btn--danger" form="fd-select-groceries-remove-form">Delete</button>`,
+        `<button type="submit" class="fd-btn fd-btn--danger" form="fd-select-things-remove-form">Delete</button>`,
     );
 });
 
@@ -188,19 +188,6 @@ describe("select.css", () => {
         );
         expect(picked).toContain("background: var(--text-primary)");
         expect(picked).not.toContain("accent");
-    });
-
-    test("a grocery line's tick shows beside the box only while selecting", () => {
-        expect(rules).toMatch(
-            /\.fd-check\.fd-row__select-state\s*\{\s*display:\s*none;/,
-        );
-        expect(rules).toMatch(
-            /\[data-fd-selecting\] \.fd-check\.fd-row__select-state\s*\{\s*display:\s*block;/,
-        );
-        // The tick button itself still steps aside, so a tap only picks.
-        expect(rules).toMatch(
-            /\.fd-row--grocery\.fd-row--selectable\s*>\s*\.fd-row__body\s*>\s*\.fd-row__lead\s*\{\s*display:\s*none;/,
-        );
     });
 
     test("the box stays out of sight until the list is selecting", () => {

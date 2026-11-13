@@ -1,8 +1,7 @@
 import type { GrocerySnapshot } from "../../../domain/grocery.js";
 import { esc } from "../../components/v2/html.js";
 import { APP_PATHS } from "../../route-map.js";
-import { sheetTrigger } from "../../components/v2/sheet.js";
-import { renderKitchenHead } from "./kitchen-head.js";
+import { kitchenAddButton, renderKitchenHead } from "./kitchen-head.js";
 import {
     type GroceryLineView,
     type GroceryStoreView,
@@ -99,10 +98,9 @@ export function renderKitchenOverviewHead(
     itemCount: number,
     groceryOpenCount: number,
 ): string {
-    const add = sheetTrigger({
+    const add = kitchenAddButton({
         target: FD_FRIDGE_ADD_SHEET_ID,
         label: "Add item",
-        className: "fd-btn fd-btn--primary fd-kitchen-overview-add",
     });
     return renderKitchenHead({
         active: "fridge",
@@ -111,7 +109,7 @@ export function renderKitchenOverviewHead(
             itemCount,
             groceryOpenCount,
         ),
-        desktopTools: add,
+        desktopTools: add.desktop,
     });
 }
 

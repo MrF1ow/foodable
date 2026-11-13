@@ -11,9 +11,7 @@ import {
     bulkDeleteSavedItems,
     bulkDiscardFridgeItems,
     bulkLockKey,
-    bulkRemoveGroceryLines,
     bulkRemoveUsuals,
-    bulkTickOffGroceryLines,
     inBulkTransaction,
 } from "./bulk.js";
 import { liveFoodsStore } from "./foods.js";
@@ -24,11 +22,9 @@ import { setFallbackActorForTests } from "./actor.js";
 import { setSqlForTests } from "./sql.js";
 import { describeDb, householdOwnerActor } from "./testing/pg.js";
 import {
-    asUser,
     seedFood,
     seedFridgeItem,
     seedFridgeLocation,
-    seedGrocerySection,
     seedGroceryStore,
     seedHousehold,
 } from "./testing/fixtures.js";
@@ -51,234 +47,6 @@ describeDb(pgAvailable !== null, "bulk actions db", (getCtx) => {
     });
 
     afterEach(() => setSqlForTests(null));
-
-    async function seedLines(names: string[]): Promise<string[]> {
-        const storeId = await seedGroceryStore(sql, householdId);
-        const sectionId = await seedGrocerySection(sql, householdId, storeId);
-        const ids: string[] = [];
-        for (const name of names) {
-            const foodId = await seedFood(sql, householdId, { name });
-            const id = crypto.randomUUID();
-            await sql`
-                insert into public.grocery_lines (
-                    id, household_id, store_id, section_id, kind,
-                    display_name, amount, unit, food_id, checked
-                )
-                values (
-                    ${id}, ${householdId}, ${storeId}, ${sectionId}, ${"food"},
-                    ${name}, ${2}, ${"each"}, ${foodId}, ${false}
-                )
-            `;
-            ids.push(id);
-        }
-        return ids;
-    }
-
-    const checkedLines = async () =>
-        (
-            (await sql`
-                select display_name from public.grocery_lines
-                where household_id = ${householdId} and checked
-                order by display_name
-            `) as { display_name: string }[]
-        ).map((r) => r.display_name);
-
-    const lineCount = async () =>
-        Number(
-            (
-                await sql`
-                    select count(*)::int as n from public.grocery_lines
-                    where household_id = ${householdId}
-                `
-            )[0].n,
-        );
-
-    test("tick off checks every selected line and nothing else", async () => {
-        const [milk, eggs, bread] = await seedLines(["Milk", "Eggs", "Bread"]);
-        const result = await bulkTickOffGroceryLines({
-            householdId,
-            lineIds: [milk!, bread!],
-        });
-        expect(result).toEqual({ status: "applied", count: 2 });
-        expect(await checkedLines()).toEqual(["Bread", "Milk"]);
-        expect(eggs).toBeDefined();
-    });
-
-    test("tick off keeps the ticks when the restock stamp fails, as ticking each alone does", async () => {
-        const [milk, eggs] = await seedLines(["Milk", "Eggs"]);
-        await sql`
-            create function public.bulk_test_refuse_stamp() returns trigger
-            language plpgsql as $$
-            begin
-                raise exception 'stamp refused';
-            end $$
-        `;
-        await sql`
-            create trigger bulk_test_refuse_stamp
-            before update of last_restocked_on on public.foods
-            for each row execute function public.bulk_test_refuse_stamp()
-        `;
-        try {
-            const result = await bulkTickOffGroceryLines({
-                householdId,
-                lineIds: [milk!, eggs!],
-            });
-            expect(result).toEqual({ status: "applied", count: 2 });
-        } finally {
-            await sql`drop trigger bulk_test_refuse_stamp on public.foods`;
-            await sql`drop function public.bulk_test_refuse_stamp()`;
-        }
-        expect(await checkedLines()).toEqual(["Eggs", "Milk"]);
-        const stamped = await sql`
-            select name from public.foods
-            where household_id = ${householdId} and last_restocked_on is not null
-        `;
-        expect(stamped).toHaveLength(0);
-    });
-
-    test("tick off stamps the usual's restock day like ticking it alone", async () => {
-        const [milk] = await seedLines(["Milk"]);
-        await bulkTickOffGroceryLines({ householdId, lineIds: [milk!] });
-        const [food] = await sql`
-            select last_restocked_on from public.foods
-            where household_id = ${householdId} and name = ${"Milk"}
-        `;
-        expect(food.last_restocked_on).not.toBeNull();
-    });
-
-    test("tick off leaves the restock day of a line that was already ticked, and says already when nothing is left", async () => {
-        const [milk, eggs] = await seedLines(["Milk", "Eggs"]);
-        await sql`
-            update public.grocery_lines set checked = true where id = ${milk!}
-        `;
-        await sql`
-            update public.foods set last_restocked_on = ${"2026-01-02"}
-            where household_id = ${householdId} and name = ${"Milk"}
-        `;
-        const restockedOn = async (name: string) =>
-            (
-                (await sql`
-                    select last_restocked_on::text as d from public.foods
-                    where household_id = ${householdId} and name = ${name}
-                `) as { d: string | null }[]
-            )[0]!.d;
-        expect(
-            await bulkTickOffGroceryLines({
-                householdId,
-                lineIds: [milk!, eggs!],
-            }),
-        ).toEqual({ status: "applied", count: 1 });
-        expect(await restockedOn("Milk")).toBe("2026-01-02");
-        expect(await restockedOn("Eggs")).not.toBeNull();
-        expect(
-            await bulkTickOffGroceryLines({
-                householdId,
-                lineIds: [milk!, eggs!],
-            }),
-        ).toEqual({ status: "already", count: 0 });
-    });
-
-    test("a batch with one id that is not there writes nothing", async () => {
-        const [milk, eggs] = await seedLines(["Milk", "Eggs"]);
-        await expect(
-            bulkTickOffGroceryLines({
-                householdId,
-                lineIds: [milk!, eggs!, crypto.randomUUID()],
-            }),
-        ).rejects.toBeInstanceOf(BulkSelectionError);
-        expect(await checkedLines()).toEqual([]);
-        await expect(
-            bulkRemoveGroceryLines({
-                householdId,
-                lineIds: [milk!, crypto.randomUUID()],
-            }),
-        ).rejects.toBeInstanceOf(BulkSelectionError);
-        expect(await lineCount()).toBe(2);
-    });
-
-    test("a line of another household is never touched", async () => {
-        const [milk] = await seedLines(["Milk"]);
-        // Another household's line, seeded as the owner, hidden from this one.
-        const other = await seedHousehold(sql);
-        const storeId = await seedGroceryStore(sql, other.householdId);
-        const sectionId = await seedGrocerySection(
-            sql,
-            other.householdId,
-            storeId,
-        );
-        const foreignFood = await seedFood(sql, other.householdId, {
-            name: "Foil",
-        });
-        const foreign = crypto.randomUUID();
-        await sql`
-            insert into public.grocery_lines (
-                id, household_id, store_id, section_id, kind,
-                display_name, amount, unit, food_id, checked
-            )
-            values (
-                ${foreign}, ${other.householdId}, ${storeId}, ${sectionId},
-                ${"food"}, ${"Foil"}, ${1}, ${"roll"}, ${foreignFood}, ${false}
-            )
-        `;
-        // Two households are seeded, so say whose request this is.
-        const asMe = <T>(fn: () => Promise<T>) =>
-            asUser(userId, fn, householdId);
-        await expect(
-            asMe(() =>
-                bulkRemoveGroceryLines({
-                    householdId,
-                    lineIds: [milk!, foreign],
-                }),
-            ),
-        ).rejects.toBeInstanceOf(BulkSelectionError);
-        expect(
-            await asMe(() =>
-                bulkRemoveGroceryLines({
-                    householdId,
-                    lineIds: [foreign],
-                }),
-            ),
-        ).toEqual({ status: "already", count: 0 });
-        const [row] = await sql`
-            select count(*)::int as n from public.grocery_lines
-            where household_id = ${other.householdId}
-        `;
-        expect(row.n).toBe(1);
-        expect(await lineCount()).toBe(1);
-    });
-
-    test("remove deletes the selected lines and a repeat is a no-op", async () => {
-        const [milk, eggs, bread] = await seedLines(["Milk", "Eggs", "Bread"]);
-        const input = { householdId, lineIds: [milk!, eggs!] };
-        expect(await bulkRemoveGroceryLines(input)).toEqual({
-            status: "applied",
-            count: 2,
-        });
-        expect(await lineCount()).toBe(1);
-        expect(await bulkRemoveGroceryLines(input)).toEqual({
-            status: "already",
-            count: 0,
-        });
-        expect(await lineCount()).toBe(1);
-        expect(bread).toBeDefined();
-    });
-
-    test("two removes of the same lines at once delete them once", async () => {
-        const { pg, sql: owner } = getCtx();
-        const ids = await seedLines(["Milk", "Eggs"]);
-        const key = bulkLockKey(householdId, "grocery-remove");
-        // The holder takes the batch's lock first, so both submits queue
-        // behind it and then run one after the other.
-        const [a, b] = await raceOnUniqueKey({
-            url: pg.url,
-            restoreSql: owner,
-            blockInsert: (tx) =>
-                tx`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
-            run: () => bulkRemoveGroceryLines({ householdId, lineIds: ids }),
-        });
-        expect([a.status, b.status].sort()).toEqual(["already", "applied"]);
-        expect(await lineCount()).toBe(0);
-    });
 
     async function seedFridge(names: string[]) {
         const locationId = await seedFridgeLocation(sql, householdId);
@@ -375,6 +143,28 @@ describeDb(pgAvailable !== null, "bulk actions db", (getCtx) => {
             count: 0,
         });
         expect(await discardRows()).toHaveLength(1);
+    });
+
+    test("two discards of the same items at once discard them once", async () => {
+        const { pg, sql: owner } = getCtx();
+        const { items } = await seedFridge(["Yogurt", "Spinach"]);
+        const key = bulkLockKey(householdId, "fridge-discard");
+        // The holder takes the batch's lock first, so both submits queue
+        // behind it and then run one after the other.
+        const [a, b] = await raceOnUniqueKey({
+            url: pg.url,
+            restoreSql: owner,
+            blockInsert: (tx) =>
+                tx`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
+            run: () =>
+                bulkDiscardFridgeItems({
+                    householdId,
+                    itemIds: items,
+                    actorUserId: userId,
+                }),
+        });
+        expect([a.status, b.status].sort()).toEqual(["already", "applied"]);
+        expect(await discardRows()).toHaveLength(2);
     });
 
     async function seedUsual(name: string) {

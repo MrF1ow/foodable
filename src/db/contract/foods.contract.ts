@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
+import { removeUsuals } from "../../domain/bulk.js";
 import {
+    addUsualByHand,
+    addUsualFromProduct,
+    removeUsual,
+} from "../../domain/usual-add.js";
+import {
+    linkProduct,
     markUsualRestocked,
     mergeFoods,
     NO_USUAL_SCHEDULE,
+    removeProduct,
     setUsualPurchase,
     setUsualSchedule,
     updateFood,
+    usualProductRows,
     type Food,
     type FoodsStore,
     type MemoryFoodsStore,
@@ -834,6 +843,382 @@ export function runFoodsStoreContract(
             });
             expect(restored?.usualStoreId).toBe(c.storeId);
             expect(restored?.usualAmount).toEqual({ amount: 500, unit: "ml" });
+        });
+
+        describe("usual added by scan or by hand", () => {
+            const lookup = async (c: StoreContractCtx) => [{ id: c.storeId }];
+            const msOf = (iso: string | null | undefined) =>
+                iso == null ? null : new Date(iso).getTime();
+
+            test("usualAddedAt starts null and round trips through insert, read, list and update", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const plain = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "Plain",
+                        normalizedName: "plain",
+                    }),
+                );
+                expect(plain.usualAddedAt).toBeNull();
+                const stamp = "2026-11-13T12:34:56.000Z";
+                const saved = await store.updateFoodRow({
+                    ...plain,
+                    usualAddedAt: stamp,
+                });
+                expect(msOf(saved?.usualAddedAt)).toBe(msOf(stamp));
+                expect(
+                    msOf(
+                        (await store.getFood(c.householdId, plain.id))
+                            ?.usualAddedAt,
+                    ),
+                ).toBe(msOf(stamp));
+                expect(
+                    msOf(
+                        (await store.listFoods(c.householdId)).find(
+                            (f) => f.id === plain.id,
+                        )?.usualAddedAt,
+                    ),
+                ).toBe(msOf(stamp));
+                const cleared = await store.updateFoodRow({
+                    ...saved!,
+                    usualAddedAt: null,
+                });
+                expect(cleared?.usualAddedAt).toBeNull();
+                const inserted = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "Stamped",
+                        normalizedName: "stamped",
+                        usualAddedAt: stamp,
+                    }),
+                );
+                expect(msOf(inserted.usualAddedAt)).toBe(msOf(stamp));
+            });
+
+            test("a typed usual lists with no products and is not addable", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const typed = await addUsualByHand(store, c.householdId, {
+                    name: "Half & Half",
+                    basis: "per_serving",
+                    serving: { amount: 30, unit: "ml" },
+                    calories: 39,
+                    proteinG: 0.9,
+                    carbsG: 1.2,
+                    fatG: 3.3,
+                    purchase: {
+                        usualStoreId: c.storeId,
+                        usualAmount: { amount: 1, unit: "each" },
+                    },
+                    stores: { listStores: () => lookup(c) },
+                    createdBy: c.userId,
+                });
+                const read = (await store.getFood(c.householdId, typed.id))!;
+                expect(read).toMatchObject({
+                    nutritionBasis: "100ml",
+                    calories: 130,
+                    proteinG: 3,
+                    carbsG: 4,
+                    fatG: 11,
+                    nutritionSource: "manual",
+                    usualStoreId: c.storeId,
+                    usualAmount: { amount: 1, unit: "each" },
+                    serving: { amount: 30, unit: "ml" },
+                });
+                expect(read.usualAddedAt).not.toBeNull();
+                const { rows, addable } = usualProductRows({
+                    foods: await store.listFoods(c.householdId),
+                });
+                const row = rows.find((r) => r.food.id === typed.id);
+                expect(row?.products).toEqual([]);
+                expect(row?.usual).toBeNull();
+                expect(addable.map((f) => f.id)).not.toContain(typed.id);
+            });
+
+            test("by hand reuses an equal food, fills an empty one, and refuses different macros", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const stores = { listStores: () => lookup(c) };
+                const macros = {
+                    calories: 52,
+                    proteinG: 0.3,
+                    carbsG: 14,
+                    fatG: 0.2,
+                };
+                const empty = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "Fuji apple",
+                        normalizedName: "fuji apple",
+                    }),
+                );
+                const filled = await addUsualByHand(store, c.householdId, {
+                    name: "fuji  APPLE",
+                    basis: "per_100g",
+                    ...macros,
+                    stores,
+                });
+                expect(filled.id).toBe(empty.id);
+                expect(filled.calories).toBe(52);
+                expect(filled.nutritionBasis).toBe("100g");
+                const again = await addUsualByHand(store, c.householdId, {
+                    name: "Fuji apple",
+                    basis: "per_100g",
+                    ...macros,
+                    stores,
+                });
+                expect(again.id).toBe(empty.id);
+                await expect(
+                    addUsualByHand(store, c.householdId, {
+                        name: "Fuji apple",
+                        basis: "per_100g",
+                        ...macros,
+                        calories: 80,
+                        stores,
+                    }),
+                ).rejects.toThrow("Fuji apple");
+                expect(
+                    (await store.getFood(c.householdId, empty.id))?.calories,
+                ).toBe(52);
+            });
+
+            test("by hand attaches a barcode and refuses one another food holds", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const stores = { listStores: () => lookup(c) };
+                const macros = {
+                    calories: 100,
+                    proteinG: 1,
+                    carbsG: 2,
+                    fatG: 3,
+                };
+                const first = await addUsualByHand(store, c.householdId, {
+                    name: "Scanned miss",
+                    basis: "per_100g",
+                    ...macros,
+                    barcode: "0123456789012",
+                    stores,
+                });
+                expect(
+                    await store.listBarcodes(c.householdId, first.id),
+                ).toEqual(["0123456789012"]);
+                await expect(
+                    addUsualByHand(store, c.householdId, {
+                        name: "Another",
+                        basis: "per_100g",
+                        ...macros,
+                        barcode: "0123456789012",
+                        stores,
+                    }),
+                ).rejects.toThrow("Scanned miss");
+                expect(
+                    (await store.listFoods(c.householdId)).filter(
+                        (f) => f.name === "Another",
+                    ),
+                ).toHaveLength(0);
+            });
+
+            test("from a product links it, makes it usual, and Remove clears the stamp", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const stores = { listStores: () => lookup(c) };
+                const product = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "Horizon Milk",
+                        normalizedName: "horizon milk",
+                        brand: "Horizon",
+                    }),
+                );
+                const food = await addUsualFromProduct(store, c.householdId, {
+                    productId: product.id,
+                    newFoodName: "Milk",
+                    purchase: { usualStoreId: c.storeId },
+                    stores,
+                    createdBy: c.userId,
+                });
+                expect(food.name).toBe("Milk");
+                expect(food.usualProductId).toBe(product.id);
+                // The product makes it a usual: no stamp.
+                expect(food.usualAddedAt).toBeNull();
+                const linked = (await store.getFood(
+                    c.householdId,
+                    product.id,
+                ))!;
+                expect(linked.genericFoodId).toBe(food.id);
+                expect(linked.usualStoreId).toBe(c.storeId);
+                const again = await addUsualFromProduct(store, c.householdId, {
+                    productId: product.id,
+                    newFoodName: "milk",
+                    stores,
+                });
+                expect(again.id).toBe(food.id);
+                expect(again.usualAddedAt).toBeNull();
+                await removeUsual(store, c.householdId, food.id);
+                const after = (await store.getFood(c.householdId, food.id))!;
+                expect(after.usualAddedAt).toBeNull();
+                expect(after.usualProductId).toBeNull();
+                expect(
+                    (await store.getFood(c.householdId, product.id))
+                        ?.genericFoodId,
+                ).toBeNull();
+                expect(
+                    usualProductRows({
+                        foods: await store.listFoods(c.householdId),
+                    }).rows,
+                ).toEqual([]);
+            });
+
+            test("a typed usual's own barcode re-adds it, and losing a product leaves it listed", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const stores = { listStores: () => lookup(c) };
+                const typed = await addUsualByHand(store, c.householdId, {
+                    name: "Oat milk",
+                    basis: "per_100ml",
+                    calories: 45,
+                    proteinG: 1,
+                    carbsG: 6,
+                    fatG: 1.5,
+                    barcode: "0123456789012",
+                    stores,
+                });
+                await removeUsual(store, c.householdId, typed.id);
+                const owner = await store.getBarcodeFoodId(
+                    c.householdId,
+                    "0123456789012",
+                );
+                expect(owner).toBe(typed.id);
+                const again = await addUsualFromProduct(store, c.householdId, {
+                    productId: owner!,
+                    stores,
+                });
+                expect(again.id).toBe(typed.id);
+                expect(again.genericFoodId).toBeNull();
+                expect(again.usualAddedAt).not.toBeNull();
+                const product = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "Oatly",
+                        normalizedName: "oatly",
+                        brand: "Oatly",
+                    }),
+                );
+                await linkProduct(store, c.householdId, product.id, typed.id);
+                await removeProduct(store, c.householdId, typed.id, product.id);
+                const { rows } = usualProductRows({
+                    foods: await store.listFoods(c.householdId),
+                });
+                expect(rows.map((r) => r.food.id)).toEqual([typed.id]);
+                expect(rows[0]?.products).toEqual([]);
+            });
+
+            test("filing a stamped food under another drops its stamp, and removing the parent leaves nothing listed", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const stores = { listStores: () => lookup(c) };
+                const milk = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "Milk",
+                        normalizedName: "milk",
+                    }),
+                );
+                const oat = await addUsualByHand(store, c.householdId, {
+                    name: "Oat milk",
+                    basis: "per_100ml",
+                    calories: 45,
+                    proteinG: 1,
+                    carbsG: 6,
+                    fatG: 1.5,
+                    stores,
+                });
+                expect(oat.usualAddedAt).not.toBeNull();
+                const filed = await linkProduct(
+                    store,
+                    c.householdId,
+                    oat.id,
+                    milk.id,
+                );
+                expect(filed.usualAddedAt).toBeNull();
+                expect(filed.genericFoodId).toBe(milk.id);
+                const read = await store.getFood(c.householdId, oat.id);
+                expect(read?.usualAddedAt).toBeNull();
+                expect(read?.genericFoodId).toBe(milk.id);
+                await removeUsual(store, c.householdId, milk.id);
+                expect(
+                    usualProductRows({
+                        foods: await store.listFoods(c.householdId),
+                    }).rows,
+                ).toEqual([]);
+            });
+
+            test("re-filing a scanned product leaves no ghost usual behind", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const stores = { listStores: () => lookup(c) };
+                const milk = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "Milk",
+                        normalizedName: "milk",
+                    }),
+                );
+                const oat = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "Oat milk",
+                        normalizedName: "oat milk",
+                    }),
+                );
+                const product = await store.insertFood(
+                    sampleFood(c.householdId, {
+                        name: "Oatly Barista",
+                        normalizedName: "oatly barista",
+                        brand: "Oatly",
+                    }),
+                );
+                for (const foodId of [milk.id, oat.id]) {
+                    await addUsualFromProduct(store, c.householdId, {
+                        productId: product.id,
+                        foodId,
+                        stores,
+                    });
+                }
+                expect(
+                    (await store.getFood(c.householdId, milk.id))?.usualAddedAt,
+                ).toBeNull();
+                expect(
+                    usualProductRows({
+                        foods: await store.listFoods(c.householdId),
+                    }).rows.map((r) => r.food.id),
+                ).toEqual([oat.id]);
+            });
+
+            test("bulk remove clears a typed usual's stamp", async () => {
+                await reset();
+                const c = ctx();
+                const store = createStore();
+                const typed = await addUsualByHand(store, c.householdId, {
+                    name: "Typed one",
+                    basis: "per_100g",
+                    calories: 1,
+                    proteinG: 1,
+                    carbsG: 1,
+                    fatG: 1,
+                    stores: { listStores: () => lookup(c) },
+                });
+                const result = await removeUsuals(store, {
+                    householdId: c.householdId,
+                    foodIds: [typed.id],
+                });
+                expect(result).toEqual({ status: "applied", count: 1 });
+                expect(
+                    (await store.getFood(c.householdId, typed.id))
+                        ?.usualAddedAt,
+                ).toBeNull();
+            });
         });
 
         describe("restock schedule on the usual record", () => {

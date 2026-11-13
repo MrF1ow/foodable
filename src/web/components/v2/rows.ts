@@ -74,11 +74,6 @@ export type RowSelect = {
     value: string;
     /** What the box is named after: "Select <label>". */
     label: Text;
-    /**
-     * A state of the row's own that stays in sight while selecting, so the box
-     * does not have to carry it (a grocery line's tick). `on` fills it.
-     */
-    state?: { on: boolean };
 };
 
 type RowBase = {
@@ -110,12 +105,7 @@ function leadSlot(lead: RowLead | undefined): string {
 
 function selectBox(select: RowSelect | undefined): string {
     if (!select) return "";
-    const state = select.state
-        ? select.state.on
-            ? `<span class="fd-check fd-check--on fd-row__select-state" role="img" aria-label="Already checked off">${iconCheck()}</span>`
-            : `<span class="fd-check fd-row__select-state" aria-hidden="true"></span>`
-        : "";
-    return `<label class="fd-row__select"><input type="checkbox" class="fd-row__select-input" data-fd-select-item name="${esc(select.name)}" value="${esc(select.value)}" aria-label="Select ${esc(select.label)}"><span class="fd-row__select-box" aria-hidden="true">${iconCheck()}</span></label>${state}`;
+    return `<label class="fd-row__select"><input type="checkbox" class="fd-row__select-input" data-fd-select-item name="${esc(select.name)}" value="${esc(select.value)}" aria-label="Select ${esc(select.label)}"><span class="fd-row__select-box" aria-hidden="true">${iconCheck()}</span></label>`;
 }
 
 function swipeAction(action: SwipeAction, side: "lead" | "trail"): Html {
@@ -355,7 +345,7 @@ export function searchResultRow(
  * carries the POST form that flips it. A checked line is struck through.
  */
 export function groceryRow(
-    opts: RowBase & {
+    opts: Omit<RowBase, "select"> & {
         title: Text;
         /** 0–100 product score; omitted or non-finite shows no badge. */
         score?: number | null;
@@ -404,8 +394,6 @@ export function groceryRow(
     ]);
     return rowShell({
         ...opts,
-        // The tick keeps showing while selecting, beside the box.
-        select: opts.select && { ...opts.select, state: { on: checked } },
         variant: "grocery",
         extraClass: checked ? "fd-row--checked" : undefined,
         main,

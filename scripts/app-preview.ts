@@ -1040,6 +1040,7 @@ function food(
         usualStoreId: null,
         usualAmount: null,
         ...NO_USUAL_SCHEDULE,
+        usualAddedAt: null,
         createdBy: null,
         archivedAt: null,
         createdAt: "2026-10-01T00:00:00Z",

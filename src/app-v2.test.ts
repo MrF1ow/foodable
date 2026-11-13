@@ -168,7 +168,7 @@ describe("/app-v2.css", () => {
         );
         // Add and Share are absolutely placed beside the tabs: no fixed
         // negative margins pulling a row up into them.
-        const tools = css.indexOf(".fd-kitchen-fridge-top,");
+        const tools = css.indexOf(".fd-kitchen-fridge-top {");
         expect(css.slice(tools, css.indexOf("}", tools))).toMatch(
             /position:\s*absolute/,
         );
@@ -176,7 +176,7 @@ describe("/app-v2.css", () => {
         // Share is the same 34px circle as Add on the phone (icon only), so
         // it cannot cover the end of the Usuals tab on a narrow screen.
         expect(css).toMatch(
-            /\.fd-kitchen-grocery-tools \.fd-kitchen-grocery-share {[^}]*width:\s*34px/,
+            /\.fd-kitchen-fridge-top \.fd-kitchen-grocery-share {[^}]*width:\s*34px/,
         );
     });
 
@@ -276,7 +276,8 @@ describe("/app-v2.js", () => {
         // +~0.6 KB Log sheet: Add to groceries opens the Groceries add sheet.
         // +~6.2 KB Select mode: pick several rows on four lists, act once.
         // +~1.9 KB Sheets: a dialog opened over a sheet is not a tap on its backdrop.
-        expect(js.length).toBeLessThan(146_000);
+        // +~3.2 KB Add a usual: tabs, and the scanner taking a target per opener.
+        expect(js.length).toBeLessThan(151_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

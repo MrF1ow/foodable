@@ -466,6 +466,7 @@ function sampleRow(over: Partial<Food>): Food {
         usualStoreId: null,
         usualAmount: null,
         ...NO_USUAL_SCHEDULE,
+        usualAddedAt: null,
         offQuality: null,
         createdBy: null,
         archivedAt: null,

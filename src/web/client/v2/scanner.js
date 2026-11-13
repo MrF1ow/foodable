@@ -14,8 +14,23 @@ function digitsOnly(raw) {
     return String(raw ?? "").replace(/\D/g, "");
 }
 
+const DEFAULT_TARGET = "/foods/by-barcode/{code}";
+
+// Where a read code goes is a path template on this site with one `{code}`.
+// The log sheet's scanner keeps the default; an opener (Add a usual) names
+// another for the one open.
+function safeTarget(value) {
+    return typeof value === "string" &&
+        /^\/(?!\/)[\w\-./?=&%]*\{code\}[\w\-./?=&%]*$/.test(value)
+        ? value
+        : null;
+}
+
+let openerTarget = null;
+
 function barcodeUrl(code) {
-    return `/foods/by-barcode/${encodeURIComponent(code)}`;
+    const template = openerTarget ?? DEFAULT_TARGET;
+    return template.replace("{code}", () => encodeURIComponent(code));
 }
 
 function stopTracks(stream) {
@@ -425,6 +440,28 @@ async function startCamera(dialog) {
     loopDecode(dialog, session);
 }
 
+let openerTargetsBound = false;
+
+// An opener that names a target (data-fd-scanner-target) aims the scanner at
+// it for that open; any other opener of the scanner puts the default back.
+function bindOpenerTargets() {
+    if (openerTargetsBound) return;
+    openerTargetsBound = true;
+    document.addEventListener(
+        "click",
+        (event) => {
+            const opener = event.target?.closest?.("[data-fd-open-sheet]");
+            if (opener?.getAttribute("data-fd-open-sheet") !== SCANNER_ID) {
+                return;
+            }
+            openerTarget = safeTarget(
+                opener.getAttribute("data-fd-scanner-target"),
+            );
+        },
+        true,
+    );
+}
+
 function bindPageExitHooks() {
     if (pageExitHooksBound) return;
     pageExitHooksBound = true;
@@ -438,7 +475,9 @@ function bindScannerDialog(dialog) {
     if (dialog.dataset.fdScannerBound) return;
     dialog.dataset.fdScannerBound = "1";
     bindPageExitHooks();
+    bindOpenerTargets();
     dialog.addEventListener("close", () => {
+        openerTarget = null;
         stopSession();
         if (dialog.classList.contains("fd-scanner--type-only")) {
             showTypePanel(dialog, true);

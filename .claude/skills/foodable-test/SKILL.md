@@ -1,7 +1,7 @@
 ---
 name: foodable-test
 description: Run, start, verify, test, preview or screenshot Foodable safely - isolated local stack (Postgres plus server on its own ports), which verification tool fits which change, and what never to touch. Use before running the server, tests, check:nav, previews, the widget harness or e2e.
-updated: "dab46055ae980cebf1651e6767ed179526e048c0"
+updated: "e4f2f39c09b8a1110943c74b58d56618828370a4"
 watches:
     - package.json#scripts
     - docker-compose.yml
@@ -73,6 +73,9 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 - **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app` (household owner; `src/db/testing/pg.ts`). Needs `initdb` (PATH or `PG_BIN`), else skipped.
 - **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed": another run holds them; wait until `ss -ltn` shows both free). No database.
 - **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow: long `timeout`). Clear tmp/app-preview first. Without `--shots`: serves :4787 (`PREVIEW_PORT`). Per page: `-390.png` and `-1440.png`. Chromium; fixture data.
+- **WebKit (Safari-class checks):** Playwright's WPE `MiniBrowser` only starts through a wrapper that exports `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH` and `WEBKIT_INSPECTOR_RESOURCES_PATH` (its `bin`, `lib`, `share`), plus `WEBKIT_FORCE_COMPLEX_TEXT=1` and an `LD_LIBRARY_PATH` with its `lib` and `sys/lib` and an ICU 74 libs directory.
+- **Barcode scans against a running server** hit live Open Food Facts (no fixture on the server), so they need network; unit tests stub it.
+- **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
 - **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&v2=1&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. `bun --no-env-file test src/widgets.test.ts` guards assembly. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked (below).

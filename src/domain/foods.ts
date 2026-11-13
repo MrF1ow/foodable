@@ -103,6 +103,11 @@ export type Food = {
     restockLowLevel: number | null;
     /** `YYYY-MM-DD` of the last put-away or tick-off, in the household's day. */
     lastRestockedOn: string | null;
+    /**
+     * When a plain food was added to Usuals by hand. A plain food is a usual
+     * when it has live products or this is set; null keeps the old rule.
+     */
+    usualAddedAt: string | null;
     offQuality: FoodQuality | null;
     createdBy: string | null;
     archivedAt: string | null;
@@ -1334,6 +1339,7 @@ export function newFood(input: {
     restockWhenLow?: boolean;
     restockLowLevel?: number | null;
     lastRestockedOn?: string | null;
+    usualAddedAt?: string | null;
     offQuality?: FoodQuality | null;
     createdBy?: string | null;
 }): Food {
@@ -1378,6 +1384,7 @@ export function newFood(input: {
         restockWhenLow: input.restockWhenLow ?? false,
         restockLowLevel: input.restockLowLevel ?? null,
         lastRestockedOn: input.lastRestockedOn ?? null,
+        usualAddedAt: input.usualAddedAt ?? null,
         offQuality:
             input.offQuality == null ? null : copyQuality(input.offQuality),
         createdBy: input.createdBy ?? null,
@@ -1618,11 +1625,24 @@ async function findFoodByLooseKey(
     return copyFood(matches[0]!);
 }
 
+/**
+ * `nameMatch: false` keeps a scanned product from being folded into a food
+ * that merely goes by its name: a household barcode, the same Open Food Facts
+ * id, or a live row with the same name and brand (another pack size of the
+ * same product) reuses a row, anything else becomes a product row of its own.
+ * A branded product never merges into a plain food by name, but an unbranded
+ * hit named like a plain food is that food (the unique name index allows one
+ * row per name), so it binds to it. The default (match by name) is what the
+ * log sheet and the barcode page rely on.
+ */
+export type BarcodeFoodOptions = { nameMatch?: boolean };
+
 export async function findOrCreateFoodByBarcodeFromHit(
     store: FoodsStore,
     householdId: string,
     normalized: string,
     hit: FoodResult,
+    opts: BarcodeFoodOptions = {},
 ): Promise<{ food: Food; created: boolean }> {
     const existingId = await store.getBarcodeFoodId(householdId, normalized);
     if (existingId) {
@@ -1638,12 +1658,26 @@ export async function findOrCreateFoodByBarcodeFromHit(
         const food = await applyHitQualityToFood(store, byOff, hit);
         return { food, created: false };
     }
-    const byName = await existingByNameOrAlias(
-        store,
-        householdId,
-        "food",
-        normalizeFoodName(hit.name),
-    );
+    // A product row of its own never folds into a food that merely goes by its
+    // name, but the catalog still holds one live row per name and brand: the
+    // same product in another pack size reuses that row. An unbranded hit has
+    // no brand to tell it apart, so it matches by name like the default.
+    const brandedOwnRow =
+        opts.nameMatch === false && normalizeFoodBrand(hit.brand) != null;
+    const byName = brandedOwnRow
+        ? await findFoodByNameAndBrand(
+              store,
+              householdId,
+              "food",
+              hit.name,
+              hit.brand,
+          )
+        : await existingByNameOrAlias(
+              store,
+              householdId,
+              "food",
+              normalizeFoodName(hit.name),
+          );
     if (byName) {
         await store.setBarcode(householdId, normalized, byName.id);
         const food = await applyHitQualityToFood(store, byName, hit);
@@ -1676,6 +1710,7 @@ export async function findOrCreateFoodByBarcodeResult(
     householdId: string,
     barcode: string,
     lookup: (barcode: string) => Promise<FoodResult | null>,
+    opts: BarcodeFoodOptions = {},
 ): Promise<{ food: Food; created: boolean }> {
     const normalized = normalizeBarcode(barcode);
     if (!normalized) throw new FoodsInputError("Enter a valid barcode.");
@@ -1746,6 +1781,7 @@ export async function findOrCreateFoodByBarcodeResult(
         householdId,
         normalized,
         hit,
+        opts,
     );
 }
 
@@ -2026,6 +2062,7 @@ export type MergedFoodFieldPick = Pick<
     | "allergens"
     | "usualStoreId"
     | "usualAmount"
+    | "usualAddedAt"
     | UsualScheduleKey
     | "offQuality"
     | "offNutrientLevels"
@@ -2069,17 +2106,22 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
                   ? { ...drop.usualAmount }
                   : null,
         ...mergedUsualSchedule(keep, drop),
+        usualAddedAt: keep.usualAddedAt ?? drop.usualAddedAt,
         offQuality: mergeOffQuality(keep.offQuality, drop.offQuality),
         offNutrientLevels: keep.offNutrientLevels ?? drop.offNutrientLevels,
     };
 }
 
-type UsualRow = Pick<Food, "genericFoodId" | "usualProductId" | "archivedAt">;
+type UsualRow = Pick<
+    Food,
+    "genericFoodId" | "usualProductId" | "archivedAt"
+> & { usualAddedAt?: string | null };
 
 /**
  * Whether a grocery line is the household's usual product for its food: the
  * line's food is the usual product itself, or a generic whose effective
- * product is. The usual lives on the generic food. An archived row (the line's
+ * product is, or a plain food that is a usual with no product (typed in, or
+ * scanned as itself: `usualAddedAt`). The usual lives on the generic food. An archived row (the line's
  * food or its generic) records no usual, so an archived generic never makes a
  * line usual.
  */
@@ -2098,6 +2140,7 @@ export function isUsualGroceryLine(input: {
     const generic = food?.genericFoodId
         ? live(input.genericOf(food.genericFoodId))
         : food;
+    if (food && !food.genericFoodId && food.usualAddedAt != null) return true;
     const usualProductId = generic?.usualProductId ?? null;
     return (
         usualProductId != null &&
@@ -2737,11 +2780,13 @@ export type UsualProductRow = {
 };
 
 /**
- * The Usual products page: every live plain food that has at least one live
- * product, sorted by name, with its usual product when one is set. A
- * household starts with an empty list and adds to it; nothing is listed just
- * because a recipe or grocery line uses it. `addable` is every other live
- * plain food, the choices behind "Add usual product".
+ * The Usual products page: every live plain food that is a usual, sorted by
+ * name, with its usual product when one is set. A plain food is a usual when
+ * it has at least one live product or was added to Usuals by hand
+ * (`usualAddedAt`); the latter lists with `products: []` and `usual: null`.
+ * A household starts with an empty list and adds to it; nothing is listed
+ * just because a recipe or grocery line uses it. `addable` is every other
+ * live plain food, the choices behind "Add usual product".
  */
 export function usualProductRows(input: {
     foods: readonly Food[];
@@ -2766,6 +2811,10 @@ export function usualProductRows(input: {
     for (const food of plainFoods) {
         const products = (productsByPlain.get(food.id) ?? []).sort(byName);
         if (products.length === 0) {
+            if (food.usualAddedAt != null) {
+                rows.push({ food, products: [], usual: null });
+                continue;
+            }
             if (barcoded.has(food.id) || food.offSourceId) continue;
             addable.push(food);
             continue;
@@ -2915,7 +2964,16 @@ export async function linkProduct(
     }
     assertPlainFoodTarget(food);
     assertSameKindLiveNotSelf(product, food, productId, foodId);
-    if (product.genericFoodId === foodId) return product;
+    // A product is never a usual by itself: filing a food under another drops
+    // its own added-to-Usuals stamp, or it would reappear on Usuals when the
+    // food it now belongs to is removed.
+    const filed =
+        product.usualAddedAt != null
+            ? { ...product, usualAddedAt: null }
+            : product;
+    if (product.genericFoodId === foodId) {
+        return filed === product ? product : saveFood(store, filed);
+    }
     if (product.genericFoodId && product.genericFoodId !== foodId) {
         const oldPlain = await store.getFood(
             householdId,
@@ -2928,7 +2986,7 @@ export async function linkProduct(
             });
         }
     }
-    return saveFood(store, { ...product, genericFoodId: foodId });
+    return saveFood(store, { ...filed, genericFoodId: foodId });
 }
 
 export async function setUsualPurchase(
@@ -3718,6 +3776,8 @@ export async function mergeFoods(
         ...mergedFields,
         genericFoodId: mergedGenericId,
         usualProductId: mergedUsualId,
+        // A food filed under another is a product, never a usual by itself.
+        usualAddedAt: mergedGenericId ? null : mergedFields.usualAddedAt,
         usualStoreId: mergedFields.usualStoreId,
         usualAmount:
             mergedFields.usualAmount == null
@@ -4197,6 +4257,7 @@ export function duplicatePairs(
                 ...mergedFields,
                 usualProductId: nextUsual,
                 genericFoodId: nextGeneric,
+                usualAddedAt: nextGeneric ? null : mergedFields.usualAddedAt,
             };
 
             const fieldsFilled = fieldsFilledKeys(state, drop, mergedFields);
@@ -4892,6 +4953,11 @@ function servingFromRow(row: {
     return { label, amount, unit };
 }
 
+function timestampFromRow(value: unknown): string | null {
+    if (value instanceof Date) return value.toISOString();
+    return typeof value === "string" && value ? value : null;
+}
+
 export function foodFromRow(row: {
     id: unknown;
     household_id: unknown;
@@ -4930,6 +4996,7 @@ export function foodFromRow(row: {
     restock_when_low?: unknown;
     restock_low_level?: unknown;
     last_restocked_on?: unknown;
+    usual_added_at?: unknown;
     nutriscore_grade?: unknown;
     nova_group?: unknown;
     ecoscore_grade?: unknown;
@@ -5019,6 +5086,7 @@ export function foodFromRow(row: {
                 : null,
         usualAmount,
         ...usualScheduleFromRow(row),
+        usualAddedAt: timestampFromRow(row.usual_added_at),
         offQuality: offQualityFromRow({
             nutriscore_grade: row.nutriscore_grade ?? null,
             nova_group: row.nova_group ?? null,
@@ -5082,6 +5150,7 @@ export function foodToRow(row: Food) {
         restock_when_low: row.restockWhenLow,
         restock_low_level: row.restockLowLevel,
         last_restocked_on: row.lastRestockedOn,
+        usual_added_at: row.usualAddedAt,
         ...offQualityToRowFields(row.offQuality),
         created_by: row.createdBy,
         archived_at: row.archivedAt,

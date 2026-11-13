@@ -5,9 +5,7 @@ import {
     deleteSavedItems,
     discardFridgeItems,
     parseBulkIds,
-    removeGroceryLines,
     removeUsuals,
-    tickOffGroceryLines,
 } from "./bulk.js";
 import { isUsualFood } from "./restock.js";
 import {
@@ -43,29 +41,6 @@ import {
 const HH = "hh-1";
 const TODAY = "2026-11-13";
 
-async function groceryWith(names: string[]) {
-    const grocery = createMemoryGroceryStore();
-    const foods = createMemoryFoodsStore();
-    const settings = createMemorySettingsStore();
-    const store = await createGroceryStore(settings, HH, "Safeway");
-    const sections = await settings.listSections(store.id);
-    const other = sections.find((row) => row.isOther)!;
-    const lines = [];
-    for (const name of names) {
-        lines.push(
-            await addGroceryManualFood(grocery, settings, foods, {
-                householdId: HH,
-                storeId: store.id,
-                sectionId: other.id,
-                name,
-                amount: 2,
-                unit: "each",
-            }),
-        );
-    }
-    return { grocery, foods, lines };
-}
-
 async function fridgeWith(names: string[]) {
     const fridge = createMemoryFridgeStore();
     const stock = createMemoryStockStore();
@@ -88,9 +63,6 @@ async function fridgeWith(names: string[]) {
     return { fridge, stock, foods, items, made };
 }
 
-const lineOf = async (grocery: GroceryListStore, id: string) =>
-    (await grocery.listLines(HH)).find((row) => row.id === id);
-
 test("parseBulkIds keeps each uuid once and refuses anything else", () => {
     const a = crypto.randomUUID();
     const b = crypto.randomUUID();
@@ -109,158 +81,6 @@ test("parseBulkIds keeps each uuid once and refuses anything else", () => {
     expect(parseBulkIds(many.slice(0, BULK_MAX_IDS))).toHaveLength(
         BULK_MAX_IDS,
     );
-});
-
-test("tickOffGroceryLines ticks every selected line and leaves the others", async () => {
-    const { grocery, foods, lines } = await groceryWith([
-        "Milk",
-        "Eggs",
-        "Bread",
-    ]);
-    const result = await tickOffGroceryLines(grocery, foods, {
-        householdId: HH,
-        lineIds: [lines[0]!.id, lines[2]!.id],
-        today: TODAY,
-    });
-    expect(result).toEqual({ status: "applied", count: 2 });
-    expect((await lineOf(grocery, lines[0]!.id))?.checked).toBe(true);
-    expect((await lineOf(grocery, lines[1]!.id))?.checked).toBe(false);
-    expect((await lineOf(grocery, lines[2]!.id))?.checked).toBe(true);
-});
-
-test("tickOffGroceryLines stamps a usual's restock day like ticking it alone", async () => {
-    const { grocery, foods, lines } = await groceryWith(["Milk"]);
-    const milk = (await foods.listFoods(HH)).find((f) => f.name === "Milk")!;
-    expect(milk.lastRestockedOn ?? null).toBeNull();
-    await tickOffGroceryLines(grocery, foods, {
-        householdId: HH,
-        lineIds: [lines[0]!.id],
-        today: TODAY,
-    });
-    const after = await foods.getFood(HH, milk.id);
-    expect(after?.lastRestockedOn).toBe(TODAY);
-});
-
-test("tickOffGroceryLines runs each restock stamp through isolate and keeps the tick when the stamp fails", async () => {
-    const { grocery, foods, lines } = await groceryWith(["Milk", "Eggs"]);
-    let isolated = 0;
-    const errors = spyOn(console, "error").mockImplementation(() => {});
-    try {
-        const result = await tickOffGroceryLines(grocery, foods, {
-            householdId: HH,
-            lineIds: lines.map((l) => l.id),
-            today: TODAY,
-            isolate: async (work) => {
-                isolated += 1;
-                await work();
-                throw new Error("stamp refused");
-            },
-        });
-        expect(result).toEqual({ status: "applied", count: 2 });
-        expect(errors).toHaveBeenCalledTimes(2);
-    } finally {
-        errors.mockRestore();
-    }
-    expect(isolated).toBe(2);
-    for (const line of lines) {
-        expect((await lineOf(grocery, line.id))?.checked).toBe(true);
-    }
-});
-
-test("tickOffGroceryLines on lines that are already ticked says already and writes nothing", async () => {
-    // A tick leaves the line on the list, so select mode can pick it again. A
-    // replay has nothing left to do, like the other bulk actions.
-    const { grocery, foods, lines } = await groceryWith(["Milk"]);
-    const input = {
-        householdId: HH,
-        lineIds: [lines[0]!.id],
-        today: TODAY,
-    };
-    await tickOffGroceryLines(grocery, foods, input);
-    expect(await tickOffGroceryLines(grocery, foods, input)).toEqual({
-        status: "already",
-        count: 0,
-    });
-    expect((await lineOf(grocery, lines[0]!.id))?.checked).toBe(true);
-});
-
-test("tickOffGroceryLines leaves the restock day of a line that was already ticked", async () => {
-    const { grocery, foods, lines } = await groceryWith(["Milk", "Eggs"]);
-    const foodOf = async (name: string) =>
-        (await foods.listFoods(HH)).find((f) => f.name === name)!;
-    // Milk was bought on Monday, ticked the ordinary way.
-    await tickOffGroceryLines(grocery, foods, {
-        householdId: HH,
-        lineIds: [lines[0]!.id],
-        today: "2026-11-09",
-    });
-    // On Friday the person selects both rows and checks off.
-    const result = await tickOffGroceryLines(grocery, foods, {
-        householdId: HH,
-        lineIds: [lines[0]!.id, lines[1]!.id],
-        today: TODAY,
-    });
-    expect(result).toEqual({ status: "applied", count: 1 });
-    expect(
-        (await foods.getFood(HH, (await foodOf("Milk")).id))?.lastRestockedOn,
-    ).toBe("2026-11-09");
-    expect(
-        (await foods.getFood(HH, (await foodOf("Eggs")).id))?.lastRestockedOn,
-    ).toBe(TODAY);
-    // Only ticked lines, with one gone: nothing to do either, so still already.
-    expect(
-        await tickOffGroceryLines(grocery, foods, {
-            householdId: HH,
-            lineIds: [lines[0]!.id, crypto.randomUUID()],
-            today: TODAY,
-        }),
-    ).toEqual({ status: "already", count: 0 });
-});
-
-test("a selection with a line that is gone changes nothing", async () => {
-    const { grocery, foods, lines } = await groceryWith(["Milk", "Eggs"]);
-    await expect(
-        tickOffGroceryLines(grocery, foods, {
-            householdId: HH,
-            lineIds: [lines[0]!.id, crypto.randomUUID()],
-            today: TODAY,
-        }),
-    ).rejects.toBeInstanceOf(BulkSelectionError);
-    expect((await lineOf(grocery, lines[0]!.id))?.checked).toBe(false);
-    await expect(
-        removeGroceryLines(grocery, {
-            householdId: HH,
-            lineIds: [lines[0]!.id, crypto.randomUUID()],
-        }),
-    ).rejects.toBeInstanceOf(BulkSelectionError);
-    expect(await grocery.listLines(HH)).toHaveLength(2);
-});
-
-test("a line of another household counts as gone", async () => {
-    const { grocery, foods, lines } = await groceryWith(["Milk"]);
-    await expect(
-        tickOffGroceryLines(grocery, foods, {
-            householdId: "hh-other",
-            lineIds: [lines[0]!.id],
-            today: TODAY,
-        }),
-    ).resolves.toEqual({ status: "already", count: 0 });
-    expect((await lineOf(grocery, lines[0]!.id))?.checked).toBe(false);
-});
-
-test("removeGroceryLines deletes the selected lines, and a repeat is a no-op", async () => {
-    const { grocery, lines } = await groceryWith(["Milk", "Eggs", "Bread"]);
-    const ids = [lines[0]!.id, lines[1]!.id];
-    expect(
-        await removeGroceryLines(grocery, { householdId: HH, lineIds: ids }),
-    ).toEqual({ status: "applied", count: 2 });
-    expect((await grocery.listLines(HH)).map((l) => l.id)).toEqual([
-        lines[2]!.id,
-    ]);
-    expect(
-        await removeGroceryLines(grocery, { householdId: HH, lineIds: ids }),
-    ).toEqual({ status: "already", count: 0 });
-    expect(await grocery.listLines(HH)).toHaveLength(1);
 });
 
 async function ledgerOk(

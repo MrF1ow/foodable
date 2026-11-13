@@ -677,7 +677,9 @@ export function usualsAtZeroForDigest(input: {
         input.foods.map((food) => [food.id, familyOf(food)]),
     );
     for (const row of rows) {
-        if (!row.usual) continue;
+        // A usual with products needs a usual product to name; one typed in has
+        // no products and stands for itself.
+        if (!row.usual && row.products.length > 0) continue;
         const effective = input.foodsById.get(row.food.id) ?? row.food;
         const familyId = familyOf(effective);
         if (familyHasPositiveStock(familyId, input.items, input.foodsById)) {

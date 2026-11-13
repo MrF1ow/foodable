@@ -38,7 +38,6 @@ export const TOASTS = {
     },
     "grocery.line.checked": { kind: "success", text: "Checked off" },
     "grocery.line.unchecked": { kind: "success", text: "Unchecked" },
-    "grocery.lines.removed": { kind: "success", text: "Removed from the list" },
     "grocery.checked.cleared": {
         kind: "success",
         text: "Checked items cleared",
@@ -49,6 +48,7 @@ export const TOASTS = {
     },
 
     "usuals.schedule.saved": { kind: "success", text: "Restock saved" },
+    "usuals.added": { kind: "success", text: "Added to usuals" },
     "usuals.removed": { kind: "success", text: "Removed from usuals" },
 
     "nutrition.meal.logged": { kind: "success", text: "Meal logged" },
