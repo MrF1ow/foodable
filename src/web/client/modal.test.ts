@@ -39,6 +39,7 @@ class FakeEl {
 }
 
 class FakeDialog extends FakeEl {
+    readonly tagName = "DIALOG";
     open = false;
     rect = { left: 0, right: 390, top: 300, bottom: 844 };
     sheet = new FakeEl(this);
@@ -49,12 +50,16 @@ class FakeDialog extends FakeEl {
     }
     showModal() {
         this.open = true;
+        // A dialog's events pass the document in the capture phase.
+        this.doc.fire("beforetoggle", { newState: "open", target: this });
         this.fire("toggle");
+        this.doc.fire("toggle", { target: this });
     }
     close() {
         if (!this.open) return;
         this.open = false;
         this.fire("toggle");
+        this.doc.fire("close", { target: this });
     }
     getBoundingClientRect() {
         return this.rect;
@@ -64,6 +69,34 @@ class FakeDialog extends FakeEl {
     }
     hasAttribute() {
         return false;
+    }
+}
+
+/**
+ * A modal dialog that is not a `dialog.modal`: the redesign's full-screen
+ * barcode scanner, or a sheet. It sits in the top layer above whatever opened
+ * it, which stays open beneath.
+ */
+class FakeOtherDialog extends FakeEl {
+    readonly tagName = "DIALOG";
+    open = false;
+    rect = { left: 0, right: 390, top: 0, bottom: 844 };
+    closeButton = new FakeEl(this);
+    constructor(private doc: FakeEl) {
+        super();
+    }
+    showModal() {
+        this.doc.fire("beforetoggle", { newState: "open", target: this });
+        this.open = true;
+        this.doc.fire("toggle", { target: this });
+    }
+    close() {
+        if (!this.open) return;
+        this.open = false;
+        this.doc.fire("close", { target: this });
+    }
+    getBoundingClientRect() {
+        return this.rect;
     }
 }
 
@@ -229,6 +262,46 @@ test("only the topmost open dialog is dismissed", () => {
     expect(r.dialogs[0]!.open).toBe(true);
     click(r, r.doc.body, 200, 100);
     expect(r.dialogs[0]!.open).toBe(false);
+});
+
+test("a tap on a dialog opened over it is not a tap on the dialog's backdrop", () => {
+    const r = rig();
+    const over = new FakeOtherDialog(r.doc);
+    over.showModal();
+    press(r, over.closeButton, 40, 60);
+    const s = click(r, over.closeButton, 40, 60);
+    expect(r.dialog.open).toBe(true);
+    // Left alone, so the dialog over it gets its own click.
+    expect(s.stopped || s.prevented).toBe(false);
+    touchStart(r, over.closeButton, 40, 60);
+    const t = touchEnd(r, over.closeButton, 40, 60);
+    expect(r.dialog.open).toBe(true);
+    expect(t.stopped || t.prevented).toBe(false);
+    // A tap delivered to the page behind goes to the dialog on top, not here.
+    click(r, r.doc.body, 200, 100);
+    expect(r.dialog.open).toBe(true);
+});
+
+test("once the dialog over it closes, the dialog is dismissed by its backdrop again", () => {
+    const r = rig();
+    const over = new FakeOtherDialog(r.doc);
+    over.showModal();
+    over.close();
+    const s = click(r, r.dialog, 200, 100);
+    expect(r.dialog.open).toBe(false);
+    expect(s.stopped && s.prevented).toBe(true);
+});
+
+test("a dialog opened over another dialog is still the one a backdrop tap dismisses", () => {
+    const r = rig(2);
+    const over = new FakeOtherDialog(r.doc);
+    r.dialogs[1]!.close();
+    over.showModal();
+    r.dialogs[1]!.showModal();
+    click(r, r.doc.body, 200, 100);
+    expect(r.dialogs[1]!.open).toBe(false);
+    click(r, r.doc.body, 200, 100);
+    expect(r.dialogs[0]!.open).toBe(true);
 });
 
 test("a still tap on the backdrop (target = body) closes on touchend and cancels the click", () => {

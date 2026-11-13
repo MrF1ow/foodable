@@ -276,7 +276,8 @@ describe("/app-v2.js", () => {
         // +~3 KB Log sheet: ml basis, pack-serving portion, unit change resets.
         // +~0.6 KB Log sheet: Add to groceries opens the Groceries add sheet.
         // +~6.2 KB Select mode: pick several rows on four lists, act once.
-        expect(js.length).toBeLessThan(144_000);
+        // +~1.9 KB Sheets: a dialog opened over a sheet is not a tap on its backdrop.
+        expect(js.length).toBeLessThan(146_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

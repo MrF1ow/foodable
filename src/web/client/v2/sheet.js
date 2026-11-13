@@ -170,11 +170,66 @@ function focusFirstField(dialog) {
 // The dialog's own padding is `e.target === dialog` too but inside its box.
 // A press that began inside the sheet (a text-selection drag, a scroll that
 // ends over the backdrop) never dismisses.
+//
+// A sheet is only dismissed from behind when nothing sits above it. The
+// barcode scanner is a full-screen modal dialog opened from inside the open log
+// sheet, which stays open beneath it: every tap on the scanner is outside the
+// sheet's box, and would otherwise close the hidden sheet and swallow the click
+// (Close did nothing on the first tap). So every open dialog is tracked in the
+// order it opened, whoever opened it, and a sheet with another dialog opened
+// after it is covered.
 const openOrder = []; // open sheets, oldest first
+const dialogStack = []; // every open dialog, oldest first
+
+const isDialog = (el) => !!el && el.tagName === "DIALOG";
+
+const trackDialog = (e) => {
+    const dialog = e.target;
+    if (isDialog(dialog) && !dialogStack.includes(dialog)) {
+        dialogStack.push(dialog);
+    }
+};
+// beforetoggle precedes the open synchronously; toggle is the same signal for
+// engines without it. Neither moves a dialog that is already tracked.
+document.addEventListener(
+    "beforetoggle",
+    (e) => {
+        if (e.newState === "open") trackDialog(e);
+    },
+    true,
+);
+document.addEventListener(
+    "toggle",
+    (e) => {
+        if (e.target && e.target.open) trackDialog(e);
+    },
+    true,
+);
+document.addEventListener(
+    "close",
+    (e) => {
+        const at = dialogStack.indexOf(e.target);
+        // A dialog reopened before its queued close event arrives stays.
+        if (at !== -1 && !e.target.open) dialogStack.splice(at, 1);
+    },
+    true,
+);
+
+const coveredByDialog = (sheet) => {
+    const at = dialogStack.indexOf(sheet);
+    if (at === -1) return false; // no order known: keep dismissing as before
+    for (let i = at + 1; i < dialogStack.length; i++) {
+        const above = dialogStack[i];
+        if (above.open && isConnected(above)) return true;
+    }
+    return false;
+};
 
 const topSheet = () => {
     for (let i = openOrder.length - 1; i >= 0; i--) {
-        if (openOrder[i].open) return openOrder[i];
+        const sheet = openOrder[i];
+        if (!sheet.open) continue;
+        return coveredByDialog(sheet) ? null : sheet;
     }
     return null;
 };

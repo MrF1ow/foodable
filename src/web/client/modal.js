@@ -94,9 +94,64 @@ function focusFirstField(dialog) {
 // outside the dialog's box, and the target is the dialog (its backdrop) or
 // something that is not part of it. A press that began inside the dialog (a
 // text-selection drag, a scroll that ends over the backdrop) never dismisses.
+//
+// A dialog is only dismissed from behind when nothing sits above it. Another
+// modal dialog (the redesign's full-screen barcode scanner, a sheet) can open
+// over it and leave it open beneath: every tap on that one is outside this
+// dialog's box, and would otherwise close the dialog below and swallow the
+// click. So every open dialog is tracked in the order it opened, whoever
+// opened it, and a dialog with another opened after it is covered.
+const dialogStack = []; // every open dialog, oldest first
+
+const isDialog = (el) => !!el && el.tagName === "DIALOG";
+
+const trackDialog = (e) => {
+    const dialog = e.target;
+    if (isDialog(dialog) && !dialogStack.includes(dialog)) {
+        dialogStack.push(dialog);
+    }
+};
+// beforetoggle precedes the open synchronously; toggle is the same signal for
+// engines without it. Neither moves a dialog that is already tracked.
+document.addEventListener(
+    "beforetoggle",
+    (e) => {
+        if (e.newState === "open") trackDialog(e);
+    },
+    true,
+);
+document.addEventListener(
+    "toggle",
+    (e) => {
+        if (e.target && e.target.open) trackDialog(e);
+    },
+    true,
+);
+document.addEventListener(
+    "close",
+    (e) => {
+        const at = dialogStack.indexOf(e.target);
+        // A dialog reopened before its queued close event arrives stays.
+        if (at !== -1 && !e.target.open) dialogStack.splice(at, 1);
+    },
+    true,
+);
+
+const coveredByDialog = (modal) => {
+    const at = dialogStack.indexOf(modal);
+    if (at === -1) return false; // no order known: keep dismissing as before
+    for (let i = at + 1; i < dialogStack.length; i++) {
+        const above = dialogStack[i];
+        if (above.open && above.isConnected !== false) return true;
+    }
+    return false;
+};
+
 const topModal = () => {
     for (let i = openOrder.length - 1; i >= 0; i--) {
-        if (openOrder[i].open) return openOrder[i];
+        const modal = openOrder[i];
+        if (!modal.open) continue;
+        return coveredByDialog(modal) ? null : modal;
     }
     return null;
 };

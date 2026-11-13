@@ -14,6 +14,9 @@ class FakeEl {
     focused = false;
     isConnected = true;
     classList = { contains: (c: string) => this.classes.includes(c) };
+    get tagName() {
+        return this.tag.toUpperCase();
+    }
     constructor(
         readonly tag: string,
         readonly classes: string[] = [],
@@ -112,6 +115,8 @@ class FakeDialog extends FakeEl {
             newState: "open",
             target: this,
         });
+        // A dialog's events pass the document in the capture phase.
+        this.doc.fire("beforetoggle", { newState: "open", target: this });
         this.open = true;
         // The real toggle event is queued; tests fire it on demand.
     }
@@ -120,12 +125,16 @@ class FakeDialog extends FakeEl {
         if (!this.open) return;
         this.open = false;
         if (this.deferClose) this.pendingClose = true;
-        else this.fire("close");
+        else {
+            this.fire("close");
+            this.doc.fire("close", { target: this });
+        }
     }
     flush() {
         if (!this.pendingClose) return;
         this.pendingClose = false;
         this.fire("close");
+        this.doc.fire("close", { target: this });
     }
     /** Set to give the sheet a box (a bottom sheet 300..844 on a 390 page). */
     rect: { left: number; right: number; top: number; bottom: number } | null =
@@ -135,6 +144,33 @@ class FakeDialog extends FakeEl {
     }
     setPointerCapture() {}
     releasePointerCapture() {}
+}
+
+/**
+ * A modal dialog that is not a sheet: the barcode scanner, full screen, opened
+ * from inside the log sheet. It is in the top layer above every sheet.
+ */
+class FakeForeignDialog extends FakeEl {
+    open = false;
+    rect = { left: 0, right: 390, top: 0, bottom: 844 };
+    closeButton = new FakeEl("button", ["fd-scanner-head-close"], this);
+    constructor(readonly doc: FakeEl) {
+        super("dialog", ["fd-scanner"]);
+    }
+    showModal() {
+        this.fire("beforetoggle", { newState: "open", target: this });
+        this.doc.fire("beforetoggle", { newState: "open", target: this });
+        this.open = true;
+    }
+    close() {
+        if (!this.open) return;
+        this.open = false;
+        this.fire("close");
+        this.doc.fire("close", { target: this });
+    }
+    getBoundingClientRect() {
+        return this.rect;
+    }
 }
 
 class FakeDoc extends FakeEl {
@@ -478,6 +514,87 @@ test("with no sheet open the document click is ignored", () => {
     r.dialog.close();
     const s = click(r, r.doc.body, 200, 100);
     expect(s.stopped || s.prevented).toBe(false);
+});
+
+// The barcode scanner is a full-screen modal dialog opened from the Scan tile
+// inside the open log sheet; the sheet stays open beneath it. Every tap on the
+// scanner lands outside the sheet's box, so the sheet must not read them as
+// taps on its own backdrop.
+function scannerOverSheet() {
+    const r = boxed();
+    const scanner = new FakeForeignDialog(r.doc);
+    scanner.showModal();
+    return { ...r, scanner };
+}
+
+test("a tap on a dialog opened over the sheet is not a tap on the sheet's backdrop", () => {
+    const r = scannerOverSheet();
+    press(r, r.scanner.closeButton, 40, 60);
+    const s = click(r, r.scanner.closeButton, 40, 60);
+    expect(r.dialog.open).toBe(true);
+    // Left alone, so the scanner's own Close handler gets the click.
+    expect(s.stopped || s.prevented).toBe(false);
+    // The same for a tap on the scanner itself (its padding, its stage).
+    const t = click(r, r.scanner, 200, 100);
+    expect(r.dialog.open).toBe(true);
+    expect(t.stopped || t.prevented).toBe(false);
+});
+
+test("a touch on a dialog opened over the sheet neither closes the sheet nor is cancelled", () => {
+    const r = scannerOverSheet();
+    touchStart(r, r.scanner.closeButton, 40, 60);
+    const s = touchEnd(r, r.scanner.closeButton, 40, 60);
+    expect(r.dialog.open).toBe(true);
+    expect(s.prevented || s.stopped).toBe(false);
+    // And no click is swallowed afterwards: the scanner's Close gets it.
+    const c = click(r, r.scanner.closeButton, 40, 60);
+    expect(c.stopped || c.prevented).toBe(false);
+});
+
+test("a backdrop tap delivered to the page behind does not reach a sheet under a dialog", () => {
+    const r = scannerOverSheet();
+    press(r, r.doc.body, 200, 100);
+    const s = click(r, r.doc.body, 200, 100);
+    expect(r.dialog.open).toBe(true);
+    expect(s.stopped || s.prevented).toBe(false);
+});
+
+test("once the dialog over it closes, the sheet is dismissed by its backdrop again", () => {
+    const r = scannerOverSheet();
+    r.scanner.close();
+    const s = click(r, r.dialog, 200, 100);
+    expect(r.dialog.open).toBe(false);
+    expect(s.stopped && s.prevented).toBe(true);
+});
+
+test("a sheet opened over another dialog is still the one a backdrop tap dismisses", () => {
+    const ctx = setup();
+    const lower = new FakeDialog(ctx.doc);
+    const upper = new FakeDialog(ctx.doc);
+    load(ctx);
+    lower.rect = { left: 0, right: 390, top: 300, bottom: 844 };
+    openIt(lower);
+    const scanner = new FakeForeignDialog(ctx.doc);
+    scanner.showModal();
+    upper.rect = { left: 0, right: 390, top: 300, bottom: 844 };
+    openIt(upper);
+    ctx.doc.fire("click", {
+        target: ctx.doc.body,
+        clientX: 200,
+        clientY: 100,
+        detail: 1,
+        ...spy(),
+    });
+    expect(upper.open).toBe(false);
+    // The older sheet is under the dialog still open above it.
+    ctx.doc.fire("click", {
+        target: ctx.doc.body,
+        clientX: 200,
+        clientY: 100,
+        detail: 1,
+        ...spy(),
+    });
+    expect(lower.open).toBe(true);
 });
 
 function touch(x: number, y: number) {
