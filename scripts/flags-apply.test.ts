@@ -4,6 +4,7 @@ import { FLAGS_EPOCH } from "../src/flags.js";
 import type { RolloutFile } from "../src/flags-rollout.js";
 import {
     DEFAULT_RAILWAY_PROJECT_ID,
+    checkFails,
     expandInternalRule,
     parseRailwayRules,
     planFlagChanges,
@@ -167,17 +168,53 @@ describe("planFlagChanges", () => {
         ]);
     });
 
-    test("extra Railway flag is reported, not deleted", () => {
-        const railway: RailwayFlag[] = [
-            ...syncRailway(),
-            { name: "orphan", type: "bool", default: false, rules: [] },
-        ];
-        const plan = planFlagChanges(syncFile(), railway, PROJECT);
-        expect(plan.extraInRailway).toEqual(["orphan"]);
+    test("a registered flag missing from the file is drift, not deleted", () => {
+        const file = syncFile();
+        delete file.flags!["off-lookups"];
+        const plan = planFlagChanges(file, syncRailway(), PROJECT);
+        expect(plan.extraInRailway).toEqual(["off-lookups"]);
+        expect(plan.retiredInRailway).toEqual([]);
+        expect(checkFails(plan)).toBe(true);
         expect(
             plan.commands.some(
-                (c) => c.includes("delete") && c.includes("orphan"),
+                (c) => c.includes("delete") && c.includes("off-lookups"),
             ),
+        ).toBe(false);
+    });
+
+    test("a Railway flag that FLAGS no longer defines is retired, not drift", () => {
+        const railway: RailwayFlag[] = [
+            ...syncRailway(),
+            { name: "ui-v2", type: "bool", default: true, rules: [] },
+        ];
+        const plan = planFlagChanges(syncFile(), railway, PROJECT);
+        expect(plan.retiredInRailway).toEqual(["ui-v2"]);
+        expect(plan.extraInRailway).toEqual([]);
+        expect(plan.commands).toEqual([]);
+        expect(checkFails(plan)).toBe(false);
+    });
+
+    test("retired flags do not hide real drift", () => {
+        const file = syncFile();
+        file.flags!["mcp-widgets-v2"] = { default: true, rules: [] };
+        const railway: RailwayFlag[] = [
+            ...syncRailway(),
+            { name: "ui-v2", type: "bool", default: true, rules: [] },
+        ];
+        const plan = planFlagChanges(file, railway, PROJECT);
+        expect(plan.retiredInRailway).toEqual(["ui-v2"]);
+        expect(checkFails(plan)).toBe(true);
+    });
+});
+
+describe("checkFails", () => {
+    test("in-sync plan passes", () => {
+        expect(
+            checkFails({
+                commands: [],
+                extraInRailway: [],
+                retiredInRailway: [],
+            }),
         ).toBe(false);
     });
 });
