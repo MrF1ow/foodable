@@ -261,6 +261,8 @@ Locally, with `RAILWAY_TOKEN` exported, run `bun run flags:apply --dry-run` to s
 
 **Emergency kill:** flip the flag off in Railway first (`railway flag set <name> false`), then update `flags/rollout.yml` in a follow-up pull request. Until the file matches Railway, the drift check fails — that is intentional.
 
+**Retiring a flag:** removing a flag from `flags/rollout.yml` (and from `FLAGS`) does not delete it in Railway: `flags:apply` never deletes, it only reports `extra flag "<name>" in Railway (not deleted)`. After the merge deploys, delete it with `railway flag delete <name>` and drop it from `FOODABLE_FLAGS` if you set it there. Until then the drift check (`flags:apply --check`) fails; an unknown name in `FOODABLE_FLAGS` only logs a warning.
+
 Without `RAILWAY_TOKEN`, Foodable never calls Railway's flag service at runtime. Every **temporary** flag is off and every **kill switch** stays on. `FOODABLE_FLAGS` is read only when `RAILWAY_TOKEN` is unset. Use it to turn features on for yourself or everyone on a self-hosted box. Syntax is comma-separated `name:mode` pairs, for example `mcp-widgets-v2:internal` or `mcp-widgets-v2:all`. Modes:
 
 - `all` — on for every request.
