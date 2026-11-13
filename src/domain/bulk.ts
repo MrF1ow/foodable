@@ -11,10 +11,9 @@
  * A repeat is not an error. When none of the ids has anything left to do (a
  * double submit, or a page that was stale), the answer is `already` and
  * nothing is written. A batch where some ids have work and others are gone is
- * refused whole: the page the person selected on is out of date. Ticking off
- * is the exception to "done": a line that is still there always has a tick to
- * apply (it is idempotent), so a replay of a tick-off says `applied`, and only
- * lines that are gone make it `already`.
+ * refused whole: the page the person selected on is out of date. A line that
+ * is already ticked is done: ticking it again would move a usual's restock day
+ * from the day it was bought to today, which ticking row by row never does.
  */
 import {
     NO_USUAL_SCHEDULE,
@@ -25,7 +24,11 @@ import {
     type FoodsStore,
 } from "./foods.js";
 import { type FridgeStore } from "./fridge.js";
-import { checkGroceryLine, type GroceryListStore } from "./grocery.js";
+import {
+    checkGroceryLine,
+    type GroceryLine,
+    type GroceryListStore,
+} from "./grocery.js";
 import {
     assertCanDeleteRecipe,
     deleteRecipe,
@@ -116,7 +119,11 @@ function settle<I, T>(
     return todo;
 }
 
-/** Tick several grocery lines off, as ticking each alone does. */
+/**
+ * Tick several grocery lines off, as ticking each alone does. Lines that are
+ * already ticked are skipped (select mode lets a person pick them): they are
+ * not stamped again and not counted.
+ */
 export async function tickOffGroceryLines(
     grocery: GroceryListStore,
     foods: FoodsStore,
@@ -131,9 +138,10 @@ export async function tickOffGroceryLines(
     const lines = new Map(
         (await grocery.listLines(input.householdId)).map((l) => [l.id, l]),
     );
-    const todo = settle(input.lineIds, (id) => {
+    const todo = settle(input.lineIds, (id): Found<GroceryLine> => {
         const line = lines.get(id);
-        return line ? { kind: "todo", item: line } : null;
+        if (!line) return null;
+        return line.checked ? { kind: "done" } : { kind: "todo", item: line };
     });
     if (!todo) return ALREADY;
     for (const line of todo) {

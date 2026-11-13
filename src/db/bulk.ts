@@ -6,8 +6,8 @@
  * and the action. A second submit of the same batch (a double tap, a retry)
  * waits for the first to commit, then reads the state it left: for discard,
  * remove and delete the rows are gone or done, and the domain answers
- * `already` instead of acting twice. A tick-off leaves its lines in place, so
- * its retry ticks them again (a no-op) and answers `applied`. Batches of
+ * `already` instead of acting twice (a tick-off leaves its lines in place, but
+ * they are ticked by then, and the domain skips ticked lines). Batches of
  * different actions do not wait for each other.
  */
 import {

@@ -146,6 +146,38 @@ describeDb(pgAvailable !== null, "bulk actions db", (getCtx) => {
         expect(food.last_restocked_on).not.toBeNull();
     });
 
+    test("tick off leaves the restock day of a line that was already ticked, and says already when nothing is left", async () => {
+        const [milk, eggs] = await seedLines(["Milk", "Eggs"]);
+        await sql`
+            update public.grocery_lines set checked = true where id = ${milk!}
+        `;
+        await sql`
+            update public.foods set last_restocked_on = ${"2026-01-02"}
+            where household_id = ${householdId} and name = ${"Milk"}
+        `;
+        const restockedOn = async (name: string) =>
+            (
+                (await sql`
+                    select last_restocked_on::text as d from public.foods
+                    where household_id = ${householdId} and name = ${name}
+                `) as { d: string | null }[]
+            )[0]!.d;
+        expect(
+            await bulkTickOffGroceryLines({
+                householdId,
+                lineIds: [milk!, eggs!],
+            }),
+        ).toEqual({ status: "applied", count: 1 });
+        expect(await restockedOn("Milk")).toBe("2026-01-02");
+        expect(await restockedOn("Eggs")).not.toBeNull();
+        expect(
+            await bulkTickOffGroceryLines({
+                householdId,
+                lineIds: [milk!, eggs!],
+            }),
+        ).toEqual({ status: "already", count: 0 });
+    });
+
     test("a batch with one id that is not there writes nothing", async () => {
         const [milk, eggs] = await seedLines(["Milk", "Eggs"]);
         await expect(

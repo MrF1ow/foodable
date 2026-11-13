@@ -167,9 +167,9 @@ test("tickOffGroceryLines runs each restock stamp through isolate and keeps the 
     }
 });
 
-test("tickOffGroceryLines on lines that are already ticked ticks them again and says applied", async () => {
-    // Ticking is idempotent, so a replay is not `already`: that answer is for
-    // rows that are gone. The route still announces it, since the lines are ticked.
+test("tickOffGroceryLines on lines that are already ticked says already and writes nothing", async () => {
+    // A tick leaves the line on the list, so select mode can pick it again. A
+    // replay has nothing left to do, like the other bulk actions.
     const { grocery, foods, lines } = await groceryWith(["Milk"]);
     const input = {
         householdId: HH,
@@ -178,10 +178,43 @@ test("tickOffGroceryLines on lines that are already ticked ticks them again and 
     };
     await tickOffGroceryLines(grocery, foods, input);
     expect(await tickOffGroceryLines(grocery, foods, input)).toEqual({
-        status: "applied",
-        count: 1,
+        status: "already",
+        count: 0,
     });
     expect((await lineOf(grocery, lines[0]!.id))?.checked).toBe(true);
+});
+
+test("tickOffGroceryLines leaves the restock day of a line that was already ticked", async () => {
+    const { grocery, foods, lines } = await groceryWith(["Milk", "Eggs"]);
+    const foodOf = async (name: string) =>
+        (await foods.listFoods(HH)).find((f) => f.name === name)!;
+    // Milk was bought on Monday, ticked the ordinary way.
+    await tickOffGroceryLines(grocery, foods, {
+        householdId: HH,
+        lineIds: [lines[0]!.id],
+        today: "2026-11-09",
+    });
+    // On Friday the person selects both rows and checks off.
+    const result = await tickOffGroceryLines(grocery, foods, {
+        householdId: HH,
+        lineIds: [lines[0]!.id, lines[1]!.id],
+        today: TODAY,
+    });
+    expect(result).toEqual({ status: "applied", count: 1 });
+    expect(
+        (await foods.getFood(HH, (await foodOf("Milk")).id))?.lastRestockedOn,
+    ).toBe("2026-11-09");
+    expect(
+        (await foods.getFood(HH, (await foodOf("Eggs")).id))?.lastRestockedOn,
+    ).toBe(TODAY);
+    // Only ticked lines, with one gone: nothing to do either, so still already.
+    expect(
+        await tickOffGroceryLines(grocery, foods, {
+            householdId: HH,
+            lineIds: [lines[0]!.id, crypto.randomUUID()],
+            today: TODAY,
+        }),
+    ).toEqual({ status: "already", count: 0 });
 });
 
 test("a selection with a line that is gone changes nothing", async () => {
