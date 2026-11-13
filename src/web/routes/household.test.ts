@@ -24,7 +24,11 @@ import { createMemoryWeighInStore } from "../../domain/notices-actionable.js";
 import { createMemoryPlansStore } from "../../domain/plan.js";
 import { createMemoryNoticeDismissalsStore } from "../../domain/notice-dismissals.js";
 import * as actualFoods from "../../foods.js";
-import { createMemoryFoodsStore, newFood } from "../../domain/foods.js";
+import {
+    createMemoryFoodsStore,
+    FoodsInputError,
+    newFood,
+} from "../../domain/foods.js";
 import { addLocation, createMemoryFridgeStore } from "../../domain/fridge.js";
 import {
     addGroceryFoodById,
@@ -51,6 +55,7 @@ import * as actualDbFetchMemory from "../../db/fetch-memory.js";
 import { createMemoryFetchMemoryStore } from "../../domain/fetch-memory.js";
 import { resetFlagsForTests } from "../../flags.js";
 import { USUALS_INTRO } from "../pages/v2/kitchen-usuals.js";
+import { decodeToastFlash } from "../components/toast.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
@@ -107,6 +112,7 @@ const db: {
     rulesStore: ReturnType<typeof createMemoryRulesStore>;
     barcodeFoods: Record<string, FoodResult>;
     barcodeLookupThrows: boolean;
+    lookupsPaused: boolean;
 } = {
     profile: PROFILE,
     members: [
@@ -138,6 +144,7 @@ const db: {
     rulesStore: createMemoryRulesStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
     barcodeLookupThrows: false,
+    lookupsPaused: false,
 };
 
 mock.module("../../db/foods.js", () => ({
@@ -246,9 +253,15 @@ mock.module("../../db/profiles.js", () => ({
 }));
 mock.module("../../foods.js", () => ({
     ...realFoods,
-    lookupBarcode: async (barcode: string) => {
+    lookupBarcode: async (
+        barcode: string,
+        hooks: { notice?: { message: string | null } } = {},
+    ) => {
         if (db.barcodeLookupThrows) {
             throw new Error("Network down");
+        }
+        if (db.lookupsPaused && hooks.notice) {
+            hooks.notice.message = realFoods.ONLINE_FOOD_LOOKUPS_PAUSED_MESSAGE;
         }
         return db.barcodeFoods[barcode] ?? null;
     },
@@ -332,6 +345,7 @@ beforeEach(() => {
     db.foodsStore.linkDismissals(db.dismissalsStore);
     db.barcodeFoods = {};
     db.barcodeLookupThrows = false;
+    db.lookupsPaused = false;
     db.profile = { ...PROFILE };
     db.members = [
         {
@@ -1668,6 +1682,727 @@ describe("kitchen usuals restock", () => {
         };
         const on = await getUsuals();
         expect(on.html).toContain("1 usual · restock on Sundays");
+        resetFlagsForTests();
+    });
+});
+
+describe("add a usual routes", () => {
+    const FORM = "application/x-www-form-urlencoded";
+    const HALF_CODE = "0193968379117";
+
+    function halfAndHalf(): FoodResult {
+        return {
+            ...offProductFixture(),
+            name: "Half & Half",
+            brand: "Member's Mark",
+            barcode: HALF_CODE,
+            source: `off:${HALF_CODE}`,
+        };
+    }
+
+    function offProductFixture(): FoodResult {
+        return {
+            name: "OFF Greek Yogurt",
+            brand: "Fage",
+            serving: "170 g",
+            serving_quantity: 170,
+            serving_quantity_unit: "g",
+            calories: 59,
+            protein_g: 10,
+            carbs_g: 4,
+            fat_g: 0.4,
+            fiber_g: 0,
+            sugar_g: 4,
+            alcohol_g: null,
+            nutriscore_grade: "a",
+            nova_group: 1,
+            source: "off:1",
+            source_name: "openfoodfacts" as const,
+            barcode: "1",
+        };
+    }
+
+    const get = (path: string) =>
+        app().request(`http://x${path}`, {
+            headers: { cookie: cookieFor(ALICE) },
+        });
+    const post = (path: string, params: Record<string, string>) =>
+        app().request(`http://x${path}`, {
+            method: "POST",
+            headers: { cookie: cookieFor(ALICE), "content-type": FORM },
+            body: new URLSearchParams(params).toString(),
+        });
+    function toastOf(res: Response): string | null {
+        const cookie = res.headers.get("set-cookie") ?? "";
+        const value = /foodable_toast=([^;]+)/.exec(cookie)?.[1];
+        return value
+            ? (decodeToastFlash(decodeURIComponent(value))?.key ?? null)
+            : null;
+    }
+    const handFields = {
+        name: "Oat milk",
+        basis: "per_100ml",
+        calories: "45",
+        protein_g: "1",
+        carbs_g: "6.5",
+        fat_g: "1.5",
+        return_to: "/kitchen/usuals",
+    };
+    async function plain(name: string) {
+        return db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name }),
+        );
+    }
+
+    test("scan of a product the household already filed shows What is it? with its food preselected", async () => {
+        const { eggs, kirkland } = await seedEggsCatalog();
+        await db.foodsStore.setBarcode(HH, "0123456789012", kirkland.id);
+        const res = await get("/kitchen/usuals/add/barcode/0123456789012");
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain("What is it?");
+        expect(html).toContain("Kirkland Large Eggs");
+        expect(html).toContain(`name="product_id" value="${kirkland.id}"`);
+        expect(html).toMatch(
+            new RegExp(`name="food_choice" value="${eggs.id}" checked`),
+        );
+        expect(html).toContain("data-sheet-open-on-load");
+        resetFlagsForTests();
+    });
+
+    function heavyCream(): FoodResult {
+        return {
+            ...halfAndHalf(),
+            name: "Heavy Cream",
+            brand: "Kirkland",
+        };
+    }
+
+    test("scan of an Open Food Facts product offers the matching food as a suggestion", async () => {
+        const cream = await plain("Cream");
+        await plain("Flour");
+        db.barcodeFoods[HALF_CODE] = heavyCream();
+        const res = await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`);
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain("What is it?");
+        expect(html).toMatch(
+            new RegExp(`name="food_choice" value="${cream.id}" checked`),
+        );
+        expect(html).not.toContain("Flour</span>");
+        // The scanned product is a catalog row now, not yet a usual.
+        const rows = await db.foodsStore.listFoods(HH);
+        expect(rows.some((f) => f.brand === "Kirkland")).toBe(true);
+        expect(rows.every((f) => f.usualAddedAt == null)).toBe(true);
+        resetFlagsForTests();
+    });
+
+    test("scan with no matching food pre-fills a new name without the brand", async () => {
+        db.barcodeFoods[HALF_CODE] = {
+            ...heavyCream(),
+            name: "Kirkland Heavy Cream",
+        };
+        const html = await (
+            await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`)
+        ).text();
+        expect(html).toMatch(/name="food_choice" value="new" checked/);
+        expect(html).toContain(
+            'name="new_food_name" autocomplete="off" value="Heavy Cream"',
+        );
+        resetFlagsForTests();
+    });
+
+    test("a scanned product named like a food you have is a product row, offered under that food", async () => {
+        const half = await plain("Half & half");
+        db.barcodeFoods[HALF_CODE] = halfAndHalf();
+        const res = await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`);
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        const product = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.brand === "Member's Mark",
+        )!;
+        expect(product).toMatchObject({
+            name: "Half & Half",
+            offSourceId: HALF_CODE,
+        });
+        expect(product.id).not.toBe(half.id);
+        expect(await db.foodsStore.getBarcodeFoodId(HH, HALF_CODE)).toBe(
+            product.id,
+        );
+        // The plain food is untouched: no barcode, no OFF data.
+        const plainRow = await db.foodsStore.getFood(HH, half.id);
+        expect(plainRow?.offSourceId).toBeNull();
+        expect(plainRow?.nutritionSource).not.toBe("openfoodfacts");
+        expect(html).toContain(`name="product_id" value="${product.id}"`);
+        expect(html).toMatch(
+            new RegExp(`name="food_choice" value="${half.id}" checked`),
+        );
+        const confirmed = await post("/kitchen/usuals/add/product", {
+            product_id: product.id,
+            food_choice: half.id,
+            return_to: "/kitchen/usuals",
+        });
+        expect(confirmed.status).toBe(303);
+        const linked = await db.foodsStore.getFood(HH, product.id);
+        expect(linked?.genericFoodId).toBe(half.id);
+        const food = await db.foodsStore.getFood(HH, half.id);
+        expect(food?.usualProductId).toBe(product.id);
+        expect(food?.usualAddedAt).not.toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("What is it? never offers another brand's product", async () => {
+        const cream = await plain("Cream");
+        const other = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Heavy Cream",
+                brand: "Organic Valley",
+                offSourceId: "0093966000016",
+            }),
+        );
+        db.barcodeFoods[HALF_CODE] = heavyCream();
+        const html = await (
+            await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`)
+        ).text();
+        expect(html).toMatch(
+            new RegExp(`name="food_choice" value="${cream.id}" checked`),
+        );
+        expect(html).not.toContain(`name="food_choice" value="${other.id}"`);
+        resetFlagsForTests();
+    });
+
+    test("the Find box searches plain foods for the scanned product", async () => {
+        db.barcodeFoods[HALF_CODE] = heavyCream();
+        const cream = await plain("Whipping cream");
+        const html = await (
+            await get(`/kitchen/usuals/add/barcode/${HALF_CODE}?fq=whipping`)
+        ).text();
+        expect(html).toContain('value="whipping"');
+        expect(html).toContain(`value="${cream.id}"`);
+        resetFlagsForTests();
+    });
+
+    test("scan of a plain food typed in earlier is added as it is", async () => {
+        const typed = await plain("Oat milk");
+        await db.foodsStore.setBarcode(HH, "0123456789012", typed.id);
+        const html = await (
+            await get("/kitchen/usuals/add/barcode/0123456789012")
+        ).text();
+        expect(html).toContain("added as it is");
+        expect(html).not.toContain('name="food_choice"');
+        const res = await post("/kitchen/usuals/add/product", {
+            product_id: typed.id,
+            return_to: "/kitchen/usuals",
+        });
+        expect(res.status).toBe(303);
+        expect(
+            (await db.foodsStore.getFood(HH, typed.id))?.usualAddedAt,
+        ).not.toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("scan miss lands on Type it with the barcode carried", async () => {
+        const res = await get("/kitchen/usuals/add/barcode/0123456789012");
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain("No product found for this barcode.");
+        expect(html).toContain('name="barcode" value="0123456789012"');
+        expect(html).toMatch(
+            /data-fd-usual-add-tab="type"[^>]*aria-selected="true"/,
+        );
+        resetFlagsForTests();
+    });
+
+    test("a failed lookup says so and still offers Type it with the barcode", async () => {
+        db.barcodeLookupThrows = true;
+        const html = await (
+            await get("/kitchen/usuals/add/barcode/0123456789012")
+        ).text();
+        expect(html).toContain("Could not look this barcode up.");
+        expect(html).toContain('name="barcode" value="0123456789012"');
+        resetFlagsForTests();
+    });
+
+    test("paused online lookups say so instead of claiming no product", async () => {
+        db.lookupsPaused = true;
+        const html = await (
+            await get("/kitchen/usuals/add/barcode/0123456789012")
+        ).text();
+        expect(html).toContain("Online food lookups are paused");
+        expect(html).not.toContain("No product found for this barcode.");
+        expect(html).toContain('name="barcode" value="0123456789012"');
+        resetFlagsForTests();
+    });
+
+    test("an invalid code answers 400 in the Scan tab", async () => {
+        const res = await get("/kitchen/usuals/add/barcode/123");
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain("isn't a barcode");
+        expect(html).toContain("data-sheet-open-on-load");
+        resetFlagsForTests();
+    });
+
+    test("confirming with a food links the product, makes it the usual and lists the usual", async () => {
+        const half = await plain("Cream");
+        db.barcodeFoods[HALF_CODE] = heavyCream();
+        await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`);
+        const product = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.brand === "Kirkland",
+        )!;
+        const res = await post("/kitchen/usuals/add/product", {
+            product_id: product.id,
+            food_choice: half.id,
+            return_to: "/kitchen/usuals",
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/kitchen/usuals");
+        expect(toastOf(res)).toBe("usuals.added");
+        expect(
+            (await db.foodsStore.getFood(HH, product.id))?.genericFoodId,
+        ).toBe(half.id);
+        const food = await db.foodsStore.getFood(HH, half.id);
+        expect(food?.usualProductId).toBe(product.id);
+        expect(food?.usualAddedAt).not.toBeNull();
+        const html = await (await get("/kitchen/usuals")).text();
+        expect(html).toContain('id="fd-usual-row-' + half.id + '"');
+        resetFlagsForTests();
+    });
+
+    test("confirming with a new name creates the plain food", async () => {
+        db.barcodeFoods[HALF_CODE] = heavyCream();
+        await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`);
+        const product = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.brand === "Kirkland",
+        )!;
+        const res = await post("/kitchen/usuals/add/product", {
+            product_id: product.id,
+            food_choice: "new",
+            new_food_name: "Half and half",
+            return_to: "/kitchen/usuals?store=st-1",
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/kitchen/usuals?store=st-1");
+        const created = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.name === "Half and half",
+        );
+        expect(created?.usualProductId).toBe(product.id);
+        resetFlagsForTests();
+    });
+
+    test("confirming keeps the store chip the person was on", async () => {
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        const half = await plain("Cream");
+        db.barcodeFoods[HALF_CODE] = heavyCream();
+        await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`);
+        const product = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.brand === "Kirkland",
+        )!;
+        const res = await post("/kitchen/usuals/add/product", {
+            product_id: product.id,
+            food_choice: half.id,
+            usual_store_id: costco.id,
+            usual_amount: "2",
+            usual_unit: "each",
+            return_to: `/kitchen/usuals?store=${costco.id}`,
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(
+            `/kitchen/usuals?store=${costco.id}`,
+        );
+        expect(
+            (await db.foodsStore.getFood(HH, product.id))?.usualStoreId,
+        ).toBe(costco.id);
+        resetFlagsForTests();
+    });
+
+    test("confirming without naming a food answers 400 with the step still open and nothing written", async () => {
+        db.barcodeFoods[HALF_CODE] = heavyCream();
+        await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`);
+        const product = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.brand === "Kirkland",
+        )!;
+        const res = await post("/kitchen/usuals/add/product", {
+            product_id: product.id,
+            scan_code: HALF_CODE,
+            return_to: "/kitchen/usuals",
+        });
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain("What is it?");
+        expect(html).toContain('id="fd-usual-add-food-error"');
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(toastOf(res)).toBeNull();
+        expect(
+            (await db.foodsStore.getFood(HH, product.id))?.genericFoodId,
+        ).toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("adding from Search makes a plain food a usual as it is", async () => {
+        const flour = await plain("Flour");
+        const listed = await (await get("/kitchen/usuals?q=flo")).text();
+        expect(listed).toContain(`name="product_id" value="${flour.id}"`);
+        expect(listed).toMatch(
+            /data-fd-usual-add-tab="search"[^>]*aria-selected="true"/,
+        );
+        const res = await post("/kitchen/usuals/add/product", {
+            product_id: flour.id,
+            via: "search",
+            return_to: "/kitchen/usuals",
+        });
+        expect(res.status).toBe(303);
+        expect(toastOf(res)).toBe("usuals.added");
+        expect(
+            (await db.foodsStore.getFood(HH, flour.id))?.usualAddedAt,
+        ).not.toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("adding a branded plain food from Search adds it as it is", async () => {
+        const butter = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Butter",
+                brand: "Kerrygold",
+            }),
+        );
+        const listed = await (await get("/kitchen/usuals?q=butter")).text();
+        expect(listed).toContain(`name="food_choice" value="${butter.id}"`);
+        const res = await post("/kitchen/usuals/add/product", {
+            product_id: butter.id,
+            food_choice: butter.id,
+            via: "search",
+            return_to: "/kitchen/usuals",
+        });
+        expect(res.status).toBe(303);
+        const saved = await db.foodsStore.getFood(HH, butter.id);
+        expect(saved?.usualAddedAt).not.toBeNull();
+        expect(saved?.genericFoodId).toBeNull();
+        resetFlagsForTests();
+    });
+
+    test("confirming without a store or amount keeps the usual's store and amount", async () => {
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        const { eggs, kirkland } = await seedEggsCatalog();
+        await db.foodsStore.setBarcode(HH, "0123456789012", kirkland.id);
+        const first = await post("/kitchen/usuals/add/product", {
+            product_id: kirkland.id,
+            food_choice: eggs.id,
+            usual_store_id: costco.id,
+            usual_amount: "24",
+            usual_unit: "each",
+            return_to: "/kitchen/usuals",
+        });
+        expect(first.status).toBe(303);
+        // Scanned again; What is it? is confirmed with its defaults left alone.
+        const again = await post("/kitchen/usuals/add/product", {
+            product_id: kirkland.id,
+            food_choice: eggs.id,
+            usual_store_id: "",
+            usual_amount: "",
+            usual_unit: "",
+            return_to: "/kitchen/usuals",
+        });
+        expect(again.status).toBe(303);
+        const usual = await db.foodsStore.getFood(HH, kirkland.id);
+        expect(usual?.usualStoreId).toBe(costco.id);
+        expect(usual?.usualAmount).toEqual({ amount: 24, unit: "each" });
+        // A Search add of the same food (no store fields at all) keeps them too.
+        const search = await post("/kitchen/usuals/add/product", {
+            product_id: eggs.id,
+            food_choice: eggs.id,
+            via: "search",
+            return_to: "/kitchen/usuals",
+        });
+        expect(search.status).toBe(303);
+        const after = await db.foodsStore.getFood(HH, kirkland.id);
+        expect(after?.usualStoreId).toBe(costco.id);
+        expect(after?.usualAmount).toEqual({ amount: 24, unit: "each" });
+        resetFlagsForTests();
+    });
+
+    test("picking only a store keeps the amount an existing usual already has", async () => {
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        const { eggs, kirkland } = await seedEggsCatalog();
+        await db.foodsStore.setBarcode(HH, "0123456789012", kirkland.id);
+        await post("/kitchen/usuals/add/product", {
+            product_id: kirkland.id,
+            food_choice: eggs.id,
+            usual_store_id: costco.id,
+            usual_amount: "24",
+            usual_unit: "each",
+            return_to: "/kitchen/usuals",
+        });
+        const again = await post("/kitchen/usuals/add/product", {
+            product_id: kirkland.id,
+            food_choice: eggs.id,
+            usual_store_id: costco.id,
+            usual_amount: "",
+            usual_unit: "",
+            return_to: "/kitchen/usuals",
+        });
+        expect(again.status).toBe(303);
+        const usual = await db.foodsStore.getFood(HH, kirkland.id);
+        expect(usual?.usualStoreId).toBe(costco.id);
+        expect(usual?.usualAmount).toEqual({ amount: 24, unit: "each" });
+        // And only an amount keeps the store.
+        const amountOnly = await post("/kitchen/usuals/add/product", {
+            product_id: kirkland.id,
+            food_choice: eggs.id,
+            usual_store_id: "",
+            usual_amount: "12",
+            usual_unit: "each",
+            return_to: "/kitchen/usuals",
+        });
+        expect(amountOnly.status).toBe(303);
+        const after = await db.foodsStore.getFood(HH, kirkland.id);
+        expect(after?.usualStoreId).toBe(costco.id);
+        expect(after?.usualAmount).toEqual({ amount: 12, unit: "each" });
+        resetFlagsForTests();
+    });
+
+    test("scanning a second pack size of a branded product opens What is it? on the same row", async () => {
+        db.barcodeFoods[HALF_CODE] = halfAndHalf();
+        const first = await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`);
+        expect(first.status).toBe(200);
+        const other = "0193968379124";
+        db.barcodeFoods[other] = { ...halfAndHalf(), barcode: other };
+        const second = await get(`/kitchen/usuals/add/barcode/${other}`);
+        expect(second.status).toBe(200);
+        const html = await second.text();
+        expect(html).toContain("What is it?");
+        const rows = (await db.foodsStore.listFoods(HH)).filter(
+            (f) => f.brand === "Member's Mark",
+        );
+        expect(rows).toHaveLength(1);
+        expect(await db.foodsStore.getBarcodeFoodId(HH, other)).toBe(
+            rows[0]!.id,
+        );
+        expect(html).toContain(`name="product_id" value="${rows[0]!.id}"`);
+        resetFlagsForTests();
+    });
+
+    test("scanning an unbranded product named like a food you have opens What is it? on that food", async () => {
+        const cream = await plain("Cream");
+        const code = "0000000012345";
+        db.barcodeFoods[code] = {
+            ...offProductFixture(),
+            name: "Cream",
+            brand: null,
+            barcode: code,
+            source: `off:${code}`,
+        };
+        const res = await get(`/kitchen/usuals/add/barcode/${code}`);
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain("What is it?");
+        expect(await db.foodsStore.getBarcodeFoodId(HH, code)).toBe(cream.id);
+        expect(
+            (await db.foodsStore.listFoods(HH)).filter(
+                (f) => f.name === "Cream",
+            ),
+        ).toHaveLength(1);
+        resetFlagsForTests();
+    });
+
+    test("a product the catalog refuses shows in the sheet instead of failing the page", async () => {
+        const code = "0000000099999";
+        db.barcodeFoods[code] = {
+            ...offProductFixture(),
+            name: "Taken name",
+            brand: "Nobody",
+            barcode: code,
+            source: `off:${code}`,
+        };
+        const insert = db.foodsStore.insertFood;
+        db.foodsStore.insertFood = async () => {
+            throw new FoodsInputError("That food already exists.");
+        };
+        try {
+            const res = await get(`/kitchen/usuals/add/barcode/${code}`);
+            expect(res.status).toBe(400);
+            const html = await res.text();
+            expect(html).toContain("That food already exists.");
+            expect(html).toContain("fd-kitchen-sheet-error");
+        } finally {
+            db.foodsStore.insertFood = insert;
+        }
+        resetFlagsForTests();
+    });
+
+    test("a What is it? error keeps the store and amount that were picked", async () => {
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        db.barcodeFoods[HALF_CODE] = heavyCream();
+        await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`);
+        const product = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.brand === "Kirkland",
+        )!;
+        const res = await post("/kitchen/usuals/add/product", {
+            product_id: product.id,
+            scan_code: HALF_CODE,
+            usual_store_id: costco.id,
+            usual_amount: "12",
+            usual_unit: "each",
+            return_to: "/kitchen/usuals",
+        });
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toMatch(
+            new RegExp(`name="usual_store_id" value="${costco.id}" checked`),
+        );
+        expect(html).toMatch(/name="usual_amount" value="12"/);
+        expect(html).toMatch(/<option value="each" selected>/);
+        resetFlagsForTests();
+    });
+
+    test("Type it creates the food and the usual shows after the redirect", async () => {
+        const res = await post("/kitchen/usuals/add/manual", handFields);
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/kitchen/usuals");
+        expect(toastOf(res)).toBe("usuals.added");
+        const oat = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.name === "Oat milk",
+        )!;
+        expect(oat).toMatchObject({
+            calories: 45,
+            proteinG: 1,
+            carbsG: 6.5,
+            fatG: 1.5,
+            nutritionBasis: "100ml",
+        });
+        const html = await (await get("/kitchen/usuals")).text();
+        expect(html).toContain('id="fd-usual-row-' + oat.id + '"');
+        expect(html).toContain("Oat milk");
+        resetFlagsForTests();
+    });
+
+    test("Type it per serving converts a serving in grams", async () => {
+        const res = await post("/kitchen/usuals/add/manual", {
+            ...handFields,
+            name: "Granola",
+            basis: "per_serving",
+            serving_amount: "40",
+            serving_unit: "g",
+            calories: "180",
+        });
+        expect(res.status).toBe(303);
+        const granola = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.name === "Granola",
+        )!;
+        expect(granola.calories).toBe(450);
+        resetFlagsForTests();
+    });
+
+    test("Type it with a barcode carried attaches it to the new food", async () => {
+        const res = await post("/kitchen/usuals/add/manual", {
+            ...handFields,
+            barcode: "0123456789012",
+        });
+        expect(res.status).toBe(303);
+        const id = await db.foodsStore.getBarcodeFoodId(HH, "0123456789012");
+        expect((await db.foodsStore.getFood(HH, id!))?.name).toBe("Oat milk");
+        resetFlagsForTests();
+    });
+
+    test("Type it with a macro missing answers 400, keeps the sheet open and the values, and says which", async () => {
+        const res = await post("/kitchen/usuals/add/manual", {
+            ...handFields,
+            calories: "",
+            barcode: "0123456789012",
+        });
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain('id="fd-usual-add-calories-error"');
+        expect(html).toContain("Enter the calories.");
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(html).toContain('value="Oat milk"');
+        expect(html).toContain('name="barcode" value="0123456789012"');
+        expect(html).toMatch(/name="basis" value="per_100ml" checked/);
+        expect(html).toMatch(
+            /data-fd-usual-add-tab="type"[^>]*aria-selected="true"/,
+        );
+        expect(toastOf(res)).toBeNull();
+        expect((await db.foodsStore.listFoods(HH)).length).toBe(0);
+        resetFlagsForTests();
+    });
+
+    test("Type it for a name that has different macros answers 400 with a sheet-level message", async () => {
+        const existing = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Oat milk",
+                calories: 90,
+                proteinG: 3,
+                carbsG: 12,
+                fatG: 4,
+                nutritionBasis: "100ml",
+            }),
+        );
+        const res = await post("/kitchen/usuals/add/manual", handFields);
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain("Oat milk");
+        expect(html).toMatch(
+            /<p class="fd-kitchen-sheet-error" role="alert">[^<]*Oat milk/,
+        );
+        expect(html).toContain("data-sheet-open-on-load");
+        expect((await db.foodsStore.getFood(HH, existing.id))?.calories).toBe(
+            90,
+        );
+        resetFlagsForTests();
+    });
+
+    test("a typed usual's edit sheet saves its store and amount", async () => {
+        const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
+        await post("/kitchen/usuals/add/manual", handFields);
+        const oat = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.name === "Oat milk",
+        )!;
+        const res = await post(`/kitchen/usuals/${oat.id}`, {
+            product_food_id: "",
+            usual_store_id: costco.id,
+            usual_amount: "2",
+            usual_unit: "each",
+            return_to: "/kitchen/usuals",
+        });
+        expect(res.status).toBe(303);
+        const saved = await db.foodsStore.getFood(HH, oat.id);
+        expect(saved?.usualStoreId).toBe(costco.id);
+        expect(saved?.usualAmount).toEqual({ amount: 2, unit: "each" });
+        const html = await (await get("/kitchen/usuals")).text();
+        expect(html).toContain("Costco");
+        resetFlagsForTests();
+    });
+
+    test("Remove takes a typed usual off the list and clears it", async () => {
+        await post("/kitchen/usuals/add/manual", handFields);
+        const oat = (await db.foodsStore.listFoods(HH)).find(
+            (f) => f.name === "Oat milk",
+        )!;
+        const res = await post(`/kitchen/usuals/${oat.id}/remove`, {
+            return_to: "/kitchen/usuals",
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/kitchen/usuals");
+        expect(toastOf(res)).toBe("usuals.removed");
+        expect(
+            (await db.foodsStore.getFood(HH, oat.id))?.usualAddedAt,
+        ).toBeNull();
+        const html = await (await get("/kitchen/usuals")).text();
+        expect(html).not.toContain('id="fd-usual-row-' + oat.id + '"');
+        resetFlagsForTests();
+    });
+
+    test("Remove of an unknown food answers 400 and writes nothing", async () => {
+        const res = await post("/kitchen/usuals/nope/remove", {
+            return_to: "/kitchen/usuals",
+        });
+        expect(res.status).toBe(400);
         resetFlagsForTests();
     });
 });

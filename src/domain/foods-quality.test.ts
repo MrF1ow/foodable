@@ -414,3 +414,99 @@ test("refreshFoodQualityByBarcode never creates", async () => {
     expect(out).toBeNull();
     expect((await store.listFoods(HH)).length).toBe(before);
 });
+
+test("nameMatch: false makes a product row instead of merging into a food of the same name", async () => {
+    const store = createMemoryFoodsStore();
+    const plain = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Nutella" }),
+    );
+    const { food, created } = await findOrCreateFoodByBarcodeResult(
+        store,
+        HH,
+        BARCODE,
+        async () => hitWithQuality(),
+        { nameMatch: false },
+    );
+    expect(created).toBe(true);
+    expect(food.id).not.toBe(plain.id);
+    expect(food).toMatchObject({ brand: "Ferrero", offSourceId: BARCODE });
+    expect(await store.getBarcodeFoodId(HH, BARCODE)).toBe(food.id);
+    expect((await store.getFood(HH, plain.id))?.offSourceId).toBeNull();
+});
+
+test("by default a scanned product still merges into a food of the same name", async () => {
+    const store = createMemoryFoodsStore();
+    const plain = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Nutella" }),
+    );
+    const { food, created } = await findOrCreateFoodByBarcodeResult(
+        store,
+        HH,
+        BARCODE,
+        async () => hitWithQuality(),
+    );
+    expect(created).toBe(false);
+    expect(food.id).toBe(plain.id);
+});
+
+test("nameMatch: false reuses the row of the same name and brand for another pack size", async () => {
+    const store = createMemoryFoodsStore();
+    const first = await findOrCreateFoodByBarcodeResult(
+        store,
+        HH,
+        BARCODE,
+        async () => hitWithQuality(),
+        { nameMatch: false },
+    );
+    const second = await findOrCreateFoodByBarcodeResult(
+        store,
+        HH,
+        "3017620422003",
+        async () => hitWithQuality(),
+        { nameMatch: false },
+    );
+    expect(first.created).toBe(true);
+    expect(second.created).toBe(false);
+    expect(second.food.id).toBe(first.food.id);
+    expect(await store.getBarcodeFoodId(HH, "3017620422003")).toBe(
+        first.food.id,
+    );
+    expect(await store.getBarcodeFoodId(HH, BARCODE)).toBe(first.food.id);
+});
+
+test("nameMatch: false matches an unbranded hit named like a food by name", async () => {
+    const store = createMemoryFoodsStore();
+    const plain = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Nutella" }),
+    );
+    const { food, created } = await findOrCreateFoodByBarcodeResult(
+        store,
+        HH,
+        BARCODE,
+        async () => ({ ...hitWithQuality(), brand: null }),
+        { nameMatch: false },
+    );
+    expect(created).toBe(false);
+    expect(food.id).toBe(plain.id);
+});
+
+test("nameMatch: false still reuses a household barcode and an OFF source id", async () => {
+    const store = createMemoryFoodsStore();
+    const known = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Spread",
+            offSourceId: BARCODE,
+        }),
+    );
+    const { food, created } = await findOrCreateFoodByBarcodeResult(
+        store,
+        HH,
+        BARCODE,
+        async () => hitWithQuality(),
+        { nameMatch: false },
+    );
+    expect(created).toBe(false);
+    expect(food.id).toBe(known.id);
+});

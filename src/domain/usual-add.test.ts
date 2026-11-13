@@ -14,7 +14,10 @@ import {
 import {
     addUsualByHand,
     addUsualFromProduct,
+    isPlainFoodRow,
+    nameWithoutBrand,
     removeUsual,
+    suggestUsualFoods,
     UsualInputError,
     type UsualByHandInput,
 } from "./usual-add.js";
@@ -171,6 +174,18 @@ describe("addUsualFromProduct", () => {
         expect(food.genericFoodId).toBeNull();
         expect(food.createdBy).toBe("user-1");
         expect(food.usualProductId).toBe(scanned.id);
+    });
+
+    test("a new name has its inner spaces collapsed", async () => {
+        const { store, product } = setup();
+        const scanned = await product("Horizon Milk");
+        const food = await addUsualFromProduct(store, HH, {
+            productId: scanned.id,
+            newFoodName: "  Whole   milk ",
+            stores,
+        });
+        expect(food.name).toBe("Whole milk");
+        expect(food.normalizedName).toBe("whole milk");
     });
 
     test("a new name that matches an existing plain food reuses it", async () => {
@@ -401,6 +416,16 @@ describe("addUsualByHand", () => {
         expect(rows[0]!.products).toEqual([]);
         expect(rows[0]!.usual).toBeNull();
         expect(addable.map((f) => f.id)).not.toContain(food.id);
+    });
+
+    test("collapses the spaces inside the name", async () => {
+        const { store } = setup();
+        const food = await addUsualByHand(
+            store,
+            HH,
+            hand({ name: "  Oat   milk " }),
+        );
+        expect(food.name).toBe("Oat milk");
     });
 
     test("per 100 g stores the 100g basis", async () => {
@@ -860,5 +885,126 @@ describe("usual membership", () => {
             stores: [{ id: "s1" }],
         } as never);
         expect(out.map((row) => row.foodId)).toEqual([food.id]);
+    });
+});
+
+describe("nameWithoutBrand", () => {
+    test("drops the brand at either end, and only there", () => {
+        expect(nameWithoutBrand("Kirkland Large Eggs", "Kirkland")).toBe(
+            "Large Eggs",
+        );
+        expect(
+            nameWithoutBrand("Half & Half - Member's Mark", "Member's Mark"),
+        ).toBe("Half & Half");
+        expect(
+            nameWithoutBrand("Kirkland Signature Kirkland", "Kirkland"),
+        ).toBe("Signature");
+        expect(nameWithoutBrand("Eggs", null)).toBe("Eggs");
+    });
+
+    test("collapses the spaces inside a name", () => {
+        expect(nameWithoutBrand("Kirkland  Large   Eggs", "Kirkland")).toBe(
+            "Large Eggs",
+        );
+        expect(nameWithoutBrand("  Large   Eggs ", null)).toBe("Large Eggs");
+    });
+
+    test("keeps the whole name when the brand is all there is", () => {
+        expect(nameWithoutBrand("Kirkland", "Kirkland")).toBe("Kirkland");
+    });
+});
+
+describe("isPlainFoodRow", () => {
+    test("is true only for an unfiled, unbranded, unscanned food", () => {
+        expect(
+            isPlainFoodRow({
+                genericFoodId: null,
+                brand: null,
+                offSourceId: null,
+            }),
+        ).toBe(true);
+        expect(
+            isPlainFoodRow({
+                genericFoodId: "x",
+                brand: null,
+                offSourceId: null,
+            }),
+        ).toBe(false);
+        expect(
+            isPlainFoodRow({
+                genericFoodId: null,
+                brand: "Kirkland",
+                offSourceId: null,
+            }),
+        ).toBe(false);
+        expect(
+            isPlainFoodRow({
+                genericFoodId: null,
+                brand: null,
+                offSourceId: "123",
+            }),
+        ).toBe(false);
+    });
+});
+
+describe("suggestUsualFoods", () => {
+    const none = new Map<string, string[]>();
+
+    test("offers only plain foods, never another brand's product", async () => {
+        const { plain, product } = setup();
+        const eggs = await plain("Eggs");
+        const organic = await product("Eggs", { offSourceId: "0093966000016" });
+        const scanned = await product("Large Eggs", {
+            brand: "Kirkland",
+            offSourceId: "0096619000000",
+        });
+        const result = suggestUsualFoods(
+            scanned,
+            [eggs, organic, scanned],
+            none,
+        );
+        expect(result.filed).toBeNull();
+        expect(result.matches.map((f) => f.id)).toEqual([eggs.id]);
+    });
+
+    test("puts the food a product is filed under first, and not again in the matches", async () => {
+        const { plain, product } = setup();
+        const eggs = await plain("Eggs");
+        const scanned = await product("Large Eggs", {
+            brand: "Kirkland",
+            genericFoodId: eggs.id,
+        });
+        const result = suggestUsualFoods(scanned, [eggs, scanned], none);
+        expect(result.filed?.id).toBe(eggs.id);
+        expect(result.matches).toEqual([]);
+    });
+
+    test("a search replaces the name match", async () => {
+        const { plain, product } = setup();
+        const eggs = await plain("Eggs");
+        const flour = await plain("Flour");
+        const scanned = await product("Large Eggs", { brand: "Kirkland" });
+        const result = suggestUsualFoods(
+            scanned,
+            [eggs, flour, scanned],
+            none,
+            "flo",
+        );
+        expect(result.matches.map((f) => f.id)).toEqual([flour.id]);
+    });
+});
+
+describe("addUsualFromProduct from Search", () => {
+    test("a branded plain food named as its own food is added as it is", async () => {
+        const { store, product } = setup();
+        const butter = await product("Butter", { brand: "Kerrygold" });
+        const food = await addUsualFromProduct(store, HH, {
+            productId: butter.id,
+            foodId: butter.id,
+            stores,
+        });
+        expect(food.id).toBe(butter.id);
+        expect(food.usualAddedAt).not.toBeNull();
+        expect(food.genericFoodId).toBeNull();
     });
 });

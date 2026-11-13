@@ -3,6 +3,8 @@ import { Hono } from "hono";
 import type { SQL } from "bun";
 import { resetFlagsForTests } from "../../flags.js";
 import { createProduct } from "../../domain/foods.js";
+import { addUsualByHand } from "../../domain/usual-add.js";
+import { liveSettingsStore } from "../../db/settings.js";
 import { createRecipe } from "../../domain/recipes.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
@@ -278,6 +280,28 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
                 select generic_food_id from public.foods where id = ${product.id}
             `;
             expect(row.generic_food_id).toBeNull();
+        });
+
+        test("remove takes a typed usual, which has no product, off the list", async () => {
+            const typed = await addUsualByHand(liveFoodsStore(), householdId, {
+                name: "Oat milk",
+                basis: "per_100ml",
+                calories: "45",
+                proteinG: "1",
+                carbsG: "6.5",
+                fatG: "1.5",
+                stores: liveSettingsStore(),
+            });
+            const res = await post("/kitchen/usuals/bulk/remove", [
+                ...ids([typed.id]),
+                ["return_to", "/kitchen/usuals"],
+            ]);
+            expect(res.status).toBe(303);
+            expect(toastKey(res)).toBe("usuals.removed");
+            const [row] = await sql`
+                select usual_added_at from public.foods where id = ${typed.id}
+            `;
+            expect(row.usual_added_at).toBeNull();
         });
 
         test("a food that is not a usual, picked with a usual, answers 400 and removes nothing", async () => {

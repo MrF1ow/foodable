@@ -4,6 +4,7 @@ import {
     findFoodByNameAndBrand,
     FoodsInputError,
     linkProduct,
+    matchFoodsByWords,
     newFood,
     NO_USUAL_SCHEDULE,
     normalizeFoodName,
@@ -12,6 +13,7 @@ import {
     setUsualProduct,
     setUsualPurchase,
     setUsualSchedule,
+    similarFoods,
     type Food,
     type FoodKind,
     type FoodServing,
@@ -49,6 +51,88 @@ async function liveFood(
     const food = await store.getFood(householdId, foodId);
     if (!food || food.archivedAt) throw new FoodsInputError("Unknown food.");
     return food;
+}
+
+/**
+ * A plain food is the thing a usual is: not filed under another food, not a
+ * branded row and not one scanned from Open Food Facts. Only such a row can be
+ * the usual as it is, and only such rows are offered as "what is it?".
+ */
+export function isPlainFoodRow(
+    food: Pick<Food, "genericFoodId" | "brand" | "offSourceId">,
+): boolean {
+    return !food.genericFoodId && food.brand == null && !food.offSourceId;
+}
+
+function collapseSpaces(text: string): string {
+    return text.replace(/\s+/g, " ").trim();
+}
+
+function escapeRegExp(text: string): string {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A product's name without its brand at either end: the name to suggest for the food. */
+export function nameWithoutBrand(name: string, brand: string | null): string {
+    const trimmed = collapseSpaces(name);
+    const b = brand?.trim();
+    if (!b) return trimmed;
+    const sep = "[\\s\\-\u2013\\u00b7,:]*";
+    const cut = trimmed
+        .replace(new RegExp(`^${escapeRegExp(b)}${sep}`, "i"), "")
+        .replace(new RegExp(`${sep}${escapeRegExp(b)}$`, "i"), "")
+        .trim();
+    return cut || trimmed;
+}
+
+export type UsualFoodSuggestions = {
+    /** The plain food the product is already filed under, when there is one. */
+    filed: Food | null;
+    /** Other plain foods it could be, best first. */
+    matches: Food[];
+};
+
+/**
+ * The foods a scanned product could be: the one it is filed under, then real
+ * plain foods only (never another brand's product), found by the person's
+ * search or, with none, by the product's own name without its brand.
+ */
+export function suggestUsualFoods(
+    product: Food,
+    foods: readonly Food[],
+    aliases: ReadonlyMap<string, string[]>,
+    query = "",
+): UsualFoodSuggestions {
+    const live = (id: string | null) => {
+        const food = id ? foods.find((f) => f.id === id) : undefined;
+        return food && !food.archivedAt ? food : null;
+    };
+    const filed = live(product.genericFoodId);
+    const search = query.trim();
+    const plain = foods.filter(
+        (f) =>
+            !f.archivedAt &&
+            isPlainFoodRow(f) &&
+            f.kind === product.kind &&
+            f.id !== product.id,
+    );
+    const candidates = search
+        ? matchFoodsByWords(search, plain, aliases)
+        : similarFoods(
+              nameWithoutBrand(product.name, product.brand),
+              plain,
+              aliases,
+              {
+                  kind: product.kind,
+                  keepResolved: true,
+              },
+          ).map((c) => c.food);
+    return {
+        filed,
+        matches: candidates
+            .filter((f) => f.id !== filed?.id)
+            .slice(0, search ? 8 : 3),
+    };
 }
 
 /** The live plain food that goes by this name (or alias), or null. */
@@ -117,7 +201,7 @@ export async function addUsualFromProduct(
         await parseUsualPurchase(householdId, input.purchase, input.stores);
     }
     const foodId = input.foodId?.trim() || null;
-    const newName = input.newFoodName?.trim() || null;
+    const newName = collapseSpaces(input.newFoodName ?? "") || null;
     let created: Food | null = null;
     let target: Food;
     try {
@@ -145,7 +229,7 @@ export async function addUsualFromProduct(
             }
         } else if (product.genericFoodId) {
             target = await liveFood(store, householdId, product.genericFoodId);
-        } else if (product.brand == null && !product.offSourceId) {
+        } else if (isPlainFoodRow(product)) {
             target = product;
         } else {
             throw new UsualInputError(
@@ -306,7 +390,7 @@ export async function addUsualByHand(
     householdId: string,
     input: UsualByHandInput,
 ): Promise<Food> {
-    const name = input.name?.trim() ?? "";
+    const name = collapseSpaces(input.name ?? "");
     if (!name) throw new UsualInputError("Enter a food name.", "name");
     const kind: FoodKind = input.kind ?? "food";
     if (

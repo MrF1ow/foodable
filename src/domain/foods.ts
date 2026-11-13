@@ -1625,11 +1625,22 @@ async function findFoodByLooseKey(
     return copyFood(matches[0]!);
 }
 
+/**
+ * `nameMatch: false` keeps a scanned product from being folded into a food
+ * that merely goes by its name: a household barcode, the same Open Food Facts
+ * id, or a live row with the same name and brand (another pack size of the
+ * same product) reuses a row, anything else becomes a product row of its own.
+ * An unbranded hit matches by name as usual. The default (match by name) is
+ * what the log sheet and the barcode page rely on.
+ */
+export type BarcodeFoodOptions = { nameMatch?: boolean };
+
 export async function findOrCreateFoodByBarcodeFromHit(
     store: FoodsStore,
     householdId: string,
     normalized: string,
     hit: FoodResult,
+    opts: BarcodeFoodOptions = {},
 ): Promise<{ food: Food; created: boolean }> {
     const existingId = await store.getBarcodeFoodId(householdId, normalized);
     if (existingId) {
@@ -1645,12 +1656,26 @@ export async function findOrCreateFoodByBarcodeFromHit(
         const food = await applyHitQualityToFood(store, byOff, hit);
         return { food, created: false };
     }
-    const byName = await existingByNameOrAlias(
-        store,
-        householdId,
-        "food",
-        normalizeFoodName(hit.name),
-    );
+    // A product row of its own never folds into a food that merely goes by its
+    // name, but the catalog still holds one live row per name and brand: the
+    // same product in another pack size reuses that row. An unbranded hit has
+    // no brand to tell it apart, so it matches by name like the default.
+    const brandedOwnRow =
+        opts.nameMatch === false && normalizeFoodBrand(hit.brand) != null;
+    const byName = brandedOwnRow
+        ? await findFoodByNameAndBrand(
+              store,
+              householdId,
+              "food",
+              hit.name,
+              hit.brand,
+          )
+        : await existingByNameOrAlias(
+              store,
+              householdId,
+              "food",
+              normalizeFoodName(hit.name),
+          );
     if (byName) {
         await store.setBarcode(householdId, normalized, byName.id);
         const food = await applyHitQualityToFood(store, byName, hit);
@@ -1683,6 +1708,7 @@ export async function findOrCreateFoodByBarcodeResult(
     householdId: string,
     barcode: string,
     lookup: (barcode: string) => Promise<FoodResult | null>,
+    opts: BarcodeFoodOptions = {},
 ): Promise<{ food: Food; created: boolean }> {
     const normalized = normalizeBarcode(barcode);
     if (!normalized) throw new FoodsInputError("Enter a valid barcode.");
@@ -1753,6 +1779,7 @@ export async function findOrCreateFoodByBarcodeResult(
         householdId,
         normalized,
         hit,
+        opts,
     );
 }
 

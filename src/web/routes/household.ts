@@ -134,7 +134,10 @@ import { forbiddenDashboardHtml } from "../loaders.js";
 
 // TOAST_KEYS: "household.fetch-refusal.cleared"
 
+import { usualAddRoutes } from "./usual-add.js";
+
 export const householdRoutes = new Hono();
+householdRoutes.route("/", usualAddRoutes);
 
 // Settings › Household › Stores in the new app (own file: ten routes of its own).
 householdRoutes.route("/", householdStoresRoutes);

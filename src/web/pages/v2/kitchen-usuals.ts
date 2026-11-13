@@ -23,7 +23,15 @@ import {
     usualRow,
     type UsualPart,
 } from "../../components/v2/rows.js";
-import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
+import { confirmSheet, sheet } from "../../components/v2/sheet.js";
+import {
+    addUsualSheet,
+    addUsualTrigger,
+    USUAL_ADD_SHEET_ID,
+    type UsualAddView,
+} from "./kitchen-usuals-add.js";
+
+export { USUAL_ADD_SHEET_ID };
 import { selectMode } from "./select-mode.js";
 import { stepper } from "../../components/v2/stepper.js";
 import type { Notice } from "../../../domain/notices.js";
@@ -33,7 +41,6 @@ import { renderKitchenHead } from "./kitchen-head.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 
 export const USUALS_V2_RETURN_TO = "/kitchen/usuals";
-export const USUAL_ADD_SHEET_ID = "fd-usual-add";
 
 export const USUALS_INTRO =
     "What you usually buy, where, and how much. Adding a food to the list fills these in.";
@@ -62,6 +69,22 @@ export function usualSheetId(foodId: string): string {
 
 function productPickerSheetId(foodId: string): string {
     return `${usualSheetId(foodId)}-product`;
+}
+
+export function usualRemoveSheetId(foodId: string): string {
+    return `${usualSheetId(foodId)}-remove`;
+}
+
+/** Asks before taking one usual off the list; posts to its remove route. */
+function removeUsualSheet(row: UsualProductRow, returnTo: string): string {
+    return confirmSheet({
+        id: usualRemoveSheetId(row.food.id),
+        title: "Remove from usuals",
+        message: `Remove ${row.food.name} from your usuals?`,
+        action: `${USUALS_V2_RETURN_TO}/${row.food.id}/remove`,
+        confirmLabel: "Remove",
+        hiddenFields: { return_to: returnTo },
+    });
 }
 
 export function usualRestockSheetId(foodId: string): string {
@@ -154,12 +177,6 @@ export type KitchenUsualsRowMeta = {
     restock?: UsualRestockView;
 };
 
-export type KitchenUsualsAddSearch = {
-    q: string;
-    results: Food[];
-    truncated: boolean;
-};
-
 export type KitchenUsualsV2View = {
     chrome: AppChromeBase;
     rows: UsualProductRow[];
@@ -173,7 +190,8 @@ export type KitchenUsualsV2View = {
     openRestock?: boolean;
     /** "Sundays": the household's restock day, when restocking is on. */
     restockDay?: string | null;
-    addSearch?: KitchenUsualsAddSearch;
+    /** The Add a usual sheet's state; absent leaves it closed on Scan. */
+    add?: UsualAddView;
     openGroceriesCount?: number;
     /** The household's open notices; the usuals running low show in place. */
     notices?: readonly Notice[];
@@ -669,6 +687,7 @@ ${unitField(formId, unitValue, `${stepperId}-unit`)}
 </form>
 ${restockGroup(row, restock, formId)}
 ${productPickerSheet(row, formId, pick)}
+${removeUsualSheet(row, returnTo)}
 ${restockSheet(row, restock, { returnTo, open: restockOpen, error: restockOpen ? errorHtml : "" })}`;
     return sheet({
         id: sheetId,
@@ -676,54 +695,10 @@ ${restockSheet(row, restock, { returnTo, open: restockOpen, error: restockOpen ?
         title: row.food.name,
         subtitle: USUALS_EDIT_SUBTITLE,
         body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${esc(formId)}">Save</button>`,
+        actions: `<button type="button" class="fd-btn fd-btn--danger" commandfor="${esc(usualRemoveSheetId(row.food.id))}" command="show-modal">Remove</button>
+<button type="submit" class="fd-btn fd-btn--primary" form="${esc(formId)}">Save</button>`,
         openOnLoad: open,
     });
-}
-
-function addUsualSheet(view: KitchenUsualsV2View): string {
-    if ((view.addable?.length ?? 0) === 0) return "";
-    const q = view.addSearch?.q ?? "";
-    const results = view.addSearch?.results ?? [];
-    const resultRows = results
-        .map((food) => {
-            const chooseHref = `${USUALS_V2_RETURN_TO}?food=${encodeURIComponent(food.id)}${view.selectedStoreId ? `&store=${encodeURIComponent(view.selectedStoreId)}` : ""}`;
-            const brand = food.brand
-                ? `<span class="fd-kitchen-usual-add__brand">${esc(food.brand)}</span>`
-                : "";
-            return `<li class="fd-kitchen-usual-add__result"><a class="fd-kitchen-usual-add__choose" href="${esc(chooseHref)}"><span class="fd-kitchen-usual-add__name">${esc(food.name)}</span>${brand}</a></li>`;
-        })
-        .join("");
-    const searchOutcome =
-        view.addSearch == null
-            ? ""
-            : results.length === 0
-              ? `<p class="fd-kitchen-usual-add__empty">No matching food.</p>`
-              : `<ul class="fd-kitchen-usual-add__results">${resultRows}</ul>${view.addSearch.truncated ? `<p class="fd-kitchen-usual-add__hint">Showing the first 20. Type more to narrow it.</p>` : ""}`;
-    const body = `<form method="get" action="${esc(USUALS_V2_RETURN_TO)}" class="fd-kitchen-usual-add-form">
-<label class="fd-kitchen-sheet-label">Food<input id="fd-usual-add-q" name="q" type="search" autocomplete="off" value="${esc(q)}" /></label>
-<button type="submit" class="fd-btn fd-btn--primary">Search</button>
-</form>
-<p class="fd-kitchen-usual-add__hint">Scanned products aren't listed. File them under a food with Belongs to… on <a href="/settings/household/items">Items</a>.</p>
-${searchOutcome}`;
-    return sheet({
-        id: USUAL_ADD_SHEET_ID,
-        kind: "edit",
-        title: "Add a usual",
-        body,
-        openOnLoad: view.addSearch != null,
-    });
-}
-
-function addUsualTrigger(view: KitchenUsualsV2View): string {
-    if ((view.addable?.length ?? 0) === 0) return "";
-    return String(
-        sheetTrigger({
-            target: USUAL_ADD_SHEET_ID,
-            label: "Add a usual",
-            className: "fd-kitchen-usual-add-btn",
-        }),
-    );
 }
 
 function renderUsualsHead(view: KitchenUsualsV2View): string {
@@ -769,8 +744,18 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
     const sheets = view.rows
         .map((row) => editUsualSheet(row, view, resolvedOpen))
         .join("");
-    const addTrigger = addUsualTrigger(view);
-    const addSheet = addUsualSheet(view);
+    const returnTo = view.selectedStoreId
+        ? `${USUALS_V2_RETURN_TO}?store=${encodeURIComponent(view.selectedStoreId)}`
+        : USUALS_V2_RETURN_TO;
+    const addTrigger = addUsualTrigger();
+    const addSheet = addUsualSheet({
+        add: view.add,
+        addable: view.addable,
+        stores: view.stores,
+        selectedStoreId: view.selectedStoreId,
+        returnTo,
+        barcodeCamera: view.chrome.flags.barcodeCamera,
+    });
     const select = selectMode({
         scope: "usuals",
         returnTo: view.selectedStoreId

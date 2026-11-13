@@ -10,6 +10,7 @@ import {
     DOLLAR_PAYLOADS,
     injectedAttributes,
 } from "../../components/v2/test-helpers.js";
+import { usualAddFoundView } from "./kitchen-usuals-add.js";
 import {
     USUALS_EDIT_SUBTITLE,
     USUALS_INTRO,
@@ -669,5 +670,490 @@ describe("usualTableCells", () => {
         expect(
             usualTableCells({ ...meta, productLabel: "Any brand" }),
         ).toContain("fd-usual-cell--muted");
+    });
+});
+
+describe("Add a usual sheet", () => {
+    const scanFound = {
+        kind: "found" as const,
+        code: "0193968379117",
+        product: {
+            id: "p1",
+            name: "Half & Half",
+            brand: "Member's Mark",
+        },
+        self: false,
+        options: [{ id: "hh", name: "Half & half", brand: null }],
+        choice: "hh",
+        newName: "Half & Half",
+        query: "",
+        purchase: {},
+    };
+
+    function addSheetHtml(overrides: Record<string, unknown> = {}): string {
+        const html = renderKitchenUsualsBody(baseView(overrides) as never);
+        const start = html.indexOf(
+            '<dialog class="fd-sheet fd-sheet--edit" id="fd-usual-add"',
+        );
+        expect(start).toBeGreaterThan(-1);
+        return html.slice(start, html.indexOf("</dialog>", start));
+    }
+
+    test("opens from a trigger that shows even with nothing searchable", () => {
+        const html = renderKitchenUsualsBody(
+            baseView({ addable: [], rows: [], rowMeta: new Map() }) as never,
+        );
+        expect(html).toContain('commandfor="fd-usual-add"');
+        expect(html).toContain('id="fd-usual-add"');
+        expect(html).toContain("Add a usual");
+    });
+
+    test("has three ways in: Scan, Search and Type it", () => {
+        const sheet = addSheetHtml();
+        for (const tab of ["scan", "search", "type"]) {
+            expect(sheet).toContain(`data-fd-usual-add-tab="${tab}"`);
+            expect(sheet).toContain(`data-fd-usual-add-panel="${tab}"`);
+        }
+        expect(sheet).toMatch(/role="tab"[^>]*>Scan</);
+        expect(sheet).toMatch(/role="tab"[^>]*>Search</);
+        expect(sheet).toMatch(/role="tab"[^>]*>Type it</);
+        // The first tab shows; the others are hidden until chosen.
+        expect(sheet).toMatch(
+            /data-fd-usual-add-tab="scan"[^>]*aria-selected="true"/,
+        );
+        expect(sheet).toMatch(/data-fd-usual-add-panel="search"[^>]*hidden/);
+        expect(sheet).toMatch(/data-fd-usual-add-panel="type"[^>]*hidden/);
+    });
+
+    test("the hint about scanned products and Belongs to is gone", () => {
+        const html = renderKitchenUsualsBody(baseView() as never);
+        expect(html).not.toContain("Scanned products aren");
+        expect(html).not.toContain("Belongs to");
+    });
+
+    test("Scan opens the shared scanner and aims it at this page", () => {
+        const sheet = addSheetHtml();
+        expect(sheet).toContain('data-fd-open-sheet="fd-barcode-scan"');
+        expect(sheet).toContain(
+            'data-fd-scanner-target="/kitchen/usuals/add/barcode/{code}"',
+        );
+        expect(sheet).toContain("Scan a barcode");
+    });
+
+    test("the store chip rides along in the scan target", () => {
+        const sheet = addSheetHtml({ selectedStoreId: "st-costco" });
+        expect(sheet).toContain(
+            'data-fd-scanner-target="/kitchen/usuals/add/barcode/{code}?store=st-costco"',
+        );
+    });
+
+    test("the camera kill switch turns Scan into typing the number", () => {
+        const view = baseView();
+        const off = {
+            ...view,
+            chrome: {
+                ...view.chrome,
+                flags: { ...view.chrome.flags, barcodeCamera: false },
+            },
+        };
+        const sheet = addSheetHtml(off);
+        expect(sheet).toContain("Enter a barcode");
+        expect(sheet).not.toContain("Scan a barcode");
+        expect(sheet).toContain('data-fd-open-sheet="fd-barcode-scan"');
+    });
+
+    test("Search says so when nothing is searchable, and lists matches as add forms", () => {
+        const empty = addSheetHtml({ addable: [] });
+        expect(empty).toContain(
+            "Nothing to add from your foods. Scan it or type it in.",
+        );
+        const sheet = addSheetHtml({
+            add: {
+                tab: "search",
+                search: {
+                    q: "flo",
+                    results: [food({ id: "flour", name: "Flour" })],
+                    truncated: false,
+                },
+            },
+        });
+        expect(sheet).toContain('action="/kitchen/usuals/add/product"');
+        expect(sheet).toContain('name="product_id" value="flour"');
+        expect(sheet).toContain("Flour");
+        expect(sheet).toMatch(
+            /data-fd-usual-add-tab="search"[^>]*aria-selected="true"/,
+        );
+        expect(sheet).toContain("data-sheet-open-on-load");
+    });
+
+    test("What is it? shows the product and preselects its food", () => {
+        const sheet = addSheetHtml({ add: { tab: "scan", scan: scanFound } });
+        expect(sheet).toContain("What is it?");
+        expect(sheet).toContain("Half &amp; Half");
+        expect(sheet).toContain("Member's Mark");
+        expect(sheet).toContain('action="/kitchen/usuals/add/product"');
+        expect(sheet).toContain('name="product_id" value="p1"');
+        expect(sheet).toMatch(/name="food_choice" value="hh" checked/);
+        expect(sheet).toContain('name="new_food_name"');
+        expect(sheet).toContain('value="Half &amp; Half"');
+        expect(sheet).toContain("data-sheet-open-on-load");
+    });
+
+    test("What is it? offers a search of foods and a new name", () => {
+        const sheet = addSheetHtml({
+            add: {
+                tab: "scan",
+                scan: {
+                    ...scanFound,
+                    options: [],
+                    choice: "new",
+                    query: "milk",
+                },
+            },
+        });
+        expect(sheet).toContain('name="fq"');
+        expect(sheet).toContain('value="milk"');
+        expect(sheet).toMatch(/name="food_choice" value="new" checked/);
+    });
+
+    test("a scanned plain food is added as it is, with nothing to pick", () => {
+        const sheet = addSheetHtml({
+            add: {
+                tab: "scan",
+                scan: { ...scanFound, self: true, options: [], choice: "" },
+            },
+        });
+        expect(sheet).toContain('name="product_id" value="p1"');
+        expect(sheet).not.toContain('name="food_choice"');
+        expect(sheet).toContain("Add usual");
+    });
+
+    test("a scan miss lands on Type it with the barcode carried", () => {
+        const sheet = addSheetHtml({
+            add: {
+                tab: "type",
+                scan: {
+                    kind: "miss",
+                    code: "0123456789012",
+                    lookupFailed: false,
+                },
+            },
+        });
+        expect(sheet).toContain("0123456789012");
+        expect(sheet).toContain('name="barcode" value="0123456789012"');
+        expect(sheet).toMatch(
+            /data-fd-usual-add-tab="type"[^>]*aria-selected="true"/,
+        );
+        expect(sheet).toContain("data-sheet-open-on-load");
+    });
+
+    test("a failed lookup says it could not look the code up", () => {
+        const sheet = addSheetHtml({
+            add: {
+                tab: "type",
+                scan: {
+                    kind: "miss",
+                    code: "0123456789012",
+                    lookupFailed: true,
+                },
+            },
+        });
+        expect(sheet).toContain("Could not look this barcode up");
+    });
+
+    test("an invalid code shows in the Scan tab", () => {
+        const sheet = addSheetHtml({
+            add: { tab: "scan", scan: { kind: "invalid", code: "12" } },
+        });
+        expect(sheet).toContain("isn't a barcode");
+        expect(sheet).toMatch(
+            /data-fd-usual-add-tab="scan"[^>]*aria-selected="true"/,
+        );
+    });
+
+    test("Type it asks for the name and all four macros, per 100 g by default", () => {
+        const sheet = addSheetHtml();
+        expect(sheet).toContain('action="/kitchen/usuals/add/manual"');
+        for (const name of [
+            "name",
+            "calories",
+            "protein_g",
+            "carbs_g",
+            "fat_g",
+        ]) {
+            expect(sheet).toMatch(new RegExp(`name="${name}"[^>]*required`));
+        }
+        expect(sheet).toMatch(/name="calories"[^>]*inputmode="decimal"/);
+        expect(sheet).toMatch(/name="basis" value="per_100g" checked/);
+        expect(sheet).toContain('name="basis" value="per_100ml"');
+        expect(sheet).toContain('name="basis" value="per_serving"');
+        expect(sheet).toContain('name="serving_amount"');
+        expect(sheet).toContain('name="serving_unit"');
+        expect(sheet).toContain('name="usual_store_id"');
+        expect(sheet).toContain('name="usual_amount"');
+        expect(sheet).not.toMatch(/name="barcode"/);
+    });
+
+    test("a Type it error keeps the values and sits under its field", () => {
+        const sheet = addSheetHtml({
+            add: {
+                tab: "type",
+                type: {
+                    values: {
+                        name: "Oat milk",
+                        protein_g: "1",
+                        basis: "per_100ml",
+                    },
+                },
+                error: { message: "Enter the calories.", field: "calories" },
+            },
+        });
+        expect(sheet).toContain('value="Oat milk"');
+        expect(sheet).toMatch(/name="basis" value="per_100ml" checked/);
+        expect(sheet).toContain(
+            '<p class="fd-kitchen-sheet-error" id="fd-usual-add-calories-error" role="alert">Enter the calories.</p>',
+        );
+        expect(sheet).toMatch(/name="calories"[^>]*aria-invalid="true"/);
+        expect(sheet).toContain("data-sheet-open-on-load");
+    });
+
+    test("an error with no field is a sheet-level message", () => {
+        const sheet = addSheetHtml({
+            add: {
+                tab: "type",
+                error: {
+                    message: "Oat milk already has different macros.",
+                    field: null,
+                },
+            },
+        });
+        expect(sheet).toContain(
+            '<p class="fd-kitchen-sheet-error" role="alert">Oat milk already has different macros.</p>',
+        );
+    });
+
+    test("a What is it? error sits under the food choice", () => {
+        const sheet = addSheetHtml({
+            add: {
+                tab: "scan",
+                scan: scanFound,
+                error: {
+                    message: "Pick the food this product is.",
+                    field: "food",
+                },
+            },
+        });
+        expect(sheet).toContain('id="fd-usual-add-food-error"');
+        expect(sheet).toContain("Pick the food this product is.");
+    });
+
+    test("a typed usual with no product renders as a row with a working edit sheet", () => {
+        const typed = food({
+            id: "oat",
+            name: "Oat milk",
+            usualAddedAt: "2026-11-13",
+        });
+        const html = renderKitchenUsualsBody(
+            baseView({
+                rows: [{ food: typed, products: [], usual: null }],
+                rowMeta: new Map([
+                    [
+                        "oat",
+                        {
+                            productLabel: "Any brand",
+                            storeId: null,
+                            storeName: null,
+                            amountLabel: null,
+                            onList: false,
+                        },
+                    ],
+                ]),
+            }) as never,
+        );
+        expect(html).toContain('id="fd-usual-row-oat"');
+        expect(html).toContain("Oat milk");
+        expect(html).toContain('action="/kitchen/usuals/oat"');
+    });
+
+    test("the usual's edit sheet can remove it, after asking", () => {
+        const html = renderKitchenUsualsBody(
+            baseView({
+                rows: [
+                    {
+                        food: food({ id: "oat", name: "Oat milk" }),
+                        products: [],
+                        usual: null,
+                    },
+                ],
+                rowMeta: new Map([
+                    [
+                        "oat",
+                        {
+                            productLabel: "Any brand",
+                            storeId: null,
+                            storeName: null,
+                            amountLabel: null,
+                            onList: false,
+                        },
+                    ],
+                ]),
+            }) as never,
+        );
+        expect(html).toContain('commandfor="fd-usual-oat-remove"');
+        expect(html).toContain('id="fd-usual-oat-remove"');
+        expect(html).toContain('action="/kitchen/usuals/oat/remove"');
+    });
+
+    test("the Add a usual sheet parks focus on the panel, not a hidden field", () => {
+        expect(addSheetHtml()).toContain('data-fd-sheet-focus="panel"');
+    });
+
+    test("What is it? shows the store and amount that were picked", () => {
+        const sheet = addSheetHtml({
+            add: {
+                tab: "scan",
+                scan: {
+                    ...scanFound,
+                    purchase: {
+                        usual_store_id: "st-1",
+                        usual_amount: "12",
+                        usual_unit: "each",
+                    },
+                },
+            },
+            stores: [{ id: "st-1", name: "Costco" }],
+        });
+        expect(sheet).toMatch(/name="usual_store_id" value="st-1" checked/);
+        expect(sheet).toContain('name="usual_amount" value="12"');
+        expect(sheet).toContain('<option value="each" selected>');
+    });
+
+    test("a paused lookup is said, not reported as no product found", () => {
+        const sheet = addSheetHtml({
+            add: {
+                tab: "type",
+                scan: {
+                    kind: "miss",
+                    code: "0193968379117",
+                    lookupFailed: false,
+                    paused: true,
+                },
+            },
+        });
+        expect(sheet).toContain("Online food lookups are paused");
+        expect(sheet).not.toContain("No product found");
+    });
+});
+
+describe("usualAddFoundView", () => {
+    const eggs = food({ id: "eggs", name: "Eggs" });
+    const kirkland = food({
+        id: "k",
+        name: "Kirkland Large Eggs",
+        brand: "Kirkland",
+        offSourceId: "0123456789012",
+    });
+    const noAliases = new Map<string, string[]>();
+    const found = { code: "0123456789012", productId: "k" };
+
+    test("a product with no food yet is offered the foods its name holds, best first", () => {
+        const flour = food({ id: "flour", name: "Flour" });
+        const view = usualAddFoundView(
+            found,
+            [eggs, kirkland, flour],
+            noAliases,
+        )!;
+        expect(view.self).toBe(false);
+        expect(view.options.map((o) => o.id)).toEqual(["eggs"]);
+        expect(view.choice).toBe("eggs");
+        expect(view.newName).toBe("Large Eggs");
+    });
+
+    test("the new-name prefill collapses the spaces in the product's name", () => {
+        const spaced = {
+            ...kirkland,
+            name: "Kirkland   Large  Eggs ",
+        };
+        const view = usualAddFoundView(found, [spaced], noAliases)!;
+        expect(view.newName).toBe("Large Eggs");
+    });
+
+    test("a product filed under a food puts that food first, marked, and keeps it chosen", () => {
+        const duck = food({ id: "duck", name: "Duck eggs" });
+        const filed = { ...kirkland, genericFoodId: "eggs" };
+        const view = usualAddFoundView(found, [eggs, filed, duck], noAliases)!;
+        expect(view.options[0]).toMatchObject({
+            id: "eggs",
+            note: "Filed under this",
+        });
+        expect(view.choice).toBe("eggs");
+    });
+
+    test("nothing close means a new food is the choice", () => {
+        const view = usualAddFoundView(found, [kirkland], noAliases)!;
+        expect(view.options).toEqual([]);
+        expect(view.choice).toBe("new");
+    });
+
+    test("a search lists foods that hold its words and keeps a choice already made", () => {
+        const flour = food({ id: "flour", name: "Flour" });
+        const view = usualAddFoundView(
+            { ...found, query: "flo", choice: "flour" },
+            [eggs, kirkland, flour],
+            noAliases,
+        )!;
+        expect(view.options.map((o) => o.id)).toEqual(["flour"]);
+        expect(view.choice).toBe("flour");
+        expect(view.query).toBe("flo");
+    });
+
+    test("a food chosen earlier stays on offer when the search no longer lists it", () => {
+        const flour = food({ id: "flour", name: "Flour" });
+        const view = usualAddFoundView(
+            { ...found, query: "eggs", choice: "flour" },
+            [eggs, kirkland, flour],
+            noAliases,
+        )!;
+        expect(view.options[0]!.id).toBe("flour");
+        expect(view.choice).toBe("flour");
+    });
+
+    test("a plain food with no brand is added as it is", () => {
+        const view = usualAddFoundView(
+            { ...found, productId: "eggs" },
+            [eggs],
+            noAliases,
+        )!;
+        expect(view.self).toBe(true);
+        expect(view.choice).toBe("");
+    });
+
+    test("another brand's product is never a candidate, nor preselected", () => {
+        const organic = food({
+            id: "ov",
+            name: "Eggs",
+            brand: "Organic Valley",
+            offSourceId: "0093966000016",
+        });
+        const view = usualAddFoundView(found, [kirkland, organic], noAliases)!;
+        expect(view.options).toEqual([]);
+        expect(view.choice).toBe("new");
+        const searched = usualAddFoundView(
+            { ...found, query: "eggs" },
+            [kirkland, organic],
+            noAliases,
+        )!;
+        expect(searched.options).toEqual([]);
+    });
+
+    test("a product that is gone gives no step", () => {
+        expect(usualAddFoundView(found, [eggs], noAliases)).toBeNull();
+        expect(
+            usualAddFoundView(
+                found,
+                [{ ...kirkland, archivedAt: "2026-01-01" }],
+                noAliases,
+            ),
+        ).toBeNull();
     });
 });

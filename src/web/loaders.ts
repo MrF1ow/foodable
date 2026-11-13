@@ -100,6 +100,12 @@ import {
     type PutAwayDraft,
 } from "./pages/v2/kitchen-groceries.js";
 import {
+    usualAddFoundView,
+    type UsualAddFound,
+    type UsualAddTab,
+    type UsualAddView,
+} from "./pages/v2/kitchen-usuals-add.js";
+import {
     kitchenUsualRowMeta,
     renderKitchenUsualsV2Page,
     restockWeekdayLabel,
@@ -1178,6 +1184,24 @@ export async function renderSettingsHelpRoute(
     };
 }
 
+/** What the Add a usual sheet should show: set by its routes, built into a view here. */
+export type UsualAddRequest = {
+    tab?: UsualAddTab;
+    /** A search of foods (the Search tab). */
+    search?: string;
+    scan?:
+        | ({ kind: "found" } & UsualAddFound)
+        | {
+              kind: "miss";
+              code: string;
+              lookupFailed: boolean;
+              paused?: boolean;
+          }
+        | { kind: "invalid"; code: string };
+    type?: { values: Record<string, string> };
+    error?: { message: string; field: string | null };
+};
+
 export async function renderUsualProductsListPage(
     viewerUserId: string,
     opts: {
@@ -1187,6 +1211,7 @@ export async function renderUsualProductsListPage(
         storeFilter?: string;
         openFoodId?: string;
         openRestock?: boolean;
+        add?: UsualAddRequest;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -1197,17 +1222,31 @@ export async function renderUsualProductsListPage(
     const foods = await store.listFoods(householdId);
     const barcodedFoodIds = await store.listBarcodedFoodIds(householdId);
     const { rows, addable } = usualProductRows({ foods, barcodedFoodIds });
-    const q = opts.q?.trim() ?? "";
-    let addSearch:
-        { q: string; results: Food[]; truncated: boolean } | undefined;
-    if (q) {
+    const q = (opts.add?.search ?? opts.q)?.trim() ?? "";
+    const request = opts.add;
+    let add: UsualAddView | undefined;
+    if (request || q) {
         const aliases = await store.listAllAliases(householdId);
-        const matched = matchFoodsByWords(q, addable, aliases);
-        addSearch = {
-            q,
-            results: matched.slice(0, 20),
-            truncated: matched.length > 20,
+        add = {
+            tab: request?.tab ?? "scan",
+            type: request?.type,
+            error: request?.error,
         };
+        if (q) {
+            const matched = matchFoodsByWords(q, addable, aliases);
+            add.search = {
+                q,
+                results: matched.slice(0, 20),
+                truncated: matched.length > 20,
+            };
+            if (!request?.tab) add.tab = "search";
+        }
+        if (request?.scan?.kind === "found") {
+            const found = usualAddFoundView(request.scan, foods, aliases);
+            if (found) add.scan = found;
+        } else if (request?.scan) {
+            add.scan = request.scan;
+        }
     }
     const [noticeResult, groceryLines] = await Promise.all([
         loadViewerNotices(gate.viewer),
@@ -1278,7 +1317,7 @@ export async function renderUsualProductsListPage(
             restockDay: config.preferences.restock.enabled
                 ? restockWeekdayLabel(config.preferences.restock.weekday)
                 : null,
-            addSearch,
+            add,
             openGroceriesCount: groceryOpenLineCount(groceryLines),
             notices: noticeResult.notices,
         }),

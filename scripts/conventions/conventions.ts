@@ -281,6 +281,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/mcp/tools/household-digest.ts": "household",
     "src/db/household-digest.ts": "household",
     "src/web/routes/household.ts": "household",
+    "src/web/routes/usual-add.ts": "household",
     "src/web/routes/household-stores.ts": "household",
     "src/web/routes/household.test.ts": "household",
     "src/web/routes/possible-duplicates.test.ts": "household",
@@ -445,6 +446,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/v2/kitchen-groceries.ts": "grocery",
     "src/web/pages/v2/kitchen-groceries.test.ts": "grocery",
     "src/web/pages/v2/kitchen-usuals.ts": "web",
+    "src/web/pages/v2/kitchen-usuals-add.ts": "web",
     "src/web/pages/v2/kitchen-usuals.test.ts": "web",
     // Select several rows, act once: the bulk twins of the single-row actions.
     "src/domain/bulk.ts": "web",

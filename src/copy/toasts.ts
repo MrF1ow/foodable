@@ -49,6 +49,7 @@ export const TOASTS = {
     },
 
     "usuals.schedule.saved": { kind: "success", text: "Restock saved" },
+    "usuals.added": { kind: "success", text: "Added to usuals" },
     "usuals.removed": { kind: "success", text: "Removed from usuals" },
 
     "nutrition.meal.logged": { kind: "success", text: "Meal logged" },

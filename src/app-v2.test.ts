@@ -276,7 +276,8 @@ describe("/app-v2.js", () => {
         // +~0.6 KB Log sheet: Add to groceries opens the Groceries add sheet.
         // +~6.2 KB Select mode: pick several rows on four lists, act once.
         // +~1.9 KB Sheets: a dialog opened over a sheet is not a tap on its backdrop.
-        expect(js.length).toBeLessThan(146_000);
+        // +~3.2 KB Add a usual: tabs, and the scanner taking a target per opener.
+        expect(js.length).toBeLessThan(151_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

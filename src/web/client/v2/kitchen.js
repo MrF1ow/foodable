@@ -194,6 +194,52 @@ function initGroceryRows(root) {
     });
 }
 
+// Add a usual: Scan, Search and Type it are tabs of one sheet. The server
+// renders the right one selected and the others `hidden`; this swaps them.
+const USUAL_ADD_TAB = "[data-fd-usual-add-tab]";
+
+function selectUsualAddTab(dialog, tab) {
+    dialog.querySelectorAll(USUAL_ADD_TAB).forEach((button) => {
+        const on = button.getAttribute("data-fd-usual-add-tab") === tab;
+        button.setAttribute("aria-selected", on ? "true" : "false");
+        button.setAttribute("tabindex", on ? "0" : "-1");
+    });
+    dialog.querySelectorAll("[data-fd-usual-add-panel]").forEach((panel) => {
+        panel.hidden = panel.getAttribute("data-fd-usual-add-panel") !== tab;
+    });
+}
+
+document.addEventListener("click", (event) => {
+    const button = event.target?.closest?.(USUAL_ADD_TAB);
+    const dialog = button?.closest("dialog");
+    if (!button || !dialog) return;
+    selectUsualAddTab(dialog, button.getAttribute("data-fd-usual-add-tab"));
+});
+
+// Arrow keys move between the tabs, as a tablist does.
+document.addEventListener("keydown", (event) => {
+    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
+    const current = event.target?.closest?.(USUAL_ADD_TAB);
+    const dialog = current?.closest("dialog");
+    if (!current || !dialog) return;
+    const tabs = Array.from(dialog.querySelectorAll(USUAL_ADD_TAB));
+    const step = event.key === "ArrowRight" ? 1 : -1;
+    const next =
+        tabs[(tabs.indexOf(current) + step + tabs.length) % tabs.length];
+    if (!next) return;
+    event.preventDefault();
+    selectUsualAddTab(dialog, next.getAttribute("data-fd-usual-add-tab"));
+    next.focus();
+});
+
+// Typing a name for a new food picks "A new food" for the person.
+document.addEventListener("input", (event) => {
+    const input = event.target?.closest?.("[data-fd-usual-add-newname]");
+    const form = input?.closest("form");
+    const radio = form?.querySelector('input[name="food_choice"][value="new"]');
+    if (radio) radio.checked = true;
+});
+
 window.FoodableApp.onLoad((root) => {
     if (root.querySelector(".fd-kitchen-fridge-page")) {
         initFridgeRows(root);
