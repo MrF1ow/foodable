@@ -33,6 +33,7 @@ import { settingsErrorBanner } from "./settings-shared.js";
 import { renderAppShell } from "../../shell.js";
 import { fdIcon } from "../../components/fd-icons.js";
 import { formatExpiryWhen, expiryToneClass } from "./today-rail.js";
+import { selectMode } from "./select-mode.js";
 import {
     type KitchenFridgeGroceryOverview,
     kitchenFridgeItemCountLabel,
@@ -270,6 +271,11 @@ function fridgeItemRowMarkup(
             dateTime: date.dateTime,
             dateClass: date.className || undefined,
             swipe,
+            select: {
+                name: "ids[]",
+                value: item.id,
+                label: item.displayName,
+            },
         }),
     );
     const attrs = ` data-fd-fridge-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
@@ -546,15 +552,34 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
             ? view.groceryLines.filter((row) => !row.checked).length
             : 0);
     const head = renderKitchenOverviewHead(view.items.length, groceryOpen);
+    const select = selectMode({
+        scope: "fridge",
+        returnTo: FRIDGE_RETURN_TO,
+        actions: [
+            {
+                kind: "confirm",
+                key: "discard",
+                label: "Discard",
+                action: "/kitchen/fridge/bulk/discard",
+                title: "Discard items",
+                one: "Discard 1 item?",
+                many: "Discard {n} items?",
+                confirmLabel: "Discard",
+            },
+        ],
+    });
+    const selectable = view.items.length > 0;
     return `${head}
-<div class="fd-kitchen-fridge-page">
+<div class="fd-kitchen-fridge-page"${select.rootAttrs}>
 <div class="fd-kitchen-fridge-top">${addBtn}</div>
 ${view.error && !view.openItemId && !view.openAdd ? String(settingsErrorBanner(view.error)) : ""}
 ${String(noticeStrip(stripNotices(view.notices ?? [], ["grocery.running_low"], undefined), { back: "/kitchen/fridge", label: "Running low" }))}
 ${useSoonStrip(view)}
+${selectable ? select.tools + select.bar : ""}
 ${columns}
 ${empty}
 ${allItemSheets(view)}
+${selectable ? select.sheets : ""}
 ${addItemSheet(view)}
 </div>`;
 }

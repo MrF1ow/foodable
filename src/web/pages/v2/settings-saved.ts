@@ -19,6 +19,7 @@ import {
     settingsPageHeader,
 } from "./settings-shared.js";
 import { FOODS_MERGE_MODAL_ID } from "../foods.js";
+import { selectMode } from "./select-mode.js";
 
 export const SETTINGS_SAVED_MERGE_SHEET_ID = FOODS_MERGE_MODAL_ID;
 
@@ -79,6 +80,10 @@ function foodRowMarkup(
     return manageRow({
         title: food.name,
         meta,
+        // An archived food has nothing left to delete.
+        select: food.archivedAt
+            ? undefined
+            : { name: "food_ids[]", value: food.id, label: food.name },
         actions: food.archivedAt
             ? undefined
             : rowDeleteTrigger({
@@ -105,6 +110,7 @@ function recipeRowMarkup(recipe: Recipe): Html {
     return manageRow({
         title: recipe.name,
         meta: recipe.tags[0] ?? "Recipe",
+        select: { name: "recipe_ids[]", value: recipe.id, label: recipe.name },
         actions: rowDeleteTrigger({
             target: savedRecipeDeleteSheetId(recipe.id),
             name: recipe.name,
@@ -195,8 +201,28 @@ export function renderSettingsSavedV2Body(view: SettingsSavedV2View): string {
         recipeItems.length === 0
             ? `<p class="fd-settings-saved-empty">No recipes match.</p>`
             : rowList(recipeItems, { label: "Recipes" });
+    const select = selectMode({
+        scope: "saved",
+        returnTo: q
+            ? `/settings/saved?q=${encodeURIComponent(q)}`
+            : "/settings/saved",
+        actions: [
+            {
+                kind: "confirm",
+                key: "delete",
+                label: "Delete",
+                action: "/settings/saved/bulk/delete",
+                title: "Delete saved items",
+                one: "Delete 1 saved item? A recipe cannot be brought back.",
+                many: "Delete {n} saved items? Recipes cannot be brought back.",
+                confirmLabel: "Delete",
+            },
+        ],
+    });
+    const selectable =
+        view.foods.some((f) => !f.archivedAt) || view.recipes.length > 0;
     const headerActions = mergeTrigger ? String(mergeTrigger) : undefined;
-    return `${String(settingsPageHeader("Saved foods & recipes", headerActions))}${String(settingsErrorBanner(view.error))}${search}${String(sectionHeader({ title: "Foods", level: 2 }))}${String(foodsSection)}${String(sectionHeader({ title: "Recipes", level: 2 }))}${String(recipesSection)}${mergeSheet(view)}${deleteFoodSheets(view)}${deleteRecipeSheets(view)}`;
+    return `${String(settingsPageHeader("Saved foods & recipes", headerActions))}<div${select.rootAttrs}>${String(settingsErrorBanner(view.error))}${search}${selectable ? select.tools + select.bar : ""}${String(sectionHeader({ title: "Foods", level: 2 }))}${String(foodsSection)}${String(sectionHeader({ title: "Recipes", level: 2 }))}${String(recipesSection)}${mergeSheet(view)}${deleteFoodSheets(view)}${deleteRecipeSheets(view)}${selectable ? select.sheets : ""}</div>`;
 }
 
 export function renderSettingsSavedV2Page(view: SettingsSavedV2View): string {

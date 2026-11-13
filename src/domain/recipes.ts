@@ -1175,12 +1175,20 @@ export async function deleteRecipe(
 ): Promise<boolean> {
     const recipe = await store.getRecipe(householdId, recipeId);
     if (!recipe) return false;
+    assertCanDeleteRecipe(recipe, actor);
+    return store.deleteRecipe(householdId, recipeId);
+}
+
+/** Only the creator or the household owner may delete a recipe. */
+export function assertCanDeleteRecipe(
+    recipe: Pick<Recipe, "creatorId">,
+    actor: { userId: string; isOwner: boolean },
+): void {
     if (recipe.creatorId !== actor.userId && !actor.isOwner) {
         throw new RecipeForbiddenError(
             "Only the creator or household owner can delete this recipe.",
         );
     }
-    return store.deleteRecipe(householdId, recipeId);
 }
 
 export async function updateRecipe(

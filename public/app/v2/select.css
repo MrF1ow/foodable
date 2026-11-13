@@ -1,0 +1,238 @@
+/* Select mode on a list (Groceries, Fridge, Usuals, Saved foods & recipes):
+ * the Select button, each row's box, and the "N selected" bar. Markup is
+ * src/web/pages/v2/select-mode.ts and the row's `select` option
+ * (components/v2/rows.ts); behaviour is src/web/client/v2/select-mode.js, which
+ * sets `data-fd-selecting` on the list's root. Tokens only. The one desktop
+ * block is last. */
+
+/* ---- the Select button ---- */
+
+.fd-select-tools {
+    display: flex;
+    justify-content: flex-end;
+}
+[data-fd-selecting] .fd-select-tools {
+    display: none;
+}
+
+.fd-select-toggle,
+.fd-select-bar .fd-btn {
+    appearance: none;
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 0;
+    height: 34px;
+    margin: 0;
+    padding: 0 var(--fd-s-12);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 14px/18px var(--font-body);
+    cursor: pointer;
+}
+.fd-select-toggle:focus-visible,
+.fd-select-bar .fd-btn:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+/* ---- a row's box: out of sight until the list is in select mode ---- */
+
+/* The box is the first thing in the row body, a flex item before the text, so
+ * it lines up with the row's own line and a nested list never moves it. */
+.fd-row__select {
+    display: none;
+}
+[data-fd-selecting] .fd-row__select {
+    position: relative;
+    box-sizing: content-box;
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    /* The old app floors a label holding a checkbox at 36px; this box is not one. */
+    min-height: 0;
+    /* A 44px tap target around the 22px circle; the footprint stays 22px. */
+    margin: -11px;
+    padding: 11px;
+    cursor: pointer;
+}
+/* The real checkbox covers the hit area, unseen; the box is drawn beside it. */
+.fd-row__select-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+/* A rounded square filled with ink when picked, like a selected chip: never
+ * the green circle of a ticked grocery line, so a picked line cannot look
+ * ticked and a ticked one cannot look picked. */
+.fd-row__select-box {
+    position: relative;
+    box-sizing: border-box;
+    width: 22px;
+    height: 22px;
+    border: 1.5px solid var(--text-tertiary);
+    border-radius: calc(var(--radius-sm) / 2);
+    background: transparent;
+    color: var(--surface-bg);
+    pointer-events: none;
+}
+.fd-row__select-box .fd-icon {
+    position: absolute;
+    top: -1.5px;
+    left: -1.5px;
+    width: 22px;
+    height: 22px;
+    opacity: 0;
+}
+.fd-row__select-input:checked + .fd-row__select-box {
+    border-color: var(--text-primary);
+    background: var(--text-primary);
+}
+.fd-row__select-input:checked + .fd-row__select-box .fd-icon {
+    opacity: 1;
+}
+.fd-row__select-input:focus-visible + .fd-row__select-box {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+/* A grocery line's tick: the button steps aside while selecting (a tap picks),
+ * and its state stays in view as a plain circle beside the box. */
+.fd-check.fd-row__select-state {
+    display: none;
+}
+[data-fd-selecting] .fd-check.fd-row__select-state {
+    display: block;
+}
+
+/* In select mode a row only picks: its own actions step aside for the box. */
+[data-fd-selecting] .fd-row--selectable > .fd-row__body {
+    cursor: pointer;
+}
+[data-fd-selecting] .fd-row--selectable > .fd-row__action,
+[data-fd-selecting] .fd-row--selectable > .fd-row__body > .fd-row__actions,
+[data-fd-selecting] .fd-row--selectable > .fd-row__body > .fd-row__chevron,
+[data-fd-selecting]
+    .fd-row--grocery.fd-row--selectable
+    > .fd-row__body
+    > .fd-row__lead {
+    display: none;
+}
+/* Only this row's own box tints it, not a product nested under it. */
+[data-fd-selecting]
+    .fd-row--selectable:has(
+        > .fd-row__body > .fd-row__select > .fd-row__select-input:checked
+    )
+    > .fd-row__body {
+    background: var(--surface-raised);
+}
+
+/* ---- the bar: floats above the phone nav, one row for the count and Cancel
+ * and one for the actions ---- */
+
+.fd-select-bar {
+    position: fixed;
+    bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    z-index: 45;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+        "count cancel"
+        "actions actions";
+    align-items: center;
+    gap: var(--fd-s-10) var(--fd-s-12);
+    width: min(calc(100vw - 2 * var(--space-gutter)), 520px);
+    padding: var(--fd-s-12) var(--fd-s-12) var(--fd-s-12) var(--space-gutter);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--overlay-glass);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    transform: translateX(-50%);
+}
+.fd-select-bar__count {
+    grid-area: count;
+    min-width: 0;
+    font: 600 14px/18px var(--font-body);
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+.fd-select-bar > [data-fd-select-cancel] {
+    grid-area: cancel;
+}
+.fd-select-bar__actions {
+    grid-area: actions;
+    display: flex;
+    gap: var(--fd-s-10);
+}
+.fd-select-bar__actions .fd-btn {
+    flex: 1 1 0;
+    height: 44px;
+}
+.fd-select-bar .fd-btn--primary {
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+.fd-select-bar .fd-btn--danger {
+    color: var(--status-over);
+}
+.fd-select-bar .fd-btn:disabled {
+    opacity: 0.45;
+    cursor: default;
+}
+
+@media (min-width: 1024px) {
+    /* Inline under the page head instead of floating over the content. */
+    .fd-select-bar {
+        position: static;
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: space-between;
+        width: auto;
+        margin: 0 0 var(--space-section);
+        padding: var(--fd-s-10) var(--fd-s-12) var(--fd-s-10)
+            var(--space-gutter);
+        background: var(--surface-panel);
+        -webkit-backdrop-filter: none;
+        backdrop-filter: none;
+        transform: none;
+    }
+    .fd-select-bar__count {
+        flex: 1 1 auto;
+    }
+    .fd-select-bar__actions {
+        flex: none;
+    }
+    .fd-select-bar__actions .fd-btn {
+        flex: none;
+        height: 34px;
+    }
+    /* The Usuals table is a grid of columns: the box leaves the grid and sits
+       in a gutter made at the table's left, so no column moves. */
+    [data-fd-selecting] .fd-kitchen-usual-table {
+        padding-left: 56px;
+    }
+    [data-fd-selecting]
+        .fd-kitchen-usual-table
+        .fd-row--usual
+        > .fd-row__body
+        > .fd-row__select {
+        position: absolute;
+        top: 50%;
+        left: -46px;
+        margin: 0;
+        transform: translateY(-50%);
+    }
+}

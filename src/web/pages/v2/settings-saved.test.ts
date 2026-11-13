@@ -73,6 +73,41 @@ describe("settings saved v2", () => {
         );
     });
 
+    test("select mode: foods and recipes post under their own field, archived foods are left out", () => {
+        const archived = {
+            ...food("Old milk", "f-old"),
+            archivedAt: "2026-01-01T00:00:00.000Z",
+        };
+        const html = renderSettingsSavedV2Page({
+            chrome,
+            foods: [food("Eggs", "f-eggs"), archived],
+            recipes: [recipe()],
+            searchQuery: "",
+        });
+        expect(html).toContain('data-fd-select="saved"');
+        expect(html).toContain('data-fd-select-toggle="saved"');
+        expect(html).toContain(
+            '<input type="checkbox" class="fd-row__select-input" data-fd-select-item name="food_ids[]" value="f-eggs" aria-label="Select Eggs">',
+        );
+        expect(html).toContain(
+            '<input type="checkbox" class="fd-row__select-input" data-fd-select-item name="recipe_ids[]" value="r-omelet" aria-label="Select Omelet">',
+        );
+        expect(html).not.toContain('value="f-old"');
+        expect(html).toContain('action="/settings/saved/bulk/delete"');
+        expect(html).toContain('data-one="Delete 1 saved item?');
+        expect(html).toContain('data-many="Delete {n} saved items?');
+    });
+
+    test("select mode: nothing to select when no food or recipe matches", () => {
+        const html = renderSettingsSavedV2Page({
+            chrome,
+            foods: [],
+            recipes: [],
+            searchQuery: "zzz",
+        });
+        expect(html).not.toContain("data-fd-select-toggle");
+    });
+
     test("lists product under parent and search finds product", () => {
         const eggs = {
             ...food("Eggs", "f-eggs"),

@@ -233,10 +233,11 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
         },
         // Tests that read the app stylesheets from disk: field.test.ts reads
         // app.css, the v2 tests read public/app/v2/*.css, recipes.test.ts reads
-        // app.css for one rule, settings-home.test.ts reads settings.css.
+        // app.css for one rule, settings-home.test.ts reads settings.css,
+        // select-mode.test.ts reads select.css and the v2 token sheets.
         {
             when: /^public\/app\//,
-            tests: /^src\/web\/(components\/field|components\/v2\/[^/]+|pages\/recipes|pages\/v2\/settings-home)\.test\.ts$/,
+            tests: /^src\/web\/(components\/field|components\/v2\/[^/]+|pages\/recipes|pages\/v2\/(settings-home|select-mode))\.test\.ts$/,
         },
         // turbo-forms.test.ts reads the generated login page.
         {

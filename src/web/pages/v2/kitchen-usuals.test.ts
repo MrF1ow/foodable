@@ -231,6 +231,27 @@ describe("renderKitchenUsualsV2Page", () => {
         expect(kitchenTab).toMatch(/aria-current="page"[^>]*>Usuals/);
     });
 
+    test("select mode: every usual has a checkbox, with a confirmed Remove", () => {
+        const body = renderKitchenUsualsBody(baseView() as never);
+        expect(body).toContain(
+            'class="fd-kitchen-usuals-page" data-fd-select="usuals"',
+        );
+        expect(body).toContain('data-fd-select-toggle="usuals"');
+        expect(body).toMatch(
+            /<input type="checkbox" class="fd-row__select-input" data-fd-select-item name="ids\[\]" value="[^"]+" aria-label="Select [^"]+">/,
+        );
+        expect(body).toContain('action="/kitchen/usuals/bulk/remove"');
+        expect(body).toContain('data-one="Remove 1 usual from the list?"');
+        expect(body).toContain('data-many="Remove {n} usuals from the list?"');
+    });
+
+    test("select mode: an empty list has no Select", () => {
+        const body = renderKitchenUsualsBody(
+            baseView({ rows: [], rowMeta: new Map() }) as never,
+        );
+        expect(body).not.toContain("data-fd-select-toggle");
+    });
+
     test("renders intro, add control, and escaping in names", () => {
         const nasty = baseView({
             rows: [

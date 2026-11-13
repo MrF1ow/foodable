@@ -61,10 +61,32 @@ function swipeDataAttr(action: SwipeAction, side: "left" | "right"): string {
     return ` data-swipe-${side}="${esc(`${url}\t${action.label}`)}"`;
 }
 
+/**
+ * A row that can be picked with others and acted on once. The checkbox is in
+ * the markup always; `select-mode.js` shows it only while a list is in
+ * selection mode, and its form reads the ticked ones as `name=value`
+ * fields (the checkbox belongs to no form of its own).
+ */
+export type RowSelect = {
+    /** Field the ticked box posts under (`ids[]`). */
+    name: string;
+    /** The row's id. */
+    value: string;
+    /** What the box is named after: "Select <label>". */
+    label: Text;
+    /**
+     * A state of the row's own that stays in sight while selecting, so the box
+     * does not have to carry it (a grocery line's tick). `on` fills it.
+     */
+    state?: { on: boolean };
+};
+
 type RowBase = {
     /** Leading dot or caller markup (avatar, icon). Built by `dot()` / v2 helpers only. */
     lead?: RowLead;
     swipe?: RowSwipe;
+    /** Makes the row pickable in the list's selection mode. */
+    select?: RowSelect;
     className?: string;
     id?: string;
 };
@@ -84,6 +106,16 @@ function leadSlot(lead: RowLead | undefined): string {
     if (!lead) return "";
     const inner = "dot" in lead ? dot(lead.dot) : lead.html;
     return `<span class="fd-row__lead">${inner}</span>`;
+}
+
+function selectBox(select: RowSelect | undefined): string {
+    if (!select) return "";
+    const state = select.state
+        ? select.state.on
+            ? `<span class="fd-check fd-check--on fd-row__select-state" role="img" aria-label="Already checked off">${iconCheck()}</span>`
+            : `<span class="fd-check fd-row__select-state" aria-hidden="true"></span>`
+        : "";
+    return `<label class="fd-row__select"><input type="checkbox" class="fd-row__select-input" data-fd-select-item name="${esc(select.name)}" value="${esc(select.value)}" aria-label="Select ${esc(select.label)}"><span class="fd-row__select-box" aria-hidden="true">${iconCheck()}</span></label>${state}`;
 }
 
 function swipeAction(action: SwipeAction, side: "lead" | "trail"): Html {
@@ -121,7 +153,12 @@ function rowShell(opts: ShellOpts): Html {
             ? ` data-sheet-id="${esc(swipe.sheetId)}" aria-controls="${esc(swipe.sheetId)}"`
             : "";
     const id = opts.id ? ` id="${esc(opts.id)}"` : "";
+    if (opts.select && opts.href) {
+        // A checkbox inside a link would be a second control in one tap target.
+        throw new Error("v2 rows: select cannot be combined with href");
+    }
     const body = [
+        selectBox(opts.select),
         leadSlot(opts.lead),
         `<div class="fd-row__main">${opts.main}</div>`,
         opts.trailing ?? "",
@@ -134,9 +171,10 @@ function rowShell(opts: ShellOpts): Html {
             "fd-row",
             `fd-row--${opts.variant}`,
             hasSwipe && "fd-row--swipe",
+            opts.select && "fd-row--selectable",
             opts.extraClass,
             opts.className,
-        )}"${id}${open}${swipeData}${swipeDataTrail}${sheetLink}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}${opts.after ?? ""}</li>`,
+        )}"${id}${open}${swipeData}${swipeDataTrail}${sheetLink}${opts.select ? " data-fd-select-row" : ""}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}${opts.after ?? ""}</li>`,
     );
 }
 
@@ -366,6 +404,8 @@ export function groceryRow(
     ]);
     return rowShell({
         ...opts,
+        // The tick keeps showing while selecting, beside the box.
+        select: opts.select && { ...opts.select, state: { on: checked } },
         variant: "grocery",
         extraClass: checked ? "fd-row--checked" : undefined,
         main,

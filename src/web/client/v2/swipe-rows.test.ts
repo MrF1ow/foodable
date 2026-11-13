@@ -72,6 +72,9 @@ class FakeEl {
         if (token === "textarea") return this.tag === "textarea";
         if (token === "label") return this.tag === "label";
         if (token === "form") return this.tag === "form";
+        if (token.startsWith("[") && token.endsWith("]")) {
+            return token.slice(1, -1) in this.attrs;
+        }
         if (token.startsWith(".")) {
             const cls = token.slice(1).split(".")[0] ?? "";
             return cls.length > 0 && this.classes.includes(cls);
@@ -280,6 +283,36 @@ test("past threshold fires", () => {
         clientY: 52,
     });
     expect(trailForm.requestSubmits).toEqual([trailBtn]);
+});
+
+test("in a list in select mode a swipe on a row fires nothing", () => {
+    const ctx = setup();
+    const { row, body, leadForm, trailForm } = swipeRow();
+    const list = new FakeEl("div");
+    list.setAttribute("data-fd-selecting", "");
+    row.parent = list;
+    list.children.push(row);
+    ctx.doc.rows.push(row);
+    load(ctx);
+    for (const [id, from, to] of [
+        [1, 100, 230],
+        [2, 230, 90],
+    ] as const) {
+        body.fire("pointerdown", {
+            pointerId: id,
+            button: 0,
+            clientX: from,
+            clientY: 50,
+        });
+        ctx.doc.fire("pointermove", {
+            pointerId: id,
+            clientX: to,
+            clientY: 52,
+        });
+        ctx.doc.fire("pointerup", { pointerId: id, clientX: to, clientY: 52 });
+    }
+    expect(leadForm.requestSubmits).toEqual([]);
+    expect(trailForm.requestSubmits).toEqual([]);
 });
 
 test("below threshold cancels", () => {

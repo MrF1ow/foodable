@@ -190,6 +190,36 @@ describe("gated route harness on composed app", () => {
             },
             {
                 method: "POST",
+                path: "/kitchen/groceries/bulk/check",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/kitchen/groceries/bulk/remove",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/kitchen/fridge/bulk/discard",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/kitchen/usuals/bulk/remove",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
+                path: "/settings/saved/bulk/delete",
+                flag: "ui-v2",
+                notFound: true,
+            },
+            {
+                method: "POST",
                 path: "/kitchen/groceries/put-away",
                 flag: "ui-v2",
                 notFound: true,

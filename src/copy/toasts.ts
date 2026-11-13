@@ -20,6 +20,7 @@ export const TOASTS = {
     "fridge.item.updated": { kind: "success", text: "Fridge item updated" },
     "fridge.item.eaten": { kind: "success", text: "Marked as eaten" },
     "fridge.item.discarded": { kind: "success", text: "Item discarded" },
+    "fridge.items.discarded": { kind: "success", text: "Items discarded" },
     "fridge.item.added-to-grocery": {
         kind: "success",
         text: "Added to the grocery list",
@@ -36,6 +37,7 @@ export const TOASTS = {
     },
     "grocery.line.checked": { kind: "success", text: "Checked off" },
     "grocery.line.unchecked": { kind: "success", text: "Unchecked" },
+    "grocery.lines.removed": { kind: "success", text: "Removed from the list" },
     "grocery.checked.cleared": {
         kind: "success",
         text: "Checked items cleared",
@@ -46,6 +48,7 @@ export const TOASTS = {
     },
 
     "usuals.schedule.saved": { kind: "success", text: "Restock saved" },
+    "usuals.removed": { kind: "success", text: "Removed from usuals" },
 
     "nutrition.meal.logged": { kind: "success", text: "Meal logged" },
     "nutrition.meal.updated": { kind: "success", text: "Meal updated" },
@@ -403,6 +406,7 @@ export const TOASTS = {
     },
     "settings.foods.merged": { kind: "success", text: "Foods merged" },
     "settings.foods.updated": { kind: "success", text: "Food saved" },
+    "settings.saved.deleted": { kind: "success", text: "Deleted" },
 } as const satisfies Record<string, { kind: ToastKind; text: string }>;
 
 export type ToastKey = keyof typeof TOASTS;

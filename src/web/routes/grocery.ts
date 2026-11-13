@@ -40,6 +40,7 @@ import {
     findOrCreateFoodByBarcodeResult,
     linkProductPromptPath,
 } from "../../domain/foods.js";
+import { bulkRoutes } from "./bulk.js";
 import { groceryLineCheckToastKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
 import { buildDidYouMeanModal } from "../components/did-you-mean.js";
@@ -51,6 +52,9 @@ import {
 } from "../form.js";
 
 export const groceryRoutes = new Hono();
+
+// Select several rows, act once (Groceries, Fridge, Usuals, Saved foods & recipes).
+groceryRoutes.route("/", bulkRoutes);
 
 function storeFilterFromReturnTo(returnTo: string): string | undefined {
     try {

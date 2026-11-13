@@ -24,6 +24,7 @@ import {
     type UsualPart,
 } from "../../components/v2/rows.js";
 import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
+import { selectMode } from "./select-mode.js";
 import { stepper } from "../../components/v2/stepper.js";
 import type { Notice } from "../../../domain/notices.js";
 import { renderAppShell } from "../../shell.js";
@@ -383,6 +384,7 @@ function usualListRow(row: UsualProductRow, view: KitchenUsualsV2View): Html {
             title: row.food.name,
             meta: meta.productLabel,
             parts: kitchenUsualRowParts(meta),
+            select: { name: "ids[]", value: row.food.id, label: row.food.name },
         }),
     );
     // Function replacements: a string would read `$` in an id as a pattern.
@@ -769,16 +771,37 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
         .join("");
     const addTrigger = addUsualTrigger(view);
     const addSheet = addUsualSheet(view);
+    const select = selectMode({
+        scope: "usuals",
+        returnTo: view.selectedStoreId
+            ? `${USUALS_V2_RETURN_TO}?store=${encodeURIComponent(view.selectedStoreId)}`
+            : USUALS_V2_RETURN_TO,
+        actions: [
+            {
+                kind: "confirm",
+                key: "remove",
+                label: "Remove",
+                action: "/kitchen/usuals/bulk/remove",
+                title: "Remove usuals",
+                one: "Remove 1 usual from the list?",
+                many: "Remove {n} usuals from the list?",
+                confirmLabel: "Remove",
+            },
+        ],
+    });
+    const selectable = rows.length > 0;
     return `${renderUsualsHead(view)}
-<div class="fd-kitchen-usuals-page">
+<div class="fd-kitchen-usuals-page"${select.rootAttrs}>
 ${pageError}
 <p class="fd-kitchen-usual-intro">${esc(USUALS_INTRO)}</p>
 ${String(runningLowStrip(view.notices))}
 ${view.stores.length > 0 ? storeFilterChips(view) : ""}
+${selectable ? select.tools + select.bar : ""}
 ${rows.length > 0 ? String(sectionHeader({ title: "Usuals", count: rows.length })) : ""}
 <div class="fd-kitchen-usual-table">${rows.length > 0 ? USUAL_TABLE_HEAD : ""}${list}</div>
 <div class="fd-kitchen-usual-add-wrap">${addTrigger}</div>
 ${sheets}
+${selectable ? select.sheets : ""}
 ${addSheet}
 </div>`;
 }

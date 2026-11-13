@@ -238,6 +238,8 @@ function initSwipeRow(row) {
 
     body.addEventListener("pointerdown", (e) => {
         if (e.button !== undefined && e.button !== 0) return;
+        // A list in select mode (select-mode.js) picks rows; a drag fires nothing.
+        if (row.closest && row.closest("[data-fd-selecting]")) return;
         if (pointerTargetBlocked(e.target)) return;
         dragging = true;
         aborted = false;

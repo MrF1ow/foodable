@@ -1527,13 +1527,22 @@ export async function addGrocerySupply(
  * Ticks a line off or back on. Ticking a food-backed line off stamps the day
  * its usual was last restocked when `restocked` names the foods store and the
  * household-local day (`YYYY-MM-DD`); unticking never touches the stamp.
+ *
+ * A failed stamp never undoes the tick. Inside one database transaction a
+ * failed statement would abort every later one, so a caller that ticks several
+ * lines in one passes `isolate`, which runs the stamp so that its failure
+ * leaves the transaction usable (a savepoint) and rethrows it to be logged.
  */
 export async function checkGroceryLine(
     grocery: GroceryListStore,
     householdId: string,
     lineId: string,
     checked: boolean,
-    restocked?: { foods: FoodsStore; today: string },
+    restocked?: {
+        foods: FoodsStore;
+        today: string;
+        isolate?: <T>(work: () => Promise<T>) => Promise<T>;
+    },
 ): Promise<GroceryLine | null> {
     const lines = await grocery.listLines(householdId);
     const current = lines.find((line) => line.id === lineId);
@@ -1541,13 +1550,16 @@ export async function checkGroceryLine(
     const updated = await grocery.updateLine({ ...current, checked });
     if (checked && restocked && current.foodId) {
         // The tick is saved; a failed stamp only delays the next schedule.
-        try {
-            await markUsualRestocked(
+        const foodId = current.foodId;
+        const stamp = () =>
+            markUsualRestocked(
                 restocked.foods,
                 householdId,
-                current.foodId,
+                foodId,
                 restocked.today,
             );
+        try {
+            await (restocked.isolate ? restocked.isolate(stamp) : stamp());
         } catch (err) {
             console.error(
                 `[restock] stamp failed: ${err instanceof Error ? err.message : String(err)}`,

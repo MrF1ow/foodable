@@ -275,7 +275,8 @@ describe("/app-v2.js", () => {
         // +~0.4 KB Again chips: a submit key per rendered form.
         // +~3 KB Log sheet: ml basis, pack-serving portion, unit change resets.
         // +~0.6 KB Log sheet: Add to groceries opens the Groceries add sheet.
-        expect(js.length).toBeLessThan(137_600);
+        // +~6.2 KB Select mode: pick several rows on four lists, act once.
+        expect(js.length).toBeLessThan(144_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
