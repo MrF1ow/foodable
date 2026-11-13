@@ -111,6 +111,8 @@ describe("classifyPath mapped", () => {
         ".flow/profile.yaml",
         ".github/agent-context-budget.json",
         "bunfig.toml",
+        ".railway/railway.ts",
+        ".railway/anything-added-later.ts",
     ])("%s is high", (path) => {
         expect(classifyPath(path)).toEqual({
             level: "high",

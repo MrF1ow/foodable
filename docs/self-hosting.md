@@ -90,6 +90,8 @@ git merge v0.2.0   # the release you are updating to
 git push origin main
 ```
 
+A deploy that used the old `railway.toml` must first edit `.railway/railway.ts` (repo, region, service name, domains) and run `railway config plan`, then `railway config apply`, before it deploys the release that removes `railway.toml`. Otherwise it loses the Dockerfile build and the health check.
+
 1. Back up. Take a host snapshot or `pg_dump`, and run `export_all_data` for each member as a second copy.
 2. Dry-run the pending migrations against a copy of your data, locally:
 
@@ -312,11 +314,11 @@ To allow another callback (for example a self-hosted bot), add its exact redirec
 
 Deploy-day steps: [deploy-checklist.md](./deploy-checklist.md).
 
-`railway.toml` at the repo root builds from the `Dockerfile` (`builder = "DOCKERFILE"`, `dockerfilePath = "Dockerfile"`) and health-checks `GET /health` (`healthcheckTimeout` 60, `restartPolicyType` `ON_FAILURE`). Committing it creates nothing on Railway. Create the project yourself with two services: a Postgres database, and the app from the GitHub repo. Railway then picks the file up on every deploy.
+`.railway/railway.ts` is the service's Railway config. It builds from the `Dockerfile`, health-checks `GET /health` (timeout 60 s), restarts on failure, runs the pre-deploy command, and sets the region, the custom domain and waiting for CI before a deploy. Variables are left out on purpose: they stay in Railway. Committing or pushing the file changes nothing on Railway by itself. Create the project yourself with two services, a Postgres database and the app from the GitHub repo. Then, in a fork, edit the repo and region in the file and delete its `domains` line (`railway config plan` fails on a domain Railway does not know yet; see [Custom domain on Cloudflare](#custom-domain-on-cloudflare)). The `service("foodable")` name must match the app service's name on Railway, or apply creates a second app service. Run `railway config plan` to see what would change, and `railway config apply` to apply it. Without apply, set the same things by hand in the app service's settings: Dockerfile builder, health check `/health` with a 60 s timeout, restart on failure, and the pre-deploy command below.
 
 **Postgres.** Add a database (New → Database → PostgreSQL). Turn on backups in its settings before the household has data in it. The app reaches it over Railway's private network, so the database needs no public TCP proxy; add one only while you run `pg_dump`, `db:dryrun --data` or `db:import-postgres` from your own machine, and remove it afterwards.
 
-**Pre-deploy command.** In the app service's deploy settings, set the pre-deploy command to `bun run db:migrate`. Railway runs it in the new image before it switches traffic, and a failing migration stops the deploy while the old version keeps serving. That is what keeps schema and code in step: a migration and the code that needs it ship in the same commit, and the schema is always updated first.
+**Pre-deploy command.** `.railway/railway.ts` sets it to `bun run db:migrate` once you have run `railway config apply` (or set it by hand in the app service's deploy settings). Railway runs it in the new image before it switches traffic, and a failing migration stops the deploy while the old version keeps serving. That is what keeps schema and code in step: a migration and the code that needs it ship in the same commit, and the schema is always updated first.
 
 Set the same variables as `.env.example` on the app service:
 
@@ -344,6 +346,7 @@ Optional. The generated `*.up.railway.app` domain is enough to go live. Cloudfla
 3. Set SSL/TLS to **Full**. Flexible sends plain HTTP to Railway, and Railway redirects HTTP to HTTPS, so the browser loops. Full (strict) is also wrong for this setup: while Railway issues or renews the certificate it can briefly present the `*.up.railway.app` certificate, and strict mode answers 526. Full still encrypts the hop from Cloudflare to Railway. Source: [Railway's SSL troubleshooting](https://docs.railway.com/networking/troubleshooting/ssl).
 4. If Railway stays on "Validating Challenges", turn the Cloudflare proxy off, wait until Railway shows the certificate as issued, then turn the proxy back on.
 5. Set `PUBLIC_ORIGIN` to `https://your-domain` with no trailing slash, and redeploy. OAuth metadata and the MCP icon URL follow that value.
+6. Optionally put `domains: [{ domain: "your-domain", port: 8080 }]` back in `.railway/railway.ts` so the file records the custom domain. `railway config plan` should then show no change.
 
 Use a single-label name such as `food.example.com`. A deeper name (`app.food.example.com`) does not work through the orange cloud unless the zone has Cloudflare Advanced Certificate Manager. For that name, leave the record DNS-only.
 
