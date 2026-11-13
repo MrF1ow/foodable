@@ -8,9 +8,14 @@
  * again, only revoked and made anew.
  */
 import type { ShareLink } from "../../../domain/sharing.js";
-import { esc, raw, type Html } from "../../components/v2/html.js";
-import { rowList, sectionHeader } from "../../components/v2/rows.js";
-import { confirmSheet, sheetTrigger } from "../../components/v2/sheet.js";
+import { type Html } from "../../components/v2/html.js";
+import {
+    manageRow,
+    rowDeleteTrigger,
+    rowList,
+    sectionHeader,
+} from "../../components/v2/rows.js";
+import { confirmSheet } from "../../components/v2/sheet.js";
 import { shareDateLabel, shareExpiryLabel } from "./share-sheet.js";
 
 export type SharedLinkRow = {
@@ -76,16 +81,16 @@ function metaLine(link: SharedLinkRow): string {
 }
 
 function linkRow(link: SharedLinkRow): Html {
-    const sheetId = sharedLinkSheetId(link.id);
-    const revoke = sheetTrigger({
-        target: sheetId,
-        label: "Revoke",
-        ariaLabel: `Revoke the link to ${whatLabel(link)}`,
-        className: "fd-settings-btn fd-settings-btn--sm",
+    return manageRow({
+        title: whatLabel(link),
+        meta: metaLine(link),
+        actions: rowDeleteTrigger({
+            target: sharedLinkSheetId(link.id),
+            name: `the link to ${whatLabel(link)}`,
+            verb: "Revoke",
+        }),
+        className: "fd-row--shared-link",
     });
-    return raw(
-        `<li class="fd-row fd-row--shared-link"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__title">${esc(whatLabel(link))}</span><span class="fd-row__meta">${esc(metaLine(link))}</span></div>${revoke}</div></li>`,
-    );
 }
 
 function revokeSheet(link: SharedLinkRow): string {

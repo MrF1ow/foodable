@@ -99,6 +99,13 @@ test("only an active invite can be revoked", () => {
         }),
     );
     expect(html).toContain('commandfor="household-invite-revoke-active"');
+    // The same red trash as shared links, named after the invite, no text button.
+    expect(html).toContain("fd-icon-btn--danger");
+    expect(html).toContain(
+        'aria-label="Revoke invite code (expires 2026-11-16)"',
+    );
+    expect(html).not.toContain("btn-sm btn-danger");
+    expect(html).toContain('id="household-invite-revoke-active"');
     expect(html).not.toContain("household-invite-revoke-used");
     expect(html).not.toContain("household-invite-revoke-old");
     expect(html).toContain("Expires 2026-11-16");

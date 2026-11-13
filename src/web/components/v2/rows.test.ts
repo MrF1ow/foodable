@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
-import { raw } from "./html.js";
+import { esc, raw } from "./html.js";
 import { iconRepeat } from "./icons.js";
 import {
     foodRow,
     fridgeRow,
     groceryRow,
     macroLine,
+    manageRow,
     partRow,
+    rowDeleteTrigger,
     rowList,
     searchResultRow,
     sectionHeader,
@@ -35,7 +37,9 @@ test("foodRow: title, inline meta, macros and a trailing value in one li", () =>
     });
     expect(html).toStartWith(`<li class="fd-row fd-row--food">`);
     expect(html).toContain(`<div class="fd-row__body">`);
-    expect(html).toContain(`<span class="fd-row__title">Scrambled eggs</span>`);
+    expect(html).toContain(
+        `<span class="fd-row__title" title="Scrambled eggs">Scrambled eggs</span>`,
+    );
     expect(html).toContain(`<span class="fd-row__meta">3 large</span>`);
     expect(html).toContain(`<span class="fd-row__value">216</span>`);
     expect(html).toEndWith("</li>");
@@ -355,4 +359,49 @@ test("usualRow refuses a script href", () => {
     expect(() =>
         usualRow({ title: "Milk", href: "javascript:alert(1)" }),
     ).toThrow("unsafe href");
+});
+
+test("rowDeleteTrigger: an icon-only red trash that names the item and opens its sheet", () => {
+    const html = rowDeleteTrigger({ target: "del-eggs", name: "Eggs" });
+    expect(html).toContain(`class="fd-icon-btn fd-icon-btn--danger"`);
+    expect(html).toContain(`commandfor="del-eggs" command="show-modal"`);
+    expect(html).toContain(`aria-label="Delete Eggs"`);
+    expect(html).toContain("<svg");
+    expect(html).not.toContain(">Delete<");
+    expect(
+        rowDeleteTrigger({ target: "t", name: "the link", verb: "Revoke" }),
+    ).toContain(`aria-label="Revoke the link"`);
+});
+
+test("rowDeleteTrigger escapes the item name", () => {
+    expect(rowDeleteTrigger({ target: "t", name: XSS })).toContain(
+        `aria-label="Delete ${XSS_ESCAPED}"`,
+    );
+});
+
+test("manageRow: a one-line title with the full name in `title`, a meta line and the actions in one li", () => {
+    const long =
+        "Member's Mark Colombian Single Serve Cups (100 count, Medium-Dark Roast)";
+    const html = manageRow({
+        title: long,
+        meta: "kcal unknown",
+        actions: rowDeleteTrigger({ target: "t", name: long }),
+    });
+    expect(html).toStartWith(`<li class="fd-row fd-row--manage">`);
+    // The whole name is in the markup (CSS ends it in "…"; nothing is cut).
+    expect(html).toContain(
+        `<span class="fd-row__title" title="${esc(long)}">${esc(long)}</span>`,
+    );
+    expect(html).toContain(`<span class="fd-row__sub">kcal unknown</span>`);
+    expect(html).toContain(`<span class="fd-row__actions">`);
+    expect(html).toContain(`aria-label="Delete `);
+});
+
+test("manageRow without actions renders no empty actions slot; `after` stays inside the li", () => {
+    const html = manageRow({
+        title: "Eggs",
+        after: `<ul class="nested"></ul>`,
+    });
+    expect(html).not.toContain("fd-row__actions");
+    expect(html).toEndWith(`<ul class="nested"></ul></li>`);
 });

@@ -19,8 +19,9 @@ import {
     type ActionForm,
     type Html,
 } from "./html.js";
-import { iconCheck, iconChevronRight, iconPlus } from "./icons.js";
+import { iconCheck, iconChevronRight, iconPlus, iconTrash } from "./icons.js";
 import { scoreBadge } from "./score-badge.js";
+import { sheetTrigger } from "./sheet.js";
 
 /** A value the caller already formatted. Only escaped here. */
 export type Text = string | number;
@@ -75,6 +76,8 @@ type ShellOpts = RowBase & {
     /** Whole-row link. The row body becomes an `<a>`; no interactive children then. */
     href?: string;
     extraClass?: string;
+    /** Markup after the row body, still inside the `<li>` (a nested list). */
+    after?: Html | string;
 };
 
 function leadSlot(lead: RowLead | undefined): string {
@@ -133,7 +136,7 @@ function rowShell(opts: ShellOpts): Html {
             hasSwipe && "fd-row--swipe",
             opts.extraClass,
             opts.className,
-        )}"${id}${open}${swipeData}${swipeDataTrail}${sheetLink}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}</li>`,
+        )}"${id}${open}${swipeData}${swipeDataTrail}${sheetLink}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}${opts.after ?? ""}</li>`,
     );
 }
 
@@ -143,7 +146,7 @@ function titleLine(
     titleClass?: string,
 ): Html {
     return raw(
-        `<span class="fd-row__line"><span class="${cls("fd-row__title", titleClass)}">${esc(title)}</span>${extra ?? ""}</span>`,
+        `<span class="fd-row__line"><span class="${cls("fd-row__title", titleClass)}" title="${esc(title)}">${esc(title)}</span>${extra ?? ""}</span>`,
     );
 }
 
@@ -151,6 +154,61 @@ function metaSpan(meta: Text | undefined, className = "fd-row__meta"): string {
     return meta == null || meta === ""
         ? ""
         : `<span class="${className}">${esc(meta)}</span>`;
+}
+
+/**
+ * The red trash button that ends a list row's action line: icon only, a 32px
+ * circle, named after the item ("Delete Eggs"). It opens the item's confirm
+ * sheet (`target`), so it never deletes on its own tap. `verb` swaps the word
+ * for the same gesture ("Revoke").
+ */
+export function rowDeleteTrigger(opts: {
+    /** `id` of the confirm sheet it opens. */
+    target: string;
+    /** What is deleted; goes into the accessible name. */
+    name: Text;
+    verb?: string;
+}): Html {
+    return raw(
+        sheetTrigger({
+            target: opts.target,
+            label: `${opts.verb ?? "Delete"} ${opts.name}`,
+            className: "fd-icon-btn fd-icon-btn--danger",
+            icon: String(iconTrash()),
+        }),
+    );
+}
+
+/**
+ * Manage row: a one-line name that ends in "…" when it does not fit (the full
+ * name stays in the markup and in the `title` attribute), an optional meta
+ * line, and the row's action buttons (`actions`, e.g. `rowDeleteTrigger`) at
+ * the end, always on the row's own line. `after` is a nested list that belongs
+ * to the row (products under a food).
+ */
+export function manageRow(
+    opts: RowBase & {
+        title: Text;
+        meta?: Text;
+        actions?: Html | string;
+        after?: Html | string;
+    },
+): Html {
+    const main = join([
+        titleLine(opts.title, undefined),
+        opts.meta != null && opts.meta !== ""
+            ? `<span class="fd-row__sub">${esc(opts.meta)}</span>`
+            : "",
+    ]);
+    const actions = opts.actions
+        ? raw(`<span class="fd-row__actions">${opts.actions}</span>`)
+        : undefined;
+    return rowShell({
+        ...opts,
+        variant: "manage",
+        main,
+        trailing: actions,
+    });
 }
 
 /** Grams / counts the caller formatted ("19", 2, "–"). */

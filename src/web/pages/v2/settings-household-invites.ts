@@ -4,20 +4,26 @@ import { escapeHtml, renderAppShell } from "../../shell.js";
 import type { AppChromeBase } from "../../attention.js";
 import { renderHouseholdNav } from "../../components/settings-nav.js";
 import {
-    confirmModal,
     emptyState,
     errorBanner,
     modal,
     modalTrigger,
     pageHeader,
     panel,
-    row,
 } from "../../components/ui.js";
+import { type Html } from "../../components/v2/html.js";
+import {
+    manageRow,
+    rowDeleteTrigger,
+    rowList,
+} from "../../components/v2/rows.js";
+import { confirmSheet } from "../../components/v2/sheet.js";
 import type { ViewerFlags } from "../../../viewer-flags.js";
 
 export const INVITE_CREATE_MODAL_ID = "household-invite-create";
 const CODE_ID = "household-invite-code";
 
+/** `id` of an invite's revoke confirm sheet. */
 export function inviteRevokeModalId(inviteId: string): string {
     return `household-invite-revoke-${inviteId}`;
 }
@@ -62,18 +68,18 @@ export function renderHouseholdInvitesPage(
     view: HouseholdInvitesPageView,
 ): string {
     const nowMs = (view.now ?? new Date()).getTime();
-    const revokeModals: string[] = [];
+    const revokeSheets: string[] = [];
     const rows = view.invites.map((invite) => {
-        let actions = "";
+        let actions: Html | undefined;
         if (isActive(invite, nowMs)) {
             const id = inviteRevokeModalId(invite.id);
-            actions = modalTrigger({
+            actions = rowDeleteTrigger({
                 target: id,
-                label: "Revoke",
-                className: "btn-sm btn-danger",
+                name: `invite code (${inviteMeta(invite, nowMs).toLowerCase()})`,
+                verb: "Revoke",
             });
-            revokeModals.push(
-                confirmModal({
+            revokeSheets.push(
+                confirmSheet({
                     id,
                     title: "Revoke invite",
                     message:
@@ -87,11 +93,12 @@ export function renderHouseholdInvitesPage(
                 }),
             );
         }
-        return `<li class="household-invite">${row({
+        return manageRow({
             title: inviteTitle(invite, nowMs),
             meta: inviteMeta(invite, nowMs),
             actions,
-        })}</li>`;
+            className: "household-invite",
+        });
     });
 
     const revealed = view.createdCode
@@ -140,11 +147,16 @@ ${fromInput}<p class="modal-message">Create a single-use code that lets one pers
         ${panel({
             title: "Invites",
             body: rows.length
-                ? `<ul class="household-invites list">${rows.join("")}</ul>`
+                ? String(
+                      rowList(rows, {
+                          label: "Invites",
+                          className: "household-invites",
+                      }),
+                  )
                 : emptyState("No invite codes yet."),
         })}
         ${createModal}
-        ${revokeModals.join("")}
+        ${revokeSheets.join("")}
     `;
 
     return renderAppShell({

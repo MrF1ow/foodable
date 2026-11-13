@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { esc } from "../../components/v2/html.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import { newFood } from "../../../domain/foods.js";
 import type { Recipe } from "../../../domain/recipes.js";
@@ -91,5 +92,64 @@ describe("settings saved v2", () => {
         expect(html).toContain("Eggs");
         expect(html).toContain("Cage Free Eggs");
         expect(html).toContain("fd-settings-saved-products");
+    });
+
+    test("a long name stays whole in the markup (title + trash label) for the one-line ellipsis row", () => {
+        const long =
+            "Member's Mark Colombian Single Serve Cups (100 count, Medium-Dark Roast)";
+        const html = renderSettingsSavedV2Page({
+            chrome,
+            foods: [food(long, "f-long")],
+            recipes: [
+                recipe({ name: "Spaghetti alla carbonara con guanciale" }),
+            ],
+            searchQuery: "",
+        });
+        expect(html).toContain("fd-row--manage");
+        expect(html).toContain(esc(long));
+        expect(html).toContain(`title="${esc(long)}"`);
+        expect(html).toContain(`aria-label="Delete ${esc(long)}"`);
+        expect(html).toContain(
+            `aria-label="Delete Spaghetti alla carbonara con guanciale"`,
+        );
+        expect(html).toContain("fd-icon-btn--danger");
+        // No text Delete button left in a row; the confirm sheet still has one.
+        expect(html).not.toContain("fd-btn--sm fd-btn--danger");
+        expect(html).not.toContain("fd-settings-saved-row");
+        // Same confirm as before: the trash opens the item's sheet.
+        expect(html).toContain(
+            `commandfor="${savedFoodDeleteSheetId("f-long")}"`,
+        );
+        expect(html).toContain('action="/recipes/r-omelet/delete"');
+    });
+
+    test("the brand and the Archived marker ride on the meta line, and the trash label tells same-name products apart", () => {
+        const plain = food("Eggs", "f-eggs");
+        const kirkland = {
+            ...food("Eggs", "f-eggs-k"),
+            brand: "Kirkland",
+            genericFoodId: "f-eggs",
+        };
+        const old = {
+            ...food("Eggs", "f-eggs-old"),
+            brand: "Old Farm",
+            genericFoodId: "f-eggs",
+            archivedAt: "2026-01-01T00:00:00.000Z",
+        };
+        const html = renderSettingsSavedV2Page({
+            chrome,
+            foods: [plain, kirkland, old],
+            recipes: [],
+            searchQuery: "",
+        });
+        // The title is the name alone; the cut-off part never hides the brand.
+        expect(html).not.toContain(">Eggs · Kirkland<");
+        expect(html).toContain('title="Eggs">Eggs</span>');
+        expect(html).toContain("Kirkland · 155 kcal / 100 g");
+        expect(html).toContain('aria-label="Delete Eggs (Kirkland)"');
+        expect(html).toContain('aria-label="Delete Eggs"');
+        // Archived leads the meta so a long brand cannot cut it off; no trash.
+        expect(html).toContain("Archived · Old Farm · 155 kcal / 100 g");
+        expect(html).not.toContain("Delete Eggs (Old Farm)");
     });
 });

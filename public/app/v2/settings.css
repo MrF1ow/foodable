@@ -670,15 +670,67 @@
     min-width: 0;
 }
 
+/*
+ * Social post readers: the label is one line that ends in "…" and stays inside
+ * the text column, so it can never run under the Turn on / Turn off button,
+ * which keeps its size and its one line.
+ */
+.fd-row--social .fd-row__main {
+    flex: 1 1 0;
+    min-width: 0;
+}
+.fd-row--social .fd-row__main > .fd-row__title,
+.fd-row--social .fd-row__main > .fd-row__meta {
+    max-width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fd-row--social .fd-row__body > :is(form, button) {
+    flex: none;
+}
+.fd-row--social .fd-settings-btn {
+    white-space: nowrap;
+}
+
 .fd-row__trailing {
     flex: 0 0 auto;
 }
 
 .fd-row__actions--wrap {
     display: flex;
+    /* The global .fd-row__actions is flex: none; a wrapping group must shrink. */
+    flex: 0 1 auto;
     flex-wrap: wrap;
+    min-width: 0;
     gap: var(--fd-s-6);
     justify-content: flex-end;
+}
+
+/*
+ * Possible duplicates: the two food names stay readable. The row wraps, the
+ * names take the full width of the first line and "Merge…" / "Keep separate"
+ * sit under them; on a wide screen the actions sit beside the names again.
+ */
+.fd-row--dup .fd-row__body {
+    flex-wrap: wrap;
+}
+.fd-row--dup .fd-row__main {
+    flex: 1 1 100%;
+}
+.fd-row--dup .fd-row__actions--wrap {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+}
+@media (min-width: 640px) {
+    .fd-row--dup .fd-row__main {
+        flex: 1 1 0;
+    }
+    .fd-row--dup .fd-row__actions--wrap {
+        flex: 0 1 auto;
+        justify-content: flex-end;
+    }
 }
 
 .fd-settings-token {
@@ -817,45 +869,15 @@
     min-width: 0;
 }
 
-/* Linked products wrap onto their own line under the parent food. */
+/* Linked products sit under the parent food, indented behind a hairline. */
 .fd-settings-saved-products {
-    flex-basis: 100%;
     list-style: none;
-    margin: 0;
+    margin: 0 0 var(--fd-s-6) var(--fd-s-6);
     padding: 0 0 0 var(--fd-s-12);
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-6);
     border-left: 2px solid var(--line);
-    margin-left: var(--fd-s-6);
-    margin-top: var(--fd-s-6);
 }
-
-.fd-settings-saved-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--fd-s-12);
-    padding: var(--fd-s-10) 0;
-}
-
-.fd-settings-saved-row__title {
-    margin: 0;
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.fd-settings-saved-row__meta {
-    margin: var(--fd-s-4) 0 0;
-    font-size: 0.8125rem;
-    color: var(--text-secondary);
-}
-
-.fd-settings-saved-actions {
-    display: flex;
-    gap: var(--fd-s-6);
-    flex-shrink: 0;
+.fd-settings-saved-products .fd-row {
+    border-bottom: 0;
 }
 
 .fd-settings-saved-merge-form {
