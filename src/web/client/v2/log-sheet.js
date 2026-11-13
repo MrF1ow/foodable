@@ -1060,8 +1060,26 @@ function bindLogShortcuts() {
 
 // The log dialogs are rendered after .fd-shell, directly in <body>, so they
 // are found from the document, not from the shell.
+// The Quick grid's "Add to groceries" tile lands on the Groceries tab with
+// ?add=1: open its add sheet once, then drop the flag so a reload does not.
+function openGroceryAddFromLink() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("add") !== "1") return;
+    const dialog = document.getElementById("fd-grocery-add");
+    if (!(dialog instanceof HTMLDialogElement)) return;
+    params.delete("add");
+    const query = params.toString();
+    window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+    openSheet("fd-grocery-add");
+}
+
 function init() {
     if (!document.querySelector(".fd-shell")) return;
+    openGroceryAddFromLink();
     bindSearchSheet(document);
     bindAmountSheet(document);
     bindQuickCalSheet(document);
@@ -1077,6 +1095,7 @@ if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_LOG_MACROS) {
         macrosFor,
         portionLabel,
         amountAfterUnitChange,
+        openGroceryAddFromLink,
         allowedUnits,
         itemGrams,
         formatLogMacroKcal,

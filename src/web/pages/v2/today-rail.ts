@@ -1,6 +1,6 @@
 import type { WeightEntry } from "../../../db/nutrition.js";
 import type { FridgeItem } from "../../../domain/fridge.js";
-import type { Notice } from "../../../domain/notices.js";
+import { noticeShortSentence, type Notice } from "../../../domain/notices.js";
 import { panelGroupKey } from "../../../domain/notices-for.js";
 import {
     daysUntilExpiry,
@@ -189,7 +189,7 @@ function usesAllLabel(itemCount: number, totalItems: number): string {
     return `Uses all ${totalItems}`;
 }
 
-function useSoonHighlightMarkup(view: TodayView): string {
+function useSoonHighlightMarkup(view: TodayView, canPlan: boolean): string {
     const hit = view.useSoonHighlight;
     if (!hit) return "";
     const facts = [
@@ -198,13 +198,17 @@ function useSoonHighlightMarkup(view: TodayView): string {
             ? `${Math.round(hit.kcalPerPortion)} kcal per serving`
             : "",
     ].filter(Boolean);
+    // Plan opens the recipe page with its Add to plan sheet already open.
+    const plan = canPlan
+        ? `<a class="fd-today-useall__plan" href="/recipes/${esc(hit.recipeId)}?plan=1">Plan</a>`
+        : "";
     const meta = facts.length
         ? `<p class="fd-today-useall__meta">${esc(facts.join(" · "))}</p>`
         : "";
-    return `<div class="fd-today-useall"><p class="fd-today-useall__eyebrow">${esc(usesAllLabel(hit.itemCount, hit.totalItems))}</p><p class="fd-today-useall__name">${esc(hit.name)}</p>${meta}<a class="fd-today-useall__cook" href="/recipes/${esc(hit.recipeId)}#fd-recipe-cook-heading">Cook it</a></div>`;
+    return `<div class="fd-today-useall"><p class="fd-today-useall__eyebrow">${esc(usesAllLabel(hit.itemCount, hit.totalItems))}</p><p class="fd-today-useall__name">${esc(hit.name)}</p>${meta}<div class="fd-today-useall__actions"><a class="fd-today-useall__cook" href="/recipes/${esc(hit.recipeId)}#fd-recipe-cook-heading">Cook it</a>${plan}</div></div>`;
 }
 
-function useSoonMarkup(view: TodayView): string {
+function useSoonMarkup(view: TodayView, canPlan: boolean): string {
     const items = view.expiringFridge;
     if (items.length === 0) {
         // The same empty card as Needs attention, not a bare line in the rail.
@@ -234,7 +238,7 @@ function useSoonMarkup(view: TodayView): string {
         })
         .join("");
     const head = cardHeader("Use soon", { count: items.length });
-    return `<section class="fd-today-card" aria-label="Use soon">${head}<ul class="fd-today-rail-list">${rows}</ul>${useSoonHighlightMarkup(view)}</section>`;
+    return `<section class="fd-today-card" aria-label="Use soon">${head}<ul class="fd-today-rail-list">${rows}</ul>${useSoonHighlightMarkup(view, canPlan)}</section>`;
 }
 
 function attentionMarkup(view: TodayView): string {
@@ -261,7 +265,10 @@ function attentionMarkup(view: TodayView): string {
                 : "";
             return railRow({
                 dotClass: noticeDotClass(notice),
-                title: noticeSentence(notice),
+                title:
+                    noticeShortSentence(notice, {
+                        viewerUserId: view.attention.viewerUserId,
+                    }) ?? noticeSentence(notice),
                 trail: `${action}${dismiss}`,
             });
         })
@@ -361,7 +368,7 @@ export function renderTodayRail(data: TodayPageData): Html {
         );
     }
     return raw(
-        `<aside class="fd-today-rail" aria-label="Day sidebar">${useSoonMarkup(view)}${attentionMarkup(view)}${thisWeekMarkup(data)}${weightMarkup(view, false)}</aside>`,
+        `<aside class="fd-today-rail" aria-label="Day sidebar">${useSoonMarkup(view, data.plan != null)}${attentionMarkup(view)}${thisWeekMarkup(data)}${weightMarkup(view, false)}</aside>`,
     );
 }
 

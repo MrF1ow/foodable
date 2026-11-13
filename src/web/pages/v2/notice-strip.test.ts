@@ -9,6 +9,7 @@ import {
     buildPreviewKitchenUsualsView,
     renderKitchenUsualsBody,
 } from "./kitchen-usuals.js";
+import { noticeSentence } from "../../../copy/notices.js";
 import { noticeStrip, parseNoticeBack, stripNotices } from "./notice-strip.js";
 import { renderRecipesListBody } from "./recipes-list.js";
 import { buildPreviewTodayPageData, renderTodayV2Page } from "./today.js";
@@ -69,7 +70,55 @@ function weighIn(userId: string, name: string): Notice {
     };
 }
 
+/** The visible row texts: the dismiss label keeps the full sentence, so look only here. */
+function rowTexts(html: string): string[] {
+    return [
+        ...html.matchAll(
+            /<span class="fd-notice-strip__text">([^<]*)<\/span>/g,
+        ),
+    ].map((m) => m[1]!);
+}
+
 describe("noticeStrip", () => {
+    test("a row shows the short sentence and keeps the full one as the dismiss label", () => {
+        const html = String(
+            noticeStrip([low, missing, weighIn(ME, "Alex")], {
+                back: "/",
+                viewerUserId: ME,
+                label: "Notices",
+            }),
+        );
+        expect(rowTexts(html)).toEqual([
+            "Eggs running low",
+            "Flour missing for tomorrow",
+            "Weigh in · last Tuesday",
+        ]);
+        expect(html).toContain(
+            'aria-label="Dismiss: Running low: Eggs (2 left, below 4)"',
+        );
+    });
+
+    test("a notice with no short form falls back to the full sentence", () => {
+        const expiring: Notice = {
+            code: "fridge.expiring",
+            severity: "info",
+            subject: { kind: "fridge_item", id: "fi-1" },
+            related: [],
+            params: {
+                name: "Milk",
+                amount: 1,
+                unit: "each",
+                expiresOn: "2026-11-13",
+                daysLeft: 1,
+                onGroceryList: "no",
+            },
+        };
+        const html = String(
+            noticeStrip([expiring], { back: "/", label: "Soon" }),
+        );
+        expect(rowTexts(html)).toEqual([noticeSentence(expiring)]);
+    });
+
     test("nothing to say renders nothing", () => {
         expect(
             String(noticeStrip([], { back: "/", label: "Running low" })),
@@ -352,6 +401,11 @@ describe("where the one-tap notices show", () => {
         );
         expect(phoneOnly).not.toContain("Running low: Eggs");
         expect(phoneOnly).not.toContain("Sam hasn't");
+        // The phone rows read short, as in the design.
+        expect(rowTexts(phoneOnly)).toEqual([
+            "Weigh in · last Tuesday",
+            "Flour missing for tomorrow",
+        ]);
     });
 
     test("a peer's read-only day shows no one-tap notices", () => {

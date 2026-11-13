@@ -162,6 +162,26 @@ describe("renderLogSheets", () => {
         expect(html).toMatch(/data-fd-log-portion>1 portion · 30 g</);
     });
 
+    test("the Quick grid has Cook a recipe and Add to groceries, and no Photo tile", () => {
+        const html = renderLogSheets({ timezone: "UTC" });
+        expect(html).toContain(
+            '<a class="fd-quick-tile" href="/recipes"><span class="fd-quick-tile__icon" aria-hidden="true">',
+        );
+        expect(html).toContain(">Cook a recipe</span>");
+        expect(html).toContain('href="/kitchen/groceries?add=1"');
+        expect(html).toContain(">Add to groceries</span>");
+        expect(html).not.toContain("Photo");
+        // The existing tiles stay.
+        for (const label of [
+            "Quick calories",
+            "Water +250 ml",
+            "Weigh in",
+            "Scan barcode",
+        ]) {
+            expect(html).toContain(`>${label}</span>`);
+        }
+    });
+
     test("recipe amount sheet is portion-only", () => {
         const html = renderLogSheets({
             timezone: "UTC",
@@ -304,7 +324,7 @@ describe("renderLogSheets", () => {
         expect(html).toContain("data-sheet-open-on-load");
     });
 
-    test("empty search shows four QUICK tiles when the camera is on", () => {
+    test("empty search shows the six QUICK tiles when the camera is on", () => {
         const html = renderLogSheets({
             timezone: "UTC",
             previewSearch: "empty",
@@ -316,7 +336,8 @@ describe("renderLogSheets", () => {
         expect(html).toContain("Weigh in");
         expect(html).toContain("Scan barcode");
         const tiles = html.match(/\bclass="fd-quick-tile"/g) ?? [];
-        expect(tiles).toHaveLength(4);
+        // Four actions, then Cook a recipe and Add to groceries.
+        expect(tiles).toHaveLength(6);
     });
 
     describe("Copy yesterday tile", () => {
@@ -353,16 +374,24 @@ describe("renderLogSheets", () => {
             );
         });
 
-        test("is the fifth tile after the four existing ones", () => {
+        test("follows the design order: Scan, Quick calories, Water, Weigh in, Cook, Copy yesterday, Add to groceries", () => {
             const html = withHints(["breakfast"]);
             const grid = html.match(
                 /<div class="fd-log-quick-grid">([\s\S]*?)<\/div><\/div>/,
             )![1]!;
-            expect(grid.indexOf("Scan barcode")).toBeLessThan(
-                grid.indexOf("Copy yesterday"),
-            );
+            const order = [
+                "Scan barcode",
+                "Quick calories",
+                "Water +250 ml",
+                "Weigh in",
+                "Cook a recipe",
+                "Copy yesterday",
+                "Add to groceries",
+            ].map((label) => grid.indexOf(label));
+            expect(order.every((i) => i >= 0)).toBe(true);
+            expect(order).toEqual([...order].sort((a, b) => a - b));
             expect(html.match(/\bclass="fd-quick-tile"/g) ?? []).toHaveLength(
-                5,
+                7,
             );
         });
 
@@ -384,11 +413,9 @@ describe("renderLogSheets", () => {
             }
         });
 
-        test("never adds the frame's other missing tiles", () => {
+        test("never adds the frame's Photo of meal tile: no feature is behind it", () => {
             const html = withHints(["breakfast"]);
             expect(html).not.toContain("Photo of meal");
-            expect(html).not.toContain("Cook a recipe");
-            expect(html).not.toContain("Add to groceries");
         });
     });
 

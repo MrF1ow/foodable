@@ -173,7 +173,8 @@ describe("/app-v2.js", () => {
         // +~4.2 KB Sheets: backdrop dismiss by geometry on document, with a touch-tap fallback.
         // +~0.4 KB Again chips: a submit key per rendered form.
         // +~3 KB Log sheet: ml basis, pack-serving portion, unit change resets.
-        expect(js.length).toBeLessThan(137_000);
+        // +~0.6 KB Log sheet: Add to groceries opens the Groceries add sheet.
+        expect(js.length).toBeLessThan(137_600);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

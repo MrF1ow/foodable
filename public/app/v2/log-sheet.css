@@ -227,6 +227,7 @@
 
 .fd-quick-tile {
     display: flex;
+    text-decoration: none;
     flex-direction: column;
     align-items: center;
     gap: var(--fd-s-7);

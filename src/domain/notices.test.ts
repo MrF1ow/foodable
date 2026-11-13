@@ -1,6 +1,7 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import {
     needsAttentionCount,
+    noticeShortSentence,
     tabDotsFromNotices,
     type Notice,
     sortNotices,
@@ -93,4 +94,97 @@ test("tabDotsFromNotices lights only tabs that own the code", () => {
         },
     ];
     expect(tabDotsFromNotices(householdDup)).toEqual({ household: true });
+});
+
+function shortNotice(
+    code: Notice["code"],
+    params: Notice["params"],
+    subject: Notice["subject"] = { kind: "food", id: "f1" },
+): Notice {
+    return { code, severity: "info", subject, related: [], params };
+}
+
+describe("noticeShortSentence", () => {
+    test("a usual running low drops the reason", () => {
+        expect(
+            noticeShortSentence(
+                shortNotice("grocery.running_low", {
+                    name: "Eggs",
+                    reason: "1 left, wants 6",
+                }),
+            ),
+        ).toBe("Eggs running low");
+    });
+
+    test("a food missing for the plan names the day", () => {
+        const base = {
+            name: "Lemon",
+            unknown: "no",
+            recipeName: "Fish",
+            recipeCount: 1,
+        };
+        // 2026-11-14 is a Saturday.
+        expect(
+            noticeShortSentence(
+                shortNotice("plan.missing_ingredient", {
+                    ...base,
+                    plannedOn: "2026-11-14",
+                    daysLeft: 2,
+                }),
+            ),
+        ).toBe("Lemon missing for Saturday");
+        expect(
+            noticeShortSentence(
+                shortNotice("plan.missing_ingredient", {
+                    ...base,
+                    plannedOn: "2026-11-13",
+                    daysLeft: 1,
+                }),
+            ),
+        ).toBe("Lemon missing for tomorrow");
+        expect(
+            noticeShortSentence(
+                shortNotice("plan.missing_ingredient", {
+                    ...base,
+                    unknown: "yes",
+                    plannedOn: "2026-11-12",
+                    daysLeft: 0,
+                }),
+            ),
+        ).toBe("Lemon: can't tell how much you have for today");
+    });
+
+    test("a weigh-in due names the last weekday, and whose when it is not the viewer's", () => {
+        const weigh = shortNotice(
+            "nutrition.weigh_in_due",
+            {
+                name: "Sam",
+                days: 9,
+                // 2026-11-03 is a Tuesday.
+                lastWeighedOn: "2026-11-03",
+            },
+            { kind: "member", id: "u-sam" },
+        );
+        expect(noticeShortSentence(weigh)).toBe("Weigh in · last Tuesday");
+        expect(noticeShortSentence(weigh, { viewerUserId: "u-sam" })).toBe(
+            "Weigh in · last Tuesday",
+        );
+        expect(noticeShortSentence(weigh, { viewerUserId: "u-me" })).toBe(
+            "Sam: weigh in · last Tuesday",
+        );
+        const old = shortNotice(
+            "nutrition.weigh_in_due",
+            { name: "Sam", days: 40, lastWeighedOn: "2026-10-03" },
+            { kind: "member", id: "u-sam" },
+        );
+        expect(noticeShortSentence(old)).toBe("Weigh in · 40 days ago");
+    });
+
+    test("a kind with no short form returns null", () => {
+        expect(
+            noticeShortSentence(
+                shortNotice("fridge.expired", { name: "Milk" }),
+            ),
+        ).toBeNull();
+    });
 });

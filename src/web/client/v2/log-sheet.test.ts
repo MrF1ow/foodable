@@ -10,6 +10,7 @@ type LogMacroApi = {
         unit: string,
     ) => Record<string, number | null> | null;
     allowedUnits: (item: Record<string, unknown>) => string[];
+    openGroceryAddFromLink: () => void;
     portionLabel: (
         serving: { amount: number; unit: string },
         portions: number,
@@ -522,4 +523,46 @@ test("switching from or to portion resets the amount, between g and ml it stays"
     expect(api.amountAfterUnitChange("g", "ml", "250")).toBe("250");
     expect(api.amountAfterUnitChange(undefined, "ml", "30")).toBe("30");
     expect(api.amountAfterUnitChange("ml", "ml", "30")).toBe("30");
+});
+
+test("?add=1 opens the grocery add sheet once and drops the flag", () => {
+    class Dialog extends (g.HTMLDialogElement as typeof HTMLElement) {
+        open = false;
+        showModal() {
+            this.open = true;
+        }
+    }
+    const dialog = new Dialog();
+    const replaced: string[] = [];
+    const win = g.window as Record<string, unknown>;
+    const savedLocation = win.location;
+    win.location = {
+        pathname: "/kitchen/groceries",
+        search: "?add=1&store=s1",
+        hash: "",
+    };
+    win.history = {
+        state: null,
+        replaceState: (_s: unknown, _t: string, url: string) =>
+            replaced.push(url),
+    };
+    const saved = g.document;
+    g.document = {
+        getElementById: (id: string) =>
+            id === "fd-grocery-add" ? dialog : null,
+    };
+    try {
+        api.openGroceryAddFromLink();
+        expect(dialog.open).toBe(true);
+        expect(replaced).toEqual(["/kitchen/groceries?store=s1"]);
+        // Without the flag nothing opens.
+        const quiet = new Dialog();
+        g.document = { getElementById: () => quiet };
+        win.location = { pathname: "/kitchen/groceries", search: "", hash: "" };
+        api.openGroceryAddFromLink();
+        expect(quiet.open).toBe(false);
+    } finally {
+        g.document = saved;
+        win.location = savedLocation;
+    }
 });

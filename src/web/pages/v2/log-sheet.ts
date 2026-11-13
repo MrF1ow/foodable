@@ -319,6 +319,17 @@ function quickIconCopy(): string {
  * is the same idempotent write. Disabled (not hidden) while the chosen meal has
  * nothing to copy; copy-yesterday.js re-points it when the meal changes.
  */
+/** The Groceries tab with its add sheet open (log-sheet.js opens it on load). */
+export const FD_GROCERY_ADD_HREF = "/kitchen/groceries?add=1";
+
+function quickIconPot(): string {
+    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 11h16v5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z"/><path d="M2.5 11h19"/><path d="M9 7.5c0-1.4 1-1.4 1-2.8M14 7.5c0-1.4 1-1.4 1-2.8"/></svg>`;
+}
+
+function quickIconCart(): string {
+    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 4h2.5l2 11h10l2-8H7"/><circle cx="9.5" cy="19" r="1.2"/><circle cx="16.5" cy="19" r="1.2"/></svg>`;
+}
+
 function copyYesterdayTile(copy: CopyYesterdayOpts, selected: string): string {
     const disabled = copy.slots.includes(selected) ? "" : " disabled";
     return `<form class="fd-quick-form" method="post" action="/log/copy-yesterday" data-fd-copy-yesterday data-fd-copy-yesterday-slots="${escapeHtml(copy.slots.join(" "))}"><input type="hidden" name="slot" value="${escapeHtml(selected)}" /><input type="hidden" name="return_to" value="${escapeHtml(copy.returnTo)}" /><button type="submit" class="fd-quick-tile" data-fd-copy-yesterday-button${disabled}><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconCopy()}</span><span class="fd-quick-tile__label">Copy yesterday</span></button></form>`;
@@ -335,7 +346,11 @@ function quickActionsHtml(
     const scan = barcodeCamera
         ? `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Scan barcode</span></button>`
         : `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Enter barcode</span></button>`;
-    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${cal}${water}${weight}${scan}${copy ? copyYesterdayTile(copy, selectedMeal) : ""}</div>`;
+    // Cook a recipe goes to the recipes, where each one has its Cook step; Add
+    // to groceries opens the Groceries tab's add sheet (log-sheet.js reads add=1).
+    const cook = `<a class="fd-quick-tile" href="/recipes"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconPot()}</span><span class="fd-quick-tile__label">Cook a recipe</span></a>`;
+    const groceries = `<a class="fd-quick-tile" href="${FD_GROCERY_ADD_HREF}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconCart()}</span><span class="fd-quick-tile__label">Add to groceries</span></a>`;
+    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${scan}${cal}${water}${weight}${cook}${copy ? copyYesterdayTile(copy, selectedMeal) : ""}${groceries}</div>`;
 }
 
 function macroField(

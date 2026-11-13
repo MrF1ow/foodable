@@ -763,6 +763,27 @@ describe("Use soon recipe lines", () => {
         );
         expect(rail).not.toContain("Plan");
     });
+
+    test("with the week plan on, Plan sits beside Cook it and opens the recipe's plan sheet", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        const base = buildPreviewTodayPageData(chrome, today);
+        const rail = String(
+            renderTodayRail({
+                ...base,
+                plan: {
+                    today,
+                    days: [],
+                    plannedCount: 0,
+                    missing: [],
+                },
+                view,
+            }),
+        );
+        expect(rail).toContain(
+            '<a class="fd-today-useall__plan" href="/recipes/r-salmon-rice?plan=1">Plan</a>',
+        );
+        expect(rail.indexOf("Cook it")).toBeLessThan(rail.indexOf(">Plan<"));
+    });
 });
 
 describe("today edit sheet Again", () => {

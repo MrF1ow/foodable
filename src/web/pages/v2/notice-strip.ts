@@ -12,7 +12,11 @@
  */
 import { noticeActionFor, noticeSentence } from "../../../copy/notices.js";
 import { dismissalKey } from "../../../domain/notice-dismissals.js";
-import type { Notice, NoticeCode } from "../../../domain/notices.js";
+import {
+    noticeShortSentence,
+    type Notice,
+    type NoticeCode,
+} from "../../../domain/notices.js";
 import {
     noticeActPath,
     NOTICE_DISMISS_PATH,
@@ -160,7 +164,7 @@ export function noticeStrip(
                 button: "fd-notice-strip__action",
                 form: "fd-notice-strip__action-form",
             });
-            return `<li class="fd-notice-strip__row" data-notice="${esc(notice.code)}"><span class="${dotClass(notice)}" aria-hidden="true"></span><span class="fd-notice-strip__text">${esc(noticeSentence(notice))}</span>${action}${noticeDismissControl(notice, opts.back)}</li>`;
+            return `<li class="fd-notice-strip__row" data-notice="${esc(notice.code)}"><span class="${dotClass(notice)}" aria-hidden="true"></span><span class="fd-notice-strip__text">${esc(noticeShortSentence(notice, { viewerUserId: opts.viewerUserId }) ?? noticeSentence(notice))}</span>${action}${noticeDismissControl(notice, opts.back)}</li>`;
         })
         .join("");
     const extra = opts.className ? ` ${esc(opts.className)}` : "";
