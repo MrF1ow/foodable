@@ -19,7 +19,12 @@ import {
     type FoodsStore,
 } from "./foods.js";
 import { familyIdOf } from "./food-quantity.js";
-import { missingGramsGap, storedFoodUnit, toGrams } from "./food-quantity.js";
+import {
+    missingGramsGap,
+    placeholderAmountUnit,
+    storedFoodUnit,
+    toGrams,
+} from "./food-quantity.js";
 import {
     resolveGrocerySectionId,
     suggestGrocerySection,
@@ -1736,7 +1741,11 @@ export async function addRecipeToGrocery(opts: {
                 continue;
             }
             const food = foodsById.get(foodId);
-            const placeholderUnit = food?.defaultUnit || "g";
+            // The amount sits under the "to taste" note: a placeholder 1, in a
+            // unit that is not 1 g of salt.
+            const placeholderUnit = placeholderAmountUnit({
+                defaultUnit: food?.defaultUnit ?? "",
+            });
             const section = suggestGrocerySection({
                 sections: storeSections,
                 allSections,

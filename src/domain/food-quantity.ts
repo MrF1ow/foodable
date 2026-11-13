@@ -109,6 +109,17 @@ export function missingGramsReason(
     return missingGramsGap(displayName, quantity, food)?.message ?? null;
 }
 
+/**
+ * The unit of a grocery amount nobody gave ("1 of it"). A food whose catalog
+ * unit is the base mass or volume (`g`, `ml`, or none) has no sensible "1":
+ * 1 g of spinach is never what is on the list, so it reads 1 each. Any other
+ * catalog unit (each, lb, cup, ...) is a unit people shop in and is kept.
+ */
+export function placeholderAmountUnit(food: { defaultUnit: string }): string {
+    const unit = food.defaultUnit.trim();
+    return unit === "" || unit === "g" || unit === "ml" ? "each" : unit;
+}
+
 export function storedFoodUnit(
     unit: string | undefined,
     food: { defaultUnit: string },

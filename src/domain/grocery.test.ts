@@ -246,6 +246,51 @@ test("pickGroceryAmount: chosen vs usual vs default 1 defaultUnit", () => {
     });
 });
 
+test("pickGroceryAmount: an amount nobody gave is never 1 g or 1 ml", () => {
+    const pick = (defaultUnit: string, unit?: string) =>
+        pickGroceryAmount({ unit, usual: null, food: { defaultUnit } });
+    // A food whose catalog unit is the base mass or volume has no sensible
+    // "1": the line says 1 each instead.
+    expect(pick("g")).toEqual({
+        quantity: { amount: 1, unit: "each" },
+        reason: "default",
+    });
+    expect(pick("ml").quantity).toEqual({ amount: 1, unit: "each" });
+    expect(pick("").quantity).toEqual({ amount: 1, unit: "each" });
+    // A unit that is a shopping unit on its own is kept.
+    expect(pick("each").quantity).toEqual({ amount: 1, unit: "each" });
+    expect(pick("lb").quantity).toEqual({ amount: 1, unit: "lb" });
+    expect(pick("cup").quantity).toEqual({ amount: 1, unit: "cup" });
+    // A unit the caller named stays, whatever it is.
+    expect(pick("each", "g").quantity).toEqual({ amount: 1, unit: "g" });
+    // An amount the caller chose is theirs: 3 with no unit is 3 of the catalog unit.
+    expect(
+        pickGroceryAmount({
+            amount: 3,
+            usual: null,
+            food: { defaultUnit: "g" },
+        }).quantity,
+    ).toEqual({ amount: 3, unit: "g" });
+});
+
+test("a restock add for a food with no usual amount lists 1 each, not 1 g", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    // Foods default to "g" when nothing else is set, as Spinach does here.
+    const spinach = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Spinach" }),
+    );
+    expect(spinach.defaultUnit).toBe("g");
+    const line = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        foodId: spinach.id,
+        source: "restock",
+    });
+    expect(line.quantity).toEqual({ amount: 1, unit: "each" });
+});
+
 test("addGroceryFoodById auto-picks usual store and amount via effectiveFood", async () => {
     const grocery = createMemoryGroceryStore();
     const foods = createMemoryFoodsStore();

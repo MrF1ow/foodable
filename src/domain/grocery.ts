@@ -14,7 +14,7 @@ import {
     type FoodsStore,
     type UsualAmount,
 } from "./foods.js";
-import { storedFoodUnit } from "./food-quantity.js";
+import { placeholderAmountUnit, storedFoodUnit } from "./food-quantity.js";
 import type {
     GroceryPreferences,
     GrocerySection,
@@ -640,10 +640,13 @@ export function pickGroceryAmount(input: {
             reason: "usual",
         };
     }
+    // No amount from the caller and no usual one: "1 of it". The unit the
+    // caller named stays; otherwise the food's own, except that 1 g or 1 ml is
+    // never a shopping amount (see placeholderAmountUnit).
     return {
         quantity: {
             amount: 1,
-            unit: storedFoodUnit(input.unit, input.food),
+            unit: givenUnit || placeholderAmountUnit(input.food),
         },
         reason: "default",
     };
