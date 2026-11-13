@@ -1057,12 +1057,14 @@ function listUsuals(
         weekday?: number;
         stores?: { id: string; name: string }[];
         lines?: Pick<GroceryLine, "foodId" | "checked">[];
+        dismissed?: ReadonlySet<string>;
     } = {},
 ) {
     return usualsList({
         listed,
         stock: [],
         lines: opts.lines ?? [],
+        dismissed: opts.dismissed ?? new Set<string>(),
         stores: opts.stores ?? LIST_STORES,
         today: TODAY,
         householdRestockDay: opts.weekday ?? 1,
@@ -1251,6 +1253,120 @@ test("usualsList counts a line for the usual's product as on the list", () => {
         lines: [{ foodId: brand.id, checked: false }],
     });
     expect(rows.find((r) => r.name === "Milk")!.onList).toBe(true);
+});
+
+function lowRice(over: Partial<ReturnType<typeof newFood>> = {}) {
+    // No schedule and empty stock: due only because it is low.
+    return newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Rice",
+        restockWhenLow: true,
+        restockLowLevel: 1,
+        usualAmount: { amount: 4, unit: "each" },
+        ...over,
+    });
+}
+
+test("usualsList: a recent tick covers a low usual, like the runner", () => {
+    const rice = lowRice({ lastRestockedOn: addDays(TODAY, -2) });
+    const { rows } = listUsuals([rice], {
+        lines: [{ foodId: rice.id, checked: true }],
+    });
+    expect(rows[0]).toMatchObject({
+        due: { trigger: "low" },
+        onList: true,
+    });
+});
+
+test("usualsList: a stale tick no longer covers a low usual", () => {
+    const rice = lowRice({ lastRestockedOn: addDays(TODAY, -8) });
+    const { rows } = listUsuals([rice], {
+        lines: [{ foodId: rice.id, checked: true }],
+    });
+    expect(rows[0]).toMatchObject({
+        due: { trigger: "low" },
+        onList: false,
+    });
+});
+
+test("usualsList: a tick never covers a schedule-due usual", () => {
+    const tea = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Tea",
+        restockSchedule: "weekly",
+        lastRestockedOn: null,
+    });
+    const { rows } = listUsuals([tea], {
+        lines: [{ foodId: tea.id, checked: true }],
+    });
+    expect(rows[0]).toMatchObject({
+        due: { trigger: "schedule" },
+        onList: false,
+    });
+});
+
+test("usualsList: an unticked line covers a low usual whatever the tick age", () => {
+    const rice = lowRice({ lastRestockedOn: addDays(TODAY, -30) });
+    const { rows } = listUsuals([rice], {
+        lines: [{ foodId: rice.id, checked: false }],
+    });
+    expect(rows[0]!.onList).toBe(true);
+});
+
+test("usualsList: a low usual whose running-low notice is dismissed says so", () => {
+    const rice = lowRice({ lastRestockedOn: "2026-05-01" });
+    const key = (relatedKey: string) =>
+        dismissedKeySet([
+            {
+                id: "d1",
+                householdId: HH,
+                code: "grocery.running_low",
+                subjectKind: "food",
+                subjectId: rice.id,
+                relatedKey,
+                dismissedBy: "u1",
+                createdAt: "2026-05-02T00:00:00.000Z",
+            },
+        ]);
+    expect(
+        listUsuals([rice], { dismissed: key("2026-05-01") }).rows[0],
+    ).toMatchObject({ due: { trigger: "low" }, dismissed: true });
+    // A dismissal for an older restock does not hide it.
+    expect(
+        listUsuals([rice], { dismissed: key("2026-04-01") }).rows[0]!.dismissed,
+    ).toBe(false);
+    expect(listUsuals([rice]).rows[0]!.dismissed).toBe(false);
+});
+
+test("usualsList: a dismissal does not touch a schedule-due usual", () => {
+    const tea = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Tea",
+        restockSchedule: "weekly",
+        restockWhenLow: true,
+        restockLowLevel: 1,
+        lastRestockedOn: null,
+    });
+    const dismissed = dismissedKeySet([
+        {
+            id: "d1",
+            householdId: HH,
+            code: "grocery.running_low",
+            subjectKind: "food",
+            subjectId: tea.id,
+            relatedKey: "",
+            dismissedBy: "u1",
+            createdAt: "2026-05-02T00:00:00.000Z",
+        },
+    ]);
+    const { rows } = listUsuals([tea], { dismissed });
+    expect(rows[0]).toMatchObject({
+        due: { trigger: "schedule" },
+        dismissed: false,
+    });
 });
 
 test("usualsList says whether today is the household restock day", () => {

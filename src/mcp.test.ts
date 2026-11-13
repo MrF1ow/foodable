@@ -9827,6 +9827,86 @@ describe("list_usuals over HTTP", () => {
     );
 
     test.each(ERAS)(
+        "a low usual follows the runner's rule: a recent tick covers it, a stale tick does not, a dismissal hides it (%p)",
+        async (era) => {
+            const { today, eggs } = await seedUsuals();
+            setRestockWeekday((weekdayOf(today) + 3) % 7);
+            const market = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Market",
+            );
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            const stamp = async (lastRestockedOn: string | null) => {
+                await db.foodsStore.updateFoodRow({
+                    ...(await db.foodsStore.getFood("hh-1", eggs.id))!,
+                    lastRestockedOn,
+                });
+            };
+            await withHttpClient("u1", era, async (client) => {
+                const eggsRow = async () => {
+                    const r = (await client.callTool({
+                        name: "list_usuals",
+                        arguments: {},
+                    })) as ToolResult;
+                    return {
+                        row: LIST_USUALS_OUTPUT_SCHEMA.parse(
+                            r.structuredContent,
+                        ).usuals.find((u) => u.food_id === eggs.id)!,
+                        text: r.content[0]?.text ?? "",
+                    };
+                };
+                const open = await eggsRow();
+                expect(open.row).toMatchObject({
+                    due: { trigger: "low" },
+                    on_list: false,
+                    dismissed: false,
+                });
+                const added = (await client.callTool({
+                    name: "add_grocery_line",
+                    arguments: {
+                        kind: "food",
+                        food_id: eggs.id,
+                        store_id: market.id,
+                        amount: 12,
+                        unit: "each",
+                    },
+                })) as ToolResult;
+                expect(
+                    (added.structuredContent as { status?: string }).status,
+                ).toBe("ok");
+                expect((await eggsRow()).row.on_list).toBe(true);
+                // Ticked off: a recent tick still covers a low usual.
+                const [line] = await db.groceryStore.listLines("hh-1");
+                await db.groceryStore.updateLine({ ...line!, checked: true });
+                await stamp(addUtcDays(today, -2));
+                expect((await eggsRow()).row.on_list).toBe(true);
+                // A stale tick does not.
+                await stamp(addUtcDays(today, -8));
+                expect((await eggsRow()).row.on_list).toBe(false);
+                // A dismissed running-low notice hides it until the next restock.
+                await db.dismissalsStore.insert({
+                    householdId: "hh-1",
+                    code: "grocery.running_low",
+                    subjectKind: "food",
+                    subjectId: eggs.id,
+                    relatedKey: addUtcDays(today, -8),
+                    dismissedBy: "u1",
+                });
+                const hidden = await eggsRow();
+                expect(hidden.row).toMatchObject({
+                    on_list: false,
+                    dismissed: true,
+                });
+                expect(hidden.text).toContain("dismissed");
+                // Restocking later moves the scope, so the dismissal lapses.
+                await stamp(addUtcDays(today, -9));
+                expect((await eggsRow()).row.dismissed).toBe(false);
+            });
+        },
+    );
+
+    test.each(ERAS)(
         "the text says so when a usual has no low level, no N, or restock is off (%p)",
         async (era) => {
             const mk = (name: string, extra: Partial<Food>) =>

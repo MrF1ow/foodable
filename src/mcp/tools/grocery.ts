@@ -167,8 +167,10 @@ export const LIST_USUALS_OUTPUT_SCHEMA = z.object({
                     trigger: z.enum(["schedule", "low"]),
                 })
                 .nullable(),
-            /** An unchecked grocery line already names this food (or its family), so adding it again would duplicate the line. */
+            /** The grocery list already covers this usual (an unchecked line for the food or its family, or for a low usual a recently ticked one), so adding it again would duplicate the line. */
             on_list: z.boolean(),
+            /** A low usual whose running-low notice was dismissed; the restock runner skips it, so the card does not offer it. */
+            dismissed: z.boolean(),
         }),
     ),
 });
@@ -191,6 +193,7 @@ function usualWire(row: UsualListRow) {
         paused: row.paused,
         due: row.due,
         on_list: row.onList,
+        dismissed: row.dismissed,
     };
 }
 
@@ -214,7 +217,7 @@ function usualLine(row: UsualListRow): string {
         ? `${row.name} → ${row.productName}`
         : row.name;
     const status = row.due
-        ? `DUE (${row.due.reason})${row.onList ? ", already on the list" : ""}`
+        ? `DUE (${row.due.reason})${row.onList ? ", already on the list" : row.dismissed ? ", dismissed" : ""}`
         : "not due";
     return `- ${what}: ${how.join(", ")}; ${status}`;
 }
@@ -933,15 +936,25 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 "list_usuals",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const [config, owner, listed, stock, stores, lines] =
-                        await Promise.all([
-                            getHouseholdConfig(householdId),
-                            getHouseholdOwnerProfile(householdId),
-                            liveFoodsStore().listFoods(householdId),
-                            liveFridgeStore().listItems(householdId),
-                            liveSettingsStore().listStores(householdId),
-                            liveGroceryStore().listLines(householdId),
-                        ]);
+                    const [
+                        config,
+                        owner,
+                        listed,
+                        stock,
+                        stores,
+                        lines,
+                        dismissals,
+                    ] = await Promise.all([
+                        getHouseholdConfig(householdId),
+                        getHouseholdOwnerProfile(householdId),
+                        liveFoodsStore().listFoods(householdId),
+                        liveFridgeStore().listItems(householdId),
+                        liveSettingsStore().listStores(householdId),
+                        liveGroceryStore().listLines(householdId),
+                        liveNoticeDismissalsStore().listForHousehold(
+                            householdId,
+                        ),
+                    ]);
                     const weekday = config.preferences.restock.weekday;
                     const today = householdTodayAt(config.preferences, owner);
                     const { rows, isRestockDay } = usualsList({
@@ -949,6 +962,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         stock,
                         stores,
                         lines,
+                        dismissed: dismissedKeySet(dismissals),
                         today,
                         householdRestockDay: weekday,
                     });

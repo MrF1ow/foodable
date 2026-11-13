@@ -4471,6 +4471,7 @@ function usual(over: Record<string, unknown> = {}) {
         low_level: 6,
         paused: false,
         on_list: false,
+        dismissed: false,
         due: { reason: "2 left, below 6", trigger: "low" },
         ...over,
     };
@@ -4677,6 +4678,43 @@ test("restock-nudge v2: a usual already on the list is shown On the list, left o
     expect(after).toContain(">On the list<");
     expect(after).toContain(">Added<");
     expect(after).not.toContain('data-act="add:');
+});
+
+test("restock-nudge v2: a usual whose notice was dismissed is shown Dismissed, left out of Add and its count, and never sent", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([
+            usual({ dismissed: true }),
+            usual({
+                food_id: "food-milk",
+                name: "Milk",
+                product_name: null,
+                amount: 1,
+                unit: "gal",
+                due: { reason: "weekly", trigger: "schedule" },
+            }),
+        ]),
+        reply: addReply,
+    });
+    const body = w.html();
+    expect(body).toContain(">Eggs<");
+    expect(body).toContain(">Dismissed<");
+    expect(body).not.toContain(">On the list<");
+    expect(body).toContain("Add 1 to the Costco list");
+    w.tap("add:st-costco");
+    await w.settle();
+    expect(w.calls.map((c) => c.args.food_id)).toEqual(["food-milk"]);
+    expect(w.html()).toContain(">Dismissed<");
+});
+
+test("restock-nudge v2: when every due usual is dismissed or listed there is no Add", async () => {
+    const w = await mountRecipe(await v2Widget("restock-nudge"), {
+        data: usualsData([
+            usual({ dismissed: true }),
+            usual({ food_id: "f2", name: "Milk", on_list: true }),
+        ]),
+        reply: addReply,
+    });
+    expect(w.html()).not.toContain("data-act=");
 });
 
 test("restock-nudge v2: when every due usual is already on the list there is no Add", async () => {

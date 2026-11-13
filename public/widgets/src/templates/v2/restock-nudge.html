@@ -104,6 +104,7 @@
                 adding: "Adding…",
                 added: "Added",
                 onList: "On the list",
+                dismissed: "Dismissed",
                 failed: "Could not add {name}. Nothing after it was added.",
                 unsure: "May have been added \u2014 check the list",
                 noteUnsure:
@@ -135,6 +136,7 @@
                         low_level: 6,
                         paused: false,
                         on_list: false,
+                        dismissed: false,
                         due: { reason: "2 left, below 6", trigger: "low" },
                     },
                     {
@@ -153,6 +155,7 @@
                         low_level: null,
                         paused: false,
                         on_list: false,
+                        dismissed: false,
                         due: {
                             reason: "weekly, last bought 7 days ago",
                             trigger: "schedule",
@@ -174,6 +177,7 @@
                         low_level: null,
                         paused: false,
                         on_list: false,
+                        dismissed: false,
                         due: {
                             reason: "every 2 weeks, last bought 14 days ago",
                             trigger: "schedule",
@@ -197,11 +201,13 @@
                 return v2Qty(u.amount == null ? 1 : u.amount, u.unit);
             }
 
-            // A usual already on the grocery list is shown but never re-added:
-            // add_grocery_line always inserts a line.
+            // A usual already on the grocery list, or whose running-low notice
+            // was dismissed (the restock runner skips it too), is shown but
+            // never re-added: add_grocery_line always inserts a line.
             function needsAdd(u) {
                 return (
                     !u.on_list &&
+                    !u.dismissed &&
                     !added.has(u.food_id) &&
                     !unsure.has(u.food_id)
                 );
@@ -241,6 +247,7 @@
                 const done = added.has(u.food_id);
                 const maybe = !done && unsure.has(u.food_id);
                 const listed = !done && !maybe && !!u.on_list;
+                const muted = !done && !maybe && !listed && !!u.dismissed;
                 return `<div class="ur" data-food-id="${esc(u.food_id)}">${v2Dot(
                     undefined,
                     low ? "warn" : "dim",
@@ -248,9 +255,15 @@
                 )}<div class="ur-main"><span class="ur-t">${esc(u.name)}</span><span class="ur-s${
                     low || maybe ? " is-warn" : ""
                 }">${esc(maybe ? T.unsure : sub)}</span></div><span class="row-end${
-                    done ? " is-ok" : listed ? " is-dim" : ""
+                    done ? " is-ok" : listed || muted ? " is-dim" : ""
                 }">${esc(
-                    done ? T.added : listed ? T.onList : amountText(u),
+                    done
+                        ? T.added
+                        : listed
+                          ? T.onList
+                          : muted
+                            ? T.dismissed
+                            : amountText(u),
                 )}</span></div>`;
             }
 

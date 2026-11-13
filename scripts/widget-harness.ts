@@ -22,7 +22,8 @@
 //                       on 2 of 4) or none (not enough data to score)
 //   ?state=stores       restock-nudge sample: costco (default), stores (due
 //                       usuals at two stores and one with none), onlist (Eggs
-//                       already on the list) or empty
+//                       already on the list), dismissed (Eggs' running-low
+//                       notice dismissed) or empty
 //   ?state=busy         week-plan sample: design (default: three planned days,
 //                       two foods missing), busy (two meals on one day),
 //                       future (a week starting three days after today)
@@ -89,6 +90,7 @@ function restockUsuals(state: string) {
         paused: false,
         due,
         on_list: false,
+        dismissed: false,
     });
     const costco: [string, string] = ["st-costco", "Costco"];
     const tj: [string, string] = ["st-tj", "Trader Joe's"];
@@ -137,6 +139,8 @@ function restockUsuals(state: string) {
         ];
     } else if (state === "onlist") {
         usuals = [{ ...eggs, on_list: true }, milk, chicken, rice];
+    } else if (state === "dismissed") {
+        usuals = [{ ...eggs, dismissed: true }, milk, chicken, rice];
     } else if (state === "empty") {
         usuals = [rice];
     }
@@ -275,7 +279,7 @@ function indexPage(): string {
      <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>,
      <code>?v2=1</code> (the v2 assembly), <code>?theme=dark</code> (host theme),
      <code>?state=full|partial|none</code> (product-score sample),
-     <code>?state=costco|stores|onlist|empty</code> (restock-nudge sample),
+     <code>?state=costco|stores|onlist|dismissed|empty</code> (restock-nudge sample),
      <code>?state=design|busy|future|empty</code> (week-plan sample).</p>
   <ul>${links}</ul>
 </body></html>`;
