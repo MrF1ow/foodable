@@ -54,8 +54,6 @@ const FILES = [
     "CLAUDE.md",
     "AGENTS.md",
     ".claude/skills/foodable-test/SKILL.md",
-    ".prettierignore",
-    ".prettierrc",
     "bun.lock",
     "package.json",
     "db/migrations/20261110000000_add_thing.sql",
@@ -100,8 +98,8 @@ describe("changedChecks", () => {
         const checks = run(["src/domain/fridge.ts"]);
         expect(ids(checks)).toEqual(["format", "lint", "typecheck", "test"]);
         expect(byId(checks, "format").cmd).toEqual([
-            "bunx",
-            "prettier",
+            "bun",
+            "fmt",
             "--check",
             "--ignore-unknown",
             "src/domain/fridge.ts",
@@ -569,8 +567,8 @@ describe("changedChecks: non-code files under src/ and public/", () => {
     });
 });
 
-describe("changedChecks: prettier inputs", () => {
-    test.each([".prettierignore", ".prettierrc", "package.json", "bun.lock"])(
+describe("changedChecks: bun fmt inputs", () => {
+    test.each(["bunfig.toml", ".editorconfig", "package.json", "bun.lock"])(
         "%s formats the whole tree",
         (path) => {
             const format = byId(run([path]), "format");
@@ -580,7 +578,7 @@ describe("changedChecks: prettier inputs", () => {
     );
 
     test("whole-tree format still applies when the config was deleted", () => {
-        const checks = changedChecks([".prettierrc.json"], { files: FILES });
+        const checks = changedChecks(["bunfig.toml"], { files: FILES });
         expect(byId(checks, "format").cmd).toEqual([
             "bun",
             "run",
@@ -590,8 +588,8 @@ describe("changedChecks: prettier inputs", () => {
 
     test("ordinary files are still formatted one by one", () => {
         expect(byId(run(["src/brand.ts"]), "format").cmd.slice(0, 4)).toEqual([
-            "bunx",
-            "prettier",
+            "bun",
+            "fmt",
             "--check",
             "--ignore-unknown",
         ]);

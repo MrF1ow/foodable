@@ -525,8 +525,6 @@ const LOW_REPO_EXACT = new Set([
     "README.md",
     "LICENSE",
     ".gitignore",
-    ".prettierignore",
-    ".prettierrc",
     ".dockerignore",
     ".env.example",
     "tsconfig.json",

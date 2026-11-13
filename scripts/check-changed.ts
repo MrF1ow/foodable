@@ -65,10 +65,11 @@ export const DEFAULT_BASE = "origin/main";
 //
 // path → checks (an absent row means that check is not triggered):
 //
-//   format      every changed file that still exists (prettier skips ignored and
+//   format      every changed file that still exists (`bun fmt` skips ignored and
 //               unknown files itself). The whole tree (`format:check`) when the
-//               prettier config, package.json or bun.lock changes: the rules or
-//               the prettier version moved, so untouched files can start failing.
+//               `[fmt]` config (bunfig.toml), package.json or bun.lock changes:
+//               the rules or the Bun version moved, so untouched files can start
+//               failing.
 //   typecheck   any .ts/.tsx/.js/.mjs/.cjs/.json (dot-dirs excluded), tsconfig,
 //               package.json, bun.lock.
 //   test        one `bun test <files>` for the union of:
@@ -109,10 +110,10 @@ const FULL_SUITE: RegExp[] = [
     /^db\/(migrations\/|bootstrap\.sql$)/,
 ];
 
-/** Prettier's own inputs: a change re-judges every file, not only this one. */
+/** `bun fmt`'s own inputs: a change re-judges every file, not only this one. */
 const FORMAT_ALL_TRIGGERS: RegExp[] = [
-    /^\.prettier(ignore|rc[^/]*)$/,
-    /^prettier\.config\.[^/]+$/,
+    /^bunfig\.toml$/,
+    /^\.editorconfig$/,
     /^package\.json$/,
     /^bun\.lock$/,
 ];
@@ -405,7 +406,7 @@ export function changedChecks(
         checks.push({
             id: "format",
             label: `format: ${live.length} file${live.length === 1 ? "" : "s"}`,
-            cmd: ["bunx", "prettier", "--check", "--ignore-unknown", ...live],
+            cmd: ["bun", "fmt", "--check", "--ignore-unknown", ...live],
         });
     }
 
