@@ -16,13 +16,22 @@ export type SettingsHelpView = {
     backHref: string;
 };
 
-type GlossaryEntry = {
+type GlossaryCopy = {
     id: string;
     title: string;
     body: string;
 };
 
-const GLOSSARY: GlossaryEntry[] = [
+/** One glossary topic. `title` is plain text (escape it on render); `answer`
+ *  is ready-to-render HTML: the paragraph, plus the copyable prompt block on
+ *  the one entry that carries it. */
+export type GlossaryEntry = {
+    id: string;
+    title: string;
+    answer: string;
+};
+
+const GLOSSARY_COPY: GlossaryCopy[] = [
     {
         id: "food-vs-household-item",
         title: "Food vs household item",
@@ -100,26 +109,40 @@ const GLOSSARY: GlossaryEntry[] = [
     },
 ];
 
-export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);
 const PROMPT_FIELD_ID = "help-unverified-recipes-prompt";
 
-/** Glossary sections for Help (legacy and v2 settings). */
+function promptBlockHtml(): string {
+    return `${field({
+        id: PROMPT_FIELD_ID,
+        label: "Prompt",
+        control: `<textarea id="${PROMPT_FIELD_ID}" readonly rows="14">${escapeHtml(UNVERIFIED_RECIPES_PROMPT)}</textarea>`,
+    })}<button type="button" class="btn-sm" data-copy-target="${PROMPT_FIELD_ID}" data-copy-status="${PROMPT_FIELD_ID}-status" aria-label="Copy prompt">Copy</button> <span id="${PROMPT_FIELD_ID}-status" class="muted" role="status" aria-live="polite"></span>`;
+}
+
+/** The glossary, shared by the legacy Help page and the v2 Help list. */
+export const GLOSSARY: readonly GlossaryEntry[] = GLOSSARY_COPY.map(
+    (entry) => ({
+        id: entry.id,
+        title: entry.title,
+        // The newline after the paragraph is part of the legacy page's bytes.
+        answer: `<p>${escapeHtml(entry.body)}</p>\n${
+            entry.id === "unverified-recipes" ? promptBlockHtml() : ""
+        }`,
+    }),
+);
+
+export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);
+
+/** Glossary sections for the legacy Help page. */
 export function renderSettingsGlossaryHtml(): string {
-    return GLOSSARY.map((entry) => {
-        const promptBlock =
-            entry.id === "unverified-recipes"
-                ? `${field({
-                      id: PROMPT_FIELD_ID,
-                      label: "Prompt",
-                      control: `<textarea id="${PROMPT_FIELD_ID}" readonly rows="14">${escapeHtml(UNVERIFIED_RECIPES_PROMPT)}</textarea>`,
-                  })}<button type="button" class="btn-sm" data-copy-target="${PROMPT_FIELD_ID}" data-copy-status="${PROMPT_FIELD_ID}-status" aria-label="Copy prompt">Copy</button> <span id="${PROMPT_FIELD_ID}-status" class="muted" role="status" aria-live="polite"></span>`
-                : "";
-        return `<section class="help-entry psec" id="${escapeHtml(entry.id)}">
+    return GLOSSARY.map(
+        (
+            entry,
+        ) => `<section class="help-entry psec" id="${escapeHtml(entry.id)}">
 <h3 class="subsection-title">${escapeHtml(entry.title)}</h3>
-<p>${escapeHtml(entry.body)}</p>
-${promptBlock}
-</section>`;
-    }).join("");
+${entry.answer}
+</section>`,
+    ).join("");
 }
 
 export function renderSettingsHelpPage(view: SettingsHelpView): string {

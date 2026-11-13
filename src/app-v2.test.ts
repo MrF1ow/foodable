@@ -181,6 +181,19 @@ describe("/app-v2.css", () => {
         );
     });
 
+    test("Help titles are plain, not capitals; Kitchen has no per-tab title classes", () => {
+        const help = readFileSync("./public/app/v2/settings.css", "utf8");
+        const at = help.indexOf(".fd-settings-help__summary {");
+        expect(at).toBeGreaterThanOrEqual(0);
+        expect(help.slice(at, help.indexOf("}", at))).not.toContain(
+            "uppercase",
+        );
+        const kitchen = readFileSync("./public/app/v2/kitchen.css", "utf8");
+        expect(kitchen).not.toContain("fd-kitchen-grocery-title");
+        expect(kitchen).not.toContain("fd-kitchen-usual-title");
+        expect(kitchen).not.toContain("fd-kitchen-usual-head");
+    });
+
     test("one breakpoint: a single 1024px media query", () => {
         const shell = readFileSync("./public/app/v2/shell.css", "utf8");
         expect(shell.match(/@media \(min-width: 1024px\)/g)?.length).toBe(1);

@@ -510,31 +510,80 @@
     color: var(--text-secondary);
 }
 
+/* Help: one card of rows, the Settings card language. Each row is a native
+   <details>; the title is the row label, the answer opens beneath it. */
 .fd-settings-help {
+    list-style: none;
+    margin: 0;
+    padding: 0;
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-12);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
 }
 
-.fd-settings-help-entry {
-    padding: var(--fd-s-12);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--line);
+.fd-settings-help__item + .fd-settings-help__item {
+    border-top: 1px solid var(--line);
+}
+
+.fd-settings-help__summary {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    min-height: 51px;
+    padding: 13px var(--space-section);
+    color: var(--text-primary);
+    font: 400 0.9375rem/1.25 var(--font-body);
+    cursor: pointer;
+    list-style: none;
+}
+
+.fd-settings-help__summary::-webkit-details-marker {
+    display: none;
+}
+
+.fd-settings-help__summary:hover {
     background: var(--surface-raised);
 }
 
-.fd-settings-help-entry__title {
-    margin: 0 0 var(--fd-s-6);
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--text-primary);
+.fd-settings-help__summary:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: -2px;
 }
 
-.fd-settings-help-entry p {
-    margin: 0;
-    font-size: 0.9375rem;
-    line-height: 1.45;
+.fd-settings-help__label {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fd-settings-help__chev {
+    flex: none;
+    color: var(--text-tertiary);
+}
+
+.fd-settings-help__row[open] .fd-settings-help__chev {
+    transform: rotate(90deg);
+}
+
+.fd-settings-help__answer {
+    padding: 0 var(--space-section) 16px;
+    font: 400 0.9375rem/1.45 var(--font-body);
     color: var(--text-secondary);
+}
+
+.fd-settings-help__answer p {
+    margin: 0;
+}
+
+.fd-settings-help__answer .field,
+.fd-settings-help__answer textarea {
+    margin-top: var(--fd-s-10);
+}
+
+.fd-settings-help__answer .btn-sm {
+    margin-top: var(--fd-s-6);
 }
 
 .fd-settings-household {
