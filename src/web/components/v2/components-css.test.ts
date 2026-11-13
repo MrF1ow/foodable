@@ -7,6 +7,10 @@ const css = readFileSync(
     "utf8",
 );
 // Comments may quote hex values or class names; the rules are what ships.
+/** Escapes every regex metacharacter, backslash included, so a selector matches literally. */
+const escapeRegExp = (text: string): string =>
+    text.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+
 const rules = css.replace(/\/\*[\s\S]*?\*\//g, "");
 
 test("components.css has no colour literal: every colour is a token", () => {
@@ -58,7 +62,7 @@ test("transitions are switched off under prefers-reduced-motion", () => {
 test("a row's name is one line ending in an ellipsis; its neighbours keep their line", () => {
     const block = (selector: string) =>
         rules.match(
-            new RegExp(`${selector.replace(/[.]/g, "\\.")}\\s*\\{([^}]*)\\}`),
+            new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`),
         )?.[1] ?? "";
     const title = block(".fd-row__title");
     expect(title).toContain("white-space: nowrap");
@@ -121,7 +125,7 @@ const settingsRules = readFileSync(
 test("a wrapping action group can shrink, and the dup row puts it under the names on a phone", () => {
     const block = (selector: string) =>
         settingsRules.match(
-            new RegExp(`${selector.replace(/[.]/g, "\\.")}\\s*\\{([^}]*)\\}`),
+            new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`),
         )?.[1] ?? "";
     const wrap = block(".fd-row__actions--wrap");
     expect(wrap).toMatch(/flex:\s*0 1 auto/);
