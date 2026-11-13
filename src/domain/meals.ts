@@ -11,6 +11,7 @@ import {
     type FoodsStore,
 } from "./foods.js";
 import { nutritionScaleAmount, toGrams } from "./food-quantity.js";
+import { dimensionOf, isQuantityUnit } from "./quantity.js";
 import {
     macrosForPerson,
     type Recipe,
@@ -39,6 +40,13 @@ export type MealItemSpec = {
     unit?: string | null;
     portions?: number | null;
     newFood?: boolean;
+    /**
+     * The snapshot this item was logged with, when the spec re-creates an
+     * existing item (Again, copy yesterday, an amount edit). It is only the
+     * fallback for a unit the food cannot scale: the figures that were logged
+     * are the truth then, rescaled by the amount ratio.
+     */
+    logged?: LoggedItemFigures | null;
 };
 
 export type MealNutrients = {
@@ -50,6 +58,12 @@ export type MealNutrients = {
     sugar_g: number | null;
     alcohol_g: number | null;
     caffeine_mg: number | null;
+};
+
+export type LoggedItemFigures = MealNutrients & {
+    amount: number | null;
+    unit: string | null;
+    grams: number | null;
 };
 
 export type MealItemSnapshot = MealNutrients & {
@@ -152,30 +166,92 @@ function parsePositive(
     return value;
 }
 
+/**
+ * The unit an item is measured in when the caller names none. A per-100 ml
+ * food defaults to millilitres, never to a mass: its figures scale by ml, and
+ * grams would need a density nobody gave. A volume or count default is kept.
+ */
+function defaultUnitOf(food: Food | null): string {
+    const unit = food?.defaultUnit?.trim() || "g";
+    if (
+        food?.nutritionBasis === "100ml" &&
+        isQuantityUnit(unit) &&
+        dimensionOf(unit) === "mass"
+    ) {
+        return "ml";
+    }
+    return unit;
+}
+
+/**
+ * The logged figures of an item, rescaled to a new amount in the same unit.
+ * Null when there is nothing to rescale from: no snapshot, another unit, or an
+ * amount that was never recorded. The same amount returns the figures as
+ * logged.
+ */
+function rescaleLogged(
+    logged: LoggedItemFigures | null | undefined,
+    amount: number,
+    unit: string,
+): { nutrients: MealNutrients; grams: number | null } | null {
+    if (!logged || logged.amount == null || !(logged.amount > 0)) return null;
+    const loggedUnit = logged.unit?.trim() || "g";
+    if (loggedUnit.toLowerCase() !== unit.toLowerCase()) return null;
+    const ratio = amount / logged.amount;
+    const scale = (value: number | null): number | null =>
+        value == null ? null : ratio === 1 ? value : roundAmount(value * ratio);
+    return {
+        nutrients: {
+            calories: scale(logged.calories),
+            protein_g: scale(logged.protein_g),
+            carbs_g: scale(logged.carbs_g),
+            fat_g: scale(logged.fat_g),
+            fiber_g: scale(logged.fiber_g),
+            sugar_g: scale(logged.sugar_g),
+            alcohol_g: scale(logged.alcohol_g),
+            caffeine_mg: scale(logged.caffeine_mg),
+        },
+        grams: scale(logged.grams),
+    };
+}
+
 function snapshotFoodItem(
     spec: MealItemSpec,
     food: Food | null,
     sortOrder: number,
 ): MealItemSnapshot {
     const amount = parsePositive(spec.amount, "amount");
-    const unit = spec.unit?.trim() || food?.defaultUnit || "g";
+    const unit = spec.unit?.trim() || defaultUnitOf(food);
     const grams = amount == null ? null : toGrams({ amount, unit }, food);
     const scale =
         amount == null ? null : nutritionScaleAmount({ amount, unit }, food);
-    const nutrients = food ? nutrientsFromFood(food, scale) : emptyNutrients();
+    // A unit the food cannot scale (grams of a per-100 ml food with no
+    // density) falls back to what the item was logged with, so an item that
+    // was logged that way keeps its figures instead of going unknown.
+    const kept =
+        food != null && amount != null && scale == null
+            ? rescaleLogged(spec.logged, amount, unit)
+            : null;
+    const nutrients = kept
+        ? kept.nutrients
+        : food
+          ? nutrientsFromFood(food, scale)
+          : emptyNutrients();
     const label =
         spec.name?.trim() ||
         food?.name ||
         (amount != null ? `${amount} ${unit}` : "Food");
     const unknown =
-        food == null || scale == null || allNutrientsNull(nutrients);
+        food == null ||
+        (scale == null && kept == null) ||
+        allNutrientsNull(nutrients);
     return {
         foodId: food?.id ?? spec.foodId?.trim() ?? null,
         recipeId: null,
         label,
         amount,
         unit,
-        grams,
+        grams: grams ?? kept?.grams ?? null,
         portions: null,
         ...nutrients,
         sortOrder,
@@ -290,8 +366,30 @@ export function buildMealFromItems(
         totals: sumItemNutrients(items),
         unknownItems: items
             .filter((item) => item.unknown)
-            .map((item) => item.label),
+            .map((item) => unknownItemLabel(item, foods)),
     };
+}
+
+/**
+ * Name an item whose nutrition is unknown. A per-100 ml food logged by mass or
+ * count with no density is the one case the caller can fix by logging it
+ * differently, so say so: the text reaches the model that chose the unit.
+ */
+function unknownItemLabel(
+    item: MealItemSnapshot,
+    foods: ReadonlyMap<string, Food>,
+): string {
+    const food = item.foodId ? foods.get(item.foodId) : undefined;
+    if (
+        food?.nutritionBasis === "100ml" &&
+        item.unit != null &&
+        isQuantityUnit(item.unit) &&
+        dimensionOf(item.unit) !== "volume" &&
+        !((food.gramsPerMl ?? 0) > 0)
+    ) {
+        return `${item.label} (a per-100 ml food: log it in ml, or set its grams per ml)`;
+    }
+    return item.label;
 }
 
 export function itemListDigest(specs: MealItemSpec[]): string {
@@ -585,6 +683,7 @@ function specFromStoredItem(item: RelogStoredItem): MealItemSpec {
             name: item.label,
             amount: item.amount ?? 1,
             unit: item.unit?.trim() || "g",
+            logged: item,
         };
     }
     return {

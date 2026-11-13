@@ -12358,6 +12358,74 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
     );
 });
 
+describe("log_meal with a per-100 ml food over HTTP", () => {
+    // As OFF hands over a liquid: per 100 ml, no density, default unit grams.
+    async function halfAndHalf() {
+        const created = await findOrCreateManualFood(
+            db.foodsStore,
+            "hh-1",
+            "food",
+            "Half & Half",
+        );
+        const food = await updateFood(db.foodsStore, "hh-1", created.id, {
+            calories: 130,
+            fatG: 11,
+        });
+        return (await db.foodsStore.updateFoodRow({
+            ...food,
+            nutritionBasis: "100ml",
+        }))!;
+    }
+
+    test.each(ERAS)(
+        "an amount with no unit is millilitres and logs the calories (%p)",
+        async (mode) => {
+            const food = await halfAndHalf();
+            await withHttpClient("u1", mode, async (client) => {
+                const r = (await client.callTool({
+                    name: "log_meal",
+                    arguments: {
+                        description: "Coffee",
+                        meal_type: "breakfast",
+                        items: [{ food_id: food.id, amount: 30 }],
+                    },
+                })) as ToolResult;
+                expect(r.isError).toBeFalsy();
+                expect(textOf(r)).not.toContain("Nutrition unknown");
+            });
+            expect(db.inserted[0]!.calories).toBe(39);
+            const items = db.inserted[0]!.items as Record<string, unknown>[];
+            expect(items[0]).toMatchObject({
+                unit: "ml",
+                amount: 30,
+                calories: 39,
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "grams with no density stay unknown and the text says to log it in ml (%p)",
+        async (mode) => {
+            const food = await halfAndHalf();
+            await withHttpClient("u1", mode, async (client) => {
+                const r = (await client.callTool({
+                    name: "log_meal",
+                    arguments: {
+                        description: "Coffee",
+                        meal_type: "breakfast",
+                        items: [{ food_id: food.id, amount: 30, unit: "g" }],
+                    },
+                })) as ToolResult;
+                expect(r.isError).toBeFalsy();
+                expect(textOf(r)).toContain(
+                    "Nutrition unknown for: Half & Half (a per-100 ml food: log it in ml",
+                );
+            });
+            expect(db.inserted[0]!.calories).toBeUndefined();
+        },
+    );
+});
+
 describe("/mcp still serves 2025-era clients unchanged", () => {
     test("a legacy client completes initialize and lists tools", async () => {
         db.goals = goals({ user_id: "u1" });
