@@ -64,6 +64,7 @@ function food(overrides: Partial<Food> & Pick<Food, "id" | "name">): Food {
         usualStoreId: null,
         usualAmount: null,
         ...NO_USUAL_SCHEDULE,
+        usualAddedAt: null,
         offQuality: null,
         createdBy: null,
         archivedAt: null,

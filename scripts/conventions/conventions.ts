@@ -233,6 +233,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/components/share-arrived.ts": "web",
     "src/domain/share.ts": "recipes",
     "src/domain/foods.ts": "foods",
+    "src/domain/usual-add.ts": "foods",
     "src/domain/foods-possible-duplicates.test.ts": "foods",
     "src/domain/food-merge-job.ts": "foods",
     "src/domain/food-identity.ts": "foods",

@@ -103,6 +103,11 @@ export type Food = {
     restockLowLevel: number | null;
     /** `YYYY-MM-DD` of the last put-away or tick-off, in the household's day. */
     lastRestockedOn: string | null;
+    /**
+     * When a plain food was added to Usuals by hand. A plain food is a usual
+     * when it has live products or this is set; null keeps the old rule.
+     */
+    usualAddedAt: string | null;
     offQuality: FoodQuality | null;
     createdBy: string | null;
     archivedAt: string | null;
@@ -1334,6 +1339,7 @@ export function newFood(input: {
     restockWhenLow?: boolean;
     restockLowLevel?: number | null;
     lastRestockedOn?: string | null;
+    usualAddedAt?: string | null;
     offQuality?: FoodQuality | null;
     createdBy?: string | null;
 }): Food {
@@ -1378,6 +1384,7 @@ export function newFood(input: {
         restockWhenLow: input.restockWhenLow ?? false,
         restockLowLevel: input.restockLowLevel ?? null,
         lastRestockedOn: input.lastRestockedOn ?? null,
+        usualAddedAt: input.usualAddedAt ?? null,
         offQuality:
             input.offQuality == null ? null : copyQuality(input.offQuality),
         createdBy: input.createdBy ?? null,
@@ -2026,6 +2033,7 @@ export type MergedFoodFieldPick = Pick<
     | "allergens"
     | "usualStoreId"
     | "usualAmount"
+    | "usualAddedAt"
     | UsualScheduleKey
     | "offQuality"
     | "offNutrientLevels"
@@ -2069,6 +2077,7 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
                   ? { ...drop.usualAmount }
                   : null,
         ...mergedUsualSchedule(keep, drop),
+        usualAddedAt: keep.usualAddedAt ?? drop.usualAddedAt,
         offQuality: mergeOffQuality(keep.offQuality, drop.offQuality),
         offNutrientLevels: keep.offNutrientLevels ?? drop.offNutrientLevels,
     };
@@ -2737,11 +2746,13 @@ export type UsualProductRow = {
 };
 
 /**
- * The Usual products page: every live plain food that has at least one live
- * product, sorted by name, with its usual product when one is set. A
- * household starts with an empty list and adds to it; nothing is listed just
- * because a recipe or grocery line uses it. `addable` is every other live
- * plain food, the choices behind "Add usual product".
+ * The Usual products page: every live plain food that is a usual, sorted by
+ * name, with its usual product when one is set. A plain food is a usual when
+ * it has at least one live product or was added to Usuals by hand
+ * (`usualAddedAt`); the latter lists with `products: []` and `usual: null`.
+ * A household starts with an empty list and adds to it; nothing is listed
+ * just because a recipe or grocery line uses it. `addable` is every other
+ * live plain food, the choices behind "Add usual product".
  */
 export function usualProductRows(input: {
     foods: readonly Food[];
@@ -2766,6 +2777,10 @@ export function usualProductRows(input: {
     for (const food of plainFoods) {
         const products = (productsByPlain.get(food.id) ?? []).sort(byName);
         if (products.length === 0) {
+            if (food.usualAddedAt != null) {
+                rows.push({ food, products: [], usual: null });
+                continue;
+            }
             if (barcoded.has(food.id) || food.offSourceId) continue;
             addable.push(food);
             continue;
@@ -4892,6 +4907,11 @@ function servingFromRow(row: {
     return { label, amount, unit };
 }
 
+function timestampFromRow(value: unknown): string | null {
+    if (value instanceof Date) return value.toISOString();
+    return typeof value === "string" && value ? value : null;
+}
+
 export function foodFromRow(row: {
     id: unknown;
     household_id: unknown;
@@ -4930,6 +4950,7 @@ export function foodFromRow(row: {
     restock_when_low?: unknown;
     restock_low_level?: unknown;
     last_restocked_on?: unknown;
+    usual_added_at?: unknown;
     nutriscore_grade?: unknown;
     nova_group?: unknown;
     ecoscore_grade?: unknown;
@@ -5019,6 +5040,7 @@ export function foodFromRow(row: {
                 : null,
         usualAmount,
         ...usualScheduleFromRow(row),
+        usualAddedAt: timestampFromRow(row.usual_added_at),
         offQuality: offQualityFromRow({
             nutriscore_grade: row.nutriscore_grade ?? null,
             nova_group: row.nova_group ?? null,
@@ -5082,6 +5104,7 @@ export function foodToRow(row: Food) {
         restock_when_low: row.restockWhenLow,
         restock_low_level: row.restockLowLevel,
         last_restocked_on: row.lastRestockedOn,
+        usual_added_at: row.usualAddedAt,
         ...offQualityToRowFields(row.offQuality),
         created_by: row.createdBy,
         archived_at: row.archivedAt,

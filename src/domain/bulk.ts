@@ -15,14 +15,8 @@
  * is already ticked is done: ticking it again would move a usual's restock day
  * from the day it was bought to today, which ticking row by row never does.
  */
-import {
-    NO_USUAL_SCHEDULE,
-    removeProduct,
-    setUsualSchedule,
-    updateFood,
-    usualProductRows,
-    type FoodsStore,
-} from "./foods.js";
+import { updateFood, usualProductRows, type FoodsStore } from "./foods.js";
+import { removeUsual } from "./usual-add.js";
 import { type FridgeStore } from "./fridge.js";
 import {
     checkGroceryLine,
@@ -217,10 +211,11 @@ export async function discardFridgeItems(
  * Take several foods off the Usuals list. A food is a usual two ways, and
  * removing one has to end both: it has products (what puts it on the page) and
  * it has restock settings (what the restock runner and `list_usuals` read, and
- * what keeps adding it to Groceries). Each selected food loses its products,
- * as Remove does to one product (`removeProduct` also clears the usual
- * product), and its schedule, paused flag, add-when-low switch, low level and
- * last-restocked day go back to `NO_USUAL_SCHEDULE`.
+ * what keeps adding it to Groceries), and one added by hand carries its own
+ * stamp. `removeUsual` ends all of them for each selected food: its products
+ * come off (which also clears the usual product), the stamp goes, and its
+ * schedule, paused flag, add-when-low switch, low level and last-restocked day
+ * go back to `NO_USUAL_SCHEDULE`.
  */
 export async function removeUsuals(
     foods: FoodsStore,
@@ -236,20 +231,7 @@ export async function removeUsuals(
     });
     if (!todo) return ALREADY;
     for (const row of todo) {
-        for (const product of row.products) {
-            await removeProduct(
-                foods,
-                input.householdId,
-                row.food.id,
-                product.id,
-            );
-        }
-        await setUsualSchedule(
-            foods,
-            input.householdId,
-            row.food.id,
-            NO_USUAL_SCHEDULE,
-        );
+        await removeUsual(foods, input.householdId, row.food.id);
     }
     return { status: "applied", count: todo.length };
 }
