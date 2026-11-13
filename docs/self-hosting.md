@@ -87,10 +87,13 @@ Update to a [release](https://github.com/MrF1ow/foodable/releases) rather than w
 ```bash
 git fetch upstream --tags
 git merge v0.2.0   # the release you are updating to
-git push origin main
 ```
 
-A deploy that used the old `railway.toml` must first edit `.railway/railway.ts` (repo, region, service name, domains) and run `railway config plan`, then `railway config apply`, before it deploys the release that removes `railway.toml`. Otherwise it loses the Dockerfile build and the health check.
+A deploy that used the old `railway.toml` must, before it pushes the release that removes `railway.toml`, edit `.railway/railway.ts` (repo, region, service name, domains), run `railway config plan`, then `railway config apply`. Otherwise it loses the Dockerfile build and the health check. Pushing `main` is what deploys:
+
+```bash
+git push origin main
+```
 
 1. Back up. Take a host snapshot or `pg_dump`, and run `export_all_data` for each member as a second copy.
 2. Dry-run the pending migrations against a copy of your data, locally:
@@ -314,7 +317,7 @@ To allow another callback (for example a self-hosted bot), add its exact redirec
 
 Deploy-day steps: [deploy-checklist.md](./deploy-checklist.md).
 
-`.railway/railway.ts` is the service's Railway config. It builds from the `Dockerfile`, health-checks `GET /health` (timeout 60 s), restarts on failure, runs the pre-deploy command, and sets the region, the custom domain and waiting for CI before a deploy. Variables are left out on purpose: they stay in Railway. Committing or pushing the file changes nothing on Railway by itself. Create the project yourself with two services, a Postgres database and the app from the GitHub repo. Then, in a fork, edit the repo and region in the file and delete its `domains` line (`railway config plan` fails on a domain Railway does not know yet; see [Custom domain on Cloudflare](#custom-domain-on-cloudflare)). The `service("foodable")` name must match the app service's name on Railway, or apply creates a second app service. Run `railway config plan` to see what would change, and `railway config apply` to apply it. Without apply, set the same things by hand in the app service's settings: Dockerfile builder, health check `/health` with a 60 s timeout, restart on failure, and the pre-deploy command below.
+`.railway/railway.ts` is the service's Railway config. It builds from the `Dockerfile`, health-checks `GET /health` (timeout 60 s), restarts on failure, runs the pre-deploy command, and sets the region, the custom domain and waiting for CI before a deploy. Variables are left out on purpose: they stay in Railway. Committing or pushing the file changes nothing on Railway by itself. Create the project yourself with two services, a Postgres database and the app from the GitHub repo. Then, in a fork, edit the repo and region in the file and delete its `domains` line (`railway config plan` fails on a domain Railway does not know yet; see [Custom domain on Cloudflare](#custom-domain-on-cloudflare)). The `service("foodable")` name must match the app service's name on Railway, or apply creates a second app service. Run `railway config plan` to see what would change, and `railway config apply` to apply it; both need Node.js on `PATH` (22.6 or newer), which the CLI uses to evaluate the file. Without apply, set the same things by hand in the app service's settings: Dockerfile builder, health check `/health` with a 60 s timeout, restart on failure, and the pre-deploy command below.
 
 **Postgres.** Add a database (New → Database → PostgreSQL). Turn on backups in its settings before the household has data in it. The app reaches it over Railway's private network, so the database needs no public TCP proxy; add one only while you run `pg_dump`, `db:dryrun --data` or `db:import-postgres` from your own machine, and remove it afterwards.
 

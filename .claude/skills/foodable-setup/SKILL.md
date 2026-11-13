@@ -34,6 +34,7 @@ Then check the tools on this machine, and install any that are missing (ask firs
 git --version
 bun --version            # https://bun.sh
 railway --version        # https://docs.railway.com/guides/cli
+node --version           # https://nodejs.org, 22.6 or newer; `railway config plan` and `apply` run .railway/railway.ts with it
 gh --version             # optional, makes forking one command
 openssl version
 ```
