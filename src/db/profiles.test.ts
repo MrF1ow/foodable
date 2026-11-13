@@ -51,7 +51,6 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
         expect(inserted.alcohol_tracking_enabled).toBe(false);
         expect(inserted.preferred_drink_unit).toBeNull();
         expect(inserted.theme).toBeNull();
-        expect(inserted.nutrition_layout).toBeNull();
         expect(inserted.created_at).toMatch(/\+00:00$/);
         expect(inserted.updated_at).toMatch(/\+00:00$/);
 
@@ -61,22 +60,6 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
         expect(updated.timezone).toBe("Europe/Kyiv");
         expect(updated.widgets_enabled).toBe(false);
         expect(updated.preferred_weight_unit).toBe("lb");
-    });
-
-    test("upsertProfile leaves the retired nutrition_layout column alone", async () => {
-        await upsertProfile(userId, { timezone: "America/New_York" });
-        await getCtx().sql`
-            update profiles
-            set nutrition_layout = ${getCtx().sql.array(["trends", "goal-progress"], "text")}
-            where user_id = ${userId}
-        `;
-        const updated = await upsertProfile(userId, {
-            timezone: "Europe/Kyiv",
-            theme: "dark",
-        });
-        expect(updated.timezone).toBe("Europe/Kyiv");
-        expect(updated.theme).toBe("dark");
-        expect(updated.nutrition_layout).toEqual(["trends", "goal-progress"]);
     });
 
     test("preference wrappers without a row", async () => {
@@ -131,7 +114,6 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
             alcohol_tracking_enabled: false,
             preferred_drink_unit: null,
             theme: "dark",
-            nutrition_layout: null,
             created_at: expect.any(String),
             updated_at: expect.any(String),
         });

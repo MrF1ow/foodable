@@ -19,9 +19,6 @@ export interface Profile {
     alcohol_tracking_enabled: boolean;
     preferred_drink_unit: DrinkUnit | null;
     theme: "light" | "dark" | null;
-    /** The retired card order of the old Nutrition page. The column stays
-     *  until a later migration drops it; nothing reads or writes it. */
-    nutrition_layout?: string[] | null;
     created_at: string;
     updated_at: string;
 }
