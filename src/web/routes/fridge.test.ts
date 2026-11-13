@@ -1,5 +1,4 @@
-import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
-import { Hono } from "hono";
+import { afterAll, describe, expect, mock, test } from "bun:test";
 import {
     createMemoryFridgeStore,
     defaultFreezeExpiry,
@@ -14,11 +13,6 @@ import {
     createMemoryFoodsStore,
     findOrCreateManualFood,
 } from "../../domain/foods.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
 import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
 import * as actualFridgeDb from "../../db/fridge.js";
@@ -30,7 +24,6 @@ import { createMemorySettingsStore } from "../../domain/settings.js";
 import * as actualRestock from "../../db/restock.js";
 import * as actualStock from "../../db/stock.js";
 import * as actualAttention from "../attention.js";
-import { gatedRoutesOf } from "../../test-support/flag-harness.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -182,16 +175,12 @@ mock.module("../attention.js", () => ({
                     : "light",
             attention: { count: 0, tabs: {} },
             flags,
-            ...(flags.uiV2
-                ? {
-                      identity: {
-                          viewerName: viewer.displayName,
-                          viewerRole: viewer.role,
-                          householdName: "Test household",
-                          memberCount: 1,
-                      },
-                  }
-                : {}),
+            identity: {
+                viewerName: viewer.displayName,
+                viewerRole: viewer.role,
+                householdName: "Test household",
+                memberCount: 1,
+            },
         };
     },
 }));
@@ -209,10 +198,6 @@ afterAll(() => {
     mock.module("../attention.js", () => realAttention);
 });
 
-afterEach(() => {
-    resetFlagsForTests();
-});
-
 process.env.OAUTH_CLIENT_ID ||= "test-client-id";
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
@@ -223,23 +208,8 @@ function cookie(userId: string): string {
 }
 
 describe("fridge routes", () => {
-    test("freeze route is ui-v2 gated", () => {
-        const gated = gatedRoutesOf(app).find(
-            (r) =>
-                r.method === "POST" &&
-                r.path === "/kitchen/fridge/items/:id/freeze",
-        );
-        expect(gated).toEqual({
-            method: "POST",
-            path: "/kitchen/fridge/items/:id/freeze",
-            flag: "ui-v2",
-            notFound: true,
-        });
-    });
-
-    test("GET /kitchen/fridge serves v2 markup when ui-v2 is on", async () => {
+    test("GET /kitchen/fridge serves the kitchen page", async () => {
         await seedFridge();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request("http://x/kitchen/fridge", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -249,20 +219,8 @@ describe("fridge routes", () => {
         expect(html).not.toContain("fridge-add-location");
     });
 
-    test("GET /kitchen/fridge keeps legacy page when ui-v2 is off", async () => {
-        await seedFridge();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await app.request("http://x/kitchen/fridge", {
-            headers: { cookie: cookie(ALICE) },
-        });
-        const html = await res.text();
-        expect(html).toContain('action="/kitchen/fridge/locations"');
-        expect(html).not.toContain("fd-kitchen-fridge-page");
-    });
-
     test("POST freeze moves item to freezer", async () => {
         await seedFridge();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const expiry = defaultFreezeExpiry(today);
         const res = await app.request(
             "http://x/kitchen/fridge/items/it-berries/freeze",
@@ -305,7 +263,6 @@ describe("fridge routes", () => {
             foodId: "f-y",
             expiresOn: null,
         });
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request(
             "http://x/kitchen/fridge/items/it-x/freeze",
             {
@@ -344,7 +301,6 @@ describe("fridge routes", () => {
             foodId: null,
             expiresOn: null,
         });
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request(
             "http://x/kitchen/fridge/items/supply-1/add-to-grocery",
             {
@@ -398,7 +354,6 @@ describe("fridge routes", () => {
             },
         );
         const item = added.item!;
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request(
             `http://x/kitchen/fridge/items/${item.id}`,
             {
@@ -424,7 +379,6 @@ describe("fridge routes", () => {
 
     test("unknown item query and blank add reopen flows", async () => {
         await seedFridge();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const unknown = await app.request(
             "http://x/kitchen/fridge?item=does-not-exist",
             { headers: { cookie: cookie(ALICE) } },
@@ -480,7 +434,6 @@ describe("fridge routes", () => {
                 locationId: loc.id,
             },
         );
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
         const res = await app.request(
             `http://x/kitchen/fridge/items/${added.item!.id}/eat`,
             {
@@ -515,7 +468,6 @@ describe("fridge routes", () => {
             sortOrder: 0,
         });
         await findOrCreateManualFood(foodsStore, HH, "food", "Eggs");
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request("http://x/kitchen/fridge/items", {
             method: "POST",
             headers: {

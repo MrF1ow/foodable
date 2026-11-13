@@ -24,7 +24,6 @@ const realHousehold = { ...actualHousehold };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const BOB = "22222222-2222-4222-8222-222222222222";
-const CAROL = "33333333-3333-4333-8333-333333333333";
 
 const member: HouseholdMember = {
     userId: ALICE,
@@ -90,186 +89,18 @@ afterEach(() => {
 });
 
 describe("gated route harness on composed app", () => {
-    test("gated routes are off while ui-v2 is off", async () => {
+    // The household app has no gated routes left but the sharing ones (the
+    // share and revoke routes and the shared-recipe import): they follow
+    // `mcp-share-links`, which stays off on this deploy.
+    test("gated routes are off while their flag is off", async () => {
         const routes = await assertGatedRoutesOff(app, {
             cookie: sessionCookie(ALICE),
         });
-        const invites = routes.filter((r) =>
-            r.path.startsWith("/settings/household/invites"),
-        );
-        expect(invites.map((r) => r.path).sort()).toEqual([
-            "/settings/household/invites",
-            "/settings/household/invites",
-            "/settings/household/invites/revoke",
-        ]);
-        const stores = routes.filter((r) =>
-            r.path.startsWith("/settings/household/stores"),
-        );
-        expect(stores.map((r) => `${r.method} ${r.path}`).sort()).toEqual(
-            [
-                "GET /settings/household/stores",
-                "GET /settings/household/stores/:id",
-                "POST /settings/household/stores/add",
-                "POST /settings/household/stores/order",
-                "POST /settings/household/stores/preferences",
-                "POST /settings/household/stores/:id/rename",
-                "POST /settings/household/stores/:id/delete",
-                "POST /settings/household/stores/:id/sections",
-                "POST /settings/household/stores/:id/sections/order",
-                "POST /settings/household/stores/:id/sections/:sectionId/rename",
-                "POST /settings/household/stores/:id/sections/:sectionId/visibility",
-                "POST /settings/household/stores/:id/rules/add",
-            ].sort(),
-        );
-        expect(
-            routes.filter(
-                (r) =>
-                    !r.path.startsWith("/settings/household/invites") &&
-                    !r.path.startsWith("/settings/household/stores"),
-            ),
-        ).toEqual([
-            {
-                method: "POST",
-                path: "/meals/:id/edit",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/meals/:id/delete",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/meals/undo",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/meals/:id/again",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/foods/:id",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/foods/:id/add-to-grocery",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/foods/by-barcode/:code",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/foods/by-barcode/:code",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/kitchen/usuals/:foodId/schedule",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/kitchen/fridge/items/:id/freeze",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/kitchen/groceries/bulk/check",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/kitchen/groceries/bulk/remove",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/kitchen/fridge/bulk/discard",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/kitchen/usuals/bulk/remove",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/settings/saved/bulk/delete",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/kitchen/groceries/put-away",
-                flag: "ui-v2",
-                notFound: true,
-            },
+        expect(routes).toEqual([
             {
                 method: "POST",
                 path: "/recipes/import-shared",
                 flag: "mcp-share-links",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/recipes/:id/cook/preview",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/recipes/:id/cook/confirm",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/recipes/:id/favourite",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/recipes/:id/plan",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/recipes/plan/:planId/move",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/recipes/plan/:planId/remove",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/recipes/plan/add-missing",
-                flag: "ui-v2",
                 notFound: true,
             },
             {
@@ -290,168 +121,6 @@ describe("gated route harness on composed app", () => {
                 flag: "mcp-share-links",
                 notFound: true,
             },
-            {
-                method: "POST",
-                path: "/settings/household/plurals-same-food",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/settings/household/items/:id/archive",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/settings/account",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/settings/display",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/settings/goals",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/settings/goals",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/settings/goals/days/clear",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/settings/product-score",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/settings/product-score",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/settings/product-score/household",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/settings/product-score/household",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/settings/ai-connections",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/settings/ai-connections/disconnect",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/settings/saved",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/settings/export",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/settings/export",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/settings/display",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/notices/:code/act",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/notices/dismiss",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/dev/gallery-v2",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/api/log/search",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/log",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/log/quick",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/log/water",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/log/weight",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "POST",
-                path: "/log/copy-yesterday",
-                flag: "ui-v2",
-                notFound: true,
-            },
-            {
-                method: "GET",
-                path: "/trends",
-                flag: "ui-v2",
-                notFound: true,
-            },
         ]);
     });
 });
@@ -459,26 +128,7 @@ describe("gated route harness on composed app", () => {
 describe("household product score, owner and admin only", () => {
     const PATH = "http://test/settings/product-score/household";
 
-    // The role check must not answer before the flag does: with ui-v2 off the
-    // page does not exist for anyone, a plain member or a stranger included.
-    for (const [who, userId] of [
-        ["a plain member", BOB],
-        ["a user with no household", CAROL],
-    ] as const) {
-        for (const method of ["GET", "POST"] as const) {
-            test(`${method} is a 404 for ${who} while ui-v2 is off`, async () => {
-                setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-                const res = await app.request(PATH, {
-                    method,
-                    headers: { cookie: sessionCookie(userId) },
-                });
-                expect(res.status).toBe(404);
-            });
-        }
-    }
-
-    test("a plain member is still refused with 403 once ui-v2 is on", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("a plain member is refused with 403", async () => {
         for (const method of ["GET", "POST"] as const) {
             const res = await app.request(PATH, {
                 method,
@@ -491,7 +141,6 @@ describe("household product score, owner and admin only", () => {
 
 describe("invite revoke", () => {
     test("a malformed invite id is a 400, not a uuid cast error", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const errors: unknown[] = [];
         const realError = console.error;
         console.error = (...args: unknown[]) => void errors.push(args);
@@ -518,13 +167,13 @@ describe("invite revoke", () => {
 
 describe("gated route harness on test routes", () => {
     test("redirect and notFound routes with requireMember", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         let hits = 0;
         const sub = new Hono();
         sub.get(
             "/redirect",
             requireMember,
-            gatedRoute("ui-v2", { redirectTo: "/" }),
+            gatedRoute("mcp-share-links", { redirectTo: "/" }),
             () => {
                 hits += 1;
                 return new Response("ok");
@@ -533,7 +182,7 @@ describe("gated route harness on test routes", () => {
         sub.get(
             "/missing",
             requireMember,
-            gatedRoute("ui-v2", { notFound: true }),
+            gatedRoute("mcp-share-links", { notFound: true }),
             () => {
                 hits += 1;
                 return new Response("ok");
@@ -542,7 +191,7 @@ describe("gated route harness on test routes", () => {
         sub.post(
             "/redirect",
             requireMember,
-            gatedRoute("ui-v2", { redirectTo: "/" }),
+            gatedRoute("mcp-share-links", { redirectTo: "/" }),
             () => {
                 hits += 1;
                 return new Response("ok");
@@ -557,7 +206,7 @@ describe("gated route harness on test routes", () => {
         });
         expect(hits).toBe(0);
 
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         const on = await sub.request("http://x/redirect", {
             method: "GET",
             headers: { cookie: sessionCookie(ALICE) },
@@ -576,15 +225,16 @@ describe("gatedRoute after requireSiteUser", () => {
         // On only for a viewer whose household the gate resolved itself.
         setFlagsForTests(
             createMemoryFlags({
-                "ui-v2": (ctx) => ctx.household_id === member.householdId,
+                "mcp-share-links": (ctx) =>
+                    ctx.household_id === member.householdId,
             }),
         );
         const sub = new Hono();
         sub.get(
             "/site",
             requireSiteUser,
-            gatedRoute("ui-v2", { redirectTo: "/" }),
-            (c) => c.text(c.get("viewerFlags").uiV2 ? "on" : "off"),
+            gatedRoute("mcp-share-links", { redirectTo: "/" }),
+            (c) => c.text(c.get("viewerFlags").mcpShareLinks ? "on" : "off"),
         );
         membershipLookups = 0;
         const res = await sub.request("http://x/site", {
@@ -597,18 +247,10 @@ describe("gatedRoute after requireSiteUser", () => {
 });
 
 describe("viewerChromeWithAttention flags", () => {
-    test("default ui-v2 off; on when memory flag set", async () => {
-        setFlagsForTests(createMemoryFlags());
-        const off = await viewerChromeWithAttention(
-            { theme: "light" },
-            member,
-            emptyNotices,
-        );
-        expect(off.flags.uiV2).toBe(false);
-        expect(off.identity).toBeUndefined();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("loads the shell identity and carries the viewer's flags", async () => {
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         let identityLoads = 0;
-        const on = await viewerChromeWithAttention(
+        const chrome = await viewerChromeWithAttention(
             { theme: "light" },
             member,
             emptyNotices,
@@ -622,12 +264,12 @@ describe("viewerChromeWithAttention flags", () => {
                 };
             },
         );
-        expect(on.flags.uiV2).toBe(true);
+        expect(chrome.flags.mcpShareLinks).toBe(true);
         expect(identityLoads).toBe(1);
-        expect(on.identity?.householdName).toBe("The Test household");
+        expect(chrome.identity?.householdName).toBe("The Test household");
     });
 
-    test("the one-tap notices light Kitchen, Today and Recipes on the new app only", async () => {
+    test("the one-tap notices light Kitchen, Today and Recipes", async () => {
         const withNotices = (): NoticesForResult => ({
             ...emptyNotices,
             notices: [
@@ -655,13 +297,6 @@ describe("viewerChromeWithAttention flags", () => {
             ],
         });
         setFlagsForTests(createMemoryFlags());
-        const off = await viewerChromeWithAttention(
-            { theme: "light" },
-            member,
-            withNotices(),
-        );
-        expect(off.attention.tabs).toEqual({});
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const on = await viewerChromeWithAttention(
             { theme: "light" },
             member,
@@ -698,7 +333,7 @@ describe("viewerChromeWithAttention flags", () => {
         expect(quiet.attention.tabs).toEqual({});
     });
 
-    test("only a viewer on ui-v2 loads the one-tap notices", async () => {
+    test("a viewer always loads the one-tap notices", async () => {
         const seen: (boolean | undefined)[] = [];
         const load = async (
             _householdId: string,
@@ -709,15 +344,14 @@ describe("viewerChromeWithAttention flags", () => {
         };
         setFlagsForTests(createMemoryFlags());
         await loadViewerNotices(member, undefined, load);
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await loadViewerNotices(member, { today: "2026-11-12" }, load);
-        expect(seen).toEqual([false, true]);
+        expect(seen).toEqual([true, true]);
     });
 
     test("viewerFlagsFor evaluates like the tabbed chrome (loadViewerFlags)", async () => {
         setFlagsForTests(createMemoryFlags());
-        expect((await viewerFlagsFor(member)).uiV2).toBe(false);
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
-        expect((await viewerFlagsFor(member)).uiV2).toBe(true);
+        expect((await viewerFlagsFor(member)).mcpShareLinks).toBe(false);
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
+        expect((await viewerFlagsFor(member)).mcpShareLinks).toBe(true);
     });
 });

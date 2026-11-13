@@ -4,7 +4,6 @@ import { getProfile } from "../../db/profiles.js";
 import { dateInTz, validateTz } from "../../domain/tz.js";
 import { resolveWriteTimestamp } from "../../meal-write.js";
 import { formText } from "../form.js";
-import { gatedRoute } from "../gated.js";
 import { requireMember, siteMember } from "../middleware.js";
 import { redirectWithToast } from "../components/toast.js";
 import { safeReturnPath } from "../usual-products-path.js";
@@ -40,43 +39,38 @@ async function loggedAtForAgain(userId: string, day: string): Promise<string> {
     return iso;
 }
 
-todayAgainRoutes.post(
-    "/meals/:id/again",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const userId = member.userId;
-        const id = c.req.param("id");
-        const mealOrRes = await requireOwnedMeal(userId, id);
-        if (mealOrRes instanceof Response) return mealOrRes;
-        const meal = mealOrRes;
-        const body = await c.req.parseBody();
-        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
-        const day = formText(body, "date");
-        const submitKey = formText(body, "submit_key")
-            .trim()
-            .replace(/[^A-Za-z0-9_-]/g, "")
-            .slice(0, 64);
-        try {
-            const loggedAt = await loggedAtForAgain(userId, day);
-            const input = await mealInputForRelog(
-                member.householdId,
-                meal,
-                loggedAt,
-            );
-            // The key names one rendered Again form, so a second tap on it (or
-            // a retry) finds the first tap's meal and logs nothing; the page
-            // that comes back carries a new key for the next deliberate tap.
-            await insertMeal(userId, {
-                ...input,
-                ...(submitKey
-                    ? { idempotency_key: `again:${id}:${submitKey}` }
-                    : {}),
-            });
-            return redirectWithToast(c, returnTo, "nutrition.meal.logged");
-        } catch {
-            return c.text("Could not log this meal again.", 400);
-        }
-    },
-);
+todayAgainRoutes.post("/meals/:id/again", requireMember, async (c) => {
+    const member = siteMember(c);
+    const userId = member.userId;
+    const id = c.req.param("id");
+    const mealOrRes = await requireOwnedMeal(userId, id);
+    if (mealOrRes instanceof Response) return mealOrRes;
+    const meal = mealOrRes;
+    const body = await c.req.parseBody();
+    const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+    const day = formText(body, "date");
+    const submitKey = formText(body, "submit_key")
+        .trim()
+        .replace(/[^A-Za-z0-9_-]/g, "")
+        .slice(0, 64);
+    try {
+        const loggedAt = await loggedAtForAgain(userId, day);
+        const input = await mealInputForRelog(
+            member.householdId,
+            meal,
+            loggedAt,
+        );
+        // The key names one rendered Again form, so a second tap on it (or
+        // a retry) finds the first tap's meal and logs nothing; the page
+        // that comes back carries a new key for the next deliberate tap.
+        await insertMeal(userId, {
+            ...input,
+            ...(submitKey
+                ? { idempotency_key: `again:${id}:${submitKey}` }
+                : {}),
+        });
+        return redirectWithToast(c, returnTo, "nutrition.meal.logged");
+    } catch {
+        return c.text("Could not log this meal again.", 400);
+    }
+});

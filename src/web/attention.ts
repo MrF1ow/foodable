@@ -28,8 +28,7 @@ export type AttentionChrome = {
 export type AppChromeBase = ViewerChrome & {
     attention: AttentionChrome;
     flags: ViewerFlags;
-    /** The new shell's sidebar and account chip. Only loaded when `ui-v2` is
-     *  on for the viewer, so a viewer on the old shell costs no extra query. */
+    /** The shell's sidebar and account chip. */
     identity?: ShellIdentity;
     v2Timezone?: string;
     v2LogSheet?: Omit<
@@ -47,7 +46,7 @@ export function householdPossibleDuplicateCount(
 }
 
 /**
- * The tab dots of the notices that come with a one-tap action, which the old
+ * The tab dots of the notices that come with a one-tap action, which the
  * prefixes do not cover. Kitchen lights for a usual running low, Today and
  * Recipes for what a planned recipe is missing (both show This week), and Today
  * for the viewer's own weigh-in (a reminder about someone else has nothing to
@@ -76,7 +75,7 @@ export function actionableTabDots(
 
 export function attentionFromNotices(
     result: Pick<NoticesForResult, "notices">,
-    /** The viewer on the new app: its one-tap notices light their tabs too. */
+    /** The viewer: its one-tap notices light their tabs too. */
     viewerUserId?: string,
 ): AttentionChrome {
     return {
@@ -100,8 +99,7 @@ export async function loadHouseholdNotices(
         clock?: { today: string; timezone: string };
         /**
          * Also load the notices that come with a one-tap action (running low,
-         * missing for the plan, weigh-in due). Only the new app passes it; the
-         * old pages never see them.
+         * missing for the plan, weigh-in due).
          */
         actionable?: boolean;
     },
@@ -126,20 +124,16 @@ export async function loadHouseholdNotices(
     );
 }
 
-/**
- * The household's notices for a signed-in viewer: the one-tap ones are
- * included when the viewer is on the new app (`ui-v2`), left out otherwise.
- */
+/** The household's notices for a signed-in viewer, the one-tap ones included. */
 export async function loadViewerNotices(
     viewer: HouseholdMember,
     opts?: { refCounts?: ReadonlyMap<string, number>; today?: string },
     /** Seam for tests: how the household's notices are loaded. */
     load: typeof loadHouseholdNotices = loadHouseholdNotices,
 ): Promise<NoticesForResult> {
-    const flags = await viewerFlagsFor(viewer);
     return load(viewer.householdId, {
         ...opts,
-        actionable: flags.uiV2,
+        actionable: true,
     });
 }
 
@@ -148,7 +142,7 @@ export async function viewerChromeWithAttention(
     viewer: HouseholdMember,
     /** Notices the caller already loaded (Today's own), so they are not loaded twice. */
     prefetched?: Pick<NoticesForResult, "notices">,
-    /** Seam for tests: how the new shell's household identity is loaded. */
+    /** Seam for tests: how the shell's household identity is loaded. */
     loadIdentity: (
         viewer: HouseholdMember,
     ) => Promise<ShellIdentity> = loadShellIdentity,
@@ -157,25 +151,22 @@ export async function viewerChromeWithAttention(
     const noticeResult: Pick<NoticesForResult, "notices"> =
         prefetched ??
         (await loadHouseholdNotices(viewer.householdId, {
-            actionable: flags.uiV2,
+            actionable: true,
         }));
-    const identity = flags.uiV2 ? await loadIdentity(viewer) : undefined;
+    const identity = await loadIdentity(viewer);
     const tz =
         profile?.timezone && validateTz(profile.timezone)
             ? profile.timezone
             : "UTC";
     return {
         theme: resolveTheme(profile?.theme),
-        attention: attentionFromNotices(
-            noticeResult,
-            flags.uiV2 ? viewer.userId : undefined,
-        ),
+        attention: attentionFromNotices(noticeResult, viewer.userId),
         householdPossibleDuplicates: householdPossibleDuplicateCount(
             noticeResult.notices,
         ),
         flags,
-        ...(flags.uiV2 ? { v2Timezone: tz } : {}),
-        ...(identity ? { identity } : {}),
+        v2Timezone: tz,
+        identity,
     };
 }
 
@@ -190,7 +181,7 @@ export function viewerFlagsFor(viewer: HouseholdMember): Promise<ViewerFlags> {
     );
 }
 
-/** Household name and member count for the new shell's sidebar. The viewer's
+/** Household name and member count for the shell's sidebar. The viewer's
  *  own name and role come from the membership the caller already holds. */
 export async function loadShellIdentity(
     viewer: HouseholdMember,

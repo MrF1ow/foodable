@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { FIXTURE_APP_CHROME_FLAGS } from "./test-support/chrome-flags.js";
 import {
     APP_V2_JS_SOURCES,
     appV2ScriptHref,
@@ -311,8 +310,4 @@ describe("chat widgets never get the v2 layer", () => {
             expect(html, key).not.toContain("app-v2");
         }
     });
-});
-
-test("fixture flags default to the old shell", () => {
-    expect(FIXTURE_APP_CHROME_FLAGS.uiV2).toBe(false);
 });

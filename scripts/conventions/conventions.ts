@@ -312,8 +312,6 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "public/widgets/src/templates/component-gallery.html": "widgets",
     "src/web/shell.ts": "web",
     "src/web/shell-v2.ts": "web",
-    "src/web/fixtures/shell-legacy.golden.json": "web",
-    "src/test-support/shell-legacy-cases.ts": "web",
     "src/test-support/recipe-macros.ts": "recipes",
     "src/web/form.ts": "web",
     "src/web/loaders.ts": "web",

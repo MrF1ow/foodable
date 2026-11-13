@@ -1,4 +1,4 @@
-// The new household shell (flag `ui-v2`), drawn from the FigCraft design:
+// The household shell, drawn from the FigCraft design:
 // Components › Nav bar, Screens › Today (Header, Account chip) and
 // Desktop › Today (Sidebar, Top bar). Phones get a floating four-tab nav with
 // the green search button in the middle and the account chip top right;
@@ -326,7 +326,7 @@ ${topBar(chrome)}
 </div>
 ${phoneTabs(chrome, active)}
 </div>
-${chrome.flags.uiV2 ? renderLogSheets({ timezone: chrome.v2Timezone ?? "UTC", barcodeCamera: chrome.flags.barcodeCamera, scannerZxingHref: scannerZxingScriptHref(), scannerWasmHref: scannerWasmHref(), ...chrome.v2LogSheet }) : ""}
+${renderLogSheets({ timezone: chrome.v2Timezone ?? "UTC", barcodeCamera: chrome.flags.barcodeCamera, scannerZxingHref: scannerZxingScriptHref(), scannerWasmHref: scannerWasmHref(), ...chrome.v2LogSheet })}
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;

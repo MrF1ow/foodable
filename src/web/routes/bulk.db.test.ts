@@ -1,11 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import type { SQL } from "bun";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import { createProduct } from "../../domain/foods.js";
 import { createRecipe } from "../../domain/recipes.js";
 import { liveFoodsStore } from "../../db/foods.js";
@@ -43,7 +39,6 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
         await ctx.truncateAll();
         sql = ctx.sql;
         setSqlForTests(sql);
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         ({ householdId, userId } = await seedHousehold(sql));
     });
 
@@ -198,17 +193,6 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
                 null,
             );
             expect(res.status).not.toBe(303);
-            expect(await lines()).toHaveLength(1);
-        });
-
-        test("with the redesign off the route is not there", async () => {
-            setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-            const [milk] = await seedLines(["Milk"]);
-            const res = await post(
-                "/kitchen/groceries/bulk/remove",
-                ids([milk!]),
-            );
-            expect(res.status).toBe(404);
             expect(await lines()).toHaveLength(1);
         });
     });

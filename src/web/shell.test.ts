@@ -5,7 +5,6 @@ import {
     APP_TABS,
     appBar,
     appHead,
-    bottomNav,
     renderAppShell,
     parseAppearanceInput,
     renderBarePage,
@@ -14,6 +13,7 @@ import {
     themeColorMeta,
 } from "./shell.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
+import { bottomNav } from "./components/bottom-nav.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
@@ -98,21 +98,20 @@ test("unset theme follows the system", () => {
 test("a tab page uses the shell and marks its tab active", () => {
     const html = shellPage();
     expect(html).toContain("<h1>Fridge</h1>");
-    expect(html).toContain('href="/kitchen/fridge" aria-current="page"');
-    expect(html).toContain('href="/settings" data-turbo="false"');
-    expect(html).toContain('aria-label="Settings"');
-    expect(html).toContain('class="btn-icon app-bar-action"');
-    expect(html).not.toContain('href="/logout"');
-    expect(html).toContain('class="app-bar-logo"');
-    expect(html).toContain('href="/"');
-    expect(html).not.toMatch(
-        /class="app-bar-logo" href="\/" data-turbo="false"/,
+    expect(html).toMatch(
+        /<a class="fd-tab" href="\/kitchen\/fridge" aria-current="page"/,
     );
+    expect(html).toContain('href="/settings" data-turbo="false"');
+    expect(html).not.toContain('href="/logout"');
+    expect(html).not.toContain("app-bar");
     expect(html).toMatch(
         /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
     expect(html).toMatch(
         /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
+    );
+    expect(html).toMatch(
+        /<link rel="stylesheet" href="\/app-v2\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
     expect(html).toContain(
         '<meta name="turbo-refresh-method" content="morph" />',
@@ -125,12 +124,12 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
     expect(html).not.toContain("data-theme");
     expect(html).toContain('<meta name="foodable-theme" content="system" />');
     expect(html).toContain(
-        `<meta name="theme-color" content="${THEME_NAV_COLOR.dark}" media="(prefers-color-scheme: dark)" />`,
+        `<meta name="theme-color" content="${THEME_COLOR.dark}" media="(prefers-color-scheme: dark)" />`,
     );
     expect(html).toContain(
-        '<meta name="foodable-theme-chrome" content="nav" />',
+        '<meta name="foodable-theme-chrome" content="page" />',
     );
-    expect(html).toContain('class="has-bottom-nav"');
+    expect(html).not.toContain("has-bottom-nav");
     expect(html).not.toContain("--accent");
 });
 
@@ -138,7 +137,7 @@ test("an explicit theme stamps data-theme on html", () => {
     const html = shellPage("household", "dark");
     expect(html).toContain('<html lang="en" data-theme="dark">');
     expect(html).toContain(
-        `<meta name="theme-color" content="${THEME_NAV_COLOR.dark}" />`,
+        `<meta name="theme-color" content="${THEME_COLOR.dark}" />`,
     );
     expect(html).toContain('<meta name="foodable-theme" content="dark" />');
     expect(html).not.toContain("--accent");

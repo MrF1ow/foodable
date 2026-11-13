@@ -69,7 +69,8 @@ test("foods settings use modals for edit and merge", () => {
     expect(html).toContain(
         '<button type="submit" class="btn-primary" disabled>Save food</button>',
     );
-    expect((html.match(/<dialog/g) ?? []).length).toBe(3);
+    // 3 on the page, 5 from the shell's log sheets.
+    expect((html.match(/<dialog/g) ?? []).length).toBe(8);
 });
 
 test("food edit dialog count does not grow with the catalog", () => {
@@ -89,7 +90,7 @@ test("food edit dialog count does not grow with the catalog", () => {
     });
     const dialogs = (html: string) => (html.match(/<dialog/g) ?? []).length;
     expect(dialogs(few)).toBe(dialogs(many));
-    expect(dialogs(many)).toBe(3);
+    expect(dialogs(many)).toBe(8);
 });
 
 function expectErrorOnceInModal(

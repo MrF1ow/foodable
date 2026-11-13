@@ -2,7 +2,6 @@ import { Hono } from "hono";
 import { renderFridgeInventoryPage } from "../loaders.js";
 
 import { formAmount, formText } from "../form.js";
-import { gatedRoute } from "../gated.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { lookupBarcode } from "../../foods.js";
 import {
@@ -11,7 +10,6 @@ import {
     FridgeInputError,
     freezeFridgeItem,
     moveItem,
-    prepareAddFoodByBarcode,
     prepareAddFoodById,
     prepareAddManualFood,
     prepareAddSupply,
@@ -91,7 +89,6 @@ async function fridgeFormError(
         userId,
         message,
         openModalId,
-        undefined,
         extras,
         opts,
     );
@@ -114,7 +111,6 @@ fridgeRoutes.get("/kitchen/fridge", requireSiteUser, async (c) => {
         c.get("userId"),
         undefined,
         undefined,
-        c.req.query("link_product"),
         undefined,
         {
             openItemId: c.req.query("item"),
@@ -277,7 +273,6 @@ fridgeRoutes.post("/kitchen/fridge/items", requireMember, async (c) => {
                     userId,
                     undefined,
                     openModalId,
-                    undefined,
                     { didYouMean },
                 );
                 return c.html(page.html, 409);
@@ -538,7 +533,6 @@ fridgeRoutes.post(
 fridgeRoutes.post(
     "/kitchen/fridge/items/:id/freeze",
     requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
     async (c) => {
         const userId = c.get("userId");
         const member = siteMember(c);

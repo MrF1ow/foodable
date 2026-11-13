@@ -1,12 +1,4 @@
-import {
-    afterAll,
-    afterEach,
-    beforeEach,
-    describe,
-    expect,
-    mock,
-    test,
-} from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import {
     createMemoryFlags,
     resetFlagsForTests,
@@ -396,13 +388,8 @@ async function restockFlour() {
     });
 }
 
-afterEach(() => {
-    resetFlagsForTests();
-});
-
 describe("renderRecipesListPage", () => {
-    test("ui-v2 renders the v2 list body", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("renders the list body", async () => {
         const page = await renderRecipesListPage(ALICE, {});
         expect(page.status).toBe(200);
         expect(page.html).toContain("fd-recipes-page");
@@ -411,28 +398,16 @@ describe("renderRecipesListPage", () => {
     });
 
     test("the shared-recipe import form follows mcp-share-links", async () => {
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
-        );
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const off = await renderRecipesListPage(ALICE, {});
         expect(off.html).toContain('action="/recipes/import"');
         expect(off.html).not.toContain("/recipes/import-shared");
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
-        );
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         const on = await renderRecipesListPage(ALICE, {});
         expect(on.html).toContain('action="/recipes/import-shared"');
     });
 
-    test("ui-v2 off keeps the legacy list markup", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const page = await renderRecipesListPage(ALICE, {});
-        expect(page.html).toContain("recipe-list");
-        expect(page.html).not.toContain("fd-recipes-page");
-    });
-
-    test("ui-v2 duplicate import surfaces open link", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("duplicate import surfaces open link", async () => {
         const page = await renderRecipesListPage(ALICE, {
             importDuplicateRecipeId: "11111111-1111-4111-8111-111111111112",
         });
@@ -440,8 +415,7 @@ describe("renderRecipesListPage", () => {
         expect(page.html).toContain("11111111-1111-4111-8111-111111111112");
     });
 
-    test("ui-v2 filter query trims the card list", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("filter query trims the card list", async () => {
         const eggs = await db.foodsStore.insertFood(
             newFood({
                 householdId: HH,
@@ -480,8 +454,7 @@ describe("renderRecipesListPage", () => {
 });
 
 describe("renderRecipeDetailRoute", () => {
-    test("ui-v2 renders the v2 recipe page", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("renders the recipe page", async () => {
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(page.status).toBe(200);
         expect(page.html).toContain("fd-recipe-detail");
@@ -490,22 +463,17 @@ describe("renderRecipeDetailRoute", () => {
     });
 
     test("Share is offered only while mcp-share-links is on", async () => {
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
-        );
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const off = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(off.html).not.toContain("fd-recipe-share");
         expect(off.html).not.toContain("/share");
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
-        );
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         const on = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(on.html).toContain('id="fd-recipe-share-sheet"');
         expect(on.html).toContain(`action="/recipes/${db.recipeId}/share"`);
     });
 
-    test("ui-v2 page carries the cook sheet with a preview of what the cook takes", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("the page carries the cook sheet with a preview of what the cook takes", async () => {
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(page.html).toContain('id="fd-recipe-cook-sheet"');
         expect(page.html).toContain("Takes from your kitchen");
@@ -517,18 +485,10 @@ describe("renderRecipeDetailRoute", () => {
     });
 
     test("?cook=1 opens the sheet on load", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId, {
             openCook: true,
         });
         expect(page.html).toContain("data-sheet-open-on-load");
-    });
-
-    test("ui-v2 off keeps legacy recipe detail markup", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
-        expect(page.html).toContain("recipe-cook");
-        expect(page.html).not.toContain("fd-recipe-detail");
     });
 });
 
@@ -589,7 +549,6 @@ async function flourLeft(): Promise<number> {
 
 describe("POST /recipes/:id/cook", () => {
     test("the legacy cook route still cooks the same movements as the sheet's confirm", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const legacy = await recipesApp().request(
             `http://x/recipes/${db.recipeId}/cook`,
             {
@@ -641,7 +600,6 @@ describe("GET /recipes/:id/cook/preview", () => {
     }
 
     test("returns the preview region for that many servings", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await get("4");
         expect(res.status).toBe(200);
         expect(res.headers.get("cache-control")).toContain("no-store");
@@ -654,28 +612,20 @@ describe("GET /recipes/:id/cook/preview", () => {
     });
 
     test("names what is short when the kitchen cannot cover it", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const html = await (await get("20")).text();
         expect(html).toContain("fd-recipe-cook-use--short");
     });
 
     test("rejects junk servings without a preview", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         for (const bad of ["0", "-1", "abc", ""]) {
             const res = await get(bad);
             expect(res.status).toBe(400);
         }
     });
-
-    test("is a 404 while ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        expect((await get("2")).status).toBe(404);
-    });
 });
 
 describe("POST /recipes/:id/cook/confirm", () => {
     test("cooks and logs exactly one portion of the recipe to the chosen slot", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
         body.set("servings", "4");
@@ -708,7 +658,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     });
 
     test("a double submit cooks and logs once", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
         const first = await postConfirm(body);
@@ -721,7 +670,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     });
 
     test("a double submit with the switch off cooks once", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
         body.delete("log_serving");
@@ -741,7 +689,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     });
 
     test("with the switch off it cooks and logs nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
         body.delete("log_serving");
@@ -753,7 +700,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     });
 
     test("a shortfall is cooked anyway and the toast says so", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
         body.set("servings", "20");
@@ -765,7 +711,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     });
 
     test("lists what moved when the kitchen changed after the preview", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
         // Someone cooked or discarded flour between the preview and the confirm.
@@ -791,7 +736,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     }
 
     test("two submits in flight at once cook and log once", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
         const [a, b] = await Promise.all([
@@ -808,7 +752,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     });
 
     test("a meal that cannot be saved cooks nothing and re-opens the sheet", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
         db.failInsert = true;
@@ -823,7 +766,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     });
 
     test("a cook that fails takes the just-logged meal back", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
         const insertMovement = db.stockStore.insertMovement;
@@ -846,7 +788,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     });
 
     test("bad servings re-open the sheet with the error and change nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postConfirm(
             new URLSearchParams({
                 servings: "0",
@@ -864,7 +805,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
     });
 
     test("an unknown slot falls back to the guess instead of failing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postConfirm(
             new URLSearchParams({
                 servings: "2",
@@ -877,21 +817,6 @@ describe("POST /recipes/:id/cook/confirm", () => {
         expect(["breakfast", "lunch", "dinner", "snack"]).toContain(
             db.meals[0]?.input.meal_type,
         );
-    });
-
-    test("is a 404 while ui-v2 is off, and takes nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await postConfirm(
-            new URLSearchParams({
-                servings: "2",
-                meal_type: "dinner",
-                log_serving: "1",
-                submit_key: "k",
-            }),
-        );
-        expect(res.status).toBe(404);
-        expect(await flourLeft()).toBe(500);
-        expect(db.meals).toHaveLength(0);
     });
 });
 
@@ -918,7 +843,6 @@ async function favouriteIds(userId: string): Promise<string[]> {
 
 describe("POST /recipes/:id/favourite", () => {
     test("stars for the viewer and goes back to the list with its search and filter", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postFavourite(
             new URLSearchParams({
                 on: "1",
@@ -935,7 +859,6 @@ describe("POST /recipes/:id/favourite", () => {
     });
 
     test("goes back to the recipe page from the recipe page", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postFavourite(
             new URLSearchParams({ on: "1", back: "recipe" }),
         );
@@ -944,7 +867,6 @@ describe("POST /recipes/:id/favourite", () => {
     });
 
     test("an unknown filter or back value falls back instead of being followed", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postFavourite(
             new URLSearchParams({
                 on: "1",
@@ -968,7 +890,6 @@ describe("POST /recipes/:id/favourite", () => {
     });
 
     test("on=0 unstars, and starring or unstarring twice changes nothing more", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await postFavourite(new URLSearchParams({ on: "1" }));
         await postFavourite(new URLSearchParams({ on: "1" }));
         expect(await favouriteIds(ALICE)).toEqual([db.recipeId]);
@@ -978,7 +899,6 @@ describe("POST /recipes/:id/favourite", () => {
     });
 
     test("another member's stars are untouched", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await postFavourite(new URLSearchParams({ on: "1" }), { as: BOB });
         await postFavourite(new URLSearchParams({ on: "1" }));
         await postFavourite(new URLSearchParams({ on: "0" }));
@@ -987,17 +907,9 @@ describe("POST /recipes/:id/favourite", () => {
     });
 
     test("a recipe that is not in the household is a 404 and stars nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postFavourite(new URLSearchParams({ on: "1" }), {
             recipeId: "11111111-1111-4111-8111-1111111111ff",
         });
-        expect(res.status).toBe(404);
-        expect(await favouriteIds(ALICE)).toEqual([]);
-    });
-
-    test("is a 404 while ui-v2 is off, and stars nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await postFavourite(new URLSearchParams({ on: "1" }));
         expect(res.status).toBe(404);
         expect(await favouriteIds(ALICE)).toEqual([]);
     });
@@ -1015,7 +927,6 @@ describe("favourites on the pages", () => {
     }
 
     test("the Favourites filter lists only the viewer's starred recipes", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const porridge = await second();
         await db.recipesStore.setFavourite(HH, ALICE, db.recipeId, true);
         await db.recipesStore.setFavourite(HH, BOB, porridge, true);
@@ -1041,7 +952,6 @@ describe("favourites on the pages", () => {
     });
 
     test("cards show the viewer's own star state", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const porridge = await second();
         await db.recipesStore.setFavourite(HH, ALICE, db.recipeId, true);
         await db.recipesStore.setFavourite(HH, BOB, porridge, true);
@@ -1057,7 +967,6 @@ describe("favourites on the pages", () => {
     });
 
     test("with nothing starred the filter says so", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipesListPage(ALICE, {
             filter: "favourites",
         });
@@ -1065,7 +974,6 @@ describe("favourites on the pages", () => {
     });
 
     test("the recipe page star reflects the viewer's own state", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await db.recipesStore.setFavourite(HH, BOB, db.recipeId, true);
         const unstarred = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(unstarred.html).toContain("fd-star-form");
@@ -1074,14 +982,6 @@ describe("favourites on the pages", () => {
         const starred = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(starred.html).toContain("fd-star--on");
         expect(starred.html).toContain("Remove Pancakes from favourites");
-    });
-
-    test("ui-v2 off shows no star on the old pages", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const list = await renderRecipesListPage(ALICE, {});
-        expect(list.html).not.toContain("fd-star");
-        const detail = await renderRecipeDetailRoute(ALICE, db.recipeId);
-        expect(detail.html).not.toContain("fd-star");
     });
 });
 
@@ -1120,7 +1020,6 @@ describe("POST /recipes/:id/plan", () => {
     }
 
     test("plans the recipe on a day and slot with its servings", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const day = addPlanDays(todayUtc(), 2);
         const res = await add({ date: day, slot: "lunch", servings: "3" });
         expect(res.status).toBe(303);
@@ -1139,13 +1038,11 @@ describe("POST /recipes/:id/plan", () => {
     });
 
     test("servings default to what the recipe yields", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await add({ date: todayUtc(), slot: "dinner", servings: "" });
         expect((await planned())[0]?.servings).toBe(2);
     });
 
     test("a bad slot re-renders the recipe with the sheet open and plans nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await add({ date: todayUtc(), slot: "brunch" });
         expect(res.status).toBe(400);
         const html = await res.text();
@@ -1158,7 +1055,6 @@ describe("POST /recipes/:id/plan", () => {
     });
 
     test("a bad date re-renders with the sheet open and keeps what was typed", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await add({
             date: "2026-02-30",
             slot: "dinner",
@@ -1176,7 +1072,6 @@ describe("POST /recipes/:id/plan", () => {
     });
 
     test("a day before the household's today is refused with the sheet open", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const yesterday = addPlanDays(todayUtc(), -1);
         const res = await add({
             date: yesterday,
@@ -1194,7 +1089,6 @@ describe("POST /recipes/:id/plan", () => {
     });
 
     test("the household's calendar decides what is past, not UTC's", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         // One of these zones is on a different calendar day from UTC right now.
         for (const tz of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
             db.ownerTimezone = tz;
@@ -1212,7 +1106,6 @@ describe("POST /recipes/:id/plan", () => {
     });
 
     test("servings that are not more than zero are refused", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         for (const bad of ["0", "-2", "abc"]) {
             const res = await add({
                 date: todayUtc(),
@@ -1225,7 +1118,6 @@ describe("POST /recipes/:id/plan", () => {
     });
 
     test("a double submit plans once", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const body = { date: todayUtc(), slot: "dinner", servings: "2" };
         await add(body);
         const again = await add(body);
@@ -1235,18 +1127,10 @@ describe("POST /recipes/:id/plan", () => {
     });
 
     test("a recipe that is not in the household is a 404", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postPlanPath(
             "/recipes/99999999-9999-4999-8999-999999999999/plan",
             new URLSearchParams({ date: todayUtc(), slot: "dinner" }),
         );
-        expect(res.status).toBe(404);
-        expect(await planned()).toEqual([]);
-    });
-
-    test("is a 404 while ui-v2 is off, and plans nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await add({ date: todayUtc(), slot: "dinner" });
         expect(res.status).toBe(404);
         expect(await planned()).toEqual([]);
     });
@@ -1265,7 +1149,6 @@ describe("moving and removing a plan", () => {
     }
 
     test("move puts the plan on another day and slot and changes its servings", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const id = await seed();
         const day = addPlanDays(todayUtc(), 3);
         const res = await postPlanPath(
@@ -1286,7 +1169,6 @@ describe("moving and removing a plan", () => {
     });
 
     test("move onto a day and slot that holds the same recipe merges into one plan", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const id = await seed();
         const day = addPlanDays(todayUtc(), 2);
         const there = await db.plansStore.addPlan({
@@ -1320,7 +1202,6 @@ describe("moving and removing a plan", () => {
         );
 
     test("a form that does not check re-renders Recipes with that plan's sheet open and the typed values kept", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const id = await seed();
         const before = await planned();
         const yesterday = addPlanDays(todayUtc(), -1);
@@ -1378,7 +1259,6 @@ describe("moving and removing a plan", () => {
     });
 
     test("the same failure from Today re-renders Today with the sheet open", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const id = await seed();
         const res = await postPlanPath(
             `/recipes/plan/${id}/move`,
@@ -1400,7 +1280,6 @@ describe("moving and removing a plan", () => {
     });
 
     test("a plan that is gone is still a redirect with the gone toast", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postPlanPath(
             "/recipes/plan/99999999-9999-4999-8999-999999999999/move",
             new URLSearchParams({
@@ -1415,7 +1294,6 @@ describe("moving and removing a plan", () => {
     });
 
     test("a plan outside the week cannot reopen a sheet, so the reason comes as a toast", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const old = await db.plansStore.addPlan({
             householdId: HH,
             recipeId: db.recipeId,
@@ -1432,7 +1310,6 @@ describe("moving and removing a plan", () => {
     });
 
     test("a past day is not a move target; today and later are", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         for (const tz of ["Pacific/Kiritimati", "Pacific/Pago_Pago"]) {
             db.ownerTimezone = tz;
             const hhToday = dateInTz(new Date(), tz);
@@ -1458,7 +1335,6 @@ describe("moving and removing a plan", () => {
     });
 
     test("move and remove treat a malformed plan id like a plan that is gone", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await seed();
         // The uuid column rejects anything else with a cast error, so the
         // route has to turn it away before asking the store.
@@ -1497,7 +1373,6 @@ describe("moving and removing a plan", () => {
     });
 
     test("move and remove only reach the household's own plans", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await seed();
         const other = "99999999-9999-4999-8999-999999999999";
         const moved = await postPlanPath(
@@ -1514,7 +1389,6 @@ describe("moving and removing a plan", () => {
     });
 
     test("remove takes the plan off and goes back to the page it came from", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const id = await seed();
         const res = await postPlanPath(
             `/recipes/plan/${id}/remove`,
@@ -1527,29 +1401,12 @@ describe("moving and removing a plan", () => {
     });
 
     test("an unknown back value is not followed", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const id = await seed();
         const res = await postPlanPath(
             `/recipes/plan/${id}/remove`,
             new URLSearchParams({ back: "https://evil.example/" }),
         );
         expect(res.headers.get("location")).toBe("/recipes");
-    });
-
-    test("both are a 404 while ui-v2 is off, and change nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const id = await seed();
-        const moved = await postPlanPath(
-            `/recipes/plan/${id}/move`,
-            new URLSearchParams({ date: todayUtc(), slot: "lunch" }),
-        );
-        const removed = await postPlanPath(
-            `/recipes/plan/${id}/remove`,
-            new URLSearchParams({}),
-        );
-        expect(moved.status).toBe(404);
-        expect(removed.status).toBe(404);
-        expect(await planned()).toMatchObject([{ id, slot: "dinner" }]);
     });
 });
 
@@ -1577,7 +1434,6 @@ describe("POST /recipes/plan/add-missing", () => {
     }
 
     test("puts what the kitchen cannot cover on the list with source plan", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await createGroceryStore(db.settingsStore, HH, "Market");
         // 20 servings of a 2-portion recipe: 1000 g of flour, and 500 g is held.
         await planPancakes(20);
@@ -1598,7 +1454,6 @@ describe("POST /recipes/plan/add-missing", () => {
     });
 
     test("a second tap adds nothing more", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await createGroceryStore(db.settingsStore, HH, "Market");
         await planPancakes(20);
         await addMissing();
@@ -1608,7 +1463,6 @@ describe("POST /recipes/plan/add-missing", () => {
     });
 
     test("with the kitchen covering the plan it says nothing is missing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await createGroceryStore(db.settingsStore, HH, "Market");
         await planPancakes(2);
         const res = await addMissing();
@@ -1617,7 +1471,6 @@ describe("POST /recipes/plan/add-missing", () => {
     });
 
     test("an amount that cannot be counted is added in full and labelled", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await createGroceryStore(db.settingsStore, HH, "Market");
         const eggs = await db.foodsStore.insertFood(
             newFood({
@@ -1682,7 +1535,6 @@ describe("POST /recipes/plan/add-missing", () => {
     });
 
     test("without a store it asks for one and adds nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await planPancakes(20);
         const res = await addMissing();
         expect(toastOf(res)).toMatchObject({
@@ -1691,20 +1543,10 @@ describe("POST /recipes/plan/add-missing", () => {
         });
         expect(await lines()).toEqual([]);
     });
-
-    test("is a 404 while ui-v2 is off, and adds nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        await createGroceryStore(db.settingsStore, HH, "Market");
-        await planPancakes(20);
-        const res = await addMissing();
-        expect(res.status).toBe(404);
-        expect(await lines()).toEqual([]);
-    });
 });
 
 describe("This week on the pages", () => {
     test("Recipes lists seven days from the household's today with the planned recipes", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const today = todayUtc();
         await db.plansStore.addPlan({
             householdId: HH,
@@ -1724,7 +1566,6 @@ describe("This week on the pages", () => {
     });
 
     test("the week starts on the household's calendar day, not UTC's", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         db.ownerTimezone = "Pacific/Kiritimati";
         const ahead = dateInTz(new Date(), "Pacific/Kiritimati");
         await db.plansStore.addPlan({
@@ -1745,7 +1586,6 @@ describe("This week on the pages", () => {
     });
 
     test("plans before today are hidden but stay stored", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await db.plansStore.addPlan({
             householdId: HH,
             recipeId: db.recipeId,
@@ -1760,14 +1600,12 @@ describe("This week on the pages", () => {
     });
 
     test("an empty week shows the empty state and no missing link", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const page = await renderRecipesListPage(ALICE, {});
         expect(page.html).toContain("Nothing planned yet");
         expect(page.html).not.toContain("fd-plan-missing-sheet");
     });
 
     test("a missing ingredient shows the link and the sheet that adds it", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await db.plansStore.addPlan({
             householdId: HH,
             recipeId: db.recipeId,
@@ -1782,7 +1620,6 @@ describe("This week on the pages", () => {
     });
 
     test("?plan_date sends each card's Plan to that day", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const day = addPlanDays(todayUtc(), 3);
         const page = await renderRecipesListPage(ALICE, { planDate: day });
         expect(page.html).toContain("Pick a recipe for");
@@ -1794,7 +1631,6 @@ describe("This week on the pages", () => {
     });
 
     test("the recipe page offers Add to plan, open on ?plan=1 with the day", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const closed = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(closed.html).toContain('id="fd-recipe-plan-sheet"');
         expect(closed.html).not.toMatch(
@@ -1808,13 +1644,5 @@ describe("This week on the pages", () => {
             /<dialog[^>]*id="fd-recipe-plan-sheet"[^>]*data-sheet-open-on-load/,
         );
         expect(open.html).toContain(`value="${day}"`);
-    });
-
-    test("ui-v2 off shows no plan UI on the old pages", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const list = await renderRecipesListPage(ALICE, {});
-        expect(list.html).not.toContain("fd-plan-");
-        const detail = await renderRecipeDetailRoute(ALICE, db.recipeId);
-        expect(detail.html).not.toContain("fd-recipe-plan");
     });
 });

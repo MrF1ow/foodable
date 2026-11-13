@@ -1,10 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Hono } from "hono";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import {
     getMealById,
     insertMeal,
@@ -104,7 +100,6 @@ describeDb(pgAvailable !== null, "today again db", (getCtx) => {
     }
 
     test("again logs a copy with the same items when flag on", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const foodId = await seedFood(sql, "Egg", 80, 6);
         const computed = await mealWriteFromItems(householdId, [
@@ -147,7 +142,6 @@ describeDb(pgAvailable !== null, "today again db", (getCtx) => {
     });
 
     test("again on grams of a per-100 ml food logs the figures it was logged with", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         // As OFF hands over a liquid: per 100 ml, no density, default unit grams.
         const foodId = crypto.randomUUID();
@@ -214,7 +208,6 @@ describeDb(pgAvailable !== null, "today again db", (getCtx) => {
     });
 
     test("the same Again tapped twice logs one meal, a fresh tap logs another", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const foodId = await seedFood(sql, "Egg", 80, 6);
         const computed = await mealWriteFromItems(householdId, [
@@ -257,35 +250,7 @@ describeDb(pgAvailable !== null, "today again db", (getCtx) => {
         expect(await count()).toBe(before + 2);
     });
 
-    test("again 404 without flag and does not write", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const { sql } = getCtx();
-        const { meal } = await insertMeal(userId, {
-            meal_type: "snack",
-            logged_at: "2026-03-01T12:00:00.000Z",
-            description: "Apple",
-            calories: 95,
-        });
-        const countBefore = await sql`
-            select count(*)::int as n from public.meals where user_id = ${userId}
-        `;
-        const res = await hono.request(`http://test/meals/${meal.id}/again`, {
-            method: "POST",
-            headers: {
-                cookie: cookie(userId),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "return_to=/&date=2026-03-01",
-        });
-        expect(res.status).toBe(404);
-        const countAfter = await sql`
-            select count(*)::int as n from public.meals where user_id = ${userId}
-        `;
-        expect(countAfter[0]!.n).toBe(countBefore[0]!.n);
-    });
-
     test("again picks up edited food nutrition", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const foodId = await seedFood(sql, "Egg", 80, 6);
         const computed = await mealWriteFromItems(householdId, [
@@ -368,7 +333,6 @@ describeDb(pgAvailable !== null, "today again db", (getCtx) => {
     }
 
     test("again uses usual-product nutrition like a fresh log", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const plainId = await seedUsualEggs(sql, 80, 140);
         const fresh = await mealWriteFromItems(householdId, [
@@ -402,7 +366,6 @@ describeDb(pgAvailable !== null, "today again db", (getCtx) => {
     });
 
     test("again keeps logged snapshot when the food was archived", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const foodId = await seedFood(sql, "Eggs", 80, 6);
         const computed = await mealWriteFromItems(householdId, [
@@ -441,7 +404,6 @@ describeDb(pgAvailable !== null, "today again db", (getCtx) => {
     });
 
     test("another household meal id returns 404", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { meal } = await insertMeal(otherUserId, {
             meal_type: "dinner",
             logged_at: "2026-03-01T18:00:00.000Z",

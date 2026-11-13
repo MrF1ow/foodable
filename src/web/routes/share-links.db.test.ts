@@ -71,9 +71,7 @@ describeDb(
             sql = ctx.sql;
             await ctx.truncateAll();
             setSqlForTests(sql);
-            setFlagsForTests(
-                createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
-            );
+            setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
             setRateLimitStore(createMemoryRateLimitStore());
             const a = await seedHousehold(sql);
             householdId = a.householdId;
@@ -402,9 +400,7 @@ describeDb(
                 await shoot(`/s/${mintShareToken()}`),
                 await shoot("/s/not-a-token"),
             ];
-            setFlagsForTests(
-                createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
-            );
+            setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
             refusals.push(await shoot(`/s/${live.token}`));
             for (const refusal of refusals) {
                 expect(refusal.status).toBe(404);
@@ -606,7 +602,6 @@ describeDb(
                 ];
                 setFlagsForTests(
                     createMemoryFlags({
-                        "ui-v2": true,
                         "mcp-share-links": false,
                     }),
                 );

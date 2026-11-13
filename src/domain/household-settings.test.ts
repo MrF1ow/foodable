@@ -282,7 +282,8 @@ test("member dialog count does not grow with the household", () => {
     const six = page(6);
     const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
     expect(dialogs(one)).toBe(dialogs(six));
-    expect(dialogs(one)).toBe(10);
+    // 10 on the page, 5 from the shell's log sheets.
+    expect(dialogs(one)).toBe(15);
     expect(six.match(/id="household-manage"/g)?.length).toBe(1);
     expect(six.match(/id="household-remove"/g)?.length).toBe(1);
     expect(six.match(/id="household-make-owner"/g)?.length).toBe(1);
@@ -367,34 +368,21 @@ test("recipe settings lists social reader risk text and platforms", () => {
     ).toBeGreaterThanOrEqual(2);
 });
 
-test("the Members panel links the owner to invite codes only with ui-v2", () => {
-    const v2Chrome = {
-        ...chrome,
-        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
-    };
+test("the Members panel links the owner to invite codes, and nobody else", () => {
     const link = 'href="/settings/household/invites"';
-    const ownerV2 = renderHouseholdSettingsPage({
+    const owner = renderHouseholdSettingsPage({
         ...ownerHouseholdBase,
-        chrome: v2Chrome,
+        chrome,
         unverifiedRecipeExpiryDays: null,
     } as never);
-    expect(ownerV2).toContain(link);
-    const ownerV1 = renderHouseholdSettingsPage({
+    expect(owner).toContain(link);
+    const member = renderHouseholdSettingsPage({
         ...ownerHouseholdBase,
-        chrome: {
-            ...chrome,
-            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: false },
-        },
-        unverifiedRecipeExpiryDays: null,
-    } as never);
-    expect(ownerV1).not.toContain(link);
-    const memberV2 = renderHouseholdSettingsPage({
-        ...ownerHouseholdBase,
-        chrome: v2Chrome,
+        chrome,
         isOwner: false,
         canManage: false,
         viewerUserId: bob.userId,
         unverifiedRecipeExpiryDays: null,
     } as never);
-    expect(memberV2).not.toContain(link);
+    expect(member).not.toContain(link);
 });

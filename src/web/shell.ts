@@ -4,11 +4,10 @@ import { appScriptHref, appStylesheetHref } from "../widgets.js";
 import type { MemberRole } from "../household.js";
 import type { ViewerFlags } from "../viewer-flags.js";
 import type { AttentionChrome } from "./attention.js";
-import { bottomNav } from "./components/bottom-nav.js";
 import { iconLogOut, iconSettings } from "./components/icons.js";
 import { renderAppShellV2 } from "./shell-v2.js";
 
-export { bottomNav, escapeHtml };
+export { escapeHtml };
 
 import { APP_PATHS } from "./route-map.js";
 
@@ -31,16 +30,15 @@ export type ViewerChrome = {
     theme: ThemePref;
 };
 
-/** The new shell's navigation ids. Settings is the sidebar item (no phone tab). */
+/** The shell's navigation ids. Settings is the sidebar item (no phone tab). */
 export type V2NavId =
     "today" | "kitchen" | "recipes" | "trends" | "settings" | "none";
 
 /** The Kitchen text tabs under the page header (design: Kitchen tabs). */
 export type V2KitchenTab = "fridge" | "groceries" | "usuals";
 
-/** Who is looking and which household, for the new shell's sidebar and account
- *  chip. Loaded only when `ui-v2` is on for the viewer (`viewerChromeWithAttention`),
- *  so a viewer on the old shell never pays for the extra queries. */
+/** Who is looking and which household, for the shell's sidebar and account
+ *  chip (loaded by `viewerChromeWithAttention`). */
 export type ShellIdentity = {
     viewerName: string;
     viewerRole: MemberRole;
@@ -53,23 +51,21 @@ export type AppChrome = ViewerChrome & {
     active: AppTabId | "none";
     body: string;
     attention: AttentionChrome;
-    /** Which shell renders: `flags.uiV2` picks the new one. */
     flags: ViewerFlags;
-    /** Set by `viewerChromeWithAttention` when `ui-v2` is on. */
+    /** Set by `viewerChromeWithAttention`. */
     identity?: ShellIdentity;
-    /** New shell only: overrides the tab derived from `active` (the usual
-     *  products pages are `active: "household"` in the old shell but belong to
-     *  Kitchen in the new one). The old shell ignores it. */
+    /** Overrides the tab derived from `active` (the usual products pages are
+     *  `active: "household"` but belong to Kitchen). */
     v2Active?: V2NavId;
-    /** New shell only: which Kitchen text tab is current. Defaults from
-     *  `active` (grocery → groceries, anything else → fridge); the usual
-     *  products pages set "usuals". The old shell ignores it. */
+    /** Which Kitchen text tab is current. Defaults from `active` (grocery →
+     *  groceries, anything else → fridge); the usual products pages set
+     *  "usuals". */
     v2Kitchen?: V2KitchenTab;
-    /** New shell only: open grocery line count for the Groceries kitchen tab. */
+    /** Open grocery line count for the Groceries kitchen tab. */
     v2KitchenGroceriesCount?: number;
-    /** New shell only: profile timezone for the log sheet defaults. */
+    /** Profile timezone for the log sheet defaults. */
     v2Timezone?: string;
-    /** New shell only: log sheet open state after validation errors. */
+    /** Log sheet open state after validation errors. */
     v2LogSheet?: Omit<
         import("./pages/v2/log-sheet.js").RenderLogSheetsOpts,
         "timezone"
@@ -129,7 +125,7 @@ export function appBar(
 }
 
 /** Everything in `<head>` before the stylesheet and script tags, which differ
- *  between the old shell and the new one. */
+ *  between the app shell and the bare pages. */
 export function appHeadMeta(
     title: string,
     theme: ThemePref,
@@ -160,29 +156,9 @@ export function appHead(
 <script src="${appScriptHref()}" defer data-turbo-track="reload"></script>`;
 }
 
-/** The household shell. `flags.uiV2` picks the new one (shell-v2.ts); with the
- *  flag off the markup is the old shell, byte for byte. */
+/** The household shell (shell-v2.ts). */
 export function renderAppShell(chrome: AppChrome): string {
-    return chrome.flags.uiV2
-        ? renderAppShellV2(chrome)
-        : renderLegacyAppShell(chrome);
-}
-
-/** The shell as it was before `ui-v2`. Do not change its output: a test pins
- *  it. Deleted with the old app. */
-export function renderLegacyAppShell(chrome: AppChrome): string {
-    return `<!doctype html>
-${htmlOpen(chrome.theme)}
-<head>
-${appHead(chrome.title, chrome.theme)}
-</head>
-<body class="has-bottom-nav">
-${appBar("app", chrome.attention)}
-<main class="app-main native">${chrome.body}</main>
-${bottomNav(chrome.active, chrome.attention.tabs)}
-<div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
-</body>
-</html>`;
+    return renderAppShellV2(chrome);
 }
 
 /** Create-household and forbidden: same top bar as the app, no bottom nav.

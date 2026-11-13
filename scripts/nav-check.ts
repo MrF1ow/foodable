@@ -1,10 +1,12 @@
 /**
- * Headless browser check for Turbo-driven in-app navigation (P8).
+ * Headless browser check for Turbo-driven in-app navigation (P8): the shell on
+ * a phone and on a desktop, session expiry, the legacy redirects and theme
+ * sync across Turbo visits and full loads.
  * Starts the fixture server, drives Chromium over CDP, exits non-zero on failure.
  */
 import { spawn } from "bun";
 import { join } from "node:path";
-import { THEME_COLOR, THEME_NAV_COLOR } from "../src/tokens.js";
+import { THEME_COLOR } from "../src/tokens.js";
 
 const CDP_PORT = 9223;
 const BASE = "http://127.0.0.1:4791";
@@ -200,7 +202,7 @@ async function snap(): Promise<Snap> {
         title: document.title,
         h1: document.querySelector("h1")?.textContent?.trim() ?? null,
         marker: window.__marker ?? null,
-        active: document.querySelector("nav.bottom-nav a[aria-current='page']")?.getAttribute("aria-label") ?? null,
+        active: document.querySelector(".fd-tabs a[aria-current='page']")?.getAttribute("aria-label") ?? null,
         scrollY: Math.round(window.scrollY || 0),
         bodyPos: document.body ? (document.body.style.position || "") : "",
         open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
@@ -230,11 +232,6 @@ async function clickSel(sel: string) {
 async function setMarker() {
     await ev(`window.__marker = "stay"`);
 }
-async function prepScroll() {
-    await ev(`window.scrollTo(0, 900)`);
-    await sleep(50);
-}
-
 await send("Runtime.enable");
 await send("Page.enable");
 await send("Emulation.setDeviceMetricsOverride", {
@@ -248,1126 +245,34 @@ await import("node:fs/promises").then((fs) =>
     fs.mkdir("./tmp", { recursive: true }),
 );
 try {
-    await goto("/");
-    await setMarker();
-    await prepScroll();
-    await clickSel('nav.bottom-nav a[href="/kitchen/fridge"]');
-    await sleep(200);
-    const fridge = await snap();
-    await clickSel('nav.bottom-nav a[href="/recipes"]');
-    await sleep(200);
-    await setMarker();
-    await clickSel('a[href="/recipes/r1"]');
-    await sleep(200);
-    const recipe = await snap();
-    await goto("/recipes");
-    await setMarker();
-    await ev(`(() => {
-        const form = document.querySelector("form.recipe-list-filters");
-        const tag = form.querySelector("input[name='tag']");
-        tag.value = "dinner";
-        form.querySelector("button[type='submit']").click();
-    })()`);
-    await sleep(250);
-    const filtered = await snap();
-    await goto("/");
-    await setMarker();
-    await clickSel('a[href="/?member=u2"]');
-    await sleep(200);
-    const member = await snap();
-    await goto("/kitchen/fridge");
-    await setMarker();
-    await prepScroll();
-    const yFridge = (await snap()).scrollY;
-    await clickSel('nav.bottom-nav a[href="/kitchen/groceries"]');
-    await sleep(150);
-    await ev(`history.back()`);
-    await sleep(250);
-    const back = await snap();
-    record(
-        "nav, recipe link, member switch, GET filter, back+scroll",
-        fridge.marker === "stay" &&
-            fridge.active === "Fridge" &&
-            /fridge/i.test(fridge.h1 || "") &&
-            recipe.marker === "stay" &&
-            /shakshuka/i.test(recipe.h1 || "") &&
-            filtered.marker === "stay" &&
-            filtered.href.includes("tag=dinner") &&
-            member.marker === "stay" &&
-            member.href.includes("member=u2") &&
-            back.marker === "stay" &&
-            back.href.endsWith("/kitchen/fridge") &&
-            Math.abs(back.scrollY - yFridge) < 80,
-        { fridge, recipe, filtered, member, back, yFridge, ex: drain() },
-    );
-
-    await control("post=ok&delay=0&reset=posts&modal=");
-    await goto("/kitchen/fridge");
-    await setMarker();
-    await prepScroll();
-    const yDel = (await snap()).scrollY;
-    await clickSel('button[aria-label="Delete Expired milk"]');
-    await sleep(40);
-    await clickSel("dialog[open] button.btn-danger");
-    await sleep(1200);
-    const afterDel = await snap();
-    const postsDel = await stats();
-    const delPosts = postsDel.posts.filter((p) => p.path.includes("/delete"));
-    const itemAfter = await ev<number>(
-        `document.querySelectorAll('li.fridge-item[data-item-id="i1"]').length`,
+    // A bookmarked old path still lands on its new home. This checks only the
+    // first hop (the real app then forwards /settings/household/items on to
+    // /settings/saved; the fixture does not serve that second page).
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    const legacyGet = await fetch(`${BASE}/settings/foods?q=eggs`, {
+        redirect: "manual",
+    });
+    const legacyPost = await fetch(`${BASE}/settings/foods`, {
+        method: "POST",
+        redirect: "manual",
+    });
+    const legacyGetTo = new URL(legacyGet.headers.get("location") ?? "", BASE);
+    const legacyPostTo = new URL(
+        legacyPost.headers.get("location") ?? "",
+        BASE,
     );
     record(
-        "fridge delete confirm",
-        afterDel.marker === "stay" &&
-            delPosts.length === 1 &&
-            afterDel.open.length === 0 &&
-            afterDel.bodyPos === "" &&
-            Math.abs(afterDel.scrollY - yDel) < 80 &&
-            itemAfter === 0,
+        "legacy /settings/foods: first hop is a 301 to /settings/household/items (query kept, POST 308)",
+        legacyGet.status === 301 &&
+            legacyGetTo.pathname === "/settings/household/items" &&
+            legacyGetTo.search === "?q=eggs" &&
+            legacyPost.status === 308 &&
+            legacyPostTo.pathname === "/settings/household/items",
         {
-            afterDel,
-            yDel,
-            itemAfter,
-            delPosts: delPosts.map((p) => p.path),
+            get: [legacyGet.status, legacyGetTo.pathname + legacyGetTo.search],
+            post: [legacyPost.status, legacyPostTo.pathname],
             ex: drain(),
         },
-    );
-
-    await control("post=ok&delay=0&reset=posts");
-    await goto("/kitchen/fridge");
-    await setMarker();
-    await clickSel('button[aria-label="Edit Eggs"]');
-    await sleep(40);
-    const eggsEdit = await ev<{
-        open: boolean;
-        dialogs: number;
-        action: string | null;
-        amount: string | null;
-        unit: string | null;
-        location: string | null;
-        expires: string | null;
-        title: string | null;
-        expectedExpires: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("fridge-edit-food");
-        const form = dialog?.querySelector("form.fridge-item-edit");
-        const trigger = document.querySelector('button[aria-label="Edit Eggs"]');
-        return {
-            open: !!dialog?.open,
-            dialogs: document.querySelectorAll("#fridge-edit-food").length,
-            action: form?.getAttribute("action") ?? null,
-            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
-            unit: form?.querySelector("select[name='qty_unit']")?.value ?? null,
-            location: form?.querySelector("select[name='location_id']")?.value ?? null,
-            expires: form?.querySelector("input[name='expires_on']")?.value ?? null,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            expectedExpires: trigger?.getAttribute("data-fill-field-expires_on") ?? null,
-        };
-    })()`);
-    await ev(`document.getElementById("fridge-edit-food")?.close()`);
-    await clickSel('button[aria-label="Edit Paper towels"]');
-    await sleep(40);
-    const supplyEdit = await ev<{
-        open: boolean;
-        action: string | null;
-        amount: string | null;
-        unit: string | null;
-        location: string | null;
-        expires: string | null;
-        title: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("fridge-edit-supply");
-        const form = dialog?.querySelector("form.fridge-item-edit");
-        return {
-            open: !!dialog?.open,
-            action: form?.getAttribute("action") ?? null,
-            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
-            unit: form?.querySelector("select[name='qty_unit']")?.value ?? null,
-            location: form?.querySelector("select[name='location_id']")?.value ?? null,
-            expires: form?.querySelector("input[name='expires_on']")?.value ?? null,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-        };
-    })()`);
-    await ev(`document.getElementById("fridge-edit-supply")?.close()`);
-    await clickSel('button[aria-label="Edit Yogurt"]');
-    await sleep(40);
-    const yogurtEdit = await ev<{
-        open: boolean;
-        action: string | null;
-        amount: string | null;
-        unit: string | null;
-        location: string | null;
-        title: string | null;
-        error: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("fridge-edit-food");
-        const form = dialog?.querySelector("form.fridge-item-edit");
-        return {
-            open: !!dialog?.open,
-            action: form?.getAttribute("action") ?? null,
-            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
-            unit: form?.querySelector("select[name='qty_unit']")?.value ?? null,
-            location: form?.querySelector("select[name='location_id']")?.value ?? null,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
-        };
-    })()`);
-    await ev(`document.getElementById("fridge-edit-food")?.close()`);
-    await clickSel('button[aria-label="Edit Eggs"]');
-    await sleep(40);
-    await ev(`(() => {
-        const input = document.querySelector("#fridge-edit-food input[name='qty_amount']");
-        if (input) input.value = "12";
-    })()`);
-    await clickSel("#fridge-edit-food button[type='submit']");
-    await sleep(700);
-    const afterEdit = await snap();
-    const editPosts = await stats();
-    const editPost = editPosts.posts.find(
-        (p) => p.path === "/kitchen/fridge/items/i2",
-    );
-    const eggsQty = await ev<string | null>(
-        `document.querySelector('li.fridge-item[data-item-id="i2"] .fridge-item-qty')?.textContent ?? null`,
-    );
-    await clickSel('button[aria-label="Edit Eggs"]');
-    await sleep(40);
-    const reopened = await ev<string | null>(
-        `document.querySelector("#fridge-edit-food input[name='qty_amount']")?.value ?? null`,
-    );
-    record(
-        "fridge shared edit dialog",
-        eggsEdit.open === true &&
-            eggsEdit.dialogs === 1 &&
-            eggsEdit.action === "/kitchen/fridge/items/i2" &&
-            eggsEdit.amount === "6" &&
-            eggsEdit.unit === "each" &&
-            eggsEdit.location === "l1" &&
-            eggsEdit.title === "Edit Eggs" &&
-            eggsEdit.expires === eggsEdit.expectedExpires &&
-            !!eggsEdit.expires &&
-            supplyEdit.open === true &&
-            supplyEdit.action === "/kitchen/fridge/items/i6" &&
-            supplyEdit.amount === "3" &&
-            supplyEdit.unit === "roll" &&
-            supplyEdit.location === "l2" &&
-            supplyEdit.expires === "" &&
-            supplyEdit.title === "Edit Paper towels" &&
-            yogurtEdit.open === true &&
-            yogurtEdit.action === "/kitchen/fridge/items/i3" &&
-            yogurtEdit.amount === "2" &&
-            yogurtEdit.unit === "each" &&
-            yogurtEdit.location === "l1" &&
-            yogurtEdit.title === "Edit Yogurt" &&
-            yogurtEdit.error == null &&
-            afterEdit.marker === "stay" &&
-            afterEdit.href.endsWith("/kitchen/fridge") &&
-            afterEdit.open.length === 0 &&
-            editPost !== undefined &&
-            editPost.entries.some(
-                ([k, v]) => k === "qty_amount" && v === "12",
-            ) &&
-            editPost.entries.some(
-                ([k, v]) => k === "qty_unit" && v === "each",
-            ) &&
-            eggsQty != null &&
-            eggsQty.includes("12 ·") &&
-            reopened === "12",
-        {
-            eggsEdit,
-            supplyEdit,
-            afterEdit,
-            editPost,
-            eggsQty,
-            reopened,
-            yogurtEdit,
-            ex: drain(),
-        },
-    );
-
-    await control("post=fail&modal=fridge-edit-i2&reset=posts&delay=0");
-    await goto("/kitchen/fridge");
-    await setMarker();
-    await clickSel('button[aria-label="Edit Eggs"]');
-    await sleep(40);
-    await clickSel("#fridge-edit-food button[type='submit']");
-    await sleep(700);
-    const editError = await ev<{
-        open: boolean;
-        action: string | null;
-        amount: string | null;
-        title: string | null;
-        banners: number;
-        error: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("fridge-edit-food");
-        const form = dialog?.querySelector("form.fridge-item-edit");
-        return {
-            open: !!dialog?.open,
-            action: form?.getAttribute("action") ?? null,
-            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            banners: document.querySelectorAll(".error-banner").length,
-            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
-        };
-    })()`);
-    record(
-        "fridge shared edit server error",
-        editError.open === true &&
-            editError.action === "/kitchen/fridge/items/i2" &&
-            editError.amount === "6" &&
-            editError.title === "Edit Eggs" &&
-            editError.error === "Name is required" &&
-            editError.banners === 1,
-        { editError, ex: drain() },
-    );
-    await control("post=ok&modal=&reset=posts&delay=0");
-
-    await goto("/settings/foods");
-    const legacyFoodsPath = await ev<string>("location.pathname");
-    record(
-        "legacy /settings/foods redirects to household items",
-        legacyFoodsPath === "/settings/household/items",
-        { legacyFoodsPath, ex: drain() },
-    );
-
-    await goto("/settings/household/items");
-    await setMarker();
-    await clickSel('button[data-fill-title="Edit Eggs"]');
-    await sleep(40);
-    await ev(`document.getElementById("food-edit")?.close()`);
-    await clickSel('button[data-fill-title="Edit Milk"]');
-    await sleep(40);
-    const milkEdit = await ev<{
-        open: boolean;
-        action: string | null;
-        name: string | null;
-        calories: string | null;
-        title: string | null;
-        error: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("food-edit");
-        const form = dialog?.querySelector("form.food-edit");
-        return {
-            open: !!dialog?.open,
-            action: form?.getAttribute("action") ?? null,
-            name: form?.querySelector("input[name='name']")?.value ?? null,
-            calories: form?.querySelector("input[name='calories']")?.value ?? null,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
-        };
-    })()`);
-    record(
-        "foods shared edit dialog",
-        milkEdit.open === true &&
-            milkEdit.action === "/settings/household/items/f2" &&
-            milkEdit.name === "Milk" &&
-            milkEdit.calories === "64" &&
-            milkEdit.title === "Edit Milk" &&
-            milkEdit.error == null,
-        { milkEdit, ex: drain() },
-    );
-    await ev(`document.getElementById("food-edit")?.close()`);
-    await control("post=fail&modal=food-edit-f1&reset=posts&delay=0");
-    await goto("/settings/household/items");
-    await clickSel('button[data-fill-title="Edit Eggs"]');
-    await sleep(40);
-    await clickSel("#food-edit button[type='submit']");
-    await sleep(700);
-    const foodEditError = await ev<{
-        open: boolean;
-        action: string | null;
-        name: string | null;
-        title: string | null;
-        banners: number;
-        error: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("food-edit");
-        const form = dialog?.querySelector("form.food-edit");
-        return {
-            open: !!dialog?.open,
-            action: form?.getAttribute("action") ?? null,
-            name: form?.querySelector("input[name='name']")?.value ?? null,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            banners: document.querySelectorAll(".error-banner").length,
-            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
-        };
-    })()`);
-    record(
-        "foods shared edit server error",
-        foodEditError.open === true &&
-            foodEditError.action === "/settings/household/items/f1" &&
-            foodEditError.name === "Eggs" &&
-            foodEditError.title === "Edit Eggs" &&
-            foodEditError.error === "Name is required" &&
-            foodEditError.banners === 1,
-        { foodEditError, ex: drain() },
-    );
-    await control("post=ok&modal=&reset=posts&delay=0");
-
-    await goto("/recipes/r1");
-    await setMarker();
-    await clickSel('button[aria-label="Edit Eggs"]');
-    await sleep(40);
-    await ev(`document.getElementById("recipe-edit-ingredient")?.close()`);
-    await clickSel('button[aria-label="Edit Milk"]');
-    await sleep(40);
-    const milkIngredient = await ev<{
-        open: boolean;
-        action: string | null;
-        note: string | null;
-        amount: string | null;
-        title: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("recipe-edit-ingredient");
-        const form = dialog?.querySelector("form.recipe-ingredient-edit");
-        return {
-            open: !!dialog?.open,
-            action: form?.getAttribute("action") ?? null,
-            note: form?.querySelector("input[name='note']")?.value ?? null,
-            amount:
-                form?.querySelector("input[name='ing_amount']")?.value ?? null,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-        };
-    })()`);
-    await ev(`document.getElementById("recipe-edit-ingredient")?.close()`);
-    await clickSel('button[aria-label="Remove Eggs"]');
-    await sleep(40);
-    await ev(`document.getElementById("recipe-delete-ingredient")?.close()`);
-    await clickSel('button[aria-label="Remove Milk"]');
-    await sleep(40);
-    const milkDelete = await ev<{
-        open: boolean;
-        action: string | null;
-        message: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("recipe-delete-ingredient");
-        const form = dialog?.querySelector("form");
-        return {
-            open: !!dialog?.open,
-            action: form?.getAttribute("action") ?? null,
-            message: dialog?.querySelector(".modal-message")?.textContent ?? null,
-        };
-    })()`);
-    record(
-        "recipe shared ingredient dialogs",
-        milkIngredient.open === true &&
-            milkIngredient.action === "/recipes/r1/ingredients/ing2" &&
-            milkIngredient.note === "" &&
-            milkIngredient.amount === "200" &&
-            milkIngredient.title === "Edit Milk" &&
-            milkDelete.open === true &&
-            milkDelete.action === "/recipes/r1/ingredients/ing2/delete" &&
-            milkDelete.message === "Remove Milk from this recipe?",
-        { milkIngredient, milkDelete, ex: drain() },
-    );
-    await ev(`document.getElementById("recipe-delete-ingredient")?.close()`);
-    await control(
-        "post=fail&modal=recipe-edit-ingredient-ing1&reset=posts&delay=0",
-    );
-    await goto("/recipes/r1");
-    await clickSel('button[aria-label="Edit Eggs"]');
-    await sleep(40);
-    await clickSel("#recipe-edit-ingredient button[type='submit']");
-    await sleep(700);
-    const ingredientError = await ev<{
-        open: boolean;
-        action: string | null;
-        note: string | null;
-        amount: string | null;
-        title: string | null;
-        banners: number;
-        error: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("recipe-edit-ingredient");
-        const form = dialog?.querySelector("form.recipe-ingredient-edit");
-        return {
-            open: !!dialog?.open,
-            action: form?.getAttribute("action") ?? null,
-            note: form?.querySelector("input[name='note']")?.value ?? null,
-            amount:
-                form?.querySelector("input[name='ing_amount']")?.value ?? null,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            banners: document.querySelectorAll(".error-banner").length,
-            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
-        };
-    })()`);
-    record(
-        "recipe shared ingredient server error",
-        ingredientError.open === true &&
-            ingredientError.action === "/recipes/r1/ingredients/ing1" &&
-            ingredientError.note === "large" &&
-            ingredientError.amount === "6" &&
-            ingredientError.title === "Edit Eggs" &&
-            ingredientError.error === "Name is required" &&
-            ingredientError.banners === 1,
-        { ingredientError, ex: drain() },
-    );
-    await control("post=ok&modal=&reset=posts&delay=0");
-
-    await goto("/kitchen/fridge");
-    await clickSel(
-        '[data-location-id="l1"] button[data-fill-title="Add food to Fridge"]',
-    );
-    await sleep(40);
-    await ev(`(() => {
-        const picker = document.querySelector("#fridge-add-food [data-food-picker]");
-        picker.querySelector('[role="tab"][data-tab="search"]').click();
-        const search = picker.querySelector("[data-search-input]");
-        search.value = "yogurt";
-        search.dispatchEvent(new Event("input", { bubbles: true }));
-        const barcode = picker.querySelector("input[name='barcode']");
-        barcode.value = "11111111";
-        const barcodeResults = picker.querySelector("[data-barcode-results]");
-        barcodeResults.textContent = "scanned yogurt";
-        barcodeResults.setAttribute("data-barcode", "11111111");
-        picker.querySelector("[data-barcode-form]").setAttribute("data-lookup-called", "lookupBarcode");
-        picker.querySelector("input[name='food_name']").value = "Old food";
-        picker.querySelector("input[name='qty_amount']").value = "9";
-        const unit = picker.querySelector("select[name='qty_unit']");
-        if (unit) unit.value = "ml";
-    })()`);
-    await ev(`document.getElementById("fridge-add-food")?.close()`);
-    await clickSel(
-        '[data-location-id="l2"] button[data-fill-title="Add food to Pantry"]',
-    );
-    await sleep(400);
-    const pantryFood = await ev<{
-        open: boolean;
-        title: string | null;
-        ids: string[];
-        kinds: string[];
-        units: string[];
-        amounts: string[];
-        names: string[];
-        barcodes: string[];
-        actions: Array<string | null>;
-        search: string | null;
-        searchResults: string | null;
-        barcodeResults: string | null;
-        scanned: string | null;
-        lookup: string | null;
-        tab: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("fridge-add-food");
-        const picker = dialog.querySelector("[data-food-picker]");
-        const barcodeResults = picker.querySelector("[data-barcode-results]");
-        return {
-            open: !!dialog.open,
-            title: dialog.querySelector(".modal-title")?.textContent ?? null,
-            ids: [...picker.querySelectorAll("input[name='location_id']")].map((el) => el.value),
-            kinds: [...picker.querySelectorAll("input[name='kind']")].map((el) => el.value),
-            units: [...picker.querySelectorAll("select[name='qty_unit']")].map((el) => el.value),
-            amounts: [...picker.querySelectorAll("input[name='qty_amount']")].map((el) => el.value),
-            names: [...picker.querySelectorAll("input[name='food_name']")].map((el) => el.value),
-            barcodes: [...picker.querySelectorAll("input[name='barcode']")].map((el) => el.value),
-            actions: [...dialog.querySelectorAll("form")].map((form) => form.getAttribute("action")),
-            search: picker.querySelector("[data-search-input]")?.value ?? null,
-            searchResults: picker.querySelector("[data-search-results]")?.textContent ?? null,
-            barcodeResults: barcodeResults?.textContent ?? null,
-            scanned: barcodeResults?.getAttribute("data-barcode") ?? null,
-            lookup: picker.querySelector("[data-barcode-form]")?.getAttribute("data-lookup-called") ?? null,
-            tab: picker.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute("data-tab") ?? null,
-        };
-    })()`);
-    await ev(`(() => {
-        const search = document.querySelector("#fridge-add-food [data-search-input]");
-        search.value = "egg";
-        search.dispatchEvent(new Event("input", { bubbles: true }));
-    })()`);
-    await sleep(400);
-    const pantryHits = await ev<string>(
-        `document.querySelector("#fridge-add-food [data-search-results]")?.textContent ?? ""`,
-    );
-    await ev(`document.getElementById("fridge-add-food")?.close()`);
-    await clickSel(
-        '[data-location-id="l1"] button[data-fill-title="Add household item to Fridge"]',
-    );
-    await sleep(40);
-    await ev(`(() => {
-        const name = document.querySelector("#fridge-add-supply input[name='name']");
-        if (name) name.value = "Sponges";
-    })()`);
-    await ev(`document.getElementById("fridge-add-supply")?.close()`);
-    await clickSel(
-        '[data-location-id="l2"] button[data-fill-title="Add household item to Pantry"]',
-    );
-    await sleep(40);
-    const pantrySupply = await ev<{
-        open: boolean;
-        title: string | null;
-        action: string | null;
-        location: string | null;
-        kind: string | null;
-        name: string | null;
-        unit: string | null;
-        amount: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("fridge-add-supply");
-        const form = dialog?.querySelector("form.fridge-add-supply");
-        return {
-            open: !!dialog?.open,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            action: form?.getAttribute("action") ?? null,
-            location: form?.querySelector("input[name='location_id']")?.value ?? null,
-            kind: form?.querySelector("input[name='kind']")?.value ?? null,
-            name: form?.querySelector("input[name='name']")?.value ?? null,
-            unit: form?.querySelector("select[name='qty_unit']")?.value ?? null,
-            amount: form?.querySelector("input[name='qty_amount']")?.value ?? null,
-        };
-    })()`);
-    await ev(`document.getElementById("fridge-add-supply")?.close()`);
-    await clickSel(
-        '[data-location-id="l1"] button[data-fill-action="/kitchen/fridge/locations/l1/delete"]',
-    );
-    await sleep(40);
-    await ev(`document.getElementById("fridge-remove-location")?.close()`);
-    await clickSel(
-        '[data-location-id="l2"] button[data-fill-action="/kitchen/fridge/locations/l2/delete"]',
-    );
-    await sleep(40);
-    const pantryRemove = await ev<{
-        open: boolean;
-        action: string | null;
-        message: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("fridge-remove-location");
-        const form = dialog?.querySelector("form");
-        return {
-            open: !!dialog?.open,
-            action: form?.getAttribute("action") ?? null,
-            message: dialog?.querySelector(".modal-message")?.textContent ?? null,
-        };
-    })()`);
-    const same = (values: string[], expected: string) =>
-        values.length > 0 && values.every((value) => value === expected);
-    record(
-        "fridge shared location dialogs",
-        pantryFood.open === true &&
-            pantryFood.title === "Add food to Pantry" &&
-            pantryFood.tab === "barcode" &&
-            same(pantryFood.ids, "l2") &&
-            same(pantryFood.kinds, "food") &&
-            same(pantryFood.units, "g") &&
-            same(pantryFood.amounts, "") &&
-            same(pantryFood.names, "") &&
-            same(pantryFood.barcodes, "") &&
-            pantryFood.actions.length > 0 &&
-            pantryFood.actions.every(
-                (action) => action === "/kitchen/fridge/items",
-            ) &&
-            pantryFood.search === "" &&
-            pantryFood.searchResults === "" &&
-            pantryFood.barcodeResults === "" &&
-            pantryFood.scanned == null &&
-            pantryFood.lookup == null &&
-            pantryHits.includes("Eggs") &&
-            pantrySupply.open === true &&
-            pantrySupply.title === "Add household item to Pantry" &&
-            pantrySupply.action === "/kitchen/fridge/items" &&
-            pantrySupply.location === "l2" &&
-            pantrySupply.kind === "supply" &&
-            pantrySupply.name === "" &&
-            pantrySupply.unit === "roll" &&
-            pantrySupply.amount === "" &&
-            pantryRemove.open === true &&
-            pantryRemove.action === "/kitchen/fridge/locations/l2/delete" &&
-            pantryRemove.message === "Remove Pantry and everything in it?",
-        { pantryFood, pantryHits, pantrySupply, pantryRemove, ex: drain() },
-    );
-    await ev(`document.getElementById("fridge-remove-location")?.close()`);
-    await control("post=fail&modal=fridge-add-food-l1&reset=posts&delay=0");
-    await goto("/kitchen/fridge");
-    await clickSel(
-        '[data-location-id="l1"] button[data-fill-title="Add food to Fridge"]',
-    );
-    await sleep(40);
-    await ev(`(() => {
-        const amount = document.querySelector("#fridge-add-food .food-picker-barcode input[name='qty_amount']");
-        if (amount) amount.value = "1";
-    })()`);
-    await clickSel(
-        "#fridge-add-food .food-picker-barcode button[type='submit']",
-    );
-    await sleep(700);
-    const addFoodError = await ev<{
-        open: boolean;
-        title: string | null;
-        location: string | null;
-        banners: number;
-        error: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("fridge-add-food");
-        return {
-            open: !!dialog?.open,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            location: dialog?.querySelector("input[name='location_id']")?.value ?? null,
-            banners: document.querySelectorAll(".error-banner").length,
-            error: dialog?.querySelector(".error-banner")?.textContent ?? null,
-        };
-    })()`);
-    await ev(`(() => {
-        const search = document.querySelector("#fridge-add-food [data-search-input]");
-        if (!search) return;
-        search.value = "egg";
-        search.dispatchEvent(new Event("input", { bubbles: true }));
-    })()`);
-    await sleep(400);
-    const morphedHits = await ev<string>(
-        `document.querySelector("#fridge-add-food [data-search-results]")?.textContent ?? ""`,
-    );
-    record(
-        "fridge shared add-food server error",
-        addFoodError.open === true &&
-            addFoodError.title === "Add food to Fridge" &&
-            addFoodError.location === "l1" &&
-            addFoodError.error === "Name is required" &&
-            addFoodError.banners === 1 &&
-            morphedHits.includes("Eggs"),
-        { addFoodError, morphedHits, ex: drain() },
-    );
-    await control("post=ok&modal=&reset=posts&delay=0");
-
-    await goto("/kitchen/fridge");
-    await setMarker();
-    await control("post=fail&modal=fridge-add-location&reset=posts&delay=0");
-    await clickSel('button[commandfor="fridge-add-location"]');
-    await sleep(40);
-    await ev(`(() => {
-        const name = document.querySelector("#fridge-add-location input[name='name']");
-        if (name) { name.removeAttribute("required"); name.value = ""; }
-    })()`);
-    await clickSel("#fridge-add-location button[type='submit']");
-    await sleep(500);
-    const addLoc = await snap();
-    record(
-        "add location empty name 400",
-        addLoc.marker === "stay" &&
-            addLoc.href.endsWith("/kitchen/fridge") &&
-            addLoc.open.includes("fridge-add-location") &&
-            addLoc.error === "Name is required",
-        { addLoc, ex: drain() },
-    );
-
-    await goto("/kitchen/groceries");
-    await control("post=ok&reset=posts");
-    await clickSel(
-        '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
-    );
-    await sleep(40);
-    await clickSel('#grocery-add-food button[role="tab"][data-tab="manual"]');
-    await sleep(30);
-    await ev(`(() => {
-        const sel = document.querySelector("#grocery-add-food [data-grocery-section]");
-        if (sel) {
-            sel.value = "sec1";
-            sel.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        const name = document.querySelector("#grocery-add-food .food-picker-manual input[name='food_name']");
-        const amt = document.querySelector("#grocery-add-food .food-picker-manual input[name='qty_amount']");
-        if (name) name.value = "Kale";
-        if (amt) amt.value = "2";
-    })()`);
-    await clickSel(
-        "#grocery-add-food .food-picker-manual button[type='submit']",
-    );
-    await sleep(400);
-    const groceryPosts = await stats();
-    const linePost = groceryPosts.posts.find(
-        (p) => p.path === "/kitchen/groceries/lines",
-    );
-    record(
-        "grocery add with Produce section_id",
-        !!linePost &&
-            linePost.entries.some(
-                ([k, v]) => k === "section_id" && v === "sec1",
-            ),
-        { entries: linePost?.entries ?? [], ex: drain() },
-    );
-
-    await goto("/kitchen/groceries");
-    await control("post=ok&reset=posts");
-    await clickSel(
-        '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
-    );
-    await sleep(40);
-    await clickSel('#grocery-add-food button[role="tab"][data-tab="manual"]');
-    await sleep(30);
-    await ev(`(() => {
-        const sel = document.querySelector("#grocery-add-food [data-grocery-section]");
-        if (sel) {
-            sel.value = "sec1";
-            sel.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        const name = document.querySelector("#grocery-add-food .food-picker-manual input[name='food_name']");
-        const amt = document.querySelector("#grocery-add-food .food-picker-manual input[name='qty_amount']");
-        if (name) name.value = "Carrots";
-        if (amt) amt.value = "3";
-    })()`);
-    await clickSel(
-        "#grocery-add-food .food-picker-manual button[type='submit']",
-    );
-    await sleep(500);
-    await clickSel(
-        '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
-    );
-    await sleep(40);
-    await clickSel('#grocery-add-food button[role="tab"][data-tab="manual"]');
-    await sleep(30);
-    await ev(`(() => {
-        const sel = document.querySelector("#grocery-add-food [data-grocery-section]");
-        if (sel) {
-            sel.value = "sec1";
-            sel.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-        const name = document.querySelector("#grocery-add-food .food-picker-manual input[name='food_name']");
-        const amt = document.querySelector("#grocery-add-food .food-picker-manual input[name='qty_amount']");
-        if (name) name.value = "Celery";
-        if (amt) amt.value = "2";
-    })()`);
-    await clickSel(
-        "#grocery-add-food .food-picker-manual button[type='submit']",
-    );
-    await sleep(500);
-    const groceryPosts2 = await stats();
-    const linePosts = groceryPosts2.posts.filter(
-        (p) => p.path === "/kitchen/groceries/lines",
-    );
-    record(
-        "grocery two adds after morph both carry section_id",
-        linePosts.length >= 2 &&
-            linePosts.every((p) =>
-                p.entries.some(([k, v]) => k === "section_id" && v === "sec1"),
-            ),
-        { linePosts: linePosts.map((p) => p.entries), ex: drain() },
-    );
-
-    await goto("/kitchen/groceries");
-    await clickSel(
-        '[data-store-id="s1"] button[commandfor="grocery-add-food"]',
-    );
-    await sleep(40);
-    await ev(`(() => {
-        const picker = document.querySelector("#grocery-add-food [data-food-picker]");
-        picker.querySelector('[role="tab"][data-tab="search"]').click();
-        const search = picker.querySelector("[data-search-input]");
-        search.value = "yogurt";
-        search.dispatchEvent(new Event("input", { bubbles: true }));
-        picker.querySelector("input[name='food_name']").value = "Old food";
-        const sel = document.querySelector("#grocery-add-food [data-grocery-section]");
-        if (sel) {
-            sel.value = "sec1";
-            sel.dispatchEvent(new Event("change", { bubbles: true }));
-        }
-    })()`);
-    await ev(`document.getElementById("grocery-add-food")?.close()`);
-    await clickSel(
-        '[data-store-id="s2"] button[commandfor="grocery-add-food"]',
-    );
-    await sleep(40);
-    const costcoFood = await ev<{
-        open: boolean;
-        options: string[];
-        infer: string | null;
-        stores: string[];
-        sections: string[];
-        search: string | null;
-        names: string[];
-        tab: string | null;
-        units: string[];
-        amounts: string[];
-    }>(`(() => {
-        const dialog = document.getElementById("grocery-add-food");
-        const picker = dialog.querySelector("[data-food-picker]");
-        const sel = dialog.querySelector("[data-grocery-section]");
-        return {
-            open: !!dialog.open,
-            options: [...(sel?.options ?? [])].map((option) => option.value),
-            infer: sel?.getAttribute("data-infer-section") ?? null,
-            stores: [...picker.querySelectorAll("input[name='store_id']")].map((el) => el.value),
-            sections: [...dialog.querySelectorAll("input[name='section_id']")].map((el) => el.value),
-            search: picker.querySelector("[data-search-input]")?.value ?? null,
-            names: [...picker.querySelectorAll("input[name='food_name']")].map((el) => el.value),
-            tab: picker.querySelector('[role="tab"][aria-selected="true"]')?.getAttribute("data-tab") ?? null,
-            units: [...picker.querySelectorAll("select[name='qty_unit']")].map((el) => el.value),
-            amounts: [...picker.querySelectorAll("input[name='qty_amount']")].map((el) => el.value),
-        };
-    })()`);
-    record(
-        "grocery shared store dialogs",
-        costcoFood.open === true &&
-            costcoFood.options.length === 1 &&
-            costcoFood.options[0] === "sec3" &&
-            costcoFood.infer == null &&
-            same(costcoFood.stores, "s2") &&
-            costcoFood.sections.length > 0 &&
-            same(costcoFood.sections, "sec3") &&
-            costcoFood.search === "" &&
-            same(costcoFood.names, "") &&
-            costcoFood.tab === "barcode" &&
-            same(costcoFood.units, "g") &&
-            same(costcoFood.amounts, ""),
-        { costcoFood, ex: drain() },
-    );
-    await ev(`document.getElementById("grocery-add-food")?.close()`);
-
-    await goto("/settings/household");
-    await clickSel('button[data-fill-title="Manage Sam"]');
-    await sleep(40);
-    await clickSel(
-        '#household-manage button[commandfor="household-make-owner"]',
-    );
-    await sleep(40);
-    const samOwner = await ev<string>(
-        `document.querySelector("#household-make-owner .modal-message")?.textContent ?? ""`,
-    );
-    await ev(`document.getElementById("household-make-owner")?.close()`);
-    await clickSel('#household-manage button[commandfor="household-remove"]');
-    await sleep(40);
-    await ev(`(() => {
-        const box = document.querySelector("#household-remove input[name='confirm']");
-        if (box) box.checked = true;
-    })()`);
-    const samRemove = await ev<{
-        title: string | null;
-        copy: string | null;
-        checked: boolean;
-    }>(`(() => {
-        const dialog = document.getElementById("household-remove");
-        const box = dialog?.querySelector("input[name='confirm']");
-        return {
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            copy: dialog?.querySelector("[data-fill-slot='remove-copy']")?.textContent ?? null,
-            checked: !!box?.checked,
-        };
-    })()`);
-    await ev(`document.getElementById("household-remove")?.close()`);
-    await ev(`document.getElementById("household-manage")?.close()`);
-    await clickSel('button[data-fill-title="Manage Riley"]');
-    await sleep(40);
-    const rileyManage = await ev<{
-        open: boolean;
-        title: string | null;
-        blurb: string | null;
-        role: string | null;
-        label: string | null;
-        className: string | null;
-        action: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("household-manage");
-        const submit = dialog?.querySelector("[data-fill-slot='role-submit']");
-        return {
-            open: !!dialog?.open,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            blurb: dialog?.querySelector("[data-fill-slot='role-blurb']")?.textContent ?? null,
-            role: dialog?.querySelector("input[name='role']")?.value ?? null,
-            label: submit?.textContent ?? null,
-            className: submit?.getAttribute("class"),
-            action: dialog?.querySelector("form.member-role")?.getAttribute("action") ?? null,
-        };
-    })()`);
-    await clickSel(
-        '#household-manage button[commandfor="household-make-owner"]',
-    );
-    await sleep(40);
-    const rileyOwner = await ev<string>(
-        `document.querySelector("#household-make-owner .modal-message")?.textContent ?? ""`,
-    );
-    const rileyOwnerAction = await ev<string | null>(
-        `document.querySelector("#household-make-owner form")?.getAttribute("action") ?? null`,
-    );
-    await ev(`document.getElementById("household-make-owner")?.close()`);
-    await clickSel('#household-manage button[commandfor="household-remove"]');
-    await sleep(40);
-    const rileyRemove = await ev<{
-        title: string | null;
-        copy: string | null;
-        label: string | null;
-        checked: boolean;
-        action: string | null;
-    }>(`(() => {
-        const dialog = document.getElementById("household-remove");
-        const box = dialog?.querySelector("input[name='confirm']");
-        return {
-            action: dialog?.querySelector("form.remove-member")?.getAttribute("action") ?? null,
-            title: dialog?.querySelector(".modal-title")?.textContent ?? null,
-            copy: dialog?.querySelector("[data-fill-slot='remove-copy']")?.textContent ?? null,
-            label: dialog?.querySelector("[data-fill-slot='remove-label']")?.textContent ?? null,
-            checked: !!box?.checked,
-        };
-    })()`);
-    record(
-        "household shared member dialogs",
-        samOwner.includes("Sam becomes the owner") &&
-            samRemove.title === "Remove Sam" &&
-            samRemove.copy ===
-                "Delete Sam's login and their meals, water, weight and goals. This can't be undone." &&
-            samRemove.checked === true &&
-            rileyManage.open === true &&
-            rileyManage.title === "Manage Riley" &&
-            rileyManage.blurb ===
-                "Riley is an admin: they can change household settings, stores and everyone's rules, and add people. You stay the owner." &&
-            rileyManage.role === "member" &&
-            rileyManage.label === "Make member" &&
-            rileyManage.className === "" &&
-            rileyManage.action === "/settings/household/members/u3/role" &&
-            rileyOwner.includes("Riley becomes the owner") &&
-            !rileyOwner.includes("Sam becomes the owner") &&
-            rileyRemove.title === "Remove Riley" &&
-            rileyRemove.copy ===
-                "Delete Riley's login and their meals, water, weight and goals. This can't be undone." &&
-            rileyRemove.label === "Remove Riley" &&
-            rileyRemove.checked === false &&
-            rileyOwnerAction === "/settings/household/members/u3/make-owner" &&
-            rileyRemove.action === "/settings/household/members/u3/remove",
-        {
-            samOwner,
-            samRemove,
-            rileyManage,
-            rileyOwner,
-            rileyOwnerAction,
-            rileyRemove,
-            ex: drain(),
-        },
-    );
-    await ev(`document.getElementById("household-remove")?.close()`);
-    await ev(`document.getElementById("household-manage")?.close()`);
-
-    await goto("/");
-    await ev(`new Promise((resolve) => {
-        document.addEventListener("turbo:load", resolve, { once: true });
-        document.querySelector('nav.bottom-nav a[href="/kitchen/fridge"]').click();
-    })`);
-    // A revisit must render once: a cached-snapshot preview followed by the
-    // fresh page replays the entrance animation, so the tab "loads twice".
-    // Leaving "/" cached it; without that the check passes on a cache miss.
-    // The preview waits a frame and a faster response cancels it, so stall
-    // the response the way a real network does.
-    const rootCached = await ev<boolean>(
-        `Turbo.session.view.snapshotCache.has(new URL("/", location.href))`,
-    );
-    await control("stall=300");
-    const renders = await ev<boolean[]>(`new Promise((resolve) => {
-        const renders = [];
-        const onRender = () => renders.push(
-            document.documentElement.hasAttribute("data-turbo-preview"));
-        document.addEventListener("turbo:render", onRender);
-        document.addEventListener("turbo:load", () => {
-            document.removeEventListener("turbo:render", onRender);
-            resolve(renders);
-        }, { once: true });
-        document.querySelector('nav.bottom-nav a[href="/"]').click();
-    })`);
-    await control("stall=0");
-    record(
-        "tab revisit renders once (no cached preview)",
-        rootCached && renders.length === 1 && renders[0] === false,
-        { rootCached, renders },
-    );
-    const orderBefore = await ev<string[]>(
-        `[...document.querySelectorAll("#nutrition-arrange .arrange-row")].map(r => r.getAttribute("data-card"))`,
-    );
-    await clickSel('button[commandfor="nutrition-arrange"]');
-    await sleep(50);
-    await clickSel("#nutrition-arrange .arrange-row .arrange-down");
-    const orderAfter = await ev<string[]>(
-        `[...document.querySelectorAll("#nutrition-arrange .arrange-row")].map(r => r.getAttribute("data-card"))`,
-    );
-    await control("reset=posts");
-    await clickSel(
-        "form.nutrition-arrange-form button.btn-primary[type='submit']",
-    );
-    await sleep(600);
-    const layoutPosts = await stats();
-    const layoutPost = layoutPosts.posts.find(
-        (p) => p.path === "/nutrition/layout",
-    );
-    const orderFields =
-        layoutPost?.entries.filter(([k]) => k === "order") ?? [];
-    const movedOnce =
-        orderAfter[0] === orderBefore[1] &&
-        orderAfter[1] === orderBefore[0] &&
-        orderAfter[2] === orderBefore[2];
-    record(
-        "arrange after two nutrition visits",
-        movedOnce &&
-            layoutPost !== undefined &&
-            orderFields.length === orderBefore.length,
-        { orderBefore, orderAfter, orderFields, ex: drain() },
-    );
-
-    await control("post=fail&modal=nutrition-log-meal&reset=posts&delay=0");
-    await goto("/");
-    await setMarker();
-    const hrefBeforeMeal = (await snap()).href;
-    await clickSel('button[commandfor="nutrition-log-meal"]');
-    await sleep(40);
-    await clickSel("#nutrition-log-meal button[type='submit']");
-    await sleep(500);
-    const badMeal = await snap();
-    record(
-        "nutrition log meal invalid 400",
-        badMeal.marker === "stay" &&
-            badMeal.href === hrefBeforeMeal &&
-            badMeal.open.includes("nutrition-log-meal") &&
-            badMeal.error === "Name is required",
-        { badMeal, hrefBeforeMeal, ex: drain() },
-    );
-
-    await control("post=ok&reset=posts&delay=0");
-    await goto("/");
-    await clickSel('button[commandfor="nutrition-log-meal"]');
-    await sleep(40);
-    await ev(`(() => {
-        const root = document.querySelector("#nutrition-log-meal [data-meal-items]");
-        if (!root) return;
-        root.querySelector("[data-add-meal-item]")?.click();
-    })()`);
-    await sleep(40);
-    await ev(`(() => {
-        const names = document.querySelectorAll("#nutrition-log-meal [data-meal-item-name]");
-        if (names[0]) names[0].value = "Apple";
-        if (names[1]) names[1].value = "Banana";
-    })()`);
-    await ev(`(() => {
-        const rows = document.querySelectorAll("#nutrition-log-meal [data-meal-item]");
-        const second = rows[1];
-        if (second) second.querySelector("[data-meal-item-remove]")?.click();
-    })()`);
-    await sleep(40);
-    await clickSel("#nutrition-log-meal button[type='submit']");
-    await sleep(500);
-    const mealPosts = await stats();
-    const mealPost = mealPosts.posts.find((p) => p.path === "/log-meal");
-    const itemNames =
-        mealPost?.entries
-            .filter(([k]) => k === "item_name")
-            .map(([, v]) => v) ?? [];
-    record(
-        "nutrition log meal add remove row",
-        mealPost !== undefined &&
-            itemNames.length === 1 &&
-            itemNames[0] === "Apple",
-        { itemNames, mealPost, ex: drain() },
-    );
-
-    await control("post=ok&reset=posts&delay=0");
-    await goto("/");
-    await setMarker();
-    await clickSel('button[commandfor="nutrition-log-water"]');
-    await sleep(40);
-    await ev(`(() => {
-        const input = document.querySelector("#nutrition-log-water input[name='amount_ml']");
-        if (input) input.value = "250";
-    })()`);
-    await clickSel("#nutrition-log-water button[type='submit']");
-    await sleep(500);
-    const okWater = await snap();
-    record(
-        "nutrition log water valid 303",
-        okWater.marker === "stay" &&
-            okWater.open.length === 0 &&
-            okWater.href.endsWith("/"),
-        { okWater, ex: drain() },
     );
 
     await control("reset=approve");
@@ -1398,7 +303,7 @@ try {
     await sleep(1500);
     const expiredGet = await snap();
     const hasAppNavGet = await ev<boolean>(
-        `!!document.querySelector("nav.bottom-nav")`,
+        `!!document.querySelector(".fd-tabs")`,
     );
     record(
         "expired session GET login full reload",
@@ -1406,16 +311,15 @@ try {
         { expiredGet, hasAppNavGet, ex: drain() },
     );
 
-    await goto("/kitchen/fridge");
+    await goto("/");
     await setMarker();
     await control("post=login&reset=posts&session=guest");
-    await clickSel('button[aria-label="Delete Expired milk"]');
-    await sleep(40);
-    await clickSel("dialog[open] button.btn-danger");
+    // The log sheet's quick-water form: any signed-in POST will do.
+    await clickSel('form[action="/log/water"] button[type="submit"]');
     await sleep(1500);
     const expiredPost = await snap();
     const hasAppNavPost = await ev<boolean>(
-        `!!document.querySelector("nav.bottom-nav")`,
+        `!!document.querySelector(".fd-tabs")`,
     );
     record(
         "expired session POST login full reload",
@@ -1426,7 +330,6 @@ try {
         { expiredPost, hasAppNavPost, ex: drain() },
     );
 
-    await goto("/login-test");
     await ev(`(() => {
         document.querySelector("input[name='email']").value = "a@b.co";
         document.querySelector("input[name='password']").value = "secret12";
@@ -1441,387 +344,8 @@ try {
         { approveAfter, loginAfterExpired, ex: drain() },
     );
 
-    async function themeSnap() {
-        return ev<{
-            dataTheme: string | null;
-            meta: string | null;
-            bg: string;
-            widgetTheme: string | null;
-            marker: string | null;
-            hasMain: boolean;
-        }>(`(() => {
-            const frame = document.querySelector(".widget-frame");
-            let widgetTheme = null;
-            try {
-                widgetTheme = frame?.contentDocument?.documentElement?.getAttribute("data-theme") ?? null;
-            } catch (_) {}
-            return {
-                dataTheme: document.documentElement.getAttribute("data-theme"),
-                meta: document.querySelector('meta[name="foodable-theme"]')?.getAttribute("content") ?? null,
-                bg: getComputedStyle(document.body).getPropertyValue("--bg").trim(),
-                widgetTheme,
-                marker: window.__marker ?? null,
-                hasMain: !!document.querySelector("main.app-main"),
-            };
-        })()`);
-    }
-
-    async function themeMetaContents() {
-        return ev<string[]>(
-            `[...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.getAttribute("content") ?? "")`,
-        );
-    }
-    async function themeChromeKind() {
-        return ev<string | null>(
-            `document.querySelector('meta[name="foodable-theme-chrome"]')?.getAttribute("content") ?? null`,
-        );
-    }
-    function systemMetaPair(kind: "page" | "nav") {
-        const colors = kind === "page" ? THEME_COLOR : THEME_NAV_COLOR;
-        return [colors.light, colors.dark];
-    }
-
+    // ---- The shell: phone nav, desktop chrome, Turbo ----
     await control("session=app&theme=dark&reset=posts&post=ok");
-    await goto("/settings");
-    await setMarker();
-    const darkStart = await themeSnap();
-    const settingsPageBg = THEME_COLOR.dark;
-    await ev(`(() => {
-        const light = document.querySelector('input[name="theme"][value="light"]');
-        if (light) light.checked = true;
-        document.querySelector("form.appearance.panel")?.requestSubmit();
-    })()`);
-    await sleep(600);
-    const afterLight = await themeSnap();
-
-    await setMarker();
-    await clickSel("a.settings-back");
-    await sleep(400);
-    const afterBack = await themeSnap();
-    const backMeta = await themeMetaContents();
-    const backChrome = await themeChromeKind();
-    record(
-        "settings back full load to tab",
-        afterBack.marker == null &&
-            backChrome === "nav" &&
-            afterBack.dataTheme === "light" &&
-            afterBack.bg === THEME_COLOR.light &&
-            backMeta.join(",") === THEME_NAV_COLOR.light,
-        { afterBack, backMeta, backChrome, ex: drain() },
-    );
-
-    await setMarker();
-    const themeMetaBaseline = await ev<{
-        count: number;
-        ids: number[];
-        contents: string[];
-    }>(`(() => {
-        const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
-        metas.forEach((m, i) => { m.__foodableNavCheck = 100 + i; });
-        return {
-            count: metas.length,
-            ids: metas.map((m) => m.__foodableNavCheck),
-            contents: metas.map((m) => m.getAttribute("content")),
-        };
-    })()`);
-    await clickSel('nav.bottom-nav a[href="/kitchen/fridge"]');
-    await sleep(200);
-    const fridgeTheme = await themeSnap();
-    const fridgeMeta = await themeMetaContents();
-    const themeMetaOnFridge = await ev<{
-        count: number;
-        ids: (number | null)[];
-        contents: string[];
-        sameNodes: boolean;
-    }>(`(() => {
-        const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
-        return {
-            count: metas.length,
-            ids: metas.map((m) => m.__foodableNavCheck ?? null),
-            contents: metas.map((m) => m.getAttribute("content")),
-            sameNodes: metas.every((m, i) => m.__foodableNavCheck === 100 + i),
-        };
-    })()`);
-    record(
-        "fridge tab visit keeps theme-color metas in place",
-        fridgeTheme.marker === "stay" &&
-            fridgeTheme.dataTheme === "light" &&
-            fridgeTheme.bg === THEME_COLOR.light &&
-            fridgeMeta.join(",") === THEME_NAV_COLOR.light &&
-            themeMetaOnFridge.count === themeMetaBaseline.count &&
-            themeMetaOnFridge.sameNodes,
-        {
-            fridgeTheme,
-            fridgeMeta,
-            themeMetaOnFridge,
-            themeMetaBaseline,
-            ex: drain(),
-        },
-    );
-
-    await setMarker();
-    await clickSel('a.app-bar-action[href="/settings"]');
-    await sleep(400);
-    const afterGear = await themeSnap();
-    const gearMeta = await themeMetaContents();
-    const gearChrome = await themeChromeKind();
-    record(
-        "settings gear full load from tab",
-        afterGear.marker == null &&
-            gearChrome === "page" &&
-            afterGear.dataTheme === "light" &&
-            afterGear.bg === THEME_COLOR.light &&
-            gearMeta.join(",") === THEME_COLOR.light,
-        { afterGear, gearMeta, gearChrome, ex: drain() },
-    );
-
-    await ev(`(() => {
-        const system = document.querySelector('input[name="theme"][value="system"]');
-        if (system) system.checked = true;
-        document.querySelector("form.appearance.panel")?.requestSubmit();
-    })()`);
-    await sleep(600);
-    const afterSystem = await themeSnap();
-    const settingsSystemMeta = await themeMetaContents();
-    const pageSystemMeta = systemMetaPair("page").join(",");
-
-    await setMarker();
-    await clickSel('nav.subnav a[href^="/settings/help"]');
-    await sleep(300);
-    const afterHelp = await themeSnap();
-    const helpPath = await ev<string>(`location.pathname`);
-    const helpMeta = await themeMetaContents();
-    const helpChrome = await themeChromeKind();
-    record(
-        "settings help sub-nav turbo visit",
-        helpPath === "/settings/help" &&
-            afterHelp.marker === "stay" &&
-            helpChrome === "page" &&
-            helpMeta.join(",") === pageSystemMeta,
-        { helpPath, afterHelp, helpMeta, helpChrome, ex: drain() },
-    );
-
-    record(
-        "theme sync across account form and settings chrome",
-        darkStart.dataTheme === "dark" &&
-            darkStart.marker === "stay" &&
-            darkStart.bg === settingsPageBg &&
-            afterLight.dataTheme === "light" &&
-            afterLight.meta === "light" &&
-            afterLight.bg === THEME_COLOR.light &&
-            afterSystem.dataTheme === null &&
-            afterSystem.meta === "system" &&
-            afterSystem.bg === THEME_COLOR.light &&
-            settingsSystemMeta.join(",") === pageSystemMeta,
-        {
-            darkStart,
-            afterLight,
-            afterSystem,
-            settingsSystemMeta,
-            ex: drain(),
-        },
-    );
-
-    await control("theme=dark&post=ok");
-    await goto("/settings");
-    await send("Emulation.setDeviceMetricsOverride", {
-        width: 390,
-        height: 844,
-        deviceScaleFactor: 1,
-        mobile: true,
-    });
-    await ev(`(() => {
-        const light = document.querySelector('input[name="theme"][value="light"]');
-        if (light) light.checked = true;
-        document.querySelector("form.appearance.panel")?.requestSubmit();
-    })()`);
-    await sleep(700);
-    await goto("/");
-    await sleep(300);
-    const shotLightOk = await ev<boolean>(
-        `!!document.querySelector("main.app-main")`,
-    );
-    await Bun.write(
-        "./tmp/nav-theme-light.png",
-        Buffer.from(
-            (
-                (await send("Page.captureScreenshot", {
-                    format: "png",
-                })) as { data: string }
-            ).data,
-            "base64",
-        ),
-    );
-    await goto("/settings");
-    await sleep(200);
-    await ev(`(() => {
-        const dark = document.querySelector('input[name="theme"][value="dark"]');
-        if (dark) dark.checked = true;
-        document.querySelector("form.appearance.panel")?.requestSubmit();
-    })()`);
-    await sleep(700);
-    await goto("/");
-    await sleep(300);
-    const shotDarkOk = await ev<boolean>(
-        `!!document.querySelector("main.app-main")`,
-    );
-    await Bun.write(
-        "./tmp/nav-theme-dark.png",
-        Buffer.from(
-            (
-                (await send("Page.captureScreenshot", {
-                    format: "png",
-                })) as { data: string }
-            ).data,
-            "base64",
-        ),
-    );
-    record(
-        "theme switch screenshots (nutrition 390x844)",
-        shotLightOk && shotDarkOk && (await themeSnap()).dataTheme === "dark",
-        { shotLightOk, shotDarkOk, ex: drain() },
-    );
-
-    async function scrollBottomShot(
-        path: string,
-        theme: "light" | "dark",
-        file: string,
-    ) {
-        await control(`theme=${theme}&post=ok`);
-        await goto(path);
-        await sleep(300);
-        const ok = await ev<boolean>(
-            `!!document.querySelector("main.app-main")`,
-        );
-        await ev(`window.scrollTo(0, document.documentElement.scrollHeight)`);
-        await sleep(150);
-        await Bun.write(
-            file,
-            Buffer.from(
-                (
-                    (await send("Page.captureScreenshot", {
-                        format: "png",
-                    })) as { data: string }
-                ).data,
-                "base64",
-            ),
-        );
-        return ok;
-    }
-    const fridgeDark = await scrollBottomShot(
-        "/kitchen/fridge",
-        "dark",
-        "./tmp/nav-fridge-dark-bottom.png",
-    );
-    const fridgeLight = await scrollBottomShot(
-        "/kitchen/fridge",
-        "light",
-        "./tmp/nav-fridge-light-bottom.png",
-    );
-    const recipesDark = await scrollBottomShot(
-        "/recipes",
-        "dark",
-        "./tmp/nav-recipes-dark-bottom.png",
-    );
-    const recipesLight = await scrollBottomShot(
-        "/recipes",
-        "light",
-        "./tmp/nav-recipes-light-bottom.png",
-    );
-    // iOS 26 Safari stops tinting the strip under its toolbar from a bottom
-    // bar with a backdrop-filter, and falls back to white.
-    const phoneNavFilter = await ev<string>(
-        `getComputedStyle(document.querySelector("nav.bottom-nav")).backdropFilter`,
-    );
-    record(
-        "phone nav has no backdrop-filter (iOS Safari toolbar tint)",
-        phoneNavFilter === "none",
-        { phoneNavFilter },
-    );
-    record(
-        "bottom screenshots (fridge and recipes 390x844)",
-        fridgeDark && fridgeLight && recipesDark && recipesLight,
-        { fridgeDark, fridgeLight, recipesDark, recipesLight, ex: drain() },
-    );
-
-    // From 768px the nav floats near the bottom edge: centred, off the edge,
-    // and kept across a Turbo visit. Phones keep the docked bar.
-    await send("Emulation.setDeviceMetricsOverride", {
-        width: 1280,
-        height: 800,
-        deviceScaleFactor: 1,
-        mobile: false,
-    });
-    await control("session=app");
-    await goto("/kitchen/fridge");
-    await setMarker();
-    const floatSnap = () =>
-        ev<{
-            centre: number;
-            gap: number;
-            width: number;
-            position: string;
-            active: string | null;
-            activeBg: string;
-        }>(`(() => {
-            const nav = document.querySelector("nav.bottom-nav");
-            const r = nav.getBoundingClientRect();
-            const cur = nav.querySelector("a[aria-current='page']");
-            return {
-                // Offset from the centre of the page, scrollbar excluded.
-                centre: Math.round(
-                    r.left + r.width / 2 - document.documentElement.clientWidth / 2,
-                ),
-                gap: Math.round(innerHeight - r.bottom),
-                width: Math.round(r.width),
-                position: getComputedStyle(nav).position,
-                active: cur?.getAttribute("aria-label") ?? null,
-                activeBg: cur ? getComputedStyle(cur).backgroundColor : "",
-            };
-        })()`);
-    const wideFridge = await floatSnap();
-    await clickSel('nav.bottom-nav a[href="/recipes"]');
-    await sleep(300);
-    const wideRecipes = await floatSnap();
-    const wideMarker = await ev<string | null>(`window.__marker ?? null`);
-    record(
-        "wide screens: floating nav centred at the bottom, kept across a visit",
-        wideFridge.position === "fixed" &&
-            Math.abs(wideFridge.centre) <= 1 &&
-            wideFridge.gap >= 8 &&
-            wideFridge.width <= 400 &&
-            wideFridge.active === "Fridge" &&
-            wideRecipes.active === "Recipes" &&
-            Math.abs(wideRecipes.centre) <= 1 &&
-            wideMarker != null &&
-            ["rgba(0, 0, 0, 0)", "transparent"].includes(wideRecipes.activeBg),
-        { wideFridge, wideRecipes, wideMarker, ex: drain() },
-    );
-
-    await send("Emulation.setDeviceMetricsOverride", {
-        width: 430,
-        height: 800,
-        deviceScaleFactor: 1,
-        mobile: true,
-    });
-
-    await control("session=app");
-    await goto("/settings");
-    await setMarker();
-    await clickSel('main a[href="/logout"][data-turbo="false"]');
-    await sleep(300);
-    const logout = await ev<{ marker: string | null; out: string | null }>(`({
-        marker: window.__marker ?? null,
-        out: document.querySelector("#out")?.textContent ?? null,
-    })`);
-    record(
-        "logout native navigation",
-        logout.marker == null && logout.out === "logged out",
-        logout,
-    );
-
-    // ---- The new shell (flag ui-v2): phone nav, desktop chrome, Turbo ----
-    await control("session=app&shell=v2&theme=dark");
     const v2Snap = () =>
         ev<{
             tabs: string;
@@ -1894,7 +418,7 @@ try {
             !v2Today.bottomNav &&
             v2Kitchen.marker === "stay" &&
             v2Kitchen.active === "Kitchen" &&
-            /fridge/i.test(v2Kitchen.h1 || "") &&
+            /^Kitchen/.test(v2Kitchen.h1 || "") &&
             v2Recipes.marker === "stay" &&
             v2Recipes.active === "Recipes",
         { v2Today, v2Kitchen, v2Recipes, ex: drain() },
@@ -2098,8 +622,8 @@ try {
             kFridge.tabs.join() ===
                 "/kitchen/fridge,/kitchen/groceries,/kitchen/usuals" &&
             kGroceries.marker === "stay" &&
-            kGroceries.current === "Groceries" &&
-            /groceries/i.test(kGroceries.h1 || "") &&
+            /^Groceries/.test(kGroceries.current || "") &&
+            /^Kitchen/.test(kGroceries.h1 || "") &&
             kGroceries.phoneCurrent === "Kitchen",
         { kFridge, kGroceries, ex: drain() },
     );
@@ -2174,18 +698,375 @@ try {
         { v2Log, v2Trends, trendsPage, trends7d, ex: drain() },
     );
 
+    // ---- Theme sync: Display form, Turbo visits, Settings entries ----
+    // The saved theme reaches <html data-theme>, meta[foodable-theme] and the
+    // theme-color metas on every load or Turbo visit (src/web/client/shell.js).
+    // The shell's browser chrome is the page colour on every route, so a
+    // Settings link and a tab link share one set of metas.
+    async function themeSnap() {
+        return ev<{
+            dataTheme: string | null;
+            meta: string | null;
+            bg: string;
+            widgetTheme: string | null;
+            marker: string | null;
+            hasMain: boolean;
+        }>(`(() => {
+            const frame = document.querySelector(".widget-frame");
+            let widgetTheme = null;
+            try {
+                widgetTheme = frame?.contentDocument?.documentElement?.getAttribute("data-theme") ?? null;
+            } catch (_) {}
+            return {
+                dataTheme: document.documentElement.getAttribute("data-theme"),
+                meta: document.querySelector('meta[name="foodable-theme"]')?.getAttribute("content") ?? null,
+                bg: getComputedStyle(document.body).getPropertyValue("--bg").trim(),
+                widgetTheme,
+                marker: window.__marker ?? null,
+                hasMain: !!document.querySelector("main.app-main"),
+            };
+        })()`);
+    }
+    // Every theme-color meta as "content" or "content|media", in document order.
+    async function themeMetaSig() {
+        return ev<string>(
+            `[...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.getAttribute("content") + (m.getAttribute("media") ? "|" + m.getAttribute("media") : "")).join(",")`,
+        );
+    }
+    function expectedMetaSig(theme: "light" | "dark" | "system") {
+        return theme === "system"
+            ? `${THEME_COLOR.light}|(prefers-color-scheme: light),${THEME_COLOR.dark}|(prefers-color-scheme: dark)`
+            : THEME_COLOR[theme];
+    }
+    async function themeChromeKind() {
+        return ev<string | null>(
+            `document.querySelector('meta[name="foodable-theme-chrome"]')?.getAttribute("content") ?? null`,
+        );
+    }
+    // Tag each theme-color meta with an expando so a later check can tell a
+    // kept node from one Turbo removed and re-created.
+    async function tagThemeMetas() {
+        return ev<number>(`(() => {
+            const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
+            metas.forEach((m, i) => { m.__foodableNavCheck = 100 + i; });
+            return metas.length;
+        })()`);
+    }
+    async function themeMetaIdentity() {
+        return ev<{ count: number; kept: boolean[] }>(`(() => {
+            const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
+            return {
+                count: metas.length,
+                kept: metas.map((m, i) => m.__foodableNavCheck === 100 + i),
+            };
+        })()`);
+    }
+    async function pickTheme(value: "light" | "dark" | "system") {
+        await ev(`(() => {
+            const radio = document.querySelector('input[name="theme"][value="${value}"]');
+            radio.checked = true;
+            radio.form.requestSubmit();
+        })()`);
+        await sleep(600);
+    }
+
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/display");
+    await setMarker();
+    const darkStart = await themeSnap();
+    const darkStartMetas = await themeMetaSig();
+    await pickTheme("light");
+    const afterLight = await themeSnap();
+    const afterLightMetas = await themeMetaSig();
+    const displayPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/display",
+    );
+
+    // Back is a full load, twice over: Display to Settings home, then Settings
+    // home to the Today tab.
+    await setMarker();
+    await clickSel("a.fd-settings-back");
+    await sleep(400);
+    const backHop1 = await ev<{ path: string; marker: string | null }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+    })`);
+    await setMarker();
+    await clickSel("a.fd-settings-phone-back");
+    await sleep(400);
+    const afterBack = await themeSnap();
+    const backMetas = await themeMetaSig();
+    const backChrome = await themeChromeKind();
+    const backPath = await ev<string>(`location.pathname`);
+    record(
+        "settings back full load to tab",
+        backHop1.path === "/settings" &&
+            backHop1.marker == null &&
+            backPath === "/" &&
+            afterBack.marker == null &&
+            backChrome === "page" &&
+            afterBack.dataTheme === "light" &&
+            afterBack.bg === THEME_COLOR.light &&
+            backMetas === expectedMetaSig("light"),
+        { backHop1, backPath, afterBack, backMetas, backChrome, ex: drain() },
+    );
+
+    // A Turbo visit between tabs keeps the very same theme-color nodes.
+    await setMarker();
+    const themeMetaCount = await tagThemeMetas();
+    await clickSel('.fd-tabs a[href="/kitchen/fridge"]');
+    await sleep(250);
+    const fridgeTheme = await themeSnap();
+    const fridgeMetas = await themeMetaSig();
+    const fridgeIdentity = await themeMetaIdentity();
+    record(
+        "fridge tab visit keeps theme-color metas in place",
+        fridgeTheme.marker === "stay" &&
+            fridgeTheme.dataTheme === "light" &&
+            fridgeTheme.bg === THEME_COLOR.light &&
+            fridgeMetas === expectedMetaSig("light") &&
+            themeMetaCount === 1 &&
+            fridgeIdentity.count === themeMetaCount &&
+            fridgeIdentity.kept.every(Boolean),
+        {
+            fridgeTheme,
+            fridgeMetas,
+            fridgeIdentity,
+            themeMetaCount,
+            ex: drain(),
+        },
+    );
+
+    // The account chip is the way into Settings from a tab: also a full load.
+    await setMarker();
+    await clickSel(".fd-account-chip");
+    await sleep(400);
+    const afterGear = await themeSnap();
+    const gearMetas = await themeMetaSig();
+    const gearChrome = await themeChromeKind();
+    const gearPath = await ev<string>(`location.pathname`);
+    record(
+        "settings gear full load from tab",
+        gearPath === "/settings" &&
+            afterGear.marker == null &&
+            gearChrome === "page" &&
+            afterGear.dataTheme === "light" &&
+            afterGear.bg === THEME_COLOR.light &&
+            gearMetas === expectedMetaSig("light"),
+        { gearPath, afterGear, gearMetas, gearChrome, ex: drain() },
+    );
+
+    // Settings home's own theme buttons: Auto drops data-theme and brings back
+    // the media-keyed metas.
+    await setMarker();
+    await clickSel('button.fd-settings-theme-btn[value="system"]');
+    await sleep(600);
+    const afterSystem = await themeSnap();
+    const systemMetas = await themeMetaSig();
+    const systemPath = await ev<string>(`location.pathname`);
+
+    await setMarker();
+    await clickSel('.fd-settings-menu a[href^="/settings/help"]');
+    await sleep(300);
+    const afterHelp = await themeSnap();
+    const helpPath = await ev<string>(`location.pathname`);
+    const helpMetas = await themeMetaSig();
+    const helpChrome = await themeChromeKind();
+    record(
+        "settings help sub-nav turbo visit",
+        helpPath === "/settings/help" &&
+            afterHelp.marker === "stay" &&
+            helpChrome === "page" &&
+            afterHelp.dataTheme === null &&
+            afterHelp.meta === "system" &&
+            helpMetas === expectedMetaSig("system"),
+        { helpPath, afterHelp, helpMetas, helpChrome, ex: drain() },
+    );
+
+    record(
+        "theme sync across account form and settings chrome",
+        darkStart.dataTheme === "dark" &&
+            darkStart.marker === "stay" &&
+            darkStart.bg === THEME_COLOR.dark &&
+            darkStartMetas === expectedMetaSig("dark") &&
+            displayPosts.length === 1 &&
+            displayPosts[0]!.entries.some(
+                ([k, v]) => k === "theme" && v === "light",
+            ) &&
+            afterLight.marker == null &&
+            afterLight.dataTheme === "light" &&
+            afterLight.meta === "light" &&
+            afterLight.bg === THEME_COLOR.light &&
+            afterLightMetas === expectedMetaSig("light") &&
+            systemPath === "/settings" &&
+            afterSystem.marker == null &&
+            afterSystem.dataTheme === null &&
+            afterSystem.meta === "system" &&
+            afterSystem.bg === THEME_COLOR.light &&
+            systemMetas === expectedMetaSig("system"),
+        {
+            darkStart,
+            darkStartMetas,
+            afterLight,
+            afterLightMetas,
+            displayPosts,
+            afterSystem,
+            systemMetas,
+            systemPath,
+            ex: drain(),
+        },
+    );
+
+    // The saved theme changes elsewhere (another device): the next Turbo
+    // visit carries it into <html>, the meta and the browser chrome without a
+    // reload. Turbo's head merge replaces a theme-color node whose colour
+    // changed, so only the end state is pinned here; the in-place update is
+    // pinned by the next case. The visit starts on Settings Help under Auto.
+    await control("theme=dark");
+    await clickSel('.fd-tabs a[href="/kitchen/fridge"]');
+    await sleep(300);
+    const flipDark = await themeSnap();
+    const flipDarkMetas = await themeMetaSig();
+    await control("theme=light");
+    await clickSel('.fd-tabs a[href="/recipes"]');
+    await sleep(300);
+    const flipLight = await themeSnap();
+    const flipLightMetas = await themeMetaSig();
+    await control("theme=system");
+    await clickSel('.fd-tabs a[href="/trends"]');
+    await sleep(300);
+    const flipSystem = await themeSnap();
+    const flipSystemMetas = await themeMetaSig();
+    record(
+        "theme flipped between Turbo visits reaches html and the theme-color metas",
+        flipDark.marker === "stay" &&
+            flipDark.dataTheme === "dark" &&
+            flipDark.meta === "dark" &&
+            flipDark.bg === THEME_COLOR.dark &&
+            flipDarkMetas === expectedMetaSig("dark") &&
+            flipLight.marker === "stay" &&
+            flipLight.dataTheme === "light" &&
+            flipLight.meta === "light" &&
+            flipLight.bg === THEME_COLOR.light &&
+            flipLightMetas === expectedMetaSig("light") &&
+            flipSystem.marker === "stay" &&
+            flipSystem.dataTheme === null &&
+            flipSystem.meta === "system" &&
+            flipSystemMetas === expectedMetaSig("system"),
+        {
+            flipDark,
+            flipDarkMetas,
+            flipLight,
+            flipLightMetas,
+            flipSystem,
+            flipSystemMetas,
+            ex: drain(),
+        },
+    );
+
+    // The sync in shell.js (turbo:before-render, after Turbo's head merge has
+    // delivered the new meta[foodable-theme]) updates <html> and the theme-color
+    // metas in place: content and media change on the same nodes, and a missing
+    // media-keyed meta is added without touching the first. Driven here by
+    // changing meta[foodable-theme] and firing the event Turbo fires.
+    await control("theme=dark");
     await goto("/");
     await setMarker();
-    await control("shell=old");
-    await clickSel('.fd-tabs a[href="/kitchen/fridge"]');
-    await sleep(600);
-    const toOld = await v2Snap();
+    const inPlaceTags = await tagThemeMetas();
+    const inPlaceStart = await themeMetaSig();
+    const inPlaceStep = async (theme: "light" | "system" | "dark") => {
+        await ev(`(() => {
+            document.querySelector('meta[name="foodable-theme"]').setAttribute("content", "${theme}");
+            document.dispatchEvent(new CustomEvent("turbo:before-render"));
+        })()`);
+        return {
+            snap: await themeSnap(),
+            sig: await themeMetaSig(),
+            identity: await themeMetaIdentity(),
+            media: await ev<(string | null)[]>(
+                `[...document.querySelectorAll('meta[name="theme-color"]')].map((m) => m.getAttribute("media"))`,
+            ),
+        };
+    };
+    const inPlaceLight = await inPlaceStep("light");
+    const inPlaceSystem = await inPlaceStep("system");
+    const inPlaceDark = await inPlaceStep("dark");
     record(
-        "switching shells is one full reload (tracked assets differ)",
-        toOld.marker == null && toOld.bottomNav && toOld.tabs === "missing",
-        { toOld, ex: drain() },
+        "theme sync updates theme-color metas in place (same nodes, content and media)",
+        inPlaceTags === 1 &&
+            inPlaceStart === expectedMetaSig("dark") &&
+            inPlaceLight.snap.dataTheme === "light" &&
+            inPlaceLight.sig === expectedMetaSig("light") &&
+            inPlaceLight.identity.count === 1 &&
+            inPlaceLight.identity.kept[0] === true &&
+            inPlaceSystem.snap.dataTheme === null &&
+            inPlaceSystem.sig === expectedMetaSig("system") &&
+            inPlaceSystem.identity.count === 2 &&
+            inPlaceSystem.identity.kept[0] === true &&
+            inPlaceDark.snap.dataTheme === "dark" &&
+            inPlaceDark.identity.kept[0] === true &&
+            inPlaceDark.media.every((m) => m == null) &&
+            inPlaceDark.sig.split(",").every((c) => c === THEME_COLOR.dark) &&
+            inPlaceDark.snap.marker === "stay",
+        {
+            inPlaceTags,
+            inPlaceStart,
+            inPlaceLight,
+            inPlaceSystem,
+            inPlaceDark,
+            ex: drain(),
+        },
     );
-    await control("shell=old&session=app&theme=dark");
+
+    // A revisit must render once: a cached-snapshot preview followed by the
+    // fresh page replays the entrance animation, so the tab "loads twice".
+    // Leaving "/" cached it; without that the check passes on a cache miss.
+    // The preview waits a frame and a faster response cancels it, so stall
+    // the response the way a real network does.
+    await control("theme=dark");
+    await goto("/");
+    await ev(`new Promise((resolve) => {
+        document.addEventListener("turbo:load", resolve, { once: true });
+        document.querySelector('.fd-tabs a[href="/kitchen/fridge"]').click();
+    })`);
+    const rootCached = await ev<boolean>(
+        `Turbo.session.view.snapshotCache.has(new URL("/", location.href))`,
+    );
+    await control("stall=300");
+    const renders = await ev<boolean[]>(`new Promise((resolve) => {
+        const renders = [];
+        const onRender = () => renders.push(
+            document.documentElement.hasAttribute("data-turbo-preview"));
+        document.addEventListener("turbo:render", onRender);
+        document.addEventListener("turbo:load", () => {
+            document.removeEventListener("turbo:render", onRender);
+            resolve(renders);
+        }, { once: true });
+        document.querySelector('.fd-tabs a[href="/"]').click();
+    })`);
+    await control("stall=0");
+    record(
+        "tab revisit renders once (no cached preview)",
+        rootCached && renders.length === 1 && renders[0] === false,
+        { rootCached, renders },
+    );
+
+    await goto("/");
+
+    await control("session=app");
+    await goto("/settings/account");
+    await setMarker();
+    await clickSel('main a[href="/logout"][data-turbo="false"]');
+    await sleep(300);
+    const logout = await ev<{ marker: string | null; out: string | null }>(`({
+        marker: window.__marker ?? null,
+        out: document.querySelector("#out")?.textContent ?? null,
+    })`);
+    record(
+        "logout native navigation",
+        logout.marker == null && logout.out === "logged out",
+        logout,
+    );
 
     const ex = drain();
     record("no uncaught console errors", ex.length === 0, { ex });

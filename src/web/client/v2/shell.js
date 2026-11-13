@@ -1,4 +1,4 @@
-// New shell behaviour (flag `ui-v2`). Loaded after /app.js, so FoodableApp and
+// Shell behaviour. Loaded after /app.js, so FoodableApp and
 // Turbo are already there.
 //
 // 1. The log-meal dialog is reached by fragment. Search, Scan and Log food link

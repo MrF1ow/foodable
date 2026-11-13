@@ -10,7 +10,7 @@ import { renderSettingsHelpV2Page } from "./settings-help.js";
 const chrome = {
     theme: "light" as const,
     attention: { count: 0, tabs: {} },
-    flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
 describe("settings help v2", () => {

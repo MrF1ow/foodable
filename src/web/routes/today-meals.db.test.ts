@@ -1,11 +1,7 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { SQL } from "bun";
 import { Hono } from "hono";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import {
     deleteMeal,
     getMealById,
@@ -26,7 +22,6 @@ import {
     verifyUndoToken,
 } from "../../domain/meal-undo.js";
 import {
-    itemSpecsFromStoredItems,
     mealLoggedAtFromLocalTime,
     scaleMealTotals,
 } from "../../domain/today-edit.js";
@@ -155,7 +150,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("time-only edit keeps logged_at precision and item idempotency digest", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const foodId = await seedFoodWithNutrition(sql, householdId, {
             name: "Egg",
@@ -223,7 +217,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("no-op save keeps the key of a meal logged without a unit", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const foodId = await seedFoodWithNutrition(sql, householdId, {
             name: "Egg",
@@ -274,7 +267,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("amount edit keeps the name the item was logged under", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const foodId = await seedFoodWithNutrition(sql, householdId, {
             name: "Egg",
@@ -329,7 +321,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("amount edit stores the key a re-log at the new amount writes", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const foodId = await seedFoodWithNutrition(sql, householdId, {
             name: "Egg",
@@ -384,7 +375,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("partial edit keeps untouched item snapshots when food nutrition changes", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const riceId = await seedFoodWithNutrition(sql, householdId, {
             name: "Rice",
@@ -445,7 +435,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("partial edit keeps deleted-food snapshot when another amount changes", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const riceId = await seedFoodWithNutrition(sql, householdId, {
             name: "Rice",
@@ -644,7 +633,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("POST recipe edit time-only keeps portions and totals", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const [recipe] = await sql`
             insert into recipes (household_id, creator_id, name, yield_portions)
@@ -720,7 +708,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("edit without a meal type is a 400, not a 500", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { meal } = await insertMeal(userId, {
             description: "No type edit",
             meal_type: "lunch",
@@ -743,7 +730,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("delete then undo through HTTP on real Postgres", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const key = "test:http-undo";
         const { meal } = await insertMeal(userId, {
             description: "Db undo",
@@ -798,7 +784,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
     });
 
     test("undo restores a recipe meal whose recipe was deleted meanwhile", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const [recipe] = await sql`
             insert into recipes (household_id, creator_id, name, yield_portions)
@@ -934,7 +919,6 @@ describeDb(pgAvailable !== null, "council r3 meal edit", (getCtx) => {
         await truncateAll();
         setSqlForTests(sql);
         ({ userId, householdId } = await seedHousehold(sql));
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
     });
 
     afterEach(() => {
@@ -1379,7 +1363,6 @@ describeDb(pgAvailable !== null, "council r3 meal edit", (getCtx) => {
     });
 
     test("hand-edited input on real Postgres is 404 / 200, not a 500", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const app = new Hono();
         app.route("/", nutritionRoutes);
         app.route("/", logRoutes);

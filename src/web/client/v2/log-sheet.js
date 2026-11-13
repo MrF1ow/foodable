@@ -1,4 +1,4 @@
-// Log search + amount sheets (flag ui-v2). Search hits /api/log/search;
+// Log search + amount sheets. Search hits /api/log/search;
 // amount posts to /log.
 const SEARCH_ID = "fd-log-search";
 const AMOUNT_ID = "fd-log-amount";

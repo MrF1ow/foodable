@@ -13,7 +13,7 @@ import { goalsDraftFrom } from "./settings-goals-form.js";
 const chrome = {
     theme: "dark" as const,
     attention: { count: 0, tabs: {} },
-    flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+    flags: FIXTURE_APP_CHROME_FLAGS,
     identity: {
         viewerName: "Ethan Flow",
         viewerRole: "owner" as const,

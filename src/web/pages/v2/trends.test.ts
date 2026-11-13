@@ -72,7 +72,7 @@ describe("renderTrendsV2Page", () => {
         const data = buildPreviewTrendsPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             fixtureDays(today),
@@ -127,7 +127,7 @@ describe("renderTrendsV2Page", () => {
             buildPreviewTrendsPageData(
                 {
                     theme: "light",
-                    flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                    flags: FIXTURE_APP_CHROME_FLAGS,
                     attention: { count: 0, tabs: {} },
                 },
                 fixtureDays(today),
@@ -157,7 +157,7 @@ describe("renderTrendsV2Page", () => {
         const data = buildPreviewTrendsPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             fixtureDays(today),
@@ -178,7 +178,7 @@ describe("renderTrendsV2Page", () => {
         const data = buildPreviewTrendsPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             fixtureDays(today).map((d) => ({
@@ -202,7 +202,7 @@ describe("renderTrendsV2Page", () => {
         const data = buildPreviewTrendsPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             fixtureDays(today).map((d) => ({
@@ -236,7 +236,7 @@ describe("renderTrendsV2Page", () => {
         const data = buildPreviewTrendsPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             days,
@@ -272,7 +272,7 @@ describe("renderTrendsV2Page", () => {
         const data = buildPreviewTrendsPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             fixtureDays(today),
@@ -293,7 +293,7 @@ describe("renderTrendsV2Page", () => {
         const data = buildPreviewTrendsPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             fixtureDays(today),

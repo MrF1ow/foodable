@@ -1,11 +1,7 @@
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
 import { TOAST_COOKIE } from "../components/toast.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
 import * as actualNutrition from "../../db/nutrition.js";
@@ -115,18 +111,7 @@ function cookie(userId: string): string {
 }
 
 describe("today again route", () => {
-    test("404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await hono.request("http://test/meals/x/again", {
-            method: "POST",
-            headers: { cookie: cookie(ALICE) },
-        });
-        expect(res.status).toBe(404);
-        expect(insertCount).toBe(0);
-    });
-
     test("cannot repeat another member's meal", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         mealStore.set("m-bob", {
             id: "m-bob",
             user_id: BOB,
@@ -158,7 +143,6 @@ describe("today again route", () => {
     });
 
     test("again redirects with toast", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         mealStore.set("m-src", {
             id: "m-src",
             user_id: ALICE,

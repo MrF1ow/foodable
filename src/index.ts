@@ -374,7 +374,7 @@ app.get("/app.js", async (c) => {
         "Cache-Control": appAssetCacheControl(c, href),
     });
 });
-// The new shell's pair (flag `ui-v2`), served exactly like the old one.
+// The household shell's stylesheet and script, served like the pair above.
 app.get("/app-v2.css", async (c) => {
     const href = appV2StylesheetHref();
     return c.body(await getAppV2Css(), 200, {

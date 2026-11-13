@@ -8,7 +8,6 @@ import { liveFridgeStore } from "../../db/fridge.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
 import { liveRecipePlansStore } from "../../db/plans.js";
 import { liveWeighInStore } from "../../db/weigh-ins.js";
-import { isViewerFlagOn } from "../../viewer-flags.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import {
     dismissNotice,
@@ -57,10 +56,6 @@ function noticeDeps(): NoticesForDeps {
 
 export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, actorUserId, analytics } = ctx;
-    // Running low, missing for the plan and weigh-in due come with the new
-    // app's one-tap actions, so they ride its flag.
-    const actionable = () => isViewerFlagOn(ctx.flags, "ui-v2");
-
     registerV2OnlyWidgetResource(server, ctx, {
         key: "attention",
         resourceName: "attention",
@@ -103,7 +98,7 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                     const { notices: all } = await noticesFor(
                         noticeDeps(),
                         householdId,
-                        { today, timezone, actionable: actionable() },
+                        { today, timezone, actionable: true },
                     );
                     const count = needsAttentionCount(all);
                     let notices = all;
@@ -175,7 +170,7 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                                 subjectId: input.subject_id,
                                 relatedId: input.related_id,
                             },
-                            { today, timezone, actionable: actionable() },
+                            { today, timezone, actionable: true },
                         );
                         return {
                             content: [

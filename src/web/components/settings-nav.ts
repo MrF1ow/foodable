@@ -20,6 +20,9 @@ export function subnav(input: {
     return `<nav class="subnav" aria-label="${input.label}">${links}</nav>`;
 }
 
+/** The phone has no Household tab, so Settings links to the members page too.
+ *  "Household" stays the preferences page; the members page is "Members", as
+ *  in the household sub-nav. */
 const SETTINGS_SECTIONS = [
     { id: "account", href: "/settings", label: "Account" },
     {
@@ -27,17 +30,8 @@ const SETTINGS_SECTIONS = [
         href: "/settings/household-settings",
         label: "Household",
     },
-    { id: "help", href: "/settings/help", label: "Help" },
-] as const;
-
-/** With `ui-v2` on, the phone has no Household tab, so Settings links to the
- *  members page too. "Household" stays the preferences page; the members page
- *  is "Members", as in the household sub-nav. */
-const SETTINGS_SECTIONS_V2 = [
-    SETTINGS_SECTIONS[0],
-    SETTINGS_SECTIONS[1],
     { id: "members", href: "/settings/household", label: "Members" },
-    SETTINGS_SECTIONS[2],
+    { id: "help", href: "/settings/help", label: "Help" },
 ] as const;
 
 export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
@@ -45,11 +39,10 @@ export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
 export function renderSettingsNav(
     active: SettingsSection,
     from?: string,
-    opts?: { v2?: boolean },
 ): string {
     return subnav({
         label: "Settings sections",
-        sections: opts?.v2 ? SETTINGS_SECTIONS_V2 : SETTINGS_SECTIONS,
+        sections: SETTINGS_SECTIONS,
         active,
         query: navQuery(from),
     });

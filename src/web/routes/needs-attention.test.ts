@@ -1,12 +1,4 @@
-import {
-    afterAll,
-    afterEach,
-    beforeEach,
-    describe,
-    expect,
-    mock,
-    test,
-} from "bun:test";
+import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
 import * as actualDbFoods from "../../db/foods.js";
 import * as actualDbFridge from "../../db/fridge.js";
@@ -25,11 +17,6 @@ import {
     readToastCookie,
     TOAST_COOKIE,
 } from "../components/toast.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
 import { createMemoryPlansStore } from "../../domain/plan.js";
 import { createMemoryWeighInStore } from "../../domain/notices-actionable.js";
 import { createGroceryStore } from "../../domain/settings.js";
@@ -638,12 +625,12 @@ describe("needs-attention routes", () => {
         expect(still.some((d) => d.id === foreign.id)).toBe(true);
     });
 
-    test("top-bar badge only when count > 0 and settings gear keeps data-turbo", async () => {
+    test("the Settings link lights up only when something needs attention, and keeps data-turbo", async () => {
         const empty = await app().request("http://x/kitchen/fridge", {
             headers: { cookie: cookieFor(ALICE) },
         });
         const emptyHtml = await empty.text();
-        expect(emptyHtml).not.toContain("app-bar-attention");
+        expect(emptyHtml).not.toContain("fd-side-dot-attention");
         expect(emptyHtml).toContain('href="/settings" data-turbo="false"');
 
         await seedGroupedNotices();
@@ -656,8 +643,7 @@ describe("needs-attention routes", () => {
             headers: { cookie: cookieFor(ALICE) },
         });
         const badgeHtml = await withBadge.text();
-        expect(badgeHtml).toContain('class="pill app-bar-attention"');
-        expect(badgeHtml).toContain(`>${count}<`);
+        expect(badgeHtml).toContain("fd-side-dot-attention");
         expect(badgeHtml).toContain('href="/settings" data-turbo="false"');
     });
 
@@ -874,11 +860,7 @@ describe("needs-attention routes", () => {
     });
 });
 
-describe("one-tap notice routes (ui-v2)", () => {
-    afterEach(() => {
-        resetFlagsForTests();
-    });
-
+describe("one-tap notice routes", () => {
     function post(path: string, fields: Record<string, string>) {
         return app().request(`http://x${path}`, {
             method: "POST",
@@ -980,7 +962,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     }
 
     test("running low: Add puts the usual on the list and goes back to the page", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const eggs = await seed();
         const res = await post("/notices/grocery.running_low/act", {
             subject_id: eggs.id,
@@ -997,7 +978,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("running low: a second tap is idempotent and says it is done", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const eggs = await seed();
         const fields = { subject_id: eggs.id, back: "/kitchen/fridge" };
         await post("/notices/grocery.running_low/act", fields);
@@ -1009,7 +989,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("running low: a stale tap (the usual is no longer low) writes nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const eggs = await seed();
         const loc = await addLocation(db.fridgeStore, HH, "Fridge");
         await addManualFood(db.fridgeStore, db.foodsStore, {
@@ -1030,7 +1009,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("plan missing: Add puts only that food on the list, never an amount from the form", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await seed();
         const { flour } = await planFlour();
         const res = await post("/notices/plan.missing_ingredient/act", {
@@ -1054,7 +1032,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("plan missing: a plan removed since the page was drawn is a stale tap", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await seed();
         const { flour, plan } = await planFlour();
         await db.plansStore.removePlan(HH, plan.id);
@@ -1067,7 +1044,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("another household's food id writes nothing for either household", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         await seed();
         const theirs = await seed(HH_OTHER);
         const res = await post("/notices/grocery.running_low/act", {
@@ -1092,7 +1068,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("with no store yet the person is told, and nothing is written", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const eggs = await db.foodsStore.insertFood({
             ...newFood({
                 householdId: HH,
@@ -1114,7 +1089,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("the weigh-in reminder has no act route (the sheet is on the page)", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         weighedLongAgo();
         const res = await post("/notices/nutrition.weigh_in_due/act", {
             subject_id: ALICE,
@@ -1124,7 +1098,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("dismiss: each of the three goes away until its scope changes", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const eggs = await seed();
         const { flour, plan } = await planFlour();
         const lastWeighedOn = weighedLongAgo();
@@ -1166,7 +1139,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("dismiss: a second tap is idempotent, and one that is not open says so", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const eggs = await seed();
         const fields = {
             code: "grocery.running_low",
@@ -1189,7 +1161,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("a return path that is not one of the app's pages falls back to Today", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const eggs = await seed();
         for (const back of ["https://evil.example", "//evil.example", ""]) {
             const res = await post("/notices/grocery.running_low/act", {
@@ -1202,7 +1173,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("dismiss: a notice that cannot be dismissed says why, not that it is taken care of", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await post("/notices/dismiss", {
             code: "grocery.allergen",
             subject_kind: "grocery_line",
@@ -1219,7 +1189,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("an act or dismiss from another day of Today comes back to that day", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const eggs = await seed();
         const res = await post("/notices/grocery.running_low/act", {
             subject_id: eggs.id,
@@ -1252,8 +1221,7 @@ describe("one-tap notice routes (ui-v2)", () => {
         });
     }
 
-    test("the Needs attention page lists the one-tap notices for a ui-v2 viewer, with their action and dismiss, and the tab dots stay lit", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("the Needs attention page lists the one-tap notices with their action and dismiss, and the tab dots stay lit", async () => {
         const eggs = await seed();
         const { flour } = await planFlour();
         weighedLongAgo();
@@ -1276,7 +1244,6 @@ describe("one-tap notice routes (ui-v2)", () => {
     });
 
     test("acting on a notice from the Needs attention page comes back to it", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const eggs = await seed();
         const res = await post("/notices/grocery.running_low/act", {
             subject_id: eggs.id,
@@ -1291,37 +1258,5 @@ describe("one-tap notice routes (ui-v2)", () => {
             back: "/needs-attention",
         });
         expect(dismissed.headers.get("location")).toBe("/needs-attention");
-    });
-
-    test("with ui-v2 off the Needs attention page shows exactly what it showed before", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        await seed();
-        await planFlour();
-        weighedLongAgo();
-        const html = await (await getPage()).text();
-        expect(html).not.toContain("Running low");
-        expect(html).not.toContain("/notices/");
-        expect(html).not.toContain("hasn't weighed in");
-        // The notice the old page always had is still there.
-        expect(html).toContain("Flour: no nutrition");
-    });
-
-    test("with ui-v2 off both routes are 404 and write nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const eggs = await seed();
-        const act = await post("/notices/grocery.running_low/act", {
-            subject_id: eggs.id,
-            back: "/",
-        });
-        const dismiss = await post("/notices/dismiss", {
-            code: "grocery.running_low",
-            subject_kind: "food",
-            subject_id: eggs.id,
-            related_id: "",
-            back: "/",
-        });
-        expect([act.status, dismiss.status]).toEqual([404, 404]);
-        expect(await db.groceryStore.listLines(HH)).toEqual([]);
-        expect(await db.dismissalsStore.listForHousehold(HH)).toEqual([]);
     });
 });

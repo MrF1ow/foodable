@@ -193,7 +193,8 @@ test("ingredient dialog count does not grow with the list", () => {
         return (html.match(/<dialog/g) ?? []).length;
     };
     expect(dialogs(2)).toBe(dialogs(20));
-    expect(dialogs(20)).toBe(7);
+    // 7 on the page, 5 from the shell's log sheets.
+    expect(dialogs(20)).toBe(12);
 });
 
 test("a failed steps save reopens the Method modal", () => {

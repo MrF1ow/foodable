@@ -27,11 +27,7 @@ import {
     resetSessionSecretWarningForTest,
     resolveSessionSigningSecret,
 } from "../../site-session.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
 import * as actualProfiles from "../../db/profiles.js";
@@ -258,16 +254,12 @@ mock.module("../attention.js", () => ({
                     : "light",
             attention: { count: 0, tabs: {} },
             flags,
-            ...(flags.uiV2
-                ? {
-                      identity: {
-                          viewerName: viewer.displayName,
-                          viewerRole: viewer.role,
-                          householdName: "Test household",
-                          memberCount: 1,
-                      },
-                  }
-                : {}),
+            identity: {
+                viewerName: viewer.displayName,
+                viewerRole: viewer.role,
+                householdName: "Test household",
+                memberCount: 1,
+            },
         };
     },
 }));
@@ -312,9 +304,8 @@ function cookie(userId: string): string {
     return `${SITE_COOKIE}=${mintSiteSession(userId)}`;
 }
 
-describe("settings routes ui-v2", () => {
-    test("GET /settings serves home when ui-v2 is on", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+describe("settings routes", () => {
+    test("GET /settings serves home", async () => {
         const res = await hono.request("http://test/settings", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -323,19 +314,7 @@ describe("settings routes ui-v2", () => {
         expect(html).toContain('data-fd-settings-page="home"');
     });
 
-    test("GET /settings serves legacy account when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await hono.request("http://test/settings", {
-            headers: { cookie: cookie(ALICE) },
-        });
-        expect(res.status).toBe(200);
-        const html = await res.text();
-        expect(html).toContain('<nav class="subnav"');
-        expect(html).not.toContain('data-fd-settings-page="home"');
-    });
-
     test("GET /settings/help serves v2 help when flag on", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request("http://test/settings/help", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -344,7 +323,6 @@ describe("settings routes ui-v2", () => {
     });
 
     test("POST /settings/display saves theme and redirects", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const body = new URLSearchParams({ theme: "dark" });
         const res = await hono.request("http://test/settings/display", {
             method: "POST",
@@ -360,7 +338,6 @@ describe("settings routes ui-v2", () => {
     });
 
     test("POST /settings/display from Settings home returns there", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         for (const [ret, want] of [
             ["/settings", "/settings"],
             ["https://evil.example/", "/settings/display"],
@@ -380,7 +357,6 @@ describe("settings routes ui-v2", () => {
     });
 
     test("POST /settings/display invalid theme re-renders 400", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const body = new URLSearchParams({ theme: "sepia" });
         const res = await hono.request("http://test/settings/display", {
             method: "POST",
@@ -395,7 +371,6 @@ describe("settings routes ui-v2", () => {
     });
 
     test("POST /settings group=account without theme leaves stored theme", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         profileTheme = "dark";
         const body = new URLSearchParams({
             group: "account",
@@ -415,7 +390,6 @@ describe("settings routes ui-v2", () => {
     });
 
     test("POST /settings group=account with theme saves theme (legacy form)", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
         profileTheme = "dark";
         const body = new URLSearchParams({
             group: "account",
@@ -435,16 +409,7 @@ describe("settings routes ui-v2", () => {
         expect(upsertPatch).toEqual({ theme: "light" });
     });
 
-    test("GET /settings/account is not found when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await hono.request("http://test/settings/account", {
-            headers: { cookie: cookie(ALICE) },
-        });
-        expect(res.status).toBe(404);
-    });
-
-    test("POST /settings/export redirects to signed archive when ui-v2 on", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("POST /settings/export redirects to signed archive", async () => {
         prevExportSessionSecret = process.env.SESSION_SECRET;
         process.env.SESSION_SECRET = "settings-export-test-secret-32chars!!";
         resetSessionSecretWarningForTest();
@@ -473,7 +438,6 @@ describe("settings routes ui-v2", () => {
     });
 
     test("POST /settings/export bad PUBLIC_ORIGIN redirects without throw", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         prevExportSessionSecret = process.env.SESSION_SECRET;
         process.env.SESSION_SECRET = "settings-export-test-secret-32chars!!";
         resetSessionSecretWarningForTest();
@@ -499,17 +463,7 @@ describe("settings routes ui-v2", () => {
         resetSessionSecretWarningForTest();
     });
 
-    test("POST /settings/export is not found when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await hono.request("http://test/settings/export", {
-            method: "POST",
-            headers: { cookie: cookie(ALICE) },
-        });
-        expect(res.status).toBe(404);
-    });
-
-    test("GET /settings/export page renders when ui-v2 on", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("GET /settings/export page renders", async () => {
         const res = await hono.request("http://test/settings/export", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -555,7 +509,6 @@ const FULL_FORM = {
 
 describe("settings goals form routes", () => {
     test("GET shows the standing goals in the form and the days with their own", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         goalsState = STORED_GOALS;
         setSystemTime(new Date("2026-11-12T12:00:00Z"));
         goalDaysState = [
@@ -582,7 +535,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST saves every field and stamps today in the member's timezone", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         alcoholTracking = true;
         profileTimezone = "Pacific/Auckland";
         // 20:00 UTC on the 12th is already the 13th in Auckland.
@@ -610,7 +562,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST with only the name or note changed leaves the set day alone", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         alcoholTracking = true;
         goalsState = STORED_GOALS;
         const res = await postGoals({
@@ -635,7 +586,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST with alcohol tracking off keeps the stored alcohol limit", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         goalsState = STORED_GOALS;
         const { daily_alcohol_g: _skip, ...noAlcohol } = FULL_FORM;
         const res = await postGoals(noAlcohol);
@@ -645,7 +595,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST takes the alcohol limit in the member's drink unit", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         alcoholTracking = true;
         drinkUnit = "uk";
         const res = await postGoals({ ...FULL_FORM, daily_alcohol_g: "2" });
@@ -655,7 +604,6 @@ describe("settings goals form routes", () => {
     });
 
     test("GET shows the alcohol limit in drinks on the form", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         alcoholTracking = true;
         goalsState = { ...STORED_GOALS, daily_alcohol_g: 28 };
         const res = await hono.request("http://test/settings/goals", {
@@ -671,7 +619,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST an untouched UK alcohol limit does not rewrite it or re-stamp the day", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         alcoholTracking = true;
         drinkUnit = "uk";
         // 10 g is 1.27 units: the form shows 1.27, and sends it back as is.
@@ -695,7 +642,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST a decimal calorie count the store rounded does not re-stamp the day", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         goalsState = { ...STORED_GOALS, daily_calories: 1801 };
         const res = await postGoals({
             goal_name: "Recomp",
@@ -714,7 +660,6 @@ describe("settings goals form routes", () => {
     });
 
     test('POST "Calories 0" alone is refused: a floor of 0 is not a target', async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postGoals({ goal_name: "x", daily_calories: "0" });
         expect(res.status).toBe(400);
         expect(await res.text()).toContain("Set at least one daily target.");
@@ -722,7 +667,6 @@ describe("settings goals form routes", () => {
     });
 
     test("a refused save re-renders with the sheet open on load, errors and draft kept", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postGoals({ ...FULL_FORM, daily_calories: "99999" });
         expect(res.status).toBe(400);
         const html = await res.text();
@@ -739,7 +683,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST out-of-bounds values re-render 400 with the typed values and errors", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postGoals({
             ...FULL_FORM,
             daily_calories: "99999",
@@ -756,7 +699,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST with no target at all is refused, so no all-blank row is made", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await postGoals({ goal_name: "Only a name" });
         expect(res.status).toBe(400);
         expect(await res.text()).toContain("Set at least one daily target.");
@@ -765,7 +707,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST clear removes that one day and no other", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         goalDaysState = [
             goalDay(ALICE, "2026-11-14"),
             goalDay(ALICE, "2026-11-15"),
@@ -781,7 +722,6 @@ describe("settings goals form routes", () => {
     });
 
     test("POST clear cannot reach another member's override", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         goalDaysState = [goalDay(BOB, "2026-11-14")];
         // A user_id in the body is ignored: the day is cleared for the caller.
         const res = await postClearDay({ date: "2026-11-14", user_id: BOB });
@@ -793,24 +733,11 @@ describe("settings goals form routes", () => {
     });
 
     test("POST clear with a bad date re-renders 400 and clears nothing", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         for (const date of ["", "2026-02-31", "tomorrow"]) {
             const res = await postClearDay({ date });
             expect(res.status).toBe(400);
             expect(await res.text()).toContain("Choose a valid day.");
         }
-        expect(goalClears).toHaveLength(0);
-    });
-
-    test("every goals route is not found when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const get = await hono.request("http://test/settings/goals", {
-            headers: { cookie: cookie(ALICE) },
-        });
-        expect(get.status).toBe(404);
-        expect((await postGoals(FULL_FORM)).status).toBe(404);
-        expect((await postClearDay({ date: "2026-11-14" })).status).toBe(404);
-        expect(goalUpserts).toHaveLength(0);
         expect(goalClears).toHaveLength(0);
     });
 });

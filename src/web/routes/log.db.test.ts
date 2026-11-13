@@ -1,10 +1,6 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Hono } from "hono";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import { copyYesterdayIdempotencyKey } from "../../domain/meals.js";
 import { recentHistoryStart } from "../../domain/log-search.js";
 import { getMealsByDate, insertMeal } from "../../db/nutrition.js";
@@ -86,7 +82,6 @@ describeDb(pgAvailable !== null, "log copy-yesterday db", (getCtx) => {
     }
 
     test("two copy-yesterday posts write one meal", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const tz = "Pacific/Kiritimati";
         const today = todayInTz(tz);
@@ -143,21 +138,7 @@ describeDb(pgAvailable !== null, "log copy-yesterday db", (getCtx) => {
         expect(keyed).toHaveLength(1);
     });
 
-    test("404 without ui-v2", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await hono.request("http://test/log/copy-yesterday", {
-            method: "POST",
-            headers: {
-                cookie: cookie(userId),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "slot=breakfast&return_to=/",
-        });
-        expect(res.status).toBe(404);
-    });
-
     test("yesterday follows the member timezone", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const tz = "Pacific/Kiritimati";
         const today = todayInTz(tz);
         const yesterday = recentHistoryStart(today, 1);
@@ -195,7 +176,6 @@ describeDb(pgAvailable !== null, "log copy-yesterday db", (getCtx) => {
     });
 
     test("stale hint: nothing yesterday redirects back with a toast", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request("http://test/log/copy-yesterday", {
             method: "POST",
             headers: {
@@ -217,7 +197,6 @@ describeDb(pgAvailable !== null, "log copy-yesterday db", (getCtx) => {
     });
 
     test("copy-yesterday includes null meal_type rows in the snack slot", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const tz = "Pacific/Kiritimati";
         const today = todayInTz(tz);
@@ -302,7 +281,6 @@ describeDb(pgAvailable !== null, "log copy-yesterday db", (getCtx) => {
     }
 
     test("copy-yesterday matches fresh usual-product nutrition", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const { sql } = getCtx();
         const tz = "Pacific/Kiritimati";
         const today = todayInTz(tz);

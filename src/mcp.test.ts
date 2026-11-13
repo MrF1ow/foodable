@@ -8597,8 +8597,6 @@ describe("household config plurals_same_food over HTTP", () => {
 });
 
 describe("household notices with actions over HTTP", () => {
-    afterEach(() => resetFlagsForTests());
-
     function addUtcDays(iso: string, delta: number): string {
         const [y, m, d] = iso.split("-").map(Number);
         return new Date(Date.UTC(y!, m! - 1, d! + delta))
@@ -8674,9 +8672,8 @@ describe("household notices with actions over HTTP", () => {
     }
 
     test.each(ERAS)(
-        "with ui-v2 on, list_notices carries the three with their actions and each can be dismissed (%p)",
+        "list_notices carries the three with their actions and each can be dismissed (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
             await withHttpClient("u1", era, async (client) => {
                 const call: CallTool = async (name, args = {}) =>
                     (await client.callTool({
@@ -8724,32 +8721,6 @@ describe("household notices with actions over HTTP", () => {
                 expect(
                     after.notices.filter((n) => CODES.includes(n.code)),
                 ).toEqual([]);
-            });
-        },
-    );
-
-    test.each(ERAS)(
-        "with ui-v2 off, none of the three is listed or dismissable (%p)",
-        async (era) => {
-            setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-            await withHttpClient("u1", era, async (client) => {
-                const call: CallTool = async (name, args = {}) =>
-                    (await client.callTool({
-                        name,
-                        arguments: args,
-                    })) as ToolResult;
-                await seed(call);
-                const sc = await listed(call);
-                expect(
-                    sc.notices.filter((n) => CODES.includes(n.code)),
-                ).toEqual([]);
-                const out = await call("dismiss_notice", {
-                    code: "nutrition.weigh_in_due",
-                    subject_kind: "member",
-                    subject_id: "u1",
-                    related_id: "2026-01-01",
-                });
-                expect(out.isError).toBe(true);
             });
         },
     );
@@ -12897,10 +12868,8 @@ describe("authenticated dashboard HTTP", () => {
         );
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain('id="recipe-import-url"');
-        expect(html).toContain("data-modal-open-on-load");
+        expect(html).toContain('class="fd-recipes-page"');
         expect(html).toContain("vm.tiktok.com/ZM123");
-        expect(html).toContain("What arrived");
         expect(html).not.toContain('name="text_origin"');
     });
 
@@ -12914,7 +12883,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         const html = await r.text();
         expect(html).toContain('name="text_origin" value="shared"');
-        expect(html).toContain("Paste the caption");
+        expect(html).toContain('aria-label="Paste recipe"');
     });
 
     test("GET /share does not create recipes", async () => {
@@ -12970,56 +12939,6 @@ describe("authenticated dashboard HTTP", () => {
         expect(returnedText).toBe(longText);
     });
 
-    test("a site cookie renders the viewer's dashboard widgets", async () => {
-        const r = await siteApp.request("http://x/", {
-            headers: { cookie: cookieFor(alice) },
-        });
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).toContain("<h1>Alice</h1>");
-        expect(html).toContain("widget-frame");
-        expect(html).not.toContain("srcdoc");
-        expect(html).not.toContain("window.__WIDGET_DATA__=");
-        expect(html).toContain('src="/app/widgets/nutrition-summary?v=');
-        expect(html).toContain("data-widget-data=");
-        expect(html).toContain('title="nutrition-summary"');
-        expect(html).not.toContain("You can look, not edit");
-        expect(html).not.toContain('action="/approve"');
-        expect(html).not.toContain('action="/add-household-member"');
-        expect(html).toContain('action="/log-meal"');
-        expect(html).not.toContain('name="log_meal"');
-        expect(html).not.toContain('class="facts"');
-        expect(html).toContain('class="bottom-nav"');
-        expect(html).toContain('href="/kitchen/fridge"');
-        expect(html).toMatch(/href="\/app\.css\?v=[a-f0-9]{12}"/);
-        expect(html).toMatch(/src="\/app\.js\?v=[a-f0-9]{12}"/);
-    });
-
-    test("a member dashboard has no add form", async () => {
-        db.profile = { ...PROFILE_BASE, user_id: bob };
-        const r = await siteApp.request("http://x/", {
-            headers: { cookie: cookieFor(bob) },
-        });
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).toContain("<h1>Bob</h1>");
-        expect(html).not.toContain('action="/add-household-member"');
-    });
-
-    test("owner peer view has no add form", async () => {
-        db.profile = { ...PROFILE_BASE, user_id: bob };
-        const r = await siteApp.request(`http://x/?member=${bob}`, {
-            headers: { cookie: cookieFor(alice) },
-        });
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).toContain("Viewing Bob");
-        expect(html).toContain('class="peer-view-tag"');
-        expect(html).not.toContain('commandfor="nutrition-arrange"');
-        expect(html).not.toContain('commandfor="nutrition-log-meal"');
-        expect(html).not.toContain('action="/add-household-member"');
-    });
-
     test("POST /settings/household as owner adds a username member", async () => {
         const r = await siteApp.request("http://x/settings/household", {
             method: "POST",
@@ -13037,7 +12956,7 @@ describe("authenticated dashboard HTTP", () => {
             role: "member",
             displayName: "Kid",
         });
-        const home = await siteApp.request("http://x/", {
+        const home = await siteApp.request("http://x/settings/household", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(await home.text()).toContain("Kid");
@@ -13255,11 +13174,13 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain("<h1>Fridge</h1>");
-        expect(html).toContain("Add a location, then add an item.");
-        expect(html).toContain('action="/kitchen/fridge/locations"');
+        expect(html).toContain(
+            '<a class="fd-kitchen-tab" href="/kitchen/fridge" aria-current="page">Fridge</a>',
+        );
+        expect(html).toContain(
+            "Add a location, then add items with the button above.",
+        );
         expect(html).not.toContain("Coming soon.");
-        expect(html).toContain('href="/kitchen/fridge" aria-current="page"');
         expect(html).not.toContain('class="facts"');
     });
 
@@ -13279,9 +13200,6 @@ describe("authenticated dashboard HTTP", () => {
         });
         const html = await page.text();
         expect(html).toContain("Pantry");
-        expect(html).toContain('class="food-picker"');
-        expect(html).toContain('class="quantity-field"');
-        expect(html).toContain("Add an item to Pantry.");
     });
 
     test("POST /kitchen/fridge/items adds a supply with the entered unit", async () => {
@@ -13455,18 +13373,13 @@ describe("authenticated dashboard HTTP", () => {
             "foodable_toast",
         );
         const html = await edit.text();
-        expect(html).toContain('class="error-banner"');
+        expect(html).toContain('class="fd-settings-error"');
         expect(html).toContain("That item is no longer in the fridge.");
         expect(
             html.match(/That item is no longer in the fridge\./g)?.length,
         ).toBe(1);
         expect(html).not.toContain("Fridge item updated");
         expect(html).not.toMatch(/data-modal-open-on-load/);
-        const head = html.indexOf('class="dash-head"');
-        const banner = html.indexOf('class="error-banner"');
-        expect(head).toBeGreaterThan(-1);
-        expect(banner).toBeGreaterThan(head);
-        expect(banner).toBeLessThan(html.indexOf("<dialog"));
         expect(await db.fridgeStore.listItems("hh-1")).toEqual([]);
         expect(await db.foodsStore.listFoods("hh-1")).toEqual([]);
 
@@ -13501,18 +13414,13 @@ describe("authenticated dashboard HTTP", () => {
             "foodable_toast",
         );
         const html = await del.text();
-        expect(html).toContain('class="error-banner"');
+        expect(html).toContain('class="fd-settings-error"');
         expect(html).toContain("That item is no longer in the fridge.");
         expect(
             html.match(/That item is no longer in the fridge\./g)?.length,
         ).toBe(1);
         expect(html).not.toContain("Removed from the fridge");
         expect(html).not.toMatch(/data-modal-open-on-load/);
-        const head = html.indexOf('class="dash-head"');
-        const banner = html.indexOf('class="error-banner"');
-        expect(head).toBeGreaterThan(-1);
-        expect(banner).toBeGreaterThan(head);
-        expect(banner).toBeLessThan(html.indexOf("<dialog"));
         expect(await db.fridgeStore.listItems("hh-1")).toEqual([]);
         expect(await db.stockStore.listMovements("hh-1")).toEqual([]);
     });
@@ -13533,26 +13441,22 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(grocery.status).toBe(200);
         const groceryHtml = await grocery.text();
-        expect(groceryHtml).toContain("<h1>Groceries</h1>");
         expect(groceryHtml).toContain(
-            'href="/kitchen/groceries" aria-current="page"',
+            '<a class="fd-kitchen-tab" href="/kitchen/groceries" aria-current="page">',
         );
+        expect(groceryHtml).toContain("Nothing on the grocery list yet.");
         expect(groceryHtml).not.toContain("Coming soon.");
-        expect(groceryHtml).toContain("Add a grocery store");
-        expect(groceryHtml).toContain('class="grocery-add-store"');
-        expect(groceryHtml).toContain('action="/kitchen/groceries/stores"');
-        expect(groceryHtml).not.toContain("<h3>Add supply</h3>");
 
         const recipes = await siteApp.request("http://x/recipes", {
             headers: { cookie: cookieFor(alice) },
         });
         expect(recipes.status).toBe(200);
         const recipesHtml = await recipes.text();
-        expect(recipesHtml).toContain("<h1>Recipes</h1>");
-        expect(recipesHtml).toContain('href="/recipes" aria-current="page"');
+        expect(recipesHtml).toContain(
+            '<h1 class="fd-recipes-title">Recipes</h1>',
+        );
         expect(recipesHtml).not.toContain("Coming soon.");
-        expect(recipesHtml).toContain('action="/recipes"');
-        expect(recipesHtml).toContain("Add a recipe.");
+        expect(recipesHtml).toContain("0 saved");
     });
 
     test("POST /recipes/import with retry only refetches after remembered refusal", async () => {
@@ -13696,7 +13600,6 @@ describe("authenticated dashboard HTTP", () => {
         expect(pasteNeeded.status).toBe(422);
         const pasteHtml = await pasteNeeded.text();
         expect(pasteHtml).toContain("Paste the Instagram caption below.");
-        expect(pasteHtml).toContain("Open the post");
         expect(pasteHtml).toContain('name="text"');
 
         const imported = await siteApp.request("http://x/recipes/import", {
@@ -13835,7 +13738,7 @@ describe("authenticated dashboard HTTP", () => {
         const pinGoneHtml = await pinGone.text();
         expect(pinGoneHtml).toContain("That page doesn't exist anymore.");
         expect(pinGoneHtml).toContain('value="Kept Chef"');
-        expect(pinGoneHtml).toContain("Recipe website link");
+        expect(pinGoneHtml).toContain('aria-label="Recipe website"');
 
         const pinEmpty = await siteApp.request("http://x/recipes/import", {
             method: "POST",
@@ -13884,7 +13787,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         const html = await detail.text();
         expect(html).toContain("Pasta");
-        expect(html).toContain("100 g");
+        expect(html).toContain("400 g");
         expect(html).toContain("Macros incomplete");
 
         const refuse = await siteApp.request(
@@ -14160,11 +14063,8 @@ describe("authenticated dashboard HTTP", () => {
         const html = await page.text();
         expect(html).toContain("Safeway");
         expect(html).toContain("Foil");
-        expect(html).toContain('data-checked="true"');
-        expect(html).toContain('commandfor="grocery-clear-checked"');
-        expect(html).toContain("Add food</button>");
-        expect(html).not.toContain("<h3>Add supply</h3>");
-        expect(html).not.toContain("grocery-add-supply");
+        expect(html).toContain("Uncheck");
+        expect(html).toContain('id="fd-grocery-clear-checked"');
         const clear = await siteApp.request(
             "http://x/kitchen/groceries/clear-checked",
             {
@@ -14197,17 +14097,10 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(add.status).toBe(400);
         const html = await add.text();
-        expect(html).toContain("allergen-warning");
         expect(html).toContain('data-blocking="true"');
-        expect(html.toLowerCase()).toContain("peanut");
+        expect(html).toContain("Contains peanut");
         expect(html).toContain("Bob");
-        expect(html).toContain('name="confirm_allergen" value="1"');
-        expect(html).toContain("Add anyway");
-        const modal = html.match(
-            /<dialog class="modal" id="grocery-add-food"[\s\S]*?<\/dialog>/,
-        )?.[0];
-        expect(modal).toContain("allergen-warning");
-        expect(modal).toContain(`name="store_id" value="${store.id}"`);
+        expect(html).toContain(`name="store_id" value="${store.id}"`);
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
     });
 
@@ -14243,7 +14136,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(r.status).toBe(403);
         const html = await r.text();
         expect(html).toContain("household membership");
-        expect(html).not.toContain("<h1>Groceries</h1>");
+        expect(html).not.toContain("fd-kitchen-groceries-page");
     });
 
     test("POST /kitchen/groceries/stores as owner adds Corner on the grocery page", async () => {
@@ -14259,14 +14152,6 @@ describe("authenticated dashboard HTTP", () => {
         expect(add.headers.get("location")).toBe("/kitchen/groceries");
         const stores = await db.settingsStore.listStores("hh-1");
         expect(stores.map((row) => row.name)).toEqual(["Corner"]);
-        const page = await siteApp.request("http://x/kitchen/groceries", {
-            headers: { cookie: cookieFor(alice) },
-        });
-        const html = await page.text();
-        expect(html).toContain('<h2 class="row-title">Corner</h2>');
-        expect(html).toContain('class="grocery-add-store"');
-        expect(html).not.toContain("<h3>Add supply</h3>");
-        expect(html).not.toContain("grocery-add-supply");
     });
 
     test("POST /kitchen/groceries/stores with an empty name re-renders grocery with the error", async () => {
@@ -14281,24 +14166,8 @@ describe("authenticated dashboard HTTP", () => {
         expect(add.status).toBe(400);
         expect(add.headers.get("location")).toBeNull();
         const html = await add.text();
-        expect(html).toContain("<h1>Groceries</h1>");
         expect(html).toContain("Enter a store name.");
-        expect(html).toContain('action="/kitchen/groceries/stores"');
-        expect(html).not.toContain("<h3>Add supply</h3>");
         expect(await db.settingsStore.listStores("hh-1")).toEqual([]);
-    });
-
-    test("GET /kitchen/groceries as a member has no add-store form", async () => {
-        db.profile = { ...PROFILE_BASE, user_id: bob };
-        const r = await siteApp.request("http://x/kitchen/groceries", {
-            headers: { cookie: cookieFor(bob) },
-        });
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).toContain("<h1>Groceries</h1>");
-        expect(html).not.toContain("grocery-add-store");
-        expect(html).not.toContain('action="/kitchen/groceries/stores"');
-        expect(html).not.toContain("<h3>Add supply</h3>");
     });
 
     test("POST /kitchen/groceries/stores as a member is refused", async () => {
@@ -14321,28 +14190,19 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain("<h1>Settings</h1>");
+        expect(html).toContain('data-fd-settings-page="home"');
         expect(html).toContain('href="/settings/help"');
-        expect(html).toContain('href="/settings" aria-current="page"');
-        expect(html).toContain(
-            '<a href="/logout" data-turbo="false">Log out</a>',
-        );
         expect(html).not.toContain("bottom-nav");
         expect(html).toContain('name="foodable-theme-chrome" content="page"');
         expect(html).not.toContain("coming-soon");
     });
 
-    test("GET /settings/household/items lists the catalog", async () => {
+    test("GET /settings/household/items goes to the saved foods page", async () => {
         const r = await siteApp.request("http://x/settings/household/items", {
             headers: { cookie: cookieFor(alice) },
         });
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).toContain("<h1>Items</h1>");
-        expect(html).toContain(
-            'href="/settings/household/items" aria-current="page"',
-        );
-        expect(html).toContain("No foods in the catalog yet.");
+        expect(r.status).toBe(302);
+        expect(r.headers.get("location")).toBe("/settings/saved");
     });
 
     test("GET /api/foods/search is member-only", async () => {
@@ -14364,7 +14224,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain("<h1>Household</h1>");
+        expect(html).toContain('<h1 class="fd-settings-title">Household</h1>');
         expect(html).toContain('action="/settings/household"');
         expect(html).toContain("Alice");
         expect(html).toContain("Bob");
@@ -14394,7 +14254,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain("<h1>Household</h1>");
+        expect(html).toContain('<h1 class="fd-settings-title">Household</h1>');
         expect(html).not.toContain('commandfor="household-add-member"');
         expect(html).not.toContain('action="/settings/household/stores"');
     });
@@ -14405,8 +14265,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain("<h1>Help</h1>");
-        expect(html).toContain('href="/settings/help" aria-current="page"');
+        expect(html).toContain('data-fd-settings-page="help"');
         expect(html).toContain('id="food-vs-household-item"');
     });
 
@@ -14423,13 +14282,12 @@ describe("authenticated dashboard HTTP", () => {
             },
         );
         expect(add.status).toBe(303);
-        const page = await siteApp.request("http://x/settings/household", {
-            headers: { cookie: cookieFor(alice) },
-        });
-        const html = await page.text();
-        expect(html).toContain("Safeway");
-        expect(html).toContain("Produce");
-        expect(html).toContain("Other");
+        const [store] = await db.settingsStore.listStores("hh-1");
+        expect(store?.name).toBe("Safeway");
+        const sections = await db.settingsStore.listSections(store!.id);
+        expect(sections.map((row) => row.name)).toEqual(
+            expect.arrayContaining(["Produce", "Other"]),
+        );
     });
 
     test("GET /settings is 403 for a non-member", async () => {
@@ -14469,47 +14327,6 @@ describe("authenticated dashboard HTTP", () => {
             "trends",
             "weight-trends",
         ]);
-        const page = await siteApp.request("http://x/", {
-            headers: { cookie: cookieFor(alice) },
-        });
-        const html = await page.text();
-        expect(
-            html.indexOf('data-nutrition-card="goal-progress"'),
-        ).toBeLessThan(html.indexOf('data-nutrition-card="nutrition-summary"'));
-    });
-
-    test("POST /nutrition/layout with a peer member is rejected and saves nothing", async () => {
-        db.profile = {
-            ...PROFILE_BASE,
-            user_id: alice,
-            nutrition_layout: null,
-        };
-        const move = await postForm(
-            "/nutrition/layout",
-            alice,
-            `card=trends&direction=up&member=${encodeURIComponent(bob)}`,
-        );
-        expect(move.status).toBe(403);
-        const html = await move.text();
-        expect(html).toContain(
-            "You can only arrange your own nutrition dashboard.",
-        );
-        expect(db.profile?.nutrition_layout).toBeNull();
-    });
-
-    test("POST /nutrition/layout rejects an unknown card", async () => {
-        const r = await postForm(
-            "/nutrition/layout",
-            alice,
-            "card=not-a-card&direction=up",
-        );
-        expect(r.status).toBe(400);
-        const html = await r.text();
-        expect(html).toContain("Unknown card.");
-        expect(html).toMatch(
-            /<dialog class="modal" id="nutrition-arrange"[^>]*data-modal-open-on-load/,
-        );
-        expect(db.profilePatches.at(-1)).not.toHaveProperty("nutrition_layout");
     });
 
     test("POST /nutrition/layout saves a full order list", async () => {
@@ -14528,18 +14345,6 @@ describe("authenticated dashboard HTTP", () => {
             "goal-progress",
             "trends",
         ]);
-    });
-
-    test("POST /nutrition/layout rejects an invalid full order", async () => {
-        const bad =
-            "order=nutrition-summary&order=nutrition-summary&order=goal-progress&order=trends";
-        const r = await postForm("/nutrition/layout", alice, bad);
-        expect(r.status).toBe(400);
-        const html = await r.text();
-        expect(html).toContain("Duplicate card in order.");
-        expect(html).toMatch(
-            /<dialog class="modal" id="nutrition-arrange"[^>]*data-modal-open-on-load/,
-        );
     });
 
     test("POST /settings persists dark theme for the next GET", async () => {
@@ -14601,26 +14406,12 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(save.status).toBe(303);
         expect(db.profile?.theme).toBeNull();
-        const r = await siteApp.request("http://x/settings", {
+        const r = await siteApp.request("http://x/settings/display", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await r.text();
         expect(html).toContain('<html lang="en">');
         expect(html).toContain('name="theme" value="system" checked');
-    });
-
-    test("?member= shows a household peer read-only", async () => {
-        db.profile = { ...PROFILE_BASE, user_id: bob };
-        const r = await siteApp.request(`http://x/?member=${bob}`, {
-            headers: { cookie: cookieFor(alice) },
-        });
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).toContain("<h1>Bob</h1>");
-        expect(html).toContain("Viewing Bob");
-        expect(html).toContain('class="peer-view-tag"');
-        expect(html).not.toContain("You can look, not edit");
-        expect(html).toContain("widget-frame");
     });
 
     test("?member= of a stranger is 403", async () => {

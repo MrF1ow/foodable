@@ -1,4 +1,4 @@
-// Recipes list: paste a link in search → POST /recipes/import (ui-v2).
+// Recipes list: paste a link in search → POST /recipes/import.
 const searchBound = new WeakSet();
 let addLinkBound = false;
 

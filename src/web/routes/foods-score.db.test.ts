@@ -14,11 +14,7 @@ import {
     updateHouseholdScoreDefault,
     updateMemberScoreSettings,
 } from "../../domain/score-settings.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
 import { foodsRoutes } from "./foods.js";
 
@@ -47,7 +43,6 @@ describeDb(pgAvailable !== null, "product screen score", (getCtx) => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
         setSqlForTests(sql);
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         ({ userId, householdId } = await seedHousehold(sql));
         peerId = crypto.randomUUID();
         await sql`

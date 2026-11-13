@@ -18,7 +18,6 @@ import {
     row,
 } from "../components/ui.js";
 import {
-    noticeBadge,
     noticeList,
     NOTICE_DISMISS_PATH,
     type NoticeListDismissOpts,
@@ -101,12 +100,10 @@ function sortGroupKeys(
 export function renderNeedsAttentionPage(view: NeedsAttentionView): string {
     const { groups, order } = groupNotices(view.result.notices);
     const sortedKeys = sortGroupKeys(order, view.result.subjectTimes);
-    const uiV2 = view.chrome.flags.uiV2;
     const ctx = {
         from: "/needs-attention",
         foods: view.result.noticeFoods,
-        // The one-tap notices only exist for a viewer on the new app.
-        ...(uiV2 ? { v2: { viewerUserId: view.viewerUserId } } : {}),
+        v2: { viewerUserId: view.viewerUserId },
     };
     const panels: string[] = [];
     for (const key of sortedKeys) {

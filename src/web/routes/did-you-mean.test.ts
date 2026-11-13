@@ -4,17 +4,23 @@ import * as actualDbFoods from "../../db/foods.js";
 import * as actualDbFridge from "../../db/fridge.js";
 import * as actualDbGrocery from "../../db/grocery.js";
 import * as actualDbHousehold from "../../db/household.js";
+import * as actualDbPlans from "../../db/plans.js";
 import * as actualDbProfiles from "../../db/profiles.js";
 import * as actualDbRecipes from "../../db/recipes.js";
 import * as actualDbRules from "../../db/rules.js";
+import * as actualDbScoreSettings from "../../db/score-settings.js";
 import * as actualDbSettings from "../../db/settings.js";
 import * as actualDbStock from "../../db/stock.js";
+import * as actualDbWeighIns from "../../db/weigh-ins.js";
 import * as actualDbNoticeDismissals from "../../db/notice-dismissals.js";
 import * as actualDbSocialReaders from "../../db/social-readers.js";
 import * as actualDbFetchMemory from "../../db/fetch-memory.js";
 import { createMemorySocialReaderStatusStore } from "../../domain/social-readers.js";
 import { createMemoryFetchMemoryStore } from "../../domain/fetch-memory.js";
 import { createMemoryNoticeDismissalsStore } from "../../domain/notice-dismissals.js";
+import { createMemoryScoreSettingsStore } from "../../domain/score-settings.js";
+import { createMemoryWeighInStore } from "../../domain/notices-actionable.js";
+import { createMemoryPlansStore } from "../../domain/plan.js";
 import * as actualFoods from "../../foods.js";
 import {
     createMemoryFoodsStore,
@@ -40,13 +46,16 @@ const realDbFoods = { ...actualDbFoods };
 const realDbFridge = { ...actualDbFridge };
 const realDbGrocery = { ...actualDbGrocery };
 const realDbHousehold = { ...actualDbHousehold };
+const realDbPlans = { ...actualDbPlans };
 const realDbProfiles = { ...actualDbProfiles };
 const realDbSocialReaders = { ...actualDbSocialReaders };
 const realDbFetchMemory = { ...actualDbFetchMemory };
 const realDbRecipes = { ...actualDbRecipes };
 const realDbRules = { ...actualDbRules };
+const realDbScoreSettings = { ...actualDbScoreSettings };
 const realDbSettings = { ...actualDbSettings };
 const realDbStock = { ...actualDbStock };
+const realDbWeighIns = { ...actualDbWeighIns };
 const realDbNoticeDismissals = { ...actualDbNoticeDismissals };
 const realFoods = { ...actualFoods };
 
@@ -143,6 +152,22 @@ mock.module("../../db/fetch-memory.js", () => ({
     ...realDbFetchMemory,
     recipeFetchMemory: () => createMemoryFetchMemoryStore(),
 }));
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns db stubs
+mock.module("../../db/score-settings.js", () => ({
+    ...realDbScoreSettings,
+    liveScoreSettingsStore: () => createMemoryScoreSettingsStore(),
+}));
+// The pages load the one-tap notices, which read the week plan and weigh-ins.
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns db stubs
+mock.module("../../db/plans.js", () => ({
+    ...realDbPlans,
+    liveRecipePlansStore: () => createMemoryPlansStore(),
+}));
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns db stubs
+mock.module("../../db/weigh-ins.js", () => ({
+    ...realDbWeighIns,
+    liveWeighInStore: () => createMemoryWeighInStore([]),
+}));
 mock.module("../../db/profiles.js", () => ({
     ...realDbProfiles,
     getProfile: async () => db.profile,
@@ -162,6 +187,12 @@ afterAll(() => {
     mock.module("../../db/rules.js", () => realDbRules);
     mock.module("../../db/household.js", () => realDbHousehold);
     mock.module("../../db/profiles.js", () => realDbProfiles);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores the score-settings stub window
+    mock.module("../../db/score-settings.js", () => realDbScoreSettings);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores the plans stub window
+    mock.module("../../db/plans.js", () => realDbPlans);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores the weigh-ins stub window
+    mock.module("../../db/weigh-ins.js", () => realDbWeighIns);
     mock.module("../../db/social-readers.js", () => realDbSocialReaders);
     mock.module("../../db/fetch-memory.js", () => realDbFetchMemory);
     mock.module("../../db/notice-dismissals.js", () => realDbNoticeDismissals);
@@ -251,7 +282,7 @@ describe("did-you-mean web forms", () => {
     test("grocery manual add", async () => {
         const eggs = await seedEggs();
         const store = await createGroceryStore(db.settingsStore, HH, "Shop");
-        const modalId = "grocery-add-food";
+        const modalId = "fd-grocery-add";
         const base = {
             kind: "food",
             store_id: store.id,
@@ -270,7 +301,7 @@ describe("did-you-mean web forms", () => {
         expect(ask.status).toBe(409);
         const askHtml = await ask.text();
         expect(askHtml).toContain(modalId);
-        expect(askHtml).toContain("data-modal-open-on-load");
+        expect(askHtml).toContain("data-sheet-open-on-load");
         expect(askHtml).toContain("Did you mean");
         expect(askHtml).toContain(`name="food_id" value="${eggs.id}"`);
         expect(askHtml).toContain('name="new_food"');
@@ -391,7 +422,7 @@ describe("did-you-mean web forms", () => {
     test("fridge manual add", async () => {
         const eggs = await seedEggs();
         const loc = await addLocation(db.fridgeStore, HH, "Fridge");
-        const modalId = "fridge-add-food";
+        const modalId = "fd-fridge-add";
         const base = {
             kind: "food",
             location_id: loc.id,
@@ -410,7 +441,7 @@ describe("did-you-mean web forms", () => {
         expect(ask.status).toBe(409);
         const html = await ask.text();
         expect(html).toContain(modalId);
-        expect(html).toContain("data-modal-open-on-load");
+        expect(html).toContain("data-sheet-open-on-load");
         expectQuestion(html, eggs.id, {
             kind: "food",
             location_id: loc.id,
@@ -515,7 +546,6 @@ describe("did-you-mean web forms", () => {
             name: "Omelette",
             yieldPortions: 1,
         });
-        const modalId = `recipe-add-ingredient-${recipe.id}`;
         const path = `/recipes/${recipe.id}/ingredients`;
         const base = {
             food_name: "chicken egg",
@@ -530,16 +560,13 @@ describe("did-you-mean web forms", () => {
             },
             body: formBody(base),
         });
+        // The recipe page has no ingredient dialog to ask in, so the refusal
+        // is the status and nothing written.
         expect(ask.status).toBe(409);
-        const html = await ask.text();
-        expect(html).toContain(modalId);
-        expect(html).toContain("data-modal-open-on-load");
-        expectQuestion(html, eggs.id, {
-            food_name: "chicken egg",
-            qty_amount: "1",
-            qty_unit: "each",
-        });
         expect(await db.foodsStore.listFoods(HH)).toHaveLength(1);
+        expect(await db.recipesStore.listIngredients(HH, recipe.id)).toEqual(
+            [],
+        );
 
         // new_food=1 before any alias exists: the flag alone creates the row.
         const createNew = await app().request(`http://x${path}`, {
@@ -759,9 +786,7 @@ describe("did-you-mean allergen replay", () => {
             }),
         });
         expect(block.status).toBe(400);
-        const html = await block.text();
-        expect(html).toContain('name="remember_alias" value="1"');
-        expect(html).toContain('name="alias_name" value="egg noodles"');
+        expect((await block.text()).toLowerCase()).toContain("wheat");
         const ok = await app().request("http://x/kitchen/groceries/lines", {
             method: "POST",
             headers: {
@@ -807,16 +832,8 @@ describe("did-you-mean grocery section", () => {
         });
         expect(res.status).toBe(409);
         const html = await res.text();
+        // The submitted section rides along as a hidden field, so the retry
+        // lands in the same section.
         expectQuestion(html, eggs.id, { section_id: dairy.id });
-        // The open dialog's slot, not the per-store <template> copies.
-        const slot = html.slice(
-            html.indexOf('data-fill-slot="sections" data-filled-template'),
-        );
-        const select = slot.match(
-            /<select id="grocery-add-section"[^>]*>([\s\S]*?)<\/select>/,
-        );
-        expect(select).not.toBeNull();
-        expect(select![1]).toContain(`<option value="${dairy.id}" selected>`);
-        expect(select![1]!.match(/ selected>/g)).toHaveLength(1);
     });
 });

@@ -5,11 +5,7 @@ import { liveScoreSettingsStore } from "../../db/score-settings.js";
 import { describeDb } from "../../db/testing/pg.js";
 import { seedHousehold } from "../../db/testing/fixtures.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import { SCORE_PRESETS } from "../../domain/product-score.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
 import { settingsRoutes } from "./settings.js";
@@ -105,7 +101,6 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
         setSqlForTests(sql);
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         ({ userId: ownerId, householdId } = await seedHousehold(sql));
         memberId = await addMember("member", "Member");
         adminId = await addMember("admin", "Admin");
@@ -392,15 +387,6 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
         expect(await store().getHouseholdDefault(householdId)).toBeNull();
         const html = await (await get(memberId)).text();
         expect(checkedPreset(html)).toBe("balanced");
-    });
-
-    test("the page is not there without the v2 shell", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        expect((await get(memberId)).status).toBe(404);
-        expect(
-            (await post(memberId, { intent: "choice", preset: "planet" }))
-                .status,
-        ).toBe(404);
     });
 
     test("a posted user id is ignored: the write is always the session member's", async () => {

@@ -74,7 +74,7 @@ describe("Today header goal name", () => {
     const base = buildPreviewTodayPageData(
         {
             theme: "light",
-            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+            flags: FIXTURE_APP_CHROME_FLAGS,
             attention: { count: 0, tabs: {} },
         },
         today,
@@ -144,7 +144,7 @@ describe("renderTodayV2Page", () => {
     const data = buildPreviewTodayPageData(
         {
             theme: "light",
-            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+            flags: FIXTURE_APP_CHROME_FLAGS,
             attention: { count: 0, tabs: {} },
         },
         today,
@@ -298,7 +298,7 @@ describe("renderTodayV2Page", () => {
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
@@ -315,7 +315,7 @@ describe("renderTodayV2Page", () => {
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
@@ -338,7 +338,7 @@ describe("renderTodayV2Page", () => {
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
@@ -375,7 +375,7 @@ describe("renderTodayV2Page", () => {
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 1, tabs: {} },
             },
             "2026-11-10",
@@ -391,7 +391,7 @@ describe("renderTodayV2Page", () => {
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
@@ -408,7 +408,7 @@ describe("renderTodayV2Page", () => {
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
@@ -425,7 +425,7 @@ describe("renderTodayV2Page", () => {
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
                 subjectLabel: "Sam",
             },
@@ -461,7 +461,7 @@ describe("renderTodayV2Page", () => {
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
@@ -541,7 +541,7 @@ describe("renderTodayV2Page", () => {
         const peer = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
                 subjectLabel: "Sam",
             },
@@ -572,7 +572,7 @@ describe("renderTodayV2Page", () => {
         const peer = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
                 subjectLabel: "Sam",
             },
@@ -607,7 +607,7 @@ describe("empty slot suggestions", () => {
     const data = buildPreviewTodayPageData(
         {
             theme: "light",
-            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+            flags: FIXTURE_APP_CHROME_FLAGS,
             attention: { count: 0, tabs: {} },
         },
         today,
@@ -700,7 +700,7 @@ describe("empty slot suggestions", () => {
         const peer = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
                 subjectLabel: "Sam",
             },
@@ -716,7 +716,7 @@ describe("Use soon recipe lines", () => {
     const today = "2026-11-10";
     const chrome = {
         theme: "light" as const,
-        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+        flags: FIXTURE_APP_CHROME_FLAGS,
         attention: { count: 0, tabs: {} },
     };
 
@@ -808,7 +808,7 @@ describe("today edit sheet Again", () => {
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
-                flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+                flags: FIXTURE_APP_CHROME_FLAGS,
                 attention: { count: 0, tabs: {} },
             },
             today,
@@ -833,7 +833,7 @@ describe("This week on Today", () => {
     const today = "2026-11-10";
     const chrome = {
         theme: "light" as const,
-        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+        flags: FIXTURE_APP_CHROME_FLAGS,
         attention: { count: 0, tabs: {} },
     };
     const week = buildWeekPlanView({

@@ -1379,7 +1379,8 @@ test("add-food dialog count does not grow with stores", () => {
     const six = page(6);
     const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
     expect(dialogs(one)).toBe(dialogs(six));
-    expect(dialogs(one)).toBe(2);
+    // 2 on the page, 5 from the shell's log sheets.
+    expect(dialogs(one)).toBe(7);
     expect(six.match(/id="grocery-add-food"/g)?.length).toBe(1);
     expect(six.match(/data-food-picker/g)?.length).toBe(1);
     expect(six.match(/commandfor="grocery-add-food"/g)?.length).toBe(7);

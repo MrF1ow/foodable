@@ -1,10 +1,5 @@
-import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
 import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
 import * as actualProfiles from "../../db/profiles.js";
@@ -103,16 +98,12 @@ mock.module("../attention.js", () => ({
                     : "light",
             attention: { count: 0, tabs: {} },
             flags,
-            ...(flags.uiV2
-                ? {
-                      identity: {
-                          viewerName: viewer.displayName,
-                          viewerRole: viewer.role,
-                          householdName: "Test household",
-                          memberCount: 1,
-                      },
-                  }
-                : {}),
+            identity: {
+                viewerName: viewer.displayName,
+                viewerRole: viewer.role,
+                householdName: "Test household",
+                memberCount: 1,
+            },
         };
     },
 }));
@@ -127,10 +118,6 @@ afterAll(() => {
     mock.module("../attention.js", () => realAttention);
 });
 
-afterEach(() => {
-    resetFlagsForTests();
-});
-
 const hono = new Hono();
 hono.route("/", trendsRoutes);
 
@@ -139,16 +126,7 @@ function cookie(userId: string): string {
 }
 
 describe("GET /trends", () => {
-    test("404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await hono.request("http://test/trends", {
-            headers: { cookie: cookie(ALICE) },
-        });
-        expect(res.status).toBe(404);
-    });
-
-    test("renders v2 trends page when ui-v2 is on", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("renders the trends page", async () => {
         const res = await hono.request("http://test/trends", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -159,7 +137,6 @@ describe("GET /trends", () => {
     });
 
     test("range query selects the default toggle", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request("http://test/trends?range=7", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -172,7 +149,6 @@ describe("GET /trends", () => {
     });
 
     test("month query is accepted and drives prev link range param", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request(
             "http://test/trends?month=2026-06&range=90",
             {

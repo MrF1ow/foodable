@@ -821,7 +821,8 @@ test("fridge item edit and delete dialogs are shared and escape row data", () =>
     expect(html.match(/id="qty-edit-food-unit"/g)?.length).toBe(1);
     expect(html.match(/id="move-edit-food"/g)?.length).toBe(1);
     expect(html.match(/id="move-edit-supply"/g)?.length).toBe(1);
-    expect(html.match(/<dialog\b/g)?.length).toBe(7);
+    // 7 on the page, 5 from the shell's log sheets.
+    expect(html.match(/<dialog\b/g)?.length).toBe(12);
     expect(html).toContain(
         'data-fill-title="Edit &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
     );
@@ -860,7 +861,7 @@ test("add-food, add-supply, and remove-location dialogs do not grow with locatio
     const six = page(6);
     const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
     expect(dialogs(one)).toBe(dialogs(six));
-    expect(dialogs(one)).toBe(7);
+    expect(dialogs(one)).toBe(12);
     expect(six.match(/id="fridge-add-food"/g)?.length).toBe(1);
     expect(six.match(/id="fridge-add-supply"/g)?.length).toBe(1);
     expect(six.match(/id="fridge-remove-location"/g)?.length).toBe(1);

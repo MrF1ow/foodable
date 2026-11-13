@@ -71,7 +71,7 @@ test("seg buttons accept aria-selected as the active state", async () => {
 });
 
 test("the app shell opts its main element into native control styling", () => {
-    expect(shellPage()).toContain('<main class="app-main native">');
+    expect(shellPage()).toContain('<main class="app-main native fd-main">');
 });
 
 test("page element defaults never outrank component classes", async () => {

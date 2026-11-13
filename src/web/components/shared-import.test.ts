@@ -3,8 +3,6 @@ import { recipeMacrosFixture } from "../../test-support/recipe-macros.js";
 import { test, expect } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { bottomNav as shellBottomNav } from "../shell.js";
-import { bottomNav as componentBottomNav } from "./bottom-nav.js";
 import { renderQuantityField } from "./quantity-field.js";
 import {
     renderFoodPicker,
@@ -360,10 +358,6 @@ test("quantity field food kind lists food units and preselects an explicit unit"
     for (const unit of ["g", "oz", "lb", "ml", "fl oz", "cup", "each"]) {
         expect(supplyHtml).toContain(`value="${unit}"`);
     }
-});
-
-test("shell re-exports the bottom-nav helper", () => {
-    expect(componentBottomNav).toBe(shellBottomNav);
 });
 
 function searchFormHtml(html: string): string {
