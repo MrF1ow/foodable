@@ -8,6 +8,7 @@ import {
     FOODABLE_USER_AGENT,
     createSafeFetcher,
     isPublicAddress,
+    urlAllowedForFetch,
 } from "./fetch-safe.js";
 
 /** Host check for fake fetchers: the exact host or a subdomain of it. */
@@ -47,6 +48,68 @@ describe("FOODABLE_USER_AGENT", () => {
 test("6to4 addresses are not public", () => {
     expect(isPublicAddress("2002:7f00:1::")).toBe(false);
     expect(isPublicAddress("2002:808:808::")).toBe(false);
+});
+
+describe("blocked hostnames", () => {
+    const allowed = (host: string) =>
+        urlAllowedForFetch(new URL(`https://${host}/`));
+
+    test.each([
+        "localhost",
+        "LOCALHOST",
+        "localhost.",
+        "app.localhost",
+        "printer.local",
+        "Printer.LOCAL",
+        "printer.local.",
+        "db.internal",
+        "railway.internal",
+        "foodable.railway.internal",
+        "Foodable.Railway.Internal",
+        "foodable.railway.internal.",
+        "router.home.arpa",
+        "ROUTER.HOME.ARPA",
+        "router.home.arpa.",
+        "internal",
+        "local",
+        "home.arpa",
+    ])("%s is blocked", (host) => {
+        expect(allowed(host)).toBe(false);
+    });
+
+    test("a public name that only contains a blocked word is allowed", () => {
+        expect(allowed("example.com")).toBe(true);
+        expect(allowed("localhost.example.com")).toBe(true);
+        expect(allowed("internal.example.com")).toBe(true);
+        expect(allowed("notlocal.example")).toBe(true);
+        expect(allowed("myinternal.com")).toBe(true);
+    });
+
+    test("fetchPage refuses a blocked hostname before resolving it", async () => {
+        const resolved: string[] = [];
+        const fetcher = createSafeFetcher({
+            resolve: async (host) => {
+                resolved.push(host);
+                return [PUBLIC];
+            },
+            fetch: async () => okResponse("ok"),
+        });
+        for (const host of [
+            "foodable.RAILWAY.INTERNAL.",
+            "nas.local",
+            "x.localhost",
+            "router.home.arpa",
+        ]) {
+            const out = await fetcher.fetchPage(`https://${host}/`, {
+                accept: ["text/html"],
+                checkRobots: false,
+            });
+            expect(out.ok).toBe(false);
+            if (out.ok) continue;
+            expect(out.reason).toBe("invalid_link");
+        }
+        expect(resolved).toEqual([]);
+    });
 });
 
 describe("isPublicAddress", () => {
