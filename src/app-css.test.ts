@@ -24,7 +24,9 @@ const APP_PARTIALS = ["base.css", "form.css", "table.css", "seg.css"];
 test("app.css assembles with no unresolved include markers", async () => {
     const css = await getAppCss();
     expect(css.match(/\/\*@include/g)).toBeNull();
-    expect(css).toContain(".bottom-nav");
+    expect(css).toContain(".app-main");
+    // No live page renders the old bottom nav, so its rules are gone.
+    expect(css).not.toContain(".bottom-nav");
 });
 
 test("app.css inlines tokens from the shared partial and app-owned partials in full", async () => {
@@ -71,7 +73,7 @@ test("seg buttons accept aria-selected as the active state", async () => {
 });
 
 test("the app shell opts its main element into native control styling", () => {
-    expect(shellPage()).toContain('<main class="app-main native">');
+    expect(shellPage()).toContain('<main class="app-main native fd-main">');
 });
 
 test("page element defaults never outrank component classes", async () => {

@@ -22,12 +22,13 @@ import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     HOUSEHOLD_ADD_STORE_MODAL_ID,
     HOUSEHOLD_MANAGE_ID,
+    HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
     manageFill,
     memberActionsTemplate,
     renderHouseholdV2OwnerModals,
-} from "../household.js";
+} from "./settings-household-modals.js";
 import {
     DUP_MERGE_MODAL_ID,
     renderPossibleDuplicatesBlock,
@@ -98,6 +99,7 @@ function pageLevelError(view: SettingsHouseholdV2View): Html {
     const modalOnly =
         view.openModalId === HOUSEHOLD_ADD_MEMBER_MODAL_ID ||
         view.openModalId === HOUSEHOLD_ADD_STORE_MODAL_ID ||
+        view.openModalId === HOUSEHOLD_ROTATE_TOKEN_MODAL_ID ||
         view.openModalId === HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID ||
         view.openModalId === HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID ||
         // The merge modal only renders while a pair is left to merge.
@@ -290,6 +292,15 @@ export function renderSettingsHouseholdV2Body(
           })
         : "";
 
+    // Owner only: the one fix for a leaked household bot token.
+    const rotateTokenTrigger = view.isOwner
+        ? `<div class="fd-settings-household-actions">${modalTrigger({
+              target: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
+              label: "Rotate household token",
+              className: "fd-settings-btn",
+          })}</div>`
+        : "";
+
     const dupBlock = renderPossibleDuplicatesBlock(
         {
             chrome: view.chrome,
@@ -302,15 +313,7 @@ export function renderSettingsHouseholdV2Body(
         { v2: true },
     );
 
-    const modals = renderHouseholdV2OwnerModals({
-        ...view,
-        location: "",
-        members: view.members,
-        stores: [],
-        memberRules: [],
-        unverifiedRecipeExpiryDays: null,
-        socialReaders: view.socialReaders,
-    });
+    const modals = renderHouseholdV2OwnerModals(view);
 
     const pluralsBlock = view.canManage
         ? pluralsSameFoodBlock(view)
@@ -319,7 +322,7 @@ export function renderSettingsHouseholdV2Body(
           );
 
     const sections = join([
-        raw(`${nameField}${token}`),
+        raw(`${nameField}${token}${rotateTokenTrigger}`),
         view.canManage
             ? raw(
                   `${String(sectionHeader({ title: "Food names", level: 2 }))}${String(pluralsBlock)}`,

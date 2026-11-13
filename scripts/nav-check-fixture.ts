@@ -1,51 +1,33 @@
 /**
- * Renders every household-app page with fixture data, in light and dark, and
- * serves the result next to the real /app.css so the pages can be looked at
- * without a database. The widget equivalent is scripts/widget-harness.ts.
+ * Fixture server for check:nav: the household app's pages rendered with
+ * fixture data in the shell, light and dark, and served next to the real
+ * /app.css, /app.js and the shell's own /app-v2.css and /app-v2.js, so Turbo
+ * navigation can be driven in a browser without a database. The widget
+ * equivalent is scripts/widget-harness.ts.
  *
  *   bun run scripts/nav-check-fixture.ts   # fixture server for check:nav (:4791)
  *
- * --shots needs Chromium on PATH (google-chrome-stable, chromium, or
- * chromium-browser — not the PATH google-chrome wrapper, which pins the GUI
- * profile). Shots pass --force-prefers-reduced-motion so --virtual-time-budget
- * does not freeze page entrances half-done, a throwaway --user-data-dir, and
- * an emulated prefers-color-scheme so bare pages (OS theme) render light and
- * dark as different bytes.
  * The server never imports this file.
  */
-import { utcTodayFromDate } from "../src/domain/stock.js";
-import { escapeHtml } from "../src/html.js";
-import { formatQuantityDisplayParts } from "../src/web/display-quantity.js";
-import { renderFridgePage } from "../src/web/pages/fridge.js";
-import { renderGroceryPage } from "../src/web/pages/grocery.js";
 import {
-    renderRecipeDetailPage,
-    renderRecipesPage,
-} from "../src/web/pages/recipes.js";
-import { renderSettingsPage } from "../src/web/pages/settings.js";
-import { renderFoodsSettingsPage } from "../src/web/pages/foods.js";
-import { renderHouseholdSettingsPage } from "../src/web/pages/household.js";
-import { renderSettingsHelpPage } from "../src/web/pages/settings-help.js";
-import { renderHouseholdSettingsPrefsPage } from "../src/web/pages/settings-household.js";
+    buildPreviewKitchenFridgeView,
+    renderKitchenFridgeV2Page,
+} from "../src/web/pages/v2/kitchen-fridge.js";
 import {
-    DEFAULT_RESTOCK,
-    EMPTY_HOUSEHOLD_PREFERENCES,
-} from "../src/household.js";
-import {
-    renderNutritionPage,
-    viewerChromeFromProfile,
-} from "../src/web/pages/nutrition.js";
+    buildPreviewKitchenGroceriesView,
+    renderKitchenGroceriesV2Page,
+} from "../src/web/pages/v2/kitchen-groceries.js";
+import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
+import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
 } from "../src/web/loaders.js";
-import { isNutritionCard } from "../src/domain/layout.js";
 import {
     getAppCss,
     getAppJs,
     getAppV2Css,
     getAppV2Js,
-    getEmbedWidgetHtml,
 } from "../src/widgets.js";
 import { defaultViewerFlags } from "../src/viewer-flags.js";
 import {
@@ -63,10 +45,7 @@ import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
-import {
-    settingsBackHref,
-    settingsUrlWithBack,
-} from "../src/web/settings-back.js";
+import { viewerChromeFromProfile } from "../src/web/shell.js";
 
 const OUT = "./tmp/app-preview";
 const PORT = 4791;
@@ -80,236 +59,8 @@ const ME = {
 const SAM = { ...ME, userId: "u2", role: "member", displayName: "Sam" };
 const RILEY = { ...ME, userId: "u3", role: "admin", displayName: "Riley" };
 
-// The widget templates carry a SAMPLE payload for standalone preview; reuse it
-// so the nutrition page shows real cards.
-async function widgetSample(key: string): Promise<unknown> {
-    const src = await Bun.file(
-        `./public/widgets/src/templates/${key}.html`,
-    ).text();
-    const m = src.match(/const SAMPLE = (\{[\s\S]*?\n {12}\});/);
-    return m ? new Function(`return (${m[1]})`)() : { locale: "en" };
-}
-
-function addUtcDays(isoDate: string, days: number): string {
-    const d = new Date(`${isoDate}T00:00:00.000Z`);
-    d.setUTCDate(d.getUTCDate() + days);
-    return d.toISOString().slice(0, 10);
-}
-
-function fridgeView(chrome: unknown) {
-    const today = utcTodayFromDate();
-    const loc = (id: string, name: string, sortOrder: number) => ({
-        id,
-        householdId: H,
-        name,
-        sortOrder,
-    });
-    const item = (
-        id: string,
-        locationId: string,
-        displayName: string,
-        amount: number,
-        unit: string,
-        expiresOn: string | null,
-        food = true,
-    ) => ({
-        id,
-        householdId: H,
-        locationId,
-        kind: food ? "food" : "supply",
-        displayName,
-        quantity: { amount, unit },
-        foodId: food ? `f-${id}` : `f-sup-${id}`,
-        expiresOn,
-    });
-    return {
-        chrome,
-        today,
-        locations: [loc("l1", "Fridge", 0), loc("l2", "Pantry", 1)],
-        items: [
-            item("i1", "l1", "Expired milk", 1, "l", addUtcDays(today, -1)),
-            item("i2", "l1", "Eggs", 6, "each", addUtcDays(today, 1)),
-            item("i3", "l1", "Yogurt", 2, "each", addUtcDays(today, 3)),
-            item("i4", "l1", "Cheese", 200, "g", addUtcDays(today, 5)),
-            item("i5", "l1", "Butter", 250, "g", addUtcDays(today, 14)),
-            item("i6", "l2", "Paper towels", 3, "roll", null, false),
-            ...Array.from({ length: 42 }, (_, i) =>
-                item(
-                    `i-scroll-${i}`,
-                    "l2",
-                    `Pantry filler ${i + 1}`,
-                    1,
-                    "each",
-                    addUtcDays(today, 30 + (i % 14)),
-                ),
-            ),
-        ],
-    };
-}
-
-function groceryView(chrome: unknown) {
-    const section = (
-        storeId: string,
-        id: string,
-        name: string,
-        isOther: boolean,
-        lines: unknown[],
-    ) => ({
-        id,
-        householdId: H,
-        storeId,
-        name,
-        sortOrder: isOther ? 8 : 0,
-        hidden: false,
-        isOther,
-        lines,
-    });
-    const line = (
-        storeId: string,
-        sectionId: string,
-        id: string,
-        name: string,
-        amount: number,
-        unit: string,
-        checked: boolean,
-        alreadyHave: unknown = null,
-    ) => ({
-        id,
-        householdId: H,
-        storeId,
-        sectionId,
-        kind: "food",
-        displayName: name,
-        quantity: { amount, unit },
-        foodId: `f-${id}`,
-        checked,
-        alreadyHave,
-    });
-    return {
-        chrome,
-        isOwner: true,
-        locations: [
-            { id: "l1", name: "Fridge" },
-            { id: "l2", name: "Pantry" },
-        ],
-        stores: [
-            {
-                id: "s1",
-                householdId: H,
-                name: "Safeway",
-                sortOrder: 0,
-                rules: [{ id: "r1", body: "Prefer store brand." }],
-                sections: [
-                    section("s1", "sec1", "Produce", false, [
-                        line("s1", "sec1", "g1", "Bananas", 6, "each", false),
-                        line("s1", "sec1", "g2", "Spinach", 300, "g", true),
-                    ]),
-                    section("s1", "sec2", "Other", true, [
-                        line("s1", "sec2", "g3", "Eggs", 12, "each", false, {
-                            cover: "partial",
-                            have: { amount: 6, unit: "each" },
-                            need: { amount: 12, unit: "each" },
-                        }),
-                    ]),
-                ],
-            },
-            {
-                id: "s2",
-                householdId: H,
-                name: "Costco",
-                sortOrder: 1,
-                rules: [],
-                sections: [
-                    section("s2", "sec3", "Dairy", false, [
-                        line("s2", "sec3", "g4", "Milk", 2, "l", false),
-                    ]),
-                ],
-            },
-        ],
-    };
-}
-
-const RECIPE = {
-    id: "r1",
-    householdId: H,
-    creatorId: "u1",
-    name: "Shakshuka",
-    yieldPortions: 4,
-    instructions: "Simmer tomatoes, crack eggs, cover.",
-    sourceUrl: null,
-    tags: ["dinner", "vegetarian"],
-    notes: null,
-    prepMinutes: 10,
-    cookMinutes: 20,
-    verification: "verified" as const,
-    updatedAt: "2026-10-01T00:00:00Z",
-};
-
-const RECIPE_TWO = {
-    id: "r2",
-    householdId: H,
-    creatorId: "u1",
-    name: "Oatmeal",
-    yieldPortions: 2,
-    instructions: "Simmer oats.",
-    sourceUrl: null,
-    tags: ["breakfast"],
-    notes: null,
-    prepMinutes: 5,
-    cookMinutes: 10,
-    verification: "verified" as const,
-    updatedAt: "2026-10-01T00:00:00Z",
-};
-
-const MACROS = {
-    calories: 320,
-    protein_g: 18,
-    carbs_g: 22,
-    fat_g: 17,
-    fiber_g: 5,
-    sugar_g: 9,
-    alcohol_g: 0,
-    incomplete: false,
-};
-
-function food(id: string, name: string, calories: number | null) {
-    return {
-        id,
-        householdId: H,
-        kind: "food",
-        name,
-        normalizedName: name.toLowerCase(),
-        brand: null,
-        defaultUnit: "g",
-        gramsPerEach: null,
-        gramsPerMl: null,
-        calories,
-        proteinG: null,
-        carbsG: null,
-        fatG: null,
-        fiberG: null,
-        sugarG: null,
-        alcoholG: null,
-        caffeineMg: null,
-        nutritionSource: null,
-        allergens: [],
-        offSourceId: null,
-        genericFoodId: null,
-        usualProductId: null,
-        usualStoreId: null,
-        usualAmount: null,
-        createdBy: null,
-        archivedAt: null,
-        createdAt: "2026-10-01T00:00:00Z",
-        updatedAt: "2026-10-01T00:00:00Z",
-        aliases: [],
-    };
-}
-
-// Views are cast with `as never`: this script is not typechecked (CI's
-// typecheck covers src/ only) and the fixtures only carry what renderers read.
-// The shell the page renders in: the old one, or the new one (flag ui-v2) for
-// the -v2 renders the v2 scenarios navigate.
+// Views are cast with `as never`: this script is typechecked, but the
+// fixtures only carry what the renderers read.
 const FIXTURE_TRENDS_GOALS: NutritionGoals = {
     user_id: "u1",
     daily_calories: 2200,
@@ -357,210 +108,109 @@ function previewTrendsPage(chrome: ReturnType<typeof fixtureChrome>) {
     return renderTrendsV2Page(data);
 }
 
-function fixtureChrome(theme: "light" | "dark", v2: boolean) {
+function fixtureChrome(theme: "light" | "dark") {
     return {
         ...viewerChromeFromProfile({ theme }),
         attention: { count: 0, tabs: {} },
-        flags: { ...defaultViewerFlags(), uiV2: v2 },
-        ...(v2
-            ? {
-                  identity: {
-                      viewerName: "Ethan Flow",
-                      viewerRole: "owner",
-                      householdName: "The Flow household",
-                      memberCount: 2,
-                  },
-              }
-            : {}),
+        flags: defaultViewerFlags(),
+        identity: {
+            viewerName: "Ethan Flow",
+            viewerRole: "owner",
+            householdName: "The Flow household",
+            memberCount: 2,
+        },
     };
 }
 
-async function pages(
-    theme: "light" | "dark",
-    v2 = false,
-): Promise<Record<string, string>> {
-    const chrome = fixtureChrome(theme, v2);
-    const nutrition = v2
-        ? renderTodayV2Page(
-              buildPreviewTodayPageData(chrome as never, "2026-11-10"),
-          )
-        : await renderNutritionPage({
-              access: { ok: true, mode: "self", viewer: ME, subject: ME },
-              members: [ME, SAM],
-              summary: await widgetSample("nutrition-summary"),
-              goals: await widgetSample("goal-progress"),
-              trends: await widgetSample("trends"),
-              weight: await widgetSample("weight-trends"),
-              chrome,
-              cardOrder: [
-                  "nutrition-summary",
-                  "goal-progress",
-                  "trends",
-                  "weight-trends",
-              ],
-          } as never);
-    const nutritionPeer = await renderNutritionPage({
-        access: { ok: true, mode: "peer", viewer: ME, subject: SAM },
-        members: [ME, SAM],
-        summary: await widgetSample("nutrition-summary"),
-        goals: await widgetSample("goal-progress"),
-        trends: await widgetSample("trends"),
-        weight: await widgetSample("weight-trends"),
+function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
+    return renderSettingsHouseholdV2Page({
         chrome,
-        cardOrder: [
-            "nutrition-summary",
-            "goal-progress",
-            "trends",
-            "weight-trends",
-        ],
-        viewMemberId: SAM.userId,
-    } as never);
-    return {
-        nutrition,
-        "nutrition-peer": nutritionPeer,
-        fridge: renderFridgePage(fridgeView(chrome) as never),
-        grocery: renderGroceryPage(groceryView(chrome) as never),
-        recipes: renderRecipesPage({
-            chrome,
-            recipes: [RECIPE, RECIPE_TWO],
-            members: [ME, SAM],
-            viewerId: "u1",
-        } as never),
-        recipe: renderRecipeDetailPage(recipeDetailFixture(chrome) as never),
-        settings: v2
-            ? renderSettingsHomeV2Page({
-                  chrome: chrome as never,
-                  displayName: "Ethan Flow",
-                  email: "ethan@example.com",
-              })
-            : renderSettingsPage({
-                  chrome,
-                  flags: chrome.flags,
-                  backHref: "/kitchen/fridge",
-                  displayName: "Ethan",
-                  timezone: "America/Los_Angeles",
-                  weightUnit: "kg",
-                  widgetsEnabled: true,
-                  alcoholTrackingEnabled: false,
-                  drinkUnit: "",
-              } as never),
-        ...(v2
-            ? {
-                  "settings-account": renderSettingsAccountV2Page({
-                      chrome: chrome as never,
-                      backHref: "/kitchen/fridge",
-                      displayName: "Ethan Flow",
-                      timezone: "America/Los_Angeles",
-                      weightUnit: "kg",
-                      widgetsEnabled: true,
-                      alcoholTrackingEnabled: false,
-                      drinkUnit: "",
-                  }),
-                  "settings-display": renderSettingsDisplayV2Page({
-                      chrome: chrome as never,
-                      storedTheme: null,
-                  }),
-              }
-            : {}),
-        household: renderHouseholdSettingsPage({
-            chrome,
-            householdName: "Flow house",
-            location: "Portland",
-            members: [ME, SAM, RILEY],
-            stores: [
-                {
-                    id: "s1",
-                    householdId: H,
-                    name: "Safeway",
-                    sortOrder: 0,
-                    sections: [
-                        {
-                            id: "sec1",
-                            householdId: H,
-                            storeId: "s1",
-                            name: "Produce",
-                            sortOrder: 0,
-                            hidden: false,
-                            isOther: false,
-                        },
-                    ],
-                    rules: [{ id: "r1", body: "Prefer store brand." }],
-                },
-            ],
-            memberRules: [
-                { member: ME, rules: [], allergens: [], dislikes: [] },
-            ],
-            isOwner: true,
-        } as never),
-        foods: renderFoodsSettingsPage(foodsSettingsFixture(chrome) as never),
-        help: v2
-            ? renderSettingsHelpV2Page({ chrome: chrome as never })
-            : renderSettingsHelpPage({
-                  chrome,
-                  flags: chrome.flags,
-                  backHref: "/kitchen/fridge",
-              } as never),
-        "settings-household": renderHouseholdSettingsPrefsPage({
-            chrome,
-            flags: chrome.flags,
-            backHref: "/kitchen/fridge",
-            member: { ...ME, role: "owner" },
-            preferences: {
-                ...EMPTY_HOUSEHOLD_PREFERENCES,
-                restock: { ...DEFAULT_RESTOCK, enabled: true },
+        householdName: "The Flow household",
+        members: [ME, SAM, RILEY],
+        stores: [],
+        isOwner: true,
+        canManage: true,
+        viewerUserId: ME.userId,
+        noticeResult: {
+            notices: [],
+            dismissals: [],
+            subjectNames: new Map(),
+            subjectTimes: new Map(),
+            noticeFoods: new Map(),
+            catalogFoods: [],
+            aliasMap: new Map(),
+            barcodedIds: new Set(),
+            possibleDuplicatePairs: [],
+            recipesListPrefetch: {
+                recipes: [],
+                allIngredients: [],
+                fridgeItems: [],
+                foodsById: new Map(),
             },
-            ownerTimezoneLabel: "America/Los_Angeles",
+        },
+        duplicatePairs: [],
+        refCounts: new Map(),
+    } as never);
+}
+
+async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
+    const chrome = fixtureChrome(theme);
+    return {
+        nutrition: renderTodayV2Page(
+            buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+        ),
+        fridge: renderKitchenFridgeV2Page(
+            buildPreviewKitchenFridgeView(chrome as never, "2026-11-10"),
+        ),
+        grocery: renderKitchenGroceriesV2Page(
+            buildPreviewKitchenGroceriesView(chrome as never),
+        ),
+        recipes: renderRecipesListV2Page({
+            chrome,
+            query: "",
+            filter: "",
+            totalCount: 0,
+            cards: [],
+        } as never),
+        trends: previewTrendsPage(chrome),
+        settings: renderSettingsHomeV2Page({
+            chrome: chrome as never,
+            displayName: "Ethan Flow",
+            email: "ethan@example.com",
         }),
+        "settings-account": renderSettingsAccountV2Page({
+            chrome: chrome as never,
+            backHref: "/kitchen/fridge",
+            displayName: "Ethan Flow",
+            timezone: "America/Los_Angeles",
+            weightUnit: "kg",
+            widgetsEnabled: true,
+            alcoholTrackingEnabled: false,
+            drinkUnit: "",
+        }),
+        "settings-display": renderSettingsDisplayV2Page({
+            chrome: chrome as never,
+            storedTheme: null,
+        }),
+        help: renderSettingsHelpV2Page({ chrome: chrome as never }),
+        household: householdPage(chrome),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
-        ...(v2 ? { trends: previewTrendsPage(chrome) } : {}),
     };
 }
 
-function findChromium(): string | null {
-    // Prefer the real binary. PATH `google-chrome` is often a wrapper that
-    // pins --user-data-dir to the GUI profile and hangs headless shots.
-    for (const bin of [
-        "/usr/bin/google-chrome-stable",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "google-chrome-stable",
-        "chromium",
-        "chromium-browser",
-    ]) {
-        if (bin.startsWith("/")) {
-            try {
-                if (Bun.file(bin).size > 0) return bin;
-            } catch {
-                // missing
-            }
-            continue;
-        }
-        const path = Bun.which(bin);
-        if (path) return path;
-    }
-    return null;
-}
-
-// Warm the asset hashes before writing pages. A later re-render (a shared
-// dialog's server-error response) goes through renderAppShell, which stamps
+// Warm the asset hashes before writing pages: renderAppShell stamps
 // /app.css?v= and /app.js?v= once the bundles exist. If the page the browser
-// loaded omitted those queries, Turbo treats the 400 as a tracked-element
-// mismatch and full-reloads the unfilled page.
+// loaded omitted those queries, Turbo treats a later response that carries
+// them as a tracked-element mismatch and full-reloads.
 await getAppCss();
 await getAppJs();
 await getAppV2Css();
 await getAppV2Js();
 
-const names: string[] = [];
 for (const theme of ["light", "dark"] as const) {
     for (const [name, html] of Object.entries(await pages(theme))) {
-        const file = `${name}-${theme}`;
-        await Bun.write(`${OUT}/${file}.html`, html);
-        names.push(file);
-    }
-    for (const [name, html] of Object.entries(await pages(theme, true))) {
-        await Bun.write(`${OUT}/${name}-${theme}-v2.html`, html);
+        await Bun.write(`${OUT}/${name}-${theme}.html`, html);
     }
 }
 
@@ -574,9 +224,7 @@ const ROUTE_BASE: Record<string, string> = {
     "/settings/account": "settings-account",
     "/settings/display": "settings-display",
     "/settings/help": "help",
-    "/settings/household-settings": "settings-household",
     "/settings/household": "household",
-    "/settings/household/items": "foods",
     "/create-household": "create-household",
 };
 
@@ -587,19 +235,15 @@ function themeFileSuffix(): "light" | "dark" {
     return accountTheme ?? "light";
 }
 
-/** Which shell the fixture's pages render in; /__control?shell=v2|old. */
-let shellV2 = false;
-
 function routeHtmlFile(pathname: string): string {
     const base = ROUTE_BASE[pathname] || "fridge";
-    return `${base}-${themeFileSuffix()}${shellV2 ? "-v2" : ""}.html`;
+    return `${base}-${themeFileSuffix()}.html`;
 }
 
 function applyAccountTheme(html: string): string {
     if (accountTheme === "light" || accountTheme === "dark") return html;
-    // System follows the OS. The light render stamps data-theme on <html>
-    // and on each widget frame; every stamp has to come off or the cards
-    // stay light while the page does not.
+    // System follows the OS. The light render stamps data-theme on <html>;
+    // the stamp has to come off or the page stays light.
     return html
         .replace(/\sdata-theme="(light|dark)"/g, "")
         .replace(
@@ -610,7 +254,6 @@ function applyAccountTheme(html: string): string {
 
 let stallMs = 0;
 let postMode = "ok";
-let modalId = "";
 let loginPath = "";
 let postDelay = 0;
 let sessionMode: "app" | "guest" = "app";
@@ -649,180 +292,6 @@ async function loginDocument() {
         .replaceAll("{{CONNECT_HINT}}", "");
 }
 
-function foodsSettingsFixture(chrome: unknown) {
-    return {
-        chrome,
-        stores: [{ id: "s1", householdId: H, name: "Safeway", sortOrder: 0 }],
-        foods: [food("f1", "Eggs", 143), food("f2", "Milk", 64)],
-    };
-}
-
-function recipeDetailFixture(chrome: unknown) {
-    const ingredient = (
-        id: string,
-        displayName: string,
-        amount: number,
-        unit: string,
-        note: string | null,
-    ) => ({
-        id,
-        recipeId: "r1",
-        foodId: id,
-        displayName,
-        quantity: { amount, unit },
-        note,
-        sortOrder: 0,
-        perPortionAmount: amount,
-        personAmount: amount,
-    });
-    return {
-        chrome,
-        recipe: RECIPE,
-        notices: [],
-        noticeContext: {
-            from: "/recipes/r1",
-            foods: new Map([
-                ["ing1", { genericFoodId: null }],
-                ["ing2", { genericFoodId: null }],
-            ]),
-        },
-        ingredients: [
-            ingredient("ing1", "Eggs", 6, "each", "large"),
-            ingredient("ing2", "Milk", 200, "ml", null),
-        ],
-        members: [ME, SAM],
-        stores: [{ id: "s1", name: "Safeway" }],
-        viewerId: "u1",
-        filterUserId: "u1",
-        portionCount: 1,
-        macros: MACROS,
-        isOwner: true,
-    };
-}
-
-function renderFailedModal(pathname: string, modalId: string): string | null {
-    if (!modalId) return null;
-    const chrome = fixtureChrome(themeFileSuffix(), shellV2);
-    if (pathname === "/kitchen/fridge") {
-        const view = fridgeView(chrome);
-        const itemId = (prefix: string) =>
-            modalId.startsWith(prefix) ? modalId.slice(prefix.length) : "";
-        const hasItem = (id: string) =>
-            id.length > 0 && view.items.some((item) => item.id === id);
-        const hasLocation = (id: string) =>
-            id.length > 0 &&
-            view.locations.some((location) => location.id === id);
-        if (
-            !hasItem(itemId("fridge-edit-")) &&
-            !hasItem(itemId("fridge-delete-")) &&
-            !hasLocation(itemId("fridge-add-food-")) &&
-            !hasLocation(itemId("fridge-add-supply-")) &&
-            !hasLocation(itemId("fridge-remove-location-"))
-        ) {
-            return null;
-        }
-        return renderFridgePage({
-            ...view,
-            error: "Name is required",
-            openModalId: modalId,
-        } as never);
-    }
-    if (pathname === "/recipes/r1") {
-        const view = recipeDetailFixture(chrome);
-        const itemId = (prefix: string) =>
-            modalId.startsWith(prefix) ? modalId.slice(prefix.length) : "";
-        const known = (id: string) =>
-            id.length > 0 &&
-            view.ingredients.some((ingredient) => ingredient.id === id);
-        if (
-            !known(itemId("recipe-edit-ingredient-")) &&
-            !known(itemId("recipe-delete-ingredient-"))
-        ) {
-            return null;
-        }
-        return renderRecipeDetailPage({
-            ...view,
-            error: "Name is required",
-            openModalId: modalId,
-        } as never);
-    }
-    if (
-        pathname === "/settings/household/items" &&
-        modalId.startsWith("food-edit-")
-    ) {
-        const id = modalId.slice("food-edit-".length);
-        const view = foodsSettingsFixture(chrome);
-        if (!id || !view.foods.some((item) => item.id === id)) return null;
-        return renderFoodsSettingsPage({
-            ...view,
-            error: "Name is required",
-            openModalId: modalId,
-        } as never);
-    }
-    return null;
-}
-
-function injectModal(html: string, id: string) {
-    if (!id) return html;
-    const re = new RegExp(`(<dialog\\b[^>]*\\bid="${id}"[^>]*)>`);
-    return html
-        .replace(re, (_full, openTag) => {
-            const cleaned = String(openTag).replace(
-                /\sdata-modal-open-on-load/g,
-                "",
-            );
-            return `${cleaned} data-modal-open-on-load>`;
-        })
-        .replace(
-            new RegExp(
-                `(<dialog\\b[^>]*\\bid="${id}"[^>]*>\\s*<div class="modal-sheet">)`,
-            ),
-            `$1<p class="error-banner" id="p8-error">Name is required</p>`,
-        );
-}
-
-function stripItem(html: string, id: string) {
-    const re = new RegExp(
-        `<li\\b[^>]*class="[^"]*fridge-item[^"]*"[^>]*data-item-id="${id}"[\\s\\S]*?</li>`,
-    );
-    if (!re.test(html)) {
-        const re2 = new RegExp(
-            `<li\\b[^>]*data-item-id="${id}"[^>]*>[\\s\\S]*?</li>`,
-        );
-        return html.replace(re2, `<p id="done">Item removed</p>`);
-    }
-    return html.replace(re, `<p id="done">Item removed</p>`);
-}
-
-/** The 303 page is the fixture's next fridge render, with this edit applied. */
-function patchFridgeItemQty(
-    html: string,
-    id: string,
-    amount: number,
-    unit: string,
-): string {
-    const label = escapeHtml(formatQuantityDisplayParts(amount, unit));
-    const safeId = id.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const liRe = new RegExp(
-        `<li\\b[^>]*class="[^"]*fridge-item[^"]*"[^>]*data-item-id="${safeId}"[\\s\\S]*?</li>`,
-    );
-    return html.replace(liRe, (li) => {
-        let next = li.replace(
-            /(<p class="fridge-item-qty row-meta">)[^<]*? · /,
-            (_match, open: string) => `${open}${label} · `,
-        );
-        next = next.replace(
-            /data-fill-field-qty_amount="[^"]*"/g,
-            () => `data-fill-field-qty_amount="${escapeHtml(String(amount))}"`,
-        );
-        next = next.replace(
-            /data-fill-field-qty_unit="[^"]*"/g,
-            () => `data-fill-field-qty_unit="${escapeHtml(unit)}"`,
-        );
-        return next;
-    });
-}
-
 const server = Bun.serve({
     port: PORT,
     async fetch(req) {
@@ -842,7 +311,6 @@ const server = Bun.serve({
                 approveCount,
                 stallMs,
                 postMode,
-                modalId,
                 loginPath,
                 postDelay,
                 sessionMode,
@@ -854,8 +322,6 @@ const server = Bun.serve({
                 stallMs = Number(url.searchParams.get("stall"));
             if (url.searchParams.has("post"))
                 postMode = url.searchParams.get("post") || "ok";
-            if (url.searchParams.has("modal"))
-                modalId = url.searchParams.get("modal") || "";
             if (url.searchParams.has("loginpath"))
                 loginPath = url.searchParams.get("loginpath") || "";
             if (url.searchParams.has("delay"))
@@ -867,9 +333,6 @@ const server = Bun.serve({
             if (url.searchParams.has("session")) {
                 const mode = url.searchParams.get("session");
                 sessionMode = mode === "guest" ? "guest" : "app";
-            }
-            if (url.searchParams.has("shell")) {
-                shellV2 = url.searchParams.get("shell") === "v2";
             }
             if (url.searchParams.has("theme")) {
                 const t = url.searchParams.get("theme");
@@ -884,26 +347,10 @@ const server = Bun.serve({
                 ok: true,
                 stallMs,
                 postMode,
-                modalId,
                 loginPath,
                 postDelay,
                 sessionMode,
                 accountTheme,
-            });
-        }
-        if (path.startsWith("/app/widgets/")) {
-            let key = path.slice("/app/widgets/".length);
-            try {
-                key = decodeURIComponent(key);
-            } catch {
-                return new Response("not found", { status: 404 });
-            }
-            if (!isNutritionCard(key)) {
-                return new Response("not found", { status: 404 });
-            }
-            const doc = await getEmbedWidgetHtml(key);
-            return new Response(doc.html, {
-                headers: { "content-type": "text/html; charset=utf-8" },
             });
         }
         if (
@@ -998,29 +445,27 @@ const server = Bun.serve({
             const entries: [string, string][] = [];
             for (const [k, v] of form.entries()) entries.push([k, String(v)]);
             posts.push({ path, entries });
-            if (
-                path === "/settings" &&
-                entries.some(([k, v]) => k === "group" && v === "account")
-            ) {
+            // Settings › Display (and the theme buttons on Settings home) save
+            // the appearance, as the real route does; the saved theme is what
+            // the next page renders.
+            if (path === "/settings/display") {
                 const picked = entries.find(([k]) => k === "theme")?.[1];
                 accountTheme =
                     picked === "light" || picked === "dark" ? picked : null;
             }
             if (postDelay) await sleep(postDelay);
             const referer =
-                req.headers.get("referer") ||
-                "http://127.0.0.1:4791/kitchen/fridge";
+                req.headers.get("referer") || `http://127.0.0.1:${PORT}/`;
             const dest = new URL(referer);
             let destKey = dest.pathname + dest.search;
-            if (path === "/settings") {
-                const fromRaw = entries.find(([k]) => k === "from")?.[1];
-                const backHref = settingsBackHref({
-                    from: fromRaw,
-                    origin: url.origin,
-                });
-                destKey = settingsUrlWithBack(backHref);
+            if (path === "/settings/display") {
+                // Like the route: Settings home's control comes back to it.
+                destKey =
+                    entries.find(([k]) => k === "return")?.[1] === "/settings"
+                        ? "/settings"
+                        : "/settings/display";
             }
-            const file = routeHtmlFile(dest.pathname);
+            const file = routeHtmlFile(destKey.split("?")[0]!);
             let html = applyAccountTheme(
                 await fileHtml(file, destKey + "#post"),
             );
@@ -1033,38 +478,6 @@ const server = Bun.serve({
                     status: 401,
                     headers: { "content-type": "text/html; charset=utf-8" },
                 });
-            }
-            const item =
-                /^\/kitchen\/fridge\/items\/([^/]+)/.exec(path)?.[1] ?? "";
-            if (postMode === "fail" || postMode === "modal") {
-                const rendered = renderFailedModal(dest.pathname, modalId);
-                if (rendered) {
-                    html = applyAccountTheme(
-                        stamp(rendered, destKey + "#post"),
-                    );
-                } else {
-                    html = injectModal(html, modalId);
-                }
-                html = html.replace(
-                    "</main>",
-                    `<script>window.__xss=1</script></main>`,
-                );
-                return new Response(html, {
-                    status: 400,
-                    headers: { "content-type": "text/html; charset=utf-8" },
-                });
-            }
-            if (path.includes("/delete") && item) html = stripItem(html, item);
-            if (
-                postMode === "ok" &&
-                new RegExp("^/kitchen/fridge/items/[^/]+$").test(path)
-            ) {
-                const amount = entries.find(([k]) => k === "qty_amount")?.[1];
-                const unit = entries.find(([k]) => k === "qty_unit")?.[1] ?? "";
-                const n = amount == null ? Number.NaN : Number(amount);
-                if (Number.isFinite(n) && unit) {
-                    html = patchFridgeItemQty(html, item, n, unit);
-                }
             }
             html = html.replace("</main>", `<p id="done">saved</p></main>`);
             pending.set(destKey, { html, status: 200 });
@@ -1093,13 +506,6 @@ const server = Bun.serve({
             const login = await loginDocument();
             return new Response(login, {
                 status: 200,
-                headers: { "content-type": "text/html; charset=utf-8" },
-            });
-        }
-        if (path.startsWith("/recipes/")) {
-            if (stallMs) await sleep(stallMs);
-            const html = await fileHtml("recipe-light.html", path);
-            return new Response(html, {
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
         }

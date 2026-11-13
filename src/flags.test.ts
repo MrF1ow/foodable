@@ -282,9 +282,9 @@ test("sdkContext omits client", () => {
 describe("parseFoodableFlags", () => {
     test("modes and whitespace", () => {
         const { rules } = parseFoodableFlags(
-            " ui-v2:internal ,  off-lookups:off  ",
+            " mcp-widgets-v2:internal ,  off-lookups:off  ",
         );
-        expect(rules.get("ui-v2")).toBe("internal");
+        expect(rules.get("mcp-widgets-v2")).toBe("internal");
         expect(rules.get("off-lookups")).toBe("off");
     });
 
@@ -300,13 +300,17 @@ describe("parseFoodableFlags", () => {
         const lines: string[] = [];
         console.warn = (msg: string) => lines.push(String(msg));
         try {
-            parseFoodableFlags("ui-v2:sideways,ui-v2:sideways");
+            parseFoodableFlags(
+                "mcp-widgets-v2:sideways,mcp-widgets-v2:sideways",
+            );
         } finally {
             console.warn = warn;
         }
         const modeWarnings = lines.filter((l) => l.includes("sideways"));
         expect(modeWarnings.length).toBe(1);
-        expect(parseFoodableFlags("ui-v2:sideways").rules.size).toBe(0);
+        expect(parseFoodableFlags("mcp-widgets-v2:sideways").rules.size).toBe(
+            0,
+        );
     });
 
     test("empty flag name is malformed", () => {
@@ -316,10 +320,14 @@ describe("parseFoodableFlags", () => {
     });
 
     test("duplicate last wins", () => {
-        const { warnings } = parseFoodableFlags("ui-v2:off,ui-v2:all");
+        const { warnings } = parseFoodableFlags(
+            "mcp-widgets-v2:off,mcp-widgets-v2:all",
+        );
         expect(warnings.some((w) => w.includes("duplicate"))).toBe(true);
-        const { rules } = parseFoodableFlags("ui-v2:off,ui-v2:all");
-        expect(rules.get("ui-v2")).toBe("all");
+        const { rules } = parseFoodableFlags(
+            "mcp-widgets-v2:off,mcp-widgets-v2:all",
+        );
+        expect(rules.get("mcp-widgets-v2")).toBe("all");
     });
 
     test("empty string", () => {
@@ -329,19 +337,21 @@ describe("parseFoodableFlags", () => {
 });
 
 test("env reader internal vs all vs default", () => {
-    const rules = parseFoodableFlags("ui-v2:internal,off-lookups:off").rules;
+    const rules = parseFoodableFlags(
+        "mcp-widgets-v2:internal,off-lookups:off",
+    ).rules;
     const reader = createEnvFlags(rules);
 
-    expect(reader.isEnabled("ui-v2", userCtx("owner"))).toBe(true);
-    expect(reader.isEnabled("ui-v2", userCtx("member"))).toBe(false);
-    expect(reader.evaluate("ui-v2", userCtx("owner")).reason).toBe(
+    expect(reader.isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(true);
+    expect(reader.isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(false);
+    expect(reader.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
         "ENV_INTERNAL",
     );
 
     const hh = buildFlagContext({
         auth: { kind: "household", householdId: "hh-1" },
     });
-    expect(reader.isEnabled("ui-v2", hh)).toBe(false);
+    expect(reader.isEnabled("mcp-widgets-v2", hh)).toBe(false);
 
     const hhRules = parseFoodableFlags("restock-runner:internal").rules;
     const hhReader = createEnvFlags(hhRules);
@@ -497,7 +507,9 @@ describe("Railway reader fake SDK", () => {
         });
         const reader = createRailwayFlags(sdk);
         reader.markInitDone();
-        expect(reader.evaluate("ui-v2", userCtx("owner")).reason).toBe("STALE");
+        expect(reader.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
+            "STALE",
+        );
 
         const sdk2 = fakeSdk({
             evaluateBoolean: () => ({
@@ -508,7 +520,9 @@ describe("Railway reader fake SDK", () => {
         });
         const r2 = createRailwayFlags(sdk2);
         r2.markInitDone();
-        expect(r2.evaluate("ui-v2", userCtx("owner")).reason).toBe("CONFLICT");
+        expect(r2.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
+            "CONFLICT",
+        );
 
         const sdk3 = fakeSdk({
             evaluateBoolean: () => ({
@@ -519,7 +533,7 @@ describe("Railway reader fake SDK", () => {
         });
         const r3 = createRailwayFlags(sdk3);
         r3.markInitDone();
-        expect(r3.evaluate("ui-v2", userCtx("owner")).reason).toBe(
+        expect(r3.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
             "TARGETING_MATCH",
         );
     });
@@ -532,7 +546,9 @@ describe("Railway reader fake SDK", () => {
         });
         const reader = createRailwayFlags(sdk);
         reader.markInitDone();
-        expect(reader.evaluate("ui-v2", userCtx("owner"))).toMatchObject({
+        expect(
+            reader.evaluate("mcp-widgets-v2", userCtx("owner")),
+        ).toMatchObject({
             value: false,
             reason: "ERROR",
             source: "railway",
@@ -548,7 +564,10 @@ describe("Railway reader fake SDK", () => {
             synced: true,
         });
         await initFlags({
-            env: { RAILWAY_TOKEN: "proj.tok", FOODABLE_FLAGS: "ui-v2:all" },
+            env: {
+                RAILWAY_TOKEN: "proj.tok",
+                FOODABLE_FLAGS: "mcp-widgets-v2:all",
+            },
             sdk,
             timeoutMs: 100,
         });
@@ -596,7 +615,9 @@ describe("Railway reader fake SDK", () => {
                 timeoutMs: 50,
             });
             const ctx = userCtx("owner");
-            expect(getFlags().evaluate("ui-v2", ctx).reason).toBe("NOT_READY");
+            expect(getFlags().evaluate("mcp-widgets-v2", ctx).reason).toBe(
+                "NOT_READY",
+            );
             expect(evalCalls).toBe(0);
             const line = logs.find((l) => l.includes("init failed"));
             expect(line).toBeDefined();
@@ -628,11 +649,13 @@ describe("Railway reader fake SDK", () => {
         });
         expect(Date.now() - t0).toBeLessThan(1000);
         const ctx = userCtx("owner");
-        expect(getFlags().evaluate("ui-v2", ctx).reason).toBe("NOT_READY");
+        expect(getFlags().evaluate("mcp-widgets-v2", ctx).reason).toBe(
+            "NOT_READY",
+        );
         resolveInit?.();
         await initPromise;
         await new Promise((r) => setTimeout(r, 0));
-        expect(getFlags().evaluate("ui-v2", ctx).reason).toBe(
+        expect(getFlags().evaluate("mcp-widgets-v2", ctx).reason).toBe(
             "TARGETING_MATCH",
         );
     });
@@ -650,15 +673,15 @@ describe("initFlags source selection", () => {
         await initFlags({
             env: {
                 RAILWAY_TOKEN: "tok",
-                FOODABLE_FLAGS: "ui-v2:all",
+                FOODABLE_FLAGS: "mcp-widgets-v2:all",
                 RAILWAY_API_TOKEN: "api-should-not-matter",
             },
             sdk,
         });
         expect(initCalls).toBe(1);
-        expect(getFlags().evaluate("ui-v2", userCtx("member")).source).toBe(
-            "railway",
-        );
+        expect(
+            getFlags().evaluate("mcp-widgets-v2", userCtx("member")).source,
+        ).toBe("railway");
     });
 
     test("FOODABLE_FLAGS without token", async () => {
@@ -681,15 +704,36 @@ describe("initFlags source selection", () => {
         };
         await initFlags({
             env: {
-                FOODABLE_FLAGS: "ui-v2:all",
+                FOODABLE_FLAGS: "mcp-widgets-v2:all",
                 RAILWAY_API_TOKEN: "ignored",
             },
             sdk,
         });
         expect(initCalls).toBe(0);
-        expect(getFlags().isEnabled("ui-v2", userCtx("member"))).toBe(true);
-        expect(getFlags().evaluate("ui-v2", userCtx("member")).source).toBe(
-            "env",
+        expect(getFlags().isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(
+            true,
+        );
+        expect(
+            getFlags().evaluate("mcp-widgets-v2", userCtx("member")).source,
+        ).toBe("env");
+    });
+
+    test("a retired flag in FOODABLE_FLAGS warns once and boots", async () => {
+        const warn = console.warn;
+        const lines: string[] = [];
+        console.warn = (msg: string) => lines.push(String(msg));
+        try {
+            await initFlags({
+                env: { FOODABLE_FLAGS: "ui-v2:all,mcp-widgets-v2:all" },
+            });
+        } finally {
+            console.warn = warn;
+        }
+        expect(
+            lines.filter((l) => l.includes('unknown flag "ui-v2"')),
+        ).toHaveLength(1);
+        expect(getFlags().isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(
+            true,
         );
     });
 
@@ -702,13 +746,15 @@ describe("initFlags source selection", () => {
         });
         await initFlags({ env: {}, sdk });
         expect(initCalls).toBe(0);
-        expect(getFlags().isEnabled("ui-v2", userCtx("owner"))).toBe(false);
+        expect(getFlags().isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(
+            false,
+        );
         expect(getFlags().isEnabled("off-lookups", userCtx("owner"))).toBe(
             true,
         );
-        expect(getFlags().evaluate("ui-v2", userCtx("owner")).source).toBe(
-            "fallback",
-        );
+        expect(
+            getFlags().evaluate("mcp-widgets-v2", userCtx("owner")).source,
+        ).toBe("fallback");
     });
 
     test("idempotent second call", async () => {
@@ -756,43 +802,45 @@ test("getFlags before init uses fallback", () => {
 });
 
 test("setFlagsForTests override", () => {
-    const mem = createMemoryFlags({ "ui-v2": true });
+    const mem = createMemoryFlags({ "mcp-widgets-v2": true });
     setFlagsForTests(mem);
-    expect(getFlags().isEnabled("ui-v2", userCtx("owner"))).toBe(true);
+    expect(getFlags().isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(true);
     setFlagsForTests(null);
 });
 
 test("createFallbackFlags", () => {
     const reader = createFallbackFlags();
-    expect(reader.isEnabled("ui-v2", userCtx("owner"))).toBe(false);
+    expect(reader.isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(false);
     expect(reader.isEnabled("off-lookups", userCtx("owner"))).toBe(true);
-    expect(reader.evaluate("ui-v2", userCtx("owner")).reason).toBe("DEFAULT");
+    expect(reader.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
+        "DEFAULT",
+    );
 });
 
 test("memory flags and all-on / all-off helpers", () => {
     const on = createMemoryFlags(allFlagsOn());
-    expect(on.isEnabled("ui-v2", userCtx("member"))).toBe(true);
+    expect(on.isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(true);
     expect(on.isEnabled("off-lookups", userCtx("member"))).toBe(true);
 
     const off = createMemoryFlags(allFlagsOff());
-    expect(off.isEnabled("ui-v2", userCtx("member"))).toBe(false);
+    expect(off.isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(false);
     expect(off.isEnabled("off-lookups", userCtx("member"))).toBe(false);
 
     const defaults = defaultFlags();
-    expect(defaults["ui-v2"]).toBe(false);
+    expect(defaults["mcp-widgets-v2"]).toBe(false);
     expect(defaults["off-lookups"]).toBe(true);
 
     const dynamic = createMemoryFlags({
-        "ui-v2": (ctx) => ctx.role === "owner",
+        "mcp-widgets-v2": (ctx) => ctx.role === "owner",
     });
-    expect(dynamic.isEnabled("ui-v2", userCtx("owner"))).toBe(true);
-    expect(dynamic.isEnabled("ui-v2", userCtx("member"))).toBe(false);
+    expect(dynamic.isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(true);
+    expect(dynamic.isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(false);
 });
 
 test("destructured isEnabled from getFlags", async () => {
     await initFlags({ env: {} });
     const { isEnabled } = getFlags();
-    expect(isEnabled("ui-v2", userCtx("owner"))).toBe(false);
+    expect(isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(false);
 });
 
 describe("round-2 QA fixes", () => {
@@ -865,9 +913,9 @@ describe("round-2 QA fixes", () => {
                 sdk,
                 timeoutMs: 20,
             });
-            expect(reader.evaluate("ui-v2", userCtx("owner")).reason).toBe(
-                "NOT_READY",
-            );
+            expect(
+                reader.evaluate("mcp-widgets-v2", userCtx("owner")).reason,
+            ).toBe("NOT_READY");
         } finally {
             console.error = errSpy;
         }
@@ -925,7 +973,9 @@ describe("round-2 QA fixes", () => {
 
             const ctx = userCtx("owner");
             expect(getFlags()).toBe(fresh);
-            expect(getFlags().evaluate("ui-v2", ctx).source).toBe("fallback");
+            expect(getFlags().evaluate("mcp-widgets-v2", ctx).source).toBe(
+                "fallback",
+            );
             expect(await initFlags({ env: {} })).toBe(fresh);
             expect(evalCalls).toBe(0);
         } finally {

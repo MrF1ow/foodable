@@ -13,7 +13,7 @@ const HH = "hh-1";
 const chrome = {
     theme: "light" as const,
     attention: { count: 0, tabs: {} },
-    flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
 function section(

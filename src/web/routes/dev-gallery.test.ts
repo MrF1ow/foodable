@@ -1,10 +1,6 @@
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import type { HouseholdMember } from "../../household.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import * as actualHousehold from "../../db/household.js";
 import * as actualProfiles from "../../db/profiles.js";
 import * as actualAttention from "../attention.js";
@@ -43,7 +39,6 @@ mock.module("../../db/profiles.js", () => ({
                   widgets_enabled: true,
                   alcohol_tracking_enabled: false,
                   preferred_drink_unit: null,
-                  nutrition_layout: null,
                   created_at: "2026-01-01T00:00:00.000Z",
                   updated_at: "2026-01-01T00:00:00.000Z",
               }
@@ -64,16 +59,12 @@ mock.module("../attention.js", () => ({
                     : "light",
             attention: { count: 0, tabs: {} },
             flags,
-            ...(flags.uiV2
-                ? {
-                      identity: {
-                          viewerName: viewer.displayName,
-                          viewerRole: viewer.role,
-                          householdName: "Test household",
-                          memberCount: 2,
-                      },
-                  }
-                : {}),
+            identity: {
+                viewerName: viewer.displayName,
+                viewerRole: viewer.role,
+                householdName: "Test household",
+                memberCount: 2,
+            },
         };
     },
 }));
@@ -118,7 +109,6 @@ afterEach(() => {
 describe("GET /dev/gallery-v2", () => {
     test("returns 404 when env is not local", async () => {
         process.env.RAILWAY_ENVIRONMENT_NAME = "production";
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request(galleryUrl, {
             headers: { cookie: sessionCookie(ALICE) },
         });
@@ -128,25 +118,15 @@ describe("GET /dev/gallery-v2", () => {
     test("returns 404 when NODE_ENV is production without Railway env", async () => {
         process.env.NODE_ENV = "production";
         delete process.env.RAILWAY_ENVIRONMENT_NAME;
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request(galleryUrl, {
             headers: { cookie: sessionCookie(ALICE) },
         });
         expect(res.status).toBe(404);
     });
 
-    test("returns 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await app.request(galleryUrl, {
-            headers: { cookie: sessionCookie(ALICE) },
-        });
-        expect(res.status).toBe(404);
-    });
-
-    test("returns 200 with v2 components when local and ui-v2 on", async () => {
+    test("returns 200 with the components when local", async () => {
         delete process.env.RAILWAY_ENVIRONMENT_NAME;
         delete process.env.NODE_ENV;
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request(galleryUrl, {
             headers: { cookie: sessionCookie(ALICE) },
         });

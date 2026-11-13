@@ -1,8 +1,3 @@
-function navQuery(from?: string): string {
-    if (!from || from === "/") return "";
-    return `?from=${encodeURIComponent(from)}`;
-}
-
 export function subnav(input: {
     label: string;
     sections: readonly { id: string; href: string; label: string }[];
@@ -18,41 +13,6 @@ export function subnav(input: {
         })
         .join("");
     return `<nav class="subnav" aria-label="${input.label}">${links}</nav>`;
-}
-
-const SETTINGS_SECTIONS = [
-    { id: "account", href: "/settings", label: "Account" },
-    {
-        id: "household",
-        href: "/settings/household-settings",
-        label: "Household",
-    },
-    { id: "help", href: "/settings/help", label: "Help" },
-] as const;
-
-/** With `ui-v2` on, the phone has no Household tab, so Settings links to the
- *  members page too. "Household" stays the preferences page; the members page
- *  is "Members", as in the household sub-nav. */
-const SETTINGS_SECTIONS_V2 = [
-    SETTINGS_SECTIONS[0],
-    SETTINGS_SECTIONS[1],
-    { id: "members", href: "/settings/household", label: "Members" },
-    SETTINGS_SECTIONS[2],
-] as const;
-
-export type SettingsSection = (typeof SETTINGS_SECTIONS)[number]["id"];
-
-export function renderSettingsNav(
-    active: SettingsSection,
-    from?: string,
-    opts?: { v2?: boolean },
-): string {
-    return subnav({
-        label: "Settings sections",
-        sections: opts?.v2 ? SETTINGS_SECTIONS_V2 : SETTINGS_SECTIONS,
-        active,
-        query: navQuery(from),
-    });
 }
 
 const HOUSEHOLD_SECTIONS = [

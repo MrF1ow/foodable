@@ -23,7 +23,9 @@ import {
     setRateLimitStore,
 } from "../../rate-limit.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
+import { groceryRoutes } from "./grocery.js";
 import { householdRoutes } from "./household.js";
+import { recipesRoutes } from "./recipes.js";
 import { createShareLinksRoutes } from "./share-links.js";
 import { shareLinkManageRoutes } from "./share-links-manage.js";
 
@@ -53,9 +55,7 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         sql = ctx.sql;
         await ctx.truncateAll();
         setSqlForTests(sql);
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
-        );
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         setRateLimitStore(createMemoryRateLimitStore());
         const a = await seedHousehold(sql);
         householdId = a.householdId;
@@ -273,9 +273,7 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
     });
 
     test("with mcp-share-links off every handler is a 404 and nothing is stored", async () => {
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
-        );
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const recipe = await seedRecipe(householdId, ownerId);
         const link = await asUser(
             ownerId,
@@ -419,14 +417,55 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
     test("with mcp-share-links off Settings has no Shared links section", async () => {
         const recipe = await seedRecipe(householdId, ownerId);
         await make(ownerId, householdId, "recipe", recipe.id);
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
-        );
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const res = await get(ownerId, "/settings/household");
         expect(res.status).toBe(200);
         const html = await res.text();
         expect(html).not.toContain("Shared links");
         expect(html).not.toMatch(/shared-links\/[0-9a-f-]{36}\/revoke/);
+    });
+
+    test("the Share buttons and the Shared links section show only while mcp-share-links is on", async () => {
+        const recipe = await seedRecipe(householdId, ownerId);
+        const page = async (path: string) => {
+            const res = await new Hono()
+                .route("/", recipesRoutes)
+                .route("/", groceryRoutes)
+                .route("/", householdRoutes)
+                .request(`http://test${path}`, {
+                    headers: {
+                        cookie: `${SITE_COOKIE}=${mintSiteSession(ownerId)}`,
+                    },
+                });
+            expect(res.status).toBe(200);
+            return res.text();
+        };
+        const recipePath = `/recipes/${recipe.id}`;
+
+        // On: the recipe and the grocery list can be shared, and Settings lists
+        // the links.
+        const recipeOn = await page(recipePath);
+        expect(recipeOn).toContain('id="fd-recipe-share-sheet"');
+        expect(recipeOn).toContain(`action="/recipes/${recipe.id}/share"`);
+        expect(recipeOn).toContain("fd-recipe-share-btn");
+        const groceriesOn = await page("/kitchen/groceries");
+        expect(groceriesOn).toContain('id="fd-grocery-share-sheet"');
+        expect(groceriesOn).toContain("fd-kitchen-grocery-share");
+        expect(await page("/settings/household")).toContain("Shared links");
+
+        // Off: none of the three is on the page.
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
+        const recipeOff = await page(recipePath);
+        expect(recipeOff).not.toContain("fd-recipe-share-sheet");
+        expect(recipeOff).not.toContain("fd-recipe-share-btn");
+        expect(recipeOff).not.toContain(`/recipes/${recipe.id}/share`);
+        const groceriesOff = await page("/kitchen/groceries");
+        expect(groceriesOff).not.toContain("fd-grocery-share-sheet");
+        expect(groceriesOff).not.toContain("fd-kitchen-grocery-share");
+        expect(groceriesOff).not.toContain("/kitchen/groceries/share");
+        const settingsOff = await page("/settings/household");
+        expect(settingsOff).not.toContain("Shared links");
+        expect(settingsOff).not.toContain("shared-links");
     });
 
     test("Settings with no links shows an empty state", async () => {

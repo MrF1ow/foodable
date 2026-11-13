@@ -7,6 +7,21 @@ import {
     legacyRedirectTarget,
 } from "./route-map.js";
 
+describe("APP_PATHS", () => {
+    test("names no retired page", () => {
+        const retired = [
+            "/log-meal",
+            "/log-water",
+            "/log-weight",
+            "/nutrition/layout",
+            "/settings/household-settings",
+        ];
+        for (const path of Object.values(APP_PATHS)) {
+            expect(retired).not.toContain(path);
+        }
+    });
+});
+
 describe("legacyRedirectTarget", () => {
     const cases: { in: string; want: string | null }[] = [
         { in: "/fridge", want: APP_PATHS.kitchenFridge },

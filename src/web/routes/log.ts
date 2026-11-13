@@ -64,11 +64,14 @@ import {
     resolveWriteWeightUnit,
 } from "../../weight-write.js";
 import { toGrams as weightToGrams, isWeightUnit } from "../../domain/units.js";
-import { formAmount, formOptionalNumber, formText } from "../form.js";
-import { logWaterFromForm } from "../pages/nutrition.js";
+import {
+    formAmount,
+    formOptionalNumber,
+    formText,
+    logWaterFromForm,
+} from "../form.js";
 import { redirectWithToast } from "../components/toast.js";
 import { renderDashboardPage, weighInPrefillForUser } from "../loaders.js";
-import { getHouseholdMembership } from "../../db/household.js";
 import {
     FD_LOG_POST,
     FD_LOG_QUICK_POST,
@@ -79,7 +82,7 @@ import {
     type WeighInPrefill,
 } from "../pages/v2/log-sheet.js";
 import { safeReturnPath } from "../usual-products-path.js";
-import { gatedRoute } from "../gated.js";
+import { viewerFlagsFor } from "../attention.js";
 import { requireMember, siteMember } from "../middleware.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
 import { mealInputForSlotRelog } from "./log-relog.js";
@@ -399,88 +402,81 @@ function countHouseholdHits(sources: LogSearchSources, query: string): number {
     return householdLogSearchCount(mergeLogResults(sources, query));
 }
 
-logRoutes.get(
-    "/api/log/search",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const rate = await checkWebSearchRateLimit(member.userId);
-        c.header("X-RateLimit-Limit", String(rate.limit));
-        c.header("X-RateLimit-Remaining", String(rate.remaining));
-        if (!rate.allowed) {
-            c.header("Retry-After", String(rate.retryAfterSeconds ?? 60));
-            return c.json(
-                {
-                    error: "rate_limited",
-                    error_description: `Rate limit exceeded (${rate.limit} requests per minute). Retry after ${rate.retryAfterSeconds}s.`,
-                },
-                429,
-            );
-        }
+logRoutes.get("/api/log/search", requireMember, async (c) => {
+    const member = siteMember(c);
+    const rate = await checkWebSearchRateLimit(member.userId);
+    c.header("X-RateLimit-Limit", String(rate.limit));
+    c.header("X-RateLimit-Remaining", String(rate.remaining));
+    if (!rate.allowed) {
+        c.header("Retry-After", String(rate.retryAfterSeconds ?? 60));
+        return c.json(
+            {
+                error: "rate_limited",
+                error_description: `Rate limit exceeded (${rate.limit} requests per minute). Retry after ${rate.retryAfterSeconds}s.`,
+            },
+            429,
+        );
+    }
 
-        // Postgres text cannot hold NUL; a typed-in one would fail the query.
-        const q = (c.req.query("q") ?? "").replaceAll("\u0000", "");
-        const limit = parseLimit(c.req.query("limit"));
-        const online = c.req.query("online") === "1";
-        const profile = await getProfile(member.userId);
-        const tz =
-            profile?.timezone && validateTz(profile.timezone)
-                ? profile.timezone
-                : "UTC";
+    // Postgres text cannot hold NUL; a typed-in one would fail the query.
+    const q = (c.req.query("q") ?? "").replaceAll("\u0000", "");
+    const limit = parseLimit(c.req.query("limit"));
+    const online = c.req.query("online") === "1";
+    const profile = await getProfile(member.userId);
+    const tz =
+        profile?.timezone && validateTz(profile.timezone)
+            ? profile.timezone
+            : "UTC";
 
-        const flags = c.get("viewerFlags");
-        const offLookups = flags.offLookups === true;
+    const flags = await viewerFlagsFor(member);
+    const offLookups = flags.offLookups === true;
 
-        const built = await buildLogSearchSources({
-            householdId: member.householdId,
-            userId: member.userId,
-            query: q,
-            limit,
-            timezone: tz,
-        });
-        let { sources } = built;
+    const built = await buildLogSearchSources({
+        householdId: member.householdId,
+        userId: member.userId,
+        query: q,
+        limit,
+        timezone: tz,
+    });
+    let { sources } = built;
 
-        let offHits: FoodResult[] = [];
-        if (offLookups && q.trim()) {
-            const householdHits = countHouseholdHits(sources, q);
-            if (online || householdHits < 5) {
-                try {
-                    offHits = await searchFoodsByName(q.trim(), [], {
-                        householdId: member.householdId,
-                    });
-                } catch {
-                    offHits = [];
-                }
+    let offHits: FoodResult[] = [];
+    if (offLookups && q.trim()) {
+        const householdHits = countHouseholdHits(sources, q);
+        if (online || householdHits < 5) {
+            try {
+                offHits = await searchFoodsByName(q.trim(), [], {
+                    householdId: member.householdId,
+                });
+            } catch {
+                offHits = [];
             }
         }
+    }
 
-        if (offHits.length > 0) {
-            const { kept, householdFoodIds } = await splitOffByHouseholdBarcode(
-                liveFoodsStore(),
-                member.householdId,
-                offHits,
-                new Set(built.foodsById.keys()),
-            );
-            const food = [...(sources.food ?? [])];
-            const listed = new Set(food.map((item) => item.food_id));
-            for (const id of householdFoodIds) {
-                const row = built.foodsById.get(id);
-                if (row && !listed.has(id)) {
-                    food.push(foodToSource(row, built.weights));
-                }
+    if (offHits.length > 0) {
+        const { kept, householdFoodIds } = await splitOffByHouseholdBarcode(
+            liveFoodsStore(),
+            member.householdId,
+            offHits,
+            new Set(built.foodsById.keys()),
+        );
+        const food = [...(sources.food ?? [])];
+        const listed = new Set(food.map((item) => item.food_id));
+        for (const id of householdFoodIds) {
+            const row = built.foodsById.get(id);
+            if (row && !listed.has(id)) {
+                food.push(foodToSource(row, built.weights));
             }
-            sources = { ...sources, food };
-            if (kept.length > 0)
-                sources.off = kept.map((hit) =>
-                    offToSource(hit, built.weights),
-                );
         }
+        sources = { ...sources, food };
+        if (kept.length > 0)
+            sources.off = kept.map((hit) => offToSource(hit, built.weights));
+    }
 
-        const merged = mergeLogResults(sources, q);
-        return c.json(trimSources(merged, limit));
-    },
-);
+    const merged = mergeLogResults(sources, q);
+    return c.json(trimSources(merged, limit));
+});
 
 export function logSearchGroupKinds(
     result: LogSearchResult,
@@ -582,13 +578,7 @@ async function logSheetErrorPage(
     userId: string,
     sheet: LogSheetRerender,
 ): Promise<Response> {
-    const page = await renderDashboardPage(
-        userId,
-        undefined,
-        undefined,
-        undefined,
-        sheet,
-    );
+    const page = await renderDashboardPage(userId, undefined, undefined, sheet);
     return new Response(page.html, {
         status: page.status === 200 ? 400 : page.status,
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -603,17 +593,11 @@ async function logErrorPage(
 ): Promise<Response> {
     // The error shows inside the reopened amount sheet only, not as a second
     // page-level banner too.
-    const page = await renderDashboardPage(
-        userId,
-        undefined,
-        undefined,
-        undefined,
-        {
-            amountOpenOnLoad: true,
-            amountError: error,
-            amount: prefill,
-        },
-    );
+    const page = await renderDashboardPage(userId, undefined, undefined, {
+        amountOpenOnLoad: true,
+        amountError: error,
+        amount: prefill,
+    });
     return new Response(page.html, {
         status: page.status === 200 ? 400 : page.status,
         headers: { "content-type": "text/html; charset=utf-8" },
@@ -682,74 +666,67 @@ export async function buildLogWriteItem(input: {
     };
 }
 
-logRoutes.post(
-    FD_LOG_POST,
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const userId = member.userId;
-        const profile = await getProfile(userId);
-        const tz =
-            profile?.timezone && validateTz(profile.timezone)
-                ? profile.timezone
-                : "UTC";
-        const body = await c.req.parseBody();
-        const amount = formAmount(body, "amount");
-        const unit = formText(body, "unit");
-        const logged_at = formText(body, "logged_at") || undefined;
-        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
-        const prefill: LogAmountPrefill = {
-            name: formText(body, "display_name") || "Food",
-            food_id: formText(body, "food_id") || undefined,
-            recipe_id: formText(body, "recipe_id") || undefined,
-            barcode: formText(body, "barcode") || undefined,
+logRoutes.post(FD_LOG_POST, requireMember, async (c) => {
+    const member = siteMember(c);
+    const userId = member.userId;
+    const profile = await getProfile(userId);
+    const tz =
+        profile?.timezone && validateTz(profile.timezone)
+            ? profile.timezone
+            : "UTC";
+    const body = await c.req.parseBody();
+    const amount = formAmount(body, "amount");
+    const unit = formText(body, "unit");
+    const logged_at = formText(body, "logged_at") || undefined;
+    const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+    const prefill: LogAmountPrefill = {
+        name: formText(body, "display_name") || "Food",
+        food_id: formText(body, "food_id") || undefined,
+        recipe_id: formText(body, "recipe_id") || undefined,
+        barcode: formText(body, "barcode") || undefined,
+        amount,
+        unit,
+        meal_type: formText(body, "meal_type"),
+        logged_at,
+    };
+    try {
+        const meal_type = parseMealType(prefill.meal_type ?? "");
+        prefill.meal_type = meal_type;
+        const { spec, name } = await buildLogWriteItem({
+            householdId: member.householdId,
+            foodId: prefill.food_id,
+            recipeId: prefill.recipe_id,
+            barcode: prefill.barcode,
             amount,
             unit,
-            meal_type: formText(body, "meal_type"),
-            logged_at,
-        };
-        try {
-            const meal_type = parseMealType(prefill.meal_type ?? "");
-            prefill.meal_type = meal_type;
-            const { spec, name } = await buildLogWriteItem({
-                householdId: member.householdId,
-                foodId: prefill.food_id,
-                recipeId: prefill.recipe_id,
-                barcode: prefill.barcode,
-                amount,
-                unit,
-            });
-            prefill.name = name;
-            const { iso } = await resolveWriteTimestamp(userId, logged_at);
-            const computed = await mealWriteFromItems(member.householdId, [
-                spec,
-            ]);
-            await insertMeal(userId, {
-                description: computed.description,
-                meal_type,
-                logged_at: iso,
-                ...computed.totals,
-                items: computed.items,
-                item_digest: computed.item_digest,
-            });
-            return redirectWithToast(c, returnTo, "nutrition.meal.logged");
-        } catch (err) {
-            const message =
-                err instanceof MealItemsError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : "Could not log this meal.";
-            const filled = await enrichAmountPrefill(
-                member.householdId,
-                userId,
-                prefill,
-            );
-            return logErrorPage(userId, message, filled, tz);
-        }
-    },
-);
+        });
+        prefill.name = name;
+        const { iso } = await resolveWriteTimestamp(userId, logged_at);
+        const computed = await mealWriteFromItems(member.householdId, [spec]);
+        await insertMeal(userId, {
+            description: computed.description,
+            meal_type,
+            logged_at: iso,
+            ...computed.totals,
+            items: computed.items,
+            item_digest: computed.item_digest,
+        });
+        return redirectWithToast(c, returnTo, "nutrition.meal.logged");
+    } catch (err) {
+        const message =
+            err instanceof MealItemsError
+                ? err.message
+                : err instanceof Error
+                  ? err.message
+                  : "Could not log this meal.";
+        const filled = await enrichAmountPrefill(
+            member.householdId,
+            userId,
+            prefill,
+        );
+        return logErrorPage(userId, message, filled, tz);
+    }
+});
 
 function parseBoundedMacro(
     raw: number | undefined,
@@ -775,223 +752,202 @@ function parseQuickCalories(raw: number): number {
     return raw;
 }
 
-logRoutes.post(
-    FD_LOG_QUICK_POST,
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const userId = member.userId;
-        const profile = await getProfile(userId);
-        const tz =
-            profile?.timezone && validateTz(profile.timezone)
-                ? profile.timezone
-                : "UTC";
-        const body = await c.req.parseBody();
-        const calories = formAmount(body, "calories");
-        const meal_type = formText(body, "meal_type");
-        const description = formText(body, "description") || "Quick calories";
-        const logged_at = formText(body, "logged_at") || undefined;
-        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
-        const prefill: QuickCaloriesPrefill = {
-            calories,
-            protein_g: formOptionalNumber(body, "protein_g"),
-            carbs_g: formOptionalNumber(body, "carbs_g"),
-            fat_g: formOptionalNumber(body, "fat_g"),
+logRoutes.post(FD_LOG_QUICK_POST, requireMember, async (c) => {
+    const member = siteMember(c);
+    const userId = member.userId;
+    const profile = await getProfile(userId);
+    const tz =
+        profile?.timezone && validateTz(profile.timezone)
+            ? profile.timezone
+            : "UTC";
+    const body = await c.req.parseBody();
+    const calories = formAmount(body, "calories");
+    const meal_type = formText(body, "meal_type");
+    const description = formText(body, "description") || "Quick calories";
+    const logged_at = formText(body, "logged_at") || undefined;
+    const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+    const prefill: QuickCaloriesPrefill = {
+        calories,
+        protein_g: formOptionalNumber(body, "protein_g"),
+        carbs_g: formOptionalNumber(body, "carbs_g"),
+        fat_g: formOptionalNumber(body, "fat_g"),
+        description,
+        meal_type,
+        logged_at,
+    };
+    try {
+        const mealType = parseMealType(meal_type);
+        const kcal = parseQuickCalories(calories);
+        const protein_g = parseBoundedMacro(prefill.protein_g, "protein");
+        const carbs_g = parseBoundedMacro(prefill.carbs_g, "carbs");
+        const fat_g = parseBoundedMacro(prefill.fat_g, "fat");
+        const { iso } = await resolveWriteTimestamp(userId, logged_at);
+        await insertMeal(userId, {
             description,
-            meal_type,
-            logged_at,
-        };
-        try {
-            const mealType = parseMealType(meal_type);
-            const kcal = parseQuickCalories(calories);
-            const protein_g = parseBoundedMacro(prefill.protein_g, "protein");
-            const carbs_g = parseBoundedMacro(prefill.carbs_g, "carbs");
-            const fat_g = parseBoundedMacro(prefill.fat_g, "fat");
-            const { iso } = await resolveWriteTimestamp(userId, logged_at);
-            await insertMeal(userId, {
-                description,
-                meal_type: mealType,
-                logged_at: iso,
-                calories: kcal,
-                protein_g,
-                carbs_g,
-                fat_g,
-            });
-            return redirectWithToast(c, returnTo, "nutrition.meal.logged");
-        } catch (err) {
-            const message =
-                err instanceof MealItemsError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : "Could not log this meal.";
-            return logSheetErrorPage(userId, {
-                quickCaloriesOpenOnLoad: true,
-                quickCaloriesError: message,
-                quickCalories: prefill,
-            });
-        }
-    },
-);
+            meal_type: mealType,
+            logged_at: iso,
+            calories: kcal,
+            protein_g,
+            carbs_g,
+            fat_g,
+        });
+        return redirectWithToast(c, returnTo, "nutrition.meal.logged");
+    } catch (err) {
+        const message =
+            err instanceof MealItemsError
+                ? err.message
+                : err instanceof Error
+                  ? err.message
+                  : "Could not log this meal.";
+        return logSheetErrorPage(userId, {
+            quickCaloriesOpenOnLoad: true,
+            quickCaloriesError: message,
+            quickCalories: prefill,
+        });
+    }
+});
 
-logRoutes.post(
-    FD_LOG_WATER_POST,
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const userId = member.userId;
-        const body = await c.req.parseBody();
-        const logged_at = formText(body, "logged_at") || undefined;
-        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
-        try {
-            const amountRaw =
-                formText(body, "amount_ml") ||
-                String(formAmount(body, "amount_ml"));
-            const result = await logWaterFromForm(
-                userId,
-                { amount_ml: amountRaw },
-                async (uid, input) =>
-                    insertWater(uid, {
-                        ...input,
-                        logged_at: (
-                            await resolveWriteTimestamp(userId, logged_at)
-                        ).iso,
-                    }),
-            );
-            if (!result.ok) {
-                throw new MealItemsError(result.error);
-            }
-            return redirectWithToast(c, returnTo, "nutrition.water.logged");
-        } catch (err) {
-            const message =
-                err instanceof MealItemsError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : "Could not log water.";
-            return logSheetErrorPage(userId, {
-                searchOpenOnLoad: true,
-                searchError: message,
-            });
-        }
-    },
-);
-
-logRoutes.post(
-    FD_LOG_WEIGHT_POST,
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const userId = member.userId;
-        const body = await c.req.parseBody();
-        const weight = formAmount(body, "weight");
-        const unitRaw = formText(body, "unit");
-        const logged_at = formText(body, "logged_at") || undefined;
-        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
-        const resolvedUnit = isWeightUnit(unitRaw)
-            ? unitRaw
-            : await resolveWriteWeightUnit(userId, undefined);
-        const weighBase = await weighInPrefillForUser(userId);
-        const prefill: WeighInPrefill = {
-            ...weighBase,
-            weight,
-            unit: resolvedUnit,
-            logged_at,
-        };
-        try {
-            const { iso } = await resolveWriteTimestamp(userId, logged_at);
-            const weight_g = weightToGrams(weight, resolvedUnit);
-            assertPlausibleWeight(weight_g, resolvedUnit);
-            await insertWeight(userId, {
-                weight_g,
-                logged_at: iso,
-            });
-            return redirectWithToast(c, returnTo, "nutrition.weight.logged");
-        } catch (err) {
-            const message =
-                err instanceof MealItemsError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : "Could not log weight.";
-            return logSheetErrorPage(userId, {
-                weighInOpenOnLoad: true,
-                weighInError: message,
-                weighIn: prefill,
-            });
-        }
-    },
-);
-
-logRoutes.post(
-    "/log/copy-yesterday",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const userId = member.userId;
-        const profile = await getProfile(userId);
-        const tz =
-            profile?.timezone && validateTz(profile.timezone)
-                ? profile.timezone
-                : "UTC";
-        const body = await c.req.parseBody();
-        const slot = formText(body, "slot");
-        const returnTo = safeReturnPath(formText(body, "return_to"), "/");
-        let meal_type: MealInput["meal_type"];
-        try {
-            meal_type = parseMealType(slot);
-        } catch {
-            return c.text("Choose a meal type.", 400);
-        }
-        const today = todayInTz(tz);
-        const yesterday = recentHistoryStart(today, 1);
-        const dayMeals = await getMealsByDate(userId, yesterday, tz);
-        const slotMeals = dayMeals.filter(
-            (row) => resolveMealType(row.meal_type) === meal_type,
+logRoutes.post(FD_LOG_WATER_POST, requireMember, async (c) => {
+    const member = siteMember(c);
+    const userId = member.userId;
+    const body = await c.req.parseBody();
+    const logged_at = formText(body, "logged_at") || undefined;
+    const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+    try {
+        const amountRaw =
+            formText(body, "amount_ml") ||
+            String(formAmount(body, "amount_ml"));
+        const result = await logWaterFromForm(
+            userId,
+            { amount_ml: amountRaw },
+            async (uid, input) =>
+                insertWater(uid, {
+                    ...input,
+                    logged_at: (await resolveWriteTimestamp(userId, logged_at))
+                        .iso,
+                }),
         );
-        // A stale hint (yesterday's slot changed since the page loaded) goes
-        // back to the page with a toast rather than a bare error response.
-        if (slotMeals.length === 0) {
+        if (!result.ok) {
+            throw new MealItemsError(result.error);
+        }
+        return redirectWithToast(c, returnTo, "nutrition.water.logged");
+    } catch (err) {
+        const message =
+            err instanceof MealItemsError
+                ? err.message
+                : err instanceof Error
+                  ? err.message
+                  : "Could not log water.";
+        return logSheetErrorPage(userId, {
+            searchOpenOnLoad: true,
+            searchError: message,
+        });
+    }
+});
+
+logRoutes.post(FD_LOG_WEIGHT_POST, requireMember, async (c) => {
+    const member = siteMember(c);
+    const userId = member.userId;
+    const body = await c.req.parseBody();
+    const weight = formAmount(body, "weight");
+    const unitRaw = formText(body, "unit");
+    const logged_at = formText(body, "logged_at") || undefined;
+    const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+    const resolvedUnit = isWeightUnit(unitRaw)
+        ? unitRaw
+        : await resolveWriteWeightUnit(userId, undefined);
+    const weighBase = await weighInPrefillForUser(userId);
+    const prefill: WeighInPrefill = {
+        ...weighBase,
+        weight,
+        unit: resolvedUnit,
+        logged_at,
+    };
+    try {
+        const { iso } = await resolveWriteTimestamp(userId, logged_at);
+        const weight_g = weightToGrams(weight, resolvedUnit);
+        assertPlausibleWeight(weight_g, resolvedUnit);
+        await insertWeight(userId, {
+            weight_g,
+            logged_at: iso,
+        });
+        return redirectWithToast(c, returnTo, "nutrition.weight.logged");
+    } catch (err) {
+        const message =
+            err instanceof MealItemsError
+                ? err.message
+                : err instanceof Error
+                  ? err.message
+                  : "Could not log weight.";
+        return logSheetErrorPage(userId, {
+            weighInOpenOnLoad: true,
+            weighInError: message,
+            weighIn: prefill,
+        });
+    }
+});
+
+logRoutes.post("/log/copy-yesterday", requireMember, async (c) => {
+    const member = siteMember(c);
+    const userId = member.userId;
+    const profile = await getProfile(userId);
+    const tz =
+        profile?.timezone && validateTz(profile.timezone)
+            ? profile.timezone
+            : "UTC";
+    const body = await c.req.parseBody();
+    const slot = formText(body, "slot");
+    const returnTo = safeReturnPath(formText(body, "return_to"), "/");
+    let meal_type: MealInput["meal_type"];
+    try {
+        meal_type = parseMealType(slot);
+    } catch {
+        return c.text("Choose a meal type.", 400);
+    }
+    const today = todayInTz(tz);
+    const yesterday = recentHistoryStart(today, 1);
+    const dayMeals = await getMealsByDate(userId, yesterday, tz);
+    const slotMeals = dayMeals.filter(
+        (row) => resolveMealType(row.meal_type) === meal_type,
+    );
+    // A stale hint (yesterday's slot changed since the page loaded) goes
+    // back to the page with a toast rather than a bare error response.
+    if (slotMeals.length === 0) {
+        return redirectWithToast(
+            c,
+            returnTo,
+            "nutrition.meal.copy-yesterday.none",
+        );
+    }
+    const idempotency_key = copyYesterdayIdempotencyKey(
+        userId,
+        today,
+        meal_type,
+    );
+    try {
+        const input = await mealInputForSlotRelog(
+            member.householdId,
+            slotMeals,
+            meal_type,
+            new Date().toISOString(),
+        );
+        if (!input) {
             return redirectWithToast(
                 c,
                 returnTo,
                 "nutrition.meal.copy-yesterday.none",
             );
         }
-        const idempotency_key = copyYesterdayIdempotencyKey(
-            userId,
-            today,
+        const result = await insertMeal(userId, {
+            ...input,
             meal_type,
-        );
-        try {
-            const input = await mealInputForSlotRelog(
-                member.householdId,
-                slotMeals,
-                meal_type,
-                new Date().toISOString(),
-            );
-            if (!input) {
-                return redirectWithToast(
-                    c,
-                    returnTo,
-                    "nutrition.meal.copy-yesterday.none",
-                );
-            }
-            const result = await insertMeal(userId, {
-                ...input,
-                meal_type,
-                idempotency_key,
-            });
-            const msg = result.deduplicated
-                ? "nutrition.meal.copy-yesterday.noop"
-                : "nutrition.meal.logged";
-            return redirectWithToast(c, returnTo, msg);
-        } catch {
-            return c.text("Could not copy yesterday's meal.", 400);
-        }
-    },
-);
+            idempotency_key,
+        });
+        const msg = result.deduplicated
+            ? "nutrition.meal.copy-yesterday.noop"
+            : "nutrition.meal.logged";
+        return redirectWithToast(c, returnTo, msg);
+    } catch {
+        return c.text("Could not copy yesterday's meal.", 400);
+    }
+});

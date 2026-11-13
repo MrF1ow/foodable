@@ -1,4 +1,3 @@
-import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import { expect, test } from "bun:test";
 import {
     createMemoryFoodsStore,
@@ -22,7 +21,6 @@ import {
     type GroceryPreferences,
 } from "./settings.js";
 import { createMemoryRecipesStore } from "./recipes.js";
-import { renderGroceryPage } from "../web/pages/grocery.js";
 import {
     EMPTY_HOUSEHOLD_PREFERENCES,
     type HouseholdPreferences,
@@ -1018,92 +1016,6 @@ test("noticesFor and dismissNotice accept grocery.restocked", async () => {
     expect(after.notices.some((n) => n.code === "grocery.restocked")).toBe(
         false,
     );
-});
-
-test("grocery page renders Restocked badge via notices component", () => {
-    const notice = groceryRestockNotices(
-        [
-            {
-                id: "ln",
-                householdId: HH,
-                storeId: "s",
-                sectionId: "sec",
-                kind: "food",
-                displayName: "Milk",
-                quantity: { amount: 1, unit: "l" },
-                foodId: "f",
-                checked: false,
-                source: "restock",
-                sourceFridgeItemId: "fi",
-                note: null,
-            },
-        ],
-        [
-            fridgeFood({
-                id: "fi",
-                foodId: "f",
-                expiresOn: addDays(TODAY, 2),
-                displayName: "Milk pint",
-            }),
-        ],
-        TODAY,
-    )[0]!;
-    const html = renderGroceryPage({
-        chrome: {
-            theme: "system",
-            attention: { count: 0, tabs: {} },
-            flags: FIXTURE_APP_CHROME_FLAGS,
-        },
-        stores: [
-            {
-                id: "s",
-                householdId: HH,
-                name: "Store",
-                sortOrder: 0,
-                sections: [
-                    {
-                        id: "sec",
-                        householdId: HH,
-                        storeId: "s",
-                        name: "Dairy",
-                        hidden: false,
-                        isOther: false,
-                        sortOrder: 0,
-                        lines: [
-                            {
-                                id: "ln",
-                                householdId: HH,
-                                storeId: "s",
-                                sectionId: "sec",
-                                kind: "food",
-                                displayName: "Milk",
-                                quantity: { amount: 1, unit: "l" },
-                                foodId: "f",
-                                checked: false,
-                                source: "restock",
-                                sourceFridgeItemId: "fi",
-                                note: null,
-                                notices: [notice],
-                                alreadyHave: null,
-                            },
-                        ],
-                    },
-                ],
-                rules: [],
-            },
-        ],
-    });
-    expect(html).toContain("notice-list");
-    expect(html).toContain(noticeSentence(notice));
-    expect(html).toContain('name="return_to"');
-    expect(html).not.toContain("grocery-restock-pill");
-    // One Restocked pill, in the line's meta, and the sentence list styled
-    // as quiet text rather than a bulleted list.
-    expect(html.split('data-notice="grocery.restocked"')).toHaveLength(2);
-    expect(html).toMatch(
-        /1 l · <span class="pill[^"]*" data-notice="grocery.restocked">Restocked<\/span>/,
-    );
-    expect(html).toContain("notice-list grocery-line-notices");
 });
 
 // 2026-06-01 is a Monday (weekday 1).

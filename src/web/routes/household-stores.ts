@@ -25,7 +25,6 @@ import {
     type GroceryPreferences,
 } from "../../domain/settings.js";
 import { formText } from "../form.js";
-import { gatedRoute } from "../gated.js";
 import {
     renderSettingsStoreV2Route,
     renderSettingsStoresV2Route,
@@ -46,14 +45,10 @@ import {
 } from "../pages/v2/settings-stores-detail.js";
 
 /**
- * Settings › Household › Stores in the new app (flag `ui-v2`). Reading is open
- * to every member; every write is for owners and admins, behind the flag:
- * member -> flag -> manager, so a member with the flag off gets the same 404 as
- * everyone else.
+ * Settings › Household › Stores. Reading is open to every member; every write
+ * is for owners and admins.
  */
 export const householdStoresRoutes = new Hono();
-
-const gate = gatedRoute("ui-v2", { notFound: true });
 
 const GENERIC_ERROR = "Could not save that. Try again.";
 
@@ -138,7 +133,7 @@ async function sectionOfStore(
     }
 }
 
-householdStoresRoutes.get(STORES_PATH, requireMember, gate, async (c) => {
+householdStoresRoutes.get(STORES_PATH, requireMember, async (c) => {
     const page = await renderSettingsStoresV2Route(c.get("userId"), {
         openModalId:
             c.req.query("reorder") === "1"
@@ -148,23 +143,17 @@ householdStoresRoutes.get(STORES_PATH, requireMember, gate, async (c) => {
     return c.html(page.html, page.status);
 });
 
-householdStoresRoutes.get(
-    `${STORES_PATH}/:id`,
-    requireMember,
-    gate,
-    async (c) => {
-        const page = await renderSettingsStoreV2Route(
-            c.get("userId"),
-            c.req.param("id"),
-        );
-        return c.html(page.html, page.status);
-    },
-);
+householdStoresRoutes.get(`${STORES_PATH}/:id`, requireMember, async (c) => {
+    const page = await renderSettingsStoreV2Route(
+        c.get("userId"),
+        c.req.param("id"),
+    );
+    return c.html(page.html, page.status);
+});
 
 householdStoresRoutes.post(
     `${STORES_PATH}/add`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);
@@ -192,7 +181,6 @@ householdStoresRoutes.post(
 householdStoresRoutes.post(
     `${STORES_PATH}/order`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);
@@ -225,7 +213,6 @@ householdStoresRoutes.post(
 householdStoresRoutes.post(
     `${STORES_PATH}/preferences`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);
@@ -254,7 +241,6 @@ householdStoresRoutes.post(
 householdStoresRoutes.post(
     `${STORES_PATH}/:id/rename`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);
@@ -277,7 +263,6 @@ householdStoresRoutes.post(
 householdStoresRoutes.post(
     `${STORES_PATH}/:id/delete`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);
@@ -346,7 +331,6 @@ householdStoresRoutes.post(
 householdStoresRoutes.post(
     `${STORES_PATH}/:id/sections`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);
@@ -369,7 +353,6 @@ householdStoresRoutes.post(
 householdStoresRoutes.post(
     `${STORES_PATH}/:id/sections/order`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);
@@ -401,7 +384,6 @@ householdStoresRoutes.post(
 householdStoresRoutes.post(
     `${STORES_PATH}/:id/sections/:sectionId/rename`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);
@@ -430,7 +412,6 @@ householdStoresRoutes.post(
 householdStoresRoutes.post(
     `${STORES_PATH}/:id/sections/:sectionId/visibility`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);
@@ -460,7 +441,6 @@ householdStoresRoutes.post(
 householdStoresRoutes.post(
     `${STORES_PATH}/:id/rules/add`,
     requireMember,
-    gate,
     requireManager,
     async (c) => {
         const manager = siteMember(c);

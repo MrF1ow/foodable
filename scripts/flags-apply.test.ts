@@ -4,6 +4,7 @@ import { FLAGS_EPOCH } from "../src/flags.js";
 import type { RolloutFile } from "../src/flags-rollout.js";
 import {
     DEFAULT_RAILWAY_PROJECT_ID,
+    checkFails,
     expandInternalRule,
     parseRailwayRules,
     planFlagChanges,
@@ -18,7 +19,7 @@ function syncFile(): RolloutFile {
     return {
         internal: ["842478ef-82e8-41c9-b86a-5ce7f5644a0d"],
         flags: {
-            "ui-v2": { default: false, rules: [] },
+            "mcp-widgets-v2": { default: false, rules: [] },
             "off-lookups": { default: true, rules: [] },
             "recipe-link-reader": { default: true, rules: [] },
             "barcode-camera": { default: true, rules: [] },
@@ -31,7 +32,7 @@ function syncFile(): RolloutFile {
 function syncRailway(): RailwayFlag[] {
     return [
         {
-            name: "ui-v2",
+            name: "mcp-widgets-v2",
             type: "bool",
             default: false,
             rules: [],
@@ -78,23 +79,33 @@ describe("planFlagChanges", () => {
 
     test("changed default yields one set command", () => {
         const file = syncFile();
-        file.flags!["ui-v2"] = { default: true, rules: [] };
+        file.flags!["mcp-widgets-v2"] = { default: true, rules: [] };
         const plan = planFlagChanges(file, syncRailway(), PROJECT);
         expect(plan.commands).toEqual([
-            ["railway", "flag", "set", "ui-v2", "true", "--scope", SCOPE],
+            [
+                "railway",
+                "flag",
+                "set",
+                "mcp-widgets-v2",
+                "true",
+                "--scope",
+                SCOPE,
+            ],
         ]);
     });
 
     test("missing flag plans create with type", () => {
         const file = syncFile();
-        const railway = syncRailway().filter((f) => f.name !== "ui-v2");
+        const railway = syncRailway().filter(
+            (f) => f.name !== "mcp-widgets-v2",
+        );
         const plan = planFlagChanges(file, railway, PROJECT);
         expect(plan.commands).toEqual([
             [
                 "railway",
                 "flag",
                 "set",
-                "ui-v2",
+                "mcp-widgets-v2",
                 "false",
                 "--type",
                 "bool",
@@ -106,7 +117,7 @@ describe("planFlagChanges", () => {
 
     test("internal rule expands to key expressions", () => {
         const file = syncFile();
-        file.flags!["ui-v2"] = { default: false, rules: ["internal"] };
+        file.flags!["mcp-widgets-v2"] = { default: false, rules: ["internal"] };
         const plan = planFlagChanges(file, syncRailway(), PROJECT);
         const when = expandInternalRule(file.internal ?? []);
         expect(plan.commands).toEqual([
@@ -114,7 +125,7 @@ describe("planFlagChanges", () => {
                 "railway",
                 "flag",
                 "set",
-                "ui-v2",
+                "mcp-widgets-v2",
                 "true",
                 "--when",
                 when,
@@ -129,7 +140,7 @@ describe("planFlagChanges", () => {
     test("removed rule plans unset", () => {
         const file = syncFile();
         const railway = syncRailway().map((f) =>
-            f.name === "ui-v2"
+            f.name === "mcp-widgets-v2"
                 ? {
                       ...f,
                       rules: [
@@ -148,7 +159,7 @@ describe("planFlagChanges", () => {
                 "railway",
                 "flag",
                 "unset",
-                "ui-v2",
+                "mcp-widgets-v2",
                 "--rule-id",
                 "stale",
                 "--scope",
@@ -157,17 +168,53 @@ describe("planFlagChanges", () => {
         ]);
     });
 
-    test("extra Railway flag is reported, not deleted", () => {
-        const railway: RailwayFlag[] = [
-            ...syncRailway(),
-            { name: "orphan", type: "bool", default: false, rules: [] },
-        ];
-        const plan = planFlagChanges(syncFile(), railway, PROJECT);
-        expect(plan.extraInRailway).toEqual(["orphan"]);
+    test("a registered flag missing from the file is drift, not deleted", () => {
+        const file = syncFile();
+        delete file.flags!["off-lookups"];
+        const plan = planFlagChanges(file, syncRailway(), PROJECT);
+        expect(plan.extraInRailway).toEqual(["off-lookups"]);
+        expect(plan.retiredInRailway).toEqual([]);
+        expect(checkFails(plan)).toBe(true);
         expect(
             plan.commands.some(
-                (c) => c.includes("delete") && c.includes("orphan"),
+                (c) => c.includes("delete") && c.includes("off-lookups"),
             ),
+        ).toBe(false);
+    });
+
+    test("a Railway flag that FLAGS no longer defines is retired, not drift", () => {
+        const railway: RailwayFlag[] = [
+            ...syncRailway(),
+            { name: "ui-v2", type: "bool", default: true, rules: [] },
+        ];
+        const plan = planFlagChanges(syncFile(), railway, PROJECT);
+        expect(plan.retiredInRailway).toEqual(["ui-v2"]);
+        expect(plan.extraInRailway).toEqual([]);
+        expect(plan.commands).toEqual([]);
+        expect(checkFails(plan)).toBe(false);
+    });
+
+    test("retired flags do not hide real drift", () => {
+        const file = syncFile();
+        file.flags!["mcp-widgets-v2"] = { default: true, rules: [] };
+        const railway: RailwayFlag[] = [
+            ...syncRailway(),
+            { name: "ui-v2", type: "bool", default: true, rules: [] },
+        ];
+        const plan = planFlagChanges(file, railway, PROJECT);
+        expect(plan.retiredInRailway).toEqual(["ui-v2"]);
+        expect(checkFails(plan)).toBe(true);
+    });
+});
+
+describe("checkFails", () => {
+    test("in-sync plan passes", () => {
+        expect(
+            checkFails({
+                commands: [],
+                extraInRailway: [],
+                retiredInRailway: [],
+            }),
         ).toBe(false);
     });
 });

@@ -30,16 +30,16 @@ const ctx = buildFlagContext({
 
 describe("viewer-flags", () => {
     test("flagKey maps registry names to camelCase", () => {
-        expect(flagKey("ui-v2")).toBe("uiV2");
+        expect(flagKey("mcp-widgets-v2")).toBe("mcpWidgetsV2");
         expect(flagKey("off-lookups")).toBe("offLookups");
         expect(flagKey("recipe-link-reader")).toBe("recipeLinkReader");
     });
 
     test("all flags on via memory reader", () => {
         const flags = evaluateViewerFlags(ctx, createMemoryFlags(allFlagsOn()));
-        expect(flags.uiV2).toBe(true);
+        expect(flags.mcpWidgetsV2).toBe(true);
         expect(flags.offLookups).toBe(true);
-        expect(isViewerFlagOn(flags, "ui-v2")).toBe(true);
+        expect(isViewerFlagOn(flags, "mcp-widgets-v2")).toBe(true);
     });
 
     test("all flags off via memory reader", () => {
@@ -47,7 +47,7 @@ describe("viewer-flags", () => {
             ctx,
             createMemoryFlags(allFlagsOff()),
         );
-        expect(flags.uiV2).toBe(false);
+        expect(flags.mcpWidgetsV2).toBe(false);
         expect(flags.barcodeCamera).toBe(false);
     });
 
@@ -56,7 +56,7 @@ describe("viewer-flags", () => {
             ctx,
             createMemoryFlags(defaultFlags()),
         );
-        expect(flags.uiV2).toBe(false);
+        expect(flags.mcpWidgetsV2).toBe(false);
         expect(flags.offLookups).toBe(true);
     });
 
@@ -64,10 +64,10 @@ describe("viewer-flags", () => {
         const flags = evaluateViewerFlags(
             ctx,
             createMemoryFlags({
-                "ui-v2": (c) => c.role === "owner",
+                "mcp-widgets-v2": (c) => c.role === "owner",
             }),
         );
-        expect(flags.uiV2).toBe(true);
+        expect(flags.mcpWidgetsV2).toBe(true);
         const memberCtx = buildFlagContext({
             auth: { kind: "user", userId: "user-2" },
             member: {
@@ -81,15 +81,15 @@ describe("viewer-flags", () => {
             evaluateViewerFlags(
                 memberCtx,
                 createMemoryFlags({
-                    "ui-v2": (c) => c.role === "owner",
+                    "mcp-widgets-v2": (c) => c.role === "owner",
                 }),
-            ).uiV2,
+            ).mcpWidgetsV2,
         ).toBe(false);
     });
 
     test("defaultViewerFlags is stable for fixtures", () => {
         const flags = defaultViewerFlags();
-        expect(flags.uiV2).toBe(false);
+        expect(flags.mcpWidgetsV2).toBe(false);
         expect(flags.restockRunner).toBe(true);
     });
 });

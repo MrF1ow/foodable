@@ -5,11 +5,9 @@ import {
     APP_TABS,
     appBar,
     appHead,
-    bottomNav,
     renderAppShell,
     parseAppearanceInput,
     renderBarePage,
-    renderSettingsPage,
     resolveTheme,
     themeColorMeta,
 } from "./shell.js";
@@ -34,7 +32,7 @@ function shellPage(
 
 const SHELL_JS = readFileSync(join(import.meta.dir, "client/shell.js"), "utf8");
 
-test("bottom nav hrefs and tab order", () => {
+test("app tab hrefs and order", () => {
     expect(APP_TABS.map((tab) => tab.id)).toEqual([
         "fridge",
         "grocery",
@@ -56,36 +54,6 @@ test("bottom nav hrefs and tab order", () => {
         "Recipes",
         "Household",
     ]);
-
-    const html = bottomNav("nutrition");
-    const hrefs = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
-    expect(hrefs).toEqual([
-        "/kitchen/fridge",
-        "/kitchen/groceries",
-        "/",
-        "/recipes",
-        "/settings/household",
-    ]);
-    expect(html).toContain('href="/" aria-current="page"');
-    expect(html).not.toContain('href="/kitchen/fridge" aria-current="page"');
-    expect(html.match(/<svg\b/g)?.length).toBe(5);
-    expect([...html.matchAll(/\stitle="([^"]+)"/g)].map((m) => m[1])).toEqual([
-        "Fridge",
-        "Groceries",
-        "Nutrition",
-        "Recipes",
-        "Household",
-    ]);
-    // Parsed, not stripped with a regex: every visible character is text.
-    let text = "";
-    new HTMLRewriter()
-        .on("*", {
-            text(chunk) {
-                text += chunk.text;
-            },
-        })
-        .transform(html);
-    expect(text.trim()).toBe("");
 });
 
 test("unset theme follows the system", () => {
@@ -98,21 +66,20 @@ test("unset theme follows the system", () => {
 test("a tab page uses the shell and marks its tab active", () => {
     const html = shellPage();
     expect(html).toContain("<h1>Fridge</h1>");
-    expect(html).toContain('href="/kitchen/fridge" aria-current="page"');
-    expect(html).toContain('href="/settings" data-turbo="false"');
-    expect(html).toContain('aria-label="Settings"');
-    expect(html).toContain('class="btn-icon app-bar-action"');
-    expect(html).not.toContain('href="/logout"');
-    expect(html).toContain('class="app-bar-logo"');
-    expect(html).toContain('href="/"');
-    expect(html).not.toMatch(
-        /class="app-bar-logo" href="\/" data-turbo="false"/,
+    expect(html).toMatch(
+        /<a class="fd-tab" href="\/kitchen\/fridge" aria-current="page"/,
     );
+    expect(html).toContain('href="/settings" data-turbo="false"');
+    expect(html).not.toContain('href="/logout"');
+    expect(html).not.toContain("app-bar");
     expect(html).toMatch(
         /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
     expect(html).toMatch(
         /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
+    );
+    expect(html).toMatch(
+        /<link rel="stylesheet" href="\/app-v2\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
     expect(html).toContain(
         '<meta name="turbo-refresh-method" content="morph" />',
@@ -125,12 +92,12 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
     expect(html).not.toContain("data-theme");
     expect(html).toContain('<meta name="foodable-theme" content="system" />');
     expect(html).toContain(
-        `<meta name="theme-color" content="${THEME_NAV_COLOR.dark}" media="(prefers-color-scheme: dark)" />`,
+        `<meta name="theme-color" content="${THEME_COLOR.dark}" media="(prefers-color-scheme: dark)" />`,
     );
     expect(html).toContain(
-        '<meta name="foodable-theme-chrome" content="nav" />',
+        '<meta name="foodable-theme-chrome" content="page" />',
     );
-    expect(html).toContain('class="has-bottom-nav"');
+    expect(html).not.toContain("has-bottom-nav");
     expect(html).not.toContain("--accent");
 });
 
@@ -138,7 +105,7 @@ test("an explicit theme stamps data-theme on html", () => {
     const html = shellPage("household", "dark");
     expect(html).toContain('<html lang="en" data-theme="dark">');
     expect(html).toContain(
-        `<meta name="theme-color" content="${THEME_NAV_COLOR.dark}" />`,
+        `<meta name="theme-color" content="${THEME_COLOR.dark}" />`,
     );
     expect(html).toContain('<meta name="foodable-theme" content="dark" />');
     expect(html).not.toContain("--accent");
@@ -166,31 +133,22 @@ test("bare pages stamp page chrome and omit the bottom nav", () => {
 });
 
 test("appHead emits foodable-theme for every preference", () => {
-    expect(appHead("T", "light")).toContain(
+    expect(appHead("T", "light", "page")).toContain(
         '<meta name="foodable-theme" content="light" />',
     );
-    expect(appHead("T", "system")).toContain(
+    expect(appHead("T", "system", "page")).toContain(
         '<meta name="foodable-theme" content="system" />',
     );
 });
 
-test("settings chrome full-loads into and out of tabs", () => {
-    const settings = renderSettingsPage({
-        title: "Settings",
-        theme: "light",
-        backHref: "/kitchen/fridge",
-        body: "<h1>Settings</h1>",
-    });
-    expect(settings).toContain(
-        'class="settings-back" href="/kitchen/fridge" data-turbo="false"',
-    );
-    expect(settings).toContain(
+test("Log out opts out of Turbo and the logo link does not", () => {
+    expect(appBar()).toContain('href="/logout" data-turbo="false"');
+    expect(appBar()).toContain('class="app-bar-logo" href="/"');
+    expect(appBar()).not.toContain(
         'class="app-bar-logo" href="/" data-turbo="false"',
     );
-    expect(appBar("app")).not.toContain(
-        'class="app-bar-logo" href="/" data-turbo="false"',
-    );
-    expect(appBar("app")).toContain('href="/settings" data-turbo="false"');
+    expect(appBar()).not.toContain("/settings");
+    expect(appBar()).not.toContain("app-bar-attention");
 });
 
 test("bare pages get the top bar and can stamp a real data-theme", () => {
@@ -227,229 +185,6 @@ test("the appearance form maps System to a cleared preference", () => {
     expect(parseAppearanceInput({ theme: "chartreuse" })).toEqual({
         theme: null,
     });
-});
-
-// The frame-sizing script lives in src/web/client/shell.js (served as /app.js
-// with defer). A widget frame can finish loading and post its first
-// size-changed before the script attaches a listener. Run the real script
-// against a frame that has already loaded and check it is sized without any
-// load event or message.
-function runFrameSizer(contentHeight: number) {
-    const script = SHELL_JS;
-    const listeners: Record<string, ((e: unknown) => void)[]> = {};
-    const docEl = {
-        style: { height: "" },
-        getBoundingClientRect: () => ({
-            height: docEl.style.height === "max-content" ? contentHeight : 150,
-        }),
-    };
-    const contentWindow = {};
-    const frame = {
-        style: { height: "" },
-        contentWindow,
-        contentDocument: { documentElement: docEl },
-        addEventListener() {},
-    };
-    const document = {
-        querySelectorAll: () => [frame],
-        addEventListener() {},
-    };
-    const window = {
-        addEventListener(type: string, fn: (e: unknown) => void) {
-            (listeners[type] ??= []).push(fn);
-        },
-    };
-    new Function("document", "window", script)(document, window);
-    const post = (source: unknown, height: number) =>
-        listeners.message!.forEach((fn) =>
-            fn({
-                source,
-                data: {
-                    method: "ui/notifications/size-changed",
-                    params: { width: 400, height },
-                },
-            }),
-        );
-    return { frame, docEl, post, contentWindow };
-}
-
-test("widget frames are sized at once, even if they loaded before the script", () => {
-    const { frame, docEl } = runFrameSizer(467);
-    expect(frame.style.height).toBe("467px");
-    // The max-content probe is undone.
-    expect(docEl.style.height).toBe("");
-});
-
-test("a frame still on about:blank is left alone until it reports", () => {
-    const { frame, post, contentWindow } = runFrameSizer(0);
-    expect(frame.style.height).toBe("");
-    post({}, 300);
-    expect(frame.style.height).toBe("");
-    post(contentWindow, 300);
-    expect(frame.style.height).toBe("300px");
-});
-
-class FakeWidgetFrame {
-    classList = { contains: (name: string) => name === "widget-frame" };
-    style = { height: "" };
-    // Counts src re-sets: that is how shell.js reloads a frame.
-    reloads = 0;
-    private attrs: Record<string, string>;
-
-    constructor(attrs: Record<string, string>, height = "") {
-        this.attrs = { ...attrs };
-        this.style.height = height;
-    }
-
-    getAttribute(name: string): string | null {
-        return Object.prototype.hasOwnProperty.call(this.attrs, name)
-            ? this.attrs[name]!
-            : null;
-    }
-
-    setAttribute(name: string, value: string) {
-        if (name === "src") this.reloads += 1;
-        this.attrs[name] = value;
-    }
-
-    removeAttribute(name: string) {
-        delete this.attrs[name];
-    }
-}
-
-function runWidgetMorph() {
-    // shell.js looks up HTMLIFrameElement on the real global. This runtime
-    // has no DOM lib, so the test installs the fake constructor there.
-    const iframeGlobal = globalThis as typeof globalThis & {
-        HTMLIFrameElement?: typeof FakeWidgetFrame;
-    };
-    const prev = iframeGlobal.HTMLIFrameElement;
-    iframeGlobal.HTMLIFrameElement = FakeWidgetFrame;
-    const listeners: Record<string, ((e: unknown) => void)[]> = {};
-    const document = {
-        documentElement: { classList: { add() {} } },
-        querySelectorAll: () => [],
-        addEventListener(type: string, fn: (e: unknown) => void) {
-            (listeners[type] ??= []).push(fn);
-        },
-    };
-    const window = { addEventListener() {} };
-    new Function("document", "window", "Element", SHELL_JS)(
-        document,
-        window,
-        class Element {},
-    );
-    const fire = (type: string, detail: unknown) => {
-        let prevented = false;
-        for (const fn of listeners[type] ?? []) {
-            fn({
-                detail,
-                preventDefault() {
-                    prevented = true;
-                },
-            });
-        }
-        return prevented;
-    };
-    return {
-        fire,
-        restore() {
-            if (prev) iframeGlobal.HTMLIFrameElement = prev;
-            else delete iframeGlobal.HTMLIFrameElement;
-        },
-    };
-}
-
-const FRAME_SRC = "/app/widgets/trends?v=abc123abc123";
-
-test("a widget frame is kept when src, data, and theme all match", () => {
-    const { fire, restore } = runWidgetMorph();
-    try {
-        const current = new FakeWidgetFrame(
-            {
-                src: FRAME_SRC,
-                "data-widget-data": '{"n":1}',
-                "data-theme": "light",
-            },
-            "480px",
-        );
-        const next = new FakeWidgetFrame({
-            src: FRAME_SRC,
-            "data-widget-data": '{"n":1}',
-            "data-theme": "light",
-        });
-        const prevented = fire("turbo:before-morph-element", {
-            currentElement: current,
-            newElement: next,
-        });
-        expect(prevented).toBe(true);
-        fire("turbo:morph-element", { currentElement: current });
-        expect(current.reloads).toBe(0);
-        expect(current.style.height).toBe("480px");
-    } finally {
-        restore();
-    }
-});
-
-test("a same-src widget frame reloads when data or theme changes and keeps its height", () => {
-    const { fire, restore } = runWidgetMorph();
-    try {
-        const current = new FakeWidgetFrame(
-            {
-                src: FRAME_SRC,
-                "data-widget-data": '{"n":1}',
-                "data-theme": "dark",
-            },
-            "480px",
-        );
-        const next = new FakeWidgetFrame({
-            src: FRAME_SRC,
-            "data-widget-data": '{"n":2}',
-            "data-theme": "light",
-        });
-        const prevented = fire("turbo:before-morph-element", {
-            currentElement: current,
-            newElement: next,
-        });
-        expect(prevented).toBe(false);
-        // The morph copies attributes and drops the fitted inline height.
-        current.setAttribute("data-widget-data", '{"n":2}');
-        current.setAttribute("data-theme", "light");
-        current.style.height = "";
-        fire("turbo:morph-element", { currentElement: current });
-        expect(current.reloads).toBe(1);
-        expect(current.style.height).toBe("480px");
-    } finally {
-        restore();
-    }
-});
-
-test("a widget frame whose src changed keeps its height and is not reloaded twice", () => {
-    const { fire, restore } = runWidgetMorph();
-    try {
-        const current = new FakeWidgetFrame(
-            { src: FRAME_SRC, "data-widget-data": '{"n":1}' },
-            "480px",
-        );
-        const next = new FakeWidgetFrame({
-            src: "/app/widgets/trends?v=fff000fff000",
-            "data-widget-data": '{"n":1}',
-        });
-        const prevented = fire("turbo:before-morph-element", {
-            currentElement: current,
-            newElement: next,
-        });
-        expect(prevented).toBe(false);
-        // The morph itself sets the new src (one navigation) and drops the
-        // fitted inline height.
-        current.setAttribute("src", "/app/widgets/trends?v=fff000fff000");
-        current.style.height = "";
-        fire("turbo:morph-element", { currentElement: current });
-        expect(current.reloads).toBe(1);
-        expect(current.style.height).toBe("480px");
-    } finally {
-        restore();
-    }
 });
 
 function runShellScript(
@@ -694,4 +429,15 @@ test("one passive pointermove listener sets --mx and --my on the panel", () => {
         clientY: 80,
     });
     expect(panel.style.props).toEqual({ "--mx": "30px", "--my": "60px" });
+});
+
+test("the toast region has one plain rule, with no bottom-nav variant", () => {
+    const css = readFileSync(
+        join(import.meta.dir, "../../public/app/app.css"),
+        "utf8",
+    );
+    expect(css).not.toContain("has-bottom-nav");
+    expect(css).toMatch(
+        /\n\.toast-region \{[^}]*bottom: calc\(16px \+ env\(safe-area-inset-bottom, 0px\)\);/,
+    );
 });

@@ -3,11 +3,7 @@ import { Hono } from "hono";
 import { TOAST_COOKIE } from "../components/toast.js";
 import { UNDO_COOKIE } from "../../domain/meal-undo.js";
 import { UNDO_SNAPSHOT_COOKIE } from "../meal-undo-flash.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
 import * as actualNutrition from "../../db/nutrition.js";
@@ -121,17 +117,7 @@ function cookie(userId: string): string {
 }
 
 describe("today meal routes", () => {
-    test("edit route 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await hono.request("http://test/meals/x/edit", {
-            method: "POST",
-            headers: { cookie: cookie(ALICE) },
-        });
-        expect(res.status).toBe(404);
-    });
-
     test("cannot edit another member's meal", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         mealStore.set("00000000-0000-4000-8000-0000000000b0", {
             id: "00000000-0000-4000-8000-0000000000b0",
             user_id: BOB,
@@ -165,7 +151,6 @@ describe("today meal routes", () => {
     });
 
     test("a non-uuid meal id is 404, not a uuid-cast 500", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         for (const action of ["edit", "delete"]) {
             const res = await hono.request(
                 `http://test/meals/not-a-uuid/${action}`,
@@ -183,7 +168,6 @@ describe("today meal routes", () => {
     });
 
     test("delete keeps toast and both undo cookies", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         mealStore.set("00000000-0000-4000-8000-0000000000d1", {
             id: "00000000-0000-4000-8000-0000000000d1",
             user_id: ALICE,
@@ -228,7 +212,6 @@ describe("today meal routes", () => {
     });
 
     test("undo POST restores meal from delete cookies", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const id = "00000000-0000-4000-8000-0000000000e2";
         const key = "auto:undo-http";
         mealStore.set(id, {

@@ -3,47 +3,9 @@ import { Glob } from "bun";
 import type { Notice } from "../../domain/notices.js";
 import {
     noticeAction,
-    noticeBadge,
     noticeList,
     type NoticeRouteContext,
 } from "./notices.js";
-
-function baseNotice(
-    over: Partial<Notice> & Pick<Notice, "code" | "severity">,
-): Notice {
-    return {
-        subject: {
-            kind: "recipe_ingredient",
-            id: "i1",
-            recipeId: "r1",
-        },
-        related: [],
-        params: { name: "Test" },
-        ...over,
-    };
-}
-
-test("noticeBadge uses severity pill classes and data-notice", () => {
-    expect(
-        noticeBadge(
-            baseNotice({ code: "recipe.no_nutrition", severity: "block" }),
-        ),
-    ).toBe(
-        '<span class="pill pill-bad" data-notice="recipe.no_nutrition">No nutrition</span>',
-    );
-    expect(
-        noticeBadge(baseNotice({ code: "recipe.no_food", severity: "warn" })),
-    ).toBe(
-        '<span class="pill pill-warn" data-notice="recipe.no_food">Not linked</span>',
-    );
-    expect(
-        noticeBadge(
-            baseNotice({ code: "recipe.partial_nutrition", severity: "info" }),
-        ),
-    ).toBe(
-        '<span class="pill pill-dim" data-notice="recipe.partial_nutrition">Partial nutrition</span>',
-    );
-});
 
 test("noticeList empty, className, escaping, dedupe, action with ctx", () => {
     expect(noticeList([])).toBe("");

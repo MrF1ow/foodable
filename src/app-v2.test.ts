@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { FIXTURE_APP_CHROME_FLAGS } from "./test-support/chrome-flags.js";
+import { readdirSync, readFileSync } from "node:fs";
 import {
     APP_V2_JS_SOURCES,
     appV2ScriptHref,
@@ -313,6 +312,13 @@ describe("chat widgets never get the v2 layer", () => {
     });
 });
 
-test("fixture flags default to the old shell", () => {
-    expect(FIXTURE_APP_CHROME_FLAGS.uiV2).toBe(false);
+describe("shell stylesheet sources", () => {
+    test("no partial's header names the removed ui-v2 flag", () => {
+        const dir = new URL("../public/app/v2/", import.meta.url);
+        for (const name of readdirSync(dir)) {
+            if (!name.endsWith(".css")) continue;
+            const css = readFileSync(new URL(name, dir), "utf8");
+            expect(css, name).not.toMatch(/ui-v2/);
+        }
+    });
 });

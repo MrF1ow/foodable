@@ -16,7 +16,7 @@ import {
     type RecipeIngredient,
     type RecipeGapNutrient,
 } from "../domain/recipes.js";
-import { HELP_IDS } from "../web/pages/settings-help.js";
+import { HELP_IDS } from "../web/pages/v2/settings-help.js";
 import {
     NOTICE_COPY,
     formatMissingNutrientList,
@@ -34,7 +34,6 @@ import {
     type GroceryAllergenMember,
 } from "../domain/grocery.js";
 import { fridgeNotices } from "../domain/stock.js";
-import { noticeBadge } from "../web/components/notices.js";
 
 const HH = "household-1";
 
@@ -97,13 +96,6 @@ test("NOTICE_COPY is complete and well-formed", () => {
             expect(entry.dismissible).toBe(false);
         }
     }
-});
-
-test("only fridge.expired sets badgeTone bad", () => {
-    const withTone = Object.entries(NOTICE_COPY).filter(
-        ([, e]) => e.badgeTone === "bad",
-    );
-    expect(withTone.map(([code]) => code)).toEqual(["fridge.expired"]);
 });
 
 test("fridge expiry sentences with grocery list state", () => {
@@ -199,25 +191,8 @@ test("fridge expiry sentences with grocery list state", () => {
     );
 });
 
-test("fridge.expired badge and pill markup are pinned", () => {
+test("fridge.expired badge copy is pinned", () => {
     expect(NOTICE_COPY["fridge.expired"].badge).toBe("Expired");
-    const today = "2026-11-06";
-    const n = fridgeNotices(
-        [
-            {
-                id: "x",
-                kind: "food",
-                foodId: "f-milk",
-                displayName: "Milk",
-                quantity: { amount: 1, unit: "l" },
-                expiresOn: "2026-11-05",
-            },
-        ],
-        today,
-    )[0]!;
-    expect(noticeBadge(n, { className: "expiry-pill" })).toBe(
-        '<span class="pill pill-bad expiry-pill" data-notice="fridge.expired">Expired</span>',
-    );
 });
 
 test("groceryAllergenWarning and allergenNotices sentences match pinned literals", async () => {

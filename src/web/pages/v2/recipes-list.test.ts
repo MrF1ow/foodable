@@ -5,7 +5,6 @@ import {
     applyV2RecipeListFilters,
     parseV2RecipeListFilter,
     renderRecipesListBody,
-    renderRecipesListV2Page,
     recipesListV2Href,
 } from "./recipes-list.js";
 
@@ -28,7 +27,7 @@ const RECIPE: Recipe = {
 const chrome = {
     theme: "light" as const,
     attention: { count: 0, tabs: {} },
-    flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+    flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
 const MACROS = {

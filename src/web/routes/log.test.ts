@@ -49,7 +49,6 @@ import {
     _resetBuckets,
 } from "../../rate-limit.js";
 import * as actualAttention from "../attention.js";
-import * as actualDashboardData from "../../dashboard-data.js";
 import * as actualLoadersToday from "../loaders-today.js";
 import * as actualLoadersPlan from "../loaders-plan.js";
 import { buildWeekPlanView } from "../pages/v2/recipes-plan.js";
@@ -67,7 +66,6 @@ const realFoodSearch = { ...actualFoodSearch };
 // Snapshots taken before mock.module: Bun patches the namespace in place.
 const realAttention = { ...actualAttention };
 const realFoods = { ...actualFoods };
-const realDashboardData = { ...actualDashboardData };
 const realLoadersToday = { ...actualLoadersToday };
 const realLoadersPlan = { ...actualLoadersPlan };
 
@@ -216,7 +214,6 @@ mock.module("../../db/profiles.js", () => ({
                 widgets_enabled: true,
                 alcohol_tracking_enabled: false,
                 preferred_drink_unit: null,
-                nutrition_layout: null,
                 created_at: "2026-01-01T00:00:00.000Z",
                 updated_at: "2026-01-01T00:00:00.000Z",
             };
@@ -230,7 +227,6 @@ mock.module("../../db/profiles.js", () => ({
                 widgets_enabled: true,
                 alcohol_tracking_enabled: false,
                 preferred_drink_unit: null,
-                nutrition_layout: null,
                 created_at: "2026-01-01T00:00:00.000Z",
                 updated_at: "2026-01-01T00:00:00.000Z",
             };
@@ -408,7 +404,7 @@ mock.module("../attention.js", () => ({
             attention: { count: 0, tabs: {} },
             householdPossibleDuplicates: 0,
             flags,
-            ...(flags.uiV2 ? { v2Timezone: tz } : {}),
+            v2Timezone: tz,
             identity: {
                 viewerName: viewer.displayName,
                 viewerRole: viewer.role,
@@ -417,15 +413,6 @@ mock.module("../attention.js", () => ({
             },
         };
     },
-}));
-
-const widgetStub = { locale: "en" };
-mock.module("../../dashboard-data.js", () => ({
-    ...realDashboardData,
-    getNutritionSummaryPayload: async () => widgetStub,
-    getGoalProgressPayload: async () => widgetStub,
-    getTrendsPayload: async () => widgetStub,
-    getWeightTrendsPayload: async () => widgetStub,
 }));
 
 // This week reads the plans table; these tests do not run against one.
@@ -456,7 +443,6 @@ mock.module("../../foods.js", () => ({
 afterAll(() => {
     mock.module("../../foods.js", () => realFoods);
     mock.module("../attention.js", () => realAttention);
-    mock.module("../../dashboard-data.js", () => realDashboardData);
     mock.module("../loaders-today.js", () => realLoadersToday);
     mock.module("../loaders-plan.js", () => realLoadersPlan);
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restores stubs taken before mock
@@ -595,18 +581,10 @@ beforeEach(async () => {
     listFoodsCalls = 0;
     listRecipesCalls = 0;
     listFridgeItemsCalls = 0;
-    setFlagsForTests(createMemoryFlags({ "ui-v2": true, "off-lookups": true }));
+    setFlagsForTests(createMemoryFlags({ "off-lookups": true }));
 });
 
 describe("GET /api/log/search", () => {
-    test("returns 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await app.request(`${searchUrl}?q=egg`, {
-            headers: { cookie: sessionCookie(ALICE) },
-        });
-        expect(res.status).toBe(404);
-    });
-
     test("a NUL byte in the query is dropped, not a Postgres 500", async () => {
         const res = await app.request(`${searchUrl}?q=a%00b`, {
             headers: { cookie: sessionCookie(ALICE) },
@@ -739,9 +717,7 @@ describe("GET /api/log/search", () => {
     });
 
     test("with off-lookups off there is no off group", async () => {
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "off-lookups": false }),
-        );
+        setFlagsForTests(createMemoryFlags({ "off-lookups": false }));
         const body = await search("egg");
         expect(body.groups.some((g) => g.kind === "off")).toBe(false);
         expect(offCalls).toBe(0);
@@ -997,23 +973,6 @@ function logForm(fields: Record<string, string>): {
 }
 
 describe("POST /log", () => {
-    test("returns 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const { body, headers } = logForm({
-            food_id: "x",
-            amount: "100",
-            unit: "g",
-            meal_type: "lunch",
-            logged_at: "2026-11-01T12:00",
-        });
-        const res = await app.request(logPostUrl, {
-            method: "POST",
-            headers,
-            body,
-        });
-        expect(res.status).toBe(404);
-    });
-
     test("logging 150 g of a food writes one meal and scales totals 1.5× per 100 g", async () => {
         const rice = (await db.foodsStore.listFoods(HH)).find(
             (row) => row.name === "Fried rice",
@@ -1268,20 +1227,6 @@ const waterPostUrl = "http://x/log/water";
 const weightPostUrl = "http://x/log/weight";
 
 describe("POST /log/quick", () => {
-    test("returns 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const { body, headers } = logForm({
-            calories: "350",
-            meal_type: "snack",
-        });
-        const res = await app.request(quickPostUrl, {
-            method: "POST",
-            headers,
-            body,
-        });
-        expect(res.status).toBe(404);
-    });
-
     test("writes quick calories without logged_at", async () => {
         const { body, headers } = logForm({
             calories: "350",
@@ -1353,17 +1298,6 @@ describe("POST /log/quick", () => {
 });
 
 describe("POST /log/water", () => {
-    test("returns 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const { body, headers } = logForm({ amount_ml: "250" });
-        const res = await app.request(waterPostUrl, {
-            method: "POST",
-            headers,
-            body,
-        });
-        expect(res.status).toBe(404);
-    });
-
     test("writes water with an explicit local time", async () => {
         const { body, headers } = logForm({
             amount_ml: "250",
@@ -1421,20 +1355,6 @@ describe("POST /log/water", () => {
 });
 
 describe("POST /log/weight", () => {
-    test("returns 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const { body, headers } = logForm({
-            weight: "180",
-            unit: "lb",
-        });
-        const res = await app.request(weightPostUrl, {
-            method: "POST",
-            headers,
-            body,
-        });
-        expect(res.status).toBe(404);
-    });
-
     test("writes weight without logged_at", async () => {
         const { body, headers } = logForm({
             weight: "180",

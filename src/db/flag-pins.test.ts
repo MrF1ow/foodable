@@ -14,7 +14,7 @@ const HOUR = 60 * 60 * 1000;
 function pin(over: Partial<Pin> = {}): Pin {
     const assignedAt = Date.parse("2026-11-08T10:00:00.000Z");
     return {
-        flag: "ui-v2",
+        flag: "mcp-widgets-v2",
         value: true,
         reason: "TARGETING_MATCH",
         epoch: 0,
@@ -105,7 +105,7 @@ describeDb(
                     user_id: userId,
                     household_id: null,
                     subject_id: userId,
-                    flag_name: "ui-v2",
+                    flag_name: "mcp-widgets-v2",
                 },
                 {
                     subject_kind: "household",
@@ -141,7 +141,7 @@ describeDb(
                 }),
             );
             const mine = await store.loadPins({ kind: "user", id: a.userId });
-            expect(mine.map((p) => p.flag)).toEqual(["ui-v2"]);
+            expect(mine.map((p) => p.flag)).toEqual(["mcp-widgets-v2"]);
             const theirs = await store.loadPins({ kind: "user", id: b.userId });
             expect(theirs.map((p) => p.flag)).toEqual(["other"]);
             const hh = await store.loadPins({
@@ -172,7 +172,7 @@ describeDb(
                     now() + interval '1 hour')
         `;
             expect((await store.loadPins(subject)).map((p) => p.flag)).toEqual([
-                "ui-v2",
+                "mcp-widgets-v2",
             ]);
         });
 

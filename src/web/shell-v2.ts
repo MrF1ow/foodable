@@ -1,4 +1,4 @@
-// The new household shell (flag `ui-v2`), drawn from the FigCraft design:
+// The household shell, drawn from the FigCraft design:
 // Components › Nav bar, Screens › Today (Header, Account chip) and
 // Desktop › Today (Sidebar, Top bar). Phones get a floating four-tab nav with
 // the green search button in the middle and the account chip top right;
@@ -37,11 +37,10 @@ import {
     renderLogSheets,
 } from "./pages/v2/log-sheet.js";
 
-/** The nutrition page's log-meal dialog (`NUTRITION_LOG_MEAL_MODAL_ID`) and its
- *  Trends card (`data-nutrition-card="trends"`). Search, Scan and Log food link
- *  to the dialog by fragment; the Trends tab links to `FD_TRENDS_PATH` (`/trends`).
- *  v2/shell.js acts on the log-meal fragment only. A test pins both against
- *  their sources. */
+/** The log-meal fragment (`#nutrition-log-meal`) and the Trends card key
+ *  (`trends`). Search, Scan and Log food link to the
+ *  log-meal fragment; the Trends tab links to `FD_TRENDS_PATH` (`/trends`).
+ *  v2/shell.js acts on the log-meal fragment only. A test pins both. */
 export const FD_LOG_MEAL_HASH = "nutrition-log-meal";
 export const FD_TRENDS_HASH = "trends";
 
@@ -295,11 +294,11 @@ function topBar(chrome: AppChrome): string {
     return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span>${scan}<a class="fd-logfood" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${fdIcon("plus")}<span>Log food</span></a></header>`;
 }
 
-/** Head for the new shell: the shared meta, then the old stylesheet and script
- *  (the page bodies still lean on them, and Turbo and the modal code live in
- *  /app.js) followed by the v2 ones. All four are Turbo-tracked, so a member
- *  whose shell changes gets one full reload, never a morph from old markup
- *  into new. */
+/** Head for the shell: the shared meta, then the base stylesheet and script
+ *  (/app.css and /app.js carry the shared form and modal primitives, Turbo and
+ *  the modal code) followed by the shell's own. All four are Turbo-tracked, so
+ *  a deploy that changes any of them gets one full reload rather than a morph
+ *  across versions. */
 export function appHeadV2(title: string, theme: ThemePref): string {
     // "page": the phone page behind the floating nav and the desktop page are
     // both --surface-bg, so the browser chrome takes the page colour.
@@ -326,7 +325,7 @@ ${topBar(chrome)}
 </div>
 ${phoneTabs(chrome, active)}
 </div>
-${chrome.flags.uiV2 ? renderLogSheets({ timezone: chrome.v2Timezone ?? "UTC", barcodeCamera: chrome.flags.barcodeCamera, scannerZxingHref: scannerZxingScriptHref(), scannerWasmHref: scannerWasmHref(), ...chrome.v2LogSheet }) : ""}
+${renderLogSheets({ timezone: chrome.v2Timezone ?? "UTC", barcodeCamera: chrome.flags.barcodeCamera, scannerZxingHref: scannerZxingScriptHref(), scannerWasmHref: scannerWasmHref(), ...chrome.v2LogSheet })}
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;

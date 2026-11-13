@@ -117,7 +117,7 @@ describe("wrapKitchenOverviewColumns", () => {
 describe("desktop overview markup in fridge body", () => {
     const chrome = {
         theme: "dark" as const,
-        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+        flags: FIXTURE_APP_CHROME_FLAGS,
         attention: { count: 0, tabs: {} },
         displayName: "Alex",
     };

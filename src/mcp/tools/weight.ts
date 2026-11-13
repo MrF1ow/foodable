@@ -18,7 +18,6 @@ import {
 import type { WeightEntry } from "../../db/nutrition.js";
 import { withAnalytics } from "../../analytics.js";
 import { todayInTz, shiftLocalDate, dateInTz } from "../../domain/tz.js";
-import { WIDGET_LOCALE } from "../../routes.js";
 import { computeWeightTrend } from "../../domain/insights.js";
 import { toGrams, formatWeight, fromGrams } from "../../domain/units.js";
 import type { WeightUnit } from "../../domain/units.js";
@@ -280,10 +279,6 @@ export function registerWeightTools(server: McpServer, ctx: ToolContext) {
                 unit: z.string(),
                 target: z.number().nullable(),
                 default_range: z.number(),
-                // The widget's UI language — see the identical field on
-                // get_nutrition_summary's outputSchema for why this is
-                // Widgets are English-only.
-                locale: z.string(),
                 // Per-day weight (same-day weigh-ins averaged) in display units,
                 // for logged days within the last 30 days; widget slices 7/14/30.
                 days: z.array(
@@ -305,7 +300,6 @@ export function registerWeightTools(server: McpServer, ctx: ToolContext) {
                     const tz = timezoneFromProfile(profile) ?? "UTC";
                     const unit =
                         preferredWeightUnitFromProfile(profile) ?? "kg";
-                    const locale = WIDGET_LOCALE;
                     const endDate = end_date ?? todayInTz(tz);
                     const windowDays = days ?? 30;
                     // The widget's toggle offers up to 30 days, so fetch at
@@ -381,7 +375,6 @@ export function registerWeightTools(server: McpServer, ctx: ToolContext) {
                             default_range: [7, 14, 30].includes(windowDays)
                                 ? windowDays
                                 : 30,
-                            locale,
                             days: widgetDays,
                         },
                     };

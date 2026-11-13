@@ -1,3 +1,4 @@
+import type { WaterInput, WaterInsertResult } from "../db/nutrition.js";
 import {
     rememberAliasForChoice,
     SimilarFoodsError,
@@ -33,59 +34,6 @@ export function formOptionalNumber(
 ): number | undefined {
     const raw = formText(body, key).trim();
     return raw === "" ? undefined : Number(raw);
-}
-
-/** Recipe ingredient amount: blank means unmeasured (null), not zero. */
-export function formRecipeIngredientAmount(
-    body: Record<string, string | File | (string | File)[]>,
-    key: string,
-): number | null {
-    const raw = formText(body, key).trim();
-    if (raw === "") return null;
-    return Number(raw);
-}
-
-function asStringList(value: unknown): string[] {
-    if (Array.isArray(value)) {
-        return value.filter((item): item is string => typeof item === "string");
-    }
-    if (typeof value === "string") return [value];
-    return [];
-}
-
-export type MealFormItem = {
-    food_id?: string;
-    name?: string;
-    amount?: string;
-    unit?: string;
-};
-
-export function formMealItems(
-    body: Record<string, string | File | (string | File)[]>,
-): MealFormItem[] {
-    const foodIds = asStringList(body.item_food_id);
-    const names = asStringList(body.item_name);
-    const amounts = asStringList(body.item_amount);
-    const units = asStringList(body.item_unit);
-    const n = Math.max(
-        foodIds.length,
-        names.length,
-        amounts.length,
-        units.length,
-    );
-    const items: MealFormItem[] = [];
-    for (let i = 0; i < n; i++) {
-        const food_id = foodIds[i]?.trim() || undefined;
-        const name = names[i]?.trim() || undefined;
-        if (!food_id && !name) continue;
-        items.push({
-            food_id,
-            name,
-            amount: amounts[i],
-            unit: units[i],
-        });
-    }
-    return items;
 }
 
 /** Drop empty strings so hidden replay fields stay minimal. */
@@ -136,18 +84,6 @@ export function fridgeItemRetryFields(
     });
 }
 
-export function recipeIngredientRetryFields(
-    body: Record<string, File | string>,
-): Record<string, string> {
-    return compactFormFields({
-        food_id: formText(body, "food_id") || undefined,
-        food_name: formText(body, "food_name") || undefined,
-        barcode: formText(body, "barcode") || undefined,
-        qty_amount: formText(body, "qty_amount") || undefined,
-        qty_unit: formText(body, "qty_unit") || undefined,
-    });
-}
-
 export function manualOnSimilar(
     body: Record<string, File | string>,
 ): OnSimilar {
@@ -168,4 +104,20 @@ export async function rememberAliasIfRequested(
 
 export function isSimilarFoodsError(err: unknown): err is SimilarFoodsError {
     return err instanceof SimilarFoodsError;
+}
+
+export type LogFormResult = { ok: true } | { ok: false; error: string };
+
+/** The log-water form: a positive whole-millilitre amount, then `insert`. */
+export async function logWaterFromForm(
+    userId: string,
+    fields: { amount_ml?: string },
+    insert: (userId: string, input: WaterInput) => Promise<WaterInsertResult>,
+): Promise<LogFormResult> {
+    const amount_ml = Number(fields.amount_ml);
+    if (!Number.isFinite(amount_ml) || amount_ml <= 0) {
+        return { ok: false, error: "Enter a water amount greater than zero." };
+    }
+    await insert(userId, { amount_ml: Math.round(amount_ml) });
+    return { ok: true };
 }

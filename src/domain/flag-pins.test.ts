@@ -11,7 +11,7 @@ import {
 import type { FlagEvaluation } from "../flags.js";
 
 const live = (over: Partial<FlagEvaluation> = {}): FlagEvaluation => ({
-    flag: "ui-v2",
+    flag: "mcp-widgets-v2",
     value: true,
     reason: "TARGETING_MATCH",
     source: "railway",
@@ -39,7 +39,7 @@ describe("flagSubject", () => {
 describe("row mappers", () => {
     test("pinFromRow reads a boolean pin and ignores other json", () => {
         const row = {
-            flag_name: "ui-v2",
+            flag_name: "mcp-widgets-v2",
             value: true,
             reason: "SPLIT",
             epoch: 2,
@@ -47,7 +47,7 @@ describe("row mappers", () => {
             expires_at: "2026-11-08T22:00:00+00:00",
         };
         expect(pinFromRow(row)).toEqual({
-            flag: "ui-v2",
+            flag: "mcp-widgets-v2",
             value: true,
             reason: "SPLIT",
             epoch: 2,
@@ -96,7 +96,7 @@ describe("decideTemporary", () => {
 
     test("an expired pin counts as no pin", () => {
         const pin = {
-            flag: "ui-v2",
+            flag: "mcp-widgets-v2",
             value: false,
             reason: "NO_MATCH",
             epoch: 0,

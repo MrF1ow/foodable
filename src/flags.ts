@@ -22,15 +22,6 @@ type FlagDef = {
 // household-unit flag keys by household id, a user-unit flag by user id, and
 // a caller with no subject uses the global row (see src/flag-pins.ts).
 export const FLAGS = {
-    "ui-v2": {
-        type: "bool",
-        kind: "temporary",
-        unit: "user",
-        fallback: false,
-        why: "The new mobile-first shell (UI-3).",
-        removeWhen:
-            "ui-v2 is on for everyone with no rollback for a few days, and the old app is deleted.",
-    },
     "mcp-widgets-v2": {
         type: "bool",
         kind: "temporary",

@@ -34,11 +34,7 @@ import { createMemoryScoreSettingsStore } from "../../domain/score-settings.js";
 import * as actualNoticeDismissals from "../../db/notice-dismissals.js";
 import * as actualAttention from "../attention.js";
 import { createMemoryNoticeDismissalsStore } from "../../domain/notice-dismissals.js";
-import { gatedRoutesOf } from "../../test-support/flag-harness.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
-import { renderGroceryPage, type GroceryPageView } from "../pages/grocery.js";
-import { renderGroceryListPage } from "../loaders.js";
-import { FIXTURE_APP_CHROME_FLAGS } from "../../test-support/chrome-flags.js";
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
 const HH = "hh-1";
@@ -69,16 +65,6 @@ let foodsStore = createMemoryFoodsStore();
 let fridgeStore = createMemoryFridgeStore();
 let stockStore = createMemoryStockStore();
 const today = "2026-11-10";
-
-const legacyGroceryHtml = renderGroceryPage({
-    chrome: {
-        theme: "light",
-        attention: { count: 0, tabs: {} },
-        flags: FIXTURE_APP_CHROME_FLAGS,
-    },
-    stores: [],
-    locations: [],
-} satisfies GroceryPageView);
 
 async function seedGroceryLines() {
     groceryStore = createMemoryGroceryStore();
@@ -152,7 +138,6 @@ mock.module("../../db/profiles.js", () => ({
         alcohol_tracking_enabled: false,
         preferred_drink_unit: null,
         theme: "light",
-        nutrition_layout: null,
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",
     }),
@@ -235,16 +220,12 @@ mock.module("../attention.js", () => ({
                     : "light",
             attention: { count: 0, tabs: {} },
             flags,
-            ...(flags.uiV2
-                ? {
-                      identity: {
-                          viewerName: viewer.displayName,
-                          viewerRole: viewer.role,
-                          householdName: "Test household",
-                          memberCount: 1,
-                      },
-                  }
-                : {}),
+            identity: {
+                viewerName: viewer.displayName,
+                viewerRole: viewer.role,
+                householdName: "Test household",
+                memberCount: 1,
+            },
         };
     },
 }));
@@ -278,22 +259,8 @@ function cookie(userId: string): string {
 }
 
 describe("grocery routes", () => {
-    test("put-away route is ui-v2 gated", () => {
-        const gated = gatedRoutesOf(app).find(
-            (r) =>
-                r.method === "POST" && r.path === "/kitchen/groceries/put-away",
-        );
-        expect(gated).toEqual({
-            method: "POST",
-            path: "/kitchen/groceries/put-away",
-            flag: "ui-v2",
-            notFound: true,
-        });
-    });
-
-    test("GET /kitchen/groceries serves v2 markup when ui-v2 is on", async () => {
+    test("GET /kitchen/groceries serves the groceries page", async () => {
         await seedGroceryLines();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request("http://x/kitchen/groceries", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -312,37 +279,19 @@ describe("grocery routes", () => {
             expect(res.status).toBe(200);
             return res.text();
         };
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
-        );
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const off = await fetchPage();
         expect(off).toContain("fd-kitchen-groceries-page");
         expect(off).not.toContain("fd-kitchen-grocery-share");
         expect(off).not.toContain("fd-grocery-share-sheet");
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
-        );
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         const on = await fetchPage();
         expect(on).toContain("fd-kitchen-grocery-share");
         expect(on).toContain('action="/kitchen/groceries/share"');
     });
 
-    test("GET /kitchen/groceries keeps legacy page when ui-v2 is off", async () => {
-        await seedGroceryLines();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const direct = await renderGroceryListPage(ALICE);
-        const res = await app.request("http://x/kitchen/groceries", {
-            headers: { cookie: cookie(ALICE) },
-        });
-        const html = await res.text();
-        expect(html).toBe(direct.html);
-        expect(html).toContain("grocery-store");
-        expect(html).not.toContain("fd-kitchen-groceries-page");
-    });
-
     test("POST put-away writes each checked line to its own location and date", async () => {
         const { fridge, pantry, lineA, lineB } = await seedGroceryLines();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request("http://x/kitchen/groceries/put-away", {
             method: "POST",
             headers: {
@@ -372,7 +321,6 @@ describe("grocery routes", () => {
 
     test("POST put-away with a bad line returns 4xx and keeps draft values", async () => {
         const { lineA, lineB } = await seedGroceryLines();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const before = await groceryStore.listLines(HH);
         const res = await app.request("http://x/kitchen/groceries/put-away", {
             method: "POST",
@@ -399,7 +347,6 @@ describe("grocery routes", () => {
     test("check POST stamps the usual's last restocked day", async () => {
         const { lineA } = await seedGroceryLines();
         await checkGroceryLine(groceryStore, HH, lineA.id, false);
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const oats = await findOrCreateManualFood(
             foodsStore,
             HH,
@@ -427,7 +374,6 @@ describe("grocery routes", () => {
     test("check POST honors return_to on the v2 tab", async () => {
         const { lineA } = await seedGroceryLines();
         await checkGroceryLine(groceryStore, HH, lineA.id, false);
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app.request(
             `http://x/kitchen/groceries/lines/${lineA.id}/check`,
             {

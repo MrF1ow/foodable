@@ -31,7 +31,6 @@ import { dismissNotice } from "../../domain/notices-for.js";
 import { NOTICE_CODES, type NoticeCode } from "../../domain/notices.js";
 import { redirectWithToast } from "../components/toast.js";
 import { formText } from "../form.js";
-import { gatedRoute } from "../gated.js";
 import { requireMember, siteMember } from "../middleware.js";
 import { parseNoticeBack } from "../pages/v2/notice-strip.js";
 
@@ -61,99 +60,89 @@ function noticeCodeOf(value: string): NoticeCode | null {
  * A tap on a notice that was already acted on, dismissed or no longer applies
  * writes nothing and says so.
  */
-noticeActionRoutes.post(
-    "/notices/:code/act",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const code = c.req.param("code");
-        if (!isActionableNoticeCode(code)) {
-            return c.text("Not found", 404);
+noticeActionRoutes.post("/notices/:code/act", requireMember, async (c) => {
+    const member = siteMember(c);
+    const code = c.req.param("code");
+    if (!isActionableNoticeCode(code)) {
+        return c.text("Not found", 404);
+    }
+    const body = await c.req.parseBody();
+    const back = parseNoticeBack(formText(body, "back"));
+    const clock = await householdClock(member.householdId);
+    try {
+        const result = await actOnNotice(
+            {
+                ...noticeActionDeps(),
+                transaction: planTransaction(
+                    "plan-missing",
+                    member.householdId,
+                ),
+            },
+            member.householdId,
+            { code, subjectId: formText(body, "subject_id") },
+            clock,
+        );
+        if (result.status === "gone") {
+            return redirectWithToast(c, back, "notice.gone");
         }
-        const body = await c.req.parseBody();
-        const back = parseNoticeBack(formText(body, "back"));
-        const clock = await householdClock(member.householdId);
-        try {
-            const result = await actOnNotice(
-                {
-                    ...noticeActionDeps(),
-                    transaction: planTransaction(
-                        "plan-missing",
-                        member.householdId,
-                    ),
-                },
-                member.householdId,
-                { code, subjectId: formText(body, "subject_id") },
-                clock,
-            );
-            if (result.status === "gone") {
-                return redirectWithToast(c, back, "notice.gone");
-            }
-            if (result.checkNames.length > 0) {
-                return redirectWithToast(c, back, "notice.added.check", {
-                    name: result.name,
-                });
-            }
-            return redirectWithToast(c, back, "notice.added", {
+        if (result.checkNames.length > 0) {
+            return redirectWithToast(c, back, "notice.added.check", {
                 name: result.name,
             });
-        } catch (err) {
-            if (!(err instanceof GroceryInputError)) throw err;
-            return redirectWithToast(c, back, "notice.error", {
-                message: err.message,
-            });
         }
-    },
-);
+        return redirectWithToast(c, back, "notice.added", {
+            name: result.name,
+        });
+    } catch (err) {
+        if (!(err instanceof GroceryInputError)) throw err;
+        return redirectWithToast(c, back, "notice.error", {
+            message: err.message,
+        });
+    }
+});
 
 /**
  * Dismisses an open notice in place, with the key the notice itself carries
  * (code, subject, and the plan or day the dismissal is held for), and returns
  * to the page it was on. Nothing else about the notice changes.
  */
-noticeActionRoutes.post(
-    "/notices/dismiss",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const body = await c.req.parseBody();
-        const back = parseNoticeBack(formText(body, "back"));
-        const code = noticeCodeOf(formText(body, "code"));
-        if (!code) return redirectWithToast(c, back, "notice.gone");
-        try {
-            assertDismissibleCode(code);
-        } catch (err) {
-            // A notice that never can be dismissed is not "taken care of":
-            // say what the person can do instead.
-            if (!(err instanceof NoticeDismissError)) throw err;
-            return redirectWithToast(c, back, "notice.error", {
-                message: err.message,
-            });
-        }
-        const clock = await householdClock(member.householdId);
-        try {
-            await dismissNotice(
-                noticeActionDeps(),
-                member.householdId,
-                member.userId,
-                {
-                    code,
-                    subjectKind: formText(
-                        body,
-                        "subject_kind",
-                    ) as NoticeSubjectKind,
-                    subjectId: formText(body, "subject_id"),
-                    relatedId: formText(body, "related_id") || undefined,
-                },
-                { ...clock, actionable: true },
-            );
-        } catch (err) {
-            if (!(err instanceof NoticeDismissError)) throw err;
-            return redirectWithToast(c, back, "notice.gone");
-        }
-        // toast: none
-        return c.redirect(back, 303);
-    },
-);
+noticeActionRoutes.post("/notices/dismiss", requireMember, async (c) => {
+    const member = siteMember(c);
+    const body = await c.req.parseBody();
+    const back = parseNoticeBack(formText(body, "back"));
+    const code = noticeCodeOf(formText(body, "code"));
+    if (!code) return redirectWithToast(c, back, "notice.gone");
+    try {
+        assertDismissibleCode(code);
+    } catch (err) {
+        // A notice that never can be dismissed is not "taken care of":
+        // say what the person can do instead.
+        if (!(err instanceof NoticeDismissError)) throw err;
+        return redirectWithToast(c, back, "notice.error", {
+            message: err.message,
+        });
+    }
+    const clock = await householdClock(member.householdId);
+    try {
+        await dismissNotice(
+            noticeActionDeps(),
+            member.householdId,
+            member.userId,
+            {
+                code,
+                subjectKind: formText(
+                    body,
+                    "subject_kind",
+                ) as NoticeSubjectKind,
+                subjectId: formText(body, "subject_id"),
+                relatedId: formText(body, "related_id") || undefined,
+            },
+            { ...clock, actionable: true },
+        );
+    } catch (err) {
+        if (!(err instanceof NoticeDismissError)) throw err;
+        return redirectWithToast(c, back, "notice.gone");
+    }
+    // toast: none
+    return c.redirect(back, 303);
+});

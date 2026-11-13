@@ -1,19 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
-import {
-    legacyShellCases,
-    stripAssetHashes,
-} from "../test-support/shell-legacy-cases.js";
-import { NUTRITION_CARDS } from "../domain/layout.js";
 import { THEME_COLOR } from "../tokens.js";
 import { getAppCss, getAppJs, getAppV2Css, getAppV2Js } from "../widgets.js";
-import { renderSettingsPage as renderSettingsAccountPage } from "./pages/settings.js";
-import { renderSettingsHelpPage } from "./pages/settings-help.js";
-import { renderHouseholdSettingsPrefsPage } from "./pages/settings-household.js";
 import { FD_ICON_PATHS } from "./components/fd-icons.js";
-import { NUTRITION_LOG_MEAL_MODAL_ID } from "./pages/nutrition.js";
 import {
     FD_LOG_HREF,
     FD_LOG_MEAL_HASH,
@@ -28,22 +17,12 @@ import {
 import { FD_BARCODE_SCAN_SHEET_ID } from "./pages/v2/log-sheet.js";
 import {
     renderAppShell,
-    renderBarePage,
-    renderLegacyAppShell,
-    renderSettingsPage,
     type AppChrome,
     type AppTabId,
     type ShellIdentity,
     type ThemePref,
     type V2NavId,
 } from "./shell.js";
-
-const GOLDEN: Record<string, string> = JSON.parse(
-    readFileSync(
-        join(import.meta.dir, "fixtures/shell-legacy.golden.json"),
-        "utf8",
-    ),
-);
 
 const IDENTITY: ShellIdentity = {
     viewerName: "Ethan Flow",
@@ -59,7 +38,7 @@ function v2Chrome(over: Partial<AppChrome> = {}): AppChrome {
         theme: "system",
         body: "<h1>Body</h1>",
         attention: { count: 0, tabs: {} },
-        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+        flags: FIXTURE_APP_CHROME_FLAGS,
         identity: IDENTITY,
         ...over,
     };
@@ -89,39 +68,7 @@ function currentHrefs(nav: string): string[] {
         .map((tag) => /href="([^"]+)"/.exec(tag)![1]!);
 }
 
-describe("flag off: the old shell is unchanged", () => {
-    const cases = legacyShellCases({
-        renderAppShell,
-        renderBarePage,
-        renderSettingsPage,
-        renderSettingsAccountPage,
-        renderSettingsHelpPage,
-        renderHouseholdSettingsPrefsPage,
-    });
-
-    test("every golden case renders the exact bytes main rendered", () => {
-        expect(Object.keys(cases).sort()).toEqual(Object.keys(GOLDEN).sort());
-        for (const [name, html] of Object.entries(cases)) {
-            expect(stripAssetHashes(html), name).toBe(GOLDEN[name]!);
-        }
-    });
-
-    test("renderAppShell with the flag off is renderLegacyAppShell", () => {
-        const chrome = v2Chrome({
-            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: false },
-        });
-        expect(renderAppShell(chrome)).toBe(renderLegacyAppShell(chrome));
-    });
-
-    test("the old shell never carries a v2 marker", () => {
-        for (const html of Object.values(cases)) {
-            expect(html).not.toContain("fd-");
-            expect(html).not.toContain("app-v2");
-        }
-    });
-});
-
-describe("flag on: the new shell", () => {
+describe("the shell", () => {
     test("landmarks and roles", () => {
         const html = v2Html();
         expect(html.match(/<main\b/g)?.length).toBe(1);
@@ -397,7 +344,6 @@ describe("flag on: the new shell", () => {
         const html = v2Html({
             flags: {
                 ...FIXTURE_APP_CHROME_FLAGS,
-                uiV2: true,
                 barcodeCamera: false,
             },
         });
@@ -530,21 +476,6 @@ describe("flag on: the new shell", () => {
                 '"><a class="fd-account-chip" href="/settings" data-turbo="false" aria-label="Settings, signed in as Ethan Flow" title="Settings">EF</a><nav class="fd-kitchen-tabs"',
             );
         });
-
-        test("the old shell never gets them", () => {
-            for (const html of Object.values(
-                legacyShellCases({
-                    renderAppShell,
-                    renderBarePage,
-                    renderSettingsPage,
-                    renderSettingsAccountPage,
-                    renderSettingsHelpPage,
-                    renderHouseholdSettingsPrefsPage,
-                }),
-            )) {
-                expect(html).not.toContain("fd-kitchen");
-            }
-        });
     });
 
     test("kitchenTabFor defaults from active", () => {
@@ -556,8 +487,8 @@ describe("flag on: the new shell", () => {
     });
 
     test("fragments name real targets on the nutrition page", () => {
-        expect(FD_LOG_MEAL_HASH).toBe(NUTRITION_LOG_MEAL_MODAL_ID);
-        expect(NUTRITION_CARDS as readonly string[]).toContain(FD_TRENDS_HASH);
+        expect(FD_LOG_MEAL_HASH).toBe("nutrition-log-meal");
+        expect(FD_TRENDS_HASH).toBe("trends");
         expect(FD_TABS.find((t) => t.id === "trends")?.href).toBe(
             FD_TRENDS_HREF,
         );
@@ -622,19 +553,6 @@ describe("head and theme chrome", () => {
         expect(tags[3]).toMatch(/src="\/app-v2\.js/);
     });
 
-    test("the old shell's assets are tracked too", () => {
-        const html = renderLegacyAppShell(
-            v2Chrome({ flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: false } }),
-        );
-        const tags = [
-            ...html.matchAll(/<(?:link rel="stylesheet"|script) [^>]*>/g),
-        ].map((m) => m[0]);
-        expect(tags.length).toBe(2);
-        for (const tag of tags) {
-            expect(tag).toContain('data-turbo-track="reload"');
-        }
-    });
-
     test("page-coloured browser chrome, and the meta says so", () => {
         const dark = v2Html({ theme: "dark" });
         expect(dark).toContain(
@@ -679,72 +597,5 @@ describe("head and theme chrome", () => {
                 new RegExp(`/${href.replace(".", "\\.")}\\?v=[0-9a-f]{12}"`),
             );
         }
-    });
-});
-
-describe("Settings sub-nav under ui-v2", () => {
-    const view = {
-        chrome: { theme: "dark" as const },
-        backHref: "/kitchen/fridge",
-        displayName: "Ethan",
-        timezone: "",
-        weightUnit: "" as const,
-        widgetsEnabled: true,
-        alcoholTrackingEnabled: false,
-        drinkUnit: "" as const,
-    };
-    const labels = (html: string) =>
-        [
-            ...between(html, /<nav class="subnav"/, "</nav>").matchAll(
-                /<a href="([^"]+)"[^>]*>([^<]+)<\/a>/g,
-            ),
-        ].map((m) => `${m[2]} ${m[1]}`);
-    const on = { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true };
-
-    test("flag on: legacy household prefs still expose v2 sub-nav", () => {
-        const expected = [
-            "Account /settings?from=%2Fkitchen%2Ffridge",
-            "Household /settings/household-settings?from=%2Fkitchen%2Ffridge",
-            "Members /settings/household?from=%2Fkitchen%2Ffridge",
-            "Help /settings/help?from=%2Fkitchen%2Ffridge",
-        ];
-        expect(
-            labels(
-                renderSettingsHelpPage({
-                    chrome: view.chrome,
-                    backHref: view.backHref,
-                    flags: on,
-                }),
-            ),
-        ).toEqual(expected);
-        const prefs = renderHouseholdSettingsPrefsPage({
-            chrome: view.chrome,
-            backHref: view.backHref,
-            flags: on,
-            member: { userId: "u1", householdId: "h1", role: "owner" } as never,
-            preferences: {
-                timezone: null,
-                restock: { enabled: false, weekday: 0, time: "09:00" },
-            } as never,
-            ownerTimezoneLabel: "UTC",
-        });
-        expect(labels(prefs)).toEqual(expected);
-    });
-
-    test("flag off, or no flags: the three old entries", () => {
-        const old = [
-            "Account /settings?from=%2Fkitchen%2Ffridge",
-            "Household /settings/household-settings?from=%2Fkitchen%2Ffridge",
-            "Help /settings/help?from=%2Fkitchen%2Ffridge",
-        ];
-        expect(labels(renderSettingsAccountPage(view))).toEqual(old);
-        expect(
-            labels(
-                renderSettingsAccountPage({
-                    ...view,
-                    flags: FIXTURE_APP_CHROME_FLAGS,
-                }),
-            ),
-        ).toEqual(old);
     });
 });

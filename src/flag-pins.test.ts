@@ -678,8 +678,8 @@ describe("non-Railway readers", () => {
     test("env, fallback and memory readers never pin and never query", async () => {
         const readers = [
             createFallbackFlags(),
-            createEnvFlags(new Map([["ui-v2", "all" as const]])),
-            createMemoryFlags({ "ui-v2": true }),
+            createEnvFlags(new Map([["mcp-widgets-v2", "all" as const]])),
+            createMemoryFlags({ "mcp-widgets-v2": true }),
         ];
         for (const reader of readers) {
             const store = createMemoryFlagPinStore();
@@ -743,7 +743,7 @@ describe("loadViewerFlags with the Railway reader", () => {
         } as RailwayFlagsSdk;
     }
 
-    test("pins ui-v2 and keeps it when the SDK goes stale", async () => {
+    test("pins mcp-widgets-v2 and keeps it when the SDK goes stale", async () => {
         const store = createMemoryFlagPinStore();
         const runtime = createFlagPinRuntime({ store });
         const ctx = ctxFor();
@@ -752,17 +752,54 @@ describe("loadViewerFlags with the Railway reader", () => {
             sdkWith({ value: true, reason: "TARGETING_MATCH" }),
         );
         live.markInitDone();
-        expect((await loadViewerFlags(ctx, live, runtime)).uiV2).toBe(true);
-        expect(store.pins.get(`user:${USER}`)?.get("ui-v2")?.value).toBe(true);
+        expect((await loadViewerFlags(ctx, live, runtime)).mcpWidgetsV2).toBe(
+            true,
+        );
+        expect(
+            store.pins.get(`user:${USER}`)?.get("mcp-widgets-v2")?.value,
+        ).toBe(true);
 
         const stale = createRailwayFlags(
             sdkWith({ value: false, reason: "STALE" }),
         );
         stale.markInitDone();
         const flags = await loadViewerFlags(ctx, stale, runtime);
-        expect(flags.uiV2).toBe(true);
+        expect(flags.mcpWidgetsV2).toBe(true);
         // Kill switches stayed on.
         expect(flags.offLookups).toBe(true);
+    });
+
+    test("a leftover pin and snapshot for a retired flag are inert", async () => {
+        const store = createMemoryFlagPinStore();
+        const runtime = createFlagPinRuntime({ store });
+        const now = Date.now();
+        store.pins.set(
+            `user:${USER}`,
+            new Map([
+                [
+                    "ui-v2",
+                    {
+                        flag: "ui-v2",
+                        value: true,
+                        reason: "TARGETING_MATCH",
+                        epoch: 1,
+                        assignedAt: now,
+                        expiresAt: now + 60_000,
+                    },
+                ],
+            ]),
+        );
+        store.snapshots.set(
+            snapshotSubjectKey({ kind: "global", id: "" }),
+            new Map([["ui-v2", true]]),
+        );
+        const live = createRailwayFlags(
+            sdkWith({ value: true, reason: "TARGETING_MATCH" }),
+        );
+        live.markInitDone();
+        const flags = await loadViewerFlags(ctxFor(), live, runtime);
+        expect(flags.mcpWidgetsV2).toBe(true);
+        expect("uiV2" in flags).toBe(false);
     });
 
     test("before the SDK is ready nothing is pinned and the fallbacks serve", async () => {
@@ -772,7 +809,7 @@ describe("loadViewerFlags with the Railway reader", () => {
             sdkWith({ value: true, reason: "TARGETING_MATCH" }),
         );
         const flags = await loadViewerFlags(ctxFor(), reader, runtime);
-        expect(flags.uiV2).toBe(false);
+        expect(flags.mcpWidgetsV2).toBe(false);
         expect(flags.offLookups).toBe(true);
         expect(store.calls.upsertPin).toBe(0);
         expect(store.calls.saveSnapshot).toBe(0);

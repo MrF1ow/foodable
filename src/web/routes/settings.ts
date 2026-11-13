@@ -1,7 +1,7 @@
 import { Hono, type Context } from "hono";
 import { parseAppearanceInput } from "../shell.js";
 
-import { parseNutritionPrefsInput } from "../pages/settings.js";
+import { parseNutritionPrefsInput } from "../pages/v2/settings-account.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
@@ -14,7 +14,6 @@ import {
     renderSettingsGoalsV2Route,
     renderSettingsHelpRoute,
     renderSettingsHomeRoute,
-    renderSettingsHouseholdRoute,
     renderSettingsSavedV2Route,
     renderSettingsScoreHouseholdV2Route,
     renderSettingsScoreV2Route,
@@ -40,8 +39,6 @@ import {
 import { exportAllData } from "../../domain/export.js";
 import { checkRateLimit } from "../../rate-limit.js";
 import { isValidDisplayTheme } from "../pages/v2/settings-display.js";
-import { viewerFlagsFor } from "../attention.js";
-import { gatedRoute } from "../gated.js";
 import { formText } from "../form.js";
 import {
     requireManager,
@@ -49,19 +46,11 @@ import {
     requireSiteUser,
     siteMember,
 } from "../middleware.js";
-import {
-    HouseholdAlreadyExistsError,
-    isRestockWeekday,
-    mergeHouseholdConfig,
-    parseHouseholdConfigPatch,
-    RESTOCK_WEEKDAY_ERROR,
-} from "../../household.js";
+import { HouseholdAlreadyExistsError } from "../../household.js";
 import {
     createHouseholdForCaller,
     getHouseholdMembership,
-    getHouseholdConfig,
     householdExists,
-    updateHouseholdConfig,
     updateMemberDisplayName,
 } from "../../db/household.js";
 import { authUserCount } from "../../db/users.js";
@@ -89,11 +78,8 @@ import {
 } from "../pages/v2/settings-goals-form.js";
 import { redirectWithToast } from "../components/toast.js";
 import { getBaseUrl } from "../../url.js";
-import {
-    householdSettingsUrlWithBack,
-    settingsBackHref,
-    settingsUrlWithBack,
-} from "../settings-back.js";
+import { settingsBackHref, settingsUrlWithBack } from "../settings-back.js";
+import { APP_PATHS } from "../route-map.js";
 
 export const settingsRoutes = new Hono();
 
@@ -106,188 +92,133 @@ function resolveBackHref(c: Context) {
 }
 
 settingsRoutes.get("/settings", requireSiteUser, async (c) => {
-    const userId = c.get("userId");
-    const member = await getHouseholdMembership(userId);
-    const flags = member ? await viewerFlagsFor(member) : null;
-    if (flags?.uiV2) {
-        const page = await renderSettingsHomeRoute(userId);
-        return c.html(page.html, page.status);
-    }
-    const backHref = resolveBackHref(c);
-    const page = await renderSettingsAccountPage(userId, { backHref });
+    const page = await renderSettingsHomeRoute(c.get("userId"));
     return c.html(page.html, page.status);
 });
 
-settingsRoutes.get(
-    "/settings/account",
-    requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const backHref = resolveBackHref(c);
-        const page = await renderSettingsAccountV2Route(c.get("userId"), {
-            backHref,
+settingsRoutes.get("/settings/account", requireSiteUser, async (c) => {
+    const backHref = resolveBackHref(c);
+    const page = await renderSettingsAccountV2Route(c.get("userId"), {
+        backHref,
+    });
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.get("/settings/display", requireSiteUser, async (c) => {
+    const page = await renderSettingsDisplayV2Route(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.get("/settings/goals", requireSiteUser, async (c) => {
+    const page = await renderSettingsGoalsV2Route(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.post("/settings/goals", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.parseBody();
+    const values = Object.fromEntries(
+        GOALS_FORM_FIELDS.map((f) => [f, formText(body, f)]),
+    ) as GoalsFormDraft;
+    const profile = await getProfile(userId);
+    const stored = await getNutritionGoals(userId);
+    const parsed = parseGoalsForm(values, {
+        alcohol: alcoholOf(profile),
+        stored,
+    });
+    if (!parsed.ok) {
+        const page = await renderSettingsGoalsV2Route(userId, {
+            error: parsed.errors.join(" "),
+            draft: values,
+            invalid: parsed.invalid,
         });
-        return c.html(page.html, page.status);
-    },
-);
+        // A non-member gets the membership page with its own status.
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    // A save that changes a target is the day those goals were set; a
+    // rename alone is not, the same rule set_nutrition_goals follows.
+    const input = parsed.changesTargets
+        ? {
+              ...parsed.input,
+              goals_set_on: todayInTz(timezoneFromProfile(profile) ?? "UTC"),
+          }
+        : parsed.input;
+    await upsertNutritionGoals(userId, input);
+    return redirectWithToast(c, "/settings/goals", "settings.goals.saved");
+});
 
-settingsRoutes.get(
-    "/settings/display",
-    requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const page = await renderSettingsDisplayV2Route(c.get("userId"));
-        return c.html(page.html, page.status);
-    },
-);
-
-settingsRoutes.get(
-    "/settings/goals",
-    requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const page = await renderSettingsGoalsV2Route(c.get("userId"));
-        return c.html(page.html, page.status);
-    },
-);
-
-settingsRoutes.post(
-    "/settings/goals",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const userId = c.get("userId");
-        const body = await c.req.parseBody();
-        const values = Object.fromEntries(
-            GOALS_FORM_FIELDS.map((f) => [f, formText(body, f)]),
-        ) as GoalsFormDraft;
-        const profile = await getProfile(userId);
-        const stored = await getNutritionGoals(userId);
-        const parsed = parseGoalsForm(values, {
-            alcohol: alcoholOf(profile),
-            stored,
+settingsRoutes.post("/settings/goals/days/clear", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const body = await c.req.parseBody();
+    const date = formText(body, "date").trim();
+    if (!isCalendarDate(date)) {
+        const page = await renderSettingsGoalsV2Route(userId, {
+            error: "Choose a valid day.",
         });
-        if (!parsed.ok) {
-            const page = await renderSettingsGoalsV2Route(userId, {
-                error: parsed.errors.join(" "),
-                draft: values,
-                invalid: parsed.invalid,
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    // Always the caller's own rows: the id comes from the session, never
+    // the form.
+    await clearGoalDays(userId, member.householdId, [date]);
+    return redirectWithToast(
+        c,
+        "/settings/goals",
+        "settings.goals.day-cleared",
+    );
+});
+
+settingsRoutes.get(SCORE_PATH, requireSiteUser, async (c) => {
+    const page = await renderSettingsScoreV2Route(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.post(SCORE_PATH, requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const body = await c.req.parseBody();
+    const store = liveScoreSettingsStore();
+    const intent = parseScoreIntent(formText(body, "intent"));
+    // Always the caller's own record: the member comes from the session,
+    // never the form. Each save is read, patched and written whole, so
+    // changing one switch keeps the choice and the other switch.
+    switch (intent) {
+        case "household":
+            await updateMemberScoreSettings(store, member.householdId, userId, {
+                choice: null,
             });
-            // A non-member gets the membership page with its own status.
-            return c.html(page.html, page.status === 200 ? 400 : page.status);
+            return redirectWithToast(c, SCORE_PATH, "settings.score.household");
+        case "warn_traces":
+        case "compare_goals": {
+            await updateMemberScoreSettings(
+                store,
+                member.householdId,
+                userId,
+                intent === "warn_traces"
+                    ? { warnTraces: formText(body, "value") === "1" }
+                    : { compareGoals: formText(body, "value") === "1" },
+            );
+            // toast: none the switch itself shows the new state
+            return c.redirect(SCORE_PATH, 303);
         }
-        // A save that changes a target is the day those goals were set; a
-        // rename alone is not, the same rule set_nutrition_goals follows.
-        const input = parsed.changesTargets
-            ? {
-                  ...parsed.input,
-                  goals_set_on: todayInTz(
-                      timezoneFromProfile(profile) ?? "UTC",
-                  ),
-              }
-            : parsed.input;
-        await upsertNutritionGoals(userId, input);
-        return redirectWithToast(c, "/settings/goals", "settings.goals.saved");
-    },
-);
-
-settingsRoutes.post(
-    "/settings/goals/days/clear",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const userId = c.get("userId");
-        const member = siteMember(c);
-        const body = await c.req.parseBody();
-        const date = formText(body, "date").trim();
-        if (!isCalendarDate(date)) {
-            const page = await renderSettingsGoalsV2Route(userId, {
-                error: "Choose a valid day.",
+        case "choice": {
+            const parsed = parseScoreForm(body);
+            if (!parsed.ok) {
+                return refusedScorePage(c, parsed.error, parsed.draft);
+            }
+            await updateMemberScoreSettings(store, member.householdId, userId, {
+                choice: parsed.choice,
             });
-            return c.html(page.html, page.status === 200 ? 400 : page.status);
+            return redirectWithToast(c, SCORE_PATH, "settings.score.saved");
         }
-        // Always the caller's own rows: the id comes from the session, never
-        // the form.
-        await clearGoalDays(userId, member.householdId, [date]);
-        return redirectWithToast(
-            c,
-            "/settings/goals",
-            "settings.goals.day-cleared",
-        );
-    },
-);
-
-settingsRoutes.get(
-    SCORE_PATH,
-    requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const page = await renderSettingsScoreV2Route(c.get("userId"));
-        return c.html(page.html, page.status);
-    },
-);
-
-settingsRoutes.post(
-    SCORE_PATH,
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const userId = c.get("userId");
-        const member = siteMember(c);
-        const body = await c.req.parseBody();
-        const store = liveScoreSettingsStore();
-        const intent = parseScoreIntent(formText(body, "intent"));
-        // Always the caller's own record: the member comes from the session,
-        // never the form. Each save is read, patched and written whole, so
-        // changing one switch keeps the choice and the other switch.
-        switch (intent) {
-            case "household":
-                await updateMemberScoreSettings(
-                    store,
-                    member.householdId,
-                    userId,
-                    { choice: null },
-                );
-                return redirectWithToast(
-                    c,
-                    SCORE_PATH,
-                    "settings.score.household",
-                );
-            case "warn_traces":
-            case "compare_goals": {
-                await updateMemberScoreSettings(
-                    store,
-                    member.householdId,
-                    userId,
-                    intent === "warn_traces"
-                        ? { warnTraces: formText(body, "value") === "1" }
-                        : { compareGoals: formText(body, "value") === "1" },
-                );
-                // toast: none the switch itself shows the new state
-                return c.redirect(SCORE_PATH, 303);
-            }
-            case "choice": {
-                const parsed = parseScoreForm(body);
-                if (!parsed.ok) {
-                    return refusedScorePage(c, parsed.error, parsed.draft);
-                }
-                await updateMemberScoreSettings(
-                    store,
-                    member.householdId,
-                    userId,
-                    { choice: parsed.choice },
-                );
-                return redirectWithToast(c, SCORE_PATH, "settings.score.saved");
-            }
-            default: {
-                const page = await renderSettingsScoreV2Route(userId, {
-                    error: "Choose what to save.",
-                });
-                return c.html(page.html, 400);
-            }
+        default: {
+            const page = await renderSettingsScoreV2Route(userId, {
+                error: "Choose what to save.",
+            });
+            return c.html(page.html, 400);
         }
-    },
-);
+    }
+});
 
 async function refusedScorePage(
     c: Context,
@@ -305,7 +236,6 @@ async function refusedScorePage(
 settingsRoutes.get(
     SCORE_HOUSEHOLD_PATH,
     requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
     requireManager,
     async (c) => {
         const page = await renderSettingsScoreHouseholdV2Route(c.get("userId"));
@@ -318,7 +248,6 @@ settingsRoutes.get(
 settingsRoutes.post(
     SCORE_HOUSEHOLD_PATH,
     requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
     requireManager,
     async (c) => {
         const userId = c.get("userId");
@@ -361,17 +290,12 @@ settingsRoutes.post(
     },
 );
 
-settingsRoutes.get(
-    "/settings/ai-connections",
-    requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const page = await renderSettingsAiV2Route(c.get("userId"), {
-            mcpUrl: `${getBaseUrl(c)}/mcp`,
-        });
-        return c.html(page.html, page.status);
-    },
-);
+settingsRoutes.get("/settings/ai-connections", requireSiteUser, async (c) => {
+    const page = await renderSettingsAiV2Route(c.get("userId"), {
+        mcpUrl: `${getBaseUrl(c)}/mcp`,
+    });
+    return c.html(page.html, page.status);
+});
 
 // The longest id an app can hold: a uuid, or the deploy-wide client id.
 const CLIENT_ID_MAX = 200;
@@ -379,207 +303,108 @@ const CLIENT_ID_MAX = 200;
 // character, so a value with one is a bad choice rather than a database error.
 const CONTROL_CHARACTER = /\p{Cc}/u;
 
-settingsRoutes.post(
-    AI_DISCONNECT_PATH,
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const userId = c.get("userId");
-        const body = await c.req.parseBody();
-        const client = formText(body, "client").trim();
-        if (
-            client === "" ||
-            client.length > CLIENT_ID_MAX ||
-            CONTROL_CHARACTER.test(client)
-        ) {
-            const page = await renderSettingsAiV2Route(userId, {
-                mcpUrl: `${getBaseUrl(c)}/mcp`,
-                error: "Choose an app to disconnect.",
-            });
-            return c.html(page.html, page.status === 200 ? 400 : page.status);
-        }
-        // Always the caller's own tokens: the member comes from the session,
-        // never the form. The marker stands for tokens with no recorded app.
-        const revoked = await revokeConnection(
-            userId,
-            client === UNKNOWN_APP_MARKER ? null : client,
-        );
-        return redirectWithToast(
-            c,
-            "/settings/ai-connections",
-            revoked > 0
-                ? "settings.ai.disconnected"
-                : "settings.ai.already-disconnected",
-        );
-    },
-);
-
-settingsRoutes.get(
-    "/settings/saved",
-    requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const page = await renderSettingsSavedV2Route(c.get("userId"), {
-            q: c.req.query("q"),
+settingsRoutes.post(AI_DISCONNECT_PATH, requireMember, async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.parseBody();
+    const client = formText(body, "client").trim();
+    if (
+        client === "" ||
+        client.length > CLIENT_ID_MAX ||
+        CONTROL_CHARACTER.test(client)
+    ) {
+        const page = await renderSettingsAiV2Route(userId, {
+            mcpUrl: `${getBaseUrl(c)}/mcp`,
+            error: "Choose an app to disconnect.",
         });
-        return c.html(page.html, page.status);
-    },
-);
-
-settingsRoutes.get(
-    "/settings/export",
-    requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const page = await renderSettingsExportV2Route(c.get("userId"));
-        return c.html(page.html, page.status);
-    },
-);
-
-settingsRoutes.post(
-    "/settings/export",
-    requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const userId = c.get("userId");
-        const limited = await checkRateLimit(userId);
-        if (!limited.allowed) {
-            return c.text("Too many requests. Try again in a minute.", 429, {
-                "Retry-After": String(limited.retryAfterSeconds ?? 60),
-            });
-        }
-        const origin = getBaseUrl(c);
-        const result = await exportAllData(
-            userId,
-            liveExportArchiveStore(),
-            origin,
-        );
-        if (!result.downloadPath) {
-            const page = await renderSettingsExportV2Route(userId, {
-                error: "Nothing to export yet.",
-            });
-            // A non-member gets the membership page with its own status.
-            return c.html(page.html, page.status === 200 ? 400 : page.status);
-        }
-        // toast: none
-        return c.redirect(result.downloadPath, 303);
-    },
-);
-
-settingsRoutes.post(
-    "/settings/display",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const userId = c.get("userId");
-        const body = await c.req.parseBody();
-        const themeRaw = formText(body, "theme");
-        if (!isValidDisplayTheme(themeRaw)) {
-            const page = await renderSettingsDisplayV2Route(userId, {
-                error: "Choose Auto, Light, or Dark.",
-            });
-            return c.html(page.html, 400);
-        }
-        const appearance = parseAppearanceInput({
-            theme: themeRaw === "system" ? "system" : themeRaw,
-        });
-        await upsertProfile(userId, appearance);
-        // The inline control on Settings home comes back to it; only that
-        // exact path is honoured.
-        const back =
-            formText(body, "return") === "/settings"
-                ? "/settings"
-                : "/settings/display";
-        // toast: none full reload refreshes theme chrome on this page
-        return c.redirect(back, 303);
-    },
-);
-
-settingsRoutes.get("/settings/help", requireSiteUser, async (c) => {
-    const backHref = resolveBackHref(c);
-    const page = await renderSettingsHelpRoute(c.get("userId"), { backHref });
-    return c.html(page.html, page.status);
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    // Always the caller's own tokens: the member comes from the session,
+    // never the form. The marker stands for tokens with no recorded app.
+    const revoked = await revokeConnection(
+        userId,
+        client === UNKNOWN_APP_MARKER ? null : client,
+    );
+    return redirectWithToast(
+        c,
+        "/settings/ai-connections",
+        revoked > 0
+            ? "settings.ai.disconnected"
+            : "settings.ai.already-disconnected",
+    );
 });
 
-settingsRoutes.get("/settings/household-settings", requireMember, async (c) => {
-    const backHref = resolveBackHref(c);
-    const page = await renderSettingsHouseholdRoute(c.get("userId"), {
-        backHref,
+settingsRoutes.get("/settings/saved", requireSiteUser, async (c) => {
+    const page = await renderSettingsSavedV2Route(c.get("userId"), {
+        q: c.req.query("q"),
     });
     return c.html(page.html, page.status);
 });
 
-settingsRoutes.post(
-    "/settings/household-settings",
-    requireManager,
-    async (c) => {
-        const userId = c.get("userId");
-        const member = siteMember(c);
-        const body = await c.req.parseBody();
-        const origin = getBaseUrl(c);
-        const backHref = settingsBackHref({
-            from: formText(body, "from"),
-            referer: undefined,
-            origin,
+settingsRoutes.get("/settings/export", requireSiteUser, async (c) => {
+    const page = await renderSettingsExportV2Route(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.post("/settings/export", requireSiteUser, async (c) => {
+    const userId = c.get("userId");
+    const limited = await checkRateLimit(userId);
+    if (!limited.allowed) {
+        return c.text("Too many requests. Try again in a minute.", 429, {
+            "Retry-After": String(limited.retryAfterSeconds ?? 60),
         });
-        const redirectTo = householdSettingsUrlWithBack(backHref);
-        const timezoneRaw = formText(body, "timezone");
-        const restockWeekdayRaw = formText(body, "restock_weekday");
-        const restockTime = formText(body, "restock_time");
-        const restockEnabled = formText(body, "restock_enabled") === "true";
-        const draft = {
-            timezone: timezoneRaw === "" ? null : timezoneRaw,
-            restockEnabled,
-            restockWeekday: restockWeekdayRaw,
-            restockTime,
-        };
+    }
+    const origin = getBaseUrl(c);
+    const result = await exportAllData(
+        userId,
+        liveExportArchiveStore(),
+        origin,
+    );
+    if (!result.downloadPath) {
+        const page = await renderSettingsExportV2Route(userId, {
+            error: "Nothing to export yet.",
+        });
+        // A non-member gets the membership page with its own status.
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    // toast: none
+    return c.redirect(result.downloadPath, 303);
+});
 
-        const weekdayTrimmed = restockWeekdayRaw.trim();
-        if (weekdayTrimmed === "" || !/^\d+$/.test(weekdayTrimmed)) {
-            const page = await renderSettingsHouseholdRoute(userId, {
-                backHref,
-                error: RESTOCK_WEEKDAY_ERROR,
-                draft,
-            });
-            return c.html(page.html, 400);
-        }
-        const restockWeekday = Number(weekdayTrimmed);
-        if (!isRestockWeekday(restockWeekday)) {
-            const page = await renderSettingsHouseholdRoute(userId, {
-                backHref,
-                error: RESTOCK_WEEKDAY_ERROR,
-                draft,
-            });
-            return c.html(page.html, 400);
-        }
+settingsRoutes.post("/settings/display", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.parseBody();
+    const themeRaw = formText(body, "theme");
+    if (!isValidDisplayTheme(themeRaw)) {
+        const page = await renderSettingsDisplayV2Route(userId, {
+            error: "Choose Auto, Light, or Dark.",
+        });
+        return c.html(page.html, 400);
+    }
+    const appearance = parseAppearanceInput({
+        theme: themeRaw === "system" ? "system" : themeRaw,
+    });
+    await upsertProfile(userId, appearance);
+    // The inline control on Settings home comes back to it; only that
+    // exact path is honoured.
+    const back =
+        formText(body, "return") === "/settings"
+            ? "/settings"
+            : "/settings/display";
+    // toast: none full reload refreshes theme chrome on this page
+    return c.redirect(back, 303);
+});
 
-        const patchInput = {
-            timezone: timezoneRaw === "" ? null : timezoneRaw,
-            restock_enabled: restockEnabled,
-            restock_weekday: restockWeekday,
-            restock_time: restockTime,
-        };
-        const parsed = parseHouseholdConfigPatch(patchInput);
-        if (!parsed.ok) {
-            const page = await renderSettingsHouseholdRoute(userId, {
-                backHref,
-                error: parsed.error,
-                draft,
-            });
-            return c.html(page.html, 400);
-        }
-        const current = await getHouseholdConfig(member.householdId);
-        await updateHouseholdConfig(
-            member.householdId,
-            mergeHouseholdConfig(current, parsed.value),
-        );
-        return redirectWithToast(
-            c,
-            redirectTo,
-            "settings.household-settings.saved",
-        );
-    },
-);
+settingsRoutes.get("/settings/help", requireSiteUser, async (c) => {
+    const page = await renderSettingsHelpRoute(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
+// The old household preferences page is gone; Household in the new app is the
+// one place for household settings, so a bookmark lands there.
+settingsRoutes.get("/settings/household-settings", async (c) => {
+    // toast: none (retired page)
+    return c.redirect(APP_PATHS.settingsHousehold, 301);
+});
 
 settingsRoutes.post("/settings", requireMember, async (c) => {
     const userId = c.get("userId");

@@ -1,9 +1,5 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import { Hono } from "hono";
 import * as actualDbFoods from "../../db/foods.js";
 import * as actualDbFridge from "../../db/fridge.js";
@@ -34,16 +30,12 @@ import {
 } from "../../domain/foods.js";
 import { addLocation, createMemoryFridgeStore } from "../../domain/fridge.js";
 import { applyMovement } from "../../domain/stock.js";
-import {
-    addGroceryFoodById,
-    createMemoryGroceryStore,
-} from "../../domain/grocery.js";
+import { createMemoryGroceryStore } from "../../domain/grocery.js";
 import {
     addRecipeIngredientById,
     createMemoryRecipesStore,
     createRecipe,
 } from "../../domain/recipes.js";
-import { createGroceryStore } from "../../domain/settings.js";
 import { createMemorySettingsStore } from "../../domain/settings.js";
 import { createMemoryRulesStore } from "../../domain/rules.js";
 import {
@@ -84,7 +76,6 @@ const PROFILE: actualDbProfiles.Profile = {
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
     theme: "light",
-    nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
 };
@@ -544,68 +535,6 @@ describe("possible-duplicates routes", () => {
         expect(await members.text()).toContain("Possible duplicates");
     });
 
-    test("recipe ingredient and grocery line link to possible duplicates", async () => {
-        const { egg, eggs } = await seedDuplicatePair();
-        const recipe = await createRecipe(db.recipesStore, {
-            householdId: HH,
-            creatorId: ALICE,
-            name: "Custard",
-            yieldPortions: 2,
-        });
-        await addRecipeIngredientById(db.recipesStore, db.foodsStore, {
-            householdId: HH,
-            recipeId: recipe.id,
-            foodId: eggs.id,
-            amount: 1,
-            unit: "each",
-        });
-        const store = await createGroceryStore(db.settingsStore, HH, "Shop");
-        await addGroceryFoodById(
-            db.groceryStore,
-            db.settingsStore,
-            db.foodsStore,
-            {
-                householdId: HH,
-                storeId: store.id,
-                foodId: egg.id,
-                amount: 1,
-                unit: "each",
-            },
-        );
-        const recipeHtml = await (
-            await app().request(`http://x/recipes/${recipe.id}`, {
-                headers: { Cookie: cookieFor(ALICE) },
-            })
-        ).text();
-        expect(recipeHtml).toContain("Possible duplicate of");
-        expect(recipeHtml).toContain("/settings/household/possible-duplicates");
-        const groceryHtml = await (
-            await app().request("http://x/kitchen/groceries", {
-                headers: { Cookie: cookieFor(ALICE) },
-            })
-        ).text();
-        expect(groceryHtml).toContain("Possible duplicate of");
-        const solo = await db.foodsStore.insertFood(
-            newFood({ householdId: HH, kind: "food", name: "solo rice" }),
-        );
-        await addRecipeIngredientById(db.recipesStore, db.foodsStore, {
-            householdId: HH,
-            recipeId: recipe.id,
-            foodId: solo.id,
-            amount: 1,
-            unit: "g",
-        });
-        const recipeWithSolo = await (
-            await app().request(`http://x/recipes/${recipe.id}`, {
-                headers: { Cookie: cookieFor(ALICE) },
-            })
-        ).text();
-        expect(recipeWithSolo).toContain("solo rice");
-        expect(recipeWithSolo).not.toMatch(
-            /solo rice[\s\S]{0,240}Possible duplicate of/,
-        );
-    });
-
     test("noticesFor still exposes pair count for chrome", async () => {
         await seedDuplicatePair();
         const result = await noticesFor(
@@ -626,13 +555,12 @@ describe("possible-duplicates routes", () => {
     });
 });
 
-describe("possible-duplicates routes ui-v2", () => {
+describe("possible-duplicates routes on the household page", () => {
     afterAll(() => {
         resetFlagsForTests();
     });
 
-    test("keep-separate success redirects to household settings when ui-v2 is on", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("keep-separate success redirects to household settings", async () => {
         const { egg, eggs } = await seedDuplicatePair();
         const keep = await app().request(
             "http://x/settings/household/possible-duplicates/keep-separate",
@@ -649,28 +577,7 @@ describe("possible-duplicates routes ui-v2", () => {
         expect(keep.headers.get("location")).toBe("/settings/household");
     });
 
-    test("keep-separate success still goes to the standalone page when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const { egg, eggs } = await seedDuplicatePair();
-        const keep = await app().request(
-            "http://x/settings/household/possible-duplicates/keep-separate",
-            {
-                method: "POST",
-                headers: {
-                    Cookie: cookieFor(ALICE),
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: `subject_id=${encodeURIComponent(egg.id)}&related_id=${encodeURIComponent(eggs.id)}`,
-            },
-        );
-        expect(keep.status).toBe(303);
-        expect(keep.headers.get("location")).toBe(
-            "/settings/household/possible-duplicates",
-        );
-    });
-
-    test("merge validation with ui-v2 re-renders household settings", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("merge validation re-renders household settings", async () => {
         const { egg, eggs } = await seedDuplicatePair();
         const solo = await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "solo" }),

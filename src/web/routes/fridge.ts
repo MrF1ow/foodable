@@ -2,16 +2,12 @@ import { Hono } from "hono";
 import { renderFridgeInventoryPage } from "../loaders.js";
 
 import { formAmount, formText } from "../form.js";
-import { gatedRoute } from "../gated.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { lookupBarcode } from "../../foods.js";
 import {
-    addLocation,
-    deleteLocation,
     FridgeInputError,
     freezeFridgeItem,
     moveItem,
-    prepareAddFoodByBarcode,
     prepareAddFoodById,
     prepareAddManualFood,
     prepareAddSupply,
@@ -28,10 +24,7 @@ import {
 import { findFoodById } from "../../domain/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
-import {
-    findOrCreateFoodByBarcodeResult,
-    linkProductPromptPath,
-} from "../../domain/foods.js";
+import { findOrCreateFoodByBarcodeResult } from "../../domain/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveStockStore } from "../../db/stock.js";
 import { insertMeal, snapshotToMealItemWrite } from "../../db/nutrition.js";
@@ -91,7 +84,6 @@ async function fridgeFormError(
         userId,
         message,
         openModalId,
-        undefined,
         extras,
         opts,
     );
@@ -114,7 +106,6 @@ fridgeRoutes.get("/kitchen/fridge", requireSiteUser, async (c) => {
         c.get("userId"),
         undefined,
         undefined,
-        c.req.query("link_product"),
         undefined,
         {
             openItemId: c.req.query("item"),
@@ -123,48 +114,6 @@ fridgeRoutes.get("/kitchen/fridge", requireSiteUser, async (c) => {
     );
     return c.html(page.html, page.status);
 });
-
-fridgeRoutes.post("/kitchen/fridge/locations", requireMember, async (c) => {
-    const userId = c.get("userId");
-    const member = siteMember(c);
-    const body = await c.req.parseBody();
-    try {
-        await addLocation(
-            liveFridgeStore(),
-            member.householdId,
-            formText(body, "name"),
-        );
-    } catch (err) {
-        const page = await fridgeFormError(userId, err, "fridge-add-location");
-        return c.html(page.html, page.status);
-    }
-    return redirectWithToast(c, "/kitchen/fridge", "fridge.location.added");
-});
-
-fridgeRoutes.post(
-    "/kitchen/fridge/locations/:id/delete",
-    requireMember,
-    async (c) => {
-        const userId = c.get("userId");
-        const member = siteMember(c);
-        const id = c.req.param("id");
-        try {
-            await deleteLocation(liveFridgeStore(), member.householdId, id);
-        } catch (err) {
-            const page = await fridgeFormError(
-                userId,
-                err,
-                `fridge-remove-location-${id}`,
-            );
-            return c.html(page.html, page.status);
-        }
-        return redirectWithToast(
-            c,
-            "/kitchen/fridge",
-            "fridge.location.removed",
-        );
-    },
-);
 
 fridgeRoutes.post("/kitchen/fridge/items", requireMember, async (c) => {
     const userId = c.get("userId");
@@ -196,7 +145,7 @@ fridgeRoutes.post("/kitchen/fridge/items", requireMember, async (c) => {
                     })
                   : formText(body, "barcode")
                     ? await (async () => {
-                          const { food, created } =
+                          const { food } =
                               await findOrCreateFoodByBarcodeResult(
                                   foods,
                                   member.householdId,
@@ -207,18 +156,13 @@ fridgeRoutes.post("/kitchen/fridge/items", requireMember, async (c) => {
                                           member.householdId,
                                       ),
                               );
-                          const prepared = await prepareAddFoodById(
-                              store,
-                              foods,
-                              {
-                                  householdId: member.householdId,
-                                  locationId,
-                                  foodId: food.id,
-                                  amount,
-                                  unit: formText(body, "qty_unit"),
-                              },
-                          );
-                          return { ...prepared, barcodeCreated: created };
+                          return prepareAddFoodById(store, foods, {
+                              householdId: member.householdId,
+                              locationId,
+                              foodId: food.id,
+                              amount,
+                              unit: formText(body, "qty_unit"),
+                          });
                       })()
                     : await prepareAddManualFood(store, foods, {
                           householdId: member.householdId,
@@ -246,20 +190,6 @@ fridgeRoutes.post("/kitchen/fridge/items", requireMember, async (c) => {
                 pickedFoodId,
             );
         }
-        const created =
-            "barcodeCreated" in prepared && prepared.barcodeCreated === true;
-        if (created) {
-            const catalog = await foods.listFoods(member.householdId);
-            const prompt = linkProductPromptPath(
-                prepared.food,
-                catalog,
-                "/kitchen/fridge",
-            );
-            if (prompt) {
-                // toast: none (link-product prompt on destination)
-                return c.redirect(prompt, 303);
-            }
-        }
     } catch (err) {
         const openModalId =
             kind === "supply"
@@ -277,7 +207,6 @@ fridgeRoutes.post("/kitchen/fridge/items", requireMember, async (c) => {
                     userId,
                     undefined,
                     openModalId,
-                    undefined,
                     { didYouMean },
                 );
                 return c.html(page.html, 409);
@@ -538,7 +467,6 @@ fridgeRoutes.post(
 fridgeRoutes.post(
     "/kitchen/fridge/items/:id/freeze",
     requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
     async (c) => {
         const userId = c.get("userId");
         const member = siteMember(c);

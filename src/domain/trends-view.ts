@@ -11,7 +11,7 @@ import { fromGrams, type WeightUnit } from "./units.js";
 import type { NutritionGoals } from "../db/nutrition.js";
 
 /** One calendar day in the user's timezone — maps from `buildDailyBuckets` /
- * `getTrendsPayload` day rows (`trendsDayPayloadOf` totals plus a `logged` flag). */
+ * `trendsDayPayloadOf` day rows (totals plus a `logged` flag). */
 export type TrendsDay = {
     date: string;
     calories: number;

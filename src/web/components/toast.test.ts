@@ -15,7 +15,6 @@ import {
     TOAST_COOKIE,
 } from "./toast.js";
 import {
-    addRecipeToGroceryToastFlash,
     cookRecipeToastFlash,
     cookSheetToastFlash,
     groceryLineCheckToastKey,
@@ -67,12 +66,12 @@ describe("toast flash codec", () => {
 
     test("formatToastText leaves param values as plain text", () => {
         const raw = '<b>&"';
-        expect(formatToastText("recipes.added-to-grocery", { count: 2 })).toBe(
-            "Added to the grocery list (2)",
+        expect(formatToastText("notice.added", { name: "Milk" })).toBe(
+            "Added Milk to the grocery list",
         );
-        expect(
-            formatToastText("recipes.added-to-grocery", { count: raw }),
-        ).toBe(`Added to the grocery list (${raw})`);
+        expect(formatToastText("notice.added", { name: raw })).toBe(
+            `Added ${raw} to the grocery list`,
+        );
     });
 
     test("formatToastText keeps $-patterns literal in a catalog param", () => {
@@ -84,12 +83,12 @@ describe("toast flash codec", () => {
     });
 
     test("toastSeedElement escapes text once for the attribute", () => {
-        const plain = formatToastText("recipes.added-to-grocery", {
-            count: '<b>&"',
+        const plain = formatToastText("notice.added", {
+            name: '<b>&"',
         });
         const seed = toastSeedElement("success", plain);
         expect(seed).toContain(
-            'data-toast-text="Added to the grocery list (&lt;b&gt;&amp;&quot;)',
+            'data-toast-text="Added &lt;b&gt;&amp;&quot; to the grocery list',
         );
     });
 
@@ -194,16 +193,6 @@ describe("toast-flash helpers", () => {
                 changedNames: ["x".repeat(120)],
             }).params?.names,
         ).toHaveLength(80);
-    });
-
-    test("addRecipeToGroceryToastFlash", () => {
-        expect(addRecipeToGroceryToastFlash(0)).toEqual({
-            key: "recipes.add-to-grocery.nothing",
-        });
-        expect(addRecipeToGroceryToastFlash(3)).toEqual({
-            key: "recipes.added-to-grocery",
-            params: { count: 3 },
-        });
     });
 
     test("groceryLineCheckToastKey", () => {

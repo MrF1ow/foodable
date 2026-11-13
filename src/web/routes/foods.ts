@@ -14,7 +14,6 @@ import {
     normalizeBarcode,
     type FoodResult,
 } from "../../foods.js";
-import { gatedRoute } from "../gated.js";
 import { formText } from "../form.js";
 import { redirectWithToast } from "../components/toast.js";
 import { liveGroceryStore } from "../../db/grocery.js";
@@ -87,191 +86,158 @@ foodsRoutes.get("/api/foods/search", requireMember, async (c) => {
     return c.json({ foods });
 });
 
-foodsRoutes.get(
-    "/foods/:id",
-    requireSiteUser,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const backHref = productBackHref(c);
-        const data = await loadProductPageData(
+foodsRoutes.get("/foods/:id", requireSiteUser, async (c) => {
+    const backHref = productBackHref(c);
+    const data = await loadProductPageData(
+        c.get("userId"),
+        c.req.param("id"),
+        backHref,
+    );
+    if (!data) return c.text("Not Found", 404);
+    return c.html(renderProductV2Page(data));
+});
+
+foodsRoutes.post("/foods/:id/add-to-grocery", requireMember, async (c) => {
+    const member = siteMember(c);
+    const foodId = c.req.param("id");
+    const foods = liveFoodsStore();
+    const food = await foods.getFood(member.householdId, foodId);
+    if (!food || food.archivedAt) return c.text("Not Found", 404);
+    const grocery = liveGroceryStore();
+    const settings = liveSettingsStore();
+    try {
+        await addGroceryFoodById(grocery, settings, foods, {
+            householdId: member.householdId,
+            foodId: food.id,
+        });
+    } catch (err) {
+        const message =
+            err instanceof GroceryInputError
+                ? err.message
+                : err instanceof Error
+                  ? err.message
+                  : "Could not add to the grocery list.";
+        const page = await loadProductPageData(
             c.get("userId"),
-            c.req.param("id"),
+            foodId,
+            productBackHref(c),
+        );
+        if (!page) return c.text("Not Found", 404);
+        return c.html(renderProductV2Page({ ...page, error: message }), 400);
+    }
+    return redirectWithToast(c, productPagePath(food.id), "grocery.line.added");
+});
+
+foodsRoutes.get("/foods/by-barcode/:code", requireMember, async (c) => {
+    const raw = c.req.param("code");
+    const backHref = productBackHref(c);
+    const normalized = normalizeBarcode(raw);
+    if (!normalized) {
+        const page = await loadProductBarcodeInvalidData(c.get("userId"), raw);
+        if (!page) return c.text("Not Found", 404);
+        return c.html(
+            renderProductBarcodeInvalidPage({ ...page, backHref }),
+            400,
+        );
+    }
+    const member = siteMember(c);
+    let hit: FoodResult | null;
+    try {
+        hit = await lookupBarcode(normalized, {
+            householdId: member.householdId,
+        });
+    } catch (err) {
+        const message =
+            err instanceof Error
+                ? err.message
+                : "Could not look up this barcode.";
+        const view = await loadProductBarcodeUnknownData(
+            c.get("userId"),
+            normalized,
             backHref,
         );
-        if (!data) return c.text("Not Found", 404);
-        return c.html(renderProductV2Page(data));
-    },
-);
-
-foodsRoutes.post(
-    "/foods/:id/add-to-grocery",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const member = siteMember(c);
-        const foodId = c.req.param("id");
-        const foods = liveFoodsStore();
-        const food = await foods.getFood(member.householdId, foodId);
-        if (!food || food.archivedAt) return c.text("Not Found", 404);
-        const grocery = liveGroceryStore();
-        const settings = liveSettingsStore();
-        try {
-            await addGroceryFoodById(grocery, settings, foods, {
-                householdId: member.householdId,
-                foodId: food.id,
-            });
-        } catch (err) {
-            const message =
-                err instanceof GroceryInputError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : "Could not add to the grocery list.";
-            const page = await loadProductPageData(
-                c.get("userId"),
-                foodId,
-                productBackHref(c),
-            );
-            if (!page) return c.text("Not Found", 404);
-            return c.html(
-                renderProductV2Page({ ...page, error: message }),
-                400,
-            );
-        }
-        return redirectWithToast(
-            c,
-            productPagePath(food.id),
-            "grocery.line.added",
+        if (!view) return c.text("Not Found", 404);
+        return c.html(
+            renderProductBarcodeUnknownPage({
+                ...view,
+                lookupFailed: true,
+                error: message,
+            }),
         );
-    },
-);
+    }
+    if (hit == null) {
+        const view = await loadProductBarcodeUnknownData(
+            c.get("userId"),
+            normalized,
+            backHref,
+        );
+        if (!view) return c.text("Not Found", 404);
+        return c.html(renderProductBarcodeUnknownPage(view));
+    }
+    const foods = liveFoodsStore();
+    const { food } = await findOrCreateFoodByBarcodeResult(
+        foods,
+        member.householdId,
+        normalized,
+        (code) => fridgeBarcodeLookup(code, member.householdId),
+    );
+    // toast: none (scanner hand-off lands on the product page)
+    return c.redirect(productPagePath(food.id), 303);
+});
 
-foodsRoutes.get(
-    "/foods/by-barcode/:code",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const raw = c.req.param("code");
-        const backHref = productBackHref(c);
-        const normalized = normalizeBarcode(raw);
-        if (!normalized) {
-            const page = await loadProductBarcodeInvalidData(
-                c.get("userId"),
-                raw,
-            );
-            if (!page) return c.text("Not Found", 404);
-            return c.html(
-                renderProductBarcodeInvalidPage({ ...page, backHref }),
-                400,
-            );
-        }
-        const member = siteMember(c);
-        let hit: FoodResult | null;
-        try {
-            hit = await lookupBarcode(normalized, {
-                householdId: member.householdId,
-            });
-        } catch (err) {
-            const message =
-                err instanceof Error
-                    ? err.message
-                    : "Could not look up this barcode.";
-            const view = await loadProductBarcodeUnknownData(
-                c.get("userId"),
-                normalized,
-                backHref,
-            );
-            if (!view) return c.text("Not Found", 404);
-            return c.html(
-                renderProductBarcodeUnknownPage({
-                    ...view,
-                    lookupFailed: true,
-                    error: message,
-                }),
-            );
-        }
-        if (hit == null) {
-            const view = await loadProductBarcodeUnknownData(
-                c.get("userId"),
-                normalized,
-                backHref,
-            );
-            if (!view) return c.text("Not Found", 404);
-            return c.html(renderProductBarcodeUnknownPage(view));
-        }
-        const foods = liveFoodsStore();
-        const { food } = await findOrCreateFoodByBarcodeResult(
+foodsRoutes.post("/foods/by-barcode/:code", requireMember, async (c) => {
+    const raw = c.req.param("code");
+    const backHref = productBackHref(c);
+    const normalized = normalizeBarcode(raw);
+    if (!normalized) {
+        const page = await loadProductBarcodeInvalidData(c.get("userId"), raw);
+        if (!page) return c.text("Not Found", 404);
+        return c.html(
+            renderProductBarcodeInvalidPage({ ...page, backHref }),
+            400,
+        );
+    }
+    const member = siteMember(c);
+    const body = await c.req.parseBody();
+    const name = formText(body, "name");
+    const foods = liveFoodsStore();
+    const existingId = await foods.getBarcodeFoodId(
+        member.householdId,
+        normalized,
+    );
+    if (existingId) {
+        // toast: none (barcode already linked to a food)
+        return c.redirect(productPagePath(existingId), 303);
+    }
+    try {
+        const food = await findOrCreateManualFood(
             foods,
             member.householdId,
-            normalized,
-            (code) => fridgeBarcodeLookup(code, member.householdId),
+            "food",
+            name,
         );
-        // toast: none (scanner hand-off lands on the product page)
+        await foods.setBarcode(member.householdId, normalized, food.id);
+        // toast: none (new product page is the confirmation)
         return c.redirect(productPagePath(food.id), 303);
-    },
-);
-
-foodsRoutes.post(
-    "/foods/by-barcode/:code",
-    requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
-    async (c) => {
-        const raw = c.req.param("code");
-        const backHref = productBackHref(c);
-        const normalized = normalizeBarcode(raw);
-        if (!normalized) {
-            const page = await loadProductBarcodeInvalidData(
-                c.get("userId"),
-                raw,
-            );
-            if (!page) return c.text("Not Found", 404);
-            return c.html(
-                renderProductBarcodeInvalidPage({ ...page, backHref }),
-                400,
-            );
-        }
-        const member = siteMember(c);
-        const body = await c.req.parseBody();
-        const name = formText(body, "name");
-        const foods = liveFoodsStore();
-        const existingId = await foods.getBarcodeFoodId(
-            member.householdId,
+    } catch (err) {
+        const message =
+            err instanceof FoodsInputError
+                ? err.message
+                : err instanceof Error
+                  ? err.message
+                  : "Could not add food.";
+        const view = await loadProductBarcodeUnknownData(
+            c.get("userId"),
             normalized,
+            backHref,
         );
-        if (existingId) {
-            // toast: none (barcode already linked to a food)
-            return c.redirect(productPagePath(existingId), 303);
-        }
-        try {
-            const food = await findOrCreateManualFood(
-                foods,
-                member.householdId,
-                "food",
-                name,
-            );
-            await foods.setBarcode(member.householdId, normalized, food.id);
-            // toast: none (new product page is the confirmation)
-            return c.redirect(productPagePath(food.id), 303);
-        } catch (err) {
-            const message =
-                err instanceof FoodsInputError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : "Could not add food.";
-            const view = await loadProductBarcodeUnknownData(
-                c.get("userId"),
-                normalized,
-                backHref,
-            );
-            if (!view) return c.text("Not Found", 404);
-            return c.html(
-                renderProductBarcodeUnknownPage({ ...view, error: message }),
-                400,
-            );
-        }
-    },
-);
+        if (!view) return c.text("Not Found", 404);
+        return c.html(
+            renderProductBarcodeUnknownPage({ ...view, error: message }),
+            400,
+        );
+    }
+});
 
 /**
  * The patch the Restock sheet posts. It always posts the whole form, so an
@@ -297,7 +263,6 @@ function usualSchedulePatch(
 foodsRoutes.post(
     "/kitchen/usuals/:foodId/schedule",
     requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
     async (c) => {
         const member = siteMember(c);
         const foodId = c.req.param("foodId");

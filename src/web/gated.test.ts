@@ -28,13 +28,13 @@ const authMiddleware = createMiddleware(async (c, next) => {
 
 describe("gatedRoute", () => {
     test("GET flag off redirects", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         let hit = false;
         const app = new Hono();
         app.get(
             "/new",
             authMiddleware,
-            gatedRoute("ui-v2", { redirectTo: "/" }),
+            gatedRoute("mcp-share-links", { redirectTo: "/" }),
             (c) => {
                 hit = true;
                 return c.text("ok", 200);
@@ -47,12 +47,12 @@ describe("gatedRoute", () => {
     });
 
     test("GET flag off with notFound", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const app = new Hono();
         app.get(
             "/hidden",
             authMiddleware,
-            gatedRoute("ui-v2", { notFound: true }),
+            gatedRoute("mcp-share-links", { notFound: true }),
             (c) => c.text("ok", 200),
         );
         const res = await app.request("http://x/hidden", { method: "GET" });
@@ -60,12 +60,12 @@ describe("gatedRoute", () => {
     });
 
     test("HEAD flag off redirects", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const app = new Hono();
         app.get(
             "/new",
             authMiddleware,
-            gatedRoute("ui-v2", { redirectTo: "/dash" }),
+            gatedRoute("mcp-share-links", { redirectTo: "/dash" }),
             () => new Response(null, { status: 200 }),
         );
         const res = await app.request("http://x/new", { method: "HEAD" });
@@ -73,13 +73,13 @@ describe("gatedRoute", () => {
     });
 
     test("POST flag off is always 404", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         let hit = false;
         const app = new Hono();
         app.post(
             "/new",
             authMiddleware,
-            gatedRoute("ui-v2", { redirectTo: "/" }),
+            gatedRoute("mcp-share-links", { redirectTo: "/" }),
             (c) => {
                 hit = true;
                 return c.text("ok", 200);
@@ -91,18 +91,18 @@ describe("gatedRoute", () => {
     });
 
     test("flag on runs handler for GET and POST", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         const app = new Hono();
         app.get(
             "/new",
             authMiddleware,
-            gatedRoute("ui-v2", { redirectTo: "/" }),
+            gatedRoute("mcp-share-links", { redirectTo: "/" }),
             (c) => c.text("ok", 200),
         );
         app.post(
             "/new",
             authMiddleware,
-            gatedRoute("ui-v2", { redirectTo: "/" }),
+            gatedRoute("mcp-share-links", { redirectTo: "/" }),
             (c) => c.text("posted", 200),
         );
         expect((await app.request("http://x/new")).status).toBe(200);
@@ -112,20 +112,22 @@ describe("gatedRoute", () => {
     });
 
     test("missing userId throws", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const app = new Hono();
         app.onError((err, c) => c.text(err.message, 500));
-        app.get("/new", gatedRoute("ui-v2", { redirectTo: "/" }), (c) =>
-            c.text("ok", 200),
+        app.get(
+            "/new",
+            gatedRoute("mcp-share-links", { redirectTo: "/" }),
+            (c) => c.text("ok", 200),
         );
         const res = await app.request("http://x/new");
         expect(res.status).toBe(500);
     });
 
     test("gatedRouteInfo returns metadata", () => {
-        const gate = gatedRoute("ui-v2", { redirectTo: "/a" });
+        const gate = gatedRoute("mcp-share-links", { redirectTo: "/a" });
         expect(gatedRouteInfo(gate)).toEqual({
-            flag: "ui-v2",
+            flag: "mcp-share-links",
             redirectTo: "/a",
         });
         expect(gatedRouteInfo(() => {})).toBeUndefined();

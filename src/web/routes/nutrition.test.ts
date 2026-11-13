@@ -1,10 +1,5 @@
-import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
+import { afterAll, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
 import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
 import * as actualProfiles from "../../db/profiles.js";
@@ -22,9 +17,6 @@ import {
 } from "../../domain/today.js";
 import { shiftLocalDate } from "../../domain/tz.js";
 import { renderDashboardPage } from "../loaders.js";
-import { NUTRITION_CARDS } from "../../domain/layout.js";
-import { renderNutritionPage } from "../pages/nutrition.js";
-import * as actualDashboardData from "../../dashboard-data.js";
 import * as actualNutrition from "../../db/nutrition.js";
 
 const realHousehold = { ...actualHousehold };
@@ -32,7 +24,6 @@ const realProfiles = { ...actualProfiles };
 const realLoadersToday = { ...actualLoadersToday };
 const realLoadersPlan = { ...actualLoadersPlan };
 const realAttention = { ...actualAttention };
-const realDashboardData = { ...actualDashboardData };
 const realNutrition = { ...actualNutrition };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
@@ -75,7 +66,6 @@ mock.module("../../db/profiles.js", () => ({
         alcohol_tracking_enabled: false,
         preferred_drink_unit: null,
         theme: "light",
-        nutrition_layout: null,
         created_at: "2026-01-01T00:00:00.000Z",
         updated_at: "2026-01-01T00:00:00.000Z",
     }),
@@ -126,17 +116,6 @@ mock.module("../loaders-today.js", () => ({
     },
 }));
 
-mock.module("../../dashboard-data.js", () => ({
-    ...realDashboardData,
-    getNutritionSummaryPayload: async () => ({
-        locale: "en",
-        drink_unit: null,
-    }),
-    getGoalProgressPayload: async () => ({ locale: "en" }),
-    getTrendsPayload: async () => ({ locale: "en" }),
-    getWeightTrendsPayload: async () => ({ locale: "en", unit: "kg" }),
-}));
-
 mock.module("../../db/nutrition.js", () => ({
     ...realNutrition,
     getLatestWeight: async () => null,
@@ -161,16 +140,12 @@ mock.module("../attention.js", () => ({
                     : "light",
             attention: { count: 0, tabs: {} },
             flags,
-            ...(flags.uiV2
-                ? {
-                      identity: {
-                          viewerName: viewer.displayName,
-                          viewerRole: viewer.role,
-                          householdName: "Test household",
-                          memberCount: 2,
-                      },
-                  }
-                : {}),
+            identity: {
+                viewerName: viewer.displayName,
+                viewerRole: viewer.role,
+                householdName: "Test household",
+                memberCount: 2,
+            },
         };
     },
 }));
@@ -180,13 +155,8 @@ afterAll(() => {
     mock.module("../../db/profiles.js", () => realProfiles);
     mock.module("../loaders-today.js", () => realLoadersToday);
     mock.module("../loaders-plan.js", () => realLoadersPlan);
-    mock.module("../../dashboard-data.js", () => realDashboardData);
     mock.module("../../db/nutrition.js", () => realNutrition);
     mock.module("../attention.js", () => realAttention);
-});
-
-afterEach(() => {
-    resetFlagsForTests();
 });
 
 const hono = new Hono();
@@ -198,7 +168,6 @@ function cookie(userId: string): string {
 
 describe("GET /", () => {
     test("Today on the new app loads the household's notices once: the chrome reuses what the page loaded", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         chromeSeen.length = 0;
         lastTodayView = null;
         const res = await hono.request("http://test/", {
@@ -214,7 +183,6 @@ describe("GET /", () => {
     });
 
     test("flag on renders v2 today", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request("http://test/", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -225,7 +193,6 @@ describe("GET /", () => {
     });
 
     test("?date= selects the day", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request("http://test/?date=2026-08-03", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -235,7 +202,6 @@ describe("GET /", () => {
     });
 
     test("invalid date falls back to calendar today weekday title", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request("http://test/?date=2026-99-99", {
             headers: { cookie: cookie(ALICE) },
         });
@@ -256,7 +222,6 @@ describe("GET /", () => {
     });
 
     test("owner can view member day", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request(
             `http://test/?member=${encodeURIComponent(BOB)}`,
             { headers: { cookie: cookie(ALICE) } },
@@ -274,7 +239,6 @@ describe("GET /", () => {
     });
 
     test("member can view owner day in peer mode", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await hono.request(
             `http://test/?member=${encodeURIComponent(ALICE)}`,
             { headers: { cookie: cookie(BOB) } },
@@ -290,7 +254,6 @@ describe("GET /", () => {
     });
 
     test("stranger member query is forbidden", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const stranger = "33333333-3333-4333-8333-333333333333";
         const res = await hono.request(
             `http://test/?member=${encodeURIComponent(stranger)}`,
@@ -299,64 +262,36 @@ describe("GET /", () => {
         expect(res.status).toBe(403);
     });
 
-    test("flag off serves legacy nutrition dashboard unchanged", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const flags = await (
-            await import("../attention.js")
-        ).viewerFlagsFor(owner);
-        const legacyHtml = await renderNutritionPage({
-            access: { ok: true, mode: "self", viewer: owner, subject: owner },
-            members: [owner, member],
-            summary: { locale: "en", drink_unit: null },
-            goals: { locale: "en" },
-            trends: { locale: "en" },
-            weight: { locale: "en", unit: "kg" },
-            chrome: {
-                theme: "light",
-                attention: { count: 0, tabs: {} },
-                flags,
-            },
-            cardOrder: [...NUTRITION_CARDS],
-        });
-        const res = await hono.request("http://test/", {
-            headers: { cookie: cookie(ALICE) },
-        });
-        const html = await res.text();
-        expect(html).toBe(legacyHtml);
-        expect(html).not.toContain("fd-today-page");
-        expect(html).not.toContain("fd-today-");
-        expect(html).toContain('title="nutrition-summary"');
+    test("the retired Nutrition page forms are gone: POST log-meal, log-water, log-weight and card layout answer 404", async () => {
+        for (const path of [
+            "/log-meal",
+            "/log-water",
+            "/log-weight",
+            "/nutrition/layout",
+        ]) {
+            const res = await hono.request(`http://test${path}`, {
+                method: "POST",
+                headers: {
+                    cookie: cookie(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "description=&meal_type=lunch",
+            });
+            expect(res.status).toBe(404);
+        }
     });
 
-    test("v2 POST log-meal validation error shows page banner", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
-        const res = await hono.request("http://test/log-meal", {
-            method: "POST",
-            headers: {
-                cookie: cookie(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "description=&meal_type=lunch",
-        });
-        expect(res.status).toBe(400);
-        const html = await res.text();
-        expect(html).toContain("fd-today-page");
-        expect(html).toContain("fd-settings-error");
-        expect(html).toContain("meal description");
+    test("a bookmarked /nutrition/layout lands on Today", async () => {
+        const res = await hono.request("http://test/nutrition/layout");
+        expect(res.status).toBe(301);
+        expect(res.headers.get("location")).toBe("/");
     });
 
     test("v2 log sheet validation error re-renders today with sheet open", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
-        const page = await renderDashboardPage(
-            ALICE,
-            undefined,
-            undefined,
-            undefined,
-            {
-                amountOpenOnLoad: true,
-                amountError: "Enter a valid amount",
-            },
-        );
+        const page = await renderDashboardPage(ALICE, undefined, undefined, {
+            amountOpenOnLoad: true,
+            amountError: "Enter a valid amount",
+        });
         expect(page.html).toContain("fd-today-page");
         expect(page.html).toContain('id="fd-log-amount"');
         expect(page.html).toContain("Enter a valid amount");

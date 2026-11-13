@@ -20,7 +20,6 @@ import {
 } from "../../db/profiles.js";
 import { withAnalytics } from "../../analytics.js";
 import { todayInTz, dateInTz } from "../../domain/tz.js";
-import { WIDGET_LOCALE } from "../../routes.js";
 import {
     runImport,
     buildSummaryText,
@@ -179,10 +178,6 @@ export const START_IMPORT_OUTPUT_SCHEMA = z.object({
     // who had asked never to see alcohol — the exact scenario the opt-in
     // exists to prevent. What null makes the widget do: see startImportPayload.
     drink_unit: DRINK_UNIT_FIELD,
-    // The widget's UI language — see the identical field on
-    // get_nutrition_summary's outputSchema for why this is z.string() and
-    // Widgets are English-only; always the literal "en".
-    locale: z.string(),
     user_id: z.string(),
 });
 
@@ -191,7 +186,6 @@ export function startImportPayload(opts: {
     tzConfigured: boolean;
     widgetsEnabled: boolean;
     alcohol: AlcoholDisplay;
-    locale: string;
     userId: string;
 }) {
     return {
@@ -236,7 +230,6 @@ export function startImportPayload(opts: {
         // tracking before importing is how to keep it. Silent would be
         // indefensible; announced, it is the user's call to make.
         drink_unit: opts.alcohol,
-        locale: opts.locale,
         user_id: opts.userId,
     };
 }
@@ -258,7 +251,6 @@ export async function buildMealProgress(
 ) {
     const profile = await getProfile(userId);
     const tz = timezoneFromProfile(profile) ?? "UTC";
-    const locale = WIDGET_LOCALE;
     const anchorIso = meal?.logged_at ?? opts?.loggedAtIso;
     if (!anchorIso) {
         throw new Error("buildMealProgress needs a meal or loggedAtIso");
@@ -283,7 +275,6 @@ export async function buildMealProgress(
         similar_foods: opts?.similarFoods ?? [],
         date: mealDate,
         drink_unit: alcohol,
-        locale,
         logged_meal: meal
             ? {
                   description: meal.description,
@@ -736,7 +727,6 @@ export function registerNutritionWriteTools(
                         tzConfigured: tz !== null,
                         widgetsEnabled,
                         alcohol,
-                        locale: WIDGET_LOCALE,
                         userId,
                     });
                     const text = widgetsEnabled

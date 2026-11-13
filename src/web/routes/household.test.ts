@@ -2,6 +2,7 @@ import { PRODUCT_DEFAULT_BACK } from "../pages/v2/product.js";
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
 import { legacyRedirects } from "../legacy-redirects.js";
+import { legacyRedirectTarget } from "../route-map.js";
 import * as actualDbFoods from "../../db/foods.js";
 import * as actualDbFridge from "../../db/fridge.js";
 import * as actualDbGrocery from "../../db/grocery.js";
@@ -37,7 +38,6 @@ import { createMemoryRulesStore } from "../../domain/rules.js";
 import { createMemorySettingsStore } from "../../domain/settings.js";
 import { createMemoryStockStore } from "../../domain/stock.js";
 import type { FoodResult } from "../../foods.js";
-import { LINK_PRODUCT_MODAL_ID } from "../components/link-product-prompt.js";
 import {
     DEFAULT_RESTOCK,
     EMPTY_HOUSEHOLD_PREFERENCES,
@@ -49,11 +49,7 @@ import { createMemorySocialReaderStatusStore } from "../../domain/social-readers
 import * as actualDbSocialReaders from "../../db/social-readers.js";
 import * as actualDbFetchMemory from "../../db/fetch-memory.js";
 import { createMemoryFetchMemoryStore } from "../../domain/fetch-memory.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import { USUALS_INTRO } from "../pages/v2/kitchen-usuals.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
@@ -88,7 +84,6 @@ const PROFILE: actualDbProfiles.Profile = {
     alcohol_tracking_enabled: false,
     preferred_drink_unit: null,
     theme: "light",
-    nutrition_layout: null,
     created_at: "2026-01-01T00:00:00.000Z",
     updated_at: "2026-01-01T00:00:00.000Z",
 };
@@ -348,7 +343,7 @@ beforeEach(() => {
     ];
 });
 
-describe("settings household routes", () => {
+describe("retired household preferences page", () => {
     function settingsApp() {
         const hono = new Hono();
         hono.route("/", householdRoutes);
@@ -356,57 +351,17 @@ describe("settings household routes", () => {
         return hono;
     }
 
-    beforeEach(() => {
+    test("GET /settings/household-settings is not a legacy redirect but lands on the household page", async () => {
+        expect(legacyRedirectTarget("/settings/household-settings")).toBeNull();
+        const r = await settingsApp().request(
+            "http://x/settings/household-settings",
+        );
+        expect(r.status).toBe(301);
+        expect(r.headers.get("location")).toBe("/settings/household");
+    });
+
+    test("POST /settings/household-settings is gone and writes nothing", async () => {
         db.configWrites = 0;
-        db.pluralsSameFood = false;
-        db.household = {
-            name: "Home",
-            recipeSearchPlaces: [],
-            preferences: {
-                ...EMPTY_HOUSEHOLD_PREFERENCES,
-                restock: { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" },
-            },
-        };
-    });
-
-    test("GET /settings/household-settings is not a legacy redirect", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            { headers: { cookie: cookieFor(ALICE) } },
-        );
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).toContain('aria-current="page">Household</a>');
-    });
-
-    test("member GET is read-only", async () => {
-        db.members = [
-            {
-                householdId: HH,
-                userId: ALICE,
-                role: "member",
-                displayName: "Alice",
-            },
-        ] as HouseholdMember[];
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            { headers: { cookie: cookieFor(ALICE) } },
-        );
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).not.toContain("<form");
-        expect(html).not.toContain('name="restock_enabled"');
-    });
-
-    test("member POST is forbidden", async () => {
-        db.members = [
-            {
-                householdId: HH,
-                userId: ALICE,
-                role: "member",
-                displayName: "Alice",
-            },
-        ] as HouseholdMember[];
         const r = await settingsApp().request(
             "http://x/settings/household-settings",
             {
@@ -415,140 +370,11 @@ describe("settings household routes", () => {
                     cookie: cookieFor(ALICE),
                     "content-type": "application/x-www-form-urlencoded",
                 },
-                body: "restock_enabled=true&restock_weekday=6&restock_time=07:00&timezone=",
+                body: "timezone=&restock_enabled=true&restock_weekday=3&restock_time=18:00",
             },
         );
-        expect(r.status).toBe(403);
+        expect(r.status).toBe(404);
         expect(db.configWrites).toBe(0);
-    });
-
-    test("owner save preserves lastRunOn", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "restock_enabled=true&restock_weekday=1&restock_time=08:00&timezone=Europe%2FKyiv&from=%2F",
-            },
-        );
-        expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/settings/household-settings");
-        expect(db.configWrites).toBe(1);
-        expect(db.household.preferences.restock.lastRunOn).toBe("2026-09-15");
-        expect(db.household.preferences.restock.enabled).toBe(true);
-        expect(db.household.preferences.timezone).toBe("Europe/Kyiv");
-    });
-
-    test("admin can save", async () => {
-        db.members = [
-            {
-                householdId: HH,
-                userId: ALICE,
-                role: "admin",
-                displayName: "Alice",
-            },
-        ] as HouseholdMember[];
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "restock_enabled=true&restock_weekday=0&restock_time=09:00&timezone=",
-            },
-        );
-        expect(r.status).toBe(303);
-        expect(db.configWrites).toBe(1);
-    });
-
-    test("invalid POST re-renders with error and does not write", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "timezone=&restock_enabled=true&restock_weekday=6&restock_time=24%3A00",
-            },
-        );
-        expect(r.status).toBe(400);
-        expect(db.configWrites).toBe(0);
-        const html = await r.text();
-        expect(html).toContain("Enter a time as HH:MM");
-        expect(html).toContain('value="24:00"');
-        // A time input would blank "24:00"; text keeps it visible and re-posted.
-        expect(html).toMatch(
-            /<input type="text" id="restock_time"[^>]*value="24:00"/,
-        );
-    });
-
-    test("blank or missing weekday POST returns 400 without write", async () => {
-        for (const body of [
-            "timezone=&restock_enabled=true&restock_time=07%3A00",
-            "timezone=&restock_enabled=true&restock_weekday=&restock_time=07%3A00",
-            "timezone=&restock_enabled=true&restock_weekday=%20%20&restock_time=07%3A00",
-        ]) {
-            db.configWrites = 0;
-            const r = await settingsApp().request(
-                "http://x/settings/household-settings",
-                {
-                    method: "POST",
-                    headers: {
-                        cookie: cookieFor(ALICE),
-                        "content-type": "application/x-www-form-urlencoded",
-                    },
-                    body,
-                },
-            );
-            expect(r.status).toBe(400);
-            expect(db.configWrites).toBe(0);
-            const html = await r.text();
-            expect(html).toContain("Pick a day from Sunday to Saturday");
-        }
-    });
-
-    test("invalid timezone POST keeps submitted timezone selected", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "timezone=Mars%2FPhobos&restock_enabled=true&restock_weekday=1&restock_time=07%3A00",
-            },
-        );
-        expect(r.status).toBe(400);
-        expect(db.configWrites).toBe(0);
-        const html = await r.text();
-        expect(html).toContain('value="Mars/Phobos" selected');
-    });
-
-    test("invalid weekday POST keeps submitted weekday selected, not Sunday", async () => {
-        const r = await settingsApp().request(
-            "http://x/settings/household-settings",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "timezone=&restock_enabled=true&restock_weekday=9&restock_time=07%3A00",
-            },
-        );
-        expect(r.status).toBe(400);
-        expect(db.configWrites).toBe(0);
-        const html = await r.text();
-        expect(html).toContain('value="9" selected');
-        expect(html).not.toMatch(/value="0"[^>]*selected/);
     });
 });
 
@@ -602,95 +428,20 @@ describe("household usual products and items routes", () => {
         });
     }
 
-    test("GET list starts empty, then Add usual product opens the picker", async () => {
+    test("GET list starts empty", async () => {
         const get = (path: string) =>
             app().request(`http://x${path}`, {
                 headers: { cookie: cookieFor(ALICE) },
             });
-        const cilantro = await db.foodsStore.insertFood(
+        await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "Cilantro" }),
         );
         const list = await get("/kitchen/usuals");
         expect(list.status).toBe(200);
         const html = await list.text();
-        expect(html).toContain("No usual products yet.");
+        expect(html).toContain("fd-kitchen-usuals-page");
         expect(html).not.toContain("Needs a usual product");
-        expect(html).toContain('name="q"');
-        const add = await get(`/kitchen/usuals?food=${cilantro.id}`);
-        expect(add.status).toBe(302);
-        expect(add.headers.get("location")).toBe(
-            `/kitchen/usuals/${cilantro.id}`,
-        );
-    });
-
-    test("GET usual-products search lists addable foods and excludes scanned products", async () => {
-        const get = (path: string) =>
-            app().request(`http://x${path}`, {
-                headers: { cookie: cookieFor(ALICE) },
-            });
-        const flourA = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "All purpose flour",
-            }),
-        );
-        const flourB = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "all-purpose flour",
-            }),
-        );
-        const carton = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Cage Free Grade A Large Eggs",
-                offSourceId: "070852010016",
-            }),
-        );
-        await db.foodsStore.setBarcode(HH, "1234567890123", carton.id);
-        // A scanned flour must not be offered either, whether it came from
-        // Open Food Facts or only carries a barcode.
-        await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Gold Medal flour",
-                offSourceId: "016000196100",
-            }),
-        );
-        const barcodedFlour = await db.foodsStore.insertFood(
-            newFood({ householdId: HH, kind: "food", name: "Pillsbury flour" }),
-        );
-        await db.foodsStore.setBarcode(HH, "051500255162", barcodedFlour.id);
-
-        const r = await get("/kitchen/usuals?q=flour");
-        expect(r.status).toBe(200);
-        const html = await r.text();
-        expect(html).toMatch(
-            /id="usual-product-add"[^>]*data-modal-open-on-load/,
-        );
-        expect(html).toContain("All purpose flour");
-        expect(html).toContain("all-purpose flour");
-        expect(html).toContain(`?food=${flourA.id}`);
-        expect(html).toContain(`?food=${flourB.id}`);
-        expect(html).toContain("Choose");
-        expect(html).not.toContain("Gold Medal flour");
-        expect(html).not.toContain("Pillsbury flour");
-        const eggs = await get("/kitchen/usuals?q=large+eggs");
-        expect(await eggs.text()).not.toContain("Cage Free Grade A Large Eggs");
-
-        const none = await get("/kitchen/usuals?q=zzz");
-        expect(none.status).toBe(200);
-        expect(await none.text()).toContain("No matching food.");
-
-        const pick = await get(`/kitchen/usuals?food=${flourA.id}`);
-        expect(pick.status).toBe(302);
-        expect(pick.headers.get("location")).toBe(
-            `/kitchen/usuals/${flourA.id}`,
-        );
+        expect(html).not.toContain("data-sheet-open-on-load");
     });
 
     test("POST set usual redirects and updates state", async () => {
@@ -752,26 +503,6 @@ describe("household usual products and items routes", () => {
         const plain = await db.foodsStore.getFood(HH, eggs.id);
         expect(plain?.usualProductId).toBe(solo.id);
         expect(kirkland.id).not.toBe(solo.id);
-    });
-
-    test("GET ?food= shortcut carries a pre-move from as its new path", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const get = (path: string) =>
-            app().request(`http://x${path}`, {
-                headers: { cookie: cookieFor(ALICE) },
-            });
-        for (const [from, want] of [
-            ["/grocery", "%2Fkitchen%2Fgroceries"],
-            ["/settings/foods", "%2Fsettings%2Fhousehold%2Fitems"],
-        ] as const) {
-            const r = await get(
-                `/kitchen/usuals?food=${eggs.id}&from=${encodeURIComponent(from)}`,
-            );
-            expect(r.status).toBe(302);
-            expect(r.headers.get("location")).toBe(
-                `/kitchen/usuals/${eggs.id}?from=${want}`,
-            );
-        }
     });
 
     test("POST pick adds a product to the list and keeps the current usual", async () => {
@@ -893,140 +624,7 @@ describe("household usual products and items routes", () => {
         expect(plain?.usualProductId).toBeTruthy();
     });
 
-    test("POST link and unlink product", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-                brand: "Kirkland",
-            }),
-        );
-        const link = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&from=/settings/household/items`,
-        );
-        expect(link.status).toBe(303);
-        expect((await db.foodsStore.getFood(HH, solo.id))?.genericFoodId).toBe(
-            eggs.id,
-        );
-        const unlink = await post(
-            `/settings/household/items/${solo.id}/link`,
-            "food_id=&from=/settings/household/items",
-        );
-        expect(unlink.status).toBe(303);
-        expect(
-            (await db.foodsStore.getFood(HH, solo.id))?.genericFoodId,
-        ).toBeNull();
-    });
-
-    test("POST link with make_usual sets usual on plain food", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&make_usual=1&from=/settings/household/items`,
-        );
-        expect(r.status).toBe(303);
-        const plain = await db.foodsStore.getFood(HH, eggs.id);
-        expect(plain?.usualProductId).toBe(solo.id);
-    });
-
-    test("POST link validation error reopens prompt with fields on items", async () => {
-        await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${solo.id}&from=/settings/household/items`,
-        );
-        expect(r.status).toBe(400);
-        const html = await r.text();
-        expect(html).toContain(`id="${LINK_PRODUCT_MODAL_ID}"`);
-        expect(html).toContain("data-modal-open-on-load");
-        expect(html).toContain('name="food_id"');
-    });
-
-    test("POST link from recipe returns to recipe on success", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const recipe = await db.recipesStore.insertRecipe({
-            id: "r1",
-            householdId: HH,
-            creatorId: ALICE,
-            name: "Test",
-            yieldPortions: 1,
-            instructions: null,
-            prepMinutes: null,
-            cookMinutes: null,
-            sourceUrl: null,
-            tags: [],
-            notes: null,
-            verification: "verified",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-        });
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&from=/recipes/${recipe.id}`,
-        );
-        expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe(`/recipes/${recipe.id}`);
-    });
-
-    test("POST link rejects unsafe from and falls back to items", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&from=${encodeURIComponent("//evil.com")}`,
-        );
-        expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/settings/household/items");
-    });
-
-    test("POST link rejects https evil from and falls back to items", async () => {
-        const { eggs } = await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${eggs.id}&from=${encodeURIComponent("https://evil.com/x")}`,
-        );
-        expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toBe("/settings/household/items");
-    });
-
     test("POST items archive keeps nutrition and archives (v2 saved delete)", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         try {
             const store = db.foodsStore;
             const food = await store.insertFood(
@@ -1076,8 +674,6 @@ describe("household usual products and items routes", () => {
         expect(r.status).toBe(400);
         const plain = await db.foodsStore.getFood(HH, eggs.id);
         expect(plain?.usualProductId).toBeNull();
-        const html = await r.text();
-        expect(html).toContain('name="usual_product_id"');
     });
 
     test("POST usual-products saves usual store and amount on product", async () => {
@@ -1170,8 +766,6 @@ describe("household usual products and items routes", () => {
         expect(await db.foodsStore.getFood(HH, eggs.id)).toEqual(before);
         const html = await r.text();
         expect(html).toContain("Enter a usual amount with its unit.");
-        expect(html).toContain('id="food-edit"');
-        expect(html).toContain("data-modal-open-on-load");
     });
 
     test("POST usual-products picker rejects amount without unit and leaves rows unchanged", async () => {
@@ -1244,60 +838,7 @@ describe("household usual products and items routes", () => {
         expect(await db.foodsStore.getFood(HH, eggs.id)).toEqual(before);
     });
 
-    test("POST link error from recipe reopens link prompt", async () => {
-        await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        await db.recipesStore.insertRecipe({
-            id: "r1",
-            householdId: HH,
-            creatorId: ALICE,
-            name: "Test",
-            yieldPortions: 1,
-            instructions: null,
-            prepMinutes: null,
-            cookMinutes: null,
-            sourceUrl: null,
-            tags: [],
-            notes: null,
-            verification: "verified",
-            updatedAt: "2026-01-01T00:00:00.000Z",
-        });
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${solo.id}&from=/recipes/r1`,
-        );
-        expect(r.status).toBe(400);
-        const html = await r.text();
-        expect(html).toContain(`id="${LINK_PRODUCT_MODAL_ID}"`);
-        expect(html).toContain('name="food_id"');
-    });
-
-    test("POST link error from fridge reopens link prompt", async () => {
-        await seedEggsCatalog();
-        const solo = await db.foodsStore.insertFood(
-            newFood({
-                householdId: HH,
-                kind: "food",
-                name: "Loose Large Eggs",
-            }),
-        );
-        const r = await post(
-            `/settings/household/items/${solo.id}/link`,
-            `food_id=${solo.id}&from=/kitchen/fridge`,
-        );
-        expect(r.status).toBe(400);
-        const html = await r.text();
-        expect(html).toContain(`id="${LINK_PRODUCT_MODAL_ID}"`);
-        expect(html).not.toContain("<h1>Items</h1>");
-    });
-
-    test("fridge barcode create with plain match redirects with link_product", async () => {
+    test("fridge barcode create with a plain-food match goes back to the fridge with no link prompt", async () => {
         await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "Eggs" }),
         );
@@ -1329,7 +870,7 @@ describe("household usual products and items routes", () => {
             "kind=food&location_id=loc1&barcode=9990001112222&qty_amount=6&qty_unit=each",
         );
         expect(r.status).toBe(303);
-        expect(r.headers.get("location")).toMatch(/link_product=/);
+        expect(r.headers.get("location")).toBe("/kitchen/fridge");
     });
 
     test("fridge barcode create with no plain suggestion skips link_product", async () => {
@@ -1585,22 +1126,6 @@ describe("fridge notice add-to-grocery route", () => {
         expect(html).toContain(
             `action="/kitchen/fridge/items/${expiring.item!.id}/add-to-grocery"`,
         );
-        const milkRow = html.match(
-            new RegExp(
-                `<li class="fridge-item" data-item-id="${onList.item.id}"[\\s\\S]*?</li>`,
-            ),
-        )?.[0];
-        expect(milkRow).toBeDefined();
-        expect(milkRow!).toContain("fridge-on-list");
-        expect(milkRow!).not.toContain("notice-action");
-        const expiredRow = html.match(
-            new RegExp(
-                `<li class="fridge-item" data-item-id="${withButton.item.id}"[\\s\\S]*?</li>`,
-            ),
-        )?.[0];
-        expect(expiredRow).toBeDefined();
-        expect(expiredRow!).toContain("notice-action");
-        expect(expiredRow!).not.toContain("fridge-on-list");
     });
 
     test("POST add-to-grocery 4xx for unknown item", async () => {
@@ -1718,7 +1243,7 @@ describe("social reader settings", () => {
 const BOB = "22222222-2222-4222-8222-222222222222";
 const OUTSIDER = "99999999-9999-4999-8999-999999999999";
 
-describe("household members page ui-v2", () => {
+describe("household members page", () => {
     afterAll(() => {
         resetFlagsForTests();
     });
@@ -1741,8 +1266,7 @@ describe("household members page ui-v2", () => {
         ];
     });
 
-    test("GET /settings/household renders v2 when ui-v2 is on", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("GET /settings/household renders the members page", async () => {
         const r = await app().request("http://x/settings/household", {
             headers: { cookie: cookieFor(ALICE) },
         });
@@ -1753,18 +1277,7 @@ describe("household members page ui-v2", () => {
         expect(html).toContain('action="/settings/household/name"');
     });
 
-    test("GET /settings/household stays legacy when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const r = await app().request("http://x/settings/household", {
-            headers: { cookie: cookieFor(ALICE) },
-        });
-        const html = await r.text();
-        expect(html).toContain("<h1>Household</h1>");
-        expect(html).not.toContain('data-fd-settings-page="household"');
-    });
-
-    test("member GET /settings/household is read-only under ui-v2", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("member GET /settings/household is read-only", async () => {
         const r = await app().request("http://x/settings/household", {
             headers: { cookie: cookieFor(BOB) },
         });
@@ -1774,7 +1287,6 @@ describe("household members page ui-v2", () => {
     });
 
     test("member POST to manager-only name change is refused", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const r = await app().request("http://x/settings/household/name", {
             method: "POST",
             headers: {
@@ -1786,8 +1298,7 @@ describe("household members page ui-v2", () => {
         expect(r.status).toBe(403);
     });
 
-    test("owner can toggle plurals_same_food under ui-v2", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("owner can toggle plurals_same_food", async () => {
         db.pluralsSameFood = false;
         const r = await app().request(
             "http://x/settings/household/plurals-same-food",
@@ -1805,7 +1316,6 @@ describe("household members page ui-v2", () => {
     });
 
     test("member POST plurals_same_food is refused", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const r = await app().request(
             "http://x/settings/household/plurals-same-food",
             {
@@ -1820,41 +1330,7 @@ describe("household members page ui-v2", () => {
         expect(r.status).toBe(403);
     });
 
-    test("POST plurals_same_food is 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const r = await app().request(
-            "http://x/settings/household/plurals-same-food",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "plurals_same_food=true",
-            },
-        );
-        expect(r.status).toBe(404);
-    });
-
-    test("member POST plurals_same_food is 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const r = await app().request(
-            "http://x/settings/household/plurals-same-food",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookieFor(BOB),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "plurals_same_food=true",
-                redirect: "manual",
-            },
-        );
-        expect(r.status).toBe(404);
-    });
-
     test("GET member page shows Today link for a peer", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const r = await app().request(
             `http://x/settings/household/members/${BOB}`,
             { headers: { cookie: cookieFor(ALICE) } },
@@ -1864,46 +1340,7 @@ describe("household members page ui-v2", () => {
         expect(html).toContain(`href="/?member=${BOB}"`);
     });
 
-    test("member page 404 when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const r = await app().request(
-            `http://x/settings/household/members/${BOB}`,
-            { headers: { cookie: cookieFor(ALICE) } },
-        );
-        expect(r.status).toBe(404);
-    });
-
-    test("any member id is not found when ui-v2 is off", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        db.members = [
-            {
-                householdId: HH,
-                userId: ALICE,
-                role: "owner",
-                displayName: "Alice",
-            },
-            {
-                householdId: HH,
-                userId: BOB,
-                role: "member",
-                displayName: "Bob",
-            },
-            {
-                householdId: "hh-other",
-                userId: OUTSIDER,
-                role: "member",
-                displayName: "Outsider",
-            },
-        ];
-        const r = await app().request(
-            `http://x/settings/household/members/${OUTSIDER}`,
-            { headers: { cookie: cookieFor(ALICE) } },
-        );
-        expect(r.status).toBe(404);
-    });
-
-    test("another household member id is forbidden under ui-v2", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("another household member id is forbidden", async () => {
         db.members = [
             {
                 householdId: HH,
@@ -1932,10 +1369,9 @@ describe("household members page ui-v2", () => {
     });
 });
 
-describe("kitchen usuals ui-v2", () => {
-    test("GET /kitchen/usuals serves v2 markup when ui-v2 is on", async () => {
+describe("kitchen usuals", () => {
+    test("GET /kitchen/usuals serves the usuals page", async () => {
         await seedEggsCatalog();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app().request("http://x/kitchen/usuals", {
             headers: { cookie: cookieFor(ALICE) },
         });
@@ -1947,20 +1383,8 @@ describe("kitchen usuals ui-v2", () => {
         expect(html).toContain("fd-kitchen-tabs");
     });
 
-    test("GET /kitchen/usuals keeps legacy page when ui-v2 is off", async () => {
-        await seedEggsCatalog();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const res = await app().request("http://x/kitchen/usuals", {
-            headers: { cookie: cookieFor(ALICE) },
-        });
-        const html = await res.text();
-        expect(html).toContain("Usual products");
-        expect(html).not.toContain("fd-kitchen-usuals-page");
-    });
-
-    test("GET picker redirects to the list with food query when ui-v2 is on", async () => {
+    test("GET picker redirects to the list with food query", async () => {
         const { eggs } = await seedEggsCatalog();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app().request(`http://x/kitchen/usuals/${eggs.id}`, {
             headers: { cookie: cookieFor(ALICE) },
         });
@@ -1972,7 +1396,6 @@ describe("kitchen usuals ui-v2", () => {
 
     test("GET unknown food query shows a page error without opening a sheet", async () => {
         await seedEggsCatalog();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const res = await app().request(
             "http://x/kitchen/usuals?food=does-not-exist",
             { headers: { cookie: cookieFor(ALICE) } },
@@ -1987,7 +1410,6 @@ describe("kitchen usuals ui-v2", () => {
     test("POST saves product, store and amount then GET shows them", async () => {
         const { eggs, kirkland } = await seedEggsCatalog();
         const costco = await createGroceryStore(db.settingsStore, HH, "Costco");
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const save = await app().request(`http://x/kitchen/usuals/${eggs.id}`, {
             method: "POST",
             headers: {
@@ -2015,7 +1437,6 @@ describe("kitchen usuals ui-v2", () => {
             ...(await db.foodsStore.getFood(HH, eggs.id))!,
             usualProductId: kirkland.id,
         });
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const r = await app().request(`http://x/kitchen/usuals/${eggs.id}`, {
             method: "POST",
             headers: {
@@ -2041,7 +1462,6 @@ describe("kitchen usuals ui-v2", () => {
             usualProductId: kirkland.id,
             usualStoreId: costco.id,
         });
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const back = `/kitchen/usuals?store=${costco.id}`;
         const r = await app().request(`http://x/kitchen/usuals/${eggs.id}`, {
             method: "POST",
@@ -2058,7 +1478,7 @@ describe("kitchen usuals ui-v2", () => {
     });
 });
 
-describe("kitchen usuals restock ui-v2", () => {
+describe("kitchen usuals restock", () => {
     function restockApp() {
         const hono = new Hono();
         hono.route("/", householdRoutes);
@@ -2094,7 +1514,6 @@ describe("kitchen usuals restock ui-v2", () => {
             ...(await db.foodsStore.getFood(HH, seeded.kirkland.id))!,
             usualAmount: { amount: 24, unit: "each" },
         });
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         return seeded;
     }
     const RESTORE_RESTOCK = { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" };
@@ -2238,19 +1657,6 @@ describe("kitchen usuals restock ui-v2", () => {
         resetFlagsForTests();
     });
 
-    test("POST is 404 when ui-v2 is off", async () => {
-        const { eggs } = await seedUsual();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const r = await postSchedule(
-            eggs.id,
-            "scope=schedule&restock_schedule=weekly",
-        );
-        expect(r.status).toBe(404);
-        const food = await db.foodsStore.getFood(HH, eggs.id);
-        expect(food?.restockSchedule).toBeNull();
-        resetFlagsForTests();
-    });
-
     test("the header names the household restock day only when restocking is on", async () => {
         await seedUsual();
         const off = await getUsuals();
@@ -2302,7 +1708,6 @@ describe("product routes (v2 foods)", () => {
     });
 
     test("GET /foods/:id 404 for archived food", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const food = await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "Archived" }),
         );
@@ -2318,7 +1723,6 @@ describe("product routes (v2 foods)", () => {
     });
 
     test("GET /foods/:id back link uses only a same-origin page, never a script", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const food = await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "Yogurt" }),
         );
@@ -2349,7 +1753,6 @@ describe("product routes (v2 foods)", () => {
     });
 
     test("POST add-to-grocery returns 400 when no store", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         db.settingsStore = createMemorySettingsStore();
         const food = await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "Milk" }),
@@ -2367,7 +1770,6 @@ describe("product routes (v2 foods)", () => {
     });
 
     test("GET by-barcode lookup error shows retry copy not OFF empty", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         db.barcodeLookupThrows = true;
         const res = await productApp().request(
             `http://x/foods/by-barcode/${PRODUCT_BARCODE}`,
@@ -2381,7 +1783,6 @@ describe("product routes (v2 foods)", () => {
     });
 
     test("POST by-barcode twice is duplicate-safe", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const code = "8880001112222";
         const post = () =>
             productApp().request(`http://x/foods/by-barcode/${code}`, {
@@ -2404,7 +1805,6 @@ describe("product routes (v2 foods)", () => {
     });
 
     test("GET by-barcode known food redirects without duplicating catalog", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const existing = await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "Household food" }),
         );
@@ -2421,7 +1821,7 @@ describe("product routes (v2 foods)", () => {
     });
 });
 
-describe("settings stores routes ui-v2", () => {
+describe("settings stores routes", () => {
     const STORES = "http://x/settings/household/stores";
     const FORM = "application/x-www-form-urlencoded";
 
@@ -2430,7 +1830,6 @@ describe("settings stores routes ui-v2", () => {
     });
 
     beforeEach(() => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         db.members = [
             {
                 householdId: HH,
@@ -2480,35 +1879,6 @@ describe("settings stores routes ui-v2", () => {
     async function storeNames() {
         return (await db.settingsStore.listStores(HH)).map((row) => row.name);
     }
-
-    test("every stores route is 404 while ui-v2 is off, for a member too", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const { costco } = await seed();
-        for (const user of [ALICE, BOB]) {
-            const list = await app().request(STORES, {
-                headers: { cookie: cookieFor(user) },
-            });
-            expect(list.status).toBe(404);
-            const one = await app().request(`${STORES}/${costco.id}`, {
-                headers: { cookie: cookieFor(user) },
-            });
-            expect(one.status).toBe(404);
-            for (const path of [
-                "/add",
-                "/order",
-                "/preferences",
-                `/${costco.id}/rename`,
-                `/${costco.id}/delete`,
-                `/${costco.id}/sections`,
-                `/${costco.id}/sections/order`,
-                `/${costco.id}/rules/add`,
-            ]) {
-                const res = await post(path, user, "name=X");
-                expect([path, res.status]).toEqual([path, 404]);
-            }
-        }
-        expect(await storeNames()).toEqual(["Costco", "Trader Joe's"]);
-    });
 
     test("a member reads the list and a store but cannot write", async () => {
         const { costco } = await seed();

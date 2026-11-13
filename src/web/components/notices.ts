@@ -2,8 +2,6 @@ import type { Food } from "../../domain/foods.js";
 import type { Notice } from "../../domain/notices.js";
 import type { NoticeRoute } from "../../copy/notices.js";
 import {
-    NOTICE_COPY,
-    POSSIBLE_DUPLICATE_OF_PREFIX,
     noticeActionFor,
     noticeDismissLabel,
     noticeDismissPair,
@@ -71,29 +69,6 @@ export const NOTICE_ROUTES: Record<
     },
 };
 
-export function noticeInlineLink(
-    notice: Notice,
-    forFoodId: string,
-    ctx?: NoticeRouteContext,
-): string {
-    if (notice.code !== "food.possible_duplicate") return "";
-    const foodRel = notice.related.find((r) => r.kind === "food");
-    if (notice.subject.kind !== "food" || !foodRel) return "";
-    const onPair = notice.subject.id === forFoodId || foodRel.id === forFoodId;
-    if (!onPair) return "";
-    const otherName =
-        notice.subject.id === forFoodId
-            ? foodRel.name
-            : String(notice.params.name);
-    const routeCtx: NoticeRouteContext = ctx ?? {
-        from: "/",
-        foods: new Map(),
-    };
-    const href = NOTICE_ROUTES.possibleDuplicatePair(notice, routeCtx);
-    if (!href) return "";
-    return `<a class="notice-link" href="${escapeHtml(href)}">${escapeHtml(POSSIBLE_DUPLICATE_OF_PREFIX)} <em>${escapeHtml(otherName)}</em></a>`;
-}
-
 export function noticeHref(
     notice: Notice,
     ctx: NoticeRouteContext,
@@ -101,26 +76,6 @@ export function noticeHref(
     const action = noticeActionFor(notice);
     if (!action) return null;
     return NOTICE_ROUTES[action.to](notice, ctx);
-}
-
-const PILL_CLASS: Record<"block" | "warn" | "info" | "bad" | "dim", string> = {
-    block: "pill-bad",
-    bad: "pill-bad",
-    warn: "pill-warn",
-    info: "pill-dim",
-    dim: "pill-dim",
-};
-
-export function noticeBadge(
-    notice: Notice,
-    opts?: { className?: string },
-): string {
-    const copy = NOTICE_COPY[notice.code];
-    const badge = copy.badge;
-    const tone = copy.badgeTone ?? notice.severity;
-    const cls = PILL_CLASS[tone];
-    const extra = opts?.className ? ` ${escapeHtml(opts.className)}` : "";
-    return `<span class="pill ${cls}${extra}" data-notice="${escapeHtml(notice.code)}">${escapeHtml(badge)}</span>`;
 }
 
 export function noticeAction(notice: Notice, ctx: NoticeRouteContext): string {

@@ -10,8 +10,6 @@ export type ToastKind = "success" | "info" | "warning" | "error";
 export const PLAN_UNKNOWN_LINE_NOTE = "Check what you have";
 
 export const TOASTS = {
-    "fridge.location.added": { kind: "success", text: "Location added" },
-    "fridge.location.removed": { kind: "success", text: "Location removed" },
     "fridge.item.added": { kind: "success", text: "Added to the fridge" },
     "fridge.item.removed": {
         kind: "success",
@@ -34,7 +32,6 @@ export const TOASTS = {
         text: "Already on the grocery list",
     },
 
-    "grocery.store.added": { kind: "success", text: "Store added" },
     "grocery.line.added": {
         kind: "success",
         text: "Added to the grocery list",
@@ -72,13 +69,7 @@ export const TOASTS = {
     },
     "nutrition.water.logged": { kind: "success", text: "Water logged" },
     "nutrition.weight.logged": { kind: "success", text: "Weight logged" },
-    "nutrition.layout.saved": {
-        kind: "success",
-        text: "Dashboard layout saved",
-    },
 
-    "recipes.created": { kind: "success", text: "Recipe created" },
-    "recipes.portion.logged": { kind: "success", text: "Portion logged" },
     "recipes.cooked": { kind: "success", text: "Recipe cooked" },
     "recipes.cooked.shortfall": {
         kind: "warning",
@@ -120,33 +111,7 @@ export const TOASTS = {
         kind: "info",
         text: "Already cooked and logged",
     },
-    "recipes.updated": { kind: "success", text: "Recipe saved" },
-    "recipes.steps.saved": { kind: "success", text: "Steps saved" },
-    "recipes.ingredient.removed": {
-        kind: "success",
-        text: "Ingredient removed",
-    },
-    "recipes.ingredient.reordered": {
-        kind: "success",
-        text: "Ingredient order updated",
-    },
-    "recipes.ingredient.updated": {
-        kind: "success",
-        text: "Ingredient updated",
-    },
     "recipes.deleted": { kind: "success", text: "Recipe deleted" },
-    "recipes.ingredient.added": {
-        kind: "success",
-        text: "Ingredient added",
-    },
-    "recipes.portion.saved": {
-        kind: "success",
-        text: "Your portion size saved",
-    },
-    "recipes.added-to-grocery": {
-        kind: "success",
-        text: "Added to the grocery list ({count})",
-    },
     "plan.added": { kind: "success", text: "Planned for {when}" },
     "plan.already": { kind: "info", text: "Already planned for {when}" },
     "plan.moved": { kind: "success", text: "Moved to {when}" },
@@ -186,22 +151,9 @@ export const TOASTS = {
         text: "That one is already taken care of",
     },
     "notice.error": { kind: "warning", text: "{message}" },
-    "recipes.verify.passed": { kind: "success", text: "Recipe verified" },
-    "recipes.unresolved.cleared": {
-        kind: "success",
-        text: "Line marked as handled",
-    },
-    "recipes.verify.failed": {
-        kind: "info",
-        text: "Still unverified: {count} problems",
-    },
     "recipes.unverified.blocked": {
         kind: "info",
-        text: "This recipe is unverified. Fix the problems, then check again.",
-    },
-    "recipes.not_found": {
-        kind: "info",
-        text: "That recipe was not found.",
+        text: "This recipe changed and is unverified now. Ask your AI assistant to fix it before you cook it.",
     },
     "recipes.import.imported": {
         kind: "success",
@@ -291,10 +243,6 @@ export const TOASTS = {
         kind: "success",
         text: "{platform} reader off",
     },
-    "recipes.add-to-grocery.nothing": {
-        kind: "info",
-        text: "Nothing to add — everything is in stock",
-    },
 
     "settings.nutrition.saved": {
         kind: "success",
@@ -324,10 +272,6 @@ export const TOASTS = {
         text: "That app was already disconnected",
     },
     "settings.profile.saved": { kind: "success", text: "Profile updated" },
-    "settings.household-settings.saved": {
-        kind: "success",
-        text: "Household settings saved",
-    },
     "settings.household.created": {
         kind: "success",
         text: "Household created",

@@ -14,11 +14,7 @@ import {
 import { describeDb } from "../../db/testing/pg.js";
 import { seedHousehold } from "../../db/testing/fixtures.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import { handleMcp } from "../../mcp/server.js";
 import { authenticateBearer } from "../../middleware.js";
 import { _resetBuckets } from "../../rate-limit.js";
@@ -175,7 +171,6 @@ describeDb(pgAvailable !== null, "settings AI connections", (getCtx) => {
         await truncateAll();
         setSqlForTests(sql);
         await _resetBuckets();
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         ({ userId, householdId } = await seedHousehold(sql));
         peerId = crypto.randomUUID();
         await sql`
@@ -350,28 +345,13 @@ describeDb(pgAvailable !== null, "settings AI connections", (getCtx) => {
         });
     }
 
-    test("with ui-v2 off the page and the action are 404 and nothing is revoked", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        await seed("claude-tok", userId, CLAUDE, "Claude");
-
-        expect((await page(userId)).status).toBe(404);
-        expect((await disconnect(userId, CLAUDE)).status).toBe(404);
-        expect(await listConnections(userId)).toHaveLength(1);
-    });
-
-    test("Settings shows the menu entry with ui-v2 on and none with it off", async () => {
+    test("Settings shows the menu entry", async () => {
         const on = await app.request("http://test/settings", {
             headers: { cookie: cookie(userId) },
         });
         const onHtml = await on.text();
         expect(onHtml).toContain('href="/settings/ai-connections"');
         expect(onHtml).toContain("AI connections");
-
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
-        const off = await app.request("http://test/settings", {
-            headers: { cookie: cookie(userId) },
-        });
-        expect(await off.text()).not.toContain("/settings/ai-connections");
     });
 
     test("signed out, the page redirects to login and Disconnect revokes nothing", async () => {

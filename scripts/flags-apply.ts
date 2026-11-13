@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { FLAGS_EPOCH } from "../src/flags.js";
+import { FLAGS, FLAGS_EPOCH } from "../src/flags.js";
 import {
     DEFAULT_ROLLOUT_PATH,
     loadRolloutFile,
@@ -25,8 +25,22 @@ export type RailwayFlag = {
 
 export type FlagChangePlan = {
     commands: string[][];
+    /** In Railway and in FLAGS, but missing from the file: real drift. */
     extraInRailway: string[];
+    /** In Railway only: neither in the file nor in FLAGS, so a retired flag. */
+    retiredInRailway: string[];
 };
+
+/** Names the code knows about: the registry plus the epoch counter. */
+const KNOWN_FLAGS: ReadonlySet<string> = new Set([
+    ...Object.keys(FLAGS),
+    FLAGS_EPOCH,
+]);
+
+/** `--check` fails on pending commands or drift, never on a retired flag. */
+export function checkFails(plan: FlagChangePlan): boolean {
+    return plan.commands.length > 0 || plan.extraInRailway.length > 0;
+}
 
 function scopeArg(projectId: string): string {
     return `project:${projectId}`;
@@ -134,16 +148,19 @@ export function planFlagChanges(
     file: RolloutFile,
     railwayState: RailwayFlag[],
     projectId: string,
+    knownFlags: ReadonlySet<string> = KNOWN_FLAGS,
 ): FlagChangePlan {
     const commands: string[][] = [];
     const fileFlags = file.flags ?? {};
     const fileNames = new Set(Object.keys(fileFlags));
     const byName = new Map(railwayState.map((row) => [row.name, row] as const));
 
-    const extraInRailway = railwayState
+    const notInFile = railwayState
         .map((row) => row.name)
         .filter((name) => !fileNames.has(name))
         .sort();
+    const extraInRailway = notInFile.filter((name) => knownFlags.has(name));
+    const retiredInRailway = notInFile.filter((name) => !knownFlags.has(name));
 
     for (const [name, entry] of Object.entries(fileFlags)) {
         if (!entry || typeof entry !== "object") {
@@ -229,7 +246,7 @@ export function planFlagChanges(
         }
     }
 
-    return { commands, extraInRailway };
+    return { commands, extraInRailway, retiredInRailway };
 }
 
 function flag(name: string): string | undefined {
@@ -308,7 +325,10 @@ async function main(): Promise<void> {
 
     const railway = await fetchRailwayState(projectId);
     const plan = planFlagChanges(file, railway, projectId);
-    const hasWork = plan.commands.length > 0 || plan.extraInRailway.length > 0;
+    const hasWork =
+        plan.commands.length > 0 ||
+        plan.extraInRailway.length > 0 ||
+        plan.retiredInRailway.length > 0;
 
     if (!hasWork) {
         console.log("in sync");
@@ -319,11 +339,17 @@ async function main(): Promise<void> {
         console.log(`report: extra flag "${name}" in Railway (not deleted)`);
     }
 
+    for (const name of plan.retiredInRailway) {
+        console.log(
+            `report: retired flag "${name}" in Railway (not in FLAGS; delete it with: railway flag delete ${name})`,
+        );
+    }
+
     for (const argv of plan.commands) {
         console.log(argv.join(" "));
     }
 
-    if (check) {
+    if (check && checkFails(plan)) {
         process.exit(1);
     }
 

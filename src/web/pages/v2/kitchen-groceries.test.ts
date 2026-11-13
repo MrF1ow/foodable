@@ -17,11 +17,11 @@ import {
     renderGroceryOverviewSections,
     renderKitchenGroceriesBody,
     renderKitchenGroceriesV2Page,
+    type GroceryLineView,
     type KitchenGroceriesLineMeta,
     type KitchenGroceriesV2View,
     FD_GROCERY_ADD_SHEET_ID,
 } from "./kitchen-groceries.js";
-import type { GroceryLineView } from "../grocery.js";
 import {
     attributeValues,
     DOLLAR_PAYLOADS,
@@ -212,7 +212,7 @@ describe("renderKitchenGroceriesV2Page", () => {
     const chrome = {
         theme: "light" as const,
         attention: { count: 0, tabs: {} },
-        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+        flags: FIXTURE_APP_CHROME_FLAGS,
         identity: {
             viewerName: "Alex",
             viewerRole: "owner" as const,

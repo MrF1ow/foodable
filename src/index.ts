@@ -27,7 +27,6 @@ import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp, redactPathForAccessLog } from "./net.js";
 import { clientIpConfigBootLine, getClientIpConfig } from "./client-ip.js";
 import { clientIp } from "./middleware.js";
-import { isNutritionCard } from "./domain/layout.js";
 import {
     appScriptHref,
     appStylesheetHref,
@@ -39,7 +38,6 @@ import {
     getAppV2Js,
     getScannerWasm,
     getScannerZxingJs,
-    getEmbedWidgetHtml,
     scannerWasmHref,
     scannerZxingScriptHref,
     warmWidgets,
@@ -162,8 +160,6 @@ app.use("*", async (c, next) => {
 app.use("*", async (c, next) => {
     await next();
     c.header("X-Content-Type-Options", "nosniff");
-    // /app/widgets/:key sets SAMEORIGIN so the nutrition page can embed that
-    // document. Every response that did not set the header stays DENY.
     if (!c.res.headers.get("X-Frame-Options")) {
         c.header("X-Frame-Options", "DENY");
     }
@@ -171,8 +167,7 @@ app.use("*", async (c, next) => {
         // img-src data: — form.css draws the <select> chevron as an inline
         // SVG data URI. script-src 'unsafe-inline' dates from srcdoc widget
         // frames, which inherited this policy; app pages no longer need it,
-        // and dropping it is its own change. Dashboard widget frames are now
-        // their own documents with their own copy (frame-ancestors 'self').
+        // and dropping it is its own change.
         c.header(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; worker-src 'self'; manifest-src 'self'; frame-ancestors 'none'",
@@ -374,7 +369,7 @@ app.get("/app.js", async (c) => {
         "Cache-Control": appAssetCacheControl(c, href),
     });
 });
-// The new shell's pair (flag `ui-v2`), served exactly like the old one.
+// The household shell's stylesheet and script, served like the pair above.
 app.get("/app-v2.css", async (c) => {
     const href = appV2StylesheetHref();
     return c.body(await getAppV2Css(), 200, {
@@ -410,28 +405,6 @@ app.get("/app-v2-scanner.wasm", async (c) => {
     } catch {
         return c.text("Scanner unavailable", 503);
     }
-});
-// Dashboard widget documents. No user data (the per-request JSON stays on
-// the framing element), so this is public like /app.css. The middleware
-// above leaves an already-set X-Frame-Options and CSP alone; SAMEORIGIN and
-// frame-ancestors 'self' are what let the page embed this response, and
-// nothing else. The rest of the policy matches the app: the widget is
-// inline script and inline style.
-const WIDGET_FRAME_CSP =
-    "default-src 'self'; script-src 'self' 'unsafe-inline'; connect-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; frame-ancestors 'self'";
-app.get("/app/widgets/:key", async (c) => {
-    const key = c.req.param("key");
-    if (!isNutritionCard(key)) return c.notFound();
-    const doc = await getEmbedWidgetHtml(key);
-    return c.body(doc.html, 200, {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": appAssetCacheControl(
-            c,
-            `/app/widgets/${key}?v=${doc.hash}`,
-        ),
-        "X-Frame-Options": "SAMEORIGIN",
-        "Content-Security-Policy": WIDGET_FRAME_CSP,
-    });
 });
 app.get("/favicon.ico", async (c) => {
     try {

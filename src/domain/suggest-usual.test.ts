@@ -3,7 +3,6 @@ import {
     createMemoryFoodsStore,
     findOrCreateManualFood,
     newFood,
-    suggestFoodFor,
     usualProductRows,
 } from "./foods.js";
 
@@ -40,34 +39,6 @@ function product(
         }),
     );
 }
-
-test("suggestFoodFor token matching", async () => {
-    const store = createMemoryFoodsStore();
-    const eggs = await plain(store, "Eggs");
-    const milk = await plain(store, "Milk");
-    await plain(store, "Oat milk", { calories: 40 });
-    let foods = await store.listFoods(HH);
-
-    expect(suggestFoodFor("Kirkland Large Eggs", foods)?.id).toBe(eggs.id);
-    expect(suggestFoodFor("Fairlife 2% Milk", foods)?.id).toBe(milk.id);
-
-    const largeEggs = await plain(store, "Large Eggs");
-    foods = await store.listFoods(HH);
-    expect(suggestFoodFor("Great Value Eggs", foods)?.id).toBe(eggs.id);
-    expect(suggestFoodFor("Kirkland Large Eggs", foods)?.id).toBe(largeEggs.id);
-    expect(suggestFoodFor("Random Widget", foods)).toBeNull();
-
-    const solo = await plain(store, "Kirkland Large Eggs");
-    foods = await store.listFoods(HH);
-    expect(suggestFoodFor(solo.name, foods)?.id).not.toBe(solo.id);
-
-    await store.updateFoodRow({
-        ...(await store.getFood(HH, eggs.id))!,
-        archivedAt: "2026-01-01T00:00:00Z",
-    });
-    const live = (await store.listFoods(HH)).filter((f) => !f.archivedAt);
-    expect(suggestFoodFor("Farm Large Eggs", live)?.id).toBe(largeEggs.id);
-});
 
 test("usualProductRows lists only foods with products", async () => {
     const store = createMemoryFoodsStore();

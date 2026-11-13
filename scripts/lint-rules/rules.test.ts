@@ -61,7 +61,7 @@ beforeAll(async () => {
 });
 
 /**
- * rule → the lines its bad.ts must fire on. The fixtures are in .prettierignore
+ * rule → the lines its bad.ts must fire on. The fixtures are in the `[fmt] ignorePatterns` of bunfig.toml
  * so these stay put; edit a bad.ts and re-pin its lines here.
  */
 const EXPECTED_BAD: Record<string, number[]> = {

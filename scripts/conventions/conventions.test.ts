@@ -60,6 +60,12 @@ describe("blastFloor", () => {
 });
 
 describe("classifyPath mapped", () => {
+    test("the household modals page is a settings path", () => {
+        expect(
+            classifyPath("src/web/pages/v2/settings-household-modals.ts"),
+        ).toMatchObject({ area: "settings", mapped: true });
+    });
+
     test("every tracked path is mapped", async () => {
         const proc = Bun.spawn(["git", "ls-files"], {
             cwd: import.meta.dir + "/../..",

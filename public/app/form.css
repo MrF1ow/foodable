@@ -26,12 +26,6 @@
     gap: 5px;
     margin-bottom: 12px;
 }
-.field-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-wrap: wrap;
-}
 .label {
     font-size: var(--fs-12);
     font-weight: 600;
@@ -211,25 +205,9 @@
 }
 /* The real input stays in the DOM for keyboard and assistive access, so it is
    hidden without display:none. */
-.drop-input {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border: 0;
-}
 
 /* ---- inline validation ---- */
 
-.field-error {
-    font-size: var(--fs-11-5);
-    line-height: 1.4;
-    color: var(--over);
-}
 .input.invalid,
 .select.invalid {
     border-color: var(--over);
@@ -246,18 +224,6 @@
     border: 1px solid var(--panel-border);
     background: var(--panel);
     margin-bottom: 10px;
-}
-.notice-warn {
-    border-color: color-mix(in srgb, var(--warn) 45%, var(--panel-border));
-    background: color-mix(in srgb, var(--warn) 9%, var(--panel));
-}
-.notice-error {
-    border-color: color-mix(in srgb, var(--over) 45%, var(--panel-border));
-    background: color-mix(in srgb, var(--over) 9%, var(--panel));
-}
-.notice-ok {
-    border-color: color-mix(in srgb, var(--accent) 45%, var(--panel-border));
-    background: color-mix(in srgb, var(--accent) 9%, var(--panel));
 }
 
 /* ---- progress ---- */
@@ -310,7 +276,4 @@
 .step.done .dot {
     background: color-mix(in srgb, var(--accent) 30%, var(--track));
     color: var(--text);
-}
-.step-sep {
-    color: var(--panel-border);
 }

@@ -5,7 +5,6 @@ import { getProfile } from "../../db/profiles.js";
 import { getHouseholdMembership } from "../../db/household.js";
 import { forbiddenDashboardHtml } from "../loaders.js";
 import { viewerChromeWithAttention } from "../attention.js";
-import { gatedRoute } from "../gated.js";
 import { requireSiteUser } from "../middleware.js";
 import { renderDevGalleryV2Page } from "../pages/dev-gallery.js";
 
@@ -22,7 +21,6 @@ devGalleryRoutes.get(
     "/dev/gallery-v2",
     requireSiteUser,
     localDevOnly,
-    gatedRoute("ui-v2", { notFound: true }),
     async (c) => {
         const userId = c.get("userId");
         const member = await getHouseholdMembership(userId);

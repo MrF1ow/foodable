@@ -27,7 +27,6 @@ import {
     bulkTickOffGroceryLines,
 } from "../../db/bulk.js";
 import { formText } from "../form.js";
-import { gatedRoute } from "../gated.js";
 import {
     renderFridgeInventoryPage,
     renderGroceryListPage,
@@ -138,9 +137,7 @@ async function act(
     return redirectWithToast(c, returnTo, opts.toast);
 }
 
-const V2 = gatedRoute("ui-v2", { notFound: true });
-
-bulkRoutes.post("/kitchen/groceries/bulk/check", requireMember, V2, (c) => {
+bulkRoutes.post("/kitchen/groceries/bulk/check", requireMember, (c) => {
     const member = siteMember(c);
     return act(c, {
         fallback: "/kitchen/groceries",
@@ -158,7 +155,7 @@ bulkRoutes.post("/kitchen/groceries/bulk/check", requireMember, V2, (c) => {
     });
 });
 
-bulkRoutes.post("/kitchen/groceries/bulk/remove", requireMember, V2, (c) => {
+bulkRoutes.post("/kitchen/groceries/bulk/remove", requireMember, (c) => {
     const member = siteMember(c);
     return act(c, {
         fallback: "/kitchen/groceries",
@@ -176,7 +173,7 @@ bulkRoutes.post("/kitchen/groceries/bulk/remove", requireMember, V2, (c) => {
     });
 });
 
-bulkRoutes.post("/kitchen/fridge/bulk/discard", requireMember, V2, (c) => {
+bulkRoutes.post("/kitchen/fridge/bulk/discard", requireMember, (c) => {
     const member = siteMember(c);
     return act(c, {
         fallback: "/kitchen/fridge",
@@ -191,7 +188,7 @@ bulkRoutes.post("/kitchen/fridge/bulk/discard", requireMember, V2, (c) => {
     });
 });
 
-bulkRoutes.post("/kitchen/usuals/bulk/remove", requireMember, V2, (c) => {
+bulkRoutes.post("/kitchen/usuals/bulk/remove", requireMember, (c) => {
     const member = siteMember(c);
     return act(c, {
         fallback: "/kitchen/usuals",
@@ -210,7 +207,7 @@ bulkRoutes.post("/kitchen/usuals/bulk/remove", requireMember, V2, (c) => {
     });
 });
 
-bulkRoutes.post("/settings/saved/bulk/delete", requireMember, V2, (c) => {
+bulkRoutes.post("/settings/saved/bulk/delete", requireMember, (c) => {
     const member = siteMember(c);
     return act(c, {
         fallback: SAVED_PATH,

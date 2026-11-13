@@ -378,13 +378,19 @@ describe("shareLinksEnabledFor", () => {
         expect(await shareLinksEnabledFor(link)).toBe(false);
     });
 
-    test("ui-v2 alone keeps nothing open", async () => {
+    test("another flag alone keeps nothing open", async () => {
         setFlagsForTests(
-            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
+            createMemoryFlags({
+                "mcp-widgets-v2": true,
+                "mcp-share-links": false,
+            }),
         );
         expect(await shareLinksEnabledFor(link)).toBe(false);
         setFlagsForTests(
-            createMemoryFlags({ "ui-v2": false, "mcp-share-links": true }),
+            createMemoryFlags({
+                "mcp-widgets-v2": false,
+                "mcp-share-links": true,
+            }),
         );
         expect(await shareLinksEnabledFor(link)).toBe(true);
     });

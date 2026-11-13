@@ -1,10 +1,11 @@
 import type { GrocerySnapshot } from "../../../domain/grocery.js";
-import type { GroceryLineView, GroceryStoreView } from "../grocery.js";
 import { esc } from "../../components/v2/html.js";
 import { APP_PATHS } from "../../route-map.js";
 import { sheetTrigger } from "../../components/v2/sheet.js";
 import { renderKitchenHead } from "./kitchen-head.js";
 import {
+    type GroceryLineView,
+    type GroceryStoreView,
     type KitchenGroceriesLineMeta,
     groceryCheckedCount,
     groceryHeaderSubtitle,

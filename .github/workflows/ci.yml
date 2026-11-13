@@ -8,7 +8,7 @@ name: CI
 # the PR changed. A push to main does not go through that script: a PR can edit
 # it, and the push run is the last check before Railway deploys, so it lists
 # every command as its own step instead. The format check keeps the tree
-# prettier-clean, which is what makes `bun run format` safe to run: it only ever
+# formatter-clean (`bun fmt`), which is what makes `bun run format` safe to run: it only ever
 # touches files you actually edited.
 #
 # The repo's own rules (PR conventions, migration safety, skill drift, the

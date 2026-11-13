@@ -246,7 +246,7 @@ function mountTrendsHtml(html: string): MockEl {
 const data = buildPreviewTrendsPageData(
     {
         theme: "light",
-        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+        flags: FIXTURE_APP_CHROME_FLAGS,
         attention: { count: 0, tabs: {} },
     },
     denseDays("2026-09-01", 90),

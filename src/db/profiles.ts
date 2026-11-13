@@ -19,8 +19,9 @@ export interface Profile {
     alcohol_tracking_enabled: boolean;
     preferred_drink_unit: DrinkUnit | null;
     theme: "light" | "dark" | null;
-    /** Null means default nutrition dashboard card order. */
-    nutrition_layout: string[] | null;
+    /** The retired card order of the old Nutrition page. The column stays
+     *  until a later migration drops it; nothing reads or writes it. */
+    nutrition_layout?: string[] | null;
     created_at: string;
     updated_at: string;
 }
@@ -162,7 +163,6 @@ export async function upsertProfile(
         alcohol_tracking_enabled?: boolean;
         preferred_drink_unit?: DrinkUnit | null;
         theme?: "light" | "dark" | null;
-        nutrition_layout?: string[] | null;
     },
 ): Promise<Profile> {
     const payload: Record<string, unknown> = {
@@ -181,17 +181,9 @@ export async function upsertProfile(
     if (patch.preferred_drink_unit !== undefined)
         payload.preferred_drink_unit = patch.preferred_drink_unit;
     if (patch.theme !== undefined) payload.theme = patch.theme;
-    if (patch.nutrition_layout !== undefined)
-        payload.nutrition_layout = patch.nutrition_layout;
 
     return run(async (tx) => {
         const { row, keys } = definedColumns(payload);
-        if (Array.isArray(row.nutrition_layout)) {
-            row.nutrition_layout = tx.array(
-                row.nutrition_layout as string[],
-                "text",
-            );
-        }
         const updateKeys = keys.filter((k) => k !== "user_id");
         const setClause = updateKeys
             .map((k) => `${k} = excluded.${k}`)
@@ -210,11 +202,4 @@ export async function upsertProfile(
             throw profileError("save profile", err);
         }
     });
-}
-
-export async function setNutritionLayout(
-    userId: string,
-    layout: string[],
-): Promise<Profile> {
-    return upsertProfile(userId, { nutrition_layout: layout });
 }

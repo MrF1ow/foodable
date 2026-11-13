@@ -16,9 +16,9 @@ function view(
         chrome: {
             theme: "dark",
             attention: { count: 0, tabs: {} },
-            flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+            flags: FIXTURE_APP_CHROME_FLAGS,
         },
-        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiV2: true },
+        flags: FIXTURE_APP_CHROME_FLAGS,
         backHref: "/",
         member: {
             userId: "u1",

@@ -51,7 +51,6 @@ import {
     putAwayGroceryLines,
     StockInputError,
 } from "../../domain/stock.js";
-import { WIDGET_LOCALE } from "../../routes.js";
 import {
     groceryLineExtras,
     householdAllergenMembers,
@@ -116,7 +115,6 @@ const groceryLineSchema = z.object({
 });
 
 export const GROCERY_LIST_OUTPUT_SCHEMA = z.object({
-    locale: z.string(),
     stores: z.array(
         z.object({
             id: z.string(),
@@ -357,7 +355,6 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         };
                     };
                     const payload = {
-                        locale: WIDGET_LOCALE,
                         stores: snapshot.stores.map((store) => ({
                             id: store.id,
                             name: store.name,
