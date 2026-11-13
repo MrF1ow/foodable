@@ -1,26 +1,19 @@
-import { groceryLineToRow, type GroceryLine } from "../domain/grocery.js";
+import {
+    groceryLineToRow,
+    type GroceryFamily,
+    type GroceryLine,
+} from "../domain/grocery.js";
 import type { RestockStore } from "../domain/restock.js";
 import { householdTimezone, householdTodayAt } from "../household.js";
 import { getHouseholdConfig, getHouseholdOwnerProfile } from "./household.js";
-import { GROCERY_LINE_COLS } from "./grocery.js";
-import { insertReturning, maybeOne, rows, run, type Tx } from "./sql.js";
+import { liveGroceryStore } from "./grocery.js";
+import { maybeOne, rows, run } from "./sql.js";
 
 const HOUSEHOLDS = "households";
-const GROCERY_LINES = "grocery_lines";
-
-async function insertGroceryLineTx(tx: Tx, row: GroceryLine): Promise<void> {
-    await insertReturning(
-        tx,
-        GROCERY_LINES,
-        groceryLineToRow(row),
-        GROCERY_LINE_COLS,
-        "add grocery line",
-    );
-}
 
 export function liveRestockStore(): RestockStore {
     return {
-        async commitRestockRun(householdId, runOn, lines) {
+        async commitRestockRun(householdId, runOn, lines, families) {
             return run(async (tx) => {
                 const updated = await maybeOne<{ id: string }>(
                     tx,
@@ -50,8 +43,16 @@ export function liveRestockStore(): RestockStore {
                     "restock last run",
                 );
                 if (!updated) return false;
+                // Inside this transaction: the same lock and check a card add
+                // takes, so the two cannot both miss the other's line.
+                const grocery = liveGroceryStore();
                 for (const line of lines) {
-                    await insertGroceryLineTx(tx, line);
+                    const family = families?.get(line.id);
+                    if (family) {
+                        await grocery.insertLineUnlessListed(line, family);
+                    } else {
+                        await grocery.insertLine(line);
+                    }
                 }
                 return true;
             });

@@ -87,6 +87,13 @@ describe("renderSharedLinksSection", () => {
         expect(html).toContain("Shared on 1 Nov 2026 · Never expires");
         expect(html).toContain("Recipe (deleted)");
         expect(html.match(/command="show-modal"/g)).toHaveLength(3);
+        // A red trash per link, named after what it revokes, no text button.
+        expect(html).toContain('aria-label="Revoke the link to Grocery list"');
+        expect(html).toContain(
+            'aria-label="Revoke the link to Dal &lt;tadka&gt;"',
+        );
+        expect(html.match(/fd-icon-btn fd-icon-btn--danger/g)).toHaveLength(3);
+        expect(html).not.toContain("fd-settings-btn");
     });
 
     test("each Revoke posts to its own link, in a confirm sheet", () => {

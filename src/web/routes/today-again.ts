@@ -54,6 +54,10 @@ todayAgainRoutes.post(
         const body = await c.req.parseBody();
         const returnTo = safeReturnPath(formText(body, "return_to"), "/");
         const day = formText(body, "date");
+        const submitKey = formText(body, "submit_key")
+            .trim()
+            .replace(/[^A-Za-z0-9_-]/g, "")
+            .slice(0, 64);
         try {
             const loggedAt = await loggedAtForAgain(userId, day);
             const input = await mealInputForRelog(
@@ -61,7 +65,15 @@ todayAgainRoutes.post(
                 meal,
                 loggedAt,
             );
-            await insertMeal(userId, input);
+            // The key names one rendered Again form, so a second tap on it (or
+            // a retry) finds the first tap's meal and logs nothing; the page
+            // that comes back carries a new key for the next deliberate tap.
+            await insertMeal(userId, {
+                ...input,
+                ...(submitKey
+                    ? { idempotency_key: `again:${id}:${submitKey}` }
+                    : {}),
+            });
             return redirectWithToast(c, returnTo, "nutrition.meal.logged");
         } catch {
             return c.text("Could not log this meal again.", 400);

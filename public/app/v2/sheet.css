@@ -28,6 +28,14 @@
     background: var(--surface-panel);
     color: var(--text-primary);
     font-family: var(--font-body);
+    /* iOS Safari only turns a tap into a click on something it thinks is
+     * clickable; the dimmed page behind the sheet is the dialog itself, and
+     * a tap there dismisses it. Everything inside takes its own cursor. */
+    cursor: pointer;
+}
+
+.fd-sheet > * {
+    cursor: auto;
 }
 
 .fd-sheet[open] {
@@ -121,6 +129,11 @@
     place-items: center;
     width: 32px;
     height: 32px;
+    /* /app.css floors every .native button at min-height: 44px, which turns
+       this circle into a tall oval. */
+    min-width: 0;
+    min-height: 0;
+    aspect-ratio: 1;
     margin: 0;
     padding: 0;
     border: 0;

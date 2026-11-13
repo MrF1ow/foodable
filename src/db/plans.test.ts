@@ -325,4 +325,111 @@ describeDb(pgAvailable !== null, "recipe plans db", (getCtx) => {
         }
         expect(await planCount()).toBe(0);
     });
+
+    test("the table refuses a second plan for the same recipe, day and slot", async () => {
+        const { sql } = getCtx();
+        await sql`
+            insert into public.recipe_plans (household_id, recipe_id, date, slot)
+            values (${householdId}, ${recipeId}, ${"2026-11-12"}, ${"dinner"})
+        `;
+        expect(
+            await refusal(sql`
+                insert into public.recipe_plans (household_id, recipe_id, date, slot)
+                values (${householdId}, ${recipeId}, ${"2026-11-12"}, ${"dinner"})
+            `),
+        ).toContain("recipe_plans_household_recipe_date_slot_key");
+        // A different slot or day is a different plan.
+        await sql`
+            insert into public.recipe_plans (household_id, recipe_id, date, slot)
+            values (${householdId}, ${recipeId}, ${"2026-11-12"}, ${"lunch"}),
+                   (${householdId}, ${recipeId}, ${"2026-11-13"}, ${"dinner"})
+        `;
+        expect(await planCount()).toBe(3);
+    });
+
+    test("two moves onto the same slot at once leave one plan with both servings", async () => {
+        const store = liveRecipePlansStore();
+        const there = await store.addPlan({
+            householdId,
+            recipeId,
+            date: "2026-11-14",
+            slot: "lunch",
+            servings: 1,
+        });
+        const a = await store.addPlan({
+            householdId,
+            recipeId,
+            date: "2026-11-12",
+            slot: "dinner",
+            servings: 2,
+        });
+        const b = await store.addPlan({
+            householdId,
+            recipeId,
+            date: "2026-11-13",
+            slot: "dinner",
+            servings: 3,
+        });
+        const [x, y] = await Promise.all([
+            store.movePlan(householdId, a!.id, "2026-11-14", "lunch"),
+            store.movePlan(householdId, b!.id, "2026-11-14", "lunch"),
+        ]);
+        expect(x?.id).toBe(there!.id);
+        expect(y?.id).toBe(there!.id);
+        expect(await planCount()).toBe(1);
+        expect((await store.getPlan(householdId, there!.id))?.servings).toBe(6);
+    });
+
+    test("the collapse migration keeps the earliest duplicate with all the servings", async () => {
+        const { sql } = getCtx();
+        // Text imports, so the test runs the migration files as they are on disk.
+        const text = async (name: string): Promise<string> =>
+            (
+                await import(`../../db/migrations/${name}`, {
+                    with: { type: "text" },
+                })
+            ).default as string;
+        const collapse = await text(
+            "20261113100000_collapse_duplicate_recipe_plans.sql",
+        );
+        const unique = await text("20261113100100_recipe_plans_unique.sql");
+        // Production still has the duplicates this migration exists for, so
+        // take the index away to recreate them.
+        await sql.unsafe(
+            "drop index public.recipe_plans_household_recipe_date_slot_key",
+        );
+        const other = await recipeIn(householdId);
+        const ids = Array.from({ length: 5 }, () => crypto.randomUUID());
+        await sql`
+            insert into public.recipe_plans
+                (id, household_id, recipe_id, date, slot, servings, created_at)
+            values
+                (${ids[0]}, ${householdId}, ${recipeId}, ${"2026-11-12"}, ${"dinner"}, ${2}, ${"2026-11-01T10:00:00Z"}),
+                (${ids[1]}, ${householdId}, ${recipeId}, ${"2026-11-12"}, ${"dinner"}, ${3}, ${"2026-11-01T09:00:00Z"}),
+                (${ids[2]}, ${householdId}, ${recipeId}, ${"2026-11-12"}, ${"dinner"}, ${4}, ${"2026-11-01T11:00:00Z"}),
+                (${ids[3]}, ${householdId}, ${recipeId}, ${"2026-11-12"}, ${"lunch"}, ${2}, ${"2026-11-01T09:00:00Z"}),
+                (${ids[4]}, ${householdId}, ${other}, ${"2026-11-12"}, ${"dinner"}, ${1}, ${"2026-11-01T09:00:00Z"})
+        `;
+        await sql.unsafe(collapse);
+        const left = (await sql`
+            select id, servings::float8 as servings
+            from public.recipe_plans order by id
+        `) as { id: string; servings: number }[];
+        const byId = new Map(left.map((r) => [r.id, r.servings]));
+        expect(left).toHaveLength(3);
+        // The earliest (ids[1]) stays and holds 3 + 2 + 4.
+        expect(byId.get(ids[1]!)).toBe(9);
+        expect(byId.get(ids[3]!)).toBe(2);
+        expect(byId.get(ids[4]!)).toBe(1);
+        // Running it again changes nothing, and the index then goes back on.
+        await sql.unsafe(collapse);
+        expect(await planCount()).toBe(3);
+        await sql.unsafe(unique);
+        expect(
+            await refusal(sql`
+                insert into public.recipe_plans (household_id, recipe_id, date, slot)
+                values (${householdId}, ${recipeId}, ${"2026-11-12"}, ${"dinner"})
+            `),
+        ).toContain("recipe_plans_household_recipe_date_slot_key");
+    });
 });

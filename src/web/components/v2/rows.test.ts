@@ -1,12 +1,14 @@
 import { expect, test } from "bun:test";
-import { raw } from "./html.js";
+import { esc, raw } from "./html.js";
 import { iconRepeat } from "./icons.js";
 import {
     foodRow,
     fridgeRow,
     groceryRow,
     macroLine,
+    manageRow,
     partRow,
+    rowDeleteTrigger,
     rowList,
     searchResultRow,
     sectionHeader,
@@ -35,7 +37,9 @@ test("foodRow: title, inline meta, macros and a trailing value in one li", () =>
     });
     expect(html).toStartWith(`<li class="fd-row fd-row--food">`);
     expect(html).toContain(`<div class="fd-row__body">`);
-    expect(html).toContain(`<span class="fd-row__title">Scrambled eggs</span>`);
+    expect(html).toContain(
+        `<span class="fd-row__title" title="Scrambled eggs">Scrambled eggs</span>`,
+    );
     expect(html).toContain(`<span class="fd-row__meta">3 large</span>`);
     expect(html).toContain(`<span class="fd-row__value">216</span>`);
     expect(html).toEndWith("</li>");
@@ -355,4 +359,141 @@ test("usualRow refuses a script href", () => {
     expect(() =>
         usualRow({ title: "Milk", href: "javascript:alert(1)" }),
     ).toThrow("unsafe href");
+});
+
+test("rowDeleteTrigger: an icon-only red trash that names the item and opens its sheet", () => {
+    const html = rowDeleteTrigger({ target: "del-eggs", name: "Eggs" });
+    expect(html).toContain(`class="fd-icon-btn fd-icon-btn--danger"`);
+    expect(html).toContain(`commandfor="del-eggs" command="show-modal"`);
+    expect(html).toContain(`aria-label="Delete Eggs"`);
+    expect(html).toContain("<svg");
+    expect(html).not.toContain(">Delete<");
+    expect(
+        rowDeleteTrigger({ target: "t", name: "the link", verb: "Revoke" }),
+    ).toContain(`aria-label="Revoke the link"`);
+});
+
+test("rowDeleteTrigger escapes the item name", () => {
+    expect(rowDeleteTrigger({ target: "t", name: XSS })).toContain(
+        `aria-label="Delete ${XSS_ESCAPED}"`,
+    );
+});
+
+test("manageRow: a one-line title with the full name in `title`, a meta line and the actions in one li", () => {
+    const long =
+        "Member's Mark Colombian Single Serve Cups (100 count, Medium-Dark Roast)";
+    const html = manageRow({
+        title: long,
+        meta: "kcal unknown",
+        actions: rowDeleteTrigger({ target: "t", name: long }),
+    });
+    expect(html).toStartWith(`<li class="fd-row fd-row--manage">`);
+    // The whole name is in the markup (CSS ends it in "…"; nothing is cut).
+    expect(html).toContain(
+        `<span class="fd-row__title" title="${esc(long)}">${esc(long)}</span>`,
+    );
+    expect(html).toContain(`<span class="fd-row__sub">kcal unknown</span>`);
+    expect(html).toContain(`<span class="fd-row__actions">`);
+    expect(html).toContain(`aria-label="Delete `);
+});
+
+test("manageRow without actions renders no empty actions slot; `after` stays inside the li", () => {
+    const html = manageRow({
+        title: "Eggs",
+        after: `<ul class="nested"></ul>`,
+    });
+    expect(html).not.toContain("fd-row__actions");
+    expect(html).toEndWith(`<ul class="nested"></ul></li>`);
+});
+
+test("a selectable row carries a checkbox named after the item, in every variant", () => {
+    const select = { name: "ids[]", value: "id-1", label: "Eggs" };
+    const rows = [
+        manageRow({ title: "Eggs", select }),
+        groceryRow({ title: "Eggs", select }),
+        fridgeRow({ title: "Eggs", select }),
+        usualRow({ title: "Eggs", select }),
+    ];
+    for (const row of rows) {
+        expect(row).toContain("fd-row--selectable");
+        expect(row).toContain(" data-fd-select-row");
+        expect(row).toContain(
+            `<input type="checkbox" class="fd-row__select-input" data-fd-select-item name="ids[]" value="id-1" aria-label="Select Eggs">`,
+        );
+        // The box is drawn by CSS from the input's state; it is not read out.
+        expect(row).toContain(
+            `<span class="fd-row__select-box" aria-hidden="true">`,
+        );
+    }
+});
+
+test("a grocery line keeps its tick in sight beside the box, and only a grocery line does", () => {
+    const select = { name: "ids[]", value: "id-1", label: "Eggs" };
+    const ticked = groceryRow({ title: "Eggs", checked: true, select });
+    expect(ticked).toContain(
+        `<span class="fd-check fd-check--on fd-row__select-state" role="img" aria-label="Already checked off">`,
+    );
+    const open = groceryRow({ title: "Eggs", select });
+    expect(open).toContain(
+        `<span class="fd-check fd-row__select-state" aria-hidden="true"></span>`,
+    );
+    expect(open).not.toContain("fd-check--on fd-row__select-state");
+    // The state follows the box, before the row's own lead.
+    expect(ticked.indexOf("fd-row__select-box")).toBeLessThan(
+        ticked.indexOf("fd-row__select-state"),
+    );
+    expect(ticked.indexOf("fd-row__select-state")).toBeLessThan(
+        ticked.indexOf("fd-row__lead"),
+    );
+    for (const row of [
+        manageRow({ title: "Eggs", select }),
+        fridgeRow({ title: "Eggs", select }),
+        usualRow({ title: "Eggs", select }),
+    ]) {
+        expect(row).not.toContain("fd-row__select-state");
+    }
+    expect(groceryRow({ title: "Eggs", checked: true })).not.toContain(
+        "fd-row__select-state",
+    );
+});
+
+test("the checkbox is the first thing inside the row body, so a nested list never moves it", () => {
+    const html = manageRow({
+        title: "Eggs",
+        select: { name: "ids[]", value: "id-1", label: "Eggs" },
+        after: raw(`<ul><li>nested</li></ul>`),
+    });
+    expect(html).toContain(
+        `<div class="fd-row__body"><label class="fd-row__select">`,
+    );
+    expect(html.indexOf("fd-row__select")).toBeLessThan(
+        html.indexOf("fd-row__main"),
+    );
+});
+
+test("a row that is one link cannot also be selectable", () => {
+    expect(() =>
+        fridgeRow({
+            title: "Eggs",
+            href: "/x",
+            select: { name: "ids[]", value: "1", label: "Eggs" },
+        }),
+    ).toThrow("select");
+});
+
+test("a row without select has no checkbox", () => {
+    const html = manageRow({ title: "Eggs" });
+    expect(html).not.toContain("fd-row--selectable");
+    expect(html).not.toContain("data-fd-select");
+});
+
+test("the select checkbox escapes its name, value and label", () => {
+    const html = manageRow({
+        title: "x",
+        select: { name: XSS, value: XSS, label: XSS },
+    });
+    expect(html).not.toContain("<script>");
+    expect(html).toContain(`name="${XSS_ESCAPED}"`);
+    expect(html).toContain(`value="${XSS_ESCAPED}"`);
+    expect(html).toContain(`aria-label="Select ${XSS_ESCAPED}"`);
 });

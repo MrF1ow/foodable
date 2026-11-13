@@ -58,6 +58,52 @@ export function liveGroceryStore(): GroceryListStore {
                 return groceryLineFromRow(data as never);
             });
         },
+        async insertLineUnlessListed(row, family) {
+            return run(async (tx) => {
+                try {
+                    // One add per household, store and family at a time: the
+                    // second waits here, then sees the first one's line.
+                    await tx`
+                        select pg_advisory_xact_lock(
+                            hashtextextended(${`grocery-line:${row.householdId}:${row.storeId}:${family.familyId}`}, 0)
+                        )
+                    `;
+                    const found = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(GROCERY_LINE_COLS)}
+                            from ${tx.unsafe(GROCERY_LINES)}
+                            where household_id = ${row.householdId}
+                              and store_id = ${row.storeId}
+                              and not checked
+                              and food_id = any(${tx.array([...family.foodIds], "uuid")})
+                            order by created_at asc, id asc
+                            limit 1
+                        `,
+                        "find grocery line",
+                    );
+                    if (found) {
+                        return {
+                            line: groceryLineFromRow(found as never),
+                            existed: true,
+                        };
+                    }
+                    const data = await insertReturning<Record<string, unknown>>(
+                        tx,
+                        GROCERY_LINES,
+                        groceryLineToRow(row),
+                        GROCERY_LINE_COLS,
+                        "add grocery line",
+                    );
+                    return {
+                        line: groceryLineFromRow(data as never),
+                        existed: false,
+                    };
+                } catch (err) {
+                    throw pgError("add grocery line", err);
+                }
+            });
+        },
         async updateLine(row) {
             return run(async (tx) => {
                 try {

@@ -440,6 +440,15 @@ fridgeRoutes.post("/kitchen/fridge/items/:id/eat", requireMember, async (c) => {
                 eaten.movement.id,
                 meal.id,
             );
+            // A per-100 ml food kept in grams with no density logs a meal
+            // with no figures; say so rather than a plain success.
+            if (built.unknownItems.length > 0) {
+                return redirectWithToast(
+                    c,
+                    returnTo,
+                    "fridge.item.eaten.unknown",
+                );
+            }
         }
     } catch (err) {
         const page = await fridgeFormError(userId, err, undefined, undefined, {

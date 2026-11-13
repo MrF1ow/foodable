@@ -5,7 +5,7 @@ import type {
     FridgeSnapshot,
 } from "../../../domain/fridge.js";
 import { listFridge } from "../../../domain/fridge.js";
-import { unitHintsForLog } from "../../../domain/log-search.js";
+import { foodLogFactors, unitHintsForLog } from "../../../domain/log-search.js";
 import type { AppChromeBase } from "../../attention.js";
 import { viewerChromeWithAttention } from "../../attention.js";
 import { getHouseholdMembership } from "../../../db/household.js";
@@ -22,7 +22,6 @@ import { formatBarcodeDisplay } from "./format-barcode-display.js";
 import {
     PRODUCT_MACRO_ROWS,
     productNutrition,
-    servingGramsForFood,
     subtitleServingLabel,
     type ProductNutritionHead,
     type ProductNutritionTable,
@@ -110,6 +109,9 @@ export function productLogPickPayload(
     food: Food,
     barcode: string | undefined,
 ): Record<string, unknown> {
+    const factors = foodLogFactors(food);
+    const hints = unitHintsForLog(factors);
+    const unit = hints[0] ?? "g";
     return {
         id: food.id,
         name: food.name,
@@ -119,16 +121,14 @@ export function productLogPickPayload(
         protein_per_100g: food.proteinG,
         carbs_per_100g: food.carbsG,
         fat_per_100g: food.fatG,
-        grams_per_ml: food.gramsPerMl,
-        grams_per_each: food.gramsPerEach,
-        unit_hints: unitHintsForLog({
-            grams_per_each: food.gramsPerEach,
-            grams_per_ml: food.gramsPerMl,
-        }),
+        // The same basis, serving and hints the log search gives this food,
+        // so the first hint (the portion, when there is one) leads.
+        ...factors,
+        unit_hints: hints,
         source: "food",
         barcode: barcode ?? undefined,
-        amount: servingGramsForFood(food) ?? 100,
-        unit: "g",
+        amount: unit === "portion" ? 1 : 100,
+        unit,
     };
 }
 

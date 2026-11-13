@@ -504,12 +504,27 @@ function specForChangedItem(item: MealItem, newAmount: number): MealItemSpec {
             name: item.label,
             amount: newAmount,
             unit: item.unit?.trim() || "g",
+            logged: item,
         };
     }
     return {
         name: item.label,
         amount: newAmount,
         unit: item.unit?.trim() || "g",
+    };
+}
+
+/**
+ * The spec an edited food row is recomputed from. The row's own unit wins over
+ * an omitted one (the stepper shows that unit, so the new amount is in it),
+ * and its stored figures stay the fallback for a unit the food cannot scale.
+ */
+function specToRecompute(spec: MealItemSpec, item: MealItem): MealItemSpec {
+    if (!item.food_id) return spec;
+    return {
+        ...spec,
+        unit: spec.unit?.trim() || item.unit?.trim() || "g",
+        logged: item,
     };
 }
 
@@ -568,10 +583,12 @@ export async function mealEditPatchFromItemAmounts(
             continue;
         }
         if (item.food_id || item.recipe_id) {
-            const changeSpec =
+            const changeSpec = specToRecompute(
                 loggingSpec != null
                     ? loggingSpecAtAmount(loggingSpec, item, newAmount)
-                    : specForChangedItem(item, newAmount);
+                    : specForChangedItem(item, newAmount),
+                item,
+            );
             const computed = await mealWriteFromItems(householdId, [
                 changeSpec,
             ]);

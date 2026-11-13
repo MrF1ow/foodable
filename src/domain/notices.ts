@@ -152,3 +152,72 @@ export function sortNotices(notices: readonly Notice[]): Notice[] {
     });
     return indexed.map(({ n }) => n);
 }
+
+// The short wording of the Needs attention rows on Today ("Eggs running low"),
+// for the notices that have one in the design. The full sentences in the
+// notice registry stay as they are for the Needs attention page, the tools
+// and the chat cards. Null means this notice has no short form.
+
+const WEEKDAYS = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+] as const;
+
+function weekdayOf(date: string): string {
+    const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+    return WEEKDAYS[day] ?? date;
+}
+
+/** "today", "tomorrow", or the weekday of `date`. */
+function whenWord(date: string, daysLeft: number): string {
+    if (daysLeft <= 0) return "today";
+    if (daysLeft === 1) return "tomorrow";
+    return weekdayOf(date);
+}
+
+/**
+ * Past a week "last Tuesday" would name the wrong Tuesday: on a Friday, the
+ * most recent Tuesday is 3 days back, and 10 days back is the one before it.
+ */
+const LAST_WEEKDAY_MAX_DAYS = 7;
+
+export function noticeShortSentence(
+    notice: Notice,
+    opts: { viewerUserId?: string } = {},
+): string | null {
+    const name = String(notice.params.name ?? "");
+    switch (notice.code) {
+        case "grocery.running_low":
+            return name ? `${name} running low` : null;
+        case "plan.missing_ingredient": {
+            if (!name) return null;
+            const when = whenWord(
+                String(notice.params.plannedOn),
+                Number(notice.params.daysLeft),
+            );
+            return notice.params.unknown === "yes"
+                ? `${name}: can't tell how much you have for ${when}`
+                : `${name} missing for ${when}`;
+        }
+        case "nutrition.weigh_in_due": {
+            const days = Number(notice.params.days);
+            const lastOn = String(notice.params.lastWeighedOn ?? "");
+            const last =
+                lastOn && days <= LAST_WEEKDAY_MAX_DAYS
+                    ? `last ${weekdayOf(lastOn)}`
+                    : `${days} days ago`;
+            // Another member's weigh-in says whose it is.
+            const own =
+                opts.viewerUserId == null ||
+                notice.subject.id === opts.viewerUserId;
+            return own ? `Weigh in · ${last}` : `${name}: weigh in · ${last}`;
+        }
+        default:
+            return null;
+    }
+}

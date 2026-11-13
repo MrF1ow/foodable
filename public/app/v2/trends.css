@@ -63,20 +63,40 @@
 
 .fd-trends-page .fd-seg {
     display: inline-flex;
-    padding: 2px;
+    gap: 2px;
+    padding: 3px;
     border-radius: var(--radius-pill);
     background: var(--surface-panel);
-    border: 1px solid var(--line);
+    /* The design's overlay/shadow token: 0 4px 14px. */
+    box-shadow: 0 4px 14px var(--overlay-shadow);
 }
 
 .fd-trends-page .fd-seg-btn {
+    /* /app.css floors every .native button at min-height: 44px: the compact
+       pill (24px segments in a 30px pill) opts out. */
+    min-width: 0;
+    min-height: 0;
+    height: 24px;
+    margin: 0;
     border: 0;
     background: transparent;
-    padding: 4px 8px;
+    padding: 0 10px;
     border-radius: var(--radius-pill);
-    font: 500 12px/16px var(--font-body);
+    font: 400 12px/16px var(--font-body);
     color: var(--text-secondary);
     cursor: pointer;
+}
+
+/* The year is the fourth segment, desktop only: the phone pill reads 7 · 30 · 90.
+   While the year is the active range (?range=365, or a desktop pick then a
+   narrower window) it shows, so the pill never has no highlighted segment. */
+.fd-trends-page .fd-seg-btn--desktop-only {
+    display: none;
+}
+
+.fd-trends-page .fd-seg-btn--desktop-only.fd-seg-btn--on,
+.fd-trends-page .fd-seg-btn--desktop-only[aria-pressed="true"] {
+    display: inline-block;
 }
 
 .fd-trends-page .fd-seg-btn--on,
@@ -654,15 +674,19 @@
         margin-top: 0;
     }
 
-    .fd-trends-page .fd-seg-btn {
-        padding: 6px 12px;
-        font: 500 13px/18px var(--font-body);
+    .fd-trends-page .fd-seg {
+        border: 1px solid var(--line);
+        box-shadow: none;
     }
 
-    .fd-trends-page .fd-seg-btn--on,
-    .fd-trends-page .fd-seg-btn[aria-pressed="true"] {
-        background: var(--accent-fill);
-        color: var(--accent-on);
+    .fd-trends-page .fd-seg-btn {
+        height: 27px;
+        padding: 0 12px;
+        font: 400 13px/17px var(--font-body);
+    }
+
+    .fd-trends-page .fd-seg-btn--desktop-only {
+        display: inline-block;
     }
 
     .fd-trends-body {

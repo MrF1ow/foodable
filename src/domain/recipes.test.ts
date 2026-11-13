@@ -1868,7 +1868,8 @@ test("addRecipeToGrocery handles unmeasured salt against list and stock", async 
         fridgeItems: [],
     });
     expect(first.added).toHaveLength(1);
-    expect(first.added[0]?.quantity).toEqual({ amount: 1, unit: "g" });
+    // The amount is a placeholder under the note: never 1 g of salt.
+    expect(first.added[0]?.quantity).toEqual({ amount: 1, unit: "each" });
     expect(first.added[0]?.note).toBe("to taste");
     const again = await addRecipeToGrocery({
         ...base,

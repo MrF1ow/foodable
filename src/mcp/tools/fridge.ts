@@ -834,6 +834,10 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                         );
                         const applied = Math.abs(eaten.movement.delta);
                         let mealId: string | null = null;
+                        // Names an eaten food whose nutrition could not be
+                        // worked out (a per-100 ml food kept in grams with no
+                        // density), so the meal is not silently blank.
+                        let unknownNote = "";
                         const foodId = eaten.itemBefore.foodId;
                         if (applied > 0 && foodId) {
                             const food = await findFoodById(
@@ -892,6 +896,9 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                 item_digest: itemListDigest(specs),
                             });
                             mealId = meal.id;
+                            if (built.unknownItems.length > 0) {
+                                unknownNote = ` Nutrition unknown for: ${built.unknownItems.join(", ")}.`;
+                            }
                             await liveStockStore().linkMeal(
                                 householdId,
                                 eaten.movement.id,
@@ -915,7 +922,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                         eaten.shortfall
                                             ? [eaten.shortfall]
                                             : [],
-                                    )}`,
+                                    )}${unknownNote}`,
                                 },
                             ],
                             structuredContent: payload,

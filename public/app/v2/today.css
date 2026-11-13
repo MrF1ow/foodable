@@ -753,12 +753,12 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
 
 .fd-today-useall {
     margin-top: var(--fd-s-10);
-    padding: var(--fd-s-10);
+    padding: 14px;
     border-radius: var(--radius-md);
-    background: var(--surface-raised);
+    background: var(--surface-bg);
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 3px;
 }
 
 .fd-today-useall__eyebrow {
@@ -781,21 +781,39 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
     color: var(--text-secondary);
 }
 
-.fd-today-useall__cook {
+.fd-today-useall__actions {
+    display: flex;
+    gap: var(--space-gap);
+    margin-top: var(--fd-s-10);
+}
+
+.fd-today-useall__cook,
+.fd-today-useall__plan {
     display: flex;
     align-items: center;
     justify-content: center;
     box-sizing: border-box;
     min-height: 42px;
-    margin-top: var(--fd-s-10);
-    padding: 0 var(--space-gutter);
     border-radius: var(--radius-pill);
-    background: var(--accent-fill);
-    color: var(--accent-on);
     font: 600 15px/20px var(--font-body);
     text-decoration: none;
 }
 
+.fd-today-useall__cook {
+    flex: 1;
+    padding: 0 var(--space-gutter);
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+.fd-today-useall__plan {
+    flex: none;
+    padding: 0 18px;
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+
+.fd-today-useall__plan:focus-visible,
 .fd-today-useall__cook:focus-visible {
     outline: 2px solid var(--accent-text);
     outline-offset: 2px;

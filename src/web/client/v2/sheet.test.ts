@@ -14,6 +14,9 @@ class FakeEl {
     focused = false;
     isConnected = true;
     classList = { contains: (c: string) => this.classes.includes(c) };
+    get tagName() {
+        return this.tag.toUpperCase();
+    }
     constructor(
         readonly tag: string,
         readonly classes: string[] = [],
@@ -112,6 +115,8 @@ class FakeDialog extends FakeEl {
             newState: "open",
             target: this,
         });
+        // A dialog's events pass the document in the capture phase.
+        this.doc.fire("beforetoggle", { newState: "open", target: this });
         this.open = true;
         // The real toggle event is queued; tests fire it on demand.
     }
@@ -120,15 +125,52 @@ class FakeDialog extends FakeEl {
         if (!this.open) return;
         this.open = false;
         if (this.deferClose) this.pendingClose = true;
-        else this.fire("close");
+        else {
+            this.fire("close");
+            this.doc.fire("close", { target: this });
+        }
     }
     flush() {
         if (!this.pendingClose) return;
         this.pendingClose = false;
         this.fire("close");
+        this.doc.fire("close", { target: this });
+    }
+    /** Set to give the sheet a box (a bottom sheet 300..844 on a 390 page). */
+    rect: { left: number; right: number; top: number; bottom: number } | null =
+        null;
+    getBoundingClientRect() {
+        return this.rect ?? { left: 0, right: 0, top: 0, bottom: 0 };
     }
     setPointerCapture() {}
     releasePointerCapture() {}
+}
+
+/**
+ * A modal dialog that is not a sheet: the barcode scanner, full screen, opened
+ * from inside the log sheet. It is in the top layer above every sheet.
+ */
+class FakeForeignDialog extends FakeEl {
+    open = false;
+    rect = { left: 0, right: 390, top: 0, bottom: 844 };
+    closeButton = new FakeEl("button", ["fd-scanner-head-close"], this);
+    constructor(readonly doc: FakeEl) {
+        super("dialog", ["fd-scanner"]);
+    }
+    showModal() {
+        this.fire("beforetoggle", { newState: "open", target: this });
+        this.doc.fire("beforetoggle", { newState: "open", target: this });
+        this.open = true;
+    }
+    close() {
+        if (!this.open) return;
+        this.open = false;
+        this.fire("close");
+        this.doc.fire("close", { target: this });
+    }
+    getBoundingClientRect() {
+        return this.rect;
+    }
 }
 
 class FakeDoc extends FakeEl {
@@ -287,6 +329,9 @@ test("re-running onLoad is idempotent: no doubled listeners, no second open", ()
     expect(r.dialog.showCalls).toBe(1);
     // The document-level Turbo hooks are registered once per module load.
     expect(r.doc.count("turbo:before-render")).toBe(1);
+    // ...and so is the backdrop dismissal.
+    expect(r.doc.count("click")).toBe(1);
+    expect(r.doc.count("touchend")).toBe(1);
 });
 
 test("open-on-load focuses once: the toggle that follows does not focus again", () => {
@@ -313,23 +358,320 @@ test("opening focuses the first field, or the panel when there is none", () => {
     expect(focusLog).toEqual([bare.dialog.panel]);
 });
 
-test("backdrop click closes; a click inside does not", () => {
+// Backdrop dismissal rides on one capture-phase listener set on `document`: a
+// bottom sheet 390 wide filling y 300..844; the dimmed page is y < 300. Events
+// are delivered on the document (target = what the engine reports), because
+// where iOS delivers a backdrop tap is exactly what is unknown.
+function boxed() {
     const r = rig();
+    r.dialog.rect = { left: 0, right: 390, top: 300, bottom: 844 };
     openIt(r.dialog);
-    r.dialog.fire("pointerdown", { target: r.dialog.body });
-    r.dialog.fire("click", { target: r.dialog.body });
-    expect(r.dialog.open).toBe(true);
-    r.dialog.fire("pointerdown", { target: r.dialog });
-    r.dialog.fire("click", { target: r.dialog });
+    return r;
+}
+
+type Spy = {
+    stopped: boolean;
+    prevented: boolean;
+    stopPropagation: () => void;
+    preventDefault: () => void;
+};
+function spy(): Spy {
+    const s: Spy = {
+        stopped: false,
+        prevented: false,
+        stopPropagation: () => (s.stopped = true),
+        preventDefault: () => (s.prevented = true),
+    };
+    return s;
+}
+function click(
+    r: ReturnType<typeof boxed>,
+    target: FakeEl,
+    x: number,
+    y: number,
+    extra: Record<string, unknown> = {},
+) {
+    const s = spy();
+    r.doc.fire("click", {
+        target,
+        clientX: x,
+        clientY: y,
+        detail: 1,
+        ...s,
+        ...extra,
+    });
+    return s;
+}
+function press(
+    r: ReturnType<typeof boxed>,
+    target: FakeEl,
+    x: number,
+    y: number,
+) {
+    r.doc.fire("pointerdown", { target, clientX: x, clientY: y });
+}
+
+test("the dismissal listeners live on the document, not the dialog", () => {
+    const r = boxed();
+    for (const type of ["click", "pointerdown", "touchstart", "touchend"]) {
+        expect(r.doc.count(type)).toBe(1);
+        if (type !== "pointerdown") expect(r.dialog.count(type)).toBe(0);
+    }
+});
+
+test("a backdrop click closes even when no pointerdown reached the dialog (iOS)", () => {
+    const r = boxed();
+    const s = click(r, r.dialog, 200, 100);
+    expect(r.dialog.open).toBe(false);
+    expect(s.stopped && s.prevented).toBe(true);
+});
+
+test("a backdrop tap delivered to the page behind (target = body) closes it and the page gets no click", () => {
+    const r = boxed();
+    press(r, r.doc.body, 200, 100);
+    const s = click(r, r.doc.body, 200, 100);
+    expect(r.dialog.open).toBe(false);
+    // Stopped at the document in the capture phase: it never reaches the page.
+    expect(s.stopped).toBe(true);
+    expect(s.prevented).toBe(true);
+});
+
+test("a click on the document itself behind the sheet closes it too", () => {
+    const r = boxed();
+    click(r, r.doc, 200, 100);
     expect(r.dialog.open).toBe(false);
 });
 
-test("a click on the dialog that began inside it (text selection drag) does not close", () => {
-    const r = rig();
-    openIt(r.dialog);
-    r.dialog.fire("pointerdown", { target: r.dialog.body });
-    r.dialog.fire("click", { target: r.dialog });
+test("a click inside the sheet never closes it and is left alone", () => {
+    const r = boxed();
+    press(r, r.dialog.body, 200, 500);
+    const s = click(r, r.dialog.body, 200, 500);
     expect(r.dialog.open).toBe(true);
+    expect(s.stopped || s.prevented).toBe(false);
+});
+
+test("a click on the dialog's own padding does not close", () => {
+    const r = boxed();
+    press(r, r.dialog, 3, 500);
+    click(r, r.dialog, 3, 500);
+    expect(r.dialog.open).toBe(true);
+    click(r, r.dialog, 200, 800);
+    expect(r.dialog.open).toBe(true);
+});
+
+test("a press that began inside and was released on the backdrop does not close", () => {
+    const r = boxed();
+    press(r, r.dialog.body, 200, 500);
+    click(r, r.dialog, 200, 100);
+    expect(r.dialog.open).toBe(true);
+    // ...and the next, clean backdrop click closes (the flag was consumed).
+    click(r, r.dialog, 200, 100);
+    expect(r.dialog.open).toBe(false);
+});
+
+test("a click with no pointer position does not dismiss", () => {
+    const r = boxed();
+    click(r, r.dialog, 200, 100, { detail: 0 }); // dialog.click() / keyboard
+    expect(r.dialog.open).toBe(true);
+    click(r, r.dialog, 0, 0);
+    expect(r.dialog.open).toBe(true);
+    r.doc.fire("click", { target: r.dialog, ...spy() });
+    expect(r.dialog.open).toBe(true);
+    click(r, r.dialog, 200, 100);
+    expect(r.dialog.open).toBe(false);
+});
+
+test("only the topmost open sheet is dismissed", () => {
+    const ctx = setup();
+    const lower = new FakeDialog(ctx.doc);
+    const upper = new FakeDialog(ctx.doc);
+    load(ctx);
+    for (const d of [lower, upper]) {
+        d.rect = { left: 0, right: 390, top: 300, bottom: 844 };
+        openIt(d);
+    }
+    ctx.doc.fire("click", {
+        target: ctx.doc.body,
+        clientX: 200,
+        clientY: 100,
+        detail: 1,
+        ...spy(),
+    });
+    expect(upper.open).toBe(false);
+    expect(lower.open).toBe(true);
+    ctx.doc.fire("click", {
+        target: ctx.doc.body,
+        clientX: 200,
+        clientY: 100,
+        detail: 1,
+        ...spy(),
+    });
+    expect(lower.open).toBe(false);
+});
+
+test("with no sheet open the document click is ignored", () => {
+    const r = boxed();
+    r.dialog.close();
+    const s = click(r, r.doc.body, 200, 100);
+    expect(s.stopped || s.prevented).toBe(false);
+});
+
+// The barcode scanner is a full-screen modal dialog opened from the Scan tile
+// inside the open log sheet; the sheet stays open beneath it. Every tap on the
+// scanner lands outside the sheet's box, so the sheet must not read them as
+// taps on its own backdrop.
+function scannerOverSheet() {
+    const r = boxed();
+    const scanner = new FakeForeignDialog(r.doc);
+    scanner.showModal();
+    return { ...r, scanner };
+}
+
+test("a tap on a dialog opened over the sheet is not a tap on the sheet's backdrop", () => {
+    const r = scannerOverSheet();
+    press(r, r.scanner.closeButton, 40, 60);
+    const s = click(r, r.scanner.closeButton, 40, 60);
+    expect(r.dialog.open).toBe(true);
+    // Left alone, so the scanner's own Close handler gets the click.
+    expect(s.stopped || s.prevented).toBe(false);
+    // The same for a tap on the scanner itself (its padding, its stage).
+    const t = click(r, r.scanner, 200, 100);
+    expect(r.dialog.open).toBe(true);
+    expect(t.stopped || t.prevented).toBe(false);
+});
+
+test("a touch on a dialog opened over the sheet neither closes the sheet nor is cancelled", () => {
+    const r = scannerOverSheet();
+    touchStart(r, r.scanner.closeButton, 40, 60);
+    const s = touchEnd(r, r.scanner.closeButton, 40, 60);
+    expect(r.dialog.open).toBe(true);
+    expect(s.prevented || s.stopped).toBe(false);
+    // And no click is swallowed afterwards: the scanner's Close gets it.
+    const c = click(r, r.scanner.closeButton, 40, 60);
+    expect(c.stopped || c.prevented).toBe(false);
+});
+
+test("a backdrop tap delivered to the page behind does not reach a sheet under a dialog", () => {
+    const r = scannerOverSheet();
+    press(r, r.doc.body, 200, 100);
+    const s = click(r, r.doc.body, 200, 100);
+    expect(r.dialog.open).toBe(true);
+    expect(s.stopped || s.prevented).toBe(false);
+});
+
+test("once the dialog over it closes, the sheet is dismissed by its backdrop again", () => {
+    const r = scannerOverSheet();
+    r.scanner.close();
+    const s = click(r, r.dialog, 200, 100);
+    expect(r.dialog.open).toBe(false);
+    expect(s.stopped && s.prevented).toBe(true);
+});
+
+test("a sheet opened over another dialog is still the one a backdrop tap dismisses", () => {
+    const ctx = setup();
+    const lower = new FakeDialog(ctx.doc);
+    const upper = new FakeDialog(ctx.doc);
+    load(ctx);
+    lower.rect = { left: 0, right: 390, top: 300, bottom: 844 };
+    openIt(lower);
+    const scanner = new FakeForeignDialog(ctx.doc);
+    scanner.showModal();
+    upper.rect = { left: 0, right: 390, top: 300, bottom: 844 };
+    openIt(upper);
+    ctx.doc.fire("click", {
+        target: ctx.doc.body,
+        clientX: 200,
+        clientY: 100,
+        detail: 1,
+        ...spy(),
+    });
+    expect(upper.open).toBe(false);
+    // The older sheet is under the dialog still open above it.
+    ctx.doc.fire("click", {
+        target: ctx.doc.body,
+        clientX: 200,
+        clientY: 100,
+        detail: 1,
+        ...spy(),
+    });
+    expect(lower.open).toBe(true);
+});
+
+function touch(x: number, y: number) {
+    return { clientX: x, clientY: y };
+}
+function touchStart(
+    r: ReturnType<typeof boxed>,
+    target: FakeEl,
+    x: number,
+    y: number,
+) {
+    r.doc.fire("touchstart", { target, touches: [touch(x, y)] });
+}
+function touchEnd(
+    r: ReturnType<typeof boxed>,
+    target: FakeEl,
+    x: number,
+    y: number,
+) {
+    const s = spy();
+    r.doc.fire("touchend", {
+        target,
+        touches: [],
+        changedTouches: [touch(x, y)],
+        cancelable: true,
+        ...s,
+    });
+    return s;
+}
+
+test("a still tap on the backdrop closes on touchend and cancels the click", () => {
+    const r = boxed();
+    touchStart(r, r.dialog, 200, 100);
+    const s = touchEnd(r, r.dialog, 203, 101);
+    expect(r.dialog.open).toBe(false);
+    expect(s.prevented && s.stopped).toBe(true);
+});
+
+test("a still tap delivered to the page behind (target = body) closes it", () => {
+    const r = boxed();
+    touchStart(r, r.doc.body, 200, 100);
+    const s = touchEnd(r, r.doc.body, 200, 100);
+    expect(r.dialog.open).toBe(false);
+    expect(s.prevented && s.stopped).toBe(true);
+});
+
+test("the click that follows a dismissing touch is swallowed, not delivered to the page", () => {
+    const r = boxed();
+    touchStart(r, r.doc.body, 200, 100);
+    touchEnd(r, r.doc.body, 200, 100);
+    const s = click(r, r.doc.body, 201, 100);
+    expect(s.stopped && s.prevented).toBe(true);
+    // Only that one: a later click on the page is the page's.
+    const later = click(r, r.doc.body, 201, 100);
+    expect(later.stopped || later.prevented).toBe(false);
+});
+
+test("a touch that starts inside, or drags, or starts on the backdrop and moves, does not close", () => {
+    const r = boxed();
+    touchStart(r, r.dialog.body, 200, 500);
+    touchEnd(r, r.dialog, 200, 100); // began inside, ended on the backdrop
+    expect(r.dialog.open).toBe(true);
+    touchStart(r, r.dialog, 200, 100);
+    touchEnd(r, r.dialog, 200, 160); // moved 60px: a swipe, not a tap
+    expect(r.dialog.open).toBe(true);
+    touchStart(r, r.dialog, 200, 100);
+    r.doc.fire("touchcancel");
+    touchEnd(r, r.dialog, 200, 100);
+    expect(r.dialog.open).toBe(true);
+});
+
+test("a tap inside the sheet does not close it", () => {
+    const r = boxed();
+    touchStart(r, r.dialog.body, 200, 500);
+    const s = touchEnd(r, r.dialog.body, 200, 500);
+    expect(r.dialog.open).toBe(true);
+    expect(s.prevented || s.stopped).toBe(false);
 });
 
 test("closing releases the scroll lock and restores the scroll position", () => {

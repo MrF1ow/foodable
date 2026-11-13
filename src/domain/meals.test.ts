@@ -836,3 +836,245 @@ test("unknown food or recipe ids fail closed", () => {
         ),
     ).toThrow(MealItemsError);
 });
+
+/** The columns are per 100 ml, as OFF reports a liquid (updateFood has no basis field). */
+async function perMl(
+    foods: ReturnType<typeof createMemoryFoodsStore>,
+    food: Food,
+    serving: Food["serving"],
+): Promise<Food> {
+    const saved = await foods.updateFoodRow({
+        ...food,
+        nutritionBasis: "100ml",
+        serving,
+    });
+    return saved!;
+}
+
+test("a per-100 ml food logged in ml scales by the amount, with no density", async () => {
+    const foods = createMemoryFoodsStore();
+    // 40 kcal in a 30 ml serving is 133.3 kcal per 100 ml.
+    const halfAndHalf = await perMl(
+        foods,
+        await catalogFood(foods, "Half & Half", {
+            calories: (40 / 30) * 100,
+            fatG: 10,
+        }),
+        { label: "1 tbsp (30 ml)", amount: 30, unit: "ml" },
+    );
+    const built = buildMealFromItems(
+        [{ foodId: halfAndHalf.id, amount: 30, unit: "ml" }],
+        new Map([[halfAndHalf.id, halfAndHalf]]),
+    );
+    const item = built.items[0]!;
+    expect(item.calories).toBe(40);
+    expect(item.fat_g).toBe(3);
+    expect(item.amount).toBe(30);
+    expect(item.unit).toBe("ml");
+    // No density, so no grams were guessed.
+    expect(item.grams).toBeNull();
+    expect(item.unknown).toBe(false);
+    expect(built.totals.calories).toBe(40);
+    expect(built.unknownItems).toEqual([]);
+});
+
+test("a per-100 ml food with a density still scales by ml, not by guessed grams", async () => {
+    const foods = createMemoryFoodsStore();
+    const cream = await perMl(
+        foods,
+        await catalogFood(foods, "Cream", { calories: 200, gramsPerMl: 1.2 }),
+        null,
+    );
+    const built = buildMealFromItems(
+        [{ foodId: cream.id, amount: 50, unit: "ml" }],
+        new Map([[cream.id, cream]]),
+    );
+    expect(built.items[0]!.calories).toBe(100);
+    expect(built.items[0]!.grams).toBe(60);
+});
+
+test("a per-100 g food in ml still needs a density", async () => {
+    const foods = createMemoryFoodsStore();
+    const honey = await catalogFood(foods, "Honey", {
+        calories: 300,
+        gramsPerMl: 1.4,
+    });
+    const noDensity = await catalogFood(foods, "Syrup", { calories: 300 });
+    const byDensity = buildMealFromItems(
+        [{ foodId: honey.id, amount: 10, unit: "ml" }],
+        new Map([[honey.id, honey]]),
+    );
+    expect(byDensity.items[0]!.calories).toBe(42);
+    const unknown = buildMealFromItems(
+        [{ foodId: noDensity.id, amount: 10, unit: "ml" }],
+        new Map([[noDensity.id, noDensity]]),
+    );
+    expect(unknown.items[0]!.unknown).toBe(true);
+    expect(unknown.items[0]!.calories).toBeNull();
+});
+
+/** What the old log sheet stored for 30 g of a per-100 ml food: grams, with the kcal it showed. */
+function loggedGramItem(foodId: string): RelogStoredItem {
+    return {
+        food_id: foodId,
+        recipe_id: null,
+        label: "Half & Half",
+        amount: 30,
+        unit: "g",
+        grams: 30,
+        portions: null,
+        calories: 39,
+        protein_g: null,
+        carbs_g: null,
+        fat_g: 3.3,
+        fiber_g: null,
+        sugar_g: null,
+        alcohol_g: null,
+        caffeine_mg: null,
+    };
+}
+
+async function perMlHalfAndHalf(): Promise<Food> {
+    const foods = createMemoryFoodsStore();
+    return perMl(
+        foods,
+        await catalogFood(foods, "Half & Half", { calories: 130, fatG: 11 }),
+        null,
+    );
+}
+
+function relogOf(item: RelogStoredItem, food: Food) {
+    return relogMeal(
+        {
+            meal_type: "breakfast",
+            description: "30 g Half & Half",
+            calories: item.calories,
+            protein_g: null,
+            carbs_g: null,
+            fat_g: item.fat_g,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            caffeine_mg: null,
+            items: [item],
+        },
+        [item],
+        new Map([[food.id, food]]),
+        "2026-11-13T12:00:00.000Z",
+    );
+}
+
+test("Again on a gram item of a per-100 ml food keeps the figures it was logged with", async () => {
+    const food = await perMlHalfAndHalf();
+    const out = relogOf(loggedGramItem(food.id), food);
+    expect(out.calories).toBe(39);
+    expect(out.fat_g).toBe(3.3);
+    const item = out.items![0]!;
+    expect(item.calories).toBe(39);
+    expect(item.amount).toBe(30);
+    expect(item.unit).toBe("g");
+    expect(item.grams).toBe(30);
+    expect(item.unknown).toBe(false);
+});
+
+test("copying a slot keeps a gram item of a per-100 ml food at its logged figures", async () => {
+    const food = await perMlHalfAndHalf();
+    const item = loggedGramItem(food.id);
+    const out = relogSlotMeals(
+        [
+            {
+                meal_type: "breakfast",
+                description: "30 g Half & Half",
+                calories: 39,
+                protein_g: null,
+                carbs_g: null,
+                fat_g: 3.3,
+                fiber_g: null,
+                sugar_g: null,
+                alcohol_g: null,
+                caffeine_mg: null,
+                items: [item],
+            },
+        ],
+        "breakfast",
+        new Map([[food.id, food]]),
+        "2026-11-13T12:00:00.000Z",
+    );
+    expect(out?.calories).toBe(39);
+    expect(out?.items?.[0]?.calories).toBe(39);
+});
+
+test("a logged item whose unit the food cannot scale rescales its own snapshot by the amount ratio", async () => {
+    const food = await perMlHalfAndHalf();
+    const logged = loggedGramItem(food.id);
+    const at = (amount: number, unit = "g") =>
+        buildMealFromItems(
+            [
+                {
+                    foodId: food.id,
+                    amount,
+                    unit,
+                    logged: { ...logged, amount: 30, unit: "g" },
+                },
+            ],
+            new Map([[food.id, food]]),
+        );
+    const doubled = at(60).items[0]!;
+    expect(doubled.calories).toBe(78);
+    expect(doubled.fat_g).toBe(6.6);
+    expect(doubled.grams).toBe(60);
+    expect(doubled.unknown).toBe(false);
+    // A null nutrient stays unknown, never zero.
+    expect(doubled.protein_g).toBeNull();
+    // Another unit is a different quantity, and the snapshot says nothing about it.
+    expect(at(1, "each").items[0]!.unknown).toBe(true);
+});
+
+test("a per-100 ml food logged with no unit is measured in ml, not guessed grams", async () => {
+    const food = await perMlHalfAndHalf();
+    expect(food.defaultUnit).toBe("g");
+    const built = buildMealFromItems(
+        [{ foodId: food.id, amount: 30 }],
+        new Map([[food.id, food]]),
+    );
+    const item = built.items[0]!;
+    expect(item.unit).toBe("ml");
+    expect(item.calories).toBe(39);
+    expect(item.unknown).toBe(false);
+    expect(built.unknownItems).toEqual([]);
+});
+
+test("a per-100 ml food keeps a volume default unit and a per-100 g food keeps grams", async () => {
+    const foods = createMemoryFoodsStore();
+    const cups = await perMl(
+        foods,
+        await catalogFood(foods, "Milk", { calories: 60, defaultUnit: "cup" }),
+        null,
+    );
+    const bread = await catalogFood(foods, "Bread", { calories: 250 });
+    const built = buildMealFromItems(
+        [
+            { foodId: cups.id, amount: 1 },
+            { foodId: bread.id, amount: 40 },
+        ],
+        new Map([
+            [cups.id, cups],
+            [bread.id, bread],
+        ]),
+    );
+    expect(built.items.map((i) => i.unit)).toEqual(["cup", "g"]);
+    expect(built.items[1]!.calories).toBe(100);
+});
+
+test("grams of a per-100 ml food with no density stay unknown and the note says to log it in ml", async () => {
+    const food = await perMlHalfAndHalf();
+    const built = buildMealFromItems(
+        [{ foodId: food.id, amount: 30, unit: "g" }],
+        new Map([[food.id, food]]),
+    );
+    expect(built.items[0]!.unknown).toBe(true);
+    expect(built.items[0]!.calories).toBeNull();
+    expect(built.unknownItems).toHaveLength(1);
+    expect(built.unknownItems[0]).toContain("Half & Half");
+    expect(built.unknownItems[0]).toContain("ml");
+});

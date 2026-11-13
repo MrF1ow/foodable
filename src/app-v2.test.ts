@@ -95,6 +95,105 @@ describe("/app-v2.css", () => {
         expect(shell.match(/\b(?:rgba?|hsla?|oklch)\(/g)).toBeNull();
     });
 
+    test("round icon buttons opt out of the old app's 44px button floor", async () => {
+        // /app.css gives every `.native button` min-height: 44px (zero
+        // specificity). A circle that only sets width and height 32px renders
+        // 32 x 44: a tall oval. Each one resets both minimums and stays square.
+        const css = (await getAppV2Css()).replace(/\/\*[\s\S]*?\*\//g, "");
+        for (const selector of [
+            ".fd-sheet .fd-sheet-close",
+            ".fd-icon-btn",
+            ".fd-scanner-icon-btn",
+            ".fd-star",
+            ".fd-shell .modal-close",
+        ]) {
+            const at = css.indexOf(`${selector} {`);
+            expect(at, selector).toBeGreaterThanOrEqual(0);
+            const block = css.slice(at, css.indexOf("}", at));
+            expect(block, selector).toMatch(/min-height:\s*0\b/);
+            expect(block, selector).toMatch(/min-width:\s*0\b/);
+            expect(block, selector).toMatch(/aspect-ratio:\s*1\b/);
+        }
+    });
+
+    test("the Trends range picker is a compact pill with the year on desktop only", () => {
+        const css = readFileSync("./public/app/v2/trends.css", "utf8").replace(
+            /\/\*[\s\S]*?\*\//g,
+            "",
+        );
+        const at = css.indexOf(".fd-trends-page .fd-seg-btn {");
+        expect(at).toBeGreaterThanOrEqual(0);
+        const block = css.slice(at, css.indexOf("}", at));
+        expect(block).toMatch(/min-height:\s*0\b/);
+        expect(block).toMatch(/height:\s*24px/);
+        expect(css).toMatch(/\.fd-seg-btn--desktop-only\s*{\s*display:\s*none/);
+        // The year shows on the phone while it is the active range, so the
+        // pill never has no highlighted segment (?range=365).
+        expect(css).toMatch(
+            /\.fd-seg-btn--desktop-only\.fd-seg-btn--on[^{]*{\s*display:\s*inline-block/,
+        );
+        expect(css).toMatch(
+            /\.fd-seg-btn--desktop-only\[aria-pressed="true"\]\s*{\s*display:\s*inline-block/,
+        );
+        // Regular labels (the design's weight) and the overlay/shadow token.
+        expect(block).toMatch(/font:\s*400 12px/);
+        expect(css).toMatch(
+            /\.fd-trends-page \.fd-seg {[^}]*box-shadow:\s*0 4px 14px var\(--overlay-shadow\)/,
+        );
+        // The single desktop block stays last; no max-width queries.
+        expect(css.match(/@media \(min-width: 1024px\)/g)?.length).toBe(1);
+        expect(css).not.toMatch(/@media[^{]*max-width/);
+    });
+
+    test("Kitchen tab pages sit one 16px step under the tabs and keep Add and Share out of flow", () => {
+        const css = readFileSync("./public/app/v2/kitchen.css", "utf8").replace(
+            /\/\*[\s\S]*?\*\//g,
+            "",
+        );
+        // The shell's sibling gap (--gap-section) plus the tabs' 16px bottom
+        // margin made it 30px; the three pages take that gap back, and the
+        // single desktop block puts them back under the header.
+        const pull = css.indexOf(
+            ".fd-kitchen-usuals-page {\n    position: relative",
+        );
+        expect(pull).toBeGreaterThanOrEqual(0);
+        expect(css.slice(pull, css.indexOf("}", pull))).toMatch(
+            /margin-top:\s*calc\(-1 \* var\(--gap-section/,
+        );
+        const desktop = css.slice(css.indexOf("@media (min-width: 1024px)"));
+        expect(desktop).toMatch(
+            /\.fd-kitchen-groceries-page {[^}]*margin-top:\s*0/,
+        );
+        expect(desktop).toMatch(
+            /\.fd-kitchen-usuals-page {[^}]*margin-top:\s*0/,
+        );
+        // Add and Share are absolutely placed beside the tabs: no fixed
+        // negative margins pulling a row up into them.
+        const tools = css.indexOf(".fd-kitchen-fridge-top,");
+        expect(css.slice(tools, css.indexOf("}", tools))).toMatch(
+            /position:\s*absolute/,
+        );
+        expect(css).not.toMatch(/margin-top:\s*calc\(-1 \* \(28px/);
+        // Share is the same 34px circle as Add on the phone (icon only), so
+        // it cannot cover the end of the Usuals tab on a narrow screen.
+        expect(css).toMatch(
+            /\.fd-kitchen-grocery-tools \.fd-kitchen-grocery-share {[^}]*width:\s*34px/,
+        );
+    });
+
+    test("Help titles are plain, not capitals; Kitchen has no per-tab title classes", () => {
+        const help = readFileSync("./public/app/v2/settings.css", "utf8");
+        const at = help.indexOf(".fd-settings-help__summary {");
+        expect(at).toBeGreaterThanOrEqual(0);
+        expect(help.slice(at, help.indexOf("}", at))).not.toContain(
+            "uppercase",
+        );
+        const kitchen = readFileSync("./public/app/v2/kitchen.css", "utf8");
+        expect(kitchen).not.toContain("fd-kitchen-grocery-title");
+        expect(kitchen).not.toContain("fd-kitchen-usual-title");
+        expect(kitchen).not.toContain("fd-kitchen-usual-head");
+    });
+
     test("one breakpoint: a single 1024px media query", () => {
         const shell = readFileSync("./public/app/v2/shell.css", "utf8");
         expect(shell.match(/@media \(min-width: 1024px\)/g)?.length).toBe(1);
@@ -121,13 +220,15 @@ describe("/app-v2.css", () => {
                             "toast-region",
                             "dash-head",
                             "dash-head-title-row",
+                            "modal-close",
                         ].includes(c) &&
                         !/^\d/.test(c),
                 ),
         );
         // app-main and toast-region belong to the old stylesheet and are
         // restyled here; dash-head and its title row (components/ui.ts
-        // pageHeader) are kept clear of the account chip. Nothing else may
+        // pageHeader) are kept clear of the account chip; modal-close is the
+        // old dialog's close, shown round on v2 pages. Nothing else may
         // leak in.
         expect([...foreign]).toEqual([]);
     });
@@ -170,7 +271,13 @@ describe("/app-v2.js", () => {
         // +~1.9 KB Settings AI connections: copy the connect address.
         // +~1.9 KB Log sheet: Copy yesterday tile follows the chosen meal.
         // +~0.6 KB Scanner: no bare BarcodeDetector, detach the video, start-up errors shown.
-        expect(js.length).toBeLessThan(128_300);
+        // +~4.2 KB Sheets: backdrop dismiss by geometry on document, with a touch-tap fallback.
+        // +~0.4 KB Again chips: a submit key per rendered form.
+        // +~3 KB Log sheet: ml basis, pack-serving portion, unit change resets.
+        // +~0.6 KB Log sheet: Add to groceries opens the Groceries add sheet.
+        // +~6.2 KB Select mode: pick several rows on four lists, act once.
+        // +~1.9 KB Sheets: a dialog opened over a sheet is not a tap on its backdrop.
+        expect(js.length).toBeLessThan(146_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

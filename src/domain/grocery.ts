@@ -14,7 +14,7 @@ import {
     type FoodsStore,
     type UsualAmount,
 } from "./foods.js";
-import { storedFoodUnit } from "./food-quantity.js";
+import { placeholderAmountUnit, storedFoodUnit } from "./food-quantity.js";
 import type {
     GroceryPreferences,
     GrocerySection,
@@ -79,9 +79,35 @@ export type GrocerySnapshot = {
     lines: GroceryLine[];
 };
 
+/** A food's family and every catalog food in it: what "already on the list" matches on. */
+export type GroceryFamily = { familyId: string; foodIds: readonly string[] };
+
+/** The family of `food` among `catalog`, always including `food` itself. */
+export function groceryFamilyOf(
+    food: Pick<Food, "id" | "genericFoodId">,
+    catalog: readonly Pick<Food, "id" | "genericFoodId">[],
+): GroceryFamily {
+    const familyId = familyOf(food);
+    const foodIds = catalog
+        .filter((candidate) => familyOf(candidate) === familyId)
+        .map((candidate) => candidate.id);
+    if (!foodIds.includes(food.id)) foodIds.push(food.id);
+    return { familyId, foodIds };
+}
+
 export type GroceryListStore = {
     listLines(householdId: string): Promise<GroceryLine[]>;
     insertLine(row: GroceryLine): Promise<GroceryLine>;
+    /**
+     * Inserts `row` unless the same store already has an unticked line for one
+     * of the family's foods, and returns that line instead (`existed`). The
+     * live store serialises concurrent calls for one family and store, so two
+     * adds at once still leave one line.
+     */
+    insertLineUnlessListed(
+        row: GroceryLine,
+        family: GroceryFamily,
+    ): Promise<{ line: GroceryLine; existed: boolean }>;
     updateLine(row: GroceryLine): Promise<GroceryLine | null>;
     deleteLine(householdId: string, id: string): Promise<boolean>;
 };
@@ -147,6 +173,22 @@ export function createMemoryGroceryStore(): MemoryGroceryListStore {
             };
             lines.push(saved);
             return publicLine(saved);
+        },
+        async insertLineUnlessListed(row, family) {
+            // No await between the check and the push, so two calls cannot
+            // both miss the other's line.
+            const existing = lines
+                .filter(
+                    (line) =>
+                        line.householdId === row.householdId &&
+                        line.storeId === row.storeId &&
+                        !line.checked &&
+                        line.foodId != null &&
+                        family.foodIds.includes(line.foodId),
+                )
+                .sort((a, b) => a.createdAt.localeCompare(b.createdAt))[0];
+            if (existing) return { line: publicLine(existing), existed: true };
+            return { line: await store.insertLine(row), existed: false };
         },
         async updateLine(row) {
             const idx = lines.findIndex(
@@ -598,10 +640,13 @@ export function pickGroceryAmount(input: {
             reason: "usual",
         };
     }
+    // No amount from the caller and no usual one: "1 of it". The unit the
+    // caller named stays; otherwise the food's own, except that 1 g or 1 ml is
+    // never a shopping amount (see placeholderAmountUnit).
     return {
         quantity: {
             amount: 1,
-            unit: storedFoodUnit(input.unit, input.food),
+            unit: givenUnit || placeholderAmountUnit(input.food),
         },
         reason: "default",
     };
@@ -701,6 +746,23 @@ export async function resolveGroceryLineSource(
     return { source, sourceFridgeItemId };
 }
 
+/** What an add reports when the line it asked for was already on the list. */
+type ReuseListed = {
+    /** Called with the existing line instead of a new one being inserted. */
+    onReused?: (line: GroceryLine) => void;
+};
+
+/**
+ * Whether an add folds into an unticked line the store already has for the
+ * food: always for a restock line, and whenever the caller asks.
+ */
+function reuseFor(input: {
+    reuseListed?: boolean;
+    source?: GroceryLineSource;
+}): boolean {
+    return input.reuseListed ?? input.source === "restock";
+}
+
 async function insertFromFood(
     grocery: GroceryListStore,
     settings: SettingsStore,
@@ -714,7 +776,9 @@ async function insertFromFood(
         food: Awaited<ReturnType<typeof findFoodById>>;
         source: GroceryLineSource;
         sourceFridgeItemId: string | null;
-    },
+        /** Same rule the restock runner uses: an unticked line in the food's family counts as already listed. */
+        reuseListed?: boolean;
+    } & ReuseListed,
 ): Promise<GroceryLine> {
     const sectionId = await placeGroceryLine(
         grocery,
@@ -729,7 +793,7 @@ async function insertFromFood(
         },
         foods,
     );
-    return grocery.insertLine({
+    const row: GroceryLine = {
         id: crypto.randomUUID(),
         householdId: input.householdId,
         storeId: input.storeId,
@@ -742,7 +806,15 @@ async function insertFromFood(
         source: input.source,
         sourceFridgeItemId: input.sourceFridgeItemId,
         note: null,
-    });
+    };
+    if (!input.reuseListed) return grocery.insertLine(row);
+    const catalog = await foods.listFoods(input.householdId);
+    const { line, existed } = await grocery.insertLineUnlessListed(
+        row,
+        groceryFamilyOf(input.food, catalog),
+    );
+    if (existed) input.onReused?.(line);
+    return line;
 }
 
 type GroceryPickCallback = (pick: {
@@ -884,6 +956,10 @@ export async function addGroceryFoodById(
         onPicked?: GroceryPickCallback;
         source?: GroceryLineSource;
         sourceFridgeItemId?: string | null;
+        /** Fold into an unticked line the store already has for the food. Default: only for restock lines. */
+        reuseListed?: boolean;
+        /** Called with the existing line when the add folded into it. */
+        onReused?: (line: GroceryLine) => void;
         fridge?: Pick<FridgeStore, "listItems">;
     },
 ): Promise<GroceryLine> {
@@ -990,6 +1066,11 @@ export async function addGroceryFoodById(
             food,
             source: lineSource.source,
             sourceFridgeItemId: lineSource.sourceFridgeItemId,
+            reuseListed: reuseFor({
+                reuseListed: input.reuseListed,
+                source: lineSource.source,
+            }),
+            onReused: input.onReused,
         });
     } catch (err) {
         wrapFoodsError(err);
@@ -1010,6 +1091,10 @@ export async function addGroceryFoodByBarcode(
         onPicked?: GroceryPickCallback;
         source?: GroceryLineSource;
         sourceFridgeItemId?: string | null;
+        /** Fold into an unticked line the store already has for the food. Default: only for restock lines. */
+        reuseListed?: boolean;
+        /** Called with the existing line when the add folded into it. */
+        onReused?: (line: GroceryLine) => void;
         fridge?: Pick<FridgeStore, "listItems">;
     },
     opts: {
@@ -1121,6 +1206,11 @@ export async function addGroceryFoodByBarcode(
             food,
             source: lineSource.source,
             sourceFridgeItemId: lineSource.sourceFridgeItemId,
+            reuseListed: reuseFor({
+                reuseListed: input.reuseListed,
+                source: lineSource.source,
+            }),
+            onReused: input.onReused,
         });
     } catch (err) {
         wrapFoodsError(err);
@@ -1141,6 +1231,10 @@ export async function addGroceryManualFood(
         onPicked?: GroceryPickCallback;
         source?: GroceryLineSource;
         sourceFridgeItemId?: string | null;
+        /** Fold into an unticked line the store already has for the food. Default: only for restock lines. */
+        reuseListed?: boolean;
+        /** Called with the existing line when the add folded into it. */
+        onReused?: (line: GroceryLine) => void;
         fridge?: Pick<FridgeStore, "listItems">;
         onSimilar?: OnSimilar;
     },
@@ -1251,6 +1345,11 @@ export async function addGroceryManualFood(
             food,
             source: lineSource.source,
             sourceFridgeItemId: lineSource.sourceFridgeItemId,
+            reuseListed: reuseFor({
+                reuseListed: input.reuseListed,
+                source: lineSource.source,
+            }),
+            onReused: input.onReused,
         });
     } catch (err) {
         wrapFoodsError(err);
@@ -1272,6 +1371,10 @@ export async function addGrocerySupply(
         onPicked?: GroceryPickCallback;
         source?: GroceryLineSource;
         sourceFridgeItemId?: string | null;
+        /** Fold into an unticked line the store already has for the food. Default: only for restock lines. */
+        reuseListed?: boolean;
+        /** Called with the existing line when the add folded into it. */
+        onReused?: (line: GroceryLine) => void;
         fridge?: Pick<FridgeStore, "listItems">;
         onSimilar?: OnSimilar;
     },
@@ -1409,6 +1512,11 @@ export async function addGrocerySupply(
             food,
             source: lineSource.source,
             sourceFridgeItemId: lineSource.sourceFridgeItemId,
+            reuseListed: reuseFor({
+                reuseListed: input.reuseListed,
+                source: lineSource.source,
+            }),
+            onReused: input.onReused,
         });
     } catch (err) {
         wrapFoodsError(err);
@@ -1419,13 +1527,22 @@ export async function addGrocerySupply(
  * Ticks a line off or back on. Ticking a food-backed line off stamps the day
  * its usual was last restocked when `restocked` names the foods store and the
  * household-local day (`YYYY-MM-DD`); unticking never touches the stamp.
+ *
+ * A failed stamp never undoes the tick. Inside one database transaction a
+ * failed statement would abort every later one, so a caller that ticks several
+ * lines in one passes `isolate`, which runs the stamp so that its failure
+ * leaves the transaction usable (a savepoint) and rethrows it to be logged.
  */
 export async function checkGroceryLine(
     grocery: GroceryListStore,
     householdId: string,
     lineId: string,
     checked: boolean,
-    restocked?: { foods: FoodsStore; today: string },
+    restocked?: {
+        foods: FoodsStore;
+        today: string;
+        isolate?: <T>(work: () => Promise<T>) => Promise<T>;
+    },
 ): Promise<GroceryLine | null> {
     const lines = await grocery.listLines(householdId);
     const current = lines.find((line) => line.id === lineId);
@@ -1433,13 +1550,16 @@ export async function checkGroceryLine(
     const updated = await grocery.updateLine({ ...current, checked });
     if (checked && restocked && current.foodId) {
         // The tick is saved; a failed stamp only delays the next schedule.
-        try {
-            await markUsualRestocked(
+        const foodId = current.foodId;
+        const stamp = () =>
+            markUsualRestocked(
                 restocked.foods,
                 householdId,
-                current.foodId,
+                foodId,
                 restocked.today,
             );
+        try {
+            await (restocked.isolate ? restocked.isolate(stamp) : stamp());
         } catch (err) {
             console.error(
                 `[restock] stamp failed: ${err instanceof Error ? err.message : String(err)}`,

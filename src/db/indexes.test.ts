@@ -492,7 +492,12 @@ describeDb(pgAvailable !== null, "household page reads", (ctx) => {
         );
         expectIndexOnTable(
             plan,
-            "recipe_plans_household_date_idx",
+            // The unique (household, recipe, date, slot) index also leads with
+            // the household, so the planner may read the week through it.
+            [
+                "recipe_plans_household_date_idx",
+                "recipe_plans_household_recipe_date_slot_key",
+            ],
             "public.recipe_plans",
         );
     });
@@ -508,7 +513,11 @@ describeDb(pgAvailable !== null, "household page reads", (ctx) => {
         );
         expectIndexOnTable(
             plan,
-            "recipe_plans_recipe_id_idx",
+            // With sequential scans off the planner may walk the unique index.
+            [
+                "recipe_plans_recipe_id_idx",
+                "recipe_plans_household_recipe_date_slot_key",
+            ],
             "public.recipe_plans",
         );
     });

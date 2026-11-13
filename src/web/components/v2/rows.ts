@@ -19,8 +19,9 @@ import {
     type ActionForm,
     type Html,
 } from "./html.js";
-import { iconCheck, iconChevronRight, iconPlus } from "./icons.js";
+import { iconCheck, iconChevronRight, iconPlus, iconTrash } from "./icons.js";
 import { scoreBadge } from "./score-badge.js";
+import { sheetTrigger } from "./sheet.js";
 
 /** A value the caller already formatted. Only escaped here. */
 export type Text = string | number;
@@ -60,10 +61,32 @@ function swipeDataAttr(action: SwipeAction, side: "left" | "right"): string {
     return ` data-swipe-${side}="${esc(`${url}\t${action.label}`)}"`;
 }
 
+/**
+ * A row that can be picked with others and acted on once. The checkbox is in
+ * the markup always; `select-mode.js` shows it only while a list is in
+ * selection mode, and its form reads the ticked ones as `name=value`
+ * fields (the checkbox belongs to no form of its own).
+ */
+export type RowSelect = {
+    /** Field the ticked box posts under (`ids[]`). */
+    name: string;
+    /** The row's id. */
+    value: string;
+    /** What the box is named after: "Select <label>". */
+    label: Text;
+    /**
+     * A state of the row's own that stays in sight while selecting, so the box
+     * does not have to carry it (a grocery line's tick). `on` fills it.
+     */
+    state?: { on: boolean };
+};
+
 type RowBase = {
     /** Leading dot or caller markup (avatar, icon). Built by `dot()` / v2 helpers only. */
     lead?: RowLead;
     swipe?: RowSwipe;
+    /** Makes the row pickable in the list's selection mode. */
+    select?: RowSelect;
     className?: string;
     id?: string;
 };
@@ -75,12 +98,24 @@ type ShellOpts = RowBase & {
     /** Whole-row link. The row body becomes an `<a>`; no interactive children then. */
     href?: string;
     extraClass?: string;
+    /** Markup after the row body, still inside the `<li>` (a nested list). */
+    after?: Html | string;
 };
 
 function leadSlot(lead: RowLead | undefined): string {
     if (!lead) return "";
     const inner = "dot" in lead ? dot(lead.dot) : lead.html;
     return `<span class="fd-row__lead">${inner}</span>`;
+}
+
+function selectBox(select: RowSelect | undefined): string {
+    if (!select) return "";
+    const state = select.state
+        ? select.state.on
+            ? `<span class="fd-check fd-check--on fd-row__select-state" role="img" aria-label="Already checked off">${iconCheck()}</span>`
+            : `<span class="fd-check fd-row__select-state" aria-hidden="true"></span>`
+        : "";
+    return `<label class="fd-row__select"><input type="checkbox" class="fd-row__select-input" data-fd-select-item name="${esc(select.name)}" value="${esc(select.value)}" aria-label="Select ${esc(select.label)}"><span class="fd-row__select-box" aria-hidden="true">${iconCheck()}</span></label>${state}`;
 }
 
 function swipeAction(action: SwipeAction, side: "lead" | "trail"): Html {
@@ -118,7 +153,12 @@ function rowShell(opts: ShellOpts): Html {
             ? ` data-sheet-id="${esc(swipe.sheetId)}" aria-controls="${esc(swipe.sheetId)}"`
             : "";
     const id = opts.id ? ` id="${esc(opts.id)}"` : "";
+    if (opts.select && opts.href) {
+        // A checkbox inside a link would be a second control in one tap target.
+        throw new Error("v2 rows: select cannot be combined with href");
+    }
     const body = [
+        selectBox(opts.select),
         leadSlot(opts.lead),
         `<div class="fd-row__main">${opts.main}</div>`,
         opts.trailing ?? "",
@@ -131,9 +171,10 @@ function rowShell(opts: ShellOpts): Html {
             "fd-row",
             `fd-row--${opts.variant}`,
             hasSwipe && "fd-row--swipe",
+            opts.select && "fd-row--selectable",
             opts.extraClass,
             opts.className,
-        )}"${id}${open}${swipeData}${swipeDataTrail}${sheetLink}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}</li>`,
+        )}"${id}${open}${swipeData}${swipeDataTrail}${sheetLink}${opts.select ? " data-fd-select-row" : ""}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}${opts.after ?? ""}</li>`,
     );
 }
 
@@ -143,7 +184,7 @@ function titleLine(
     titleClass?: string,
 ): Html {
     return raw(
-        `<span class="fd-row__line"><span class="${cls("fd-row__title", titleClass)}">${esc(title)}</span>${extra ?? ""}</span>`,
+        `<span class="fd-row__line"><span class="${cls("fd-row__title", titleClass)}" title="${esc(title)}">${esc(title)}</span>${extra ?? ""}</span>`,
     );
 }
 
@@ -151,6 +192,61 @@ function metaSpan(meta: Text | undefined, className = "fd-row__meta"): string {
     return meta == null || meta === ""
         ? ""
         : `<span class="${className}">${esc(meta)}</span>`;
+}
+
+/**
+ * The red trash button that ends a list row's action line: icon only, a 32px
+ * circle, named after the item ("Delete Eggs"). It opens the item's confirm
+ * sheet (`target`), so it never deletes on its own tap. `verb` swaps the word
+ * for the same gesture ("Revoke").
+ */
+export function rowDeleteTrigger(opts: {
+    /** `id` of the confirm sheet it opens. */
+    target: string;
+    /** What is deleted; goes into the accessible name. */
+    name: Text;
+    verb?: string;
+}): Html {
+    return raw(
+        sheetTrigger({
+            target: opts.target,
+            label: `${opts.verb ?? "Delete"} ${opts.name}`,
+            className: "fd-icon-btn fd-icon-btn--danger",
+            icon: String(iconTrash()),
+        }),
+    );
+}
+
+/**
+ * Manage row: a one-line name that ends in "…" when it does not fit (the full
+ * name stays in the markup and in the `title` attribute), an optional meta
+ * line, and the row's action buttons (`actions`, e.g. `rowDeleteTrigger`) at
+ * the end, always on the row's own line. `after` is a nested list that belongs
+ * to the row (products under a food).
+ */
+export function manageRow(
+    opts: RowBase & {
+        title: Text;
+        meta?: Text;
+        actions?: Html | string;
+        after?: Html | string;
+    },
+): Html {
+    const main = join([
+        titleLine(opts.title, undefined),
+        opts.meta != null && opts.meta !== ""
+            ? `<span class="fd-row__sub">${esc(opts.meta)}</span>`
+            : "",
+    ]);
+    const actions = opts.actions
+        ? raw(`<span class="fd-row__actions">${opts.actions}</span>`)
+        : undefined;
+    return rowShell({
+        ...opts,
+        variant: "manage",
+        main,
+        trailing: actions,
+    });
 }
 
 /** Grams / counts the caller formatted ("19", 2, "–"). */
@@ -308,6 +404,8 @@ export function groceryRow(
     ]);
     return rowShell({
         ...opts,
+        // The tick keeps showing while selecting, beside the box.
+        select: opts.select && { ...opts.select, state: { on: checked } },
         variant: "grocery",
         extraClass: checked ? "fd-row--checked" : undefined,
         main,

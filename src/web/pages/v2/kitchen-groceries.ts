@@ -26,6 +26,8 @@ import {
 import type { GroceryLineView, GroceryStoreView } from "../grocery.js";
 import { renderAppShell } from "../../shell.js";
 import { settingsErrorBanner } from "./settings-shared.js";
+import { renderKitchenHead } from "./kitchen-head.js";
+import { selectMode } from "./select-mode.js";
 import { UNKNOWN_ALLERGEN_TEXT } from "../../../copy/notices.js";
 import {
     GROCERY_SHARE_SHEET_ID,
@@ -310,6 +312,10 @@ export function groceryLineRowMarkup(
             checked: line.checked,
             toggle: { form: checkForm(line, line.checked, returnTo) },
             swipe,
+            // The Fridge overview's rows open the line; only this list selects.
+            select: opts.overview
+                ? undefined
+                : { name: "ids[]", value: line.id, label: labels.title },
         }),
     );
     const attrs = opts.overview
@@ -626,17 +632,54 @@ export function renderKitchenGroceriesBody(
     const sheets = allLines
         .map((line) => lineSheet(line, view, returnTo))
         .join("");
-    return `<div class="fd-kitchen-grocery-head"><h1 class="fd-kitchen-grocery-title">Kitchen<span class="fd-kitchen-grocery-count">${esc(itemCount)}</span></h1>${String(renderShareTrigger(GROCERY_SHARE_SHEET_ID, "fd-kitchen-grocery-share"))}</div>
-<div class="fd-kitchen-groceries-page">
+    const shareButton = String(
+        renderShareTrigger(GROCERY_SHARE_SHEET_ID, "fd-kitchen-grocery-share"),
+    );
+    const select = selectMode({
+        scope: "groceries",
+        returnTo,
+        actions: [
+            {
+                kind: "submit",
+                key: "check",
+                label: "Check off",
+                action: "/kitchen/groceries/bulk/check",
+            },
+            {
+                kind: "confirm",
+                key: "remove",
+                label: "Delete",
+                action: "/kitchen/groceries/bulk/remove",
+                title: "Delete items",
+                one: "Delete 1 item from the list?",
+                many: "Delete {n} items from the list?",
+                confirmLabel: "Delete",
+            },
+        ],
+    });
+    const selectable = groups.length > 0;
+    const head = renderKitchenHead({
+        active: "groceries",
+        phoneSubtitle: itemCount,
+        desktopSubtitle: itemCount,
+        desktopTools: shareButton,
+    });
+    // On the phone the header is the bare title (as on the other tabs) and
+    // Share rides at the right of the first row under the tabs.
+    return `${head}
+<div class="fd-kitchen-groceries-page"${select.rootAttrs}>
+<div class="fd-kitchen-grocery-tools">${shareButton}</div>
 ${pageError}
 ${allergenBanner}
 ${renderGroceryStoreChips(view)}
 ${groceryAddField(view)}
+${selectable ? select.tools + select.bar : ""}
 ${sections}
 ${putAwayLink(view)}
 ${walkingOrderNote(view)}
 ${empty}
 ${sheets}
+${selectable ? select.sheets : ""}
 ${groceryAddSheet(view, returnTo)}
 ${putAwaySheet(view, returnTo)}
 ${renderShareSheet({

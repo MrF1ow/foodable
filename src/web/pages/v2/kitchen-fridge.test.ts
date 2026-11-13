@@ -131,6 +131,50 @@ describe("renderKitchenFridgeV2Page", () => {
         expect(html).toContain("&lt;script&gt;");
     });
 
+    test("select mode: every item has a checkbox, with a confirmed Discard", () => {
+        const view = buildPreviewKitchenFridgeView(chrome, today, {
+            items: [
+                item({ id: "a", displayName: "Eggs" }),
+                item({ id: "b", displayName: "Spinach" }),
+            ],
+        });
+        const body = renderKitchenFridgeBody(view);
+        expect(body).toContain(
+            'class="fd-kitchen-fridge-page" data-fd-select="fridge"',
+        );
+        expect(body).toContain('data-fd-select-toggle="fridge"');
+        for (const [id, name] of [
+            ["a", "Eggs"],
+            ["b", "Spinach"],
+        ]) {
+            expect(body).toContain(
+                `<input type="checkbox" class="fd-row__select-input" data-fd-select-item name="ids[]" value="${id}" aria-label="Select ${name}">`,
+            );
+        }
+        expect(body).toContain('action="/kitchen/fridge/bulk/discard"');
+        expect(body).toContain('data-one="Discard 1 item?"');
+        expect(body).toContain('data-many="Discard {n} items?"');
+        expect(body).toContain(
+            '<input type="hidden" name="return_to" value="/kitchen/fridge">',
+        );
+    });
+
+    test("select mode: an empty fridge has no Select", () => {
+        const body = renderKitchenFridgeBody(
+            buildPreviewKitchenFridgeView(chrome, today, { items: [] }),
+        );
+        expect(body).not.toContain("data-fd-select-toggle");
+    });
+
+    test("the header is the same as on Groceries and Usuals", () => {
+        const body = renderKitchenFridgeBody(
+            buildPreviewKitchenFridgeView(chrome, today, { items: [] }),
+        );
+        expect(body).toMatch(
+            /^<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">[^<]+<\/span><\/h1>\n<header class="fd-kitchen-overview-head">\n<div class="fd-kitchen-overview-head__title">\n<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--phone">[^<]+<\/span><span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--desktop">[^<]+<\/span><\/h1>\n<\/div>\n<div class="fd-kitchen-overview-head__tools">\n<nav class="fd-seg fd-kitchen-overview-seg" aria-label="Kitchen sections">/,
+        );
+    });
+
     test("use soon lists expiring and expired items", () => {
         const view = buildPreviewKitchenFridgeView(chrome, today, {
             items: [

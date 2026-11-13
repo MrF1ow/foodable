@@ -586,6 +586,7 @@ export const APP_V2_JS_SOURCES = [
     "./src/web/client/v2/trends.js",
     "./src/web/client/v2/today.js",
     "./src/web/client/v2/kitchen.js",
+    "./src/web/client/v2/select-mode.js",
     "./src/web/client/v2/stores.js",
     "./src/web/client/v2/score-settings.js",
     "./src/web/client/v2/share-link.js",

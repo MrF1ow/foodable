@@ -1256,6 +1256,35 @@ describe("moving and removing a plan", () => {
         ]);
     });
 
+    test("move onto a day and slot that holds the same recipe merges into one plan", async () => {
+        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        const id = await seed();
+        const day = addPlanDays(todayUtc(), 2);
+        const there = await db.plansStore.addPlan({
+            householdId: HH,
+            recipeId: db.recipeId,
+            date: day,
+            slot: "lunch",
+            servings: 3,
+        });
+        const res = await postPlanPath(
+            `/recipes/plan/${id}/move`,
+            new URLSearchParams({
+                date: day,
+                slot: "lunch",
+                servings: "2",
+                back: "today",
+            }),
+        );
+        expect(res.status).toBe(303);
+        expect(toastOf(res)?.key).toBe("plan.merged");
+        expect(JSON.stringify(toastOf(res))).toContain("lunch");
+        // One plan remains: the one already there, with both servings.
+        expect(await planned()).toMatchObject([
+            { id: there!.id, date: day, slot: "lunch", servings: 5 },
+        ]);
+    });
+
     const EDIT_OPEN = (id: string) =>
         new RegExp(
             `<dialog[^>]*id="fd-plan-edit-${id}"[^>]*data-sheet-open-on-load`,

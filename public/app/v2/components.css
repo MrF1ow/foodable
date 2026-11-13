@@ -187,17 +187,44 @@
     align-items: center;
 }
 
+/*
+ * A name is one line and ends in "…" when it does not fit; what sits beside it
+ * (quantity, meta, score badge) keeps its size and stays on the line, and so
+ * does the row's trailing value or action. The full name stays in the markup.
+ */
 .fd-row__line {
     display: flex;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     align-items: baseline;
     gap: var(--fd-s-6);
     max-width: 100%;
+    min-width: 0;
+    /*
+     * .fd-row__main aligns its children to flex-start, which would size the
+     * line to its content. The inline meta's percentage cap below then
+     * measures that shrunken box and truncates short names ("Milk Kirklan…"
+     * with half the row empty). Stretch makes the line the full width of the
+     * row's text column, so the caps measure the column.
+     */
+    align-self: stretch;
+}
+.fd-row__line > :not(.fd-row__title) {
+    flex: none;
+}
+/* A long inline meta (a usual's product) ends in "…" too, so it cannot crowd the name out. */
+.fd-row__line > .fd-row__meta {
+    max-width: 45%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .fd-row__title {
+    min-width: 0;
+    overflow: hidden;
     font: 400 15px/20px var(--font-body);
     color: var(--text-primary);
-    overflow-wrap: anywhere;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 .fd-row__title--done {
     color: var(--text-secondary);
@@ -353,9 +380,54 @@
     place-items: center;
     width: 34px;
     height: 34px;
+    /* Opt out of the old app's 44px button floor so the circle stays round. */
+    min-width: 0;
+    min-height: 0;
+    aspect-ratio: 1;
     border-radius: var(--radius-pill);
     background: var(--surface-raised);
     color: var(--text-primary);
+}
+
+/* Row delete: the same round icon button, 32px like the sheet close, in red. */
+.fd-icon-btn--danger {
+    position: relative;
+    width: 32px;
+    height: 32px;
+    color: var(--status-over);
+}
+.fd-icon-btn--danger .fd-icon {
+    width: 18px;
+    height: 18px;
+}
+/* 44px touch target around the 32px circle; the visual size is unchanged. */
+.fd-icon-btn--danger::before {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 44px;
+    height: 44px;
+    transform: translate(-50%, -50%);
+    border-radius: var(--radius-pill);
+}
+
+/* Manage row (saved foods, shared links): name, meta and the actions, one line each. */
+.fd-row--manage .fd-row__main {
+    flex: 1 1 0;
+}
+.fd-row__actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--fd-s-6);
+    margin-left: auto;
+}
+.fd-row--manage .fd-row__sub {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* grocery: check circle (#21946 off, #21994 on) */

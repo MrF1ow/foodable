@@ -757,6 +757,64 @@ test("runRestockCheck memory commits lines and lastRunOn", async () => {
     expect((await grocery.listLines(HH)).length).toBe(1);
 });
 
+test("runRestockCheck skips a line a card added after the run read the list", async () => {
+    const grocery = createMemoryGroceryStore();
+    const fridge = createMemoryFridgeStore();
+    const foods = createMemoryFoodsStore();
+    const { settings } = await seedCostco();
+    const plain = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Milk" }),
+    );
+    const stock = createMemoryStockStore();
+    const loc = await addLocation(fridge, HH, "Fridge");
+    await addFridgeItemAdjust(fridge, stock, foods, {
+        householdId: HH,
+        foodId: plain.id,
+        amount: 1,
+        unit: "l",
+        locationId: loc.id,
+        expiresOn: addDays("2026-06-06", 2),
+        actorUserId: "u1",
+    });
+    let prefs: HouseholdPreferences = {
+        ...EMPTY_HOUSEHOLD_PREFERENCES,
+        restock: { enabled: true, weekday: 6, time: "00:00", lastRunOn: null },
+    };
+    const inner = createMemoryRestockStore({
+        grocery,
+        getPrefs: () => prefs,
+        setPrefs: (p) => {
+            prefs = p;
+        },
+    });
+    const deps: RestockCheckDeps = {
+        listEnabled: async () => [{ id: HH, preferences: prefs }],
+        getOwnerProfile: async () => ({ timezone: "UTC" }),
+        fridge,
+        foods,
+        grocery,
+        settings,
+        dismissals: createMemoryNoticeDismissalsStore(),
+        restock: {
+            // The run has read the (empty) list and planned its line; a card
+            // add lands before the commit.
+            async commitRestockRun(hh, on, lines, families) {
+                const planned = lines[0]!;
+                await grocery.insertLineUnlessListed(
+                    { ...planned, id: crypto.randomUUID(), source: "manual" },
+                    families!.get(planned.id)!,
+                );
+                return inner.commitRestockRun(hh, on, lines, families);
+            },
+        },
+    };
+    await runRestockCheck(deps, new Date("2026-06-06T15:00:00Z"));
+    const lines = await grocery.listLines(HH);
+    expect(lines).toHaveLength(1);
+    expect(lines[0]!.source).toBe("manual");
+    expect(prefs.restock.lastRunOn).toBe("2026-06-06");
+});
+
 test("runRestockCheck rolls back on insert failure", async () => {
     const grocery = createMemoryGroceryStore();
     let fail = true;

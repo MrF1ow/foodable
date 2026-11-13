@@ -530,29 +530,39 @@ describe("renderProductV2Page", () => {
         expect(html).toContain(`/foods/${f.id}/add-to-grocery`);
     });
 
-    test("log pick amount ignores the pack serving", () => {
+    test("log pick opens on one portion when the food has a pack serving", () => {
         const half = food(HALF_AND_HALF);
         const pick = productLogPickPayload(half, undefined);
-        expect(pick.amount).toBe(100);
-        expect(pick.unit).toBe("g");
-        expect(servingG(half)).toBeNull();
-        const each = food({
+        expect(pick.unit_hints).toEqual(["portion", "ml"]);
+        expect(pick.unit).toBe("portion");
+        expect(pick.amount).toBe(1);
+        expect(pick.basis).toBe("100ml");
+        expect(pick.serving).toEqual(half.serving);
+        const yogurt = food({
             name: "Yogurt",
             calories: 59,
             gramsPerEach: 170,
             serving: { label: "1 cup (245 g)", amount: 245, unit: "g" },
             nutritionBasis: "100g",
         });
-        expect(productLogPickPayload(each, undefined).amount).toBe(170);
-        const usualMl = food({
+        const yogurtPick = productLogPickPayload(yogurt, undefined);
+        expect(yogurtPick.unit_hints).toEqual(["portion", "g", "each"]);
+        expect(yogurtPick.unit).toBe("portion");
+        expect(yogurtPick.amount).toBe(1);
+        expect(yogurtPick.basis).toBeUndefined();
+        const milk = food({
             name: "Milk",
             calories: 42,
-            gramsPerMl: 1.03,
-            usualAmount: { amount: 200, unit: "ml" },
-            serving: { label: "1 cup (240 ml)", amount: 240, unit: "ml" },
             nutritionBasis: "100ml",
         });
-        expect(productLogPickPayload(usualMl, undefined).amount).toBe(206);
+        const milkPick = productLogPickPayload(milk, undefined);
+        expect(milkPick.unit).toBe("ml");
+        expect(milkPick.amount).toBe(100);
+        const eggs = food({ name: "Eggs", calories: 143 });
+        const eggPick = productLogPickPayload(eggs, undefined);
+        expect(eggPick.unit).toBe("g");
+        expect(eggPick.amount).toBe(100);
+        expect(eggPick.serving).toBeUndefined();
     });
 
     test("log pick payload carries food id and per-100 g macros", () => {

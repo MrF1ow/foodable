@@ -38,6 +38,56 @@ describe("renderTodayRail attention", () => {
         expect(rail).not.toContain("Nothing needs attention");
     });
 
+    test("running low, missing for the plan and weigh-in rows use the short wording", () => {
+        const low: Notice = {
+            code: "grocery.running_low",
+            severity: "info",
+            subject: { kind: "food", id: "f-eggs" },
+            related: [],
+            params: {
+                name: "Eggs",
+                reason: "1 left, wants 6",
+                dismissScope: "",
+            },
+        };
+        const missing: Notice = {
+            code: "plan.missing_ingredient",
+            severity: "info",
+            subject: { kind: "food", id: "f-lemon" },
+            related: [{ kind: "recipe", id: "r1", name: "Fish" }],
+            params: {
+                name: "Lemon",
+                unknown: "no",
+                recipeName: "Fish",
+                recipeCount: 1,
+                plannedOn: "2026-11-14",
+                daysLeft: 4,
+                dismissScope: "p1",
+            },
+        };
+        const view = buildPreviewTodayView("2026-11-10");
+        view.attention = {
+            count: 2,
+            notices: [low, missing],
+            noticeFoods: new Map(),
+        };
+        const rail = String(
+            renderTodayRail({
+                ...buildPreviewTodayPageData(chrome, "2026-11-10"),
+                view,
+            }),
+        );
+        expect(rail).toContain(">Eggs running low<");
+        expect(rail).toContain(">Lemon missing for Saturday<");
+        const titles = [
+            ...rail.matchAll(/fd-today-rail-row__title">([^<]*)</g),
+        ].map((m) => m[1]);
+        expect(titles).toEqual([
+            "Eggs running low",
+            "Lemon missing for Saturday",
+        ]);
+    });
+
     test("badge uses shell count with block and warn", () => {
         const allergen: Notice = {
             code: "grocery.allergen",

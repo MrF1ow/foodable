@@ -1,8 +1,13 @@
 import type { AppChromeBase } from "../../attention.js";
 import type { Food } from "../../../domain/foods.js";
 import type { Recipe } from "../../../domain/recipes.js";
-import { esc, raw, type Html } from "../../components/v2/html.js";
-import { rowList, sectionHeader } from "../../components/v2/rows.js";
+import { esc, type Html } from "../../components/v2/html.js";
+import {
+    manageRow,
+    rowDeleteTrigger,
+    rowList,
+    sectionHeader,
+} from "../../components/v2/rows.js";
 import {
     confirmSheet,
     sheet,
@@ -14,6 +19,7 @@ import {
     settingsPageHeader,
 } from "./settings-shared.js";
 import { FOODS_MERGE_MODAL_ID } from "../foods.js";
+import { selectMode } from "./select-mode.js";
 
 export const SETTINGS_SAVED_MERGE_SHEET_ID = FOODS_MERGE_MODAL_ID;
 
@@ -57,58 +63,59 @@ function kcalLabel(food: Food): string {
         : `${food.calories} kcal / 100 g`;
 }
 
-function foodDeleteActions(
+function foodRowMarkup(
     view: SettingsSavedV2View,
     food: SavedFoodRow,
-): string {
-    if (food.archivedAt) return "";
-    const deleteId = savedFoodDeleteSheetId(food.id);
-    return `<div class="fd-settings-saved-actions">${sheetTrigger({
-        target: deleteId,
-        label: "Delete",
-        className: "fd-btn fd-btn--sm fd-btn--danger",
-    })}</div>`;
-}
-
-function foodRowInner(food: SavedFoodRow, actions: string): string {
-    const archived = food.archivedAt ? " · Archived" : "";
-    const brand = food.brand ? ` · ${esc(food.brand)}` : "";
-    return `<div class="fd-settings-saved-row__main"><p class="fd-settings-saved-row__title">${esc(food.name)}${brand}${archived}</p><p class="fd-settings-saved-row__meta">${esc(kcalLabel(food))}</p></div>${actions}`;
-}
-
-function productRowMarkup(
-    view: SettingsSavedV2View,
-    product: SavedFoodRow,
+    after?: string,
 ): Html {
-    const actions = foodDeleteActions(view, product);
-    return raw(
-        `<li class="fd-settings-saved-row fd-settings-saved-row--product">${foodRowInner(product, actions)}</li>`,
-    );
+    // The title is the name alone, so it is what ends in "…"; the Archived
+    // marker leads the meta line, so a long brand can never cut it off.
+    const meta = [
+        food.archivedAt ? "Archived" : null,
+        food.brand,
+        kcalLabel(food),
+    ]
+        .filter(Boolean)
+        .join(" · ");
+    return manageRow({
+        title: food.name,
+        meta,
+        // An archived food has nothing left to delete.
+        select: food.archivedAt
+            ? undefined
+            : { name: "food_ids[]", value: food.id, label: food.name },
+        actions: food.archivedAt
+            ? undefined
+            : rowDeleteTrigger({
+                  target: savedFoodDeleteSheetId(food.id),
+                  name: food.brand ? `${food.name} (${food.brand})` : food.name,
+              }),
+        after,
+    });
 }
 
-function foodRowMarkup(view: SettingsSavedV2View, food: SavedFoodRow): Html {
+function plainFoodRowMarkup(
+    view: SettingsSavedV2View,
+    food: SavedFoodRow,
+): Html {
     const products = liveProducts(view, food.id);
     const nested =
         products.length === 0
-            ? ""
-            : `<ul class="fd-settings-saved-products">${products.map((p) => String(productRowMarkup(view, p))).join("")}</ul>`;
-    const actions = foodDeleteActions(view, food);
-    return raw(
-        `<li class="fd-settings-saved-row fd-settings-saved-row--plain">${foodRowInner(food, actions)}${nested}</li>`,
-    );
+            ? undefined
+            : `<ul class="fd-settings-saved-products">${products.map((p) => String(foodRowMarkup(view, p))).join("")}</ul>`;
+    return foodRowMarkup(view, food, nested);
 }
 
-function recipeRowMarkup(view: SettingsSavedV2View, recipe: Recipe): Html {
-    const deleteId = savedRecipeDeleteSheetId(recipe.id);
-    return raw(
-        `<li class="fd-settings-saved-row"><div class="fd-settings-saved-row__main"><p class="fd-settings-saved-row__title">${esc(recipe.name)}</p><p class="fd-settings-saved-row__meta">${esc(recipe.tags[0] ?? "Recipe")}</p></div><div class="fd-settings-saved-actions">${sheetTrigger(
-            {
-                target: deleteId,
-                label: "Delete",
-                className: "fd-btn fd-btn--sm fd-btn--danger",
-            },
-        )}</div></li>`,
-    );
+function recipeRowMarkup(recipe: Recipe): Html {
+    return manageRow({
+        title: recipe.name,
+        meta: recipe.tags[0] ?? "Recipe",
+        select: { name: "recipe_ids[]", value: recipe.id, label: recipe.name },
+        actions: rowDeleteTrigger({
+            target: savedRecipeDeleteSheetId(recipe.id),
+            name: recipe.name,
+        }),
+    });
 }
 
 function mergeSheet(view: SettingsSavedV2View): string {
@@ -176,10 +183,8 @@ export function renderSettingsSavedV2Body(view: SettingsSavedV2View): string {
     const q = view.searchQuery.trim();
     const search = `<form method="get" action="/settings/saved" class="fd-settings-saved-search" role="search"><label class="fd-search"><span class="visually-hidden">Search</span><input class="fd-search-text" type="search" name="q" value="${esc(q)}" placeholder="Search foods and recipes" autocomplete="off" /></label><button type="submit" class="fd-btn fd-btn--sm">Search</button></form>`;
     const topFoods = view.foods.filter((f) => isTopLevelFood(f));
-    const foodItems = topFoods.map((food) => foodRowMarkup(view, food));
-    const recipeItems = view.recipes.map((recipe) =>
-        recipeRowMarkup(view, recipe),
-    );
+    const foodItems = topFoods.map((food) => plainFoodRowMarkup(view, food));
+    const recipeItems = view.recipes.map((recipe) => recipeRowMarkup(recipe));
     const mergeTrigger =
         view.foods.filter((f) => !f.genericFoodId && !f.archivedAt).length >= 2
             ? sheetTrigger({
@@ -196,8 +201,28 @@ export function renderSettingsSavedV2Body(view: SettingsSavedV2View): string {
         recipeItems.length === 0
             ? `<p class="fd-settings-saved-empty">No recipes match.</p>`
             : rowList(recipeItems, { label: "Recipes" });
+    const select = selectMode({
+        scope: "saved",
+        returnTo: q
+            ? `/settings/saved?q=${encodeURIComponent(q)}`
+            : "/settings/saved",
+        actions: [
+            {
+                kind: "confirm",
+                key: "delete",
+                label: "Delete",
+                action: "/settings/saved/bulk/delete",
+                title: "Delete saved items",
+                one: "Delete 1 saved item? A recipe cannot be brought back.",
+                many: "Delete {n} saved items? Recipes cannot be brought back.",
+                confirmLabel: "Delete",
+            },
+        ],
+    });
+    const selectable =
+        view.foods.some((f) => !f.archivedAt) || view.recipes.length > 0;
     const headerActions = mergeTrigger ? String(mergeTrigger) : undefined;
-    return `${String(settingsPageHeader("Saved foods & recipes", headerActions))}${String(settingsErrorBanner(view.error))}${search}${String(sectionHeader({ title: "Foods", level: 2 }))}${String(foodsSection)}${String(sectionHeader({ title: "Recipes", level: 2 }))}${String(recipesSection)}${mergeSheet(view)}${deleteFoodSheets(view)}${deleteRecipeSheets(view)}`;
+    return `${String(settingsPageHeader("Saved foods & recipes", headerActions))}<div${select.rootAttrs}>${String(settingsErrorBanner(view.error))}${search}${selectable ? select.tools + select.bar : ""}${String(sectionHeader({ title: "Foods", level: 2 }))}${String(foodsSection)}${String(sectionHeader({ title: "Recipes", level: 2 }))}${String(recipesSection)}${mergeSheet(view)}${deleteFoodSheets(view)}${deleteRecipeSheets(view)}${selectable ? select.sheets : ""}</div>`;
 }
 
 export function renderSettingsSavedV2Page(view: SettingsSavedV2View): string {

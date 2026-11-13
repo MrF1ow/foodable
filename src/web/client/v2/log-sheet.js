@@ -36,6 +36,37 @@ function defaultAmountForUnit(unit) {
     return 100;
 }
 
+/**
+ * The amount to show after the unit changes. A portion count and a mass or
+ * volume are different scales, so moving from or to portion restarts at that
+ * unit's default; between g, ml and each the number stays.
+ */
+function amountAfterUnitChange(prev, next, current) {
+    if (prev && prev !== next && (prev === "portion" || next === "portion")) {
+        return String(defaultAmountForUnit(next));
+    }
+    return current;
+}
+
+/** One portion is the pack serving, in the serving's own unit. */
+function resolvePortion(serving, portions) {
+    return {
+        amount: Math.round(serving.amount * portions * 100) / 100,
+        unit: serving.unit,
+    };
+}
+
+/** "1 portion · 30 ml": what the amount is in the serving's own unit. */
+function portionLabel(serving, portions) {
+    const q = resolvePortion(serving, portions);
+    const t = (n) => String(Math.round(n * 100) / 100);
+    return `${t(portions)} portion · ${t(q.amount)} ${q.unit}`;
+}
+
+function perLabel(item) {
+    return item.basis === "100ml" ? "100 ml" : "100 g";
+}
+
 function logItemIsRelivable(item) {
     return !!(
         item?.food_id?.trim() ||
@@ -58,6 +89,15 @@ function itemGrams(amount, unit, item) {
     return null;
 }
 
+/** The ml a per-100 ml food's figures scale by; null without a density. */
+function mlFor(amount, unit, item) {
+    if (!Number.isFinite(amount) || amount <= 0) return null;
+    if (unit === "ml") return amount;
+    const grams = itemGrams(amount, unit, item);
+    const d = item.grams_per_ml;
+    return grams != null && d != null && d > 0 ? round1(grams / d) : null;
+}
+
 /**
  * Live macros for the amount sheet (tests via FOODABLE_EXPOSE_LOG_MACROS).
  * @param {Record<string, unknown>} item search JSON item
@@ -65,6 +105,10 @@ function itemGrams(amount, unit, item) {
  * @param {string} unit
  */
 function macrosFor(item, amount, unit) {
+    if (unit === "portion" && item.serving) {
+        const q = resolvePortion(item.serving, amount);
+        return macrosFor({ ...item, serving: null }, q.amount, q.unit);
+    }
     if (unit === "portion" && item.recipe_id) {
         const p = amount;
         const scale = (v) =>
@@ -78,7 +122,12 @@ function macrosFor(item, amount, unit) {
             fat_g: scale(item.fat_g),
         };
     }
-    const grams = itemGrams(amount, unit, item);
+    // A per-100 ml food scales by ml: the amount itself in ml, or grams ÷
+    // density for g and each. No density, no figure.
+    const grams =
+        item.basis === "100ml"
+            ? mlFor(amount, unit, item)
+            : itemGrams(amount, unit, item);
     if (grams == null) return null;
     const scale100 = (v) =>
         v != null && Number.isFinite(Number(v))
@@ -96,10 +145,26 @@ function allowedUnits(item) {
     const hints = item.unit_hints;
     if (Array.isArray(hints) && hints.length > 0) return hints;
     if (item.recipe_id) return ["portion"];
-    const out = ["g"];
-    if (item.grams_per_ml != null && item.grams_per_ml > 0) out.push("ml");
-    if (item.grams_per_each != null && item.grams_per_each > 0)
+    const density = item.grams_per_ml != null && item.grams_per_ml > 0;
+    const perMl = item.basis === "100ml";
+    const out = perMl ? ["ml"] : ["g"];
+    if (perMl && density) out.push("g");
+    if (!perMl && density) out.push("ml");
+    if (
+        item.grams_per_each != null &&
+        item.grams_per_each > 0 &&
+        (!perMl || density)
+    )
         out.push("each");
+    const serving = item.serving;
+    if (
+        serving &&
+        serving.amount > 0 &&
+        (perMl
+            ? serving.unit === "ml" || density
+            : serving.unit === "g" || density)
+    )
+        out.unshift("portion");
     return out;
 }
 
@@ -204,7 +269,8 @@ function itemSubtitle(item, kind) {
     if (k === "stock") {
         const amt = formatAmountUnit(item.stock_amount, item.stock_unit);
         const kcal = item.kcal_per_100g;
-        const kcalBit = kcal != null ? `${Math.round(kcal)} / 100 g kcal` : "";
+        const kcalBit =
+            kcal != null ? `${Math.round(kcal)} / ${perLabel(item)} kcal` : "";
         return ["In your fridge", amt, kcalBit].filter(Boolean).join(" · ");
     }
     if (k === "recipe") {
@@ -223,17 +289,17 @@ function itemSubtitle(item, kind) {
         const brand = item.brand || "Open Food Facts";
         const kcal = item.kcal_per_100g;
         return kcal != null
-            ? `${brand} · ${Math.round(kcal)} / 100 g kcal`
+            ? `${brand} · ${Math.round(kcal)} / ${perLabel(item)} kcal`
             : brand;
     }
     const brand = item.brand?.trim();
     const kcal = item.kcal_per_100g;
     if (brand)
         return kcal != null
-            ? `${brand} · ${Math.round(kcal)} / 100 g kcal`
+            ? `${brand} · ${Math.round(kcal)} / ${perLabel(item)} kcal`
             : brand;
     return kcal != null
-        ? `Generic · ${Math.round(kcal)} / 100 g kcal`
+        ? `Generic · ${Math.round(kcal)} / ${perLabel(item)} kcal`
         : "Generic";
 }
 
@@ -305,6 +371,15 @@ function againDate() {
     return new URLSearchParams(window.location.search).get("date") ?? "";
 }
 
+// One key per rendered Again form: the server logs a key once, so a double tap
+// on the same chip adds one meal.
+function againSubmitKey() {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+        return window.crypto.randomUUID();
+    }
+    return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
+}
+
 function recentChipHtml(item) {
     const relivable = logItemIsRelivable(item);
     const mealId = String(item.meal_id ?? "").trim();
@@ -319,7 +394,7 @@ function recentChipHtml(item) {
             : "";
     if (!relivable) {
         // Several items or free text: log the whole meal again as it was.
-        return `<form class="fd-log-recent-form" method="post" action="/meals/${encodeURIComponent(mealId)}/again"><input type="hidden" name="return_to" value="${esc(againReturnPath())}" /><input type="hidden" name="date" value="${esc(againDate())}" /><button type="submit" class="fd-chip fd-log-recent"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button></form>`;
+        return `<form class="fd-log-recent-form" method="post" action="/meals/${encodeURIComponent(mealId)}/again"><input type="hidden" name="return_to" value="${esc(againReturnPath())}" /><input type="hidden" name="date" value="${esc(againDate())}" /><input type="hidden" name="submit_key" value="${esc(againSubmitKey())}" /><button type="submit" class="fd-chip fd-log-recent"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button></form>`;
     }
     const payload = { ...item, kind: item.kind || "history" };
     return `<button type="button" class="fd-chip fd-log-recent" data-fd-log-pick="${esc(JSON.stringify(payload))}"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button>`;
@@ -688,8 +763,16 @@ function amountSubtitleLine(item) {
     const brand = item.brand?.trim();
     const kcal = item.kcal_per_100g;
     if (brand)
-        return `${brand} · ${kcal != null ? `${Math.round(kcal)} kcal` : ""} per 100 g`.trim();
-    return `Generic · ${kcal != null ? `${Math.round(kcal)} kcal` : ""} per 100 g`.trim();
+        return `${brand} · ${kcal != null ? `${Math.round(kcal)} kcal` : ""} per ${perLabel(item)}`.trim();
+    return `Generic · ${kcal != null ? `${Math.round(kcal)} kcal` : ""} per ${perLabel(item)}`.trim();
+}
+
+function syncPortionEcho(root, item, amount, unit) {
+    const el = root?.querySelector("[data-fd-log-portion]");
+    if (!el) return;
+    const show = unit === "portion" && item?.serving && amount > 0;
+    el.hidden = !show;
+    el.textContent = show ? portionLabel(item.serving, amount) : "";
 }
 
 function syncAmountHidden(form, item) {
@@ -780,6 +863,8 @@ function bindAmountSheet(root) {
             allowedUnits(selectedItem)[0];
         renderMacroTiles(macroRoot, macrosFor(selectedItem, amount, unit));
         if (stepperUnit) stepperUnit.textContent = unit;
+        form.dataset.fdUnit = unit;
+        syncPortionEcho(dialog, selectedItem, amount, unit);
     }
 
     form?.addEventListener("input", refreshMacros);
@@ -790,7 +875,19 @@ function bindAmountSheet(root) {
             )?.value;
             submit.textContent = MEAL_LABEL[meal] ?? MEAL_LABEL.dinner;
         }
-        if (event.target?.name === "unit") refreshMacros();
+        if (event.target?.name === "unit") {
+            // A portion count and a mass or volume are different scales:
+            // keeping "1" would turn 1 portion into 1 ml.
+            const amountInput = form.querySelector('[name="amount"]');
+            if (amountInput) {
+                amountInput.value = amountAfterUnitChange(
+                    form.dataset.fdUnit,
+                    String(event.target.value),
+                    amountInput.value,
+                );
+            }
+            refreshMacros();
+        }
         if (event.target?.name === "fd_log_time_mode" && timeInput) {
             const pick = form.querySelector(
                 'input[name="fd_log_time_mode"][value="pick"]:checked',
@@ -885,6 +982,8 @@ function pickItem(item) {
             submit.textContent = MEAL_LABEL[searchMeal] ?? MEAL_LABEL.dinner;
         const stepperUnit = form.querySelector(".fd-stepper__unit");
         if (stepperUnit) stepperUnit.textContent = unit;
+        form.dataset.fdUnit = unit;
+        syncPortionEcho(amountDialog, item, Number(amountInput?.value), unit);
     }
     openSheet(AMOUNT_ID);
 }
@@ -961,8 +1060,26 @@ function bindLogShortcuts() {
 
 // The log dialogs are rendered after .fd-shell, directly in <body>, so they
 // are found from the document, not from the shell.
+// The Quick grid's "Add to groceries" tile lands on the Groceries tab with
+// ?add=1: open its add sheet once, then drop the flag so a reload does not.
+function openGroceryAddFromLink() {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("add") !== "1") return;
+    const dialog = document.getElementById("fd-grocery-add");
+    if (!(dialog instanceof HTMLDialogElement)) return;
+    params.delete("add");
+    const query = params.toString();
+    window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+    openSheet("fd-grocery-add");
+}
+
 function init() {
     if (!document.querySelector(".fd-shell")) return;
+    openGroceryAddFromLink();
     bindSearchSheet(document);
     bindAmountSheet(document);
     bindQuickCalSheet(document);
@@ -976,6 +1093,9 @@ window.FoodableApp.onLoad(init);
 if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_LOG_MACROS) {
     window.FOODABLE_EXPOSE_LOG_MACROS({
         macrosFor,
+        portionLabel,
+        amountAfterUnitChange,
+        openGroceryAddFromLink,
         allowedUnits,
         itemGrams,
         formatLogMacroKcal,

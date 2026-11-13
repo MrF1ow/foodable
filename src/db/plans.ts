@@ -1,4 +1,5 @@
 import {
+    PLAN_SERVINGS_MAX,
     checkPlanDate,
     checkPlanServings,
     checkPlanSlot,
@@ -24,6 +25,16 @@ end, created_at, id`;
 
 const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * The key `planTransaction("plan-recipe", ...)` takes, so a store write that
+ * can create or merge a plan waits behind (and in front of) the domain's own
+ * serialized planning for that household. Re-taking it inside the same
+ * transaction is a no-op.
+ */
+async function lockHouseholdPlans(tx: Tx, householdId: string): Promise<void> {
+    await tx`select pg_advisory_xact_lock(hashtextextended(${`plan-recipe:${householdId}`}, 0))`;
+}
 
 export function recipePlanFromRow(row: Record<string, unknown>): RecipePlan {
     const slot = String(row.slot);
@@ -52,6 +63,24 @@ export function liveRecipePlansStore(): PlansStore {
             if (!UUID_RE.test(plan.recipeId)) return null;
             return run(async (tx) => {
                 try {
+                    await lockHouseholdPlans(tx, plan.householdId);
+                    // One plan per recipe, day and slot: planning it again is
+                    // that plan, not a second row (the unique index agrees).
+                    const planned = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(PLAN_COLS)}
+                            from ${tx.unsafe(RECIPE_PLANS)}
+                            where household_id = ${plan.householdId}::uuid
+                              and recipe_id = ${plan.recipeId}::uuid
+                              and date = ${date}::date
+                              and slot = ${slot}::text
+                            order by created_at, id
+                            limit 1
+                        `,
+                        "find plan",
+                    );
+                    if (planned) return recipePlanFromRow(planned);
                     // Selecting from recipes keeps a recipe id from another
                     // household from being planned: no row, no insert.
                     // In a savepoint: a refused insert aborts only the
@@ -130,17 +159,75 @@ export function liveRecipePlansStore(): PlansStore {
                 }
             });
         },
-        async movePlan(householdId, id, date, slot) {
+        async movePlan(householdId, id, date, slot, servings) {
             const nextDate = checkPlanDate(date);
             const nextSlot = checkPlanSlot(slot);
+            const nextServings =
+                servings === undefined ? null : checkPlanServings(servings);
             if (!UUID_RE.test(id)) return null;
             return run(async (tx) => {
                 try {
+                    await lockHouseholdPlans(tx, householdId);
+                    const moving = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(PLAN_COLS)}
+                            from ${tx.unsafe(RECIPE_PLANS)}
+                            where household_id = ${householdId}
+                              and id = ${id}::uuid
+                            for update
+                        `,
+                        "get plan",
+                    );
+                    if (!moving) return null;
+                    const incoming = nextServings ?? Number(moving.servings);
+                    // The same recipe already planned there: the two become
+                    // one. The plan that was there stays and takes the servings.
+                    const same = await maybeOne<Record<string, unknown>>(
+                        tx,
+                        tx`
+                            select id
+                            from ${tx.unsafe(RECIPE_PLANS)}
+                            where household_id = ${householdId}
+                              and recipe_id = ${String(moving.recipe_id)}::uuid
+                              and date = ${nextDate}::date
+                              and slot = ${nextSlot}::text
+                              and id <> ${id}::uuid
+                            order by created_at, id
+                            limit 1
+                            for update
+                        `,
+                        "find plan",
+                    );
+                    if (same) {
+                        const kept = await maybeOne<Record<string, unknown>>(
+                            tx,
+                            tx`
+                                update ${tx.unsafe(RECIPE_PLANS)}
+                                set servings = least(
+                                    servings + ${incoming}::numeric,
+                                    ${PLAN_SERVINGS_MAX}::numeric
+                                )
+                                where household_id = ${householdId}
+                                  and id = ${String(same.id)}::uuid
+                                returning ${tx.unsafe(PLAN_COLS)}
+                            `,
+                            "merge plan",
+                        );
+                        await tx`
+                            delete from ${tx.unsafe(RECIPE_PLANS)}
+                            where household_id = ${householdId}
+                              and id = ${id}::uuid
+                        `;
+                        return kept ? recipePlanFromRow(kept) : null;
+                    }
                     const data = await maybeOne<Record<string, unknown>>(
                         tx,
                         tx`
                             update ${tx.unsafe(RECIPE_PLANS)}
-                            set date = ${nextDate}::date, slot = ${nextSlot}::text
+                            set date = ${nextDate}::date,
+                                slot = ${nextSlot}::text,
+                                servings = ${incoming}::numeric
                             where household_id = ${householdId}
                               and id = ${id}::uuid
                             returning ${tx.unsafe(PLAN_COLS)}

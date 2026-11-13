@@ -21,6 +21,9 @@ const FLICK_VELOCITY = 0.8;
 const FLICK_MIN_PX = 12;
 // A pointer that sat still this long before release is no longer flicking.
 const FLICK_STALE_MS = 100;
+// A backdrop tap that moves more than this, or lasts longer, is a gesture.
+const TAP_SLOP_PX = 10;
+const TAP_MAX_MS = 500;
 const SNAP_BACK = "transform 180ms ease-out";
 
 const mq = (q) =>
@@ -76,6 +79,7 @@ function markOpen(dialog) {
     if (!state || state.counted) return false;
     state.counted = true;
     openSheetCount += 1;
+    openOrder.push(dialog);
     lockPageScroll();
     return true;
 }
@@ -85,6 +89,8 @@ function markClosed(dialog) {
     if (!state || !state.counted) return;
     state.counted = false;
     openSheetCount = Math.max(0, openSheetCount - 1);
+    const at = openOrder.indexOf(dialog);
+    if (at !== -1) openOrder.splice(at, 1);
     unlockPageScroll();
 }
 
@@ -152,6 +158,203 @@ function focusFirstField(dialog) {
         panel.focus({ preventScroll: true });
     }
 }
+
+// Dismiss on the dimmed page behind the TOPMOST open sheet. One code path, on
+// `document` in the capture phase, because it cannot be known where a
+// backdrop tap lands: the ::backdrop belongs to the dialog, but iOS Safari
+// has been seen to hand the tap to the page behind it (WebKit bug 267688's
+// workaround listens on document.body), and it does not reliably deliver a
+// pointerdown that targets the dialog either. Listening on the dialog alone
+// left the sheet open. "Behind" is geometry: outside the dialog's box, and
+// the target is the dialog (its backdrop) or something that is not part of it.
+// The dialog's own padding is `e.target === dialog` too but inside its box.
+// A press that began inside the sheet (a text-selection drag, a scroll that
+// ends over the backdrop) never dismisses.
+//
+// A sheet is only dismissed from behind when nothing sits above it. The
+// barcode scanner is a full-screen modal dialog opened from inside the open log
+// sheet, which stays open beneath it: every tap on the scanner is outside the
+// sheet's box, and would otherwise close the hidden sheet and swallow the click
+// (Close did nothing on the first tap). So every open dialog is tracked in the
+// order it opened, whoever opened it, and a sheet with another dialog opened
+// after it is covered.
+const openOrder = []; // open sheets, oldest first
+const dialogStack = []; // every open dialog, oldest first
+
+const isDialog = (el) => !!el && el.tagName === "DIALOG";
+
+const trackDialog = (e) => {
+    const dialog = e.target;
+    if (isDialog(dialog) && !dialogStack.includes(dialog)) {
+        dialogStack.push(dialog);
+    }
+};
+// beforetoggle precedes the open synchronously; toggle is the same signal for
+// engines without it. Neither moves a dialog that is already tracked.
+document.addEventListener(
+    "beforetoggle",
+    (e) => {
+        if (e.newState === "open") trackDialog(e);
+    },
+    true,
+);
+document.addEventListener(
+    "toggle",
+    (e) => {
+        if (e.target && e.target.open) trackDialog(e);
+    },
+    true,
+);
+document.addEventListener(
+    "close",
+    (e) => {
+        const at = dialogStack.indexOf(e.target);
+        // A dialog reopened before its queued close event arrives stays.
+        if (at !== -1 && !e.target.open) dialogStack.splice(at, 1);
+    },
+    true,
+);
+
+const coveredByDialog = (sheet) => {
+    const at = dialogStack.indexOf(sheet);
+    if (at === -1) return false; // no order known: keep dismissing as before
+    for (let i = at + 1; i < dialogStack.length; i++) {
+        const above = dialogStack[i];
+        if (above.open && isConnected(above)) return true;
+    }
+    return false;
+};
+
+const topSheet = () => {
+    for (let i = openOrder.length - 1; i >= 0; i--) {
+        const sheet = openOrder[i];
+        if (!sheet.open) continue;
+        return coveredByDialog(sheet) ? null : sheet;
+    }
+    return null;
+};
+
+const hasPoint = (x, y) => typeof x === "number" && typeof y === "number";
+
+const behindSheet = (dialog, target, x, y) => {
+    if (!hasPoint(x, y) || typeof dialog.getBoundingClientRect !== "function") {
+        return false;
+    }
+    const r = dialog.getBoundingClientRect();
+    const outside = x < r.left || x > r.right || y < r.top || y > r.bottom;
+    return outside && (target === dialog || !dialog.contains(target));
+};
+
+// A click that carries no pointer position (dialog.click(), a keyboard
+// activation: detail 0 and 0,0) is not a tap on the backdrop.
+const isPointerClick = (e) =>
+    e.detail !== 0 &&
+    hasPoint(e.clientX, e.clientY) &&
+    !(e.clientX === 0 && e.clientY === 0);
+
+let pressedInside = false;
+const notePress = (e, x, y) => {
+    const dialog = topSheet();
+    pressedInside = !!dialog && !behindSheet(dialog, e.target, x, y);
+};
+
+let tap = null; // a touch that began behind the sheet, to confirm on touchend
+let swallowClick = null; // the click a dismissing touch may still produce
+
+document.addEventListener(
+    "pointerdown",
+    (e) => notePress(e, e.clientX, e.clientY),
+    true,
+);
+document.addEventListener(
+    "pointercancel",
+    () => {
+        pressedInside = false;
+    },
+    true,
+);
+document.addEventListener(
+    "click",
+    (e) => {
+        const wasInside = pressedInside;
+        pressedInside = false;
+        if (swallowClick) {
+            const s = swallowClick;
+            swallowClick = null;
+            if (
+                Date.now() - s.at <= TAP_MAX_MS &&
+                Math.abs(e.clientX - s.x) <= 3 * TAP_SLOP_PX &&
+                Math.abs(e.clientY - s.y) <= 3 * TAP_SLOP_PX
+            ) {
+                e.stopPropagation();
+                e.preventDefault();
+                return;
+            }
+        }
+        const dialog = topSheet();
+        if (!dialog || wasInside || !isPointerClick(e)) return;
+        if (!behindSheet(dialog, e.target, e.clientX, e.clientY)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        dialog.close();
+    },
+    true,
+);
+
+// Touch path for engines that never turn a backdrop tap into a click: a short,
+// still tap that starts and ends behind the sheet. The touchend is cancelled
+// (and the click that may still follow swallowed) so nothing lands on the
+// page the sheet just uncovered.
+document.addEventListener(
+    "touchstart",
+    (e) => {
+        tap = null;
+        const t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+        if (!t) return;
+        notePress(e, t.clientX, t.clientY);
+        const dialog = topSheet();
+        if (
+            dialog &&
+            !pressedInside &&
+            behindSheet(dialog, e.target, t.clientX, t.clientY)
+        ) {
+            tap = { x: t.clientX, y: t.clientY, at: Date.now() };
+        }
+    },
+    { capture: true, passive: true },
+);
+document.addEventListener(
+    "touchend",
+    (e) => {
+        const start = tap;
+        tap = null;
+        const t = e.changedTouches && e.changedTouches[0];
+        const dialog = topSheet();
+        if (!start || !t || !dialog || (e.touches && e.touches.length)) return;
+        const still =
+            Math.abs(t.clientX - start.x) <= TAP_SLOP_PX &&
+            Math.abs(t.clientY - start.y) <= TAP_SLOP_PX;
+        if (
+            still &&
+            Date.now() - start.at <= TAP_MAX_MS &&
+            behindSheet(dialog, e.target, t.clientX, t.clientY)
+        ) {
+            if (e.cancelable) e.preventDefault();
+            e.stopPropagation();
+            swallowClick = { x: t.clientX, y: t.clientY, at: Date.now() };
+            pressedInside = false;
+            dialog.close();
+        }
+    },
+    { capture: true, passive: false },
+);
+document.addEventListener(
+    "touchcancel",
+    () => {
+        tap = null;
+    },
+    true,
+);
 
 const isConnected = (el) => !!el && el.isConnected !== false;
 
@@ -221,18 +424,6 @@ function initSheet(dialog) {
     dialog.addEventListener("close", onClosed);
     // Esc: the browser closes the dialog itself; just drop any drag in flight.
     dialog.addEventListener("cancel", resetDrag);
-
-    let backdropPointerDown = false;
-    dialog.addEventListener("pointerdown", (e) => {
-        backdropPointerDown = e.target === dialog;
-    });
-    dialog.addEventListener("pointerup", (e) => {
-        if (e.target !== dialog) backdropPointerDown = false;
-    });
-    dialog.addEventListener("click", (e) => {
-        if (e.target === dialog && backdropPointerDown) dialog.close();
-        backdropPointerDown = false;
-    });
 
     const onPointerMove = (e) => {
         if (!dragging || e.pointerId !== pointerId) return;

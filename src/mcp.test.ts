@@ -5980,6 +5980,35 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("eat_fridge_item says when a per-100 ml food eaten in grams has no nutrition", async () => {
+        db.barcodeFoods[cottage.barcode] = cottage;
+        await withPat(async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const added = await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id as string,
+                kind: "food",
+                barcode: cottage.barcode,
+                amount: 200,
+                unit: "g",
+            });
+            const food = (await db.foodsStore.listFoods("hh-1"))[0]!;
+            await db.foodsStore.updateFoodRow({
+                ...food,
+                nutritionBasis: "100ml",
+                gramsPerMl: null,
+            });
+            const eaten = await call("eat_fridge_item", {
+                id: added.structuredContent?.id as string,
+                amount: 50,
+                member_id: alice,
+            });
+            expect(eaten.isError).toBeFalsy();
+            const text = (eaten.content as { text: string }[])[0]!.text;
+            expect(text).toContain("Nutrition unknown for:");
+            expect(text).toContain("log it in ml");
+        });
+    });
+
     test("add, update, and delete fridge item write adjust movements", async () => {
         db.barcodeFoods[cottage.barcode] = cottage;
         await withPat(async (call) => {
@@ -8866,11 +8895,21 @@ describe("list_grocery_lines and get_fridge carry the Kitchen's fields over HTTP
                     amount: 500,
                     unit: "g",
                 });
-                for (const food_id of [productId, otherId]) {
+                // Two products of one family at one store would fold into a
+                // single line, so the other one is bought elsewhere.
+                const elsewhere = await createGroceryStore(
+                    db.settingsStore,
+                    "hh-1",
+                    "Costco",
+                );
+                for (const [food_id, store_id] of [
+                    [productId, store.id],
+                    [otherId, elsewhere.id],
+                ] as const) {
                     const added = await call("add_grocery_line", {
                         kind: "food",
                         food_id,
-                        store_id: store.id,
+                        store_id,
                     });
                     expect(added.isError).toBeFalsy();
                 }
@@ -9764,6 +9803,79 @@ describe("list_usuals over HTTP", () => {
                 expect(await db.groceryStore.listLines("hh-1")).toHaveLength(
                     due.length,
                 );
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_grocery_line twice for one food leaves one line and says so (%p)",
+        async (era) => {
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Corner",
+            );
+            const milk = await db.foodsStore.insertFood(
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "Milk",
+                    defaultUnit: "each",
+                }),
+            );
+            await withHttpClient("u1", era, async (client) => {
+                const add = async (args: Record<string, unknown>) =>
+                    (await client.callTool({
+                        name: "add_grocery_line",
+                        arguments: args,
+                    })) as ToolResult;
+                const args = {
+                    kind: "food",
+                    food_id: milk.id,
+                    store_id: store.id,
+                };
+                // Two restock cards (or a card and the runner) send the same call.
+                const [a, b] = await Promise.all([add(args), add(args)]);
+                for (const r of [a, b]) {
+                    expect(r.isError).toBeFalsy();
+                    ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(r.structuredContent);
+                }
+                const out = [a, b].map((r) => r.structuredContent as never) as {
+                    id: string;
+                    already_on_list: boolean;
+                }[];
+                expect(out[0]!.id).toBe(out[1]!.id);
+                expect(out.map((o) => o.already_on_list).sort()).toEqual([
+                    false,
+                    true,
+                ]);
+                const repeat = out[0]!.already_on_list ? a : b;
+                expect(repeat.content[0]?.text).toContain(
+                    "already on the list",
+                );
+                expect(
+                    [a, b].find((r) => r !== repeat)!.content[0]?.text,
+                ).toContain("Added Milk");
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(1);
+
+                // Without a store the server picks the one it is listed at.
+                const picked = await add({ kind: "food", food_id: milk.id });
+                expect(
+                    (picked.structuredContent as { already_on_list: boolean })
+                        .already_on_list,
+                ).toBe(true);
+
+                // Once it is ticked off, adding it again is a new line.
+                await client.callTool({
+                    name: "check_grocery_line",
+                    arguments: { id: out[0]!.id, checked: true },
+                });
+                const next = await add(args);
+                expect(
+                    (next.structuredContent as { already_on_list: boolean })
+                        .already_on_list,
+                ).toBe(false);
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(2);
             });
         },
     );
@@ -12271,6 +12383,74 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
             expect(db.inserted).toHaveLength(1);
             expect(db.inserted[0]?.description).toBe("eggs");
             expect(new Set(db.profileReads)).toEqual(new Set(["mode-user"]));
+        },
+    );
+});
+
+describe("log_meal with a per-100 ml food over HTTP", () => {
+    // As OFF hands over a liquid: per 100 ml, no density, default unit grams.
+    async function halfAndHalf() {
+        const created = await findOrCreateManualFood(
+            db.foodsStore,
+            "hh-1",
+            "food",
+            "Half & Half",
+        );
+        const food = await updateFood(db.foodsStore, "hh-1", created.id, {
+            calories: 130,
+            fatG: 11,
+        });
+        return (await db.foodsStore.updateFoodRow({
+            ...food,
+            nutritionBasis: "100ml",
+        }))!;
+    }
+
+    test.each(ERAS)(
+        "an amount with no unit is millilitres and logs the calories (%p)",
+        async (mode) => {
+            const food = await halfAndHalf();
+            await withHttpClient("u1", mode, async (client) => {
+                const r = (await client.callTool({
+                    name: "log_meal",
+                    arguments: {
+                        description: "Coffee",
+                        meal_type: "breakfast",
+                        items: [{ food_id: food.id, amount: 30 }],
+                    },
+                })) as ToolResult;
+                expect(r.isError).toBeFalsy();
+                expect(textOf(r)).not.toContain("Nutrition unknown");
+            });
+            expect(db.inserted[0]!.calories).toBe(39);
+            const items = db.inserted[0]!.items as Record<string, unknown>[];
+            expect(items[0]).toMatchObject({
+                unit: "ml",
+                amount: 30,
+                calories: 39,
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "grams with no density stay unknown and the text says to log it in ml (%p)",
+        async (mode) => {
+            const food = await halfAndHalf();
+            await withHttpClient("u1", mode, async (client) => {
+                const r = (await client.callTool({
+                    name: "log_meal",
+                    arguments: {
+                        description: "Coffee",
+                        meal_type: "breakfast",
+                        items: [{ food_id: food.id, amount: 30, unit: "g" }],
+                    },
+                })) as ToolResult;
+                expect(r.isError).toBeFalsy();
+                expect(textOf(r)).toContain(
+                    "Nutrition unknown for: Half & Half (a per-100 ml food: log it in ml",
+                );
+            });
+            expect(db.inserted[0]!.calories).toBeUndefined();
         },
     );
 });

@@ -19,7 +19,12 @@ import {
     type FoodsStore,
 } from "./foods.js";
 import { familyIdOf } from "./food-quantity.js";
-import { missingGramsGap, storedFoodUnit, toGrams } from "./food-quantity.js";
+import {
+    missingGramsGap,
+    placeholderAmountUnit,
+    storedFoodUnit,
+    toGrams,
+} from "./food-quantity.js";
 import {
     resolveGrocerySectionId,
     suggestGrocerySection,
@@ -1170,12 +1175,20 @@ export async function deleteRecipe(
 ): Promise<boolean> {
     const recipe = await store.getRecipe(householdId, recipeId);
     if (!recipe) return false;
+    assertCanDeleteRecipe(recipe, actor);
+    return store.deleteRecipe(householdId, recipeId);
+}
+
+/** Only the creator or the household owner may delete a recipe. */
+export function assertCanDeleteRecipe(
+    recipe: Pick<Recipe, "creatorId">,
+    actor: { userId: string; isOwner: boolean },
+): void {
     if (recipe.creatorId !== actor.userId && !actor.isOwner) {
         throw new RecipeForbiddenError(
             "Only the creator or household owner can delete this recipe.",
         );
     }
-    return store.deleteRecipe(householdId, recipeId);
 }
 
 export async function updateRecipe(
@@ -1736,7 +1749,11 @@ export async function addRecipeToGrocery(opts: {
                 continue;
             }
             const food = foodsById.get(foodId);
-            const placeholderUnit = food?.defaultUnit || "g";
+            // The amount sits under the "to taste" note: a placeholder 1, in a
+            // unit that is not 1 g of salt.
+            const placeholderUnit = placeholderAmountUnit({
+                defaultUnit: food?.defaultUnit ?? "",
+            });
             const section = suggestGrocerySection({
                 sections: storeSections,
                 allSections,

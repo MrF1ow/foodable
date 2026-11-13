@@ -11,6 +11,7 @@ import {
     getMealById,
     insertMeal,
     mealIdempotencyKey,
+    snapshotToMealItemWrite,
     updateMeal,
 } from "../../db/nutrition.js";
 import { upsertProfile } from "../../db/profiles.js";
@@ -1278,6 +1279,105 @@ describeDb(pgAvailable !== null, "council r3 meal edit", (getCtx) => {
         });
         expect(again.deduplicated).toBe(true);
     });
+    /** Half & Half as OFF hands it over: per 100 ml, no density, default unit left at grams. */
+    async function seedPerMlFood(): Promise<string> {
+        const { sql } = getCtx();
+        const id = crypto.randomUUID();
+        await sql`
+            insert into public.foods (
+                id, household_id, kind, name, normalized_name, default_unit,
+                nutrition_basis, calories, fat_g, allergens
+            )
+            values (
+                ${id}, ${householdId}, ${"food"}, ${"Half & Half"},
+                ${"half & half"}, ${"g"}, ${"100ml"}, ${130}, ${11},
+                ${sql.array([], "text")}
+            )
+        `;
+        return id;
+    }
+
+    /** A meal the old log sheet wrote: 30 g of the per-100 ml food, 39 kcal. */
+    async function insertGramMeal(
+        foodId: string,
+        specs: Parameters<typeof itemListDigest>[0],
+    ) {
+        const { meal } = await insertMeal(userId, {
+            meal_type: "breakfast",
+            logged_at: LOGGED_AT_COUNCIL,
+            description: "30 g Half & Half",
+            calories: 39,
+            fat_g: 3.3,
+            items: [
+                snapshotToMealItemWrite(
+                    {
+                        foodId,
+                        recipeId: null,
+                        label: "Half & Half",
+                        amount: 30,
+                        unit: "g",
+                        grams: 30,
+                        portions: null,
+                        calories: 39,
+                        protein_g: null,
+                        carbs_g: null,
+                        fat_g: 3.3,
+                        fiber_g: null,
+                        sugar_g: null,
+                        alcohol_g: null,
+                        caffeine_mg: null,
+                        sortOrder: 0,
+                    },
+                    householdId,
+                ),
+            ],
+            item_digest: itemListDigest(specs),
+        });
+        return (await getMealById(userId, meal.id))!;
+    }
+
+    function editAmount(mealId: string, itemId: string, amount: string) {
+        return app().request(`http://test/meals/${mealId}/edit`, {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: councilEditBody({
+                meal_type: "breakfast",
+                [`item_amount_${itemId}`]: amount,
+            }),
+        });
+    }
+
+    test("editing the grams of a per-100 ml item rescales what was logged", async () => {
+        const foodId = await seedPerMlFood();
+        const meal = await insertGramMeal(foodId, [
+            { foodId, name: "Half & Half", amount: 30, unit: "g" },
+        ]);
+        const res = await editAmount(meal.id, meal.items![0]!.id, "60");
+        expect(res.status).toBe(303);
+        const after = (await getMealById(userId, meal.id))!;
+        const item = after.items![0]!;
+        expect(item.amount).toBe(60);
+        expect(item.unit).toBe("g");
+        expect(item.calories).toBe(78);
+        expect(item.fat_g).toBe(6.6);
+        expect(after.calories).toBe(78);
+    });
+
+    test("editing a per-100 ml item logged with no unit keeps its stored unit", async () => {
+        const foodId = await seedPerMlFood();
+        // The caller omitted the unit, so the digest (and the auto key) say so.
+        const meal = await insertGramMeal(foodId, [{ foodId, amount: 30 }]);
+        const res = await editAmount(meal.id, meal.items![0]!.id, "60");
+        expect(res.status).toBe(303);
+        const item = (await getMealById(userId, meal.id))!.items![0]!;
+        expect(item.unit).toBe("g");
+        expect(item.amount).toBe(60);
+        expect(item.calories).toBe(78);
+    });
+
     test("hand-edited input on real Postgres is 404 / 200, not a 500", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
         const app = new Hono();

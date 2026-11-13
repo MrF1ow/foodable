@@ -59,14 +59,16 @@ export function runPlansStoreContract(
             const c = ctx();
             const { store, newRecipe } = createHarness();
             const recipeId = await newRecipe();
+            const otherRecipeId = await newRecipe();
             const add = (
                 date: string,
                 slot: "breakfast" | "lunch" | "dinner" | "snack",
                 id?: string,
+                forRecipe = recipeId,
             ) =>
                 store.addPlan({
                     householdId: c.householdId,
-                    recipeId,
+                    recipeId: forRecipe,
                     date,
                     slot,
                     id,
@@ -80,7 +82,8 @@ export function runPlansStoreContract(
             const lunchSun = await add("2026-11-15", "lunch");
             await add("2026-11-08", "dinner");
             await add("2026-11-16", "dinner");
-            // Two dinners in one slot keep the order they were planned in.
+            // Two dinners (of different recipes) in one slot keep the order
+            // they were planned in.
             // The later one has the smaller id, so ordering by id would flip them.
             const firstDinnerWed = await add(
                 "2026-11-11",
@@ -92,6 +95,7 @@ export function runPlansStoreContract(
                 "2026-11-11",
                 "dinner",
                 "00000000-0000-4000-8000-000000000001",
+                otherRecipeId,
             );
 
             const week = await store.listPlans(
@@ -197,6 +201,145 @@ export function runPlansStoreContract(
                     "lunch",
                 ),
             ).toBeNull();
+        });
+
+        test("moving onto the same recipe's day and slot merges the two plans", async () => {
+            await reset();
+            const c = ctx();
+            const { store, newRecipe } = createHarness();
+            const recipeId = await newRecipe();
+            const there = await store.addPlan({
+                householdId: c.householdId,
+                recipeId,
+                date: "2026-11-14",
+                slot: "lunch",
+                servings: 2,
+                createdBy: c.userId,
+            });
+            const moving = await store.addPlan({
+                householdId: c.householdId,
+                recipeId,
+                date: "2026-11-12",
+                slot: "dinner",
+                servings: 3,
+            });
+
+            const merged = await store.movePlan(
+                c.householdId,
+                moving!.id,
+                "2026-11-14",
+                "lunch",
+            );
+            // The plan already there stays and takes the moved plan's servings.
+            expect(merged).toEqual({ ...there!, servings: 5 });
+            expect(await store.getPlan(c.householdId, moving!.id)).toBeNull();
+            expect(
+                await store.listPlans(
+                    c.householdId,
+                    "2026-11-01",
+                    "2026-11-30",
+                ),
+            ).toEqual([merged!]);
+        });
+
+        test("a move that sets servings merges those servings, and the sum is capped", async () => {
+            await reset();
+            const c = ctx();
+            const { store, newRecipe } = createHarness();
+            const recipeId = await newRecipe();
+            const there = await store.addPlan({
+                householdId: c.householdId,
+                recipeId,
+                date: "2026-11-14",
+                slot: "lunch",
+                servings: 990,
+            });
+            const moving = await store.addPlan({
+                householdId: c.householdId,
+                recipeId,
+                date: "2026-11-12",
+                slot: "lunch",
+                servings: 1,
+            });
+            const merged = await store.movePlan(
+                c.householdId,
+                moving!.id,
+                "2026-11-14",
+                "lunch",
+                20,
+            );
+            expect(merged?.id).toBe(there!.id);
+            expect(merged?.servings).toBe(999);
+        });
+
+        test("a move onto another recipe's slot, or with servings, stays two plans", async () => {
+            await reset();
+            const c = ctx();
+            const { store, newRecipe } = createHarness();
+            const soup = await newRecipe();
+            const stew = await newRecipe();
+            await store.addPlan({
+                householdId: c.householdId,
+                recipeId: stew,
+                date: "2026-11-14",
+                slot: "lunch",
+            });
+            const moving = await store.addPlan({
+                householdId: c.householdId,
+                recipeId: soup,
+                date: "2026-11-12",
+                slot: "dinner",
+                servings: 2,
+            });
+            const moved = await store.movePlan(
+                c.householdId,
+                moving!.id,
+                "2026-11-14",
+                "lunch",
+                6,
+            );
+            expect(moved).toEqual({
+                ...moving!,
+                date: "2026-11-14",
+                slot: "lunch",
+                servings: 6,
+            });
+            expect(
+                await store.listPlans(
+                    c.householdId,
+                    "2026-11-01",
+                    "2026-11-30",
+                ),
+            ).toHaveLength(2);
+        });
+
+        test("adding a recipe already planned there returns that plan", async () => {
+            await reset();
+            const c = ctx();
+            const { store, newRecipe } = createHarness();
+            const recipeId = await newRecipe();
+            const first = await store.addPlan({
+                householdId: c.householdId,
+                recipeId,
+                date: "2026-11-12",
+                slot: "dinner",
+                servings: 2,
+            });
+            const again = await store.addPlan({
+                householdId: c.householdId,
+                recipeId,
+                date: "2026-11-12",
+                slot: "dinner",
+                servings: 7,
+            });
+            expect(again).toEqual(first!);
+            expect(
+                await store.listPlans(
+                    c.householdId,
+                    "2026-11-12",
+                    "2026-11-12",
+                ),
+            ).toEqual([first!]);
         });
 
         test("servings can change to a fraction, and stay above zero", async () => {

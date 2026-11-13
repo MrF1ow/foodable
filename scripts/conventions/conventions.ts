@@ -449,6 +449,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "public/app/v2/trends.css": "web",
     "src/web/pages/v2/recipes-page.ts": "web",
     "src/web/pages/v2/recipes-page.test.ts": "web",
+    "src/web/pages/v2/kitchen-head.ts": "web",
     "src/web/pages/v2/kitchen-fridge.ts": "fridge",
     "src/web/pages/v2/kitchen-fridge.test.ts": "fridge",
     "src/web/pages/v2/kitchen-overview.ts": "fridge",
@@ -457,6 +458,10 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/v2/kitchen-groceries.test.ts": "grocery",
     "src/web/pages/v2/kitchen-usuals.ts": "web",
     "src/web/pages/v2/kitchen-usuals.test.ts": "web",
+    // Select several rows, act once: the bulk twins of the single-row actions.
+    "src/domain/bulk.ts": "web",
+    "src/web/routes/bulk.ts": "web",
+    "src/web/pages/v2/select-mode.ts": "web",
     "src/web/routes/grocery.test.ts": "grocery",
     "src/web/routes/fridge.test.ts": "fridge",
     "src/web/client/v2/kitchen.js": "web",

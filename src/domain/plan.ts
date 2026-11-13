@@ -40,12 +40,20 @@ export type PlansStore = {
         from: string,
         to: string,
     ): Promise<RecipePlan[]>;
-    /** Null when the household has no such plan. */
+    /**
+     * Moves a plan to another day and slot, optionally setting its servings.
+     * When the same recipe is already planned there, the two become one: the
+     * plan already there stays (its id and who made it), takes this plan's
+     * servings on top of its own (capped at `PLAN_SERVINGS_MAX`), and the moved
+     * plan is gone, so the returned plan's id is then not `id`. Null when the
+     * household has no such plan.
+     */
     movePlan(
         householdId: string,
         id: string,
         date: string,
         slot: PlanSlot,
+        servings?: number,
     ): Promise<RecipePlan | null>;
     /** Null when the household has no such plan. */
     updatePlanServings(
@@ -208,6 +216,29 @@ export function createMemoryPlansStore(
         return plans.find((p) => p.householdId === householdId && p.id === id);
     }
 
+    function findSame(
+        householdId: string,
+        recipeId: string,
+        date: string,
+        slot: PlanSlot,
+        exceptId?: string,
+    ): RecipePlan | undefined {
+        return plans
+            .filter(
+                (p) =>
+                    p.householdId === householdId &&
+                    p.recipeId === recipeId &&
+                    p.date === date &&
+                    p.slot === slot &&
+                    p.id !== exceptId,
+            )
+            .sort(
+                (a, b) =>
+                    a.createdAt.localeCompare(b.createdAt) ||
+                    a.id.localeCompare(b.id),
+            )[0];
+    }
+
     return {
         async addPlan(input) {
             const date = checkPlanDate(input.date);
@@ -219,6 +250,14 @@ export function createMemoryPlansStore(
             ) {
                 return null;
             }
+            // One plan per recipe, day and slot: planning it again is that plan.
+            const planned = findSame(
+                input.householdId,
+                input.recipeId,
+                date,
+                slot,
+            );
+            if (planned) return { ...planned };
             const saved: RecipePlan = {
                 id: input.id ?? crypto.randomUUID(),
                 householdId: input.householdId,
@@ -255,13 +294,34 @@ export function createMemoryPlansStore(
                 )
                 .map((p) => ({ ...p }));
         },
-        async movePlan(householdId, id, date, slot) {
+        async movePlan(householdId, id, date, slot, servings) {
             const nextDate = checkPlanDate(date);
             const nextSlot = checkPlanSlot(slot);
+            const nextServings =
+                servings === undefined
+                    ? undefined
+                    : checkPlanServings(servings);
             const row = find(householdId, id);
             if (!row) return null;
+            const incoming = nextServings ?? row.servings;
+            const same = findSame(
+                householdId,
+                row.recipeId,
+                nextDate,
+                nextSlot,
+                row.id,
+            );
+            if (same) {
+                same.servings = Math.min(
+                    same.servings + incoming,
+                    PLAN_SERVINGS_MAX,
+                );
+                plans.splice(plans.indexOf(row), 1);
+                return { ...same };
+            }
             row.date = nextDate;
             row.slot = nextSlot;
+            row.servings = incoming;
             return { ...row };
         },
         async updatePlanServings(householdId, id, servings) {

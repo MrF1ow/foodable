@@ -627,9 +627,9 @@ describe("editing nutrition resets the basis", () => {
 });
 
 describe("the basis labels the per-100 columns and does not change logging", () => {
-    // Meals read the per-100 columns per 100 g, as they did before the basis
-    // was stored: a liquid logged by weight scales the same figures.
-    test("an OFF liquid whose basis becomes 100 ml logs 250 g as before", async () => {
+    // A per-100 ml food scales by ml. Grams turn into ml only through the
+    // food's own density; none is guessed.
+    test("an OFF liquid whose basis becomes 100 ml logs 250 ml like 250 g before", async () => {
         const base = {
             householdId: HH,
             kind: "food" as const,
@@ -664,15 +664,41 @@ describe("the basis labels the per-100 columns and does not change logging", () 
         expect(patch?.nutritionBasis).toBe("100ml");
         const after = { ...before, nutritionBasis: patch!.nutritionBasis! };
         const mealAfter = buildMealFromItems(
-            [{ foodId: after.id, amount: 250, unit: "g" }],
+            [{ foodId: after.id, amount: 250, unit: "ml" }],
             new Map([[after.id, after]]),
         );
         expect(mealBefore.totals.calories).toBe(105);
         expect(mealAfter.totals).toEqual(mealBefore.totals);
         expect(mealAfter.items[0]?.calories).toBe(105);
+        // By weight, with no density, the ml are unknown rather than guessed.
+        const byWeight = buildMealFromItems(
+            [{ foodId: after.id, amount: 250, unit: "g" }],
+            new Map([[after.id, after]]),
+        );
+        expect(byWeight.items[0]?.unknown).toBe(true);
+        expect(byWeight.items[0]?.calories).toBeNull();
     });
 
-    test("a new OFF liquid logged by weight has nutrition, not unknown", async () => {
+    test("a per-100 ml food logged by weight scales through its own density", () => {
+        const oil = {
+            ...newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Oil",
+                calories: 800,
+                gramsPerMl: 0.92,
+            }),
+            nutritionBasis: "100ml" as const,
+        };
+        const meal = buildMealFromItems(
+            [{ foodId: oil.id, amount: 92, unit: "g" }],
+            new Map([[oil.id, oil]]),
+        );
+        // 92 g at 0.92 g/ml is 100 ml, not 92.
+        expect(meal.items[0]?.calories).toBe(800);
+    });
+
+    test("a new OFF liquid logged in ml has nutrition, not unknown", async () => {
         const store = createMemoryFoodsStore();
         const { food } = await findOrCreateFoodByBarcodeFromHit(
             store,
@@ -682,7 +708,7 @@ describe("the basis labels the per-100 columns and does not change logging", () 
         );
         expect(food.nutritionBasis).toBe("100ml");
         const meal = buildMealFromItems(
-            [{ foodId: food.id, amount: 250, unit: "g" }],
+            [{ foodId: food.id, amount: 250, unit: "ml" }],
             new Map([[food.id, food]]),
         );
         // 133.3 per 100 x 250 / 100.

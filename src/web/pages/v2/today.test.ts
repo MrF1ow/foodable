@@ -179,6 +179,22 @@ describe("renderTodayV2Page", () => {
         expect(body).toContain('data-fd-dot="empty"');
     });
 
+    test("the selected day shows no dot; every other day does", () => {
+        const body = String(renderTodayBody(data));
+        const days = [
+            ...body.matchAll(
+                /<a class="fd-today-week__day[^"]*"[^>]*>[\s\S]*?<\/a>/g,
+            ),
+        ].map((m) => m[0]);
+        expect(days.length).toBe(7);
+        const selected = days.filter((d) => d.includes('aria-current="date"'));
+        expect(selected.length).toBe(1);
+        expect(selected[0]).not.toContain("fd-today-week__dot");
+        for (const d of days.filter((d) => !selected.includes(d))) {
+            expect(d).toContain("fd-today-week__dot");
+        }
+    });
+
     test("null macros render as em dash", () => {
         const view = buildPreviewTodayView(today);
         const meal: Meal = {
@@ -763,6 +779,27 @@ describe("Use soon recipe lines", () => {
         );
         expect(rail).not.toContain("Plan");
     });
+
+    test("with the week plan on, Plan sits beside Cook it and opens the recipe's plan sheet", () => {
+        const view = buildPreviewTodayViewWithSuggestions(today);
+        const base = buildPreviewTodayPageData(chrome, today);
+        const rail = String(
+            renderTodayRail({
+                ...base,
+                plan: {
+                    today,
+                    days: [],
+                    plannedCount: 0,
+                    missing: [],
+                },
+                view,
+            }),
+        );
+        expect(rail).toContain(
+            '<a class="fd-today-useall__plan" href="/recipes/r-salmon-rice?plan=1">Plan</a>',
+        );
+        expect(rail.indexOf("Cook it")).toBeLessThan(rail.indexOf(">Plan<"));
+    });
 });
 
 describe("today edit sheet Again", () => {
@@ -779,6 +816,14 @@ describe("today edit sheet Again", () => {
         data.openEditMealId = "m3";
         const html = renderTodayV2Page(data);
         expect(html).toContain('action="/meals/m3/again"');
+        // Each rendered Again form carries its own submit key.
+        const keys = [
+            ...html.matchAll(
+                /\/meals\/m3\/again"[^]*?name="submit_key" value="([^"]+)"/g,
+            ),
+        ].map((m) => m[1]);
+        expect(keys.length).toBeGreaterThan(0);
+        expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
         expect(html).toContain("fd-btn--accent");
         expect(html).toMatch(/Again<\/span><\/button>/);
     });

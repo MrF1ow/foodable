@@ -231,6 +231,27 @@ describe("renderKitchenUsualsV2Page", () => {
         expect(kitchenTab).toMatch(/aria-current="page"[^>]*>Usuals/);
     });
 
+    test("select mode: every usual has a checkbox, with a confirmed Remove", () => {
+        const body = renderKitchenUsualsBody(baseView() as never);
+        expect(body).toContain(
+            'class="fd-kitchen-usuals-page" data-fd-select="usuals"',
+        );
+        expect(body).toContain('data-fd-select-toggle="usuals"');
+        expect(body).toMatch(
+            /<input type="checkbox" class="fd-row__select-input" data-fd-select-item name="ids\[\]" value="[^"]+" aria-label="Select [^"]+">/,
+        );
+        expect(body).toContain('action="/kitchen/usuals/bulk/remove"');
+        expect(body).toContain('data-one="Remove 1 usual from the list?"');
+        expect(body).toContain('data-many="Remove {n} usuals from the list?"');
+    });
+
+    test("select mode: an empty list has no Select", () => {
+        const body = renderKitchenUsualsBody(
+            baseView({ rows: [], rowMeta: new Map() }) as never,
+        );
+        expect(body).not.toContain("data-fd-select-toggle");
+    });
+
     test("renders intro, add control, and escaping in names", () => {
         const nasty = baseView({
             rows: [
@@ -476,6 +497,14 @@ describe("header subtitle", () => {
         expect(restockWeekdayLabel(0)).toBe("Sundays");
         expect(restockWeekdayLabel(6)).toBe("Saturdays");
         expect(restockWeekdayLabel(9)).toBeNull();
+    });
+});
+
+describe("page header", () => {
+    test("is the same as on Fridge and Groceries", () => {
+        expect(renderKitchenUsualsBody(baseView())).toMatch(
+            /^<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">[^<]+<\/span><\/h1>\n<header class="fd-kitchen-overview-head">\n<div class="fd-kitchen-overview-head__title">\n<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--phone">[^<]+<\/span><span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--desktop">[^<]+<\/span><\/h1>\n<\/div>\n<div class="fd-kitchen-overview-head__tools">\n<nav class="fd-seg fd-kitchen-overview-seg" aria-label="Kitchen sections">/,
+        );
     });
 });
 
