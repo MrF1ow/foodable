@@ -491,6 +491,19 @@ function sessionCookie(userId: string): string {
 
 const searchUrl = "http://x/api/log/search";
 
+/** 40 kcal in a 30 ml serving: 133.3 kcal per 100 ml, as OFF reports a liquid. */
+function halfAndHalf() {
+    return newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Half & Half",
+        calories: (40 / 30) * 100,
+        fatG: 10,
+        nutritionBasis: "100ml",
+        serving: { label: "1 tbsp (30 ml)", amount: 30, unit: "ml" },
+    });
+}
+
 type Body = {
     groups: Array<{
         kind: string;
@@ -637,6 +650,46 @@ describe("GET /api/log/search", () => {
         expect(listFoodsCalls).toBe(1);
         expect(listRecipesCalls).toBe(1);
         expect(listFridgeItemsCalls).toBe(1);
+    });
+
+    test("a per-100 ml food with a pack serving leads with portion and ml", async () => {
+        await db.foodsStore.insertFood(halfAndHalf());
+        const body = await search("half");
+        const item = body.groups
+            .find((g) => g.kind === "food")
+            ?.items.find((i) => i.name === "Half & Half");
+        expect(item?.unit_hints).toEqual(["portion", "ml"]);
+        expect(item?.basis).toBe("100ml");
+        expect(item?.serving).toEqual({
+            label: "1 tbsp (30 ml)",
+            amount: 30,
+            unit: "ml",
+        });
+    });
+
+    test("a per-100 g food without a serving keeps grams as its only unit", async () => {
+        const body = await search("egg");
+        const egg = body.groups
+            .find((g) => g.kind === "food")
+            ?.items.find((i) => i.name === "Egg");
+        expect(egg?.unit_hints).toEqual(["g"]);
+        expect(egg?.serving).toBeUndefined();
+        expect(egg?.basis).toBeUndefined();
+    });
+
+    test("a per-100 g food with a serving in g defaults to the serving", async () => {
+        await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Granola",
+                calories: 450,
+                serving: { label: "1/2 cup (45 g)", amount: 45, unit: "g" },
+            }),
+        );
+        const body = await search("granola");
+        const item = body.groups.find((g) => g.kind === "food")?.items[0];
+        expect(item?.unit_hints).toEqual(["portion", "g"]);
     });
 
     test("already-saved barcode is omitted from OFF results", async () => {
@@ -1097,6 +1150,87 @@ describe("POST /log", () => {
             amount: "50",
             unit: "g",
             meal_type: "brunch",
+            logged_at: "2026-11-01T12:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(400);
+        expect(mealsInserted).toHaveLength(0);
+    });
+
+    test("a per-100 ml food logs in ml and snapshots the amount, unit and totals", async () => {
+        const food = await db.foodsStore.insertFood(halfAndHalf());
+        const { body, headers } = logForm({
+            food_id: food.id,
+            amount: "30",
+            unit: "ml",
+            meal_type: "breakfast",
+            logged_at: "2026-11-01T08:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(mealsInserted).toHaveLength(1);
+        expect(mealsInserted[0]!.calories).toBe(40);
+        const items = mealsInserted[0]!.items as Array<Record<string, unknown>>;
+        expect(items[0]!.amount).toBe(30);
+        expect(items[0]!.unit).toBe("ml");
+        expect(items[0]!.calories).toBe(40);
+        // No density is stored, and none is guessed.
+        expect(items[0]!.grams).toBeNull();
+    });
+
+    test("one portion of a food with a pack serving logs the serving in its own unit", async () => {
+        const food = await db.foodsStore.insertFood(halfAndHalf());
+        const { body, headers } = logForm({
+            food_id: food.id,
+            amount: "1",
+            unit: "portion",
+            meal_type: "breakfast",
+            logged_at: "2026-11-01T08:00",
+        });
+        const res = await app.request(logPostUrl, {
+            method: "POST",
+            headers,
+            body,
+        });
+        expect(res.status).toBe(303);
+        expect(mealsInserted[0]!.calories).toBe(40);
+        const items = mealsInserted[0]!.items as Array<Record<string, unknown>>;
+        expect(items[0]!.amount).toBe(30);
+        expect(items[0]!.unit).toBe("ml");
+    });
+
+    test("two portions double the serving", async () => {
+        const food = await db.foodsStore.insertFood(halfAndHalf());
+        const { body, headers } = logForm({
+            food_id: food.id,
+            amount: "2",
+            unit: "portion",
+            meal_type: "breakfast",
+            logged_at: "2026-11-01T08:00",
+        });
+        await app.request(logPostUrl, { method: "POST", headers, body });
+        expect(mealsInserted[0]!.calories).toBe(80);
+        const items = mealsInserted[0]!.items as Array<Record<string, unknown>>;
+        expect(items[0]!.amount).toBe(60);
+    });
+
+    test("a portion of a food with no pack serving is refused", async () => {
+        const egg = (await db.foodsStore.listFoods(HH)).find(
+            (row) => row.name === "Egg",
+        )!;
+        const { body, headers } = logForm({
+            food_id: egg.id,
+            amount: "1",
+            unit: "portion",
+            meal_type: "lunch",
             logged_at: "2026-11-01T12:00",
         });
         const res = await app.request(logPostUrl, {

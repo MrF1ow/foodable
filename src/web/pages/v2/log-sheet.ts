@@ -10,6 +10,9 @@ import {
     formatLogMacroGrams,
     formatLogMacroKcal,
     macrosForLogItem,
+    portionLabel,
+    type LogBasis,
+    type LogServing,
 } from "../../../domain/log-macro-format.js";
 import { fdIcon } from "../../components/fd-icons.js";
 import { choiceGroup } from "../../components/v2/chips.js";
@@ -82,6 +85,10 @@ export type LogAmountPrefill = {
     fat_per_100g?: number | null;
     grams_per_ml?: number | null;
     grams_per_each?: number | null;
+    /** What the per-100 columns are per; null or missing is 100 g. */
+    basis?: LogBasis | null;
+    /** The pack serving: one portion of this food. */
+    serving?: LogServing | null;
     brand?: string | null;
     source?: string | null;
 };
@@ -525,13 +532,14 @@ function amountSubtitle(prefill: LogAmountPrefill | undefined): string {
     }
     const brand = prefill.brand?.trim();
     const kcal = prefill.kcal_per_100g;
+    const per = prefill.basis === "100ml" ? "100 ml" : "100 g";
     if (brand) {
         return kcal != null
-            ? `${brand} · ${Math.round(kcal)} kcal per 100 g`
+            ? `${brand} · ${Math.round(kcal)} kcal per ${per}`
             : brand;
     }
     return kcal != null
-        ? `Generic · ${Math.round(kcal)} kcal per 100 g`
+        ? `Generic · ${Math.round(kcal)} kcal per ${per}`
         : "Generic";
 }
 
@@ -556,6 +564,8 @@ function macroTilesForAmount(
                   fat_per_100g: prefill.fat_per_100g,
                   grams_per_ml: prefill.grams_per_ml,
                   grams_per_each: prefill.grams_per_each,
+                  basis: prefill.basis,
+                  serving: prefill.serving,
               }
         : null;
     const m = macroItem ? macrosForLogItem(macroItem, amount, unit) : null;
@@ -667,6 +677,19 @@ function unitChoiceHtml(
         );
 }
 
+/**
+ * "1 portion · 30 ml": what the amount is in the pack serving's own unit.
+ * Always rendered (empty), so the client can fill it when a food is picked.
+ */
+function portionEchoHtml(
+    serving: LogServing | null,
+    amount: number,
+    unit: string,
+): string {
+    const shown = serving != null && unit === "portion" && amount > 0;
+    return `<p class="fd-log-portion" data-fd-log-portion${shown ? "" : " hidden"}>${shown ? escapeHtml(portionLabel(serving, amount)) : ""}</p>`;
+}
+
 function logAmountSheet(opts: RenderLogSheetsOpts): string {
     const prefill = opts.amount;
     const tz = opts.timezone;
@@ -677,6 +700,8 @@ function logAmountSheet(opts: RenderLogSheetsOpts): string {
                 {
                     grams_per_each: prefill.grams_per_each ?? null,
                     grams_per_ml: prefill.grams_per_ml ?? null,
+                    basis: prefill.basis ?? null,
+                    serving: prefill.serving ?? null,
                 },
                 { recipe: !!prefill.recipe_id },
             )
@@ -723,6 +748,7 @@ ${stepper({
     id: "fd-log-amount-value",
     className: "fd-log-stepper",
 }).toString()}
+${portionEchoHtml(prefill?.serving ?? null, amount, unit)}
 ${unitChoiceHtml(hints, unit, { empty: !prefill })}
 <div data-fd-log-macros>${tiles}</div>
 ${mealChoiceHtml("meal_type", meal, "fd-log-meals")}
@@ -770,6 +796,8 @@ export function logAmountUnitChips(
     factors: {
         grams_per_each?: number | null;
         grams_per_ml?: number | null;
+        basis?: LogBasis | null;
+        serving?: LogServing | null;
     },
     recipe: boolean,
 ): string[] {

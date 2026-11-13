@@ -79,6 +79,89 @@ describe("renderLogSheets", () => {
         expect(html).not.toContain(">Cancel</button>");
     });
 
+    test("a food with a pack serving defaults to 1 portion · 30 ml with its kcal", () => {
+        // 40 kcal in a 30 ml serving is 133.3 kcal per 100 ml.
+        const kcalPer100 = (40 / 30) * 100;
+        const serving = {
+            label: "1 tbsp (30 ml)",
+            amount: 30,
+            unit: "ml" as const,
+        };
+        const html = renderLogSheets({
+            timezone: "UTC",
+            amount: {
+                name: "Half & Half",
+                food_id: "f-hh",
+                brand: "Member's Mark",
+                basis: "100ml",
+                serving,
+                kcal_per_100g: kcalPer100,
+                unit_hints: logAmountUnitChips(
+                    { basis: "100ml", serving },
+                    false,
+                ),
+            },
+        });
+        const amountInput = html.match(/id="fd-log-amount-value"[^>]*>/)?.[0];
+        expect(amountInput).toContain('value="1"');
+        expect(html).toMatch(/value="portion"[^>]*checked/);
+        expect(html).toMatch(/data-fd-log-portion>1 portion · 30 ml</);
+        expect(html).toContain("per 100 ml");
+        expect(html).not.toContain("per 100 g");
+        // The kcal tile: one 30 ml portion is 40 kcal.
+        expect(html).toMatch(/kcal<\/dt><dd class="fd-tile__value">40</);
+    });
+
+    test("a per-100 ml food without a serving defaults to 100 ml", () => {
+        const html = renderLogSheets({
+            timezone: "UTC",
+            amount: {
+                name: "Oat drink",
+                food_id: "f-oat",
+                basis: "100ml",
+                unit_hints: logAmountUnitChips({ basis: "100ml" }, false),
+            },
+        });
+        const amountInput = html.match(/id="fd-log-amount-value"[^>]*>/)?.[0];
+        expect(amountInput).toContain('value="100"');
+        expect(html).toMatch(/value="ml"[^>]*checked/);
+        expect(html).toMatch(/data-fd-log-portion hidden>/);
+    });
+
+    test("a per-100 g food without a serving keeps its 100 g default", () => {
+        const html = renderLogSheets({
+            timezone: "UTC",
+            amount: {
+                name: "Rice",
+                food_id: "f-rice",
+                unit_hints: logAmountUnitChips({}, false),
+            },
+        });
+        expect(html).toContain('value="100"');
+        expect(html).toMatch(/value="g"[^>]*checked/);
+        expect(html).toMatch(/data-fd-log-portion hidden>/);
+    });
+
+    test("a per-100 g food with a serving in g defaults to 1 portion", () => {
+        const serving = {
+            label: "1/4 cup (30 g)",
+            amount: 30,
+            unit: "g" as const,
+        };
+        const html = renderLogSheets({
+            timezone: "UTC",
+            amount: {
+                name: "Flour",
+                food_id: "f-flour",
+                kcal_per_100g: 364,
+                serving,
+                unit_hints: logAmountUnitChips({ serving }, false),
+            },
+        });
+        expect(html).toMatch(/value="portion"[^>]*checked/);
+        expect(html).toMatch(/data-fd-log-portion>1 portion · 30 g</);
+    });
+
     test("recipe amount sheet is portion-only", () => {
         const html = renderLogSheets({
             timezone: "UTC",

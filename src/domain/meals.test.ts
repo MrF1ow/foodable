@@ -836,3 +836,79 @@ test("unknown food or recipe ids fail closed", () => {
         ),
     ).toThrow(MealItemsError);
 });
+
+/** The columns are per 100 ml, as OFF reports a liquid (updateFood has no basis field). */
+async function perMl(
+    foods: ReturnType<typeof createMemoryFoodsStore>,
+    food: Food,
+    serving: Food["serving"],
+): Promise<Food> {
+    const saved = await foods.updateFoodRow({
+        ...food,
+        nutritionBasis: "100ml",
+        serving,
+    });
+    return saved!;
+}
+
+test("a per-100 ml food logged in ml scales by the amount, with no density", async () => {
+    const foods = createMemoryFoodsStore();
+    // 40 kcal in a 30 ml serving is 133.3 kcal per 100 ml.
+    const halfAndHalf = await perMl(
+        foods,
+        await catalogFood(foods, "Half & Half", {
+            calories: (40 / 30) * 100,
+            fatG: 10,
+        }),
+        { label: "1 tbsp (30 ml)", amount: 30, unit: "ml" },
+    );
+    const built = buildMealFromItems(
+        [{ foodId: halfAndHalf.id, amount: 30, unit: "ml" }],
+        new Map([[halfAndHalf.id, halfAndHalf]]),
+    );
+    const item = built.items[0]!;
+    expect(item.calories).toBe(40);
+    expect(item.fat_g).toBe(3);
+    expect(item.amount).toBe(30);
+    expect(item.unit).toBe("ml");
+    // No density, so no grams were guessed.
+    expect(item.grams).toBeNull();
+    expect(item.unknown).toBe(false);
+    expect(built.totals.calories).toBe(40);
+    expect(built.unknownItems).toEqual([]);
+});
+
+test("a per-100 ml food with a density still scales by ml, not by guessed grams", async () => {
+    const foods = createMemoryFoodsStore();
+    const cream = await perMl(
+        foods,
+        await catalogFood(foods, "Cream", { calories: 200, gramsPerMl: 1.2 }),
+        null,
+    );
+    const built = buildMealFromItems(
+        [{ foodId: cream.id, amount: 50, unit: "ml" }],
+        new Map([[cream.id, cream]]),
+    );
+    expect(built.items[0]!.calories).toBe(100);
+    expect(built.items[0]!.grams).toBe(60);
+});
+
+test("a per-100 g food in ml still needs a density", async () => {
+    const foods = createMemoryFoodsStore();
+    const honey = await catalogFood(foods, "Honey", {
+        calories: 300,
+        gramsPerMl: 1.4,
+    });
+    const noDensity = await catalogFood(foods, "Syrup", { calories: 300 });
+    const byDensity = buildMealFromItems(
+        [{ foodId: honey.id, amount: 10, unit: "ml" }],
+        new Map([[honey.id, honey]]),
+    );
+    expect(byDensity.items[0]!.calories).toBe(42);
+    const unknown = buildMealFromItems(
+        [{ foodId: noDensity.id, amount: 10, unit: "ml" }],
+        new Map([[noDensity.id, noDensity]]),
+    );
+    expect(unknown.items[0]!.unknown).toBe(true);
+    expect(unknown.items[0]!.calories).toBeNull();
+});

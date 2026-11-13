@@ -60,6 +60,34 @@ export function toGrams(
     return roundAmount(quantity.amount * gramsPerEach);
 }
 
+/**
+ * The amount a food's per-100 nutrition scales by. For a food whose columns
+ * are per 100 ml that is millilitres: a volume is that many ml directly, and
+ * a mass or count turns into ml only through the food's own `gramsPerMl`
+ * (grams ÷ density), never a guessed 1 g = 1 ml. Everything else scales by
+ * grams, as `toGrams` resolves them. Null when a factor is missing.
+ */
+export function nutritionScaleAmount(
+    quantity: { amount: number; unit: string },
+    food:
+        | (FoodQuantityFactors & { nutritionBasis?: "100g" | "100ml" | null })
+        | null
+        | undefined,
+): number | null {
+    if (food?.nutritionBasis !== "100ml") return toGrams(quantity, food);
+    if (!Number.isFinite(quantity.amount)) return null;
+    if (!isQuantityUnit(quantity.unit)) return null;
+    if (dimensionOf(quantity.unit) === "volume") {
+        return roundAmount(
+            convertQuantity(asQuantity(quantity, quantity.unit), "ml").amount,
+        );
+    }
+    const grams = toGrams(quantity, food);
+    const density = food.gramsPerMl;
+    if (grams == null || density == null || !(density > 0)) return null;
+    return roundAmount(grams / density);
+}
+
 /** Convert grams back into `unit` when that unit can be resolved for `food`. */
 export function fromGrams(
     grams: number,

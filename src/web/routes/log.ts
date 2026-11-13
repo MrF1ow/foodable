@@ -17,6 +17,7 @@ import { checkWebSearchRateLimit } from "../../rate-limit.js";
 import {
     catalogNutritionFromOff,
     matchFoodsByWords,
+    servingFromOff,
 } from "../../domain/foods.js";
 import type { Food, FoodsStore } from "../../domain/foods.js";
 import { listFridge } from "../../domain/fridge.js";
@@ -42,8 +43,9 @@ import {
     MealItemsError,
     type MealItemSpec,
 } from "../../domain/meals.js";
-import { toGrams } from "../../domain/food-quantity.js";
-import { unitHintsForLog } from "../../domain/log-search.js";
+import { nutritionScaleAmount } from "../../domain/food-quantity.js";
+import { resolvePortion } from "../../domain/log-macro-format.js";
+import { foodLogFactors, unitHintsForLog } from "../../domain/log-search.js";
 import {
     foodDisplayScore,
     offHitDisplayScore,
@@ -146,8 +148,7 @@ function historyItemFromMeal(
             food_id: line.food_id,
             amount: line.amount,
             unit: line.unit,
-            grams_per_each: food?.gramsPerEach ?? null,
-            grams_per_ml: food?.gramsPerMl ?? null,
+            ...foodLogFactors(food),
             kcal_per_100g: food?.calories ?? null,
             protein_per_100g: food?.proteinG ?? null,
             carbs_per_100g: food?.carbsG ?? null,
@@ -231,6 +232,11 @@ function offToSource(
         brand: hit.brand,
         barcode: hit.barcode,
         source: hit.source,
+        // Only fresh hits carry per-100 values and say what they are per.
+        ...(hit.per_100 != null && hit.nutrition_basis === "100ml"
+            ? { basis: "100ml" as const }
+            : {}),
+        ...(servingFromOff(hit) ? { serving: servingFromOff(hit)! } : {}),
         kcal_per_100g: per100.calories,
         protein_per_100g: per100.proteinG,
         carbs_per_100g: per100.carbsG,
@@ -280,8 +286,7 @@ function foodToSource(row: Food, weights: ScoreWeights): LogSearchSourceItem {
         food_id: row.id,
         brand: row.brand,
         source: "household",
-        grams_per_each: row.gramsPerEach,
-        grams_per_ml: row.gramsPerMl,
+        ...foodLogFactors(row),
         kcal_per_100g: row.calories,
         protein_per_100g: row.proteinG,
         carbs_per_100g: row.carbsG,
@@ -376,8 +381,7 @@ export async function buildLogSearchSources(input: {
             food_id: item.foodId,
             brand: foodRow?.brand ?? null,
             source: "fridge",
-            grams_per_each: foodRow?.gramsPerEach ?? null,
-            grams_per_ml: foodRow?.gramsPerMl ?? null,
+            ...foodLogFactors(foodRow),
             kcal_per_100g: foodRow?.calories ?? null,
             protein_per_100g: foodRow?.proteinG ?? null,
             carbs_per_100g: foodRow?.carbsG ?? null,
@@ -554,16 +558,15 @@ async function enrichAmountPrefill(
             return {
                 ...prefill,
                 name: food.name,
-                unit_hints: unitHintsForLog({
-                    grams_per_each: food.gramsPerEach,
-                    grams_per_ml: food.gramsPerMl,
-                }),
+                unit_hints: unitHintsForLog(foodLogFactors(food)),
                 kcal_per_100g: food.calories,
                 protein_per_100g: food.proteinG,
                 carbs_per_100g: food.carbsG,
                 fat_per_100g: food.fatG,
                 grams_per_ml: food.gramsPerMl,
                 grams_per_each: food.gramsPerEach,
+                basis: food.nutritionBasis === "100ml" ? "100ml" : null,
+                serving: food.serving,
             };
         }
     }
@@ -655,32 +658,26 @@ export async function buildLogWriteItem(input: {
     }
     const foods = await liveFoodsStore().listFoods(input.householdId);
     const food = foods.find((row) => row.id === foodId);
-    const hints = unitHintsForLog(
-        food
-            ? {
-                  grams_per_each: food.gramsPerEach,
-                  grams_per_ml: food.gramsPerMl,
-              }
-            : {},
-    );
+    const hints = unitHintsForLog(foodLogFactors(food));
     if (!hints.includes(unit)) {
         throw new MealItemsError(
             `Unit “${unit}” is not available for this food.`,
         );
     }
-    const grams = toGrams(
-        { amount: input.amount, unit },
-        food
-            ? { gramsPerEach: food.gramsPerEach, gramsPerMl: food.gramsPerMl }
-            : null,
-    );
-    if (grams == null) {
+    // A portion is the pack serving: the meal records its amount and unit.
+    const logged =
+        unit === "portion" && food?.serving
+            ? resolvePortion(food.serving, input.amount)
+            : { amount: input.amount, unit };
+    assertLogAmount(logged.amount, logged.unit);
+    const scale = nutritionScaleAmount(logged, food ?? null);
+    if (scale == null) {
         throw new MealItemsError(
             `Unit “${unit}” is not available for this food.`,
         );
     }
     return {
-        spec: { foodId, amount: input.amount, unit },
+        spec: { foodId, amount: logged.amount, unit: logged.unit },
         name: food?.name ?? "Food",
     };
 }

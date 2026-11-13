@@ -2,6 +2,7 @@ import { test, expect } from "bun:test";
 import {
     fromGrams,
     missingGramsReason,
+    nutritionScaleAmount,
     storedFoodUnit,
     toGrams,
 } from "./food-quantity.js";
@@ -70,4 +71,41 @@ test("storedFoodUnit prefers an explicit unit then the food default", () => {
     expect(storedFoodUnit("each", { defaultUnit: "g" })).toBe("each");
     expect(storedFoodUnit("  ", { defaultUnit: "cup" })).toBe("cup");
     expect(storedFoodUnit(undefined, { defaultUnit: "g" })).toBe("g");
+});
+
+test("per-100 ml scaling: ml is direct, g and each go through grams per ml", () => {
+    const oil = {
+        gramsPerMl: 0.92,
+        gramsPerEach: 46,
+        nutritionBasis: "100ml" as const,
+    };
+    expect(nutritionScaleAmount({ amount: 100, unit: "ml" }, oil)).toBe(100);
+    // 92 g at 0.92 g/ml is 100 ml, not 92.
+    expect(nutritionScaleAmount({ amount: 92, unit: "g" }, oil)).toBe(100);
+    expect(nutritionScaleAmount({ amount: 2, unit: "each" }, oil)).toBe(100);
+    expect(nutritionScaleAmount({ amount: 1, unit: "cup" }, oil)).toBe(240);
+});
+
+test("per-100 ml scaling never assumes 1 g = 1 ml", () => {
+    const noDensity = {
+        gramsPerMl: null,
+        gramsPerEach: 330,
+        nutritionBasis: "100ml" as const,
+    };
+    expect(
+        nutritionScaleAmount({ amount: 100, unit: "g" }, noDensity),
+    ).toBeNull();
+    expect(
+        nutritionScaleAmount({ amount: 1, unit: "each" }, noDensity),
+    ).toBeNull();
+    expect(nutritionScaleAmount({ amount: 250, unit: "ml" }, noDensity)).toBe(
+        250,
+    );
+    // Per 100 g stays grams.
+    expect(
+        nutritionScaleAmount(
+            { amount: 3, unit: "each" },
+            { gramsPerMl: null, gramsPerEach: 50, nutritionBasis: "100g" },
+        ),
+    ).toBe(150);
 });

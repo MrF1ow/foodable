@@ -172,7 +172,8 @@ describe("/app-v2.js", () => {
         // +~0.6 KB Scanner: no bare BarcodeDetector, detach the video, start-up errors shown.
         // +~4.2 KB Sheets: backdrop dismiss by geometry on document, with a touch-tap fallback.
         // +~0.4 KB Again chips: a submit key per rendered form.
-        expect(js.length).toBeLessThan(133_400);
+        // +~3 KB Log sheet: ml basis, pack-serving portion, unit change resets.
+        expect(js.length).toBeLessThan(137_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

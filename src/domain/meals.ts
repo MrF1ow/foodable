@@ -10,7 +10,7 @@ import {
     type Food,
     type FoodsStore,
 } from "./foods.js";
-import { toGrams } from "./food-quantity.js";
+import { nutritionScaleAmount, toGrams } from "./food-quantity.js";
 import {
     macrosForPerson,
     type Recipe,
@@ -110,17 +110,18 @@ function scaleFrom100g(value: number | null, grams: number): number | null {
     return roundAmount(value * (grams / 100));
 }
 
-function nutrientsFromFood(food: Food, grams: number | null): MealNutrients {
-    if (grams == null) return emptyNutrients();
+/** `scale` is grams, or ml for a volume on a per-100 ml food. */
+function nutrientsFromFood(food: Food, scale: number | null): MealNutrients {
+    if (scale == null) return emptyNutrients();
     return {
-        calories: scaleFrom100g(food.calories, grams),
-        protein_g: scaleFrom100g(food.proteinG, grams),
-        carbs_g: scaleFrom100g(food.carbsG, grams),
-        fat_g: scaleFrom100g(food.fatG, grams),
-        fiber_g: scaleFrom100g(food.fiberG, grams),
-        sugar_g: scaleFrom100g(food.sugarG, grams),
-        alcohol_g: scaleFrom100g(food.alcoholG, grams),
-        caffeine_mg: scaleFrom100g(food.caffeineMg, grams),
+        calories: scaleFrom100g(food.calories, scale),
+        protein_g: scaleFrom100g(food.proteinG, scale),
+        carbs_g: scaleFrom100g(food.carbsG, scale),
+        fat_g: scaleFrom100g(food.fatG, scale),
+        fiber_g: scaleFrom100g(food.fiberG, scale),
+        sugar_g: scaleFrom100g(food.sugarG, scale),
+        alcohol_g: scaleFrom100g(food.alcoholG, scale),
+        caffeine_mg: scaleFrom100g(food.caffeineMg, scale),
     };
 }
 
@@ -159,13 +160,15 @@ function snapshotFoodItem(
     const amount = parsePositive(spec.amount, "amount");
     const unit = spec.unit?.trim() || food?.defaultUnit || "g";
     const grams = amount == null ? null : toGrams({ amount, unit }, food);
-    const nutrients = food ? nutrientsFromFood(food, grams) : emptyNutrients();
+    const scale =
+        amount == null ? null : nutritionScaleAmount({ amount, unit }, food);
+    const nutrients = food ? nutrientsFromFood(food, scale) : emptyNutrients();
     const label =
         spec.name?.trim() ||
         food?.name ||
         (amount != null ? `${amount} ${unit}` : "Food");
     const unknown =
-        food == null || grams == null || allNutrientsNull(nutrients);
+        food == null || scale == null || allNutrientsNull(nutrients);
     return {
         foodId: food?.id ?? spec.foodId?.trim() ?? null,
         recipeId: null,

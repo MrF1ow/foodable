@@ -10,6 +10,15 @@ type LogMacroApi = {
         unit: string,
     ) => Record<string, number | null> | null;
     allowedUnits: (item: Record<string, unknown>) => string[];
+    portionLabel: (
+        serving: { amount: number; unit: string },
+        portions: number,
+    ) => string;
+    amountAfterUnitChange: (
+        prev: string | undefined,
+        next: string,
+        current: string,
+    ) => string;
     recentChipHtml: (item: Record<string, unknown>) => string;
     rebuildUnitChips: (
         form: { querySelector: (sel: string) => unknown },
@@ -190,6 +199,66 @@ test("a unit without a factor is not offered", () => {
     });
     expect(hints).toEqual(["g"]);
     expect(api.macrosFor(FOOD, 1, "ml")).toBeNull();
+});
+
+// Half & Half: 40 kcal in a 30 ml serving, so 133.3 kcal per 100 ml.
+const HALF_AND_HALF = {
+    kcal_per_100g: (40 / 30) * 100,
+    basis: "100ml",
+    serving: { label: "1 tbsp (30 ml)", amount: 30, unit: "ml" },
+};
+
+test("ml on a per-100 ml food scales directly, with no density", () => {
+    expect(api.macrosFor(HALF_AND_HALF, 30, "ml")?.kcal).toBe(40);
+    expect(api.macrosFor(HALF_AND_HALF, 100, "ml")?.kcal).toBe(133.3);
+});
+
+test("one portion is the pack serving: 1 portion · 30 ml, 40 kcal", () => {
+    expect(api.macrosFor(HALF_AND_HALF, 1, "portion")?.kcal).toBe(40);
+    expect(api.portionLabel(HALF_AND_HALF.serving, 1)).toBe(
+        "1 portion · 30 ml",
+    );
+});
+
+test("g and each on a per-100 ml food go through its density, never 1 g = 1 ml", () => {
+    const oil = { kcal_per_100g: 800, basis: "100ml", grams_per_ml: 0.92 };
+    // 92 g at 0.92 g/ml is 100 ml.
+    expect(api.macrosFor(oil, 92, "g")?.kcal).toBe(800);
+    expect(api.macrosFor({ ...oil, grams_per_each: 46 }, 2, "each")?.kcal).toBe(
+        800,
+    );
+    // No density: g is not guessed.
+    expect(
+        api.macrosFor({ kcal_per_100g: 42, basis: "100ml" }, 100, "g"),
+    ).toBeNull();
+    expect(
+        api.macrosFor(
+            {
+                kcal_per_100g: 42,
+                basis: "100ml",
+                serving: { label: "x", amount: 250, unit: "g" },
+            },
+            1,
+            "portion",
+        ),
+    ).toBeNull();
+});
+
+test("a pack serving leads the unit chips, and a per-100 ml food offers ml", () => {
+    expect(api.allowedUnits(HALF_AND_HALF)).toEqual(["portion", "ml"]);
+    expect(api.allowedUnits({ basis: "100ml" })).toEqual(["ml"]);
+    expect(api.allowedUnits({ basis: "100ml", grams_per_ml: 0.92 })).toEqual([
+        "ml",
+        "g",
+    ]);
+    expect(api.allowedUnits({ serving: { amount: 45, unit: "g" } })).toEqual([
+        "portion",
+        "g",
+    ]);
+    // A serving in ml needs a density on a per-100 g food.
+    expect(api.allowedUnits({ serving: { amount: 30, unit: "ml" } })).toEqual([
+        "g",
+    ]);
 });
 
 test("recipe pick exposes portion unit only", () => {
@@ -442,4 +511,15 @@ test("rebuildUnitChips creates only allowed unit radios", () => {
     api.rebuildUnitChips(form, ["g", "ml"], "ml");
     expect(fieldset.innerHTML).toContain('value="g"');
     expect(fieldset.innerHTML).toContain('value="ml" checked');
+});
+
+test("switching from or to portion resets the amount, between g and ml it stays", () => {
+    // 1 portion must not become 1 ml.
+    expect(api.amountAfterUnitChange("portion", "ml", "1")).toBe("100");
+    expect(api.amountAfterUnitChange("ml", "portion", "250")).toBe("1");
+    expect(api.amountAfterUnitChange("portion", "g", "2")).toBe("100");
+    expect(api.amountAfterUnitChange("ml", "g", "250")).toBe("250");
+    expect(api.amountAfterUnitChange("g", "ml", "250")).toBe("250");
+    expect(api.amountAfterUnitChange(undefined, "ml", "30")).toBe("30");
+    expect(api.amountAfterUnitChange("ml", "ml", "30")).toBe("30");
 });

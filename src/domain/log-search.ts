@@ -1,4 +1,5 @@
-import { matchFoodsByWords } from "./foods.js";
+import { matchFoodsByWords, type Food } from "./foods.js";
+import type { LogBasis, LogServing } from "./log-macro-format.js";
 
 export type LogSearchGroupKind =
     "food" | "recipe" | "history" | "stock" | "off";
@@ -22,6 +23,10 @@ export type LogSearchSourceItem = {
     protein_per_100g?: number | null;
     carbs_per_100g?: number | null;
     fat_per_100g?: number | null;
+    /** What the per-100 columns are per; null or missing is 100 g. */
+    basis?: LogBasis | null;
+    /** The pack serving, when the food lists one. */
+    serving?: LogServing | null;
     /** Per-portion macros for recipes. */
     kcal_per_portion?: number | null;
     protein_g_per_portion?: number | null;
@@ -61,6 +66,8 @@ export type LogSearchResultItem = {
     fat_per_100g?: number | null;
     grams_per_ml?: number | null;
     grams_per_each?: number | null;
+    basis?: LogBasis | null;
+    serving?: LogServing | null;
     /** Per-portion macros for recipes (and history meal totals in kcal). */
     kcal?: number | null;
     protein_g?: number | null;
@@ -125,20 +132,64 @@ export function recentHistoryStart(today: string, days: number): string {
     return d.toISOString().slice(0, 10);
 }
 
+type LogFactorsFood = Pick<
+    Food,
+    "gramsPerEach" | "gramsPerMl" | "nutritionBasis" | "serving"
+>;
+
+/**
+ * What a food's unit chips and per-100 maths depend on. A per-100 g food has
+ * no `basis` here (null reads as per 100 g), so its items are unchanged.
+ */
+export function foodLogFactors(food: LogFactorsFood | null | undefined) {
+    return {
+        grams_per_each: food?.gramsPerEach ?? null,
+        grams_per_ml: food?.gramsPerMl ?? null,
+        ...(food?.nutritionBasis === "100ml"
+            ? { basis: "100ml" as const }
+            : {}),
+        ...(food?.serving ? { serving: food.serving } : {}),
+    };
+}
+
 export function unitHintsForLog(
     factors: {
         grams_per_each?: number | null;
         grams_per_ml?: number | null;
+        basis?: LogBasis | null;
+        serving?: LogServing | null;
     },
     opts: { recipe?: boolean } = {},
 ): string[] {
     if (opts.recipe) return ["portion"];
-    const hints = ["g"];
-    if (factors.grams_per_ml != null && factors.grams_per_ml > 0) {
-        hints.push("ml");
-    }
-    if (factors.grams_per_each != null && factors.grams_per_each > 0) {
+    const density = factors.grams_per_ml != null && factors.grams_per_ml > 0;
+    const perMl = factors.basis === "100ml";
+    // A per-100 ml food is measured in ml whatever its density; a per-100 g
+    // one offers ml only when a density turns it into grams.
+    // A per-100 ml food is measured in ml whatever its density. Mass and
+    // count turn into ml only through its density (grams ÷ grams_per_ml), so
+    // g and each are offered only when it has one. A per-100 g food offers
+    // ml the other way round, only with a density.
+    const hints = perMl ? ["ml"] : ["g"];
+    if (perMl && density) hints.push("g");
+    if (!perMl && density) hints.push("ml");
+    if (
+        factors.grams_per_each != null &&
+        factors.grams_per_each > 0 &&
+        (!perMl || density)
+    ) {
         hints.push("each");
+    }
+    // The pack serving leads, when its unit resolves for this food.
+    const serving = factors.serving;
+    if (
+        serving != null &&
+        serving.amount > 0 &&
+        (perMl
+            ? serving.unit === "ml" || density
+            : serving.unit === "g" || density)
+    ) {
+        hints.unshift("portion");
     }
     return hints;
 }
@@ -170,6 +221,8 @@ function toResultItem(item: LogSearchSourceItem): LogSearchResultItem {
         out.protein_per_100g = item.protein_per_100g;
     if (item.carbs_per_100g != null) out.carbs_per_100g = item.carbs_per_100g;
     if (item.fat_per_100g != null) out.fat_per_100g = item.fat_per_100g;
+    if (item.basis != null) out.basis = item.basis;
+    if (item.serving != null) out.serving = item.serving;
     if (item.grams_per_ml != null) out.grams_per_ml = item.grams_per_ml;
     if (item.grams_per_each != null) out.grams_per_each = item.grams_per_each;
     if (item.kcal_per_portion != null) out.kcal = item.kcal_per_portion;

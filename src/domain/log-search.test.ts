@@ -167,6 +167,53 @@ describe("unitHintsForLog", () => {
         ).toEqual(["g"]);
     });
 
+    test("a per-100 ml food is logged in ml; g and each need its density", () => {
+        expect(
+            unitHintsForLog({
+                grams_per_each: null,
+                grams_per_ml: null,
+                basis: "100ml",
+            }),
+        ).toEqual(["ml"]);
+        // each without a density cannot reach ml either.
+        expect(
+            unitHintsForLog({
+                grams_per_each: 330,
+                grams_per_ml: null,
+                basis: "100ml",
+            }),
+        ).toEqual(["ml"]);
+        expect(
+            unitHintsForLog({
+                grams_per_each: 50,
+                grams_per_ml: 1.03,
+                basis: "100ml",
+            }),
+        ).toEqual(["ml", "g", "each"]);
+    });
+
+    test("a pack serving is offered first as portion when its unit resolves", () => {
+        const ml = { label: "1 tbsp (30 ml)", amount: 30, unit: "ml" as const };
+        const g = { label: "1 slice (28 g)", amount: 28, unit: "g" as const };
+        expect(unitHintsForLog({ basis: "100ml", serving: ml })).toEqual([
+            "portion",
+            "ml",
+        ]);
+        // A g serving on a per-100 ml food needs a density, like g does.
+        expect(unitHintsForLog({ basis: "100ml", serving: g })).toEqual(["ml"]);
+        expect(
+            unitHintsForLog({ basis: "100ml", grams_per_ml: 0.92, serving: g }),
+        ).toEqual(["portion", "ml", "g"]);
+        expect(unitHintsForLog({ serving: g })).toEqual(["portion", "g"]);
+        // ml with no density on a per-100 g food cannot be turned into grams.
+        expect(unitHintsForLog({ serving: ml })).toEqual(["g"]);
+        expect(unitHintsForLog({ grams_per_ml: 1, serving: ml })).toEqual([
+            "portion",
+            "g",
+            "ml",
+        ]);
+    });
+
     test("recipes offer portion only", () => {
         expect(
             unitHintsForLog(
