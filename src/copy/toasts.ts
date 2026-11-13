@@ -19,6 +19,10 @@ export const TOASTS = {
     },
     "fridge.item.updated": { kind: "success", text: "Fridge item updated" },
     "fridge.item.eaten": { kind: "success", text: "Marked as eaten" },
+    "fridge.item.eaten.unknown": {
+        kind: "warning",
+        text: "Marked as eaten. Nutrition unknown: log it in ml or set its grams per ml",
+    },
     "fridge.item.discarded": { kind: "success", text: "Item discarded" },
     "fridge.items.discarded": { kind: "success", text: "Items discarded" },
     "fridge.item.added-to-grocery": {

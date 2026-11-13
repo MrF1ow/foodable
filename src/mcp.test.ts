@@ -5980,6 +5980,35 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("eat_fridge_item says when a per-100 ml food eaten in grams has no nutrition", async () => {
+        db.barcodeFoods[cottage.barcode] = cottage;
+        await withPat(async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const added = await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id as string,
+                kind: "food",
+                barcode: cottage.barcode,
+                amount: 200,
+                unit: "g",
+            });
+            const food = (await db.foodsStore.listFoods("hh-1"))[0]!;
+            await db.foodsStore.updateFoodRow({
+                ...food,
+                nutritionBasis: "100ml",
+                gramsPerMl: null,
+            });
+            const eaten = await call("eat_fridge_item", {
+                id: added.structuredContent?.id as string,
+                amount: 50,
+                member_id: alice,
+            });
+            expect(eaten.isError).toBeFalsy();
+            const text = (eaten.content as { text: string }[])[0]!.text;
+            expect(text).toContain("Nutrition unknown for:");
+            expect(text).toContain("log it in ml");
+        });
+    });
+
     test("add, update, and delete fridge item write adjust movements", async () => {
         db.barcodeFoods[cottage.barcode] = cottage;
         await withPat(async (call) => {
