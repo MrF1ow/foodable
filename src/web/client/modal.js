@@ -3,6 +3,9 @@
 const MQ_SHEET = "(max-width: 640px)";
 const DRAG_CLOSE_PX = 80;
 const FLICK_VELOCITY = 0.8;
+// A backdrop tap that moves more than this, or lasts longer, is a gesture.
+const TAP_SLOP_PX = 10;
+const TAP_MAX_MS = 500;
 
 const mq = (q) =>
     typeof window.matchMedia === "function" && window.matchMedia(q).matches;
@@ -31,13 +34,18 @@ function unlockPageScroll() {
     }
 }
 
-function onModalOpen() {
+const openOrder = []; // open dialogs, oldest first
+
+function onModalOpen(dialog) {
     openModalCount += 1;
+    if (!openOrder.includes(dialog)) openOrder.push(dialog);
     lockPageScroll();
 }
 
-function onModalClose() {
+function onModalClose(dialog) {
     openModalCount = Math.max(0, openModalCount - 1);
+    const at = openOrder.indexOf(dialog);
+    if (at !== -1) openOrder.splice(at, 1);
     unlockPageScroll();
 }
 
@@ -76,6 +84,145 @@ function focusFirstField(dialog) {
     if (field && typeof field.focus === "function") field.focus();
 }
 
+// Dismiss on the dimmed page behind the TOPMOST open dialog. The same logic as
+// the redesign's v2/sheet.js (a separate bundle, so repeated, not shared).
+// One code path, on `document` in the capture phase, because it cannot be
+// known where a backdrop tap lands: the ::backdrop belongs to the dialog, but
+// iOS Safari has been seen to hand the tap to the page behind it (WebKit bug
+// 267688's workaround listens on document.body), and it does not reliably
+// deliver a pointerdown that targets the dialog either. "Behind" is geometry:
+// outside the dialog's box, and the target is the dialog (its backdrop) or
+// something that is not part of it. A press that began inside the dialog (a
+// text-selection drag, a scroll that ends over the backdrop) never dismisses.
+const topModal = () => {
+    for (let i = openOrder.length - 1; i >= 0; i--) {
+        if (openOrder[i].open) return openOrder[i];
+    }
+    return null;
+};
+
+const hasPoint = (x, y) => typeof x === "number" && typeof y === "number";
+
+const behindModal = (dialog, target, x, y) => {
+    if (!hasPoint(x, y) || typeof dialog.getBoundingClientRect !== "function") {
+        return false;
+    }
+    const r = dialog.getBoundingClientRect();
+    const outside = x < r.left || x > r.right || y < r.top || y > r.bottom;
+    return outside && (target === dialog || !dialog.contains(target));
+};
+
+// A click that carries no pointer position (dialog.click(), a keyboard
+// activation: detail 0 and 0,0) is not a tap on the backdrop.
+const isPointerClick = (e) =>
+    e.detail !== 0 &&
+    hasPoint(e.clientX, e.clientY) &&
+    !(e.clientX === 0 && e.clientY === 0);
+
+let pressedInside = false;
+const notePress = (e, x, y) => {
+    const dialog = topModal();
+    pressedInside = !!dialog && !behindModal(dialog, e.target, x, y);
+};
+
+let tap = null; // a touch that began behind the dialog, to confirm on touchend
+let swallowClick = null; // the click a dismissing touch may still produce
+
+document.addEventListener(
+    "pointerdown",
+    (e) => notePress(e, e.clientX, e.clientY),
+    true,
+);
+document.addEventListener(
+    "pointercancel",
+    () => {
+        pressedInside = false;
+    },
+    true,
+);
+document.addEventListener(
+    "click",
+    (e) => {
+        const wasInside = pressedInside;
+        pressedInside = false;
+        if (swallowClick) {
+            const s = swallowClick;
+            swallowClick = null;
+            if (
+                Date.now() - s.at <= TAP_MAX_MS &&
+                Math.abs(e.clientX - s.x) <= 3 * TAP_SLOP_PX &&
+                Math.abs(e.clientY - s.y) <= 3 * TAP_SLOP_PX
+            ) {
+                e.stopPropagation();
+                e.preventDefault();
+                return;
+            }
+        }
+        const dialog = topModal();
+        if (!dialog || wasInside || !isPointerClick(e)) return;
+        if (!behindModal(dialog, e.target, e.clientX, e.clientY)) return;
+        e.stopPropagation();
+        e.preventDefault();
+        dialog.close();
+    },
+    true,
+);
+
+// Touch path for engines that never turn a backdrop tap into a click: a short,
+// still tap that starts and ends behind the dialog. The touchend is cancelled
+// (and the click that may still follow swallowed) so nothing lands on the
+// page the dialog just uncovered.
+document.addEventListener(
+    "touchstart",
+    (e) => {
+        tap = null;
+        const t = e.touches && e.touches.length === 1 ? e.touches[0] : null;
+        if (!t) return;
+        notePress(e, t.clientX, t.clientY);
+        const dialog = topModal();
+        if (
+            dialog &&
+            !pressedInside &&
+            behindModal(dialog, e.target, t.clientX, t.clientY)
+        ) {
+            tap = { x: t.clientX, y: t.clientY, at: Date.now() };
+        }
+    },
+    { capture: true, passive: true },
+);
+document.addEventListener(
+    "touchend",
+    (e) => {
+        const start = tap;
+        tap = null;
+        const t = e.changedTouches && e.changedTouches[0];
+        const dialog = topModal();
+        if (!start || !t || !dialog || (e.touches && e.touches.length)) return;
+        const still =
+            Math.abs(t.clientX - start.x) <= TAP_SLOP_PX &&
+            Math.abs(t.clientY - start.y) <= TAP_SLOP_PX;
+        if (
+            still &&
+            Date.now() - start.at <= TAP_MAX_MS &&
+            behindModal(dialog, e.target, t.clientX, t.clientY)
+        ) {
+            if (e.cancelable) e.preventDefault();
+            e.stopPropagation();
+            swallowClick = { x: t.clientX, y: t.clientY, at: Date.now() };
+            pressedInside = false;
+            dialog.close();
+        }
+    },
+    { capture: true, passive: false },
+);
+document.addEventListener(
+    "touchcancel",
+    () => {
+        tap = null;
+    },
+    true,
+);
+
 const dialogInit = new WeakSet();
 
 function initDialog(dialog) {
@@ -83,25 +230,13 @@ function initDialog(dialog) {
     if (dialogInit.has(dialog)) return;
     dialogInit.add(dialog);
 
-    let backdropPointerDown = false;
-    dialog.addEventListener("pointerdown", (e) => {
-        backdropPointerDown = e.target === dialog;
-    });
-    dialog.addEventListener("pointerup", (e) => {
-        if (e.target !== dialog) backdropPointerDown = false;
-    });
-    dialog.addEventListener("click", (e) => {
-        if (e.target === dialog && backdropPointerDown) dialog.close();
-        backdropPointerDown = false;
-    });
-
     dialog.addEventListener("toggle", () => {
         if (dialog.open) {
-            onModalOpen();
+            onModalOpen(dialog);
             focusFirstField(dialog);
             return;
         }
-        onModalClose();
+        onModalClose(dialog);
         dialog.style.transform = "";
     });
 
