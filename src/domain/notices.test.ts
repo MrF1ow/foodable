@@ -159,9 +159,9 @@ describe("noticeShortSentence", () => {
             "nutrition.weigh_in_due",
             {
                 name: "Sam",
-                days: 9,
-                // 2026-11-03 is a Tuesday.
-                lastWeighedOn: "2026-11-03",
+                days: 3,
+                // 2026-11-10 is a Tuesday.
+                lastWeighedOn: "2026-11-10",
             },
             { kind: "member", id: "u-sam" },
         );
@@ -178,6 +178,25 @@ describe("noticeShortSentence", () => {
             { kind: "member", id: "u-sam" },
         );
         expect(noticeShortSentence(old)).toBe("Weigh in · 40 days ago");
+    });
+
+    test("a weigh-in names the weekday only within the last week", () => {
+        const at = (days: number, lastWeighedOn: string) =>
+            noticeShortSentence(
+                shortNotice(
+                    "nutrition.weigh_in_due",
+                    { name: "Sam", days, lastWeighedOn },
+                    { kind: "member", id: "u-sam" },
+                ),
+            );
+        // Today is Friday 2026-11-13. 11-10 is the most recent Tuesday.
+        expect(at(2, "2026-11-11")).toBe("Weigh in · last Wednesday");
+        expect(at(3, "2026-11-10")).toBe("Weigh in · last Tuesday");
+        // A week back is the same weekday as today.
+        expect(at(7, "2026-11-06")).toBe("Weigh in · last Friday");
+        // Past a week, "last Tuesday" would name the wrong Tuesday.
+        expect(at(8, "2026-11-05")).toBe("Weigh in · 8 days ago");
+        expect(at(10, "2026-11-03")).toBe("Weigh in · 10 days ago");
     });
 
     test("a kind with no short form returns null", () => {

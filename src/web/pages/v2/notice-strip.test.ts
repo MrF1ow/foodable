@@ -91,7 +91,7 @@ describe("noticeStrip", () => {
         expect(rowTexts(html)).toEqual([
             "Eggs running low",
             "Flour missing for tomorrow",
-            "Weigh in · last Tuesday",
+            "Weigh in · 9 days ago",
         ]);
         expect(html).toContain(
             'aria-label="Dismiss: Running low: Eggs (2 left, below 4)"',
@@ -403,7 +403,7 @@ describe("where the one-tap notices show", () => {
         expect(phoneOnly).not.toContain("Sam hasn't");
         // The phone rows read short, as in the design.
         expect(rowTexts(phoneOnly)).toEqual([
-            "Weigh in · last Tuesday",
+            "Weigh in · 9 days ago",
             "Flour missing for tomorrow",
         ]);
     });

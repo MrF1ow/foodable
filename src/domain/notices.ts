@@ -180,8 +180,11 @@ function whenWord(date: string, daysLeft: number): string {
     return weekdayOf(date);
 }
 
-/** Past this many days "last Tuesday" would name the wrong Tuesday. */
-const LAST_WEEKDAY_MAX_DAYS = 13;
+/**
+ * Past a week "last Tuesday" would name the wrong Tuesday: on a Friday, the
+ * most recent Tuesday is 3 days back, and 10 days back is the one before it.
+ */
+const LAST_WEEKDAY_MAX_DAYS = 7;
 
 export function noticeShortSentence(
     notice: Notice,
