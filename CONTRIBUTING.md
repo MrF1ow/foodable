@@ -41,7 +41,7 @@ bun run gen:all         # regenerate login HTML and tokens
 bun run check:changed   # what CI's check job runs for your changes
 ```
 
-`check:changed` picks format (Prettier, 4-space indent; `bun run format` fixes it), `bun run lint` (oxlint with the repo's rules in `scripts/lint-rules/`), `bun run typecheck` (the whole project), the tests that import what you changed, and migration safety plus `bun run db:dryrun` when you touched `db/migrations/`. `--list` shows the plan and `--all` runs everything. A push to `main` runs every check, listed directly in `ci.yml`.
+`check:changed` picks format (`bun fmt` with the 4-space indent from `bunfig.toml`; `bun run format` fixes it, and it needs Bun 1.4.4 or newer, since an older Bun fails with the misleading `Script not found "fmt"`), `bun run lint` (oxlint with the repo's rules in `scripts/lint-rules/`), `bun run typecheck` (the whole project), the tests that import what you changed, and migration safety plus `bun run db:dryrun` when you touched `db/migrations/`. `--list` shows the plan and `--all` runs everything. A push to `main` runs every check, listed directly in `ci.yml`.
 
 ### Policy checks
 

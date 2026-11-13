@@ -78,8 +78,8 @@ Schema lives only in `db/migrations/`. Apply them with `bun run db:migrate` (`--
 - `bun --watch src/index.ts` - Run with watch mode (restarts on file changes)
 - `bun test` - Run all tests
 - `bun test src/path/to/file.test.ts` - Run a single test file
-- `bun run format` - Format code with Prettier (4-space indentation)
-- `bun run format:check` - Verify the tree is prettier-clean (CI runs this on every PR)
+- `bun run format` - Format code with `bun fmt` (4-space indentation, config in `bunfig.toml` `[fmt]`). Needs Bun 1.4.4 or newer (CI and the Dockerfile pin 1.4.4); an older Bun fails with the misleading `Script not found "fmt"`
+- `bun run format:check` - Verify the tree is formatted (`bun fmt --check`; CI runs this on every PR)
 - `bun run db:dryrun` - Apply the pending migrations to a throwaway local Postgres and check the backfill (see "Migrations" below)
 - `bun run db:rehearse` - Dry-run what production has not applied on a copy of its data, through `railway ssh`; deletes the copy afterwards (`--list` only reports; see "Rehearsing migrations on a production copy" in `docs/self-hosting.md`)
 - `bun run db:dev` - Persistent local Postgres for development (`init`, `start`, `stop`, `status`, `url`, `migrate`)
@@ -90,7 +90,7 @@ Schema lives only in `db/migrations/`. Apply them with `bun run db:migrate` (`--
 - `bun run release [patch|minor|major] [--dry-run]` - Open the release PR (see "Releases" in `CONTRIBUTING.md`)
 - `bun run gen:tokens` - Write `public/widgets/src/shared/tokens.css` from `src/tokens.ts`
 
-The committed tree is kept prettier-clean, so `bun run format` only rewrites files you actually edited. Generated output that must not be formatted goes in `.prettierignore`.
+The committed tree is kept `bun fmt`-clean, so `bun run format` only rewrites files you actually edited. Generated output that must not be formatted goes in `[fmt] ignorePatterns` in `bunfig.toml` (`bun fmt` also skips anything a repo `.gitignore` lists).
 
 ## Bun Runtime
 

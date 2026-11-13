@@ -58,7 +58,7 @@ bun test                # test suite
 bun run check:changed   # the CI checks for what you changed (--all for everything)
 bun run typecheck       # typecheck the whole project, tests and scripts included
 bun run lint            # oxlint with the repo's own rules
-bun run format          # Prettier, 4-space indent
+bun run format          # bun fmt, 4-space indent (needs Bun 1.4.4 or newer)
 ```
 
 Login templates under `public/login.html` are generated. After editing `src/copy/login.ts` or `scripts/site-partials.ts`, run `bun run gen:all`.
