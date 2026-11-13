@@ -102,5 +102,40 @@ export function runGroceryListStoreContract(
             expect(await store.insertLine(planLine)).toEqual(planLine);
             expect(await store.listLines(c.householdId)).toEqual([planLine]);
         });
+
+        test("insertLineUnlessListed reuses an unticked line of the family in that store", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const family = { familyId: c.foodId, foodIds: [c.foodId] };
+            const first = sampleGroceryLine(c, {
+                id: crypto.randomUUID(),
+                displayName: "Milk",
+                foodId: c.foodId,
+            });
+            const second = sampleGroceryLine(c, {
+                id: crypto.randomUUID(),
+                displayName: "Milk",
+                foodId: c.foodId,
+            });
+            const a = await store.insertLineUnlessListed(first, family);
+            expect(a).toEqual({ line: first, existed: false });
+            const b = await store.insertLineUnlessListed(second, family);
+            expect(b.existed).toBe(true);
+            expect(b.line.id).toBe(first.id);
+            expect(await store.listLines(c.householdId)).toEqual([first]);
+
+            // A ticked line does not count: the next add is a new line.
+            await store.updateLine({ ...first, checked: true });
+            const third = sampleGroceryLine(c, {
+                id: crypto.randomUUID(),
+                displayName: "Milk",
+                foodId: c.foodId,
+            });
+            const d = await store.insertLineUnlessListed(third, family);
+            expect(d.existed).toBe(false);
+            expect(d.line.id).toBe(third.id);
+            expect(await store.listLines(c.householdId)).toHaveLength(2);
+        });
     });
 }

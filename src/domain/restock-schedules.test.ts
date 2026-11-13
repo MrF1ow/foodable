@@ -589,9 +589,9 @@ test("switch day: a legacy and a schedules run started together insert the lines
     const serial = (d: RestockCheckDeps): RestockCheckDeps => ({
         ...d,
         restock: {
-            commitRestockRun: (hh, on, lines) => {
+            commitRestockRun: (hh, on, lines, families) => {
                 const run = chain.then(() =>
-                    d.restock.commitRestockRun(hh, on, lines),
+                    d.restock.commitRestockRun(hh, on, lines, families),
                 );
                 chain = run.catch(() => undefined);
                 return run;

@@ -77,6 +77,8 @@ import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
 export const ADD_GROCERY_LINE_OUTPUT_SCHEMA = z.object({
     status: WRITE_STATUS,
     similar_foods: z.array(SIMILAR_FOODS_ENTRY),
+    /** True when the food was already on the list at that store, so no line was added and `id` is the existing one. */
+    already_on_list: z.boolean(),
     id: z.string().nullable(),
     display_name: z.string().nullable(),
     already_have: z.string().nullable(),
@@ -435,7 +437,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Grocery Line",
             description:
-                "Add a food or supply line to the grocery list. Pass store_id only when you want to choose the store; when store_id is omitted the server picks in order: that food's usual store, else a store where the food's family already has a line, else the first household store. Pass amount only when you want to choose the quantity; when amount is omitted the server uses the food's usual amount, else 1 of its default unit. Omit section_id to let the server pick the section within the chosen store: where that food already sits, else the aisle its name suggests, else Other. Reports already-have when fridge stock matches. Allergen matches for household members are in this result's `notices`.",
+                "Add a food or supply line to the grocery list. Pass store_id only when you want to choose the store; when store_id is omitted the server picks in order: that food's usual store, else a store where the food's family already has a line, else the first household store. Pass amount only when you want to choose the quantity; when amount is omitted the server uses the food's usual amount, else 1 of its default unit. Omit section_id to let the server pick the section within the chosen store: where that food already sits, else the aisle its name suggests, else Other. If the food is already on the list at that store (unticked), no second line is added: the existing line is returned and already_on_list is true. Reports already-have when fridge stock matches. Allergen matches for household members are in this result's `notices`.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -470,6 +472,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         similar_foods: [] as z.infer<
                             typeof SIMILAR_FOODS_ENTRY
                         >[],
+                        already_on_list: false,
                         id: null,
                         display_name: null,
                         already_have: null,
@@ -485,6 +488,12 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         );
                         let storeReason: GroceryStorePickReason = "chosen";
                         let amountReason: GroceryAmountPickReason = "chosen";
+                        // The same unticked line the restock runner would see:
+                        // the add folds into it instead of listing the food twice.
+                        let alreadyOnList = false;
+                        const onReused = () => {
+                            alreadyOnList = true;
+                        };
                         const onPicked = (pick: {
                             storeId: string;
                             storeReason: GroceryStorePickReason;
@@ -509,6 +518,8 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                           unit: args.unit ?? "",
                                           foodId: args.food_id,
                                           onPicked,
+                                          reuseListed: true,
+                                          onReused,
                                           onSimilar,
                                       },
                                   )
@@ -525,6 +536,8 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                             amount: args.amount,
                                             unit: args.unit,
                                             onPicked,
+                                            reuseListed: true,
+                                            onReused,
                                         },
                                     )
                                   : args.barcode
@@ -540,6 +553,8 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                               amount: args.amount,
                                               unit: args.unit,
                                               onPicked,
+                                              reuseListed: true,
+                                              onReused,
                                           },
                                           {
                                               lookup: (barcode) =>
@@ -560,6 +575,8 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                               amount: args.amount,
                                               unit: args.unit,
                                               onPicked,
+                                              reuseListed: true,
+                                              onReused,
                                               onSimilar,
                                           },
                                       );
@@ -593,7 +610,9 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                 ? ` (${parenthetical.join(", ")})`
                                 : "";
                         const bits = [
-                            `Added ${line.displayName} ${line.quantity.amount} ${line.quantity.unit} at ${storeName}${pickNote}`,
+                            alreadyOnList
+                                ? `${line.displayName} was already on the list at ${storeName} (${line.quantity.amount} ${line.quantity.unit}); nothing added`
+                                : `Added ${line.displayName} ${line.quantity.amount} ${line.quantity.unit} at ${storeName}${pickNote}`,
                         ];
                         if (extras.alreadyHave) bits.push(extras.alreadyHave);
                         if (extras.allergenText) bits.push(extras.allergenText);
@@ -602,6 +621,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             structuredContent: {
                                 status: "ok" as const,
                                 similar_foods: [],
+                                already_on_list: alreadyOnList,
                                 id: line.id,
                                 display_name: line.displayName,
                                 already_have: extras.alreadyHave,

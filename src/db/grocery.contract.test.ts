@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, test, expect } from "bun:test";
 import { createMemoryGroceryStore } from "../domain/grocery.js";
 import { liveGroceryStore } from "./grocery.js";
 import { runGroceryListStoreContract } from "./contract/grocery.contract.js";
-import type { StoreContractCtx } from "./contract/helpers.js";
+import {
+    sampleGroceryLine,
+    type StoreContractCtx,
+} from "./contract/helpers.js";
 import { describeDb } from "./testing/pg.js";
 import { liveFridgeStore } from "./fridge.js";
 import {
@@ -14,6 +17,7 @@ import {
     seedHousehold,
 } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
+import { raceOnUniqueKey } from "./testing/lock-race.js";
 import { setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
@@ -130,5 +134,61 @@ describeDb(pgAvailable !== null, "grocery store contract live", (getCtx) => {
         const found = listed.find((row) => row.id === line.id);
         expect(found?.source).toBe("restock");
         expect(found?.sourceFridgeItemId).toBeNull();
+    });
+
+    test("two adds racing for the same food leave one line", async () => {
+        const { pg, sql } = getCtx();
+        const family = { familyId: ctx.foodId, foodIds: [ctx.foodId] };
+        const lockKey = `grocery-line:${ctx.householdId}:${ctx.storeId}:${ctx.foodId}`;
+        const add = () =>
+            liveGroceryStore().insertLineUnlessListed(
+                sampleGroceryLine(ctx, { id: crypto.randomUUID() }),
+                family,
+            );
+        // The holder takes the family's lock first, so both adds queue behind
+        // it and then run one after the other: without the lock they would
+        // never wait, and each would insert its own line.
+        const [a, b] = await raceOnUniqueKey({
+            url: pg.url,
+            restoreSql: sql,
+            blockInsert: (tx) =>
+                tx`select pg_advisory_xact_lock(hashtextextended(${lockKey}, 0))`,
+            run: add,
+        });
+        expect([a.existed, b.existed].sort()).toEqual([false, true]);
+        expect(a.line.id).toBe(b.line.id);
+        expect(
+            await liveGroceryStore().listLines(ctx.householdId),
+        ).toHaveLength(1);
+    });
+
+    test("an add to another store is a new line", async () => {
+        const { sql } = getCtx();
+        const grocery = liveGroceryStore();
+        const family = { familyId: ctx.foodId, foodIds: [ctx.foodId] };
+        const first = await grocery.insertLineUnlessListed(
+            sampleGroceryLine(ctx),
+            family,
+        );
+        const otherStore = await seedGroceryStore(
+            sql,
+            ctx.householdId,
+            "Other store",
+        );
+        const otherSection = await seedGrocerySection(
+            sql,
+            ctx.householdId,
+            otherStore,
+        );
+        const second = await grocery.insertLineUnlessListed(
+            sampleGroceryLine(ctx, {
+                storeId: otherStore,
+                sectionId: otherSection,
+            }),
+            family,
+        );
+        expect(first.existed).toBe(false);
+        expect(second.existed).toBe(false);
+        expect(await grocery.listLines(ctx.householdId)).toHaveLength(2);
     });
 });

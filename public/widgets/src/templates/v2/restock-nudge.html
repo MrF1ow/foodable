@@ -8,9 +8,12 @@
   product and the reason the server gave, the amount at the right), and one
   "Add N to the <store> list" button. The button calls add_grocery_line once
   per row, in order, with the usual's food, store and amount, and stops at the
-  first failure. A refusal is a failure to retry; an answer that never came
-  back is not (the line may exist, add_grocery_line always inserts): that row
-  reads "may have been added", is never re-sent, and the run stops there. Usuals that are not due are not shown. When the due usuals
+  first failure. A refusal means nothing was added; an answer that never came
+  back means the line may exist: that row reads "may have been added" and the
+  run stops there. The next Add sends it again, which is safe because
+  add_grocery_line folds into a line already on the list (the answer then says
+  already_on_list and the row reads "On the list"). Usuals that are not due are
+  not shown. When the due usuals
   sit at several stores they are grouped by store, one button each. The
   button is not drawn when the host cannot call tools.
 -->
@@ -106,9 +109,9 @@
                 onList: "On the list",
                 dismissed: "Dismissed",
                 failed: "Could not add {name}. Nothing after it was added.",
-                unsure: "May have been added \u2014 check the list",
+                unsure: "May have been added \u2014 Add again is safe",
                 noteUnsure:
-                    "Adding {name} to the grocery list got no answer, so it may or may not be on the list. Check the list before adding it again. Nothing after it was added.",
+                    "Adding {name} to the grocery list got no answer, so it may or may not be on the list. Adding it again will not put it on twice. Nothing after it was added.",
             };
 
             // Design sample (FigCraft Widget/Restock): one low, two on a
@@ -193,8 +196,11 @@
             const added = new Set();
             const busy = new Set();
             const errors = {};
-            // food ids whose add never got an answer: not re-sent.
+            // food ids whose add never got an answer: sent again by the next
+            // Add (a line already on the list is not doubled), marked until then.
             const unsure = new Set();
+            // food ids the server said were already on the list.
+            const listedByServer = new Set();
 
             // An unknown amount reads as one.
             function amountText(u) {
@@ -203,13 +209,14 @@
 
             // A usual already on the grocery list, or whose running-low notice
             // was dismissed (the restock runner skips it too), is shown but
-            // never re-added: add_grocery_line always inserts a line.
+            // never re-added. An add that got no answer is tried again: the
+            // server folds it into the line if it was taken.
             function needsAdd(u) {
                 return (
                     !u.on_list &&
                     !u.dismissed &&
                     !added.has(u.food_id) &&
-                    !unsure.has(u.food_id)
+                    !listedByServer.has(u.food_id)
                 );
             }
 
@@ -245,8 +252,14 @@
                     .filter(Boolean)
                     .join(" · ");
                 const done = added.has(u.food_id);
-                const maybe = !done && unsure.has(u.food_id);
-                const listed = !done && !maybe && !!u.on_list;
+                const maybe =
+                    !done &&
+                    !listedByServer.has(u.food_id) &&
+                    unsure.has(u.food_id);
+                const listed =
+                    !done &&
+                    !maybe &&
+                    (!!u.on_list || listedByServer.has(u.food_id));
                 const muted = !done && !maybe && !listed && !!u.dismissed;
                 return `<div class="ur" data-food-id="${esc(u.food_id)}">${v2Dot(
                     undefined,
@@ -354,6 +367,9 @@
                 for (const id of [...unsure]) {
                     if (!present.has(id)) unsure.delete(id);
                 }
+                for (const id of [...listedByServer]) {
+                    if (!present.has(id)) listedByServer.delete(id);
+                }
                 for (const key of Object.keys(errors)) delete errors[key];
                 MODEL = data;
                 paint();
@@ -395,7 +411,14 @@
                             if (sc && sc.status && sc.status !== "ok") {
                                 throw new Error(sc.status);
                             }
-                            added.add(u.food_id);
+                            unsure.delete(u.food_id);
+                            // Already on the list at that store: the server
+                            // kept the line it had and added nothing.
+                            if (sc && sc.already_on_list) {
+                                listedByServer.add(u.food_id);
+                            } else {
+                                added.add(u.food_id);
+                            }
                             paint();
                         } catch (e) {
                             if (e && e.toolResult) {

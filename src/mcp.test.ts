@@ -8866,11 +8866,21 @@ describe("list_grocery_lines and get_fridge carry the Kitchen's fields over HTTP
                     amount: 500,
                     unit: "g",
                 });
-                for (const food_id of [productId, otherId]) {
+                // Two products of one family at one store would fold into a
+                // single line, so the other one is bought elsewhere.
+                const elsewhere = await createGroceryStore(
+                    db.settingsStore,
+                    "hh-1",
+                    "Costco",
+                );
+                for (const [food_id, store_id] of [
+                    [productId, store.id],
+                    [otherId, elsewhere.id],
+                ] as const) {
                     const added = await call("add_grocery_line", {
                         kind: "food",
                         food_id,
-                        store_id: store.id,
+                        store_id,
                     });
                     expect(added.isError).toBeFalsy();
                 }
@@ -9764,6 +9774,79 @@ describe("list_usuals over HTTP", () => {
                 expect(await db.groceryStore.listLines("hh-1")).toHaveLength(
                     due.length,
                 );
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_grocery_line twice for one food leaves one line and says so (%p)",
+        async (era) => {
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Corner",
+            );
+            const milk = await db.foodsStore.insertFood(
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "Milk",
+                    defaultUnit: "each",
+                }),
+            );
+            await withHttpClient("u1", era, async (client) => {
+                const add = async (args: Record<string, unknown>) =>
+                    (await client.callTool({
+                        name: "add_grocery_line",
+                        arguments: args,
+                    })) as ToolResult;
+                const args = {
+                    kind: "food",
+                    food_id: milk.id,
+                    store_id: store.id,
+                };
+                // Two restock cards (or a card and the runner) send the same call.
+                const [a, b] = await Promise.all([add(args), add(args)]);
+                for (const r of [a, b]) {
+                    expect(r.isError).toBeFalsy();
+                    ADD_GROCERY_LINE_OUTPUT_SCHEMA.parse(r.structuredContent);
+                }
+                const out = [a, b].map((r) => r.structuredContent as never) as {
+                    id: string;
+                    already_on_list: boolean;
+                }[];
+                expect(out[0]!.id).toBe(out[1]!.id);
+                expect(out.map((o) => o.already_on_list).sort()).toEqual([
+                    false,
+                    true,
+                ]);
+                const repeat = out[0]!.already_on_list ? a : b;
+                expect(repeat.content[0]?.text).toContain(
+                    "already on the list",
+                );
+                expect(
+                    [a, b].find((r) => r !== repeat)!.content[0]?.text,
+                ).toContain("Added Milk");
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(1);
+
+                // Without a store the server picks the one it is listed at.
+                const picked = await add({ kind: "food", food_id: milk.id });
+                expect(
+                    (picked.structuredContent as { already_on_list: boolean })
+                        .already_on_list,
+                ).toBe(true);
+
+                // Once it is ticked off, adding it again is a new line.
+                await client.callTool({
+                    name: "check_grocery_line",
+                    arguments: { id: out[0]!.id, checked: true },
+                });
+                const next = await add(args);
+                expect(
+                    (next.structuredContent as { already_on_list: boolean })
+                        .already_on_list,
+                ).toBe(false);
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(2);
             });
         },
     );

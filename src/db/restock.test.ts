@@ -3,6 +3,7 @@ import type { GroceryLine } from "../domain/grocery.js";
 import type { HouseholdConfig } from "../household.js";
 import { runRestockCheck } from "../domain/restock.js";
 import { liveRestockStore } from "./restock.js";
+import { liveGroceryStore } from "./grocery.js";
 import { getHouseholdConfig, updateHouseholdConfig } from "./household.js";
 import { currentActor, setFallbackActorForTests, type Actor } from "./actor.js";
 import { describeDb, householdOwnerActor } from "./testing/pg.js";
@@ -161,6 +162,75 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
             select id from grocery_lines where household_id = ${householdId}
         `;
         expect(lines).toHaveLength(1);
+    });
+
+    test("a run does not double a line a card added after its read", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const storeId = await seedGroceryStore(sql, householdId, "Costco");
+        const sectionId = await seedGrocerySection(
+            sql,
+            householdId,
+            storeId,
+            "Dairy",
+        );
+        const foodId = await seedFood(sql, householdId, { name: "Milk" });
+        const family = { familyId: foodId, foodIds: [foodId] };
+        const cardLine = sampleLine(householdId, storeId, sectionId, foodId);
+        await liveGroceryStore().insertLine(cardLine);
+        const runLine = sampleLine(householdId, storeId, sectionId, foodId);
+        expect(
+            await liveRestockStore().commitRestockRun(
+                householdId,
+                "2026-06-12",
+                [runLine],
+                new Map([[runLine.id, family]]),
+            ),
+        ).toBe(true);
+        const lines = await sql`
+            select id from grocery_lines where household_id = ${householdId}
+        `;
+        expect(lines).toEqual([{ id: cardLine.id }]);
+        const config = await getHouseholdConfig(householdId);
+        expect(config.preferences.restock.lastRunOn).toBe("2026-06-12");
+    });
+
+    test("a card add and the restock run racing leave one line", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const storeId = await seedGroceryStore(sql, householdId, "Costco");
+        const sectionId = await seedGrocerySection(
+            sql,
+            householdId,
+            storeId,
+            "Dairy",
+        );
+        const foodId = await seedFood(sql, householdId, { name: "Milk" });
+        const family = { familyId: foodId, foodIds: [foodId] };
+        const runLine = sampleLine(householdId, storeId, sectionId, foodId);
+        const cardLine = sampleLine(householdId, storeId, sectionId, foodId);
+        const [committed, card] = await Promise.all([
+            liveRestockStore().commitRestockRun(
+                householdId,
+                "2026-06-12",
+                [runLine],
+                new Map([[runLine.id, family]]),
+            ),
+            liveGroceryStore().insertLineUnlessListed(cardLine, family),
+        ]);
+        expect(committed).toBe(true);
+        const lines = await sql`
+            select id from grocery_lines where household_id = ${householdId}
+        `;
+        expect(lines).toHaveLength(1);
+        // Whichever landed second saw the first and folded into it.
+        const survivor = lines[0] as { id: string };
+        expect([runLine.id, cardLine.id]).toContain(survivor.id);
+        expect(card.line.id).toBe(survivor.id);
     });
 
     test("updateHouseholdConfig keeps stored lastRunOn", async () => {

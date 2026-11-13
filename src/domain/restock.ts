@@ -12,6 +12,8 @@ import {
     pickGroceryStore,
     suggestGrocerySection,
     onGroceryList,
+    groceryFamilyOf,
+    type GroceryFamily,
     type GroceryLine,
 } from "./grocery.js";
 import { dismissedKeySet, isDismissedIn } from "./notice-dismissals.js";
@@ -815,10 +817,17 @@ export function groceryRestockNotices(
 }
 
 export type RestockStore = {
+    /**
+     * Writes the run's lines and the run marker together. With `families` (by
+     * line id) a line whose store already has an unticked line for the same
+     * food family is skipped, under the same lock a card add takes, so a card
+     * landing between the run's read and its write cannot double the line.
+     */
     commitRestockRun(
         householdId: string,
         runOn: string,
         lines: GroceryLine[],
+        families?: ReadonlyMap<string, GroceryFamily>,
     ): Promise<boolean>;
 };
 
@@ -833,7 +842,7 @@ export function createMemoryRestockStore(
     opts: MemoryRestockStoreOpts,
 ): RestockStore {
     return {
-        async commitRestockRun(householdId, runOn, lines) {
+        async commitRestockRun(householdId, runOn, lines, families) {
             const prefs = opts.getPrefs();
             const last = prefs.restock.lastRunOn;
             if (last != null && last >= runOn) return false;
@@ -841,8 +850,18 @@ export function createMemoryRestockStore(
             try {
                 for (const line of lines) {
                     opts.failOnInsert?.();
-                    await opts.grocery.insertLine(line);
-                    inserted.push(line.id);
+                    const family = families?.get(line.id);
+                    if (family) {
+                        const { line: saved, existed } =
+                            await opts.grocery.insertLineUnlessListed(
+                                line,
+                                family,
+                            );
+                        if (!existed) inserted.push(saved.id);
+                    } else {
+                        await opts.grocery.insertLine(line);
+                        inserted.push(line.id);
+                    }
                 }
                 opts.setPrefs({
                     ...prefs,
@@ -971,10 +990,17 @@ export async function runRestockCheck(
                     dueUsuals,
                     expiring: !schedules || clock.weekday === restock.weekday,
                 });
+                const lineFamilies = new Map<string, GroceryFamily>();
+                for (const line of plan.lines) {
+                    const row = listed.find((f) => f.id === line.foodId);
+                    if (row)
+                        lineFamilies.set(line.id, groceryFamilyOf(row, listed));
+                }
                 const committed = await deps.restock.commitRestockRun(
                     householdId,
                     clock.date,
                     plan.lines,
+                    lineFamilies,
                 );
                 if (!committed) {
                     log(

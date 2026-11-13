@@ -2036,3 +2036,128 @@ test("a failing stamp does not fail a tick that already saved", async () => {
     expect((await grocery.listLines(HH))[0]?.checked).toBe(true);
     expect(errors).toHaveLength(1);
 });
+
+test("a restock add folds into the unticked line the store already has", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const milk = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Milk" }),
+    );
+    const reused: string[] = [];
+    const first = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        foodId: milk.id,
+        source: "restock",
+        onReused: (line) => reused.push(line.id),
+    });
+    const second = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        foodId: milk.id,
+        source: "restock",
+        onReused: (line) => reused.push(line.id),
+    });
+    expect(second.id).toBe(first.id);
+    expect(reused).toEqual([first.id]);
+    expect(await grocery.listLines(HH)).toHaveLength(1);
+});
+
+test("reuseListed matches the food's family, not just the exact food", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const oats = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Oats" }),
+    );
+    const quaker = await foods.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Quaker Oats",
+            genericFoodId: oats.id,
+        }),
+    );
+    const product = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        foodId: quaker.id,
+    });
+    const viaGeneric = await addGroceryFoodById(grocery, settings, foods, {
+        householdId: HH,
+        storeId: store.id,
+        foodId: oats.id,
+        reuseListed: true,
+    });
+    expect(viaGeneric.id).toBe(product.id);
+    expect(await grocery.listLines(HH)).toHaveLength(1);
+});
+
+test("a ticked line, another store, or no reuse flag still adds a new line", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const other = await createGroceryStore(settings, HH, "Costco");
+    const milk = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Milk" }),
+    );
+    const add = (over: { storeId: string; reuseListed?: boolean }) =>
+        addGroceryFoodById(grocery, settings, foods, {
+            householdId: HH,
+            foodId: milk.id,
+            ...over,
+        });
+    const first = await add({ storeId: store.id });
+    // A manual add keeps today's behaviour unless the caller opts in.
+    const plain = await add({ storeId: store.id });
+    expect(plain.id).not.toBe(first.id);
+    // Another store lists it again.
+    const elsewhere = await add({ storeId: other.id, reuseListed: true });
+    expect(elsewhere.storeId).toBe(other.id);
+    // A ticked line is bought, not on the list.
+    await checkGroceryLine(grocery, HH, first.id, true);
+    await checkGroceryLine(grocery, HH, plain.id, true);
+    const again = await add({ storeId: store.id, reuseListed: true });
+    expect([first.id, plain.id]).not.toContain(again.id);
+    expect(await grocery.listLines(HH)).toHaveLength(4);
+});
+
+test("a supply restock add folds into the line already listed", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const args = {
+        householdId: HH,
+        storeId: store.id,
+        name: "Paper towels",
+        amount: 2,
+        unit: "roll",
+        source: "restock" as const,
+    };
+    const first = await addGrocerySupply(grocery, settings, foods, args);
+    const second = await addGrocerySupply(grocery, settings, foods, args);
+    expect(second.id).toBe(first.id);
+    expect(await grocery.listLines(HH)).toHaveLength(1);
+});
+
+test("two restock adds started together leave one line", async () => {
+    const grocery = createMemoryGroceryStore();
+    const foods = createMemoryFoodsStore();
+    const { settings, store } = await seedStore();
+    const milk = await foods.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Milk" }),
+    );
+    const lines = await Promise.all(
+        [0, 1].map(() =>
+            addGroceryFoodById(grocery, settings, foods, {
+                householdId: HH,
+                storeId: store.id,
+                foodId: milk.id,
+                source: "restock",
+            }),
+        ),
+    );
+    expect(lines[0]!.id).toBe(lines[1]!.id);
+    expect(await grocery.listLines(HH)).toHaveLength(1);
+});
