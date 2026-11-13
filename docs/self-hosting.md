@@ -368,4 +368,14 @@ One deploy, one Postgres database. Sign-up policy is deploy config: set optional
 5. The owner can make a member an admin (or back), hand ownership to another member, or remove a person, from that person's **Manage** dialog in Settings › Household. An admin manages the household beside the owner: name, location, stores, store rules, everyone's rules, and adding people. Roles, removal, transfer and the bot token stay with the owner, who keeps ownership when they promote someone. Removing someone erases their login, tokens and personal nutrition history (the same path as `delete_account`); shared fridge, grocery, recipe and food data stays. If the owner deletes their account without handing over, an admin becomes owner, or else the member with the oldest account (trigger `household_members_promote_on_owner_leave`). An owner who is the last member leaves an empty household behind.
 6. With the default `closed` policy, public registration stays closed after the founder exists. There is no invite link, no Google identity provider, and no auto-join if someone finds the URL. `POST /register` is MCP client registration, not a user sign-up path. Dynamic registration returns its own client id per registration, which is how a connected app is told apart in a member's connections; the deploy-wide `OAUTH_CLIENT_ID` is still accepted.
 
+## Adding a usual
+
+A usual is a plain food the household buys again and again (Eggs, Milk). Add one from the **+** on Kitchen › Usuals (the same round **+** sits on Fridge and Groceries; on a wide screen it is a labelled button). The **Add a usual** sheet has three ways in:
+
+- **Scan:** point the camera at a barcode. Foodable looks the product up and asks **What is it?**: pick the plain food it belongs to, or name a new one. The product is filed under that food and becomes its usual product.
+- **Search:** pick a food already in the catalog. It is added as it is.
+- **Type it:** for something with no product to scan. Give a name and calories, protein, carbs and fat per 100 g, per 100 ml or per serving (in g or ml). A barcode the lookup did not find is kept, so the next scan knows it.
+
+A food stays a usual until it is removed from Usuals; removing it clears its products and schedule from the list but keeps the food.
+
 Connect an agent at `https://your-host/mcp` with the household account.
