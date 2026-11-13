@@ -227,7 +227,7 @@ describe("gated route harness on composed app", () => {
             {
                 method: "POST",
                 path: "/recipes/import-shared",
-                flag: "ui-v2",
+                flag: "mcp-share-links",
                 notFound: true,
             },
             {
@@ -275,19 +275,19 @@ describe("gated route harness on composed app", () => {
             {
                 method: "POST",
                 path: "/recipes/:id/share",
-                flag: "ui-v2",
+                flag: "mcp-share-links",
                 notFound: true,
             },
             {
                 method: "POST",
                 path: "/kitchen/groceries/share",
-                flag: "ui-v2",
+                flag: "mcp-share-links",
                 notFound: true,
             },
             {
                 method: "POST",
                 path: "/settings/household/shared-links/:id/revoke",
-                flag: "ui-v2",
+                flag: "mcp-share-links",
                 notFound: true,
             },
             {

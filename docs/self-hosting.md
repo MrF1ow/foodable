@@ -269,6 +269,8 @@ Without `RAILWAY_TOKEN`, Foodable never calls Railway's flag service at runtime.
 
 Unknown flag names and unknown modes log a warning once at startup and are ignored. Flags you omit use their registry fallback.
 
+Share links make public pages that need no sign-in (`/s/:token`). They stay off, with no Share buttons and every link answering 404, unless `mcp-share-links` is on (for example `mcp-share-links:internal`); `ui-v2:all` alone does not turn them on.
+
 ## Client address (rate limits)
 
 OAuth and failed `/mcp` auth share per-address buckets. The server reads `CLIENT_IP_SOURCE`, `TRUSTED_PROXY_HOPS`, and `CLOUDFLARE_ORIGIN_SECRET` once at boot (see `.env.example`).

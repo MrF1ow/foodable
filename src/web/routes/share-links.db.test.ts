@@ -71,7 +71,9 @@ describeDb(
             sql = ctx.sql;
             await ctx.truncateAll();
             setSqlForTests(sql);
-            setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+            setFlagsForTests(
+                createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
+            );
             setRateLimitStore(createMemoryRateLimitStore());
             const a = await seedHousehold(sql);
             householdId = a.householdId;
@@ -400,7 +402,9 @@ describeDb(
                 await shoot(`/s/${mintShareToken()}`),
                 await shoot("/s/not-a-token"),
             ];
-            setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+            setFlagsForTests(
+                createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
+            );
             refusals.push(await shoot(`/s/${live.token}`));
             for (const refusal of refusals) {
                 expect(refusal.status).toBe(404);
@@ -602,7 +606,7 @@ describeDb(
                 ];
                 setFlagsForTests(
                     createMemoryFlags({
-                        "ui-v2": false,
+                        "ui-v2": true,
                         "mcp-share-links": false,
                     }),
                 );
@@ -665,7 +669,7 @@ describeDb(
             });
         });
 
-        test("ui-v2 is judged for the member who made the link", async () => {
+        test("mcp-share-links is judged for the member who made the link", async () => {
             const { recipe } = await seedRecipe(
                 householdId,
                 ownerId,
@@ -679,12 +683,16 @@ describeDb(
             );
             // On for the creator only: the link answers.
             setFlagsForTests(
-                createMemoryFlags({ "ui-v2": (ctx) => ctx.key === ownerId }),
+                createMemoryFlags({
+                    "mcp-share-links": (ctx) => ctx.key === ownerId,
+                }),
             );
             expect((await app().request(`/s/${token}`)).status).toBe(200);
             // On for everyone else: the creator's flag is what counts.
             setFlagsForTests(
-                createMemoryFlags({ "ui-v2": (ctx) => ctx.key !== ownerId }),
+                createMemoryFlags({
+                    "mcp-share-links": (ctx) => ctx.key !== ownerId,
+                }),
             );
             expect((await app().request(`/s/${token}`)).status).toBe(404);
         });

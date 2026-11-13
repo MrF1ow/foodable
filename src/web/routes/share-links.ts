@@ -62,15 +62,15 @@ const SHARE_HEADERS = {
 } as const;
 
 /**
- * Whether the public page answers for this link. The pages ship behind
- * `ui-v2`, the flag of the surfaces that mint links, evaluated for the
- * subject that minted this one: the member who created the link (`ui-v2` is a
- * user-unit flag), in the link's household, with that member's role when they
- * are still in it. A link whose creator is gone is judged as its household.
- * Anyone opening the link is never the subject: a visitor has no identity.
+ * Whether the public page answers for this link. A share page needs no
+ * sign-in, so it is open only while `mcp-share-links` is on, evaluated for the
+ * subject that minted this link: the member who created it, in the link's
+ * household, with that member's role when they are still in it. A link whose
+ * creator is gone is judged as its household. Anyone opening the link is never
+ * the subject: a visitor has no identity.
  *
- * Links come from the v2 app (`ui-v2`) or from an agent (`mcp-share-links`),
- * so either flag keeps a link open; the route asks nothing else.
+ * The flag is the only switch: links from the app and from an agent follow it
+ * alike, and with it off every link answers the standard 404.
  */
 export async function shareLinksEnabledFor(link: ShareLink): Promise<boolean> {
     const auth: AuthContext =
@@ -94,10 +94,7 @@ export async function shareLinksEnabledFor(link: ShareLink): Promise<boolean> {
             householdId: link.householdId,
         }),
     );
-    return (
-        isViewerFlagOn(flags, "ui-v2") ||
-        isViewerFlagOn(flags, "mcp-share-links")
-    );
+    return isViewerFlagOn(flags, "mcp-share-links");
 }
 
 export type ShareLinksDeps = {

@@ -70,7 +70,10 @@ export type RecipeDetailV2View = {
     cook?: CookSheetView;
     /** The Add to plan sheet. */
     plan?: PlanSheetView;
-    /** The Share sheet; a refused post re-renders the page with it open. */
+    /**
+     * The Share sheet; a refused post re-renders the page with it open. Absent
+     * leaves the Share button and the sheet out (`mcp-share-links` is off).
+     */
     share?: { open?: boolean; error?: string };
     error?: string;
 };
@@ -326,7 +329,7 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
     const backChevron = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18 9 12 15 6"/></svg>`;
     const backRound = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18 9 12 15 6"/></svg>`;
     // The heading id is the anchor Today's "Cook it" link has always used.
-    const actions = `<div class="fd-recipe-actions" id="fd-recipe-cook-heading">${String(renderShareTrigger(RECIPE_SHARE_SHEET_ID, "fd-recipe-plan-btn fd-recipe-share-btn"))}${view.plan ? String(renderPlanTrigger()) : ""}${view.cook ? String(renderCookTrigger()) : ""}</div>`;
+    const actions = `<div class="fd-recipe-actions" id="fd-recipe-cook-heading">${view.share ? String(renderShareTrigger(RECIPE_SHARE_SHEET_ID, "fd-recipe-plan-btn fd-recipe-share-btn")) : ""}${view.plan ? String(renderPlanTrigger()) : ""}${view.cook ? String(renderCookTrigger()) : ""}</div>`;
     const pageError =
         view.error && !view.cook?.open && !view.plan?.open && !view.share?.open
             ? `<p class="fd-recipe-error" role="alert">${esc(view.error)}</p>`
@@ -366,15 +369,19 @@ ${actions}
 </div>
 ${view.cook ? renderCookSheet(view.cook) : ""}
 ${view.plan ? renderPlanSheet(view.plan) : ""}
-${renderShareSheet({
-    id: RECIPE_SHARE_SHEET_ID,
-    action: `/recipes/${view.recipe.id}/share`,
-    title: "Share recipe",
-    subtitle: view.recipe.name,
-    what: "recipe",
-    open: view.share?.open,
-    error: view.share?.open ? view.error : undefined,
-})}`;
+${
+    view.share
+        ? renderShareSheet({
+              id: RECIPE_SHARE_SHEET_ID,
+              action: `/recipes/${view.recipe.id}/share`,
+              title: "Share recipe",
+              subtitle: view.recipe.name,
+              what: "recipe",
+              open: view.share.open,
+              error: view.share.open ? view.error : undefined,
+          })
+        : ""
+}`;
 }
 
 export function renderRecipeDetailV2Page(view: RecipeDetailV2View): string {

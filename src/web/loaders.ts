@@ -986,6 +986,7 @@ export async function renderGroceryListPage(
                 openPutAway: opts.openPutAway,
                 putAwayDraft: opts.putAwayDraft,
                 openAdd: addStoreId != null,
+                shareEnabled: chrome.flags.mcpShareLinks,
                 openShare: opts.openModalId === GROCERY_SHARE_SHEET_ID,
                 addStoreId: addStoreId ?? selectedStoreId,
                 allergenNotices: opts.allergenNotices,
@@ -1773,8 +1774,11 @@ export async function renderHouseholdSettingsRoute(
     if (chrome.flags.uiV2) {
         const pluralsSameFood = await getPluralsSameFood(householdId);
         // No catch: this section is the only place on the web to revoke a
-        // public link, so a failed read must fail the page, not hide it.
-        const sharedLinks = await loadSharedLinkRows(householdId, members);
+        // public link, so a failed read must fail the page, not hide it. With
+        // `mcp-share-links` off there are no links to list and no section.
+        const sharedLinks = chrome.flags.mcpShareLinks
+            ? await loadSharedLinkRows(householdId, members)
+            : undefined;
         // The Last active column is a nicety: if the read fails the page still renders.
         const lastSeen = await listMembersLastSeen(householdId).catch(
             () => undefined,
@@ -2123,6 +2127,7 @@ export async function renderRecipesListPage(
                 importSourceKind: opts.importSourceKind,
                 importSourceLabel: opts.importSourceLabel,
                 sharedImport: opts.sharedImport,
+                sharedImportEnabled: chrome.flags.mcpShareLinks,
             }),
         };
     }
@@ -2495,7 +2500,9 @@ export async function renderRecipeDetailRoute(
                     )
                 ).includes(recipeId),
                 cook,
-                share: { open: opts.openModalId === RECIPE_SHARE_SHEET_ID },
+                share: chrome.flags.mcpShareLinks
+                    ? { open: opts.openModalId === RECIPE_SHARE_SHEET_ID }
+                    : undefined,
                 plan: await planSheetView(
                     householdId,
                     recipeId,

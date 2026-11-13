@@ -231,6 +231,7 @@ describe("renderRecipeDetailBody", () => {
     test("the header actions run Share, Add to plan, Cook, with Cook last", () => {
         const html = renderRecipeDetailBody({
             ...viewBase,
+            share: {},
             cook,
             plan: {
                 recipeId: "r1",
@@ -253,8 +254,15 @@ describe("renderRecipeDetailBody", () => {
         expect(cookAt).toBeGreaterThan(plan);
     });
 
-    test("Share opens a sheet that posts to this recipe's share route", () => {
+    test("without a share view there is no Share button or sheet", () => {
         const html = renderRecipeDetailBody({ ...viewBase });
+        expect(html).not.toContain("fd-recipe-share");
+        expect(html).not.toContain("/share");
+        expect(html).not.toContain("Share recipe");
+    });
+
+    test("Share opens a sheet that posts to this recipe's share route", () => {
+        const html = renderRecipeDetailBody({ ...viewBase, share: {} });
         expect(html).toContain(
             'commandfor="fd-recipe-share-sheet" command="show-modal"',
         );

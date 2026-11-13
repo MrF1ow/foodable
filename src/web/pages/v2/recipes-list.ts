@@ -66,6 +66,11 @@ export type RecipesListV2View = {
      * could not be imported: what was pasted, and why. Reopens the import panel.
      */
     sharedImport?: { error?: string; input?: string };
+    /**
+     * Whether the import panel offers pasting a recipe from another Foodable
+     * (the `mcp-share-links` flag). Absent or false leaves that form out.
+     */
+    sharedImportEnabled?: boolean;
 };
 
 export function recipesListV2Href(opts: {
@@ -294,7 +299,7 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
 <ul class="fd-list fd-recipes-list${view.planDate ? " fd-recipes-list--planning" : ""}">${view.cards.map((card) => recipeCard(card, view)).join("")}</ul>
 </section>`
             : "";
-    const shared = view.sharedImport;
+    const shared = view.sharedImportEnabled ? view.sharedImport : undefined;
     const sharedError = shared?.error
         ? `<p class="fd-recipes-import-error fd-recipes-import-shared-error" role="alert">${esc(shared.error)}</p>`
         : "";
@@ -304,12 +309,16 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
 <input class="fd-recipes-import-input" name="url" type="url" inputmode="url" autocomplete="off" required placeholder="https://…" aria-label="Recipe link" value="${esc(view.importUrl ?? "")}" />
 <button type="submit" class="fd-recipes-import-submit">Import</button>
 </form>
-<form class="fd-recipes-import-link__form fd-recipes-import-shared" method="post" action="/recipes/import-shared" data-fd-recipes-shared data-busy-form>
+${
+    view.sharedImportEnabled
+        ? `<form class="fd-recipes-import-link__form fd-recipes-import-shared" method="post" action="/recipes/import-shared" data-fd-recipes-shared data-busy-form>
 <p class="fd-recipes-import-note">Got a recipe from another Foodable? Paste its share link, or the recipe's JSON.</p>
 ${sharedError}
 <textarea class="fd-recipes-import-text" name="shared" rows="4" required spellcheck="false" autocomplete="off" placeholder="https://…/s/… or {…}" aria-label="Shared recipe link or JSON">${esc(shared?.input ?? "")}</textarea>
 <button type="submit" class="fd-recipes-import-submit">Import recipe</button>
-</form>
+</form>`
+        : ""
+}
 </details>`;
     const planPick = view.planDate
         ? `<p class="fd-plan-pick" role="status">Pick a recipe for ${esc(planDayLabel(view.planDate))}. <a href="/recipes">Cancel</a></p>`

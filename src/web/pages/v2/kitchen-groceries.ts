@@ -81,6 +81,11 @@ export type KitchenGroceriesV2View = {
     openPutAway?: boolean;
     putAwayDraft?: PutAwayDraft;
     openAdd?: boolean;
+    /**
+     * Whether the page offers Share (the `mcp-share-links` flag). Absent or
+     * false leaves the button and the sheet out.
+     */
+    shareEnabled?: boolean;
     /** A refused Share post re-renders the page with the Share sheet open. */
     openShare?: boolean;
     addStoreId?: string | null;
@@ -632,9 +637,14 @@ export function renderKitchenGroceriesBody(
     const sheets = allLines
         .map((line) => lineSheet(line, view, returnTo))
         .join("");
-    const shareButton = String(
-        renderShareTrigger(GROCERY_SHARE_SHEET_ID, "fd-kitchen-grocery-share"),
-    );
+    const shareButton = view.shareEnabled
+        ? String(
+              renderShareTrigger(
+                  GROCERY_SHARE_SHEET_ID,
+                  "fd-kitchen-grocery-share",
+              ),
+          )
+        : "";
     const select = selectMode({
         scope: "groceries",
         returnTo,
@@ -662,14 +672,13 @@ export function renderKitchenGroceriesBody(
         active: "groceries",
         phoneSubtitle: itemCount,
         desktopSubtitle: itemCount,
-        desktopTools: shareButton,
+        ...(shareButton ? { desktopTools: shareButton } : {}),
     });
     // On the phone the header is the bare title (as on the other tabs) and
     // Share rides at the right of the first row under the tabs.
     return `${head}
 <div class="fd-kitchen-groceries-page"${select.rootAttrs}>
-<div class="fd-kitchen-grocery-tools">${shareButton}</div>
-${pageError}
+${shareButton ? `<div class="fd-kitchen-grocery-tools">${shareButton}</div>\n` : ""}${pageError}
 ${allergenBanner}
 ${renderGroceryStoreChips(view)}
 ${groceryAddField(view)}
@@ -682,15 +691,19 @@ ${sheets}
 ${selectable ? select.sheets : ""}
 ${groceryAddSheet(view, returnTo)}
 ${putAwaySheet(view, returnTo)}
-${renderShareSheet({
-    id: GROCERY_SHARE_SHEET_ID,
-    action: "/kitchen/groceries/share",
-    title: "Share grocery list",
-    subtitle: "The whole list, by store",
-    what: "grocery list",
-    open: view.openShare,
-    error: view.openShare ? view.error : undefined,
-})}
+${
+    view.shareEnabled
+        ? renderShareSheet({
+              id: GROCERY_SHARE_SHEET_ID,
+              action: "/kitchen/groceries/share",
+              title: "Share grocery list",
+              subtitle: "The whole list, by store",
+              what: "grocery list",
+              open: view.openShare,
+              error: view.openShare ? view.error : undefined,
+          })
+        : ""
+}
 ${confirmSheet({
     id: FD_GROCERY_CLEAR_SHEET_ID,
     title: "Clear checked",

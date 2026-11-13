@@ -53,7 +53,9 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         sql = ctx.sql;
         await ctx.truncateAll();
         setSqlForTests(sql);
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
+        );
         setRateLimitStore(createMemoryRateLimitStore());
         const a = await seedHousehold(sql);
         householdId = a.householdId;
@@ -270,8 +272,10 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         expect(await allStoredCount()).toBe(0);
     });
 
-    test("with ui-v2 off every handler is a 404 and nothing is stored", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+    test("with mcp-share-links off every handler is a 404 and nothing is stored", async () => {
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
+        );
         const recipe = await seedRecipe(householdId, ownerId);
         const link = await asUser(
             ownerId,
@@ -410,6 +414,19 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         expect(html).not.toContain(`shared-links/${expired.link.id}/revoke`);
         // Nothing in the list can give a link's address back.
         for (const t of [keep.token]) expect(html).not.toContain(t);
+    });
+
+    test("with mcp-share-links off Settings has no Shared links section", async () => {
+        const recipe = await seedRecipe(householdId, ownerId);
+        await make(ownerId, householdId, "recipe", recipe.id);
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
+        );
+        const res = await get(ownerId, "/settings/household");
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).not.toContain("Shared links");
+        expect(html).not.toMatch(/shared-links\/[0-9a-f-]{36}\/revoke/);
     });
 
     test("Settings with no links shows an empty state", async () => {

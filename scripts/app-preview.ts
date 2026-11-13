@@ -1659,6 +1659,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     ) =>
         renderRecipesListV2Page({
             chrome,
+            sharedImportEnabled: true,
             query: "",
             filter: "",
             totalCount: 2,
@@ -1759,6 +1760,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         grocery: V2
             ? renderKitchenGroceriesV2Page(
                   buildPreviewKitchenGroceriesView(chrome as never, {
+                      shareEnabled: true,
                       ...((): Partial<
                           import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
                       > => {
@@ -1816,6 +1818,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ? {
                   "grocery-put-away": renderKitchenGroceriesV2Page(
                       buildPreviewKitchenGroceriesView(chrome as never, {
+                          shareEnabled: true,
                           ...((): Partial<
                               import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
                           > => {

@@ -371,21 +371,21 @@ describe("shareLinksEnabledFor", () => {
         revokedAt: null,
     };
 
-    test("follows ui-v2, judged for the link's household when its creator is gone", async () => {
-        setFlagsForTests(createMemoryFlags({ "ui-v2": true }));
+    test("follows mcp-share-links, judged for the link's household when its creator is gone", async () => {
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         expect(await shareLinksEnabledFor(link)).toBe(true);
-        setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         expect(await shareLinksEnabledFor(link)).toBe(false);
     });
 
-    test("a link stays open with mcp-share-links alone, and closes with both off", async () => {
+    test("ui-v2 alone keeps nothing open", async () => {
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
+        );
+        expect(await shareLinksEnabledFor(link)).toBe(false);
         setFlagsForTests(
             createMemoryFlags({ "ui-v2": false, "mcp-share-links": true }),
         );
         expect(await shareLinksEnabledFor(link)).toBe(true);
-        setFlagsForTests(
-            createMemoryFlags({ "ui-v2": false, "mcp-share-links": false }),
-        );
-        expect(await shareLinksEnabledFor(link)).toBe(false);
     });
 });
