@@ -81,6 +81,11 @@ export const WIDGET_TEMPLATES: Record<string, string> = {
 // does not resolve these keys; MCP v2 URIs may once templates land.
 export const WIDGET_TEMPLATES_V2: Record<string, string> = {
     attention: "attention.html",
+    "use-soon": "use-soon.html",
+    "recipe-card": "recipe-card.html",
+    "product-score": "product-score.html",
+    "restock-nudge": "restock-nudge.html",
+    "week-plan": "week-plan.html",
 };
 
 /** Per-widget size caps for assembled MCP widget HTML (bytes = 1024). */

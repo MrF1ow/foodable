@@ -1,6 +1,11 @@
 import type { RestockPreferences } from "../household.js";
-import type { EffectiveFood } from "./foods.js";
-import { familyOf, foodDisplayName, usualLowLevel } from "./foods.js";
+import type { EffectiveFood, Food, RestockSchedule } from "./foods.js";
+import {
+    effectiveFoodsFromListed,
+    familyOf,
+    foodDisplayName,
+    usualLowLevel,
+} from "./foods.js";
 import type { FridgeItem } from "./fridge.js";
 import {
     pickGroceryAmount,
@@ -161,6 +166,47 @@ function tickIsRecent(lastRestockedOn: string | null, today: string): boolean {
     return since != null && since < TICKED_COVERS_LOW_DAYS;
 }
 
+/** Grocery-line families split by whether the line is still unticked. */
+type ListedFamilies = {
+    open: ReadonlySet<string>;
+    ticked: ReadonlySet<string>;
+};
+
+function listedFamilies(
+    lines: readonly Pick<GroceryLine, "foodId" | "checked">[],
+    familyById: ReadonlyMap<string, string>,
+): ListedFamilies {
+    const open = new Set<string>();
+    const ticked = new Set<string>();
+    for (const line of lines) {
+        if (!line.foodId) continue;
+        const family = familyById.get(line.foodId) ?? line.foodId;
+        (line.checked ? ticked : open).add(family);
+    }
+    return { open, ticked };
+}
+
+/**
+ * Whether the grocery list already covers a due usual: an unticked line in its
+ * family always does, and a ticked one does only for a low usual while the tick
+ * is recent. The restock runner and `list_usuals` both ask this, so what the
+ * card offers is what the runner would add.
+ */
+function usualAlreadyListed(
+    food: EffectiveFood,
+    trigger: DueUsual["trigger"],
+    listed: ListedFamilies,
+    today: string,
+): boolean {
+    const family = familyOf(food);
+    return (
+        listed.open.has(family) ||
+        (trigger === "low" &&
+            listed.ticked.has(family) &&
+            tickIsRecent(food.lastRestockedOn, today))
+    );
+}
+
 function parseDay(iso: string): number | null {
     const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso);
     if (!m) return null;
@@ -273,6 +319,14 @@ function lowReason(
     return `${formatAmount(total)} left, below ${formatAmount(level)}`;
 }
 
+/** Whether `today` (household-local `YYYY-MM-DD`) falls on the restock weekday (0 = Sunday). */
+function isRestockDayOn(today: string, householdRestockDay: number): boolean {
+    const todayMs = parseDay(today);
+    return (
+        todayMs != null && new Date(todayMs).getUTCDay() === householdRestockDay
+    );
+}
+
 /**
  * Which usuals are due for the list: by schedule on the household's restock
  * day (`householdRestockDay`, 0 = Sunday like `dowInTz`), or any day because
@@ -291,7 +345,7 @@ export function usualsDue(
 ): DueUsual[] {
     const todayMs = parseDay(today);
     if (todayMs == null) return [];
-    const isRestockDay = new Date(todayMs).getUTCDay() === householdRestockDay;
+    const isRestockDay = isRestockDayOn(today, householdRestockDay);
     const out: DueUsual[] = [];
     for (const food of usuals) {
         if (food.restockPaused || food.archivedAt || food.genericFoodId) {
@@ -310,6 +364,131 @@ export function usualsDue(
         }
     }
     return out;
+}
+
+/**
+ * A usual: a plain, live food that has a schedule or is added when low. The
+ * restock runner and `list_usuals` both pick their usuals with this, paused
+ * ones included (paused only stops them being due).
+ */
+export function isUsualFood(food: Food): boolean {
+    return (
+        !food.genericFoodId &&
+        !food.archivedAt &&
+        (food.restockSchedule != null || food.restockWhenLow)
+    );
+}
+
+export type UsualListRow = {
+    foodId: string;
+    name: string;
+    kind: "food" | "supply";
+    /** The usual product's display name, or null when the food has none. */
+    productName: string | null;
+    storeId: string | null;
+    storeName: string | null;
+    /** The usual amount to add; null means 1 of the default unit. */
+    amount: number | null;
+    unit: string;
+    schedule: RestockSchedule | null;
+    everyWeeks: number | null;
+    lastRestockedOn: string | null;
+    restockWhenLow: boolean;
+    /** The level stock is compared with when add-when-low is on, else null. */
+    lowLevel: number | null;
+    paused: boolean;
+    due: { reason: string; trigger: "schedule" | "low" } | null;
+    /**
+     * The list already covers this usual (`usualAlreadyListed`): an unchecked
+     * line for its food or family, or, for a low usual, a recent ticked one.
+     */
+    onList: boolean;
+    /** A low usual whose running-low notice was dismissed; the runner skips it too. */
+    dismissed: boolean;
+};
+
+/**
+ * Every usual of the household with its schedule and low settings and whether
+ * it is due today (and why), straight from `usualsDue`. Due usuals come
+ * first, then the rest by name; `isRestockDay` is the same check `usualsDue`
+ * makes. `listed` is the whole catalog so a usual's
+ * product and family stock resolve; `today` is the household-local date.
+ */
+export function usualsList(input: {
+    listed: readonly Food[];
+    stock: readonly FridgeItem[];
+    stores: readonly Pick<GroceryStore, "id" | "name">[];
+    /** The household's grocery lines, for `onList`. */
+    lines: readonly Pick<GroceryLine, "foodId" | "checked">[];
+    /** Dismissed notice keys (`dismissedKeySet`), for `dismissed`. */
+    dismissed?: ReadonlySet<string>;
+    today: string;
+    householdRestockDay: number;
+}): { rows: UsualListRow[]; isRestockDay: boolean } {
+    const foodsById = effectiveFoodsFromListed(input.listed);
+    const familyById = new Map<string, string>();
+    for (const [id, food] of foodsById) familyById.set(id, familyOf(food));
+    const listed = listedFamilies(input.lines, familyById);
+    const usuals = input.listed
+        .filter(isUsualFood)
+        .map((food) => foodsById.get(food.id))
+        .filter((food): food is EffectiveFood => food != null);
+    const due = new Map(
+        usualsDue(
+            usuals,
+            input.stock,
+            input.today,
+            input.householdRestockDay,
+            foodsById,
+        ).map((row) => [row.food.id, row]),
+    );
+    const storeNames = new Map(input.stores.map((s) => [s.id, s.name]));
+    const rows = usuals.map((food): UsualListRow => {
+        const hit = due.get(food.id);
+        return {
+            foodId: food.id,
+            name: food.name,
+            kind: food.kind === "supply" ? "supply" : "food",
+            productName: food.product ? foodDisplayName(food.product) : null,
+            storeId: food.usualStoreId,
+            storeName:
+                food.usualStoreId != null
+                    ? (storeNames.get(food.usualStoreId) ?? null)
+                    : null,
+            amount: food.usualAmount?.amount ?? null,
+            unit: food.usualAmount?.unit ?? food.defaultUnit,
+            schedule: food.restockSchedule,
+            everyWeeks: food.restockEveryWeeks,
+            lastRestockedOn: food.lastRestockedOn,
+            restockWhenLow: food.restockWhenLow,
+            lowLevel: food.restockWhenLow ? usualLowLevel(food) : null,
+            paused: food.restockPaused,
+            due: hit ? { reason: hit.reason, trigger: hit.trigger } : null,
+            // A usual that is not due has no trigger; only an unticked line
+            // counts for it.
+            onList: usualAlreadyListed(
+                food,
+                hit?.trigger ?? "schedule",
+                listed,
+                input.today,
+            ),
+            dismissed:
+                hit?.trigger === "low" &&
+                isDismissedIn(
+                    runningLowNotice(food, hit.reason),
+                    input.dismissed ?? new Set<string>(),
+                ),
+        };
+    });
+    rows.sort(
+        (a, b) =>
+            Number(b.due != null) - Number(a.due != null) ||
+            a.name.localeCompare(b.name),
+    );
+    return {
+        rows,
+        isRestockDay: isRestockDayOn(input.today, input.householdRestockDay),
+    };
 }
 
 type RestockPlacement = { storeId: string; sectionId: string };
@@ -395,15 +574,9 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
     // An unticked line for a family always covers it. A ticked line covers
     // only a low or expiring family, and only while the tick is recent
     // (`TICKED_COVERS_LOW_DAYS`), in the expiring and the usual loops alike.
-    const openFamilies = new Set<string>();
-    const tickedFamilies = new Set<string>();
-    for (const line of input.lines) {
-        if (!line.foodId) continue;
-        const family = familyById.get(line.foodId) ?? line.foodId;
-        (line.checked ? tickedFamilies : openFamilies).add(family);
-    }
+    const listed = listedFamilies(input.lines, familyById);
     const recentTickCovers = (family: string, food: EffectiveFood): boolean =>
-        tickedFamilies.has(family) &&
+        listed.ticked.has(family) &&
         tickIsRecent(food.lastRestockedOn, input.today);
 
     const dueByFamily = new Map<
@@ -565,10 +738,8 @@ export function restockPlan(input: RestockPlanInput): RestockPlanResult {
         a.food.name.localeCompare(b.food.name),
     );
     for (const { food, reason, trigger } of sortedDue) {
-        const family = familyOf(food);
         const alreadyListed =
-            openFamilies.has(family) ||
-            (trigger === "low" && recentTickCovers(family, food)) ||
+            usualAlreadyListed(food, trigger, listed, input.today) ||
             lines.some((line) => line.foodId === food.id);
         if (alreadyListed) {
             counts.skippedOnList += 1;
@@ -760,15 +931,7 @@ export async function runRestockCheck(
                 }
                 const listed = await deps.foods.listFoods(householdId);
                 const usualIds = schedules
-                    ? listed
-                          .filter(
-                              (f) =>
-                                  !f.genericFoodId &&
-                                  !f.archivedAt &&
-                                  (f.restockSchedule != null ||
-                                      f.restockWhenLow),
-                          )
-                          .map((f) => f.id)
+                    ? listed.filter(isUsualFood).map((f) => f.id)
                     : [];
                 for (const id of usualIds) foodIds.add(id);
                 const families = new Set<string>();

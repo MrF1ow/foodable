@@ -10,12 +10,14 @@ import type { FridgeItem } from "./fridge.js";
 import { familyIdOf } from "./food-quantity.js";
 import { sameFood, type LinkedNeed } from "./linking.js";
 import {
+    macrosForPerson,
     recipeCanMakeNow,
     type RecipeFilterRow,
     type RecipeMacros,
 } from "./recipes.js";
 import type { MealTypeSlot } from "./today.js";
 import type { Food } from "./foods.js";
+import type { RecipesListPrefetch } from "./notices-for.js";
 
 /** At most this many suggestions for one empty slot. */
 export const MAX_SLOT_SUGGESTIONS = 2;
@@ -315,4 +317,74 @@ export function recipesUsingExpiring(
             })),
         };
     });
+}
+
+/** Recipes as the Recipes page reads them, from data already loaded. */
+export function recipeRowsFromPrefetch(
+    prefetch: RecipesListPrefetch,
+): SuggestionRecipe[] {
+    const byRecipe = new Map<string, RecipesListPrefetch["allIngredients"]>();
+    for (const row of prefetch.allIngredients) {
+        const list = byRecipe.get(row.recipeId) ?? [];
+        list.push(row);
+        byRecipe.set(row.recipeId, list);
+    }
+    return prefetch.recipes.map((recipe) => {
+        const ingredients = byRecipe.get(recipe.id) ?? [];
+        return {
+            recipe,
+            ingredients,
+            macrosPerPortion: macrosForPerson(
+                ingredients,
+                recipe.yieldPortions,
+                1,
+                prefetch.foodsById,
+            ),
+        };
+    });
+}
+
+/**
+ * The recipes that use each expiring item, plus the one cookable recipe that
+ * uses the most of them (two or more; a recipe using a single item is already
+ * that item's "Use in" line). Ties keep the first recipe in item order.
+ */
+export function useSoonFromPrefetch(
+    prefetch: RecipesListPrefetch,
+    expiring: readonly ExpiringItem[],
+): {
+    uses: ExpiringUse[];
+    best: { row: SuggestionRecipe; itemCount: number } | null;
+} {
+    if (expiring.length === 0) return { uses: [], best: null };
+    const rows = recipeRowsFromPrefetch(prefetch);
+    const uses = recipesUsingExpiring(
+        rows,
+        prefetch.fridgeItems.map((item) => ({
+            quantity: item.quantity,
+            foodId: item.foodId,
+        })),
+        expiring,
+        prefetch.foodsById,
+    );
+    const counts = new Map<string, number>();
+    for (const use of uses) {
+        for (const recipe of use.recipes) {
+            counts.set(recipe.recipeId, (counts.get(recipe.recipeId) ?? 0) + 1);
+        }
+    }
+    let best: { recipeId: string; count: number } | null = null;
+    for (const use of uses) {
+        for (const recipe of use.recipes) {
+            const count = counts.get(recipe.recipeId) ?? 0;
+            if (count >= 2 && (best == null || count > best.count)) {
+                best = { recipeId: recipe.recipeId, count };
+            }
+        }
+    }
+    const row = best && rows.find((r) => r.recipe.id === best.recipeId);
+    return {
+        uses,
+        best: best && row ? { row, itemCount: best.count } : null,
+    };
 }

@@ -3,6 +3,7 @@
 // recipes and stock; `addMissingToGroceries` is the one adapter, and it goes
 // through the same add-line path as every other grocery source.
 
+import { PLAN_UNKNOWN_LINE_NOTE } from "../copy/toasts.js";
 import { familyIdOf, type FoodQuantityFactors } from "./food-quantity.js";
 import type { FoodsStore } from "./foods.js";
 import {
@@ -21,6 +22,7 @@ import {
     checkPlanDate,
     planSlotRank,
     type PlanSlot,
+    type PlanTransaction,
     type RecipePlan,
 } from "./plan.js";
 import { dimensionOf, isQuantityUnit } from "./quantity.js";
@@ -541,9 +543,27 @@ export type AddMissingToGroceriesResult = {
  * nothing, and a line in a unit that cannot be compared adds the full amount
  * and is reported in `alsoOnList`. Lines of this same call never count against
  * each other. Ingredients are always plain foods: a recipe has no supplies.
- * The store comes from the usual pick unless `storeId` names one.
+ * An added line whose stock could not be counted carries the "check what you
+ * have" note. The store comes from the usual pick unless `storeId` names one.
+ * The list is read and the lines added inside `opts.transaction`, so a second
+ * call at the same time waits and then finds the first one's lines.
  */
 export async function addMissingToGroceries(
+    grocery: GroceryListStore,
+    settings: SettingsStore,
+    foods: FoodsStore,
+    input: {
+        householdId: string;
+        lines: readonly PlanMissingLine[];
+        storeId?: string;
+    },
+    opts: { transaction?: PlanTransaction } = {},
+): Promise<AddMissingToGroceriesResult> {
+    const runTx: PlanTransaction = opts.transaction ?? ((fn) => fn());
+    return runTx(() => addMissingLocked(grocery, settings, foods, input));
+}
+
+async function addMissingLocked(
     grocery: GroceryListStore,
     settings: SettingsStore,
     foods: FoodsStore,
@@ -600,10 +620,11 @@ export async function addMissingToGroceries(
                 unit: line.missing?.unit,
                 source: "plan",
             });
-            if (line.unmeasured) {
+            if (line.unmeasured || (line.unknown && inserted.note == null)) {
+                // The list line says so too, not only the caller's notice.
                 const noted = await grocery.updateLine({
                     ...inserted,
-                    note: "to taste",
+                    note: line.unmeasured ? "to taste" : PLAN_UNKNOWN_LINE_NOTE,
                 });
                 if (noted) inserted = noted;
             }

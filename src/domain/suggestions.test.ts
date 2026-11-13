@@ -3,13 +3,17 @@ import {
     MAX_SLOT_SUGGESTIONS,
     portionFitsMacros,
     recipesUsingExpiring,
+    recipeRowsFromPrefetch,
     suggestForSlot,
+    useSoonFromPrefetch,
     type ExpiringItem,
     type MacrosLeft,
     type SuggestionRecipe,
 } from "./suggestions.js";
 import type { LinkedNeed } from "./linking.js";
 import type { RecipeMacros } from "./recipes.js";
+import type { FridgeItem } from "./fridge.js";
+import type { RecipesListPrefetch } from "./notices-for.js";
 
 const HH = "hh-1";
 
@@ -625,4 +629,74 @@ test("inputs are not mutated and results are plain JSON", () => {
     expect(JSON.stringify({ recipes, items })).toBe(before);
     expect(JSON.parse(JSON.stringify(slot))).toEqual(slot);
     expect(JSON.parse(JSON.stringify(uses))).toEqual(uses);
+});
+
+function prefetchOf(
+    rows: SuggestionRecipe[],
+    foodIds: string[],
+): RecipesListPrefetch {
+    const fridgeItems: FridgeItem[] = foodIds.map((foodId) => ({
+        id: `f-${foodId}`,
+        householdId: HH,
+        locationId: "loc-1",
+        kind: "food",
+        displayName: foodId,
+        quantity: { amount: 1000, unit: "g" },
+        foodId,
+        expiresOn: "2026-11-13",
+    }));
+    return {
+        recipes: rows.map((row) => row.recipe),
+        allIngredients: rows.flatMap((row) => row.ingredients),
+        fridgeItems,
+        foodsById: new Map(),
+    };
+}
+
+test("recipeRowsFromPrefetch groups ingredients under their recipe, in recipe order", () => {
+    const rows = recipeRowsFromPrefetch(
+        prefetchOf([PILAF, OMELETTE], [RICE, EGGS, SPINACH]),
+    );
+    expect(rows.map((row) => row.recipe.id)).toEqual(["r-pilaf", "r-omelette"]);
+    expect(rows[0]!.ingredients.map((i) => i.foodId)).toEqual([RICE]);
+    expect(rows[1]!.ingredients.map((i) => i.foodId)).toEqual([EGGS, SPINACH]);
+});
+
+test("useSoonFromPrefetch: the best recipe is the cookable one using two or more expiring items", () => {
+    const result = useSoonFromPrefetch(
+        prefetchOf([PILAF, OMELETTE], [RICE, EGGS, SPINACH]),
+        [
+            expiring("f-eggs", EGGS, "2026-11-13"),
+            expiring("f-spinach", SPINACH, "2026-11-14"),
+            expiring("f-rice", RICE, "2026-11-15"),
+        ],
+    );
+    expect(result.uses.map((u) => u.recipes[0]?.recipeId)).toEqual([
+        "r-omelette",
+        "r-omelette",
+        "r-pilaf",
+    ]);
+    expect(result.best?.row.recipe.id).toBe("r-omelette");
+    expect(result.best?.itemCount).toBe(2);
+});
+
+test("useSoonFromPrefetch: no best recipe when each uses a single item, or nothing expires, or the recipe is not cookable", () => {
+    const single = useSoonFromPrefetch(
+        prefetchOf([PILAF, OMELETTE], [RICE, EGGS, SPINACH]),
+        [expiring("f-rice", RICE, "2026-11-15")],
+    );
+    expect(single.uses).toHaveLength(1);
+    expect(single.best).toBeNull();
+
+    expect(
+        useSoonFromPrefetch(prefetchOf([OMELETTE], [EGGS, SPINACH]), []),
+    ).toEqual({ uses: [], best: null });
+
+    // Spinach is not in the fridge, so the omelette cannot be made now.
+    const short = useSoonFromPrefetch(prefetchOf([OMELETTE], [EGGS]), [
+        expiring("f-eggs", EGGS, "2026-11-13"),
+        expiring("f-spinach", SPINACH, "2026-11-14"),
+    ]);
+    expect(short.uses.every((u) => u.recipes.length === 0)).toBe(true);
+    expect(short.best).toBeNull();
 });

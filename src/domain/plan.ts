@@ -111,6 +111,81 @@ export function checkPlanServings(value: unknown): number {
     return value;
 }
 
+/** The most servings one plan may hold. */
+export const PLAN_SERVINGS_MAX = 999;
+
+/**
+ * A plan day must be a real day and not already past, in the household's
+ * calendar (`today`): a plan for yesterday would never show.
+ */
+export function checkPlanDay(value: unknown, today: string): string {
+    const date = checkPlanDate(value);
+    if (date < today) throw new PlanInputError("Pick today or a later day.");
+    return date;
+}
+
+/** Servings above zero and within `PLAN_SERVINGS_MAX`. */
+export function checkPlanServingsCapped(value: unknown): number {
+    const servings = checkPlanServings(value);
+    if (servings > PLAN_SERVINGS_MAX) {
+        throw new PlanInputError(
+            `Keep it to ${PLAN_SERVINGS_MAX} servings or fewer.`,
+        );
+    }
+    return servings;
+}
+
+/**
+ * Runs `fn` as one serialized step. The live callers pass one that holds a
+ * per-household lock for the duration, so two parallel calls cannot both find
+ * nothing and both insert; the default runs `fn` directly (the memory store).
+ */
+export type PlanTransaction = <T>(fn: () => Promise<T>) => Promise<T>;
+
+/**
+ * Plans a recipe on a day and slot. The day is checked against `today`, then
+ * the slot, then the servings (default: `recipeYield`). Planning the same
+ * recipe on the same day and slot twice is one plan: the existing one comes
+ * back with `alreadyPlanned`. Null when the store does not know the recipe.
+ * The check and the insert run inside `opts.transaction`.
+ */
+export async function planRecipe(
+    store: PlansStore,
+    input: {
+        householdId: string;
+        recipeId: string;
+        recipeYield: number;
+        date: string;
+        slot: string;
+        servings?: number | null;
+        today: string;
+        createdBy: string | null;
+    },
+    opts: { transaction?: PlanTransaction } = {},
+): Promise<{ plan: RecipePlan; alreadyPlanned: boolean } | null> {
+    const date = checkPlanDay(input.date, input.today);
+    const slot = checkPlanSlot(input.slot);
+    const servings = checkPlanServingsCapped(
+        input.servings ?? input.recipeYield,
+    );
+    const runTx: PlanTransaction = opts.transaction ?? ((fn) => fn());
+    return runTx(async () => {
+        const existing = (
+            await store.listPlans(input.householdId, date, date)
+        ).find((p) => p.recipeId === input.recipeId && p.slot === slot);
+        if (existing) return { plan: existing, alreadyPlanned: true };
+        const plan = await store.addPlan({
+            householdId: input.householdId,
+            recipeId: input.recipeId,
+            date,
+            slot,
+            servings,
+            createdBy: input.createdBy,
+        });
+        return plan ? { plan, alreadyPlanned: false } : null;
+    });
+}
+
 /** Position of a slot within the day, for ordering. */
 export function planSlotRank(slot: PlanSlot): number {
     return PLAN_SLOTS.indexOf(slot);

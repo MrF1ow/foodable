@@ -3,6 +3,10 @@ import { z } from "zod";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
+import {
+    getHouseholdConfig,
+    getHouseholdOwnerProfile,
+} from "../../db/household.js";
 import { householdToday } from "../../db/restock.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveSettingsStore } from "../../db/settings.js";
@@ -11,7 +15,11 @@ import { withAnalytics } from "../../analytics.js";
 import { lookupBarcode } from "../../foods.js";
 import { alreadyHaveTag } from "../../domain/linking.js";
 import { listFridge } from "../../domain/fridge.js";
-import { effectiveFoodsByIds } from "../../domain/foods.js";
+import {
+    effectiveFoodsByIds,
+    foodsByIds,
+    isUsualGroceryLine,
+} from "../../domain/foods.js";
 import {
     addGroceryFoodByBarcode,
     addGroceryFoodById,
@@ -30,7 +38,14 @@ import {
     isDismissedIn,
 } from "../../domain/notice-dismissals.js";
 import { sortNotices } from "../../domain/notices.js";
-import { groceryRestockNotices } from "../../domain/restock.js";
+import {
+    groceryRestockNotices,
+    usualsList,
+    type UsualListRow,
+} from "../../domain/restock.js";
+import { RESTOCK_SCHEDULES } from "../../domain/foods.js";
+import { householdTodayAt } from "../../household.js";
+import { gatedTool } from "../gated.js";
 import {
     NotedGroceryLineAmountRequiredError,
     putAwayGroceryLines,
@@ -50,10 +65,14 @@ import {
     SIMILAR_FOODS_ENTRY,
     WRITE_STATUS,
     registerWidgetResource,
+    registerV2OnlyWidgetResource,
+    uiMetaForKey,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
+import { isViewerFlagOn } from "../../viewer-flags.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
 import { GroceryInputError } from "../../domain/grocery.js";
+import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
 
 export const ADD_GROCERY_LINE_OUTPUT_SCHEMA = z.object({
     status: WRITE_STATUS,
@@ -79,6 +98,12 @@ const groceryLineSchema = z.object({
     source_fridge_item_id: z.string().nullable(),
     note: z.string().nullable(),
     already_have: z.string().nullable(),
+    /** The name of the store the line is filed under. */
+    store: z.string(),
+    /** The usual product's display name when the line's food has one, else null. */
+    product_name: z.string().nullable(),
+    /** Whether the line is the household's usual product for its food. */
+    usual: z.boolean(),
     product: z
         .object({
             food_id: z.string(),
@@ -104,6 +129,98 @@ export const GROCERY_LIST_OUTPUT_SCHEMA = z.object({
         }),
     ),
 });
+
+export const LIST_USUALS_OUTPUT_SCHEMA = z.object({
+    /** The household's restock weekday, 0 = Sunday. */
+    restock_weekday: z.number().int().min(0).max(6),
+    restock_weekday_name: z.string(),
+    /** Today in the household's time zone, `YYYY-MM-DD`. */
+    today: z.string(),
+    is_restock_day: z.boolean(),
+    /** The household's restock automation switch; when off, due usuals are not added to the list on their own. */
+    restock_enabled: z.boolean(),
+    usuals: z.array(
+        z.object({
+            food_id: z.string(),
+            name: z.string(),
+            /** What add_grocery_line needs as `kind` to restock it. */
+            kind: z.enum(["food", "supply"]),
+            /** The usual product's display name; null when the food has none. */
+            product_name: z.string().nullable(),
+            store_id: z.string().nullable(),
+            store_name: z.string().nullable(),
+            /** The usual amount to add; null means 1 of the unit. */
+            amount: z.number().nullable(),
+            unit: z.string(),
+            schedule: z.enum(RESTOCK_SCHEDULES).nullable(),
+            /** N when the schedule is every_n_weeks, else null. */
+            every_weeks: z.number().int().nullable(),
+            last_restocked_on: z.string().nullable(),
+            restock_when_low: z.boolean(),
+            /** The level stock is compared with (in the unit); null when add-when-low is off. */
+            low_level: z.number().nullable(),
+            paused: z.boolean(),
+            /** Why the usual is due now and what triggered it; null when it is not due. */
+            due: z
+                .object({
+                    reason: z.string(),
+                    trigger: z.enum(["schedule", "low"]),
+                })
+                .nullable(),
+            /** The grocery list already covers this usual (an unchecked line for the food or its family, or for a low usual a recently ticked one), so adding it again would duplicate the line. */
+            on_list: z.boolean(),
+            /** A low usual whose running-low notice was dismissed; the restock runner skips it, so the card does not offer it. */
+            dismissed: z.boolean(),
+        }),
+    ),
+});
+
+function usualWire(row: UsualListRow) {
+    return {
+        food_id: row.foodId,
+        name: row.name,
+        kind: row.kind,
+        product_name: row.productName,
+        store_id: row.storeId,
+        store_name: row.storeName,
+        amount: row.amount,
+        unit: row.unit,
+        schedule: row.schedule,
+        every_weeks: row.everyWeeks,
+        last_restocked_on: row.lastRestockedOn,
+        restock_when_low: row.restockWhenLow,
+        low_level: row.lowLevel,
+        paused: row.paused,
+        due: row.due,
+        on_list: row.onList,
+        dismissed: row.dismissed,
+    };
+}
+
+function usualLine(row: UsualListRow): string {
+    const how = [
+        row.schedule == null
+            ? null
+            : row.schedule === "every_n_weeks"
+              ? row.everyWeeks == null
+                  ? "every few weeks (not set)"
+                  : `every ${row.everyWeeks} weeks`
+              : row.schedule,
+        row.restockWhenLow
+            ? row.lowLevel == null
+                ? "add when low (no level set)"
+                : `add when below ${row.lowLevel} ${row.unit}`
+            : null,
+        row.paused ? "paused" : null,
+    ].filter((part): part is string => part != null);
+    const what = row.productName
+        ? `${row.name} → ${row.productName}`
+        : row.name;
+    const status = row.due
+        ? `DUE (${row.due.reason})${row.onList ? ", already on the list" : row.dismissed ? ", dismissed" : ""}`
+        : "not due";
+    return `- ${what}: ${how.join(", ")}; ${status}`;
+}
 
 export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, analytics, uiMeta } = ctx;
@@ -143,6 +260,21 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             ...snapshot.lines.map((line) => line.foodId),
                             ...fridge.items.map((item) => item.foodId),
                         ],
+                    );
+                    // A usual line can be the product itself, whose usual is
+                    // recorded on its generic food (shared with the Kitchen).
+                    const generics = await foodsByIds(
+                        liveFoodsStore(),
+                        householdId,
+                        snapshot.lines.map(
+                            (line) =>
+                                (line.foodId
+                                    ? foods.get(line.foodId)?.genericFoodId
+                                    : null) ?? null,
+                        ),
+                    );
+                    const storeNames = new Map(
+                        snapshot.stores.map((store) => [store.id, store.name]),
                     );
                     const allergenMembers =
                         await householdAllergenMembers(householdId);
@@ -205,6 +337,14 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                     : tag.cover === "full"
                                       ? "already have"
                                       : `already have: have ${tag.have.amount} ${tag.have.unit}, need ${tag.need.amount} ${tag.need.unit}`,
+                            store: storeNames.get(line.storeId) ?? "",
+                            product_name: eff?.product?.name ?? null,
+                            usual: isUsualGroceryLine({
+                                lineFoodId: line.foodId,
+                                effectiveProductId: eff?.product?.id,
+                                food: eff,
+                                genericOf: (id) => generics.get(id),
+                            }),
                             product: eff?.product
                                 ? {
                                       food_id: eff.product.id,
@@ -751,6 +891,98 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             },
                         ],
                         structuredContent: payload,
+                    };
+                },
+                analytics,
+            ),
+    );
+
+    // Only when list_usuals is on: a widget for a tool that is hidden would be
+    // a resource nothing links.
+    if (isViewerFlagOn(ctx.flags, "mcp-list-usuals")) {
+        registerV2OnlyWidgetResource(server, ctx, {
+            key: "restock-nudge",
+            resourceName: "restock-nudge",
+            title: "Restock",
+            description:
+                "The usuals that are due or running low, with Add to list, for list_usuals.",
+            flag: "widget-restock-nudge",
+        });
+    }
+
+    gatedTool(
+        server,
+        ctx,
+        "mcp-list-usuals",
+        "list_usuals",
+        {
+            title: "List Usuals",
+            description:
+                "List the household's usuals (foods bought on a schedule or added when stock runs low) with each one's schedule, low setting, usual product and store, and whether it is due today and why. Call it when the user asks what to restock, or at the start of a chat on the household's restock day. Due usuals come first. To restock one, call add_grocery_line with its food_id.",
+            annotations: {
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            outputSchema: LIST_USUALS_OUTPUT_SCHEMA,
+            ...uiMetaForKey(ctx, "restock-nudge", {
+                v2: true,
+                flag: "widget-restock-nudge",
+            }),
+        },
+        async () =>
+            withAnalytics(
+                "list_usuals",
+                async () => {
+                    const householdId = await callerHouseholdId();
+                    const [
+                        config,
+                        owner,
+                        listed,
+                        stock,
+                        stores,
+                        lines,
+                        dismissals,
+                    ] = await Promise.all([
+                        getHouseholdConfig(householdId),
+                        getHouseholdOwnerProfile(householdId),
+                        liveFoodsStore().listFoods(householdId),
+                        liveFridgeStore().listItems(householdId),
+                        liveSettingsStore().listStores(householdId),
+                        liveGroceryStore().listLines(householdId),
+                        liveNoticeDismissalsStore().listForHousehold(
+                            householdId,
+                        ),
+                    ]);
+                    const weekday = config.preferences.restock.weekday;
+                    const today = householdTodayAt(config.preferences, owner);
+                    const { rows, isRestockDay } = usualsList({
+                        listed,
+                        stock,
+                        stores,
+                        lines,
+                        dismissed: dismissedKeySet(dismissals),
+                        today,
+                        householdRestockDay: weekday,
+                    });
+                    const dayName = WEEKDAY_NAMES[weekday] ?? "Sunday";
+                    const restockEnabled = config.preferences.restock.enabled;
+                    const header = `Restock day is ${dayName}; today is ${today}${isRestockDay ? " (restock day)" : ""}.${restockEnabled ? "" : " Automatic restock is off, so due usuals are not added to the list on their own."}`;
+                    const text =
+                        rows.length === 0
+                            ? `${header} No usuals set up.`
+                            : `${header}\n${rows.map(usualLine).join("\n")}`;
+                    return {
+                        content: [{ type: "text" as const, text }],
+                        structuredContent: {
+                            restock_weekday: weekday,
+                            restock_weekday_name: dayName,
+                            today,
+                            is_restock_day: isRestockDay,
+                            restock_enabled: restockEnabled,
+                            usuals: rows.map(usualWire),
+                        },
                     };
                 },
                 analytics,

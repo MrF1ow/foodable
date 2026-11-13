@@ -11,7 +11,7 @@ import { liveFoodsStore } from "../../db/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
-import { liveRecipePlansStore } from "../../db/plans.js";
+import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { householdClock } from "../../db/restock.js";
 import { liveSettingsStore } from "../../db/settings.js";
@@ -76,7 +76,13 @@ noticeActionRoutes.post(
         const clock = await householdClock(member.householdId);
         try {
             const result = await actOnNotice(
-                noticeActionDeps(),
+                {
+                    ...noticeActionDeps(),
+                    transaction: planTransaction(
+                        "plan-missing",
+                        member.householdId,
+                    ),
+                },
                 member.householdId,
                 { code, subjectId: formText(body, "subject_id") },
                 clock,

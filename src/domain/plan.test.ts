@@ -1,11 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
+    PLAN_SERVINGS_MAX,
     PLAN_SLOTS,
     PlanInputError,
+    checkPlanDay,
     checkPlanServings,
+    checkPlanServingsCapped,
     createMemoryPlansStore,
     isPlanDate,
     isPlanSlot,
+    planRecipe,
     planSlotRank,
 } from "./plan.js";
 
@@ -73,5 +77,100 @@ describe("memory plans store recipe guard", () => {
         });
         plan!.servings = 99;
         expect((await store.getPlan(household, plan!.id))?.servings).toBe(1);
+    });
+});
+
+describe("checkPlanDay", () => {
+    test("a real day that is today or later passes", () => {
+        expect(checkPlanDay("2026-11-12", "2026-11-12")).toBe("2026-11-12");
+        expect(checkPlanDay("2026-12-01", "2026-11-12")).toBe("2026-12-01");
+    });
+
+    test("yesterday and a malformed day are refused", () => {
+        expect(() => checkPlanDay("2026-11-11", "2026-11-12")).toThrow(
+            "Pick today or a later day.",
+        );
+        expect(() => checkPlanDay("tomorrow", "2026-11-12")).toThrow(
+            PlanInputError,
+        );
+    });
+});
+
+describe("checkPlanServingsCapped", () => {
+    test("allows up to the ceiling and refuses above it", () => {
+        expect(PLAN_SERVINGS_MAX).toBe(999);
+        expect(checkPlanServingsCapped(999)).toBe(999);
+        expect(() => checkPlanServingsCapped(1000)).toThrow(
+            "Keep it to 999 servings or fewer.",
+        );
+        expect(() => checkPlanServingsCapped(0)).toThrow(PlanInputError);
+    });
+});
+
+describe("planRecipe", () => {
+    const HH = "hh-1";
+    const base = {
+        householdId: HH,
+        recipeId: "r-1",
+        recipeYield: 4,
+        date: "2026-11-13",
+        slot: "dinner",
+        servings: null,
+        today: "2026-11-12",
+        createdBy: "u-1",
+    } as const;
+
+    test("plans the recipe at its yield when no servings are given", async () => {
+        const store = createMemoryPlansStore();
+        const out = await planRecipe(store, base);
+        expect(out?.alreadyPlanned).toBe(false);
+        expect(out?.plan).toMatchObject({
+            recipeId: "r-1",
+            date: "2026-11-13",
+            slot: "dinner",
+            servings: 4,
+            createdBy: "u-1",
+        });
+    });
+
+    test("the same recipe, day and slot twice is one plan", async () => {
+        const store = createMemoryPlansStore();
+        const first = await planRecipe(store, base);
+        const again = await planRecipe(store, { ...base, servings: 9 });
+        expect(again?.alreadyPlanned).toBe(true);
+        expect(again?.plan.id).toBe(first!.plan.id);
+        expect(
+            await store.listPlans(HH, "2026-11-13", "2026-11-13"),
+        ).toHaveLength(1);
+    });
+
+    test("a different slot is a new plan", async () => {
+        const store = createMemoryPlansStore();
+        await planRecipe(store, base);
+        const lunch = await planRecipe(store, { ...base, slot: "lunch" });
+        expect(lunch?.alreadyPlanned).toBe(false);
+    });
+
+    test("refuses a past day, a bad slot and too many servings, writing nothing", async () => {
+        const store = createMemoryPlansStore();
+        await expect(
+            planRecipe(store, { ...base, date: "2026-11-11" }),
+        ).rejects.toThrow("Pick today or a later day.");
+        await expect(
+            planRecipe(store, { ...base, slot: "brunch" }),
+        ).rejects.toThrow(PlanInputError);
+        await expect(
+            planRecipe(store, { ...base, servings: 1000 }),
+        ).rejects.toThrow("Keep it to 999 servings or fewer.");
+        expect(await store.listPlans(HH, "2026-11-01", "2026-12-31")).toEqual(
+            [],
+        );
+    });
+
+    test("null when the store does not know the recipe", async () => {
+        const store = createMemoryPlansStore({
+            recipeInHousehold: () => false,
+        });
+        expect(await planRecipe(store, base)).toBeNull();
     });
 });

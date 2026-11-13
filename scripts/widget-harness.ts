@@ -17,6 +17,17 @@
 //   ?maxHeight=600      impose hostContext.containerDimensions.maxHeight
 //   ?fail=1             answer tools/call with a JSON-RPC error
 //   ?drinkUnit=us       alcohol tracking ON for import-meals (default: off/null)
+//   ?theme=dark         host theme at initialize (default: light)
+//   ?state=partial      product-score sample: full (default), partial (scored
+//                       on 2 of 4) or none (not enough data to score)
+//   ?state=stores       restock-nudge sample: costco (default), stores (due
+//                       usuals at two stores and one with none), onlist (Eggs
+//                       already on the list), dismissed (Eggs' running-low
+//                       notice dismissed) or empty
+//   ?state=busy         week-plan sample: design (default: three planned days,
+//                       two foods missing), busy (two meals on one day),
+//                       future (a week starting three days after today)
+//                       or empty
 //
 // Nothing here is served by the production app; scripts/ is dev-only.
 
@@ -51,6 +62,195 @@ async function fakeInsert(input: MealInput): Promise<MealInsertResult> {
     return { meal: meal as never, deduplicated: false };
 }
 
+// list_usuals payload for the restock-nudge card: the design's three Costco
+// usuals, or the same at two stores plus one without a store, or none due.
+function restockUsuals(state: string) {
+    const usual = (
+        food_id: string,
+        name: string,
+        product_name: string | null,
+        store: [string, string] | null,
+        amount: number | null,
+        unit: string,
+        due: { reason: string; trigger: "schedule" | "low" } | null,
+    ) => ({
+        food_id,
+        name,
+        kind: "food",
+        product_name,
+        store_id: store ? store[0] : null,
+        store_name: store ? store[1] : null,
+        amount,
+        unit,
+        schedule: due?.trigger === "schedule" ? "weekly" : null,
+        every_weeks: null,
+        last_restocked_on: null,
+        restock_when_low: due?.trigger === "low",
+        low_level: due?.trigger === "low" ? 6 : null,
+        paused: false,
+        due,
+        on_list: false,
+        dismissed: false,
+    });
+    const costco: [string, string] = ["st-costco", "Costco"];
+    const tj: [string, string] = ["st-tj", "Trader Joe's"];
+    const eggs = usual(
+        "food-eggs",
+        "Eggs",
+        "Vital Farms large",
+        costco,
+        24,
+        "each",
+        {
+            reason: "2 left, below 6",
+            trigger: "low",
+        },
+    );
+    const milk = usual("food-milk", "Milk", "Kirkland 2%", costco, 1, "gal", {
+        reason: "weekly, last bought 7 days ago",
+        trigger: "schedule",
+    });
+    const chicken = usual(
+        "food-chicken",
+        "Chicken thighs",
+        "Kirkland boneless",
+        costco,
+        4,
+        "lb",
+        {
+            reason: "every 2 weeks, last bought 14 days ago",
+            trigger: "schedule",
+        },
+    );
+    const rice = usual("food-rice", "Rice", null, costco, 5, "lb", null);
+    let usuals = [eggs, milk, chicken, rice];
+    if (state === "stores") {
+        usuals = [
+            eggs,
+            usual("food-salmon", "Salmon", null, tj, 1, "lb", {
+                reason: "weekly, last bought 7 days ago",
+                trigger: "schedule",
+            }),
+            usual("food-towels", "Paper towels", null, null, null, "roll", {
+                reason: "weekly, last bought 7 days ago",
+                trigger: "schedule",
+            }),
+            rice,
+        ];
+    } else if (state === "onlist") {
+        usuals = [{ ...eggs, on_list: true }, milk, chicken, rice];
+    } else if (state === "dismissed") {
+        usuals = [{ ...eggs, dismissed: true }, milk, chicken, rice];
+    } else if (state === "empty") {
+        usuals = [rice];
+    }
+    return {
+        restock_weekday: 0,
+        restock_weekday_name: "Sunday",
+        today: "2026-11-15",
+        is_restock_day: true,
+        restock_enabled: true,
+        usuals,
+    };
+}
+
+// get_week_plan payload for the week-plan card: the design's week (three
+// planned days, two foods missing), a week with two meals on one day, a week
+// that starts three days after the household's today ("future"), or none.
+// The household's today is 2026-11-14 throughout.
+function weekPlanData(state: string) {
+    const start = state === "future" ? "2026-11-17" : "2026-11-14";
+    const weekdays = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
+    const dates: [string, string][] = Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(`${start}T00:00:00Z`);
+        d.setUTCDate(d.getUTCDate() + i);
+        return [d.toISOString().slice(0, 10), weekdays[d.getUTCDay()]!];
+    });
+    const [d0, d1, d2] = [dates[0]![0], dates[1]![0], dates[2]![0]];
+    const entry = (
+        plan_id: string,
+        recipe_name: string,
+        slot: string,
+        kcal: number | null,
+    ) => ({
+        plan_id,
+        recipe_id: "rec-" + plan_id,
+        recipe_name,
+        slot,
+        servings: 2,
+        kcal_per_portion: kcal,
+    });
+    const need = (plan_id: string, recipe_name: string, date: string) => ({
+        plan_id,
+        recipe_id: "rec-" + plan_id,
+        recipe_name,
+        date,
+        slot: "dinner",
+    });
+    const planned: Record<string, ReturnType<typeof entry>[]> =
+        state === "empty"
+            ? {}
+            : {
+                  [d0]: [
+                      entry("plan-1", "Salmon, rice & spinach", "dinner", 640),
+                  ],
+                  [d1]: [entry("plan-2", "Beef chili", "dinner", 520)],
+                  [d2]: [entry("plan-3", "Chicken rice bowls", "dinner", 852)],
+              };
+    if (state === "busy") {
+        planned[d2] = [
+            entry("plan-4", "Overnight oats", "breakfast", 410),
+            entry("plan-3", "Chicken rice bowls", "dinner", 852),
+        ];
+    }
+    const days = dates.map(([date, weekday]) => ({
+        date,
+        weekday,
+        plans: planned[date] ?? [],
+    }));
+    return {
+        today: "2026-11-14",
+        from: start,
+        planned_count: days.reduce((n, d) => n + d.plans.length, 0),
+        days,
+        missing:
+            state === "empty"
+                ? []
+                : [
+                      {
+                          food_id: "food-spinach",
+                          display_name: "Spinach",
+                          amount: 200,
+                          unit: "g",
+                          unknown: false,
+                          unmeasured: false,
+                          needed_by: [
+                              need("plan-1", "Salmon, rice & spinach", d0),
+                          ],
+                      },
+                      {
+                          food_id: "food-lemon",
+                          display_name: "Lemon",
+                          amount: 2,
+                          unit: "each",
+                          unknown: false,
+                          unmeasured: false,
+                          needed_by: [
+                              need("plan-1", "Salmon, rice & spinach", d0),
+                          ],
+                      },
+                  ],
+    };
+}
+
 const PORT = Number(process.env.HARNESS_PORT ?? 8787);
 const KEYS = [
     ...new Set([
@@ -77,7 +277,10 @@ function indexPage(): string {
   <p>Pick a widget. Append query flags to simulate host behaviour:
      <code>?serverTools=0</code>, <code>?tools=0</code>, <code>?delay=3000</code>,
      <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>,
-     <code>?v2=1</code> (the v2 assembly).</p>
+     <code>?v2=1</code> (the v2 assembly), <code>?theme=dark</code> (host theme),
+     <code>?state=full|partial|none</code> (product-score sample),
+     <code>?state=costco|stores|onlist|dismissed|empty</code> (restock-nudge sample),
+     <code>?state=design|busy|future|empty</code> (week-plan sample).</p>
   <ul>${links}</ul>
 </body></html>`;
 }
@@ -220,6 +423,53 @@ function hostPage(widget: string, params: URLSearchParams): string {
     ];
     // Same rows with alcohol tracking OFF: null, not 0, everywhere.
     const mealsNoAlcohol = meals.map((m) => ({ ...m, alcohol_g: null }));
+
+    // The rows list_grocery_lines and get_fridge send, minus the optional bits.
+    const groceryLine = (
+        id: string,
+        name: string,
+        amount: number,
+        unit: string,
+        over: Record<string, unknown> = {},
+    ) => ({
+        id,
+        store_id: "st-1",
+        section_id: "sec-1",
+        display_name: name,
+        amount,
+        unit,
+        checked: false,
+        source: "manual",
+        source_fridge_item_id: null,
+        note: null,
+        already_have: null,
+        store: "Costco",
+        product_name: null,
+        usual: false,
+        product: null,
+        notices: [],
+        ...over,
+    });
+    const fridgeItem = (
+        id: string,
+        location: string,
+        name: string,
+        amount: number,
+        unit: string,
+        expiresOn: string | null,
+        daysLeft: number | null,
+    ) => ({
+        id,
+        location_id: "loc-1",
+        location,
+        kind: "food",
+        display_name: name,
+        amount,
+        unit,
+        expires_on: expiresOn,
+        days_left: daysLeft,
+        notices: [],
+    });
 
     const RESULTS: Record<string, unknown> = {
         "nutrition-summary": {
@@ -443,44 +693,70 @@ function hostPage(widget: string, params: URLSearchParams): string {
                 },
             ],
         },
+        // list_grocery_lines: two stores, usuals, a ticked line, a note.
         "grocery-list": {
             locale: "en",
             stores: [
                 {
                     id: "st-1",
-                    name: "Safeway",
+                    name: "Costco",
                     sections: [
                         {
                             id: "sec-dairy",
-                            name: "Dairy",
+                            name: "Dairy & eggs",
                             lines: [
-                                {
-                                    id: "ln-1",
-                                    store_id: "st-1",
-                                    section_id: "sec-dairy",
-                                    display_name: "Milk",
-                                    amount: 1,
-                                    unit: "l",
-                                    checked: false,
+                                groceryLine("ln-1", "Milk", 1, "gal", {
+                                    product_name: "Kirkland 2% milk",
+                                    usual: true,
+                                }),
+                                groceryLine("ln-2", "Eggs", 24, "each", {
+                                    product_name: "Vital Farms large eggs",
+                                    usual: true,
+                                }),
+                            ],
+                        },
+                        {
+                            id: "sec-pantry",
+                            name: "Pantry",
+                            lines: [
+                                groceryLine("ln-3", "Jasmine rice", 5, "lb", {
                                     already_have:
-                                        "already have: have 0.5 l, need 0.5 l",
-                                },
-                                {
-                                    id: "ln-2",
-                                    store_id: "st-1",
-                                    section_id: "sec-dairy",
-                                    display_name: "Cottage Cheese",
-                                    amount: 400,
-                                    unit: "g",
-                                    checked: true,
-                                    already_have: "already have",
-                                },
+                                        "already have: have 1 lb, need 4 lb",
+                                }),
+                                groceryLine(
+                                    "ln-4",
+                                    "Ranch dressing",
+                                    1,
+                                    "bottle",
+                                    {
+                                        product_name: "California Olive Ranch",
+                                        usual: true,
+                                        checked: true,
+                                    },
+                                ),
+                            ],
+                        },
+                    ],
+                },
+                {
+                    id: "st-2",
+                    name: "Trader Joe's",
+                    sections: [
+                        {
+                            id: "sec-fish",
+                            name: "Fish",
+                            lines: [
+                                groceryLine("ln-5", "Salmon", 1, "lb", {
+                                    note: "skin on",
+                                    store: "Trader Joe's",
+                                }),
                             ],
                         },
                     ],
                 },
             ],
         },
+        // get_fridge: today is 2026-07-15. Three tiles, a long list, a freezer.
         fridge: {
             locale: "en",
             locations: [
@@ -489,44 +765,401 @@ function hostPage(widget: string, params: URLSearchParams): string {
                     name: "Fridge",
                     sort_order: 0,
                     items: [
-                        {
-                            id: "it-1",
-                            location_id: "loc-1",
-                            kind: "food",
-                            display_name: "Milk",
-                            amount: 0.5,
-                            unit: "l",
-                            expires_on: "2026-07-18",
-                        },
+                        fridgeItem(
+                            "it-1",
+                            "Fridge",
+                            "Eggs",
+                            9,
+                            "each",
+                            "2026-07-22",
+                            7,
+                        ),
+                        fridgeItem(
+                            "it-2",
+                            "Fridge",
+                            "Chicken thighs",
+                            0.5,
+                            "lb",
+                            "2026-07-20",
+                            5,
+                        ),
+                        fridgeItem(
+                            "it-3",
+                            "Fridge",
+                            "Milk 2%",
+                            0.5,
+                            "gal",
+                            "2026-07-19",
+                            4,
+                        ),
+                        fridgeItem(
+                            "it-4",
+                            "Fridge",
+                            "Salmon",
+                            1,
+                            "lb",
+                            "2026-07-16",
+                            1,
+                        ),
+                        fridgeItem(
+                            "it-5",
+                            "Fridge",
+                            "Spinach",
+                            1,
+                            "bag",
+                            "2026-07-17",
+                            2,
+                        ),
+                        fridgeItem(
+                            "it-6",
+                            "Fridge",
+                            "Cooked rice",
+                            2,
+                            "cup",
+                            "2026-07-18",
+                            3,
+                        ),
+                        fridgeItem(
+                            "it-7",
+                            "Fridge",
+                            "Butter",
+                            1,
+                            "lb",
+                            null,
+                            null,
+                        ),
                     ],
                 },
                 {
                     id: "loc-2",
-                    name: "Pantry",
+                    name: "Freezer",
                     sort_order: 1,
                     items: [
-                        {
-                            id: "it-3",
-                            location_id: "loc-2",
-                            kind: "food",
-                            display_name: "Oats",
-                            amount: 500,
-                            unit: "g",
-                            expires_on: null,
-                        },
+                        fridgeItem(
+                            "it-8",
+                            "Freezer",
+                            "Peas",
+                            1,
+                            "bag",
+                            "2027-03-01",
+                            229,
+                        ),
                     ],
+                },
+                { id: "loc-3", name: "Pantry", sort_order: 2, items: [] },
+            ],
+        },
+        // list_expiring: urgent, soon, later, and an item no recipe uses.
+        "use-soon": {
+            items: [
+                {
+                    id: "ex-1",
+                    display_name: "Salmon",
+                    amount: 1,
+                    unit: "lb",
+                    expires_on: "2026-07-16",
+                    location: "Fridge",
+                    days_left: 1,
+                    recipe: { id: "rec-1", name: "Salmon, rice & spinach" },
+                },
+                {
+                    id: "ex-2",
+                    display_name: "Baby spinach",
+                    amount: 0.5,
+                    unit: "bag",
+                    expires_on: "2026-07-17",
+                    location: "Fridge",
+                    days_left: 2,
+                    recipe: { id: "rec-1", name: "Salmon, rice & spinach" },
+                },
+                {
+                    id: "ex-3",
+                    display_name: "Cooked rice",
+                    amount: 3,
+                    unit: "cup",
+                    expires_on: "2026-07-18",
+                    location: "Fridge",
+                    days_left: 3,
+                    recipe: { id: "rec-1", name: "Salmon, rice & spinach" },
+                },
+                {
+                    id: "ex-4",
+                    display_name: "Greek yogurt",
+                    amount: 12,
+                    unit: "oz",
+                    expires_on: "2026-07-20",
+                    location: "Fridge",
+                    days_left: 5,
+                    recipe: null,
+                },
+            ],
+            featured: {
+                id: "rec-1",
+                name: "Salmon, rice & spinach",
+                uses: 3,
+                minutes: 25,
+                calories: 640,
+                protein_g: 48,
+                carbs_g: 62,
+                fat_g: 22,
+            },
+        },
+        // list_usuals: two due at Costco (one low, one on a schedule), one
+        // not due (never a row). Replaced below for ?state=stores|empty.
+        "restock-nudge": restockUsuals("costco"),
+        // get_week_plan: replaced below for ?state=busy|empty.
+        "week-plan": weekPlanData("design"),
+        // get_recipe: one ingredient the fridge cannot cover, so Cook has a
+        // shortfall to show.
+        "recipe-card": {
+            id: "rec-1",
+            name: "Salmon, rice & spinach",
+            yield_portions: 2,
+            suggested_meal_type: "dinner",
+            creator_id: "u-1",
+            instructions: null,
+            source_url: "https://www.seriouseats.com/salmon-rice",
+            tags: [],
+            notes: null,
+            prep_minutes: 10,
+            cook_minutes: 15,
+            verification: "verified",
+            steps: [],
+            portion_count: 1,
+            macros_per_portion: {
+                calories: 640,
+                protein_g: 48,
+                carbs_g: 62,
+                fat_g: 22,
+                fiber_g: null,
+                sugar_g: null,
+                alcohol_g: null,
+                incomplete: false,
+            },
+            notices: [],
+            ingredients: [
+                ["ri-1", "Salmon fillet", 1, "lb", false],
+                ["ri-2", "Jasmine rice", 1, "cup", false],
+                ["ri-3", "Baby spinach", 0.5, "bag", false],
+                ["ri-4", "Lemon", 1, "each", true],
+            ].map(([id, name, amount, unit, missing]) => ({
+                id,
+                display_name: name,
+                amount,
+                unit,
+                note: null,
+                food_id: "food-" + id,
+                per_portion_amount: null,
+                person_amount: null,
+                product: null,
+                missing,
+            })),
+            problems: [],
+            import: null,
+            cook_preview: {
+                total_portions: 1,
+                lines: [],
+                shortfalls: [
+                    {
+                        food_id: "food-ri-4",
+                        display_name: "Lemon",
+                        amount: 1,
+                        unit: "each",
+                        unknown_factor: false,
+                    },
+                ],
+                unmeasured: [],
+                cookable: false,
+            },
+        },
+    };
+    // rate_product, in the three states the card draws: every part scored,
+    // two of four scored, and too little data to score at all.
+    // Wire shape: the notices as the tool sends them, then the verdict and
+    // the one-line reason the app's Product screen words.
+    const scoreMembers = [
+        {
+            user_id: "u-1",
+            name: "Ethan",
+            notices: [],
+            verdict: "good",
+            reason: "No issues found for this product.",
+        },
+        {
+            user_id: "u-2",
+            name: "Sam",
+            notices: [
+                {
+                    code: "food.product_allergen",
+                    severity: "block",
+                    message: "Contains milk — Sam.",
+                },
+            ],
+            verdict: "avoid",
+            reason: "Contains Milk · listed as an allergy",
+        },
+        {
+            user_id: "u-3",
+            name: "Jordan",
+            notices: [
+                {
+                    code: "food.product_trace",
+                    severity: "warn",
+                    message: "May contain traces of nuts — Jordan.",
+                },
+            ],
+            verdict: "careful",
+            reason: "May contain traces of nuts",
+        },
+    ];
+    const scoreBase = {
+        found: true,
+        product: {
+            food_id: "f-1",
+            barcode: "5201054017463",
+            name: "Fage Total 2% Greek yogurt",
+            brand: "Fage",
+        },
+        preset: "balanced",
+        preset_label: "Balanced",
+        checks: scoreMembers,
+    };
+    const scoreLabels: Record<string, string> = {
+        nutrition: "Nutri-Score",
+        processing: "Processing",
+        additives: "Additives",
+        environment: "Green-Score",
+    };
+    const scorePart = (
+        part: string,
+        value: number | null,
+        weight: number,
+        source: string | null,
+        display: string | null,
+        status: string | null,
+    ) => ({
+        part,
+        value,
+        weight,
+        known: value != null,
+        source,
+        label: scoreLabels[part],
+        display,
+        status,
+    });
+    const SCORE_STATES: Record<string, unknown> = {
+        full: {
+            ...scoreBase,
+            score: 82,
+            label: "good",
+            breakdown: [
+                scorePart("nutrition", 100, 0.4, "nutriscore a", "A", "good"),
+                scorePart(
+                    "processing",
+                    100,
+                    0.3,
+                    "nova 1",
+                    "NOVA 1 · unprocessed",
+                    "good",
+                ),
+                scorePart(
+                    "additives",
+                    100,
+                    0.2,
+                    "no additives listed",
+                    "None",
+                    "good",
+                ),
+                scorePart("environment", 50, 0.1, "ecoscore c", "C", "warn"),
+            ],
+            parts_used: 4,
+            parts_total: 4,
+            missing: [],
+            info_rows: [
+                { kind: "sugars", per_100g: 4, level: "low", status: "good" },
+                {
+                    kind: "saturated-fat",
+                    per_100g: 2,
+                    level: "moderate",
+                    status: "warn",
                 },
             ],
         },
+        partial: {
+            ...scoreBase,
+            product: {
+                ...scoreBase.product,
+                name: "Crunchy peanut butter",
+                brand: "Skippy",
+                barcode: null,
+            },
+            score: 48,
+            label: "middling",
+            breakdown: [
+                scorePart("nutrition", 50, 0.6, "nutriscore c", "C", "warn"),
+                scorePart(
+                    "processing",
+                    33,
+                    0.4,
+                    "nova 3",
+                    "NOVA 3 · processed",
+                    "over",
+                ),
+                scorePart("additives", null, 0, null, null, null),
+                scorePart("environment", null, 0, null, null, null),
+            ],
+            parts_used: 2,
+            parts_total: 4,
+            missing: ["additives", "environment"],
+            info_rows: [
+                {
+                    kind: "sugars",
+                    per_100g: 9,
+                    level: "moderate",
+                    status: "warn",
+                },
+                {
+                    kind: "saturated-fat",
+                    per_100g: 9,
+                    level: "high",
+                    status: "over",
+                },
+            ],
+        },
+        none: {
+            ...scoreBase,
+            product: {
+                ...scoreBase.product,
+                name: "Homemade granola",
+                brand: null,
+                barcode: null,
+            },
+            score: null,
+            label: "not_enough_data",
+            breakdown: [
+                scorePart("nutrition", null, 0, null, null, null),
+                scorePart("processing", null, 0, null, null, null),
+                scorePart("additives", null, 0, null, null, null),
+                scorePart("environment", null, 0, null, null, null),
+            ],
+            parts_used: 0,
+            parts_total: 4,
+            missing: ["nutrition", "processing", "additives", "environment"],
+            info_rows: [],
+        },
     };
+    RESULTS["product-score"] =
+        SCORE_STATES[params.get("state") ?? "full"] ?? SCORE_STATES.full;
+    RESULTS["restock-nudge"] = restockUsuals(params.get("state") ?? "costco");
+    RESULTS["week-plan"] = weekPlanData(params.get("state") ?? "design");
     // Probe and gallery paint their own UI; anything non-null will do.
     const toolResult = RESULTS[widget] ?? { probe: true };
 
     return `<!doctype html>
 <html><head><meta charset="utf-8"><title>host: ${widget}</title>
 <style>
-  body{font:13px/1.5 -apple-system,system-ui,sans-serif;margin:16px}
-  #frame{width:100%;height:130px;border:2px solid #888;border-radius:8px;transition:height .15s}
+  body{font:13px/1.5 -apple-system,system-ui,sans-serif;margin:16px${params.get("theme") === "dark" ? ";background:#0d0f0e;color:#ccc" : ""}}
+  #frame{box-sizing:border-box;width:100%;height:130px;border:2px solid #888;border-radius:8px;transition:height .15s}
   #log{margin-top:12px;padding:8px;background:#111;color:#0f0;border-radius:6px;
        font:11px/1.5 ui-monospace,monospace;white-space:pre-wrap;max-height:300px;overflow:auto}
   .cfg{color:#666}
@@ -548,8 +1181,25 @@ const CFG = {
   delay: ${delay},
   maxHeight: ${maxHeight ? Number(maxHeight) : "null"},
   fail: ${failCalls},
+  theme: ${JSON.stringify(params.get("theme") === "dark" ? "dark" : "light")},
 };
 const TOOL_RESULT = ${JSON.stringify(toolResult)};
+// What log_recipe_portion answers: the meal-progress payload.
+const MEAL_LOGGED = ${JSON.stringify(RESULTS["meal-logged"])};
+// What get_week_plan answers after unplan_recipe calls: the card's week minus
+// the plans removed so far, with the missing lines only those plans needed
+// dropped (the server works that out; the card does not).
+const GONE = new Set();
+function weekNow() {
+  const w = TOOL_RESULT;
+  if (!w || !Array.isArray(w.days)) return w;
+  const days = w.days.map((d) => Object.assign({}, d, { plans: d.plans.filter((p) => !GONE.has(p.plan_id)) }));
+  return Object.assign({}, w, {
+    days,
+    planned_count: days.reduce((n, d) => n + d.plans.length, 0),
+    missing: w.missing.filter((m) => m.needed_by.some((n) => !GONE.has(n.plan_id))),
+  });
+}
 const frame = document.getElementById("frame");
 const logEl = document.getElementById("log");
 const log = (m) => { logEl.textContent += "\\n" + m; logEl.scrollTop = logEl.scrollHeight; };
@@ -585,7 +1235,7 @@ window.addEventListener("message", (e) => {
           "(clientInfo/capabilities is the MCP-core shape and is wrong here)");
       return;
     }
-    const hostContext = { theme: "light" };
+    const hostContext = { theme: CFG.theme };
     if (CFG.maxHeight) hostContext.containerDimensions = { maxHeight: CFG.maxHeight };
     const hostCapabilities = {};
     if (CFG.serverTools) hostCapabilities.serverTools = {};
@@ -610,7 +1260,11 @@ window.addEventListener("message", (e) => {
   if (d.method === "ui/notifications/size-changed") {
     const h = d.params && d.params.height;
     const capped = CFG.maxHeight ? Math.min(h, CFG.maxHeight) : h;
-    frame.style.height = capped + "px";
+    // box-sizing is border-box (the right edge stays unclipped), so the frame
+    // is the reported height plus its own vertical border: the iframe's
+    // content then gets exactly the height it asked for, with no scrollbar.
+    const border = frame.offsetHeight - frame.clientHeight;
+    frame.style.height = (capped + border) + "px";
     log("<- size-changed height=" + h + (capped !== h ? " (capped to " + capped + ")" : ""));
     return;
   }
@@ -628,7 +1282,7 @@ window.addEventListener("message", (e) => {
   // ---- app-initiated tools/call ----
   if (d.method === "tools/call") {
     const name = d.params && d.params.name;
-    log("<- tools/call " + name + " (id " + d.id + ")");
+    log("<- tools/call " + name + " (id " + d.id + ") args=" + JSON.stringify(d.params.arguments || {}));
     if (!initialized) log("!! app called a tool before the handshake finished");
     if (!CFG.answerTools) { log("   (answerTools=0: dropping, app should time out)"); return; }
     setTimeout(async () => {
@@ -643,6 +1297,84 @@ window.addEventListener("message", (e) => {
           structuredContent: { dismissed: true },
         }});
         log("-> dismiss_notice dismissed=true for id " + d.id);
+        return;
+      }
+      // Canned, schema-valid answers; the arguments are in the log above.
+      if (name === "cook_recipe") {
+        const a = d.params.arguments || {};
+        const n = Number(a.total_portions) || 1;
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Cooked " + n + " portion" + (n === 1 ? "" : "s") + "." }],
+          structuredContent: {
+            total_portions: n,
+            shortfalls: [{ food_id: "food-ri-4", display_name: "Lemon", amount: n, unit: "each" }],
+            meal_ids: [],
+            unmeasured: [],
+          },
+        }});
+        log("-> cook_recipe total_portions=" + n + " for id " + d.id);
+        return;
+      }
+      if (name === "log_recipe_portion") {
+        const a = d.params.arguments || {};
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Meal logged." }],
+          structuredContent: Object.assign({}, MEAL_LOGGED, { status: "ok", similar_foods: [] }),
+        }});
+        log("-> log_recipe_portion portions=" + a.portions + " meal_type=" + a.meal_type + " for id " + d.id);
+        return;
+      }
+      if (name === "add_grocery_line") {
+        const a = d.params.arguments || {};
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Added " + a.food_id + "." }],
+          structuredContent: {
+            status: "ok", similar_foods: [], id: "ln-" + a.food_id,
+            display_name: a.food_id, already_have: null,
+            store_id: a.store_id || "st-costco", amount: a.amount == null ? 1 : a.amount,
+            unit: a.unit || "each", notices: [],
+          },
+        }});
+        log("-> add_grocery_line food_id=" + a.food_id + " for id " + d.id);
+        return;
+      }
+      if (name === "get_week_plan") {
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Week plan." }],
+          structuredContent: weekNow(),
+        }});
+        log("-> tools/call get_week_plan args=" + JSON.stringify(d.params.arguments || {}) + " for id " + d.id);
+        return;
+      }
+      if (name === "unplan_recipe") {
+        const a = d.params.arguments || {};
+        GONE.add(a.plan_id);
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Removed " + a.plan_id + " from the plan." }],
+          structuredContent: { removed: true, plan_id: a.plan_id },
+        }});
+        log("-> tools/call unplan_recipe plan_id=" + a.plan_id + " for id " + d.id);
+        return;
+      }
+      if (name === "add_plan_missing_to_groceries") {
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: "Added 1 to the grocery list: Spinach." }],
+          structuredContent: {
+            added: [{ line_id: "ln-spinach", food_id: "food-spinach", display_name: "Spinach",
+              amount: 200, unit: "g", store_id: "st-costco", note: null }],
+            on_list: [{ food_id: "food-lemon", display_name: "Lemon", existing_line_id: "ln-lemon" }],
+            unknown: [], skipped: [],
+          },
+        }});
+        log("-> tools/call add_plan_missing_to_groceries args=" + JSON.stringify(d.params.arguments || {}) + " for id " + d.id);
+        return;
+      }
+      if (name === "check_grocery_line") {
+        const a = d.params.arguments || {};
+        send({ jsonrpc: "2.0", id: d.id, result: {
+          content: [{ type: "text", text: (a.checked === false ? "Unchecked " : "Checked ") + a.id + ". Fridge unchanged." }],
+        }});
+        log("-> check_grocery_line id=" + a.id + " checked=" + a.checked + " for id " + d.id);
         return;
       }
       // bulk_import_meals runs for real, server-side, against an in-memory store.

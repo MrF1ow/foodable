@@ -13,6 +13,7 @@ import {
     shiftLocalDate,
     parseLoggedAt,
     resolveWriteLoggedAt,
+    guessMealType,
 } from "./tz.js";
 
 test("dateInTz maps an instant to the local calendar day", () => {
@@ -338,4 +339,20 @@ test("validateTz accepts IANA names and rejects junk", () => {
     expect(validateTz("Etc/GMT+5")).toBe(true);
     expect(validateTz("Mars/Phobos")).toBe(false);
     expect(validateTz("")).toBe(false);
+});
+
+test("guessMealType names the slot by the local hour, not the UTC one", () => {
+    const at = (iso: string) => new Date(iso);
+    expect(guessMealType("UTC", at("2026-11-12T08:00:00Z"))).toBe("breakfast");
+    expect(guessMealType("UTC", at("2026-11-12T12:30:00Z"))).toBe("lunch");
+    expect(guessMealType("UTC", at("2026-11-12T16:00:00Z"))).toBe("snack");
+    expect(guessMealType("UTC", at("2026-11-12T19:00:00Z"))).toBe("dinner");
+    // 02:00 UTC is 21:00 the day before in New York.
+    expect(guessMealType("America/New_York", at("2026-11-12T02:00:00Z"))).toBe(
+        "dinner",
+    );
+    // 18:00 UTC is 07:00 the next morning in Auckland.
+    expect(guessMealType("Pacific/Auckland", at("2026-11-12T18:00:00Z"))).toBe(
+        "breakfast",
+    );
 });

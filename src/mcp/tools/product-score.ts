@@ -35,11 +35,20 @@ import { filterOffNutrientLevels } from "../../domain/off-nutrient-levels.js";
 import {
     productInfoRows,
     SCORE_PARTS,
+    SCORE_PRESET_LABELS,
     scoreProduct,
     type NutrientLevel,
+    type ScoreChoicePreset,
     type ScoreQuality,
     type ScoreWeights,
 } from "../../domain/product-score.js";
+import {
+    breakdownValue,
+    levelStatus,
+    SCORE_PART_LABELS,
+} from "../../domain/product-score-display.js";
+import { memberProductVerdict } from "../../domain/product-screen.js";
+import { productMemberReasonLine } from "../../copy/product-member-reason.js";
 import {
     scoreSettingsForHousehold,
     scoreSettingsForViewer,
@@ -47,11 +56,14 @@ import {
 import { liveScoreSettingsStore } from "../../db/score-settings.js";
 import { todayInTz } from "../../domain/tz.js";
 import type { NutritionGoals } from "../../db/nutrition.js";
+import { isViewerFlagOn } from "../../viewer-flags.js";
 import { gatedTool } from "../gated.js";
 import {
     NOTICE_SCHEMA,
     noticeToWire,
+    registerV2OnlyWidgetResource,
     sumMeals,
+    uiMetaForKey,
     type DailyTotals,
     type ToolContext,
 } from "../shared.js";
@@ -63,18 +75,27 @@ const SCORE_PART_SCHEMA = z.enum([
     "environment",
 ]);
 
+const PART_STATUS_SCHEMA = z.enum(["good", "warn", "over"]);
+
 const BREAKDOWN_ENTRY_SCHEMA = z.object({
     part: SCORE_PART_SCHEMA,
     value: z.number().nullable(),
     weight: z.number(),
     known: z.boolean(),
     source: z.string().nullable(),
+    /** The part's name as the Product screen shows it ("Nutri-Score"). */
+    label: z.string(),
+    /** The value as the Product screen words it ("A", "NOVA 1 · unprocessed"); null with no data. */
+    display: z.string().nullable(),
+    /** How the Product screen colours it; null with no data. */
+    status: PART_STATUS_SCHEMA.nullable(),
 });
 
 const INFO_ROW_SCHEMA = z.object({
     kind: z.enum(["sugars", "saturated-fat"]),
     per_100g: z.number().nullable(),
     level: z.enum(["low", "moderate", "high"]).nullable(),
+    status: PART_STATUS_SCHEMA,
 });
 
 const PRODUCT_HEADER_SCHEMA = z.object({
@@ -90,6 +111,8 @@ export const RATE_PRODUCT_OUTPUT_SCHEMA = z.object({
     score: z.number().nullable(),
     label: z.enum(["good", "middling", "poor", "not_enough_data"]),
     preset: z.string(),
+    /** The weights' name as the Product screen shows it ("Balanced"). */
+    preset_label: z.string(),
     breakdown: z.array(BREAKDOWN_ENTRY_SCHEMA),
     parts_used: z.number(),
     parts_total: z.number(),
@@ -100,6 +123,10 @@ export const RATE_PRODUCT_OUTPUT_SCHEMA = z.object({
             user_id: z.string(),
             name: z.string(),
             notices: z.array(NOTICE_SCHEMA),
+            /** The member's verdict on this product, as the Product screen words it. */
+            verdict: z.enum(["good", "careful", "avoid"]),
+            /** The one-line reason under it, as the Product screen words it. */
+            reason: z.string(),
         }),
     ),
 });
@@ -348,13 +375,16 @@ function todayRemaining(
     return remaining;
 }
 
-function emptyBreakdown() {
+function emptyBreakdown(): RateProductOutput["breakdown"] {
     return SCORE_PARTS.map((part) => ({
         part,
         value: null,
         weight: 0,
         known: false,
         source: null,
+        label: SCORE_PART_LABELS[part],
+        display: null,
+        status: null,
     }));
 }
 
@@ -396,13 +426,28 @@ async function buildOutputAsync(args: {
     members: ProductCheckMember[];
     memberToday: (userId: string) => Promise<ProductCheckToday>;
     /** The preset the weights come from, and the weights themselves. */
-    preset: string;
+    preset: ScoreChoicePreset;
     weights: ScoreWeights;
 }): Promise<RateProductOutput> {
     const weights = args.weights;
     const scored =
         args.quality != null ? scoreProduct(args.quality, weights) : null;
-    const breakdown = scored?.breakdown ?? emptyBreakdown();
+    const breakdown: RateProductOutput["breakdown"] =
+        scored != null && args.quality != null
+            ? scored.breakdown.map((row) => {
+                  const shown = breakdownValue(row.part, args.quality!, scored);
+                  return {
+                      part: row.part,
+                      value: row.value,
+                      weight: row.weight,
+                      known: row.known,
+                      source: row.source,
+                      label: SCORE_PART_LABELS[row.part],
+                      display: shown?.value ?? null,
+                      status: shown?.status ?? null,
+                  };
+              })
+            : emptyBreakdown();
     const infoRows = productInfoRows({
         sugarG: args.sugarG,
         saturatedFatG: args.saturatedFatG,
@@ -411,19 +456,19 @@ async function buildOutputAsync(args: {
         kind: row.kind,
         per_100g: row.per100g,
         level: row.level,
+        status: levelStatus(row.level),
     }));
 
     const checks: RateProductOutput["checks"] = [];
     for (const member of args.members) {
         const today = await args.memberToday(member.id);
+        const notices = checkProductForMember(args.checkProduct, member, today);
         checks.push({
             user_id: member.id,
             name: member.name,
-            notices: checkProductForMember(
-                args.checkProduct,
-                member,
-                today,
-            ).map(noticeToWire),
+            notices: notices.map(noticeToWire),
+            verdict: memberProductVerdict(notices),
+            reason: productMemberReasonLine(notices),
         });
     }
 
@@ -433,13 +478,8 @@ async function buildOutputAsync(args: {
         score: scored?.score ?? null,
         label: scored?.label ?? "not_enough_data",
         preset: args.preset,
-        breakdown: breakdown.map((row) => ({
-            part: row.part,
-            value: row.value,
-            weight: row.weight,
-            known: row.known,
-            source: row.source,
-        })),
+        preset_label: SCORE_PRESET_LABELS[args.preset],
+        breakdown,
         parts_used: scored?.partsUsed ?? 0,
         parts_total: scored?.partsTotal ?? SCORE_PARTS.length,
         missing: scored?.missing ?? [...SCORE_PARTS],
@@ -460,6 +500,19 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
         analytics,
         alcohol,
     } = ctx;
+
+    // Only when rate_product is on: a widget for a tool that is hidden would
+    // be a resource nothing links.
+    if (isViewerFlagOn(ctx.flags, "mcp-rate-product")) {
+        registerV2OnlyWidgetResource(server, ctx, {
+            key: "product-score",
+            resourceName: "product-score",
+            title: "Product score",
+            description:
+                "A product's score, what it rests on and each member's check, for rate_product.",
+            flag: "widget-product-score",
+        });
+    }
 
     gatedTool(
         server,
@@ -490,6 +543,10 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                     ),
             }),
             outputSchema: RATE_PRODUCT_OUTPUT_SCHEMA,
+            ...uiMetaForKey(ctx, "product-score", {
+                v2: true,
+                flag: "widget-product-score",
+            }),
         },
         async ({ food_id, barcode, user_id }) => {
             return withAnalytics(
@@ -607,6 +664,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                                 score: null,
                                 label: "not_enough_data",
                                 preset,
+                                preset_label: SCORE_PRESET_LABELS[preset],
                                 breakdown: emptyBreakdown(),
                                 parts_used: 0,
                                 parts_total: SCORE_PARTS.length,
@@ -747,6 +805,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                             score: null,
                             label: "not_enough_data",
                             preset,
+                            preset_label: SCORE_PRESET_LABELS[preset],
                             breakdown: emptyBreakdown(),
                             parts_used: 0,
                             parts_total: SCORE_PARTS.length,

@@ -9,6 +9,7 @@ import {
     findOrCreateManualFood,
     findUpsertFoodByName,
     foodsByIds,
+    isUsualGroceryLine,
     looseFoodKey,
     mapOffAllergenTags,
     matchFoodsByWords,
@@ -847,4 +848,92 @@ test("updateFood writes default_unit and gram factors", async () => {
     expect(saved.defaultUnit).toBe("each");
     expect(saved.gramsPerEach).toBe(50);
     expect(saved.gramsPerMl).toBeNull();
+});
+
+test("isUsualGroceryLine: the usual product and its generic's line are usual", () => {
+    const generic = {
+        genericFoodId: null,
+        usualProductId: "p1",
+        archivedAt: null,
+    };
+    const product = {
+        genericFoodId: "g1",
+        usualProductId: null,
+        archivedAt: null,
+    };
+    const genericOf = (id: string) => (id === "g1" ? generic : undefined);
+    expect(
+        isUsualGroceryLine({
+            lineFoodId: "p1",
+            effectiveProductId: null,
+            food: product,
+            genericOf,
+        }),
+    ).toBe(true);
+    expect(
+        isUsualGroceryLine({
+            lineFoodId: "g1",
+            effectiveProductId: "p1",
+            food: generic,
+            genericOf,
+        }),
+    ).toBe(true);
+});
+
+test("isUsualGroceryLine: another product of the family is not usual", () => {
+    const generic = {
+        genericFoodId: null,
+        usualProductId: "p1",
+        archivedAt: null,
+    };
+    const other = {
+        genericFoodId: "g1",
+        usualProductId: null,
+        archivedAt: null,
+    };
+    expect(
+        isUsualGroceryLine({
+            lineFoodId: "p2",
+            effectiveProductId: null,
+            food: other,
+            genericOf: () => generic,
+        }),
+    ).toBe(false);
+    expect(
+        isUsualGroceryLine({
+            lineFoodId: null,
+            effectiveProductId: null,
+            food: null,
+            genericOf: () => generic,
+        }),
+    ).toBe(false);
+});
+
+test("isUsualGroceryLine: an archived generic or food gives no usual", () => {
+    const archived = {
+        genericFoodId: null,
+        usualProductId: "p1",
+        archivedAt: "2026-11-09T12:00:00.000Z",
+    };
+    const product = {
+        genericFoodId: "g1",
+        usualProductId: null,
+        archivedAt: null,
+    };
+    expect(
+        isUsualGroceryLine({
+            lineFoodId: "p1",
+            effectiveProductId: null,
+            food: product,
+            genericOf: () => archived,
+        }),
+    ).toBe(false);
+    expect(
+        isUsualGroceryLine({
+            lineFoodId: "g1",
+            effectiveProductId: "p1",
+            food: archived,
+            genericOf: () => undefined,
+        }),
+    ).toBe(false);
 });

@@ -50,6 +50,7 @@ import {
 } from "./tools/profile.js";
 import { registerFridgeTools } from "./tools/fridge.js";
 import { registerGroceryTools } from "./tools/grocery.js";
+import { registerPlanTools } from "./tools/plan.js";
 import { registerRecipesTools } from "./tools/recipes.js";
 import { registerRulesTools } from "./tools/rules.js";
 import { registerHouseholdTools } from "./tools/household.js";
@@ -71,9 +72,11 @@ Five pillars — nutrition (meals, water, weight, goals, trends), fridge (what i
 
 Foods are the shared identity. Always search_food (or lookup_barcode for a packaged product) and then pass food_id into writes — add_fridge_item, add_grocery_line, add_recipe_ingredient, log_meal items, upsert_food. Do not invent a parallel name for something the catalog already has. When a write returns status similar_foods, ask the person which food they meant (or whether it is new) and call again with that food_id or new_food: true; never pick between similar foods on the household's behalf, and pass on_similar: "create" only in unattended runs. get_food reads a catalog row; merge_foods is how duplicates get cleaned up. A plain food (Eggs) can have products (Kirkland Large Eggs) and one usual product, whose nutrition recipes, grocery lines and new meal logs read through. Never pick a brand for the household: ask which one they buy, then call set_usual_product. For a scanned packaged product, add it with upsert_food passing barcode and generic_food_id under the plain food, then set_usual_product.
 
-The loop: grocery list → put_away_grocery_lines into the fridge → cook_recipe or eat_fridge_item → meals. Checking a grocery line does not stock the fridge; put-away does. eat_fridge_item deducts stock and can log a meal; cook_recipe deducts recipe ingredients and can log one meal per member. log_meal is the direct nutrition write when stock is not involved. When a fridge notice offers Add to grocery list, call add_grocery_line with only the plain food's food_id, so the usual amount and store apply. Grocery lines with source restock were added by the household's own restock setting; remove one with delete_grocery_line if the item was used up or isn't wanted.
+The loop: grocery list → put_away_grocery_lines into the fridge → cook_recipe or eat_fridge_item → meals. Checking a grocery line does not stock the fridge; put-away does. eat_fridge_item deducts stock and can log a meal; cook_recipe deducts recipe ingredients and can log one meal per member. log_meal is the direct nutrition write when stock is not involved. When a fridge notice offers Add to grocery list, call add_grocery_line with only the plain food's food_id, so the usual amount and store apply. Grocery lines with source restock were added by the household's own restock setting; remove one with delete_grocery_line if the item was used up or isn't wanted. When list_usuals is available, call it when the user asks what to restock, or at the start of a chat on the household's restock day, to see which usuals are due and why; add one with add_grocery_line using its food_id.
 
 Imported recipes start unverified until they pass the deterministic check. Unverified recipes cannot go on the grocery list, be cooked, or be logged as portions. Fix them from import data in get_recipe (pasted text, unresolved lines, problems) without opening the original post or inventing amounts, then call verify_recipe. To import a recipe from a link, call import_recipe_from_url with optional text (the pasted caption) and credit. If it returns paste_needed, ask the user to paste the caption; never open the post yourself.
+
+When get_week_plan is available, the household's week plan can be read and changed: get_week_plan shows the next seven days and what the planned recipes still need, plan_recipe and unplan_recipe add and remove entries, and add_plan_missing_to_groceries puts the missing foods on the list (use it rather than add_grocery_line per line).
 
 Member targeting — nutrition is per person. On an OAuth user token, omit user_id to act as the caller; pass target_member on writes (log_meal, update_meal, delete_meal, bulk_import_meals, log_water, delete_water, log_weight, update_weight, delete_weight, set_nutrition_goals, log_recipe_portion) to log for another household member. user_id on those writes is not a way to sudo. On a household token, pass user_id to pick whose nutrition to read or write. Call list_members when you need ids. Fridge, grocery, recipes, and the food catalog are household-scoped.
 
@@ -157,6 +160,7 @@ export function registerTools(
     registerFridgeTools(server, ctx);
     registerGroceryTools(server, ctx);
     registerRecipesTools(server, ctx);
+    registerPlanTools(server, ctx);
     registerRulesTools(server, ctx);
     registerSearchFoodTool(server, ctx);
     registerCatalogFoodTools(server, ctx);

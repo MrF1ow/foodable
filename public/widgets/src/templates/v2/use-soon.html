@@ -1,0 +1,299 @@
+<!doctype html>
+<!--
+  Use soon card (MCP Apps), v2 look. Served for list_expiring when the
+  widget-use-soon flag is on. No v1 twin.
+
+  One card: a header with the item count, the expiring items soonest first
+  (an urgency dot, the amount beside the name, a coloured "Tomorrow / 3 days"
+  label, and the recipe to use it in), then the recipe that uses the most of
+  them with its time and per-portion macros. How many days are left comes from
+  the payload (`days_left`, resolved in the household's timezone); the browser
+  never works out "today". The design's "Cook it" and "Add to plan" buttons
+  are not here: cooking confirms in the recipe card, not from this one.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Use soon</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            .ur {
+                display: flex;
+                flex-direction: column;
+                gap: 3px;
+                padding: 9px 0;
+                border-bottom: 1px solid var(--line);
+                min-width: 0;
+            }
+            .ur:last-child {
+                border-bottom: 0;
+            }
+            .ur-main {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+                min-width: 0;
+            }
+            .ur-use {
+                margin-left: 17px;
+                font-size: 11px;
+                line-height: 13px;
+                color: var(--text-tertiary);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .ur-use b {
+                font-weight: 500;
+                color: var(--text-secondary);
+            }
+            .feat {
+                display: flex;
+                flex-direction: column;
+                gap: 6px;
+                padding: 14px;
+                border-radius: var(--radius-md);
+                background: var(--surface-bg);
+            }
+            .feat-meta {
+                display: flex;
+                flex-wrap: wrap;
+                column-gap: 6px;
+                font-size: 12px;
+                line-height: 15px;
+                color: var(--text-secondary);
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "Use soon",
+                loading: "Loading what to use soon…",
+                empty: "Nothing is expiring soon.",
+                items: { one: "{n} item", other: "{n} items" },
+                expired: "Expired",
+                today: "Today",
+                tomorrow: "Tomorrow",
+                days: "{n} days",
+                useIn: "Use in: ",
+                uses: "Uses {n} of them",
+                minutes: "{n} min",
+                kcal: "{n} kcal",
+            };
+
+            // A day or less (or already past) is red, up to three amber.
+            const OVER_DAYS = 1;
+            const WARN_DAYS = 3;
+
+            // Design sample (FigCraft Widget/Use soon): urgent, soon, later and
+            // an item no recipe uses.
+            const SAMPLE = {
+                items: [
+                    {
+                        id: "i1",
+                        display_name: "Salmon",
+                        amount: 1,
+                        unit: "lb",
+                        expires_on: "2026-11-13",
+                        location: "Fridge",
+                        days_left: 1,
+                        recipe: { id: "r1", name: "Salmon, rice & spinach" },
+                    },
+                    {
+                        id: "i2",
+                        display_name: "Baby spinach",
+                        amount: 0.5,
+                        unit: "bag",
+                        expires_on: "2026-11-14",
+                        location: "Fridge",
+                        days_left: 2,
+                        recipe: { id: "r1", name: "Salmon, rice & spinach" },
+                    },
+                    {
+                        id: "i3",
+                        display_name: "Cooked rice",
+                        amount: 3,
+                        unit: "cup",
+                        expires_on: "2026-11-15",
+                        location: "Fridge",
+                        days_left: 3,
+                        recipe: { id: "r1", name: "Salmon, rice & spinach" },
+                    },
+                    {
+                        id: "i4",
+                        display_name: "Greek yogurt",
+                        amount: 12,
+                        unit: "oz",
+                        expires_on: "2026-11-17",
+                        location: "Fridge",
+                        days_left: 5,
+                        recipe: null,
+                    },
+                ],
+                featured: {
+                    id: "r1",
+                    name: "Salmon, rice & spinach",
+                    uses: 3,
+                    minutes: 25,
+                    calories: 640,
+                    protein_g: 48,
+                    carbs_g: 62,
+                    fat_g: 22,
+                },
+            };
+
+            function whenText(days) {
+                if (days < 0) return T.expired;
+                if (days === 0) return T.today;
+                if (days === 1) return T.tomorrow;
+                return tpl(T.days, { n: days });
+            }
+
+            function urgency(days) {
+                if (days <= OVER_DAYS) return "over";
+                if (days <= WARN_DAYS) return "warn";
+                return undefined;
+            }
+
+            // Soonest first; ties by name.
+            function bySoonest(a, b) {
+                if (a.days_left !== b.days_left) {
+                    return a.days_left < b.days_left ? -1 : 1;
+                }
+                return String(a.display_name).localeCompare(
+                    String(b.display_name),
+                );
+            }
+
+            function itemRow(item) {
+                const tone = urgency(item.days_left);
+                const useIn = item.recipe
+                    ? `<div class="ur-use">${esc(T.useIn)}<b>${esc(item.recipe.name)}</b></div>`
+                    : "";
+                const sub = v2Qty(item.amount, item.unit);
+                return `<div class="ur" data-item-id="${esc(item.id)}"><div class="ur-main">${v2Dot(
+                    undefined,
+                    tone || "dim",
+                    true,
+                )}<span class="row-t">${esc(item.display_name)}</span>${
+                    sub ? `<span class="row-s">${esc(sub)}</span>` : ""
+                }<span class="row-end${tone ? ` ${v2ToneText(tone)}` : ""}">${esc(
+                    whenText(item.days_left),
+                )}</span></div>${useIn}</div>`;
+            }
+
+            function num(v) {
+                const n = Number(v);
+                return v == null || !Number.isFinite(n) ? null : Math.round(n);
+            }
+
+            function featuredBlock(f) {
+                if (!f) return "";
+                const bits = [];
+                const minutes = num(f.minutes);
+                const kcal = num(f.calories);
+                if (minutes != null) {
+                    bits.push(
+                        `<span>${esc(tpl(T.minutes, { n: minutes }))}</span>`,
+                    );
+                }
+                if (kcal != null) {
+                    bits.push(`<span>${esc(tpl(T.kcal, { n: kcal }))}</span>`);
+                }
+                const macros = [
+                    ["p", "P", num(f.protein_g)],
+                    ["c", "C", num(f.carbs_g)],
+                    ["f", "F", num(f.fat_g)],
+                ].filter((m) => m[2] != null);
+                const pcf = macros.length
+                    ? `<span class="pcf">${macros
+                          .map(
+                              (m) =>
+                                  `<span class="${m[0]}">${m[1]} ${m[2]}</span>`,
+                          )
+                          .join("")}</span>`
+                    : "";
+                const sep = bits.length && pcf ? "<span>·</span>" : "";
+                const meta =
+                    bits.length || pcf
+                        ? `<div class="feat-meta">${bits.join("<span>·</span>")}${sep}${pcf}</div>`
+                        : "";
+                return `<div class="feat">${v2Label(
+                    tpl(T.uses, { n: Number(f.uses) || 0 }),
+                )}<div class="inset-t">${esc(f.name)}</div>${meta}</div>`;
+            }
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+
+            function render(data) {
+                const items = data.items.slice().sort(bySoonest);
+                if (items.length === 0) {
+                    v2Paint(
+                        card(
+                            v2Header(T.title) +
+                                `<p class="note">${esc(T.empty)}</p>`,
+                        ),
+                    );
+                    return;
+                }
+                v2Paint(
+                    card(
+                        v2Header(T.title, plural(T.items, items.length)) +
+                            `<div class="rows">${items.map(itemRow).join("")}</div>` +
+                            featuredBlock(data.featured),
+                    ),
+                );
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (Array.isArray(payload.items)) {
+                    return {
+                        items: payload.items.filter(
+                            (it) =>
+                                it &&
+                                typeof it === "object" &&
+                                it.days_left != null &&
+                                Number.isFinite(Number(it.days_left)),
+                        ),
+                        featured:
+                            payload.featured &&
+                            typeof payload.featured === "object"
+                                ? payload.featured
+                                : null,
+                    };
+                }
+                if (payload.structuredContent)
+                    return coerce(payload.structuredContent);
+                return null;
+            }
+
+            initWidget({
+                name: "use-soon-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render: v2BridgeRender(render),
+                sample: SAMPLE,
+            });
+        </script>
+    </body>
+</html>

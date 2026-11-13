@@ -12,9 +12,7 @@ import {
     productInfoRows,
     type ProductScore,
     type ScoreChoicePreset,
-    type ScoreQuality,
     type ScoreWeights,
-    type NutrientLevel,
 } from "../../../domain/product-score.js";
 import { liveScoreSettingsStore } from "../../../db/score-settings.js";
 import {
@@ -22,6 +20,10 @@ import {
     type ScoreSettingsStore,
 } from "../../../domain/score-settings.js";
 import type { ProductCheckMember } from "../../../domain/product-checks.js";
+import {
+    breakdownValue,
+    levelStatus,
+} from "../../../domain/product-score-display.js";
 import {
     memberProductVerdict,
     scoredFoodProduct,
@@ -34,7 +36,6 @@ import {
     partRow,
     rowList,
     sectionHeader,
-    type PartStatus,
 } from "../../components/v2/rows.js";
 import { scoreBig, scoreVerdict } from "../../components/v2/score-badge.js";
 import { initialsOf } from "../../shell-v2.js";
@@ -60,38 +61,6 @@ export type ProductScoreSection = {
     memberCards: ProductMemberCard[];
 };
 
-function nutriscoreStatus(
-    grade: NonNullable<ScoreQuality["nutriscoreGrade"]>,
-): PartStatus {
-    if (grade === "a" || grade === "b") return "good";
-    if (grade === "c") return "warn";
-    return "over";
-}
-
-function levelStatus(level: NutrientLevel | null): PartStatus {
-    if (level === "low") return "good";
-    if (level === "moderate") return "warn";
-    if (level === "high") return "over";
-    return "warn";
-}
-
-function partValueStatus(value: number): PartStatus {
-    if (value >= 70) return "good";
-    if (value >= 40) return "warn";
-    return "over";
-}
-
-const NOVA_LABEL: Record<1 | 2 | 3 | 4, string> = {
-    1: "NOVA 1 · unprocessed",
-    2: "NOVA 2 · processed culinary",
-    3: "NOVA 3 · processed",
-    4: "NOVA 4 · ultra-processed",
-};
-
-function formatEco(grade: NonNullable<ScoreQuality["ecoscoreGrade"]>): string {
-    return grade === "a-plus" ? "A+" : grade.toUpperCase();
-}
-
 function formatInfoAmount(
     kind: "sugars" | "saturated-fat",
     g: number | null,
@@ -105,64 +74,6 @@ function formatInfoAmount(
               ? String(rounded)
               : rounded.toFixed(1);
     return `${text} g per 100 g`;
-}
-
-function additivesLabel(quality: ScoreQuality): string {
-    const list = quality.additives;
-    if (list == null) return "–";
-    if (list.length === 0) return "None";
-    const high = list.filter((row) => row.risk === "high").length;
-    return high > 0
-        ? `${list.length} additive(s), ${high} high risk`
-        : `${list.length} additive(s)`;
-}
-
-function breakdownValue(
-    part: "nutrition" | "processing" | "additives" | "environment",
-    quality: ScoreQuality,
-    scored: ProductScore,
-): { label: string; value: string; status: PartStatus } | null {
-    const entry = scored.breakdown.find((row) => row.part === part);
-    if (part === "nutrition" && quality.nutriscoreGrade != null) {
-        const g = quality.nutriscoreGrade;
-        return {
-            label: "Nutri-Score",
-            value: g.toUpperCase(),
-            status: nutriscoreStatus(g),
-        };
-    }
-    if (part === "processing" && quality.novaGroup != null) {
-        const status =
-            entry?.value != null
-                ? partValueStatus(entry.value)
-                : partValueStatus(50);
-        return {
-            label: "Processing",
-            value: NOVA_LABEL[quality.novaGroup],
-            status,
-        };
-    }
-    if (part === "additives" && quality.additives != null) {
-        const status =
-            entry?.value != null ? partValueStatus(entry.value) : "good";
-        return {
-            label: "Additives",
-            value: additivesLabel(quality),
-            status,
-        };
-    }
-    if (part === "environment" && quality.ecoscoreGrade != null) {
-        const status =
-            entry?.value != null
-                ? partValueStatus(entry.value)
-                : partValueStatus(50);
-        return {
-            label: "Green-Score",
-            value: formatEco(quality.ecoscoreGrade),
-            status,
-        };
-    }
-    return null;
 }
 
 function pushInfoRow(

@@ -1,6 +1,7 @@
 import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { liveFridgeStore } from "../../db/fridge.js";
+import { getProfile } from "../../db/profiles.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { getHouseholdConfig } from "../../db/household.js";
@@ -42,6 +43,7 @@ import {
     resolveUnresolvedLines,
 } from "../../domain/recipes.js";
 import { sortNotices } from "../../domain/notices.js";
+import { guessMealType, validateTz } from "../../domain/tz.js";
 import type {
     RecipeImport,
     RecipeProblem,
@@ -60,7 +62,13 @@ import {
     linkImportPaused,
     recipeLinkReaderEnabled,
 } from "../../recipe-url-fetcher.js";
-import { cookRecipe, StockInputError } from "../../domain/stock.js";
+import {
+    cookRecipe,
+    previewCookRecipe,
+    StockInputError,
+    isCookPreviewUnavailable,
+    type CookPreview,
+} from "../../domain/stock.js";
 import { mealWriteFromItems } from "./nutrition.js";
 import { noticeSentence } from "../../copy/notices.js";
 import {
@@ -75,6 +83,8 @@ import {
     WRITE_STATUS,
     QUANTITY_ITEM,
     recipeAllergenNoticesForView,
+    registerV2OnlyWidgetResource,
+    uiMetaForKey,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
@@ -276,6 +286,145 @@ const MACROS_ITEM = z.object({
 
 export const MACROS_ITEM_OUTPUT_SCHEMA = MACROS_ITEM;
 
+/** One ingredient of `get_recipe`, as the recipe card lists it. */
+const GET_RECIPE_INGREDIENT = z.object({
+    id: z.string(),
+    display_name: z.string(),
+    amount: z.number().nullable(),
+    unit: z.string().nullable(),
+    note: z.string().nullable(),
+    food_id: z.string().nullable(),
+    per_portion_amount: z.number().nullable(),
+    person_amount: z.number().nullable(),
+    product: z
+        .object({
+            food_id: z.string(),
+            name: z.string(),
+        })
+        .nullable(),
+    missing: z
+        .boolean()
+        .describe(
+            "true when the fridge cannot cover this ingredient for one serving; false when it can or when cook_preview is null",
+        ),
+});
+
+/** The cook dry run for one serving, as the recipe card reads it. */
+const COOK_PREVIEW_WIRE = z.object({
+    total_portions: z.number(),
+    lines: z.array(
+        z.object({
+            food_id: z.string(),
+            display_name: z.string(),
+            from_item_id: z.string(),
+            unit: z.string(),
+            before: z.number(),
+            after: z.number(),
+        }),
+    ),
+    shortfalls: z.array(
+        z.object({
+            food_id: z
+                .string()
+                .nullable()
+                .describe("null for an ingredient not linked to a food"),
+            display_name: z.string(),
+            amount: z.number(),
+            unit: z.string(),
+            unknown_factor: z
+                .boolean()
+                .describe(
+                    "some stock of this food could not be counted, so the real shortfall may be smaller",
+                ),
+        }),
+    ),
+    unmeasured: z.array(
+        z.object({
+            food_id: z.string().nullable(),
+            display_name: z.string(),
+        }),
+    ),
+    cookable: z.boolean(),
+});
+
+type SuggestedMealType = "breakfast" | "lunch" | "dinner" | "snack";
+
+export const GET_RECIPE_OUTPUT_SCHEMA = z.object({
+    ...RECIPE_FIELDS,
+    steps: z
+        .array(z.string())
+        .describe(
+            "instructions split into steps, as the recipe page numbers them",
+        ),
+    portion_count: z.number(),
+    macros_per_portion: MACROS_ITEM,
+    notices: z.array(NOTICE_SCHEMA),
+    ingredients: z.array(GET_RECIPE_INGREDIENT),
+    verification: z.enum(["verified", "unverified"]),
+    problems: z.array(RECIPE_PROBLEM),
+    import: RECIPE_IMPORT_WIRE.nullable(),
+    cook_preview: COOK_PREVIEW_WIRE.nullable().describe(
+        "what cooking one serving takes from the fridge; null when the recipe cannot be previewed",
+    ),
+    suggested_meal_type: z
+        .enum(["breakfast", "lunch", "dinner", "snack"])
+        .describe(
+            "the meal slot it is now for the viewing member (their timezone, UTC when unset); pass it as meal_type to log_recipe_portion",
+        ),
+});
+
+/** The dry run for one serving in wire shape. */
+function cookPreviewWire(preview: CookPreview) {
+    return {
+        total_portions: preview.totalPortions,
+        lines: preview.lines.map((line) => ({
+            food_id: line.foodId,
+            display_name: line.displayName,
+            from_item_id: line.fromItemId,
+            unit: line.unit,
+            before: line.before,
+            after: line.after,
+        })),
+        shortfalls: preview.shortfalls.map((row) => ({
+            // An ingredient with no food carries "" in the domain.
+            food_id: row.foodId || null,
+            display_name: row.displayName,
+            amount: row.amount,
+            unit: row.unit,
+            unknown_factor: row.unknownFactor,
+        })),
+        unmeasured: preview.unmeasured.map((row) => ({
+            food_id: row.foodId,
+            display_name: row.displayName,
+        })),
+        cookable: preview.shortfalls.length === 0,
+    };
+}
+
+/**
+ * The one-serving dry run behind `get_recipe`. A recipe the cook cannot run on
+ * (unverified, an unlinked or archived ingredient) is null, never an error:
+ * reading a recipe must not depend on being able to cook it.
+ */
+async function recipeCookPreview(
+    householdId: string,
+    recipeId: string,
+): Promise<CookPreview | null> {
+    try {
+        return await previewCookRecipe(
+            liveRecipesStore(),
+            liveFridgeStore(),
+            liveFoodsStore(),
+            { householdId, recipeId, totalPortions: 1 },
+        );
+    } catch (err) {
+        if (isCookPreviewUnavailable(err)) {
+            return null;
+        }
+        throw err;
+    }
+}
+
 function wireMacros(macros: ReturnType<typeof macrosForPerson>) {
     return {
         calories: macros.calories,
@@ -471,6 +620,15 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
+    registerV2OnlyWidgetResource(server, ctx, {
+        key: "recipe-card",
+        resourceName: "recipe-card",
+        title: "Recipe",
+        description:
+            "A recipe with what the fridge covers and Cook behind a confirm step, for get_recipe.",
+        flag: "widget-recipe-card",
+    });
+
     server.registerTool(
         "get_recipe",
         {
@@ -487,37 +645,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 id: z.string(),
                 member_id: z.string().optional(),
             }),
-            outputSchema: z.object({
-                ...RECIPE_FIELDS,
-                steps: z
-                    .array(z.string())
-                    .describe(
-                        "instructions split into steps, as the recipe page numbers them",
-                    ),
-                portion_count: z.number(),
-                macros_per_portion: MACROS_ITEM,
-                notices: z.array(NOTICE_SCHEMA),
-                ingredients: z.array(
-                    z.object({
-                        id: z.string(),
-                        display_name: z.string(),
-                        amount: z.number().nullable(),
-                        unit: z.string().nullable(),
-                        note: z.string().nullable(),
-                        food_id: z.string().nullable(),
-                        per_portion_amount: z.number().nullable(),
-                        person_amount: z.number().nullable(),
-                        product: z
-                            .object({
-                                food_id: z.string(),
-                                name: z.string(),
-                            })
-                            .nullable(),
-                    }),
-                ),
-                verification: z.enum(["verified", "unverified"]),
-                problems: z.array(RECIPE_PROBLEM),
-                import: RECIPE_IMPORT_WIRE.nullable(),
+            outputSchema: GET_RECIPE_OUTPUT_SCHEMA,
+            ...uiMetaForKey(ctx, "recipe-card", {
+                v2: true,
+                flag: "widget-recipe-card",
             }),
         },
         async (args) =>
@@ -589,8 +720,33 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             ? `\n${allergenBlockLines.join("\n")}`
                             : "";
                     const steps = recipeSteps(view.instructions);
+                    const cook = await recipeCookPreview(
+                        actor.householdId,
+                        args.id,
+                    );
+                    const cookWire = cook ? cookPreviewWire(cook) : null;
+                    const shortFoodIds = new Set(
+                        (cookWire?.shortfalls ?? []).flatMap((row) =>
+                            row.food_id ? [row.food_id] : [],
+                        ),
+                    );
+                    // An ingredient with no food is named in the shortfalls by
+                    // its display name alone.
+                    const shortUnlinked = new Set(
+                        (cookWire?.shortfalls ?? []).flatMap((row) =>
+                            row.food_id ? [] : [row.display_name],
+                        ),
+                    );
+                    const profile = await getProfile(memberId);
+                    const tz =
+                        profile?.timezone && validateTz(profile.timezone)
+                            ? profile.timezone
+                            : "UTC";
                     const payload = {
                         ...recipeFields(view),
+                        suggested_meal_type: guessMealType(
+                            tz,
+                        ) as SuggestedMealType,
                         verification: view.verification,
                         problems: wireProblems(problems),
                         import: wireImport(importRow),
@@ -598,6 +754,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         portion_count: view.portionCount,
                         macros_per_portion: wiredMacros,
                         notices: noticesWire,
+                        cook_preview: cookWire,
                         ingredients: view.ingredients.map((ingredient) => {
                             const eff = ingredient.foodId
                                 ? catalog.get(ingredient.foodId)
@@ -617,6 +774,9 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                           name: eff.product.name,
                                       }
                                     : null,
+                                missing: ingredient.foodId
+                                    ? shortFoodIds.has(ingredient.foodId)
+                                    : shortUnlinked.has(ingredient.displayName),
                             };
                         }),
                     };

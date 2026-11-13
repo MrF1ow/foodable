@@ -25,6 +25,12 @@ flags:
     mcp-rate-product:
         default: false
         rules: []
+    mcp-list-usuals:
+        default: false
+        rules: []
+    mcp-plan-tools:
+        default: false
+        rules: []
     mcp-household-digest:
         default: false
         rules: []
@@ -35,6 +41,21 @@ flags:
         default: false
         rules: []
     widget-attention:
+        default: false
+        rules: []
+    widget-use-soon:
+        default: false
+        rules: []
+    widget-recipe-card:
+        default: false
+        rules: []
+    widget-product-score:
+        default: false
+        rules: []
+    widget-restock-nudge:
+        default: false
+        rules: []
+    widget-week-plan:
         default: false
         rules: []
     flags-epoch:

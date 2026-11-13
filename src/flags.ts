@@ -49,6 +49,51 @@ export const FLAGS = {
         removeWhen:
             "the attention widget is on for everyone and the flag is removed.",
     },
+    "widget-use-soon": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Use soon card for list_expiring: expiring items and the recipe that uses them.",
+        removeWhen:
+            "the use-soon widget is on for everyone and the flag is removed.",
+    },
+    "widget-recipe-card": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Recipe card for get_recipe: ingredients, what the fridge covers, and Cook with a confirm step.",
+        removeWhen:
+            "the recipe-card widget is on for everyone and the flag is removed.",
+    },
+    "widget-product-score": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Product score card for rate_product: the score, what it rests on and each member's check.",
+        removeWhen:
+            "the product-score widget is on for everyone and the flag is removed.",
+    },
+    "widget-restock-nudge": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Restock card for list_usuals: what is due or low, with Add to list.",
+        removeWhen:
+            "the restock-nudge widget is on for everyone and the flag is removed.",
+    },
+    "widget-week-plan": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The Week plan card for get_week_plan: seven days, Remove per entry, add the missing to groceries.",
+        removeWhen:
+            "the week-plan widget is on for everyone and the flag is removed.",
+    },
     "off-lookups": {
         type: "bool",
         kind: "kill-switch",
@@ -89,6 +134,24 @@ export const FLAGS = {
         why: "The rate_product MCP tool.",
         removeWhen:
             "rate_product has been on for everyone for a release with no rollback.",
+    },
+    "mcp-list-usuals": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The list_usuals MCP tool.",
+        removeWhen:
+            "list_usuals has been on for everyone for a release with no rollback.",
+    },
+    "mcp-plan-tools": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The get_week_plan, plan_recipe, unplan_recipe and add_plan_missing_to_groceries MCP tools.",
+        removeWhen:
+            "The plan tools have been on for everyone for a release with no rollback.",
     },
     "mcp-household-digest": {
         type: "bool",

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { PLAN_UNKNOWN_LINE_NOTE } from "../copy/toasts.js";
 import { createMemoryFoodsStore, newFood, type Food } from "./foods.js";
 import {
     GroceryInputError,
@@ -760,6 +761,28 @@ describe("addMissingToGroceries", () => {
         ]);
         expect(result.unknown[0]!.notice).toContain("Flour");
         expect(result.unknown[0]!.notice).toContain("2 cup");
+    });
+
+    test("an unknown line says so on the list itself", async () => {
+        const { settings, grocery, foods, flour } = await seed();
+        const lines = missingForPlan(
+            [plan("p", "2026-11-12")],
+            [recipe("p", 1, [ingredient(flour, 2, "cup")])],
+            [{ foodId: flour.id, quantity: { amount: 500, unit: "g" } }],
+            {
+                from: "2026-11-12",
+                days: 7,
+                foodsById: new Map([[flour.id, factors()]]),
+            },
+        );
+        const result = await addMissingToGroceries(grocery, settings, foods, {
+            householdId: HH,
+            lines,
+        });
+        expect(result.added[0]!.note).toBe(PLAN_UNKNOWN_LINE_NOTE);
+        expect((await grocery.listLines(HH))[0]!.note).toBe(
+            PLAN_UNKNOWN_LINE_NOTE,
+        );
     });
 
     test("an ingredient with no amount is added as to taste", async () => {

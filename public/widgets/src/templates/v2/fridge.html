@@ -1,0 +1,349 @@
+<!doctype html>
+<!--
+  Fridge card (MCP Apps), v2 look. Served for get_fridge when the widgets-v2
+  flag is on; the v1 template stays as is.
+
+  One card: a header with the item count, a "Use soon" strip of tiles for the
+  soonest-expiring items, then each location's items as hairline rows with the
+  quantity and the expiry date, and a footer for what the card leaves out.
+  How many days are left comes from the payload (`days_left`, resolved in the
+  household's timezone); the browser never works out "today".
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Fridge</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            .secs {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "Fridge",
+                loading: "Loading the fridge…",
+                empty: "Nothing in the fridge.",
+                items: { one: "{n} item", other: "{n} items" },
+                useSoon: "Use soon",
+                expired: "Expired",
+                today: "Today",
+                tomorrow: "Tomorrow",
+                days: "{n} days",
+                moreLead: "+ {n} more in the {where}",
+                moreRest: "{n} in the {where}",
+            };
+
+            // Items that expire within this many days (or already have) get a
+            // tile; the strip shows the soonest few.
+            const SOON_DAYS = 3;
+            const SOON_TILES = 3;
+            const ROWS_PER_LOCATION = 3;
+            const MONTHS = [
+                "Jan",
+                "Feb",
+                "Mar",
+                "Apr",
+                "May",
+                "Jun",
+                "Jul",
+                "Aug",
+                "Sep",
+                "Oct",
+                "Nov",
+                "Dec",
+            ];
+
+            function sampleItem(
+                id,
+                loc,
+                locName,
+                name,
+                amount,
+                unit,
+                on,
+                days,
+            ) {
+                return {
+                    id,
+                    location_id: loc,
+                    location: locName,
+                    kind: "food",
+                    display_name: name,
+                    amount,
+                    unit,
+                    expires_on: on,
+                    days_left: days,
+                    notices: [],
+                };
+            }
+
+            // Design sample (FigCraft Widget/Fridge): three tiles, a location
+            // with more items than rows, and an undated item.
+            const SAMPLE = {
+                locale: "en",
+                locations: [
+                    {
+                        id: "loc-fridge",
+                        name: "Fridge",
+                        sort_order: 0,
+                        items: [
+                            sampleItem(
+                                "i1",
+                                "loc-fridge",
+                                "Fridge",
+                                "Eggs",
+                                9,
+                                "each",
+                                "2026-11-19",
+                                7,
+                            ),
+                            sampleItem(
+                                "i2",
+                                "loc-fridge",
+                                "Fridge",
+                                "Chicken thighs",
+                                0.5,
+                                "lb",
+                                "2026-11-17",
+                                5,
+                            ),
+                            sampleItem(
+                                "i3",
+                                "loc-fridge",
+                                "Fridge",
+                                "Milk 2%",
+                                0.5,
+                                "gal",
+                                "2026-11-16",
+                                4,
+                            ),
+                            sampleItem(
+                                "i4",
+                                "loc-fridge",
+                                "Fridge",
+                                "Salmon",
+                                1,
+                                "lb",
+                                "2026-11-13",
+                                1,
+                            ),
+                            sampleItem(
+                                "i5",
+                                "loc-fridge",
+                                "Fridge",
+                                "Spinach",
+                                1,
+                                "bag",
+                                "2026-11-14",
+                                2,
+                            ),
+                            sampleItem(
+                                "i6",
+                                "loc-fridge",
+                                "Fridge",
+                                "Cooked rice",
+                                2,
+                                "cup",
+                                "2026-11-15",
+                                3,
+                            ),
+                            sampleItem(
+                                "i7",
+                                "loc-fridge",
+                                "Fridge",
+                                "Butter",
+                                1,
+                                "lb",
+                                null,
+                                null,
+                            ),
+                        ],
+                    },
+                    {
+                        id: "loc-freezer",
+                        name: "Freezer",
+                        sort_order: 1,
+                        items: [
+                            sampleItem(
+                                "i8",
+                                "loc-freezer",
+                                "Freezer",
+                                "Peas",
+                                1,
+                                "bag",
+                                "2027-03-01",
+                                109,
+                            ),
+                        ],
+                    },
+                    {
+                        id: "loc-pantry",
+                        name: "Pantry",
+                        sort_order: 2,
+                        items: [],
+                    },
+                ],
+            };
+
+            // "2026-11-19" -> "Nov 19", read from the string (the date is
+            // already the household's; Date would shift it by the viewer's zone).
+            function dateText(iso) {
+                const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ""));
+                if (!m) return String(iso || "");
+                return `${MONTHS[Number(m[2]) - 1]} ${Number(m[3])}`;
+            }
+
+            function whenText(days) {
+                if (days < 0) return T.expired;
+                if (days === 0) return T.today;
+                if (days === 1) return T.tomorrow;
+                return tpl(T.days, { n: days });
+            }
+
+            function urgency(days) {
+                if (days == null) return undefined;
+                if (days <= 1) return "over";
+                if (days <= SOON_DAYS) return "warn";
+                return undefined;
+            }
+
+            // Soonest expiry first; undated last; ties by name.
+            function bySoonest(a, b) {
+                const da = a.days_left == null ? Infinity : a.days_left;
+                const db = b.days_left == null ? Infinity : b.days_left;
+                if (da !== db) return da < db ? -1 : 1;
+                return String(a.display_name).localeCompare(
+                    String(b.display_name),
+                );
+            }
+
+            function lowerName(name) {
+                return String(name).toLowerCase();
+            }
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+
+            function render(data) {
+                const locs = data.locations.filter(
+                    (l) => (l.items || []).length > 0,
+                );
+                const all = [];
+                for (const l of locs) for (const it of l.items) all.push(it);
+                if (all.length === 0) {
+                    v2Paint(
+                        card(
+                            v2Header(T.title) +
+                                `<p class="note">${esc(T.empty)}</p>`,
+                        ),
+                    );
+                    return;
+                }
+                const soon = all
+                    .filter(
+                        (it) =>
+                            it.days_left != null && it.days_left <= SOON_DAYS,
+                    )
+                    .sort(bySoonest)
+                    .slice(0, SOON_TILES);
+                const strip = soon.length
+                    ? `<div class="grp grp-tiles">${v2Label(T.useSoon)}${v2Tiles(
+                          soon.map((it) => ({
+                              when: whenText(it.days_left),
+                              tone: urgency(it.days_left),
+                              name: it.display_name,
+                          })),
+                      )}</div>`
+                    : "";
+                const hidden = [];
+                const tiled = new Set(soon);
+                const sections = locs
+                    .map((l) => {
+                        // The tiles already name their items; the list is the rest.
+                        const rest = l.items
+                            .filter((it) => !tiled.has(it))
+                            .sort(bySoonest);
+                        if (rest.length === 0) return "";
+                        const rows = rest
+                            .slice(0, ROWS_PER_LOCATION)
+                            .map((it) => ({
+                                title: it.display_name,
+                                sub: v2Qty(it.amount, it.unit),
+                                end: it.expires_on
+                                    ? dateText(it.expires_on)
+                                    : "",
+                                endKind: "date",
+                                endTone:
+                                    it.days_left != null && it.days_left < 0
+                                        ? "over"
+                                        : undefined,
+                                attrs: { "data-item-id": it.id },
+                            }));
+                        const more = rest.length - rows.length;
+                        if (more > 0) {
+                            hidden.push({ n: more, where: lowerName(l.name) });
+                        }
+                        return v2Group(l.name, rows, rest.length);
+                    })
+                    .join("");
+                let foot = "";
+                if (hidden.length) {
+                    // "+ 6 more in the fridge, 6 in the freezer"
+                    const text = hidden
+                        .map((h, i) =>
+                            tpl(i === 0 ? T.moreLead : T.moreRest, h),
+                        )
+                        .join(", ");
+                    foot = `<p class="note">${esc(text)}</p>`;
+                }
+                const meta = plural(T.items, all.length);
+                v2Paint(
+                    card(
+                        v2Header(T.title, meta) +
+                            strip +
+                            `<div class="secs">${sections}</div>` +
+                            foot,
+                    ),
+                );
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (Array.isArray(payload.locations)) return payload;
+                if (payload.structuredContent)
+                    return coerce(payload.structuredContent);
+                return null;
+            }
+
+            initWidget({
+                name: "fridge-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render: v2BridgeRender(render),
+                sample: SAMPLE,
+            });
+        </script>
+    </body>
+</html>

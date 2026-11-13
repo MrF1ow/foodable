@@ -80,6 +80,7 @@ import {
 } from "./pages/settings-household.js";
 import {
     effectiveFoodsByIds,
+    isUsualGroceryLine,
     matchFoodsByWords,
     suggestFoodFor,
     usualProductRows,
@@ -109,7 +110,6 @@ import {
     listRecipesFiltered,
     macrosForPerson,
     RecipeInputError,
-    RecipeUnverifiedError,
     recipeDislikeNote,
     recipeFilters,
     recipeNotices,
@@ -163,9 +163,8 @@ import {
     type SharedLinkRow,
 } from "./pages/v2/settings-household-shared-links.js";
 import { liveShareLinkStore } from "../db/share-links.js";
-import { guessMealType } from "./pages/v2/log-sheet.js";
 import { orderCards } from "../domain/layout.js";
-import { todayInTz, validateTz } from "../domain/tz.js";
+import { guessMealType, todayInTz, validateTz } from "../domain/tz.js";
 import { fromGrams } from "../domain/units.js";
 import { getLatestWeight } from "../db/nutrition.js";
 import type { WeighInPrefill } from "./pages/v2/log-sheet.js";
@@ -178,10 +177,9 @@ import { loadToday, useSoonFor } from "./loaders-today.js";
 import {
     listExpiring,
     previewCookRecipe,
-    StockInputError,
+    isCookPreviewUnavailable,
     type CookPreview,
 } from "../domain/stock.js";
-import { FoodsInputError } from "../domain/foods.js";
 import { parseTodayDateParam, renderTodayV2Page } from "./pages/v2/today.js";
 import {
     loadHouseholdNotices,
@@ -637,10 +635,12 @@ function kitchenGroceryLineMeta(
         ? ctx.allFoods.find((row) => row.id === foodRow.genericFoodId)
         : foodRow;
     const usualProductId = genericFood?.usualProductId ?? null;
-    const isUsual = !!(
-        usualProductId &&
-        (line.foodId === usualProductId || eff?.product?.id === usualProductId)
-    );
+    const isUsual = isUsualGroceryLine({
+        lineFoodId: line.foodId,
+        effectiveProductId: eff?.product?.id,
+        food: foodRow,
+        genericOf: (id) => ctx.allFoods.find((row) => row.id === id),
+    });
     let plainFoodName: string | null = null;
     if (genericFood && foodRow?.genericFoodId) {
         plainFoodName = genericFood.name;
@@ -2250,12 +2250,7 @@ export async function loadCookPreview(
         );
         return { preview };
     } catch (err) {
-        if (
-            err instanceof StockInputError ||
-            err instanceof RecipeInputError ||
-            err instanceof RecipeUnverifiedError ||
-            err instanceof FoodsInputError
-        ) {
+        if (isCookPreviewUnavailable(err)) {
             return { preview: null, error: err.message };
         }
         throw err;

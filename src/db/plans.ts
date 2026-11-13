@@ -4,6 +4,7 @@ import {
     checkPlanSlot,
     isPlanSlot,
     type PlansStore,
+    type PlanTransaction,
     type RecipePlan,
 } from "../domain/plan.js";
 import { maybeOne, pgCode, pgError, rows, run, type Tx } from "./sql.js";
@@ -194,4 +195,29 @@ export function liveRecipePlansStore(): PlansStore {
             });
         },
     };
+}
+
+/**
+ * Which planning write is being serialized. The two touch different rows
+ * (`recipe_plans` and `grocery_lines`), so each has its own key: planning
+ * never waits on adding the missing foods, and two of the same kind do.
+ */
+export type PlanLockOperation = "plan-recipe" | "plan-missing";
+
+/**
+ * The `transaction` the planning domain functions take, for the live stores:
+ * one such write per household at a time. The second waits on the first's
+ * advisory lock, then reads what the first committed, so "planned twice is one
+ * plan" and "a second call adds nothing" hold when agents, the chat card and
+ * the web app fire together.
+ */
+export function planTransaction(
+    operation: PlanLockOperation,
+    householdId: string,
+): PlanTransaction {
+    return (fn) =>
+        run(async (tx) => {
+            await tx`select pg_advisory_xact_lock(hashtextextended(${`${operation}:${householdId}`}, 0))`;
+            return fn();
+        });
 }

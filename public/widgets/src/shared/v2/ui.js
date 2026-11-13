@@ -87,6 +87,25 @@ function v2Attrs(attrs) {
         .join("");
 }
 
+// One amount for every card that shows a quantity: "1", "½", "1½", and any
+// other value rounded to two places. Nothing (or not a number) is "".
+const V2_FRACTIONS = { 0.25: "¼", 0.5: "½", 0.75: "¾" };
+
+function v2Amount(amount) {
+    const n = Number(amount);
+    if (amount == null || amount === "" || !Number.isFinite(n)) return "";
+    const whole = Math.floor(n);
+    const frac = V2_FRACTIONS[Math.round((n - whole) * 100) / 100];
+    if (frac) return whole > 0 ? `${whole}${frac}` : frac;
+    return String(Math.round(n * 100) / 100);
+}
+
+// Amount plus unit ("½ cup"); "each" is the default unit and is not shown.
+function v2Qty(amount, unit) {
+    const u = unit && unit !== "each" ? String(unit) : "";
+    return [v2Amount(amount), u].filter(Boolean).join(" ");
+}
+
 // One clamped fraction for every bar and toggle that reads a ratio.
 function v2Frac(f) {
     const n = Number(f);

@@ -32,7 +32,12 @@ import {
 import type { FetchOutcome } from "./fetch-safe.js";
 import { Hono } from "hono";
 import pkg from "../package.json" with { type: "json" };
-import { ADD_FRIDGE_ITEM_OUTPUT_SCHEMA } from "./mcp/tools/fridge.js";
+import {
+    ADD_FRIDGE_ITEM_OUTPUT_SCHEMA,
+    GET_FRIDGE_OUTPUT_SCHEMA,
+    LIST_EXPIRING_OUTPUT_SCHEMA,
+} from "./mcp/tools/fridge.js";
+import { GET_RECIPE_OUTPUT_SCHEMA } from "./mcp/tools/recipes.js";
 import { McpServer, InMemoryTransport } from "@modelcontextprotocol/server";
 import * as actualNutrition from "./db/nutrition.js";
 import * as actualProfiles from "./db/profiles.js";
@@ -135,6 +140,13 @@ import {
     updateFood,
 } from "./domain/foods.js";
 import { RATE_PRODUCT_OUTPUT_SCHEMA } from "./mcp/tools/product-score.js";
+import { LIST_USUALS_OUTPUT_SCHEMA } from "./mcp/tools/grocery.js";
+import {
+    ADD_PLAN_MISSING_OUTPUT_SCHEMA,
+    PLAN_RECIPE_OUTPUT_SCHEMA,
+    UNPLAN_RECIPE_OUTPUT_SCHEMA,
+    WEEK_PLAN_OUTPUT_SCHEMA,
+} from "./mcp/tools/plan.js";
 import { HOUSEHOLD_DIGEST_OUTPUT_SCHEMA } from "./mcp/tools/household-digest.js";
 import {
     FOOD_OUTPUT,
@@ -155,6 +167,9 @@ import { NOTICE_SCHEMA } from "./mcp/shared.js";
 import { LIST_NOTICES_OUTPUT_SCHEMA } from "./mcp/tools/notices.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { utcTodayFromDate } from "./domain/stock.js";
+import { WEEKDAY_NAMES } from "./domain/weekdays.js";
+import { PLAN_UNKNOWN_LINE_NOTE } from "./copy/toasts.js";
+import { fridgeExpiryLine } from "./copy/notices.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import {
     createMemoryRecipesStore,
@@ -203,6 +218,7 @@ import type {
 import {
     dateInTz,
     formatLocalDateTime,
+    guessMealType,
     todayInTz,
     weekdayInTz,
 } from "./domain/tz.js";
@@ -8742,6 +8758,455 @@ describe("usual tools keep the usual's schedule over HTTP", () => {
     });
 });
 
+describe("list_grocery_lines and get_fridge carry the Kitchen's fields over HTTP", () => {
+    test.each(ERAS)(
+        "list_grocery_lines adds store, product_name and usual (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = async (
+                    name: string,
+                    args: Record<string, unknown> = {},
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const costco = await createGroceryStore(
+                    db.settingsStore,
+                    "hh-1",
+                    "Costco",
+                );
+                const eggs = await call("upsert_food", { name: "Eggs" });
+                const eggsId = eggs.structuredContent?.id as string;
+                const product = await call("upsert_food", {
+                    generic_food_id: eggsId,
+                    name: "Kirkland Eggs",
+                });
+                const productId = product.structuredContent?.id as string;
+                const flour = await call("upsert_food", { name: "Flour" });
+                const flourId = flour.structuredContent?.id as string;
+                const set = await call("set_usual_product", {
+                    food_id: eggsId,
+                    product_food_id: productId,
+                    store_id: costco.id,
+                    amount: 12,
+                    unit: "each",
+                });
+                expect(set.isError).toBeFalsy();
+                for (const food_id of [eggsId, flourId]) {
+                    const added = await call("add_grocery_line", {
+                        kind: "food",
+                        food_id,
+                        store_id: costco.id,
+                    });
+                    expect(added.isError).toBeFalsy();
+                }
+
+                const listed = await call("list_grocery_lines");
+                expect(listed.isError).toBeFalsy();
+                const body = GROCERY_LIST_OUTPUT_SCHEMA.parse(
+                    listed.structuredContent,
+                );
+                const lines = body.stores.flatMap((s) =>
+                    s.sections.flatMap((sec) => sec.lines),
+                );
+                const usualLine = lines.find((l) =>
+                    /eggs/i.test(l.display_name),
+                )!;
+                const plainLine = lines.find((l) =>
+                    /flour/i.test(l.display_name),
+                )!;
+                expect(usualLine).toMatchObject({
+                    store: "Costco",
+                    product_name: "Kirkland Eggs",
+                    usual: true,
+                });
+                expect(plainLine).toMatchObject({
+                    store: "Costco",
+                    product_name: null,
+                    usual: false,
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a line on the usual product itself is usual (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = async (
+                    name: string,
+                    args: Record<string, unknown> = {},
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const store = await createGroceryStore(
+                    db.settingsStore,
+                    "hh-1",
+                    "Safeway",
+                );
+                const oats = await call("upsert_food", { name: "Oats" });
+                const oatsId = oats.structuredContent?.id as string;
+                const product = await call("upsert_food", {
+                    generic_food_id: oatsId,
+                    name: "Quaker Oats",
+                });
+                const productId = product.structuredContent?.id as string;
+                const other = await call("upsert_food", {
+                    generic_food_id: oatsId,
+                    name: "Store Oats",
+                });
+                const otherId = other.structuredContent?.id as string;
+                await call("set_usual_product", {
+                    food_id: oatsId,
+                    product_food_id: productId,
+                    store_id: store.id,
+                    amount: 500,
+                    unit: "g",
+                });
+                for (const food_id of [productId, otherId]) {
+                    const added = await call("add_grocery_line", {
+                        kind: "food",
+                        food_id,
+                        store_id: store.id,
+                    });
+                    expect(added.isError).toBeFalsy();
+                }
+                const body = GROCERY_LIST_OUTPUT_SCHEMA.parse(
+                    (await call("list_grocery_lines")).structuredContent,
+                );
+                const lines = body.stores.flatMap((s) =>
+                    s.sections.flatMap((sec) => sec.lines),
+                );
+                const usualLine = lines.find((l) =>
+                    /quaker/i.test(l.display_name),
+                )!;
+                const otherLine = lines.find((l) =>
+                    /store oats/i.test(l.display_name),
+                )!;
+                expect(usualLine.usual).toBe(true);
+                expect(usualLine.product_name).toBeNull();
+                expect(otherLine.usual).toBe(false);
+                expect(otherLine.product_name).toBeNull();
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a line on a product whose generic is archived is not usual (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = async (
+                    name: string,
+                    args: Record<string, unknown> = {},
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const store = await createGroceryStore(
+                    db.settingsStore,
+                    "hh-1",
+                    "Aldi",
+                );
+                const rice = await call("upsert_food", { name: "Rice" });
+                const riceId = rice.structuredContent?.id as string;
+                const product = await call("upsert_food", {
+                    generic_food_id: riceId,
+                    name: "Basmati Rice",
+                });
+                const productId = product.structuredContent?.id as string;
+                await call("set_usual_product", {
+                    food_id: riceId,
+                    product_food_id: productId,
+                    store_id: store.id,
+                    amount: 1,
+                    unit: "g",
+                });
+                await call("add_grocery_line", {
+                    kind: "food",
+                    food_id: productId,
+                    store_id: store.id,
+                });
+                const usualOf = async () => {
+                    const body = GROCERY_LIST_OUTPUT_SCHEMA.parse(
+                        (await call("list_grocery_lines")).structuredContent,
+                    );
+                    return body.stores
+                        .flatMap((s) => s.sections.flatMap((sec) => sec.lines))
+                        .find((l) => /basmati/i.test(l.display_name))!.usual;
+                };
+                expect(await usualOf()).toBe(true);
+                const generic = (
+                    await db.foodsStore.getFoodsByIds("hh-1", [riceId])
+                ).get(riceId)!;
+                await db.foodsStore.updateFoodRow({
+                    ...generic,
+                    archivedAt: "2026-11-09T12:00:00.000Z",
+                });
+                expect(await usualOf()).toBe(false);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "get_fridge adds the location name and days left (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = async (
+                    name: string,
+                    args: Record<string, unknown> = {},
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const loc = await call("add_fridge_location", {
+                    name: "Pantry",
+                });
+                const locationId = loc.structuredContent?.id as string;
+                const today = utcTodayFromDate();
+                const [y, m, d] = today.split("-").map(Number);
+                const shifted = (days: number) =>
+                    new Date(Date.UTC(y!, m! - 1, d! + days))
+                        .toISOString()
+                        .slice(0, 10);
+                const inThree = shifted(3);
+                const dated = await call("add_fridge_item", {
+                    location_id: locationId,
+                    kind: "food",
+                    name: "Yogurt",
+                    amount: 1,
+                    unit: "g",
+                });
+                await call("add_fridge_item", {
+                    location_id: locationId,
+                    kind: "food",
+                    name: "Rice",
+                    amount: 1,
+                    unit: "g",
+                });
+                const row = (await db.fridgeStore.listItems("hh-1")).find(
+                    (r) => r.id === dated.structuredContent?.id,
+                )!;
+                await db.fridgeStore.updateItem({ ...row, expiresOn: inThree });
+                const dayEdges: [string, number][] = [
+                    ["Milk", -1],
+                    ["Butter", 0],
+                ];
+                for (const [name, days] of dayEdges) {
+                    const added = await call("add_fridge_item", {
+                        location_id: locationId,
+                        kind: "food",
+                        name,
+                        amount: 1,
+                        unit: "g",
+                    });
+                    const edgeRow = (
+                        await db.fridgeStore.listItems("hh-1")
+                    ).find((r) => r.id === added.structuredContent?.id)!;
+                    await db.fridgeStore.updateItem({
+                        ...edgeRow,
+                        expiresOn: shifted(days),
+                    });
+                }
+
+                const listed = await call("get_fridge");
+                expect(listed.isError).toBeFalsy();
+                const body = GET_FRIDGE_OUTPUT_SCHEMA.parse(
+                    listed.structuredContent,
+                );
+                const items = body.locations.flatMap((l) => l.items);
+                expect(
+                    items.find((i) => i.display_name === "Yogurt"),
+                ).toMatchObject({
+                    location: "Pantry",
+                    expires_on: inThree,
+                    days_left: 3,
+                });
+                expect(
+                    items.find((i) => i.display_name === "Milk")?.days_left,
+                ).toBe(-1);
+                expect(
+                    items.find((i) => i.display_name === "Butter")?.days_left,
+                ).toBe(0);
+                expect(
+                    items.find((i) => i.display_name === "Rice"),
+                ).toMatchObject({
+                    location: "Pantry",
+                    expires_on: null,
+                    days_left: null,
+                });
+            });
+        },
+    );
+});
+
+describe("get_recipe carries the cook preview over HTTP", () => {
+    type Call = (
+        name: string,
+        args?: Record<string, unknown>,
+    ) => Promise<ToolResult>;
+
+    // A recipe of 2 portions whose ingredients are one 100 g food each, so one
+    // serving takes 50 g of each.
+    async function recipeWith(
+        call: Call,
+        stocked: { name: string; inFridge: number | null }[],
+    ) {
+        const loc = await call("add_fridge_location", { name: "Pantry" });
+        const locationId = loc.structuredContent?.id as string;
+        const recipe = await call("create_recipe", {
+            name: "Rice bowl",
+            yield_portions: 2,
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        const foodIds: Record<string, string> = {};
+        for (const { name, inFridge } of stocked) {
+            const food = await call("upsert_food", { name });
+            const foodId = food.structuredContent?.id as string;
+            foodIds[name] = foodId;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: foodId,
+                amount: 100,
+                unit: "g",
+            });
+            if (inFridge != null) {
+                const added = await call("add_fridge_item", {
+                    location_id: locationId,
+                    kind: "food",
+                    food_id: foodId,
+                    amount: inFridge,
+                    unit: "g",
+                });
+                expect(added.isError).toBeFalsy();
+            }
+        }
+        return { recipeId, foodIds };
+    }
+
+    test.each(ERAS)(
+        "a fully stocked recipe is cookable with no missing ingredient (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { recipeId } = await recipeWith(call, [
+                    { name: "Rice", inFridge: 500 },
+                    { name: "Spinach", inFridge: 500 },
+                ]);
+                const got = await call("get_recipe", { id: recipeId });
+                expect(got.isError).toBeFalsy();
+                const body = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                    got.structuredContent,
+                );
+                expect(body.cook_preview).not.toBeNull();
+                expect(body.cook_preview?.cookable).toBe(true);
+                expect(body.cook_preview?.total_portions).toBe(1);
+                expect(body.cook_preview?.shortfalls).toEqual([]);
+                expect(body.cook_preview?.lines.length).toBeGreaterThan(0);
+                expect(body.cook_preview?.lines[0]).toMatchObject({
+                    unit: "g",
+                    before: 500,
+                    after: 450,
+                });
+                expect(body.ingredients.map((i) => i.missing)).toEqual([
+                    false,
+                    false,
+                ]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "an ingredient the fridge cannot cover is missing and listed as a shortfall (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { recipeId, foodIds } = await recipeWith(call, [
+                    { name: "Rice", inFridge: 500 },
+                    { name: "Lemon", inFridge: 20 },
+                    { name: "Salt", inFridge: null },
+                ]);
+                const got = await call("get_recipe", { id: recipeId });
+                expect(got.isError).toBeFalsy();
+                const body = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                    got.structuredContent,
+                );
+                expect(body.cook_preview?.cookable).toBe(false);
+                expect(body.cook_preview?.shortfalls).toEqual([
+                    {
+                        food_id: foodIds["Lemon"]!,
+                        display_name: "Lemon",
+                        amount: 30,
+                        unit: "g",
+                        unknown_factor: false,
+                    },
+                    {
+                        food_id: foodIds["Salt"]!,
+                        display_name: "Salt",
+                        amount: 50,
+                        unit: "g",
+                        unknown_factor: false,
+                    },
+                ]);
+                const missing = Object.fromEntries(
+                    body.ingredients.map((i) => [i.display_name, i.missing]),
+                );
+                expect(missing).toEqual({
+                    Rice: false,
+                    Lemon: true,
+                    Salt: true,
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a recipe that cannot be previewed still returns with a null cook_preview (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                // An import is unverified until checked, and the cook refuses it.
+                const imported = await call("import_recipe_from_text", {
+                    text: "x",
+                    instructions: "",
+                    name: "Blocked",
+                    ingredients: [{ name: "rice", amount: 50, unit: "g" }],
+                });
+                const recipeId = (
+                    imported.structuredContent?.recipe as { id: string }
+                ).id;
+                const got = await call("get_recipe", { id: recipeId });
+                expect(got.isError).toBeFalsy();
+                const body = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                    got.structuredContent,
+                );
+                expect(body.verification).toBe("unverified");
+                expect(body.cook_preview).toBeNull();
+                expect(body.ingredients.every((i) => i.missing === false)).toBe(
+                    true,
+                );
+                expect(textOf(got)).toContain("Blocked");
+            });
+        },
+    );
+});
+
 describe("set_nutrition_goals over HTTP", () => {
     test.each(ERAS)(
         "per-day override and get_goal_progress agree (%p)",
@@ -8859,6 +9324,106 @@ describe("rate_product over HTTP", () => {
     );
 
     test.each(ERAS)(
+        "each member carries the Product screen's verdict and reason, and each part its display and status (%p)",
+        async (era) => {
+            db.members = [
+                {
+                    householdId: "hh-1",
+                    userId: "u1",
+                    role: "owner",
+                    displayName: "Ann",
+                },
+                {
+                    householdId: "hh-1",
+                    userId: "u2",
+                    role: "member",
+                    displayName: "Bo",
+                },
+            ];
+            db.goals = goals({ daily_sugar_g: 30 });
+            await addAllergen(db.rulesStore, {
+                householdId: "hh-1",
+                userId: "u1",
+                allergen: "milk",
+            });
+            const food = newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name: "Sweet Yogurt",
+                allergens: ["milk"],
+                sugarG: 50,
+                gramsPerEach: 40,
+                offQuality: {
+                    nutriscoreGrade: "a",
+                    novaGroup: 4,
+                    ecoscoreGrade: "a-plus",
+                    additives: [
+                        { tag: "en:e330", risk: "none" },
+                        { tag: "en:e250", risk: "high" },
+                    ],
+                    allergensTags: null,
+                    tracesTags: null,
+                    ingredientsAnalysisTags: null,
+                    labelsTags: null,
+                    fetchedAt: "2026-11-09T12:00:00.000Z",
+                },
+            });
+            await db.foodsStore.insertFood(food);
+            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
+                        (
+                            (await client.callTool({
+                                name: "rate_product",
+                                arguments: { food_id: food.id },
+                            })) as ToolResult
+                        ).structuredContent,
+                    );
+                    const ann = out.checks.find((c) => c.user_id === "u1");
+                    const bo = out.checks.find((c) => c.user_id === "u2");
+                    expect(ann?.verdict).toBe("avoid");
+                    expect(ann?.reason).toBe(
+                        "Contains Milk · listed as an allergy",
+                    );
+                    expect(bo?.verdict).toBe("good");
+                    expect(bo?.reason).toBe(
+                        "Fits today · 20 g sugar toward your 50 g",
+                    );
+                    // The wire notice keeps its own sentence; the reason is
+                    // the app's line, not a copy of it.
+                    expect(bo?.notices[0]?.message).not.toBe(bo?.reason);
+
+                    expect(out.preset_label).toBe("Balanced");
+                    const part = (name: string) =>
+                        out.breakdown.find((row) => row.part === name);
+                    expect(part("nutrition")).toMatchObject({
+                        label: "Nutri-Score",
+                        display: "A",
+                        status: "good",
+                    });
+                    expect(part("processing")).toMatchObject({
+                        label: "Processing",
+                        display: "NOVA 4 · ultra-processed",
+                    });
+                    expect(part("additives")).toMatchObject({
+                        label: "Additives",
+                        display: "2 additive(s), 1 high risk",
+                    });
+                    expect(part("environment")).toMatchObject({
+                        display: "A+",
+                    });
+                    expect(
+                        out.info_rows.find((row) => row.kind === "sugars"),
+                    ).toMatchObject({ per_100g: 50, status: "over" });
+                });
+            } finally {
+                resetFlagsForTests();
+            }
+        },
+    );
+
+    test.each(ERAS)(
         "scores with the caller's weights and only adds fields (%p)",
         async (era) => {
             const food = newFood({
@@ -8956,6 +9521,1218 @@ describe("rate_product over HTTP", () => {
             }
         },
     );
+});
+
+describe("list_usuals over HTTP", () => {
+    afterEach(() => resetFlagsForTests());
+
+    const WEEKDAYS = [
+        "Sunday",
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+    ];
+
+    function addUtcDays(iso: string, delta: number): string {
+        const [y, m, d] = iso.split("-").map(Number);
+        return new Date(Date.UTC(y!, m! - 1, d! + delta))
+            .toISOString()
+            .slice(0, 10);
+    }
+
+    function weekdayOf(iso: string): number {
+        return new Date(`${iso}T00:00:00Z`).getUTCDay();
+    }
+
+    function setRestockWeekday(weekday: number, enabled = true) {
+        db.household!.preferences = {
+            ...db.household!.preferences,
+            restock: {
+                ...DEFAULT_RESTOCK,
+                enabled,
+                weekday: weekday as 0 | 1 | 2 | 3 | 4 | 5 | 6,
+            },
+        };
+    }
+
+    // Four usuals: one on a weekly schedule never bought, one added when low
+    // with nothing in stock, one weekly but paused, one every four weeks and
+    // bought a week ago.
+    async function seedUsuals() {
+        const today = utcTodayFromDate();
+        await db.settingsStore.insertStore({
+            id: "store-1",
+            householdId: "hh-1",
+            name: "Corner",
+            sortOrder: 0,
+        });
+        const plain = (name: string, extra: Partial<Food>) =>
+            newFood({
+                householdId: "hh-1",
+                kind: "food",
+                name,
+                defaultUnit: "each",
+                ...extra,
+            });
+        const milk = plain("Oat milk", {
+            restockSchedule: "weekly",
+            usualStoreId: "store-1",
+            usualAmount: { amount: 2, unit: "each" },
+        });
+        const eggs = plain("Eggs", {
+            restockWhenLow: true,
+            usualAmount: { amount: 12, unit: "each" },
+        });
+        const rice = plain("Rice", {
+            restockSchedule: "weekly",
+            restockPaused: true,
+        });
+        const salt = plain("Salt", {
+            restockSchedule: "every_n_weeks",
+            restockEveryWeeks: 4,
+            lastRestockedOn: addUtcDays(today, -7),
+        });
+        const notUsual = plain("Plain flour", {});
+        for (const food of [milk, eggs, rice, salt, notUsual]) {
+            await db.foodsStore.insertFood(food);
+        }
+        return { today, milk, eggs, rice, salt };
+    }
+
+    type UsualsOut = z.infer<typeof LIST_USUALS_OUTPUT_SCHEMA>;
+
+    test.each(ERAS)(
+        "flag on: each usual says whether it is due and why (%p)",
+        async (era) => {
+            const { today, milk, eggs, rice, salt } = await seedUsuals();
+            setRestockWeekday(weekdayOf(today));
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(names).toContain("list_usuals");
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                expect(r.isError).toBeFalsy();
+                const out: UsualsOut = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.today).toBe(today);
+                expect(out.restock_weekday).toBe(weekdayOf(today));
+                expect(out.restock_weekday_name).toBe(
+                    WEEKDAYS[weekdayOf(today)]!,
+                );
+                expect(out.is_restock_day).toBe(true);
+                // Plain flour has no schedule and no low rule: not a usual.
+                // Due ones come first, then the rest by name.
+                expect(out.usuals.map((u) => u.name)).toEqual([
+                    "Eggs",
+                    "Oat milk",
+                    "Rice",
+                    "Salt",
+                ]);
+                const byId = new Map(out.usuals.map((u) => [u.food_id, u]));
+                const scheduled = byId.get(milk.id)!;
+                expect(scheduled.due?.trigger).toBe("schedule");
+                expect(scheduled.due?.reason).toContain("weekly");
+                expect(scheduled).toMatchObject({
+                    kind: "food",
+                    schedule: "weekly",
+                    every_weeks: null,
+                    store_id: "store-1",
+                    store_name: "Corner",
+                    amount: 2,
+                    unit: "each",
+                    paused: false,
+                    restock_when_low: false,
+                });
+                const low = byId.get(eggs.id)!;
+                expect(low.due?.trigger).toBe("low");
+                expect(low).toMatchObject({
+                    schedule: null,
+                    restock_when_low: true,
+                    low_level: 3,
+                    store_id: null,
+                    store_name: null,
+                    amount: 12,
+                });
+                expect(byId.get(rice.id)).toMatchObject({
+                    paused: true,
+                    due: null,
+                });
+                expect(byId.get(salt.id)).toMatchObject({
+                    schedule: "every_n_weeks",
+                    every_weeks: 4,
+                    due: null,
+                });
+                expect(out.restock_enabled).toBe(true);
+                const text = r.content[0]?.text ?? "";
+                expect(text).toContain("Oat milk");
+                expect(text).toContain("add when below 3 each");
+                expect(text).toContain("every 4 weeks");
+                expect(text).not.toContain("Automatic restock is off");
+            });
+        },
+    );
+
+    // The arguments the restock card sends to add_grocery_line for a usual.
+    function cardAddArgs(u: UsualsOut["usuals"][number]) {
+        const args: Record<string, unknown> = {
+            kind: u.kind,
+            food_id: u.food_id,
+        };
+        if (u.store_id) args.store_id = u.store_id;
+        if (u.amount != null) args.amount = u.amount;
+        if (u.unit) args.unit = u.unit;
+        return args;
+    }
+
+    test.each(ERAS)(
+        "the card's arguments add every shape of due usual through add_grocery_line (%p)",
+        async (era) => {
+            const today = utcTodayFromDate();
+            setRestockWeekday(weekdayOf(today));
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Corner",
+            );
+            const mk = (name: string, extra: Partial<Food>) =>
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name,
+                    defaultUnit: "each",
+                    restockSchedule: "weekly",
+                    ...extra,
+                });
+            const foods = [
+                mk("Milk", {
+                    usualStoreId: store.id,
+                    usualAmount: { amount: 1, unit: "gal" },
+                }),
+                mk("Rice", { defaultUnit: "g" }),
+                mk("Eggs", { usualAmount: { amount: 12, unit: "each" } }),
+                mk("Towels", {
+                    kind: "supply",
+                    defaultUnit: "roll",
+                    usualStoreId: store.id,
+                    usualAmount: { amount: 6, unit: "roll" },
+                }),
+                mk("Soap", { kind: "supply", defaultUnit: "bottle" }),
+            ];
+            for (const food of foods) await db.foodsStore.insertFood(food);
+            setFlagsForTests(
+                createMemoryFlags({
+                    "mcp-list-usuals": true,
+                    "widget-restock-nudge": true,
+                }),
+            );
+            await withHttpClient("u1", era, async (client) => {
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                const out = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                const due = out.usuals.filter((u) => u.due);
+                expect(due.map((u) => u.name).sort()).toEqual([
+                    "Eggs",
+                    "Milk",
+                    "Rice",
+                    "Soap",
+                    "Towels",
+                ]);
+                expect(due.every((u) => !u.on_list)).toBe(true);
+                for (const u of due) {
+                    const added = (await client.callTool({
+                        name: "add_grocery_line",
+                        arguments: cardAddArgs(u),
+                    })) as ToolResult;
+                    expect(added.isError).toBeFalsy();
+                    expect(
+                        (added.structuredContent as { status?: string }).status,
+                    ).toBe("ok");
+                }
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(
+                    due.length,
+                );
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a due usual already on the grocery list says on_list, and a checked line does not count (%p)",
+        async (era) => {
+            const { today, milk } = await seedUsuals();
+            setRestockWeekday(weekdayOf(today));
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Market",
+            );
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const list = async () =>
+                    LIST_USUALS_OUTPUT_SCHEMA.parse(
+                        (
+                            (await client.callTool({
+                                name: "list_usuals",
+                                arguments: {},
+                            })) as ToolResult
+                        ).structuredContent,
+                    );
+                const onList = (out: UsualsOut) =>
+                    Object.fromEntries(
+                        out.usuals.map((u) => [u.name, u.on_list]),
+                    );
+                expect(onList(await list())).toMatchObject({
+                    "Oat milk": false,
+                    Eggs: false,
+                });
+                const added = (await client.callTool({
+                    name: "add_grocery_line",
+                    arguments: {
+                        kind: "food",
+                        food_id: milk.id,
+                        store_id: store.id,
+                        amount: 2,
+                        unit: "each",
+                    },
+                })) as ToolResult;
+                expect(
+                    (added.structuredContent as { status?: string }).status,
+                ).toBe("ok");
+                const out = await list();
+                expect(onList(out)).toMatchObject({
+                    "Oat milk": true,
+                    Eggs: false,
+                });
+                expect(
+                    out.usuals.find((u) => u.food_id === milk.id)?.due,
+                ).not.toBeNull();
+                // Checked off means bought: the usual no longer counts as listed.
+                const [line] = await db.groceryStore.listLines("hh-1");
+                await db.groceryStore.updateLine({ ...line!, checked: true });
+                expect(onList(await list())["Oat milk"]).toBe(false);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a low usual follows the runner's rule: a recent tick covers it, a stale tick does not, a dismissal hides it (%p)",
+        async (era) => {
+            const { today, eggs } = await seedUsuals();
+            setRestockWeekday((weekdayOf(today) + 3) % 7);
+            const market = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Market",
+            );
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            const stamp = async (lastRestockedOn: string | null) => {
+                await db.foodsStore.updateFoodRow({
+                    ...(await db.foodsStore.getFood("hh-1", eggs.id))!,
+                    lastRestockedOn,
+                });
+            };
+            await withHttpClient("u1", era, async (client) => {
+                const eggsRow = async () => {
+                    const r = (await client.callTool({
+                        name: "list_usuals",
+                        arguments: {},
+                    })) as ToolResult;
+                    return {
+                        row: LIST_USUALS_OUTPUT_SCHEMA.parse(
+                            r.structuredContent,
+                        ).usuals.find((u) => u.food_id === eggs.id)!,
+                        text: r.content[0]?.text ?? "",
+                    };
+                };
+                const open = await eggsRow();
+                expect(open.row).toMatchObject({
+                    due: { trigger: "low" },
+                    on_list: false,
+                    dismissed: false,
+                });
+                const added = (await client.callTool({
+                    name: "add_grocery_line",
+                    arguments: {
+                        kind: "food",
+                        food_id: eggs.id,
+                        store_id: market.id,
+                        amount: 12,
+                        unit: "each",
+                    },
+                })) as ToolResult;
+                expect(
+                    (added.structuredContent as { status?: string }).status,
+                ).toBe("ok");
+                expect((await eggsRow()).row.on_list).toBe(true);
+                // Ticked off: a recent tick still covers a low usual.
+                const [line] = await db.groceryStore.listLines("hh-1");
+                await db.groceryStore.updateLine({ ...line!, checked: true });
+                await stamp(addUtcDays(today, -2));
+                expect((await eggsRow()).row.on_list).toBe(true);
+                // A stale tick does not.
+                await stamp(addUtcDays(today, -8));
+                expect((await eggsRow()).row.on_list).toBe(false);
+                // A dismissed running-low notice hides it until the next restock.
+                await db.dismissalsStore.insert({
+                    householdId: "hh-1",
+                    code: "grocery.running_low",
+                    subjectKind: "food",
+                    subjectId: eggs.id,
+                    relatedKey: addUtcDays(today, -8),
+                    dismissedBy: "u1",
+                });
+                const hidden = await eggsRow();
+                expect(hidden.row).toMatchObject({
+                    on_list: false,
+                    dismissed: true,
+                });
+                expect(hidden.text).toContain("dismissed");
+                // Restocking later moves the scope, so the dismissal lapses.
+                await stamp(addUtcDays(today, -9));
+                expect((await eggsRow()).row.dismissed).toBe(false);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "the text says so when a usual has no low level, no N, or restock is off (%p)",
+        async (era) => {
+            const mk = (name: string, extra: Partial<Food>) =>
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name,
+                    defaultUnit: "each",
+                    ...extra,
+                });
+            // Add-when-low with no usual amount: no level applies.
+            await db.foodsStore.insertFood(
+                mk("Flour", { restockWhenLow: true }),
+            );
+            await db.foodsStore.insertFood(
+                mk("Tea", {
+                    restockSchedule: "every_n_weeks",
+                    restockEveryWeeks: null,
+                }),
+            );
+            setRestockWeekday(0, false);
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                const out = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.restock_enabled).toBe(false);
+                const text = r.content[0]?.text ?? "";
+                expect(text).toContain("add when low (no level set)");
+                expect(text).not.toContain("a quarter of the usual");
+                expect(text).toContain("every few weeks (not set)");
+                expect(text).not.toContain("null");
+                expect(text).toContain("Automatic restock is off");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "off the restock day only the low usual is due (%p)",
+        async (era) => {
+            const { today, milk, eggs } = await seedUsuals();
+            setRestockWeekday((weekdayOf(today) + 1) % 7);
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                const out = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.is_restock_day).toBe(false);
+                const byId = new Map(out.usuals.map((u) => [u.food_id, u]));
+                expect(byId.get(milk.id)?.due).toBeNull();
+                expect(byId.get(eggs.id)?.due?.trigger).toBe("low");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "no usuals still returns structuredContent (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const r = (await client.callTool({
+                    name: "list_usuals",
+                    arguments: {},
+                })) as ToolResult;
+                const out = LIST_USUALS_OUTPUT_SCHEMA.parse(
+                    r.structuredContent,
+                );
+                expect(out.usuals).toEqual([]);
+                expect(r.content[0]?.text).toMatch(/no usuals/i);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "flag off omits list_usuals from tools/list and refuses calls (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": false }));
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(names).not.toContain("list_usuals");
+                await expect(
+                    client.callTool({ name: "list_usuals", arguments: {} }),
+                ).rejects.toThrow(/not found/i);
+            });
+        },
+    );
+});
+
+describe("plan tools over HTTP", () => {
+    afterEach(() => resetFlagsForTests());
+
+    const PLAN_TOOLS = [
+        "get_week_plan",
+        "plan_recipe",
+        "unplan_recipe",
+        "add_plan_missing_to_groceries",
+    ];
+
+    function addUtcDays(iso: string, delta: number): string {
+        const [y, m, d] = iso.split("-").map(Number);
+        return new Date(Date.UTC(y!, m! - 1, d! + delta))
+            .toISOString()
+            .slice(0, 10);
+    }
+
+    function callerOf(client: Client): CallTool {
+        return async (name, args = {}) =>
+            (await client.callTool({ name, arguments: args })) as ToolResult;
+    }
+
+    // A schema rejection and a handler error both mean "refused"; the text is
+    // what the caller reads either way.
+    async function refusal(
+        call: CallTool,
+        name: string,
+        args: Record<string, unknown>,
+    ): Promise<string> {
+        try {
+            const r = await call(name, args);
+            expect(r.isError).toBe(true);
+            return String(r.content[0]?.text ?? "");
+        } catch (err) {
+            return err instanceof Error ? err.message : String(err);
+        }
+    }
+
+    // Bread (1 portion) needs 200 g of Flour; the kitchen holds none.
+    async function seedBread(call: CallTool) {
+        const flour = await call("upsert_food", { name: "Flour" });
+        const recipe = await call("create_recipe", {
+            name: "Bread",
+            yield_portions: 1,
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        await call("add_recipe_ingredient", {
+            recipe_id: recipeId,
+            food_id: flour.structuredContent?.id as string,
+            amount: 200,
+            unit: "g",
+        });
+        return { recipeId, flourId: flour.structuredContent?.id as string };
+    }
+
+    async function addStore() {
+        await db.settingsStore.insertStore({
+            id: "store-1",
+            householdId: "hh-1",
+            name: "Corner",
+            sortOrder: 0,
+        });
+        await db.settingsStore.insertSection({
+            id: "section-1",
+            householdId: "hh-1",
+            storeId: "store-1",
+            name: "Other",
+            sortOrder: 0,
+            hidden: false,
+            isOther: true,
+        });
+    }
+
+    test.each(ERAS)(
+        "flag off: none of the plan tools is listed and calls are refused (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": false }));
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                for (const name of PLAN_TOOLS) {
+                    expect(names).not.toContain(name);
+                    await expect(
+                        client.callTool({ name, arguments: {} }),
+                    ).rejects.toThrow(/not found/i);
+                }
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "flag on: plan_recipe then get_week_plan shows it, unplan_recipe then removes it (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                for (const name of PLAN_TOOLS) expect(names).toContain(name);
+                const call = callerOf(client);
+                const { recipeId } = await seedBread(call);
+                const today = utcTodayFromDate();
+                const day = addUtcDays(today, 2);
+
+                const empty = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                expect(empty.from).toBe(today);
+                expect(empty.planned_count).toBe(0);
+                expect(empty.days).toHaveLength(7);
+                expect(empty.missing).toEqual([]);
+
+                const planned = await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: day,
+                    slot: "dinner",
+                    servings: 2,
+                });
+                expect(planned.isError).toBeFalsy();
+                const created = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    planned.structuredContent,
+                );
+                expect(created.already_planned).toBe(false);
+                expect(created.plan).toMatchObject({
+                    recipe_id: recipeId,
+                    recipe_name: "Bread",
+                    date: day,
+                    slot: "dinner",
+                    servings: 2,
+                });
+
+                const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                expect(week.planned_count).toBe(1);
+                const onDay = week.days.find((d) => d.date === day)!;
+                expect(onDay.weekday).toBe(
+                    WEEKDAY_NAMES[new Date(`${day}T00:00:00Z`).getUTCDay()]!,
+                );
+                expect(onDay.plans).toEqual([
+                    {
+                        plan_id: created.plan.plan_id,
+                        recipe_id: recipeId,
+                        recipe_name: "Bread",
+                        slot: "dinner",
+                        servings: 2,
+                        // Flour has no nutrition: the figure is unknown, not 0.
+                        kcal_per_portion: null,
+                    },
+                ]);
+                // Nothing in stock: the 2-serving plan needs 400 g of flour.
+                expect(week.missing).toHaveLength(1);
+                expect(week.missing[0]).toMatchObject({
+                    display_name: "Flour",
+                    amount: 400,
+                    unit: "g",
+                    unknown: false,
+                    unmeasured: false,
+                    needed_by: [
+                        {
+                            plan_id: created.plan.plan_id,
+                            recipe_id: recipeId,
+                            recipe_name: "Bread",
+                            date: day,
+                            slot: "dinner",
+                        },
+                    ],
+                });
+                expect(week.missing[0]!.food_id).toBeTruthy();
+
+                const removed = await call("unplan_recipe", {
+                    plan_id: created.plan.plan_id,
+                });
+                expect(removed.isError).toBeFalsy();
+                expect(
+                    UNPLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                        removed.structuredContent,
+                    ),
+                ).toEqual({ removed: true, plan_id: created.plan.plan_id });
+                const after = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                expect(after.planned_count).toBe(0);
+                expect(after.missing).toEqual([]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "get_week_plan starts at from and a recipe with nutrition shows kcal per portion (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const oats = await call("upsert_food", {
+                    name: "Oats",
+                    calories: 400,
+                    protein_g: 10,
+                    carbs_g: 60,
+                    fat_g: 8,
+                });
+                expect(oats.isError).toBeFalsy();
+                const recipe = await call("create_recipe", {
+                    name: "Porridge",
+                    yield_portions: 2,
+                });
+                const recipeId = recipe.structuredContent?.id as string;
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: oats.structuredContent?.id as string,
+                    amount: 100,
+                    unit: "g",
+                });
+                const day = addUtcDays(utcTodayFromDate(), 3);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: day,
+                    slot: "breakfast",
+                });
+                const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan", { from: day }))
+                        .structuredContent,
+                );
+                expect(week.from).toBe(day);
+                expect(week.days[0]!.date).toBe(day);
+                expect(week.days[6]!.date).toBe(addUtcDays(day, 6));
+                const entry = week.days[0]!.plans[0]!;
+                // Servings default to the recipe's yield; 100 g of 400 kcal/100 g over 2 portions.
+                expect(entry.servings).toBe(2);
+                expect(entry.kcal_per_portion).toBe(200);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "plan_recipe refuses a bad slot, a bad or past date, bad servings and an unknown recipe (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId } = await seedBread(call);
+                const today = utcTodayFromDate();
+                const ok = { recipe_id: recipeId, date: today, slot: "lunch" };
+
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        slot: "brunch",
+                    }),
+                ).toMatch(/breakfast|slot/i);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        date: "2026-13-45",
+                    }),
+                ).toMatch(/date|day/i);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        date: "next tuesday",
+                    }),
+                ).toMatch(/date|day/i);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        date: addUtcDays(today, -1),
+                    }),
+                ).toMatch(/today or a later day/i);
+                expect(
+                    await refusal(call, "plan_recipe", { ...ok, servings: 0 }),
+                ).toMatch(/servings/i);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        servings: 1000,
+                    }),
+                ).toMatch(/999/);
+                expect(
+                    await refusal(call, "plan_recipe", {
+                        ...ok,
+                        recipe_id: "00000000-0000-4000-8000-000000000000",
+                    }),
+                ).toMatch(/recipe.*not found|not found/i);
+                expect(
+                    WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                        (await call("get_week_plan")).structuredContent,
+                    ).planned_count,
+                ).toBe(0);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "planning the same recipe on the same day and slot twice is one plan (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId } = await seedBread(call);
+                const args = {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "snack",
+                };
+                const first = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (await call("plan_recipe", args)).structuredContent,
+                );
+                const second = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (await call("plan_recipe", args)).structuredContent,
+                );
+                expect(first.already_planned).toBe(false);
+                expect(second.already_planned).toBe(true);
+                expect(second.plan.plan_id).toBe(first.plan.plan_id);
+                expect(
+                    WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                        (await call("get_week_plan")).structuredContent,
+                    ).planned_count,
+                ).toBe(1);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "unplan_recipe with an unknown plan id is a clear error (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                expect(
+                    await refusal(call, "unplan_recipe", {
+                        plan_id: "00000000-0000-4000-8000-000000000000",
+                    }),
+                ).toMatch(/plan not found/i);
+                expect(
+                    await refusal(call, "unplan_recipe", {
+                        plan_id: "not-a-uuid",
+                    }),
+                ).toMatch(/plan not found/i);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries puts the missing lines on the list with source plan and a second call adds nothing (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await addStore();
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId, flourId } = await seedBread(call);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "dinner",
+                });
+                const first = await call("add_plan_missing_to_groceries");
+                expect(first.isError).toBeFalsy();
+                const out = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    first.structuredContent,
+                );
+                expect(out.added).toHaveLength(1);
+                expect(out.added[0]).toMatchObject({
+                    food_id: flourId,
+                    display_name: "Flour",
+                    amount: 200,
+                    unit: "g",
+                });
+                expect(out.on_list).toEqual([]);
+                expect(out.unknown).toEqual([]);
+                expect(out.skipped).toEqual([]);
+                const lines = await db.groceryStore.listLines("hh-1");
+                expect(lines).toHaveLength(1);
+                expect(lines[0]).toMatchObject({
+                    foodId: flourId,
+                    source: "plan",
+                });
+
+                const again = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(again.added).toEqual([]);
+                expect(again.on_list).toHaveLength(1);
+                expect(again.on_list[0]).toMatchObject({
+                    food_id: flourId,
+                    display_name: "Flour",
+                    existing_line_id: out.added[0]!.line_id,
+                });
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(1);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries notes an unmeasured ingredient and a line whose stock cannot be counted (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await addStore();
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId, flourId } = await seedBread(call);
+                const pepper = await call("upsert_food", { name: "Pepper" });
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: pepper.structuredContent?.id as string,
+                    amount: null,
+                });
+                // Flour is stocked in "each", which cannot be turned into grams.
+                const loc = await call("add_fridge_location", {
+                    name: "Pantry",
+                });
+                const stocked = await call("add_fridge_item", {
+                    location_id: loc.structuredContent?.id as string,
+                    kind: "food",
+                    food_id: flourId,
+                    amount: 1,
+                    unit: "each",
+                });
+                expect(stocked.isError).toBeFalsy();
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "dinner",
+                });
+                const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                const byName = new Map(
+                    week.missing.map((m) => [m.display_name, m]),
+                );
+                expect(byName.get("Flour")).toMatchObject({
+                    unknown: true,
+                    amount: 200,
+                    unit: "g",
+                });
+                expect(byName.get("Pepper")).toMatchObject({
+                    unmeasured: true,
+                    amount: null,
+                });
+
+                const out = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(out.added.map((a) => a.display_name).sort()).toEqual([
+                    "Flour",
+                    "Pepper",
+                ]);
+                expect(out.unknown.map((u) => u.display_name)).toEqual([
+                    "Flour",
+                ]);
+                expect(out.unknown[0]!.notice.length).toBeGreaterThan(0);
+                const noteOf = (name: string) =>
+                    out.added.find((a) => a.display_name === name)!.note;
+                expect(noteOf("Flour")).toBe(PLAN_UNKNOWN_LINE_NOTE);
+                expect(noteOf("Pepper")).toBe("to taste");
+                const stored = await db.groceryStore.listLines("hh-1");
+                expect(stored.map((l) => l.note).sort()).toEqual(
+                    [PLAN_UNKNOWN_LINE_NOTE, "to taste"].sort(),
+                );
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries with nothing planned adds nothing, and with no store says to add one (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const none = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(none).toEqual({
+                    added: [],
+                    on_list: [],
+                    unknown: [],
+                    skipped: [],
+                });
+                const { recipeId } = await seedBread(call);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "dinner",
+                });
+                expect(
+                    await refusal(call, "add_plan_missing_to_groceries", {}),
+                ).toMatch(/add a store/i);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a household far from UTC plans by its own calendar: from, yesterday refused, today accepted (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            const now = new Date();
+            // UTC+14 and UTC-11: at every instant at least one of them is on a
+            // different calendar day from UTC.
+            const timezone = ["Pacific/Kiritimati", "Pacific/Pago_Pago"].find(
+                (zone) => dateInTz(now, zone) !== dateInTz(now, "UTC"),
+            )!;
+            const householdToday = dateInTz(now, timezone);
+            expect(householdToday).not.toBe(utcTodayFromDate());
+            db.profile = { ...PROFILE_BASE, timezone };
+            try {
+                await withHttpClient("u1", era, async (client) => {
+                    const call = callerOf(client);
+                    const { recipeId } = await seedBread(call);
+                    expect(
+                        WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                            (await call("get_week_plan")).structuredContent,
+                        ).from,
+                    ).toBe(householdToday);
+                    expect(
+                        await refusal(call, "plan_recipe", {
+                            recipe_id: recipeId,
+                            date: addUtcDays(householdToday, -1),
+                            slot: "dinner",
+                        }),
+                    ).toMatch(/today or a later day/i);
+                    const planned = await call("plan_recipe", {
+                        recipe_id: recipeId,
+                        date: householdToday,
+                        slot: "dinner",
+                    });
+                    expect(planned.isError).toBeFalsy();
+                    const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                        (await call("get_week_plan")).structuredContent,
+                    );
+                    expect(week.days[0]!.date).toBe(householdToday);
+                    expect(week.days[0]!.plans).toHaveLength(1);
+                });
+            } finally {
+                db.profile = null;
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries takes an optional `from`: a later day adds that window's needs, a past day is refused, and a past plan is never listed (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await addStore();
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const listed = (await client.listTools()).tools.find(
+                    (t) => t.name === "add_plan_missing_to_groceries",
+                )!;
+                expect(
+                    Object.keys(listed.inputSchema.properties ?? {}),
+                ).toEqual(["from"]);
+                const { recipeId, flourId } = await seedBread(call);
+                const today = utcTodayFromDate();
+                const yesterday = addUtcDays(today, -1);
+                // A plan the web would never show: stored for a past day.
+                await db.plansStore.addPlan({
+                    householdId: "hh-1",
+                    recipeId,
+                    date: yesterday,
+                    slot: "dinner",
+                });
+                // Today's window does not list it.
+                const none = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(none.added).toEqual([]);
+                // A window that starts yesterday is refused.
+                expect(
+                    await refusal(call, "add_plan_missing_to_groceries", {
+                        from: yesterday,
+                    }),
+                ).toMatch(/pick today or a later day/i);
+                expect(
+                    await refusal(call, "add_plan_missing_to_groceries", {
+                        from: "soon",
+                    }),
+                ).toMatch(/date/i);
+                expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
+                // A plan ten days out is outside today's window, inside its own.
+                const later = addUtcDays(today, 10);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: later,
+                    slot: "dinner",
+                });
+                const outsideToday = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (await call("add_plan_missing_to_groceries"))
+                        .structuredContent,
+                );
+                expect(outsideToday.added).toEqual([]);
+                const out = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("add_plan_missing_to_groceries", {
+                            from: later,
+                        })
+                    ).structuredContent,
+                );
+                expect(out.added).toHaveLength(1);
+                expect(out.added[0]).toMatchObject({
+                    food_id: flourId,
+                    display_name: "Flour",
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "get_week_plan says the household's today whatever `from` is (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const today = utcTodayFromDate();
+                const plain = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                expect(plain.today).toBe(today);
+                expect(plain.from).toBe(today);
+                const later = addUtcDays(today, 9);
+                const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan", { from: later }))
+                        .structuredContent,
+                );
+                expect(week.from).toBe(later);
+                expect(week.today).toBe(today);
+            });
+        },
+    );
+
+    describe("widget-week-plan flag", () => {
+        const WEEK_PLAN_V2_URI = widgetUri("week-plan.html", true);
+
+        test.each(ERAS)(
+            "plan tools on and the widget flag off: get_week_plan has no ui meta and there is no week-plan resource (%p)",
+            async (era) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-plan-tools": true,
+                        "widget-week-plan": false,
+                    }),
+                );
+                await withHttpClient("u1", era, async (client) => {
+                    const { tools } = await client.listTools();
+                    const week = tools.find((t) => t.name === "get_week_plan");
+                    expect(week).toBeDefined();
+                    expect(week?._meta?.ui).toBeUndefined();
+                    expect(
+                        week?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        WEEK_PLAN_V2_URI,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "both flags on: get_week_plan links the v2 week-plan uri, which lists and reads (%p)",
+            async (era) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-plan-tools": true,
+                        "widget-week-plan": true,
+                    }),
+                );
+                const assembled = await getWidgetHtml("week-plan", {
+                    v2: true,
+                });
+                await withHttpClient("u1", era, async (client) => {
+                    const { tools } = await client.listTools();
+                    const week = tools.find((t) => t.name === "get_week_plan");
+                    expect(
+                        (week?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(WEEK_PLAN_V2_URI);
+                    expect(week?._meta?.["openai/outputTemplate"]).toBe(
+                        WEEK_PLAN_V2_URI,
+                    );
+                    // The writes the card calls carry no widget of their own.
+                    for (const name of [
+                        "unplan_recipe",
+                        "add_plan_missing_to_groceries",
+                    ]) {
+                        expect(
+                            tools.find((t) => t.name === name)?._meta?.ui,
+                        ).toBeUndefined();
+                    }
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        WEEK_PLAN_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: WEEK_PLAN_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "plan tools off: the widget flag alone adds neither the tools nor the resource (%p)",
+            async (era) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-plan-tools": false,
+                        "widget-week-plan": true,
+                    }),
+                );
+                await withHttpClient("u1", era, async (client) => {
+                    const { tools } = await client.listTools();
+                    expect(tools.map((t) => t.name)).not.toContain(
+                        "get_week_plan",
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        WEEK_PLAN_V2_URI,
+                    );
+                });
+            },
+        );
+    });
 });
 
 describe("get_household_digest", () => {
@@ -9730,6 +11507,600 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         );
     });
 
+    describe("widget-product-score flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        const PRODUCT_SCORE_V2_URI = widgetUri("product-score.html", true);
+
+        test.each(ERAS)(
+            "rate_product on and the widget flag off: no ui meta and no product-score resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-rate-product": true,
+                        "widget-product-score": false,
+                    }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const rate = tools.find((t) => t.name === "rate_product");
+                    expect(rate).toBeDefined();
+                    expect(rate?._meta?.ui).toBeUndefined();
+                    expect(
+                        rate?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        PRODUCT_SCORE_V2_URI,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "both flags on: rate_product links the v2 product-score uri, which lists and reads (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-rate-product": true,
+                        "widget-product-score": true,
+                    }),
+                );
+                const assembled = await getWidgetHtml("product-score", {
+                    v2: true,
+                });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const rate = tools.find((t) => t.name === "rate_product");
+                    expect(
+                        (rate?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(PRODUCT_SCORE_V2_URI);
+                    expect(rate?._meta?.["openai/outputTemplate"]).toBe(
+                        PRODUCT_SCORE_V2_URI,
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        PRODUCT_SCORE_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: PRODUCT_SCORE_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "rate_product off: the widget flag alone adds neither the tool nor the resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-rate-product": false,
+                        "widget-product-score": true,
+                    }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    expect(tools.map((t) => t.name)).not.toContain(
+                        "rate_product",
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        PRODUCT_SCORE_V2_URI,
+                    );
+                });
+            },
+        );
+    });
+
+    describe("widget-restock-nudge flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        const RESTOCK_V2_URI = widgetUri("restock-nudge.html", true);
+
+        test.each(ERAS)(
+            "list_usuals on and the widget flag off: no ui meta and no restock-nudge resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-list-usuals": true,
+                        "widget-restock-nudge": false,
+                    }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const usuals = tools.find((t) => t.name === "list_usuals");
+                    expect(usuals).toBeDefined();
+                    expect(usuals?._meta?.ui).toBeUndefined();
+                    expect(
+                        usuals?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        RESTOCK_V2_URI,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "both flags on: list_usuals links the v2 restock-nudge uri, which lists and reads (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-list-usuals": true,
+                        "widget-restock-nudge": true,
+                    }),
+                );
+                const assembled = await getWidgetHtml("restock-nudge", {
+                    v2: true,
+                });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const usuals = tools.find((t) => t.name === "list_usuals");
+                    expect(
+                        (usuals?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(RESTOCK_V2_URI);
+                    expect(usuals?._meta?.["openai/outputTemplate"]).toBe(
+                        RESTOCK_V2_URI,
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        RESTOCK_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: RESTOCK_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "list_usuals off: the widget flag alone adds neither the tool nor the resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({
+                        "mcp-list-usuals": false,
+                        "widget-restock-nudge": true,
+                    }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    expect(tools.map((t) => t.name)).not.toContain(
+                        "list_usuals",
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        RESTOCK_V2_URI,
+                    );
+                });
+            },
+        );
+    });
+
+    describe("widget-use-soon flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        const USE_SOON_V2_URI = widgetUri("use-soon.html", true);
+
+        function addDaysUtc(iso: string, delta: number): string {
+            const [y, m, d] = iso.split("-").map(Number);
+            return new Date(Date.UTC(y!, m! - 1, d! + delta))
+                .toISOString()
+                .slice(0, 10);
+        }
+
+        test.each(ERAS)(
+            "flag off leaves list_expiring without ui meta and no use-soon resource, and the empty path still carries structuredContent (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-use-soon": false }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const list = tools.find((t) => t.name === "list_expiring");
+                    expect(list?._meta?.ui).toBeUndefined();
+                    expect(
+                        list?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        USE_SOON_V2_URI,
+                    );
+
+                    const empty = await client.callTool({
+                        name: "list_expiring",
+                        arguments: {},
+                    });
+                    expect((empty.content as { text: string }[])[0]!.text).toBe(
+                        "Nothing expiring soon.",
+                    );
+                    expect(
+                        LIST_EXPIRING_OUTPUT_SCHEMA.parse(
+                            empty.structuredContent,
+                        ),
+                    ).toEqual({ items: [], featured: null });
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on links the use-soon uri and lists and reads the v2 resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-use-soon": true }),
+                );
+                const assembled = await getWidgetHtml("use-soon", { v2: true });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const list = tools.find((t) => t.name === "list_expiring");
+                    expect(
+                        (list?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(USE_SOON_V2_URI);
+                    expect(list?._meta?.["openai/outputTemplate"]).toBe(
+                        USE_SOON_V2_URI,
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        USE_SOON_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: USE_SOON_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                    const empty = await client.callTool({
+                        name: "list_expiring",
+                        arguments: {},
+                    });
+                    expect(
+                        LIST_EXPIRING_OUTPUT_SCHEMA.parse(
+                            empty.structuredContent,
+                        ),
+                    ).toEqual({ items: [], featured: null });
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "list_expiring names each item's location, days left and recipe, and the recipe using the most of them; the text is unchanged (%p)",
+            async (mode) => {
+                await withHttpClient("u1", mode, async (client) => {
+                    const call = async (
+                        name: string,
+                        args: Record<string, unknown>,
+                    ) =>
+                        (await client.callTool({
+                            name,
+                            arguments: args,
+                        })) as {
+                            structuredContent: Record<string, unknown>;
+                            content: { text: string }[];
+                        };
+                    const food = async (name: string) =>
+                        (
+                            await call("upsert_food", {
+                                name,
+                                calories: 100,
+                                protein_g: 10,
+                                carbs_g: 20,
+                                fat_g: 5,
+                            })
+                        ).structuredContent.id as string;
+                    const salmon = await food("Salmon");
+                    const rice = await food("Rice");
+                    const kale = await food("Kale");
+                    const loc = await call("add_fridge_location", {
+                        name: "Fridge",
+                    });
+                    const locationId = loc.structuredContent.id as string;
+                    const today = utcTodayFromDate();
+                    const dated = new Map<string, number>();
+                    for (const [foodId, days] of [
+                        [salmon, 1],
+                        [rice, 2],
+                        [kale, 30],
+                    ] as const) {
+                        const added = await call("add_fridge_item", {
+                            location_id: locationId,
+                            kind: "food",
+                            food_id: foodId,
+                            amount: 500,
+                            unit: "g",
+                        });
+                        const id = added.structuredContent.id as string;
+                        const row = (
+                            await db.fridgeStore.listItems("hh-1")
+                        ).find((r) => r.id === id)!;
+                        await db.fridgeStore.updateItem({
+                            ...row,
+                            expiresOn: addDaysUtc(today, days),
+                        });
+                        dated.set(foodId, days);
+                    }
+                    const recipe = await call("create_recipe", {
+                        name: "Salmon rice",
+                        yield_portions: 2,
+                        prep_minutes: 10,
+                        cook_minutes: 15,
+                    });
+                    const recipeId = recipe.structuredContent.id as string;
+                    for (const foodId of [salmon, rice]) {
+                        await call("add_recipe_ingredient", {
+                            recipe_id: recipeId,
+                            food_id: foodId,
+                            amount: 200,
+                            unit: "g",
+                        });
+                    }
+
+                    const listed = await call("list_expiring", { days: 3 });
+                    const parsed = LIST_EXPIRING_OUTPUT_SCHEMA.parse(
+                        listed.structuredContent,
+                    );
+                    expect(parsed.items.map((i) => i.display_name)).toEqual([
+                        "Salmon",
+                        "Rice",
+                    ]);
+                    expect(parsed.items.map((i) => i.days_left)).toEqual([
+                        1, 2,
+                    ]);
+                    expect(parsed.items.map((i) => i.location)).toEqual([
+                        "Fridge",
+                        "Fridge",
+                    ]);
+                    for (const item of parsed.items) {
+                        expect(item.recipe).toEqual({
+                            id: recipeId,
+                            name: "Salmon rice",
+                        });
+                    }
+                    // 200 g salmon + 200 g rice over 2 portions: 100 g of each.
+                    expect(parsed.featured).toEqual({
+                        id: recipeId,
+                        name: "Salmon rice",
+                        uses: 2,
+                        minutes: 25,
+                        calories: 200,
+                        protein_g: 20,
+                        carbs_g: 40,
+                        fat_g: 10,
+                    });
+                    expect(listed.content[0]!.text.split("\n")).toEqual(
+                        parsed.items.map((item) =>
+                            fridgeExpiryLine({
+                                name: item.display_name,
+                                amount: item.amount,
+                                unit: item.unit,
+                                expiresOn: item.expires_on,
+                            }),
+                        ),
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "list_expiring gives an item no recipe uses recipe null and no featured recipe when only one item is used (%p)",
+            async (mode) => {
+                await withHttpClient("u1", mode, async (client) => {
+                    const loc = await client.callTool({
+                        name: "add_fridge_location",
+                        arguments: { name: "Fridge" },
+                    });
+                    const added = await client.callTool({
+                        name: "add_fridge_item",
+                        arguments: {
+                            location_id: (
+                                loc.structuredContent as { id: string }
+                            ).id,
+                            kind: "food",
+                            name: "Lonely yogurt",
+                            amount: 1,
+                            unit: "g",
+                        },
+                    });
+                    const id = (added.structuredContent as { id: string }).id;
+                    const row = (await db.fridgeStore.listItems("hh-1")).find(
+                        (r) => r.id === id,
+                    )!;
+                    await db.fridgeStore.updateItem({
+                        ...row,
+                        expiresOn: addDaysUtc(utcTodayFromDate(), -1),
+                    });
+                    const listed = await client.callTool({
+                        name: "list_expiring",
+                        arguments: {},
+                    });
+                    const parsed = LIST_EXPIRING_OUTPUT_SCHEMA.parse(
+                        listed.structuredContent,
+                    );
+                    expect(parsed.items).toHaveLength(1);
+                    expect(parsed.items[0]).toMatchObject({
+                        display_name: "Lonely yogurt",
+                        days_left: -1,
+                        location: "Fridge",
+                        recipe: null,
+                    });
+                    expect(parsed.featured).toBeNull();
+                });
+            },
+        );
+    });
+
+    describe("widget-recipe-card flag", () => {
+        afterEach(() => resetFlagsForTests());
+
+        const RECIPE_CARD_V2_URI = widgetUri("recipe-card.html", true);
+
+        async function stockedRecipe(client: {
+            callTool: (a: {
+                name: string;
+                arguments: Record<string, unknown>;
+            }) => Promise<unknown>;
+        }) {
+            const call = async (name: string, args: Record<string, unknown>) =>
+                (await client.callTool({
+                    name,
+                    arguments: args,
+                })) as ToolResult;
+            const loc = await call("add_fridge_location", { name: "Pantry" });
+            const recipe = await call("create_recipe", {
+                name: "Rice bowl",
+                yield_portions: 2,
+            });
+            const recipeId = recipe.structuredContent?.id as string;
+            const food = await call("upsert_food", { name: "Rice" });
+            const foodId = food.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: foodId,
+                amount: 100,
+                unit: "g",
+            });
+            await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id as string,
+                kind: "food",
+                food_id: foodId,
+                amount: 500,
+                unit: "g",
+            });
+            return { call, recipeId };
+        }
+
+        test.each(ERAS)(
+            "flag off leaves get_recipe without ui meta and no recipe-card resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-recipe-card": false }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const tool = tools.find((t) => t.name === "get_recipe");
+                    expect(tool?._meta?.ui).toBeUndefined();
+                    expect(
+                        tool?._meta?.["openai/outputTemplate"],
+                    ).toBeUndefined();
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).not.toContain(
+                        RECIPE_CARD_V2_URI,
+                    );
+                    const { call, recipeId } = await stockedRecipe(client);
+                    const got = await call("get_recipe", { id: recipeId });
+                    expect(got.isError).toBeFalsy();
+                    expect(
+                        GET_RECIPE_OUTPUT_SCHEMA.parse(got.structuredContent)
+                            .name,
+                    ).toBe("Rice bowl");
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on links the recipe-card uri and lists and reads the v2 resource (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "widget-recipe-card": true }),
+                );
+                const assembled = await getWidgetHtml("recipe-card", {
+                    v2: true,
+                });
+                await withHttpClient("u1", mode, async (client) => {
+                    const { tools } = await client.listTools();
+                    const tool = tools.find((t) => t.name === "get_recipe");
+                    expect(
+                        (tool?._meta?.ui as { resourceUri?: string })
+                            ?.resourceUri,
+                    ).toBe(RECIPE_CARD_V2_URI);
+                    expect(tool?._meta?.["openai/outputTemplate"]).toBe(
+                        RECIPE_CARD_V2_URI,
+                    );
+                    const { resources } = await client.listResources();
+                    expect(resources.map((r) => r.uri)).toContain(
+                        RECIPE_CARD_V2_URI,
+                    );
+                    const res = await client.readResource({
+                        uri: RECIPE_CARD_V2_URI,
+                    });
+                    expect((res.contents[0] as { text?: string }).text).toBe(
+                        assembled,
+                    );
+                    const { call, recipeId } = await stockedRecipe(client);
+                    const got = await call("get_recipe", { id: recipeId });
+                    const body = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        got.structuredContent,
+                    );
+                    expect(body.cook_preview?.cookable).toBe(true);
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "get_recipe suggests the meal slot from the viewer's timezone (%p)",
+            async (mode) => {
+                await withHttpClient("u1", mode, async (client) => {
+                    const { call, recipeId } = await stockedRecipe(client);
+                    // UTC fallback when no timezone is saved.
+                    const before = [guessMealType("UTC")];
+                    const bare = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        (await call("get_recipe", { id: recipeId }))
+                            .structuredContent,
+                    );
+                    before.push(guessMealType("UTC"));
+                    expect(before).toContain(bare.suggested_meal_type);
+                    const tz = "Pacific/Auckland";
+                    const set = await call("set_timezone", { timezone: tz });
+                    expect(set.isError).toBeFalsy();
+                    const slots = [guessMealType(tz)];
+                    const zoned = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        (await call("get_recipe", { id: recipeId }))
+                            .structuredContent,
+                    );
+                    slots.push(guessMealType(tz));
+                    expect(slots).toContain(zoned.suggested_meal_type);
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "the card's Confirm arguments are valid: cook_recipe with total_portions, then log_recipe_portion with one portion (%p)",
+            async (mode) => {
+                await withHttpClient("u1", mode, async (client) => {
+                    const { call, recipeId } = await stockedRecipe(client);
+                    const cooked = await call("cook_recipe", {
+                        recipe_id: recipeId,
+                        total_portions: 3,
+                    });
+                    expect(cooked.isError).toBeFalsy();
+                    expect(cooked.structuredContent).toMatchObject({
+                        total_portions: 3,
+                        shortfalls: [],
+                        meal_ids: [],
+                        unmeasured: [],
+                    });
+                    const logged = await call("log_recipe_portion", {
+                        recipe_id: recipeId,
+                        portions: 1,
+                    });
+                    expect(logged.isError).toBeFalsy();
+                    expect(logged.structuredContent).toMatchObject({
+                        action: "logged",
+                    });
+                });
+            },
+        );
+    });
+
     describe("mcp-widgets-v2 flag", () => {
         afterEach(() => resetFlagsForTests());
 
@@ -9814,6 +12185,54 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         c.text?.trimStart().startsWith("<!doctype html>"),
                     ).toBe(true);
                     expect(c.text).toContain("function initWidget(config)");
+                });
+            },
+        );
+    });
+
+    describe("grocery-list and fridge v2 resources", () => {
+        afterEach(() => resetFlagsForTests());
+
+        test.each(ERAS)(
+            "flag on reads both v2 cards and they match their assembly (%p)",
+            async (mode) => {
+                setFlagsForTests(createMemoryFlags({ "mcp-widgets-v2": true }));
+                for (const key of ["grocery-list", "fridge"] as const) {
+                    const assembled = await getWidgetHtml(key, { v2: true });
+                    const uri = widgetUri(`${key}.html`, true);
+                    await withHttpClient("u1", mode, async (client) => {
+                        const res = await client.readResource({ uri });
+                        const c = res.contents[0] as {
+                            mimeType?: string;
+                            text?: string;
+                        };
+                        expect(c.mimeType).toBe("text/html;profile=mcp-app");
+                        expect(c.text).toBe(assembled);
+                        expect(c.text).not.toBe(
+                            await getWidgetHtml(key, { v2: false }),
+                        );
+                    });
+                }
+            },
+        );
+
+        test.each(ERAS)(
+            "flag off lists neither v2 card and refuses to read them (%p)",
+            async (mode) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-widgets-v2": false }),
+                );
+                await withHttpClient("u1", mode, async (client) => {
+                    const { resources } = await client.listResources();
+                    const uris = resources.map((r) => r.uri);
+                    for (const key of ["grocery-list", "fridge"]) {
+                        const v2 = widgetUri(`${key}.html`, true);
+                        expect(uris).not.toContain(v2);
+                        expect(uris).toContain(widgetUri(`${key}.html`));
+                        await expect(
+                            client.readResource({ uri: v2 }),
+                        ).rejects.toThrow();
+                    }
                 });
             },
         );

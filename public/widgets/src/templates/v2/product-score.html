@@ -1,0 +1,510 @@
+<!doctype html>
+<!--
+  Product score card (MCP Apps), v2 look. Served for rate_product when the
+  widget-product-score flag is on. No v1 twin.
+
+  One card: the weights in the header, the product with its score out of 100
+  (coloured by the label the tool returns: good / middling / poor), a grid of
+  what the score rests on (the four parts, then sugar and saturated fat), a
+  "scored on N of 4" line when a part had no data, and one row per household
+  member with Good / Careful / Avoid and the reason. Not enough data to score
+  is a message, never a 0. Everything the card words comes from the payload:
+  the label, each part's value and status, the weights' name, and each member's
+  verdict and reason, all the same as the app's Product screen. The browser
+  never re-derives a band, parses a source string or looks a label up.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Product score</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            .ps-top {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 12px;
+                min-width: 0;
+            }
+            .ps-who {
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 2px;
+            }
+            .ps-name {
+                margin: 0;
+                font-size: 16px;
+                line-height: 20px;
+                font-weight: 600;
+                overflow-wrap: anywhere;
+            }
+            .ps-sub {
+                font-size: 12px;
+                line-height: 15px;
+                color: var(--text-secondary);
+                overflow-wrap: anywhere;
+            }
+            .ps-score {
+                flex: none;
+                display: flex;
+                flex-direction: column;
+                align-items: flex-end;
+                gap: 1px;
+            }
+            .ps-num {
+                display: flex;
+                align-items: baseline;
+                gap: 3px;
+            }
+            .ps-n {
+                font-size: 40px;
+                line-height: 44px;
+                font-weight: 600;
+                font-variant-numeric: tabular-nums;
+            }
+            .ps-of {
+                font-size: 13px;
+                line-height: 16px;
+                color: var(--text-secondary);
+            }
+            .ps-word {
+                font-size: 12px;
+                line-height: 15px;
+                font-weight: 600;
+            }
+            .ps-none {
+                max-width: 150px;
+                text-align: right;
+                font-size: 13px;
+                line-height: 17px;
+                color: var(--text-secondary);
+            }
+            .ps-facts {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                padding-bottom: 14px;
+                border-bottom: 1px solid var(--line);
+            }
+            .ps-grid {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+                gap: 12px 10px;
+            }
+            .ps-cell {
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+            }
+            .ps-k {
+                font-size: 12px;
+                line-height: 15px;
+                color: var(--text-tertiary);
+            }
+            .ps-v {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                min-width: 0;
+                font-size: 14px;
+                line-height: 17px;
+                font-weight: 600;
+            }
+            .ps-v.is-dim {
+                font-weight: 400;
+            }
+            .ps-v span:last-child {
+                min-width: 0;
+                overflow-wrap: break-word;
+            }
+            .mr {
+                display: flex;
+                align-items: baseline;
+                gap: 10px;
+                padding: 10px 0;
+                border-bottom: 1px solid var(--line);
+                min-width: 0;
+            }
+            .mr:last-child {
+                border-bottom: 0;
+            }
+            .mr .dot {
+                align-self: center;
+            }
+            .mr-body {
+                flex: 1;
+                min-width: 0;
+                display: flex;
+                flex-wrap: wrap;
+                align-items: baseline;
+                column-gap: 10px;
+            }
+            .mr-n {
+                font-size: 13px;
+                line-height: 18px;
+                font-weight: 600;
+                overflow-wrap: anywhere;
+            }
+            .mr-why {
+                min-width: 0;
+                font-size: 12px;
+                line-height: 16px;
+                color: var(--text-secondary);
+                overflow-wrap: anywhere;
+            }
+            .mr-v {
+                flex: none;
+                font-size: 13px;
+                line-height: 16px;
+                font-weight: 600;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "Product score",
+                loading: "Loading the product score…",
+                weights: "{name} weights",
+                outOf: "/100",
+                notEnough: "Not enough data to score",
+                notFound: "No product found.",
+                scoredOn: "Scored on {used} of {total}",
+                leftOut:
+                    "Parts with no data are left out, not counted against it.",
+                per100: "Sugar and saturated fat are per 100 g.",
+                noData: "No data",
+                labels: { good: "Good", middling: "Middling", poor: "Poor" },
+                verdicts: { good: "Good", careful: "Careful", avoid: "Avoid" },
+                info: { sugars: "Sugar", "saturated-fat": "Sat. fat" },
+                levels: { low: "low", moderate: "moderate", high: "high" },
+            };
+
+            // The score label to the tone of its number: the same three bands
+            // the household app's Product screen uses.
+            const LABEL_TONE = { good: "ok", middling: "warn", poor: "over" };
+
+            // Design sample: the full card (the design's yogurt), in the shape
+            // rate_product returns, wording and all.
+            const SAMPLE = {
+                found: true,
+                product: {
+                    food_id: "f1",
+                    barcode: "5201054017463",
+                    name: "Fage Total 2% Greek yogurt",
+                    brand: "Fage",
+                },
+                score: 82,
+                label: "good",
+                preset: "balanced",
+                preset_label: "Balanced",
+                breakdown: [
+                    {
+                        part: "nutrition",
+                        value: 100,
+                        weight: 0.4,
+                        known: true,
+                        source: "nutriscore a",
+                        label: "Nutri-Score",
+                        display: "A",
+                        status: "good",
+                    },
+                    {
+                        part: "processing",
+                        value: 100,
+                        weight: 0.3,
+                        known: true,
+                        source: "nova 1",
+                        label: "Processing",
+                        display: "NOVA 1 · unprocessed",
+                        status: "good",
+                    },
+                    {
+                        part: "additives",
+                        value: 100,
+                        weight: 0.2,
+                        known: true,
+                        source: "no additives listed",
+                        label: "Additives",
+                        display: "None",
+                        status: "good",
+                    },
+                    {
+                        part: "environment",
+                        value: 50,
+                        weight: 0.1,
+                        known: true,
+                        source: "ecoscore c",
+                        label: "Green-Score",
+                        display: "C",
+                        status: "warn",
+                    },
+                ],
+                parts_used: 4,
+                parts_total: 4,
+                missing: [],
+                info_rows: [
+                    {
+                        kind: "sugars",
+                        per_100g: 4,
+                        level: "low",
+                        status: "good",
+                    },
+                    {
+                        kind: "saturated-fat",
+                        per_100g: 2,
+                        level: "moderate",
+                        status: "warn",
+                    },
+                ],
+                checks: [
+                    {
+                        user_id: "u1",
+                        name: "Ethan",
+                        notices: [],
+                        verdict: "good",
+                        reason: "No issues found for this product.",
+                    },
+                    {
+                        user_id: "u2",
+                        name: "Sam",
+                        notices: [],
+                        verdict: "avoid",
+                        reason: "Contains Milk · listed as an allergy",
+                    },
+                    {
+                        user_id: "u3",
+                        name: "Jordan",
+                        notices: [],
+                        verdict: "careful",
+                        reason: "May contain traces of nuts",
+                    },
+                ],
+            };
+
+            // Status words the payload carries -> the dot's look.
+            function dotFor(status) {
+                // Fixed markup: v2Dot's named colours need MACROS, which this
+                // card has no other use for.
+                if (status === "good") {
+                    return '<span class="dot lg" style="--c:var(--accent-fill)"></span>';
+                }
+                if (status === "warn" || status === "over") {
+                    return v2Dot(undefined, status, true);
+                }
+                return v2Dot(undefined, "dim", true);
+            }
+
+            function cell(label, valueText, status) {
+                const dim = status == null;
+                return `<div class="ps-cell"><span class="ps-k">${esc(label)}</span><span class="ps-v${
+                    dim ? " is-dim" : ""
+                }">${dotFor(status)}<span>${esc(valueText)}</span></span></div>`;
+            }
+
+            // One cell per part, in the order the tool sends them.
+            function partCells(breakdown) {
+                return breakdown.map((row) =>
+                    row.display
+                        ? cell(row.label, row.display, row.status)
+                        : cell(row.label, T.noData, undefined),
+                );
+            }
+
+            function amountText(g) {
+                const n = Number(g);
+                if (!Number.isFinite(n)) return "";
+                return `${Math.round(n * 10) / 10} g`;
+            }
+
+            function infoCells(rows) {
+                return rows
+                    .filter((r) => r && (r.per_100g != null || r.level != null))
+                    .map((r) => {
+                        const label = Object.hasOwn(T.info, r.kind)
+                            ? T.info[r.kind]
+                            : "";
+                        if (!label) return "";
+                        const text =
+                            r.per_100g != null
+                                ? amountText(r.per_100g)
+                                : Object.hasOwn(T.levels, r.level)
+                                  ? T.levels[r.level]
+                                  : "";
+                        if (!text) return "";
+                        return cell(label, text, r.status);
+                    })
+                    .filter(Boolean);
+            }
+
+            const VERDICT_STATUS = {
+                good: "good",
+                careful: "warn",
+                avoid: "over",
+            };
+            const VERDICT_TONE = {
+                good: "is-ok",
+                careful: "is-warn",
+                avoid: "is-over",
+            };
+
+            function memberRow(check) {
+                const known = Object.hasOwn(T.verdicts, check.verdict);
+                const dot = dotFor(known ? VERDICT_STATUS[check.verdict] : "");
+                const word = known
+                    ? `<span class="mr-v ${VERDICT_TONE[check.verdict]}">${esc(
+                          T.verdicts[check.verdict],
+                      )}</span>`
+                    : "";
+                return `<div class="mr" data-user-id="${esc(check.user_id)}">${dot}<div class="mr-body"><span class="mr-n">${esc(
+                    check.name,
+                )}</span><span class="mr-why">${esc(check.reason)}</span></div>${word}</div>`;
+            }
+
+            function productBlock(data) {
+                const p = data.product;
+                const sub = [p.brand, p.barcode].filter(Boolean).join(" · ");
+                const who = `<div class="ps-who"><h3 class="ps-name">${esc(p.name)}</h3>${
+                    sub ? `<span class="ps-sub">${esc(sub)}</span>` : ""
+                }</div>`;
+                const scored =
+                    data.score != null && Number.isFinite(Number(data.score));
+                if (!scored) {
+                    return `<div class="ps-top">${who}<span class="ps-none">${esc(
+                        T.notEnough,
+                    )}</span></div>`;
+                }
+                const tone = Object.hasOwn(LABEL_TONE, data.label)
+                    ? v2ToneText(LABEL_TONE[data.label])
+                    : "";
+                const word = Object.hasOwn(T.labels, data.label)
+                    ? T.labels[data.label]
+                    : "";
+                const n = Math.round(Number(data.score));
+                return `<div class="ps-top">${who}<div class="ps-score" role="img" aria-label="${esc(
+                    `${n} out of 100${word ? `, ${word.toLowerCase()}` : ""}`,
+                )}"><span class="ps-num" aria-hidden="true"><span class="ps-n ${tone}">${n}</span><span class="ps-of">${esc(
+                    T.outOf,
+                )}</span></span>${
+                    word
+                        ? `<span class="ps-word ${tone}" aria-hidden="true">${esc(word)}</span>`
+                        : ""
+                }</div></div>`;
+            }
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+
+            function render(data) {
+                const header = v2Header(
+                    T.title,
+                    data.preset_label
+                        ? tpl(T.weights, { name: data.preset_label })
+                        : "",
+                );
+                if (!data.found) {
+                    v2Paint(
+                        card(header + `<p class="note">${esc(T.notFound)}</p>`),
+                    );
+                    return;
+                }
+                const infos = infoCells(data.info_rows);
+                const cells = partCells(data.breakdown).concat(infos);
+                const notes = [];
+                if (data.parts_used < data.parts_total) {
+                    notes.push(
+                        `${tpl(T.scoredOn, { used: data.parts_used, total: data.parts_total })}. ${T.leftOut}`,
+                    );
+                }
+                if (infos.length) notes.push(T.per100);
+                const noteHtml = notes.length
+                    ? `<p class="note">${notes.map(esc).join(" ")}</p>`
+                    : "";
+                const members = data.checks.length
+                    ? `<div class="rows">${data.checks.map(memberRow).join("")}</div>`
+                    : "";
+                v2Paint(
+                    card(
+                        header +
+                            productBlock(data) +
+                            `<div class="ps-facts"><div class="ps-grid">${cells.join("")}</div>${noteHtml}</div>` +
+                            members,
+                    ),
+                );
+            }
+
+            function str(v) {
+                return typeof v === "string" ? v : "";
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (payload.structuredContent)
+                    return coerce(payload.structuredContent);
+                if (typeof payload.found !== "boolean") return null;
+                const p =
+                    payload.product && typeof payload.product === "object"
+                        ? payload.product
+                        : {};
+                const list = (v) =>
+                    Array.isArray(v)
+                        ? v.filter((x) => x && typeof x === "object")
+                        : [];
+                return {
+                    found: payload.found,
+                    product: {
+                        name: str(p.name),
+                        brand: str(p.brand) || null,
+                        barcode: str(p.barcode) || null,
+                    },
+                    score: payload.score,
+                    label: payload.label,
+                    preset_label: str(payload.preset_label),
+                    breakdown: list(payload.breakdown).map((b) => ({
+                        label: str(b.label),
+                        display: str(b.display) || null,
+                        status: str(b.status),
+                    })),
+                    parts_used: Number(payload.parts_used) || 0,
+                    parts_total:
+                        Number(payload.parts_total) ||
+                        list(payload.breakdown).length,
+                    info_rows: list(payload.info_rows),
+                    checks: list(payload.checks).map((c) => ({
+                        user_id: str(c.user_id),
+                        name: str(c.name),
+                        verdict: str(c.verdict),
+                        reason: str(c.reason),
+                    })),
+                };
+            }
+
+            initWidget({
+                name: "product-score-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render: v2BridgeRender(render),
+                sample: SAMPLE,
+            });
+        </script>
+    </body>
+</html>

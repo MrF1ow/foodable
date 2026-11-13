@@ -8,6 +8,7 @@ import {
     type UsualProductRow,
 } from "../../../domain/foods.js";
 import { FOOD_QUANTITY_UNITS } from "../../../domain/quantity.js";
+import { WEEKDAY_NAMES } from "../../../domain/weekdays.js";
 import type { GroceryStore } from "../../../domain/settings.js";
 import type { AppChromeBase } from "../../attention.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
@@ -47,16 +48,6 @@ export const USUAL_WHEN_LOW_MARKER = "restock_when_low_present";
 export function usualSchedulePath(foodId: string): string {
     return `${USUALS_V2_RETURN_TO}/${foodId}/${USUAL_SCHEDULE_PATH_SUFFIX}`;
 }
-
-const WEEKDAY_NAMES = [
-    "Sunday",
-    "Monday",
-    "Tuesday",
-    "Wednesday",
-    "Thursday",
-    "Friday",
-    "Saturday",
-] as const;
 
 /** The household restock day as "Sundays" (the header's "restock on …"). */
 export function restockWeekdayLabel(weekday: number): string | null {

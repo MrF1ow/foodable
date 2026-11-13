@@ -138,6 +138,8 @@ mock.module("../../db/stock.js", () => ({
 mock.module("../../db/plans.js", () => ({
     ...realPlans,
     liveRecipePlansStore: () => db.plansStore,
+    // No database here: the memory stores are the "transaction".
+    planTransaction: () => (fn: () => Promise<unknown>) => fn(),
 }));
 // Today's own meals and goals are not what these tests are about; its week plan
 // (the real loader over the memory stores) is. The day follows the household.

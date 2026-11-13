@@ -479,6 +479,9 @@
     flex-direction: column;
     gap: 2px;
 }
+.grp.grp-tiles {
+    gap: 10px;
+}
 .rows {
     display: flex;
     flex-direction: column;
@@ -615,7 +618,7 @@
 }
 .chip {
     display: inline-flex;
-    align-items: center;
+    align-items: baseline;
     gap: 4px;
     padding: 4px 10px;
     border: 1px solid var(--line);
@@ -631,8 +634,8 @@
     outline-offset: 2px;
 }
 .chip-n {
-    font-size: 11px;
-    line-height: 13px;
+    font-size: inherit;
+    line-height: inherit;
     color: var(--text-tertiary);
 }
 .chip[aria-pressed="true"] {

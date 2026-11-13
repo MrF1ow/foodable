@@ -1,0 +1,452 @@
+<!doctype html>
+<!--
+  Grocery list card (MCP Apps), v2 look. Served for list_grocery_lines when
+  the widgets-v2 flag is on; the v1 template stays as is.
+
+  One card: a header with the count still to get, store chips, then the chosen
+  store's sections as hairline rows (tick, name, "usual" tag, amount). The tick
+  calls check_grocery_line through the host and is not drawn when the host
+  cannot call tools. Checking does not put the item in the fridge.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Groceries</title>
+        <style>
+            /*@include shared/v2/tokens.css@*/
+
+            /*@include shared/v2/base.css@*/
+
+            /*@include shared/v2/components.css@*/
+
+            .secs {
+                display: flex;
+                flex-direction: column;
+                gap: 12px;
+            }
+            .row[data-busy="true"] {
+                opacity: 0.45;
+                pointer-events: none;
+            }
+            /* A line is its row plus any lines of text under it (the
+               already-have hint, a failed tick), so the hairline sits on the
+               wrapper. The text lines up under the title, past the tick. */
+            .row-wrap {
+                border-bottom: 1px solid var(--line);
+            }
+            .row-wrap:last-child {
+                border-bottom: 0;
+            }
+            .row-wrap > .row {
+                border-bottom: 0;
+            }
+            .row-wrap > .sub {
+                margin: -3px 0 0;
+                padding: 0 0 8px 30px;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="w" id="root"></div>
+
+        <script>
+            "use strict";
+
+            /*@include shared/bridge.js@*/
+
+            /*@include shared/util.js@*/
+
+            /*@include shared/v2/ui.js@*/
+
+            const T = {
+                title: "Groceries",
+                loading: "Loading the grocery list…",
+                empty: "Nothing on the grocery list.",
+                toGet: "{n} to get",
+                usual: "usual",
+                tickHint: "Tick items off here or in the app.",
+                appHint: "Tick items off in the app.",
+                checkAria: "Mark {name} checked",
+                uncheckAria: "Mark {name} unchecked",
+                failed: "Could not update {name}. It is unchanged.",
+            };
+
+            function sampleLine(
+                id,
+                store,
+                section,
+                name,
+                product,
+                amount,
+                unit,
+            ) {
+                return {
+                    id,
+                    store_id: store,
+                    section_id: section,
+                    display_name: name,
+                    amount,
+                    unit,
+                    checked: false,
+                    source: "manual",
+                    source_fridge_item_id: null,
+                    note: null,
+                    already_have: null,
+                    store: store === "st-costco" ? "Costco" : "Trader Joe's",
+                    product_name: product,
+                    usual: product != null,
+                    product: null,
+                    notices: [],
+                };
+            }
+
+            // Design sample (FigCraft Widget/Groceries): two stores, usuals,
+            // a ticked line, a note, and an already-have line.
+            const SAMPLE = (() => {
+                const olive = sampleLine(
+                    "ln-5",
+                    "st-costco",
+                    "sec-pantry",
+                    "Ranch dressing",
+                    "California Olive Ranch",
+                    1,
+                    "bottle",
+                );
+                olive.checked = true;
+                const rice = sampleLine(
+                    "ln-4",
+                    "st-costco",
+                    "sec-pantry",
+                    "Jasmine rice",
+                    null,
+                    5,
+                    "lb",
+                );
+                rice.already_have = "already have: have 1 lb, need 4 lb";
+                const salmon = sampleLine(
+                    "ln-6",
+                    "st-tj",
+                    "sec-fish",
+                    "Salmon",
+                    null,
+                    1,
+                    "lb",
+                );
+                salmon.note = "skin on";
+                return {
+                    locale: "en",
+                    stores: [
+                        {
+                            id: "st-costco",
+                            name: "Costco",
+                            sections: [
+                                {
+                                    id: "sec-dairy",
+                                    name: "Dairy & eggs",
+                                    lines: [
+                                        sampleLine(
+                                            "ln-1",
+                                            "st-costco",
+                                            "sec-dairy",
+                                            "Milk",
+                                            "Kirkland 2% milk",
+                                            1,
+                                            "gal",
+                                        ),
+                                        sampleLine(
+                                            "ln-2",
+                                            "st-costco",
+                                            "sec-dairy",
+                                            "Eggs",
+                                            "Vital Farms large eggs",
+                                            24,
+                                            "each",
+                                        ),
+                                    ],
+                                },
+                                {
+                                    id: "sec-meat",
+                                    name: "Meat",
+                                    lines: [
+                                        sampleLine(
+                                            "ln-3",
+                                            "st-costco",
+                                            "sec-meat",
+                                            "Chicken thighs",
+                                            "Kirkland chicken thighs",
+                                            4,
+                                            "lb",
+                                        ),
+                                    ],
+                                },
+                                {
+                                    id: "sec-pantry",
+                                    name: "Pantry",
+                                    lines: [rice, olive],
+                                },
+                            ],
+                        },
+                        {
+                            id: "st-tj",
+                            name: "Trader Joe's",
+                            sections: [
+                                {
+                                    id: "sec-fish",
+                                    name: "Fish",
+                                    lines: [salmon],
+                                },
+                            ],
+                        },
+                    ],
+                };
+            })();
+
+            let MODEL = null;
+            let API = null;
+            let storeId = null;
+            const busy = new Set();
+            const errors = {};
+
+            function allLines(stores) {
+                const out = [];
+                for (const s of stores) {
+                    for (const sec of s.sections || []) {
+                        for (const l of sec.lines || []) out.push(l);
+                    }
+                }
+                return out;
+            }
+
+            function storeLines(store) {
+                return allLines([store]);
+            }
+
+            function lineRow(line, canTick) {
+                const name = line.product_name || line.display_name;
+                const row = {
+                    title: name,
+                    done: !!line.checked,
+                    tag: line.usual ? T.usual : null,
+                    sub: line.note || "",
+                    end: v2Qty(line.amount, line.unit),
+                    attrs: {
+                        "data-line-id": line.id,
+                        "data-busy": busy.has(line.id) ? "true" : null,
+                    },
+                };
+                if (canTick) {
+                    row.check = !!line.checked;
+                    row.checkLabel = tpl(
+                        line.checked ? T.uncheckAria : T.checkAria,
+                        { name },
+                    );
+                }
+                // The already-have hint has no state in the design; it is a
+                // deliberate addition so a line covered by the fridge says so.
+                const have = line.already_have
+                    ? `<p class="sub note">${esc(line.already_have)}</p>`
+                    : "";
+                const err = errors[line.id]
+                    ? `<p class="sub note is-warn">${esc(errors[line.id])}</p>`
+                    : "";
+                return `<div class="row-wrap">${v2Row(row)}${have}${err}</div>`;
+            }
+
+            function card(inner) {
+                return `<section class="card">${inner}</section>`;
+            }
+
+            function renderBody(data) {
+                const canTick = !!(API && API.canCallTools);
+                const stores = data.stores.filter(
+                    (s) => storeLines(s).length > 0,
+                );
+                const all = allLines(stores);
+                if (all.length === 0) {
+                    return card(
+                        v2Header(T.title) +
+                            `<p class="note">${esc(T.empty)}</p>`,
+                    );
+                }
+                const toGet = (lines) => lines.filter((l) => !l.checked).length;
+                const left = toGet(all);
+                if (!stores.some((s) => s.id === storeId)) {
+                    storeId = stores[0].id;
+                }
+                const chips =
+                    stores.length > 1
+                        ? v2Chips(
+                              stores.map((s) => ({
+                                  label: s.name,
+                                  count: toGet(storeLines(s)),
+                                  on: s.id === storeId,
+                                  attrs: { "data-store": s.id },
+                              })),
+                          )
+                        : "";
+                const shown = stores.find((s) => s.id === storeId);
+                const secs = (shown.sections || [])
+                    .filter((sec) => (sec.lines || []).length > 0)
+                    .map(
+                        (sec) =>
+                            `<div class="grp">${v2Label(sec.name)}<div class="rows">${sec.lines
+                                .map((l) => lineRow(l, canTick))
+                                .join("")}</div></div>`,
+                    )
+                    .join("");
+                const hint = `<p class="note">${esc(canTick ? T.tickHint : T.appHint)}</p>`;
+                return card(
+                    v2Header(T.title, tpl(T.toGet, { n: left })) +
+                        chips +
+                        `<div class="secs">${secs}</div>` +
+                        hint,
+                );
+            }
+
+            // Painting replaces the card's markup, which drops keyboard focus
+            // with it. Note which tick or store chip held focus and put it
+            // back on its twin in the new markup.
+            function focusedControl() {
+                const a = document.activeElement;
+                if (!a || !a.closest) return null;
+                const chip = a.closest("button.chip");
+                if (chip) {
+                    return {
+                        sel: "button.chip",
+                        id: chip.getAttribute("data-store"),
+                    };
+                }
+                const btn = a.closest("button.check");
+                const row = btn && btn.closest("[data-line-id]");
+                return row
+                    ? {
+                          sel: "button.check",
+                          id: row.getAttribute("data-line-id"),
+                      }
+                    : null;
+            }
+
+            function restoreFocus(ctl) {
+                const mount = document.getElementById("widget-mount");
+                if (!ctl || !ctl.id || !mount) return;
+                for (const el of mount.querySelectorAll(ctl.sel)) {
+                    const holder =
+                        ctl.sel === "button.chip"
+                            ? el
+                            : el.closest("[data-line-id]");
+                    const key =
+                        holder &&
+                        holder.getAttribute(
+                            ctl.sel === "button.chip"
+                                ? "data-store"
+                                : "data-line-id",
+                        );
+                    if (key === ctl.id) {
+                        el.focus();
+                        return;
+                    }
+                }
+            }
+
+            function paint() {
+                if (!MODEL) return;
+                const ctl = focusedControl();
+                v2Paint(renderBody(MODEL));
+                restoreFocus(ctl);
+            }
+
+            function render(data) {
+                // A tick still in flight keeps its busy mark and finishes on
+                // the new model; an error for a line the result dropped goes.
+                const present = new Set(allLines(data.stores).map((l) => l.id));
+                for (const id of Object.keys(errors)) {
+                    if (!present.has(id)) delete errors[id];
+                }
+                MODEL = {
+                    stores: data.stores.map((s) => ({
+                        ...s,
+                        sections: (s.sections || []).map((sec) => ({
+                            ...sec,
+                            lines: (sec.lines || []).map((l) => ({ ...l })),
+                        })),
+                    })),
+                };
+                paint();
+            }
+
+            function findLine(id) {
+                return allLines(MODEL.stores).find((l) => l.id === id);
+            }
+
+            async function onTick(id) {
+                if (!MODEL || !API || !API.canCallTools) return;
+                if (!id || busy.has(id)) return;
+                const line = findLine(id);
+                if (!line) return;
+                const next = !line.checked;
+                const name = line.product_name || line.display_name;
+                delete errors[id];
+                busy.add(id);
+                paint();
+                try {
+                    await API.callTool("check_grocery_line", {
+                        id,
+                        checked: next,
+                    });
+                    // A new tool result may have replaced the model while the
+                    // call was out: the tick belongs on the current one.
+                    const cur = findLine(id);
+                    if (cur) cur.checked = next;
+                } catch (e) {
+                    if (findLine(id)) errors[id] = tpl(T.failed, { name });
+                } finally {
+                    busy.delete(id);
+                    paint();
+                }
+            }
+
+            function coerce(payload) {
+                if (!payload || typeof payload !== "object") return null;
+                if (Array.isArray(payload.stores)) return payload;
+                if (payload.structuredContent)
+                    return coerce(payload.structuredContent);
+                return null;
+            }
+
+            initWidget({
+                name: "grocery-list-widget",
+                loading: `<div class="empty">${esc(T.loading)}</div>`,
+                coerce,
+                render: v2BridgeRender(render),
+                sample: SAMPLE,
+                onReady(api) {
+                    API = api;
+                    paint();
+                    const root = document.getElementById("root");
+                    root.addEventListener("click", (e) => {
+                        const t = e.target;
+                        const chip =
+                            t && t.closest ? t.closest("button.chip") : null;
+                        if (chip) {
+                            const id = chip.getAttribute("data-store");
+                            if (id && MODEL) {
+                                storeId = id;
+                                paint();
+                            }
+                            return;
+                        }
+                        const btn =
+                            t && t.closest ? t.closest("button.check") : null;
+                        if (!btn) return;
+                        const row = btn.closest("[data-line-id]");
+                        const id = row && row.getAttribute("data-line-id");
+                        if (!id) return;
+                        e.preventDefault();
+                        onTick(id);
+                    });
+                },
+            });
+        </script>
+    </body>
+</html>
