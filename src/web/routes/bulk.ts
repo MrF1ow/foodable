@@ -22,14 +22,11 @@ import { StockInputError } from "../../domain/stock.js";
 import {
     bulkDeleteSavedItems,
     bulkDiscardFridgeItems,
-    bulkRemoveGroceryLines,
     bulkRemoveUsuals,
-    bulkTickOffGroceryLines,
 } from "../../db/bulk.js";
 import { formText } from "../form.js";
 import {
     renderFridgeInventoryPage,
-    renderGroceryListPage,
     renderSettingsSavedV2Route,
     renderUsualProductsListPage,
 } from "../loaders.js";
@@ -136,42 +133,6 @@ async function act(
     if (result.status === "already") return c.redirect(returnTo, 303);
     return redirectWithToast(c, returnTo, opts.toast);
 }
-
-bulkRoutes.post("/kitchen/groceries/bulk/check", requireMember, (c) => {
-    const member = siteMember(c);
-    return act(c, {
-        fallback: "/kitchen/groceries",
-        toast: "grocery.line.checked",
-        run: (body) =>
-            bulkTickOffGroceryLines({
-                householdId: member.householdId,
-                lineIds: parseBulkIds(postedIds(body)),
-            }),
-        render: (error, returnTo) =>
-            renderGroceryListPage(c.get("userId"), {
-                error,
-                storeFilter: storeOf(returnTo),
-            }),
-    });
-});
-
-bulkRoutes.post("/kitchen/groceries/bulk/remove", requireMember, (c) => {
-    const member = siteMember(c);
-    return act(c, {
-        fallback: "/kitchen/groceries",
-        toast: "grocery.lines.removed",
-        run: (body) =>
-            bulkRemoveGroceryLines({
-                householdId: member.householdId,
-                lineIds: parseBulkIds(postedIds(body)),
-            }),
-        render: (error, returnTo) =>
-            renderGroceryListPage(c.get("userId"), {
-                error,
-                storeFilter: storeOf(returnTo),
-            }),
-    });
-});
 
 bulkRoutes.post("/kitchen/fridge/bulk/discard", requireMember, (c) => {
     const member = siteMember(c);

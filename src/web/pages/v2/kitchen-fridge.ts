@@ -17,7 +17,7 @@ import type { Notice } from "../../../domain/notices.js";
 import { noticeStrip, stripNotices } from "./notice-strip.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
-import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
+import { sheet } from "../../components/v2/sheet.js";
 import { stepper } from "../../components/v2/stepper.js";
 import { fridgeRow, rowList, sectionHeader } from "../../components/v2/rows.js";
 import {
@@ -33,6 +33,7 @@ import { settingsErrorBanner } from "./settings-shared.js";
 import { renderAppShell } from "../../shell.js";
 import { fdIcon } from "../../components/fd-icons.js";
 import { formatExpiryWhen, expiryToneClass } from "./today-rail.js";
+import { kitchenAddButton, kitchenTopTools } from "./kitchen-head.js";
 import { selectMode } from "./select-mode.js";
 import {
     type KitchenFridgeGroceryOverview,
@@ -540,12 +541,10 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
             : view.items.length === 0
               ? `<p class="fd-kitchen-fridge-empty">Nothing in the fridge yet.</p>`
               : "";
-    const addBtn = sheetTrigger({
+    const addBtn = kitchenAddButton({
         target: FD_FRIDGE_ADD_SHEET_ID,
         label: "Add item",
-        className: "fd-icon-btn fd-kitchen-fridge-add",
-        icon: String(iconPlus()),
-    });
+    }).phone;
     const groceryOpen =
         view.groceryOverview?.openLineCount ??
         (view.groceryLines
@@ -571,7 +570,7 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
     const selectable = view.items.length > 0;
     return `${head}
 <div class="fd-kitchen-fridge-page"${select.rootAttrs}>
-<div class="fd-kitchen-fridge-top">${addBtn}</div>
+${kitchenTopTools(addBtn)}
 ${view.error && !view.openItemId && !view.openAdd ? String(settingsErrorBanner(view.error)) : ""}
 ${String(noticeStrip(stripNotices(view.notices ?? [], ["grocery.running_low"], undefined), { back: "/kitchen/fridge", label: "Running low" }))}
 ${useSoonStrip(view)}

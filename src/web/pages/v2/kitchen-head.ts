@@ -1,4 +1,6 @@
 import { esc } from "../../components/v2/html.js";
+import { iconPlus } from "../../components/v2/icons.js";
+import { sheetTrigger } from "../../components/v2/sheet.js";
 import { APP_PATHS } from "../../route-map.js";
 
 /**
@@ -52,4 +54,40 @@ export function renderKitchenHead(opts: {
 ${renderKitchenDesktopSeg(opts.active)}${opts.desktopTools ? `\n${opts.desktopTools}` : ""}
 </div>
 </header>`;
+}
+
+/**
+ * The add button every Kitchen tab has, in two places that are never both
+ * visible. On the phone it is the round "+" level with the tabs (`phone`, put
+ * in `kitchenTopTools`); from 1024px the tabs are gone and the labelled button
+ * rides in the header after the section switch (`desktop`, passed as
+ * `desktopTools`). One markup per place, so the three tabs cannot drift.
+ */
+export function kitchenAddButton(opts: { target: string; label: string }): {
+    phone: string;
+    desktop: string;
+} {
+    return {
+        phone: sheetTrigger({
+            target: opts.target,
+            label: opts.label,
+            className: "fd-icon-btn fd-kitchen-fridge-add",
+            icon: String(iconPlus()),
+        }),
+        desktop: sheetTrigger({
+            target: opts.target,
+            label: opts.label,
+            className: "fd-btn fd-btn--primary fd-kitchen-overview-add",
+            icon: `${String(iconPlus())}<span>${esc(opts.label)}</span>`,
+        }),
+    };
+}
+
+/**
+ * The phone's tool row at the right of the tabs, first in the page so it takes
+ * no room in the flow. Buttons are listed left to right; the add button goes
+ * last, so it sits in the same corner on every tab.
+ */
+export function kitchenTopTools(...buttons: string[]): string {
+    return `<div class="fd-kitchen-fridge-top">${buttons.join("")}</div>`;
 }

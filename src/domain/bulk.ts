@@ -1,6 +1,6 @@
 /**
  * Select several rows, act once: the bulk twins of the single-row actions on
- * the Groceries, Fridge, Usuals and Saved foods & recipes lists. Each one
+ * the Fridge, Usuals and Saved foods & recipes lists. Each one
  * calls the same domain function the one-row action does, once per selected
  * row, so a bulk and a row-by-row run end in the same state.
  *
@@ -11,18 +11,11 @@
  * A repeat is not an error. When none of the ids has anything left to do (a
  * double submit, or a page that was stale), the answer is `already` and
  * nothing is written. A batch where some ids have work and others are gone is
- * refused whole: the page the person selected on is out of date. A line that
- * is already ticked is done: ticking it again would move a usual's restock day
- * from the day it was bought to today, which ticking row by row never does.
+ * refused whole: the page the person selected on is out of date.
  */
 import { updateFood, usualProductRows, type FoodsStore } from "./foods.js";
 import { removeUsual } from "./usual-add.js";
 import { type FridgeStore } from "./fridge.js";
-import {
-    checkGroceryLine,
-    type GroceryLine,
-    type GroceryListStore,
-} from "./grocery.js";
 import {
     assertCanDeleteRecipe,
     deleteRecipe,
@@ -111,60 +104,6 @@ function settle<I, T>(
     if (todo.length === 0) return null;
     if (unknown > 0) throw new BulkSelectionError(STALE_MESSAGE);
     return todo;
-}
-
-/**
- * Tick several grocery lines off, as ticking each alone does. Lines that are
- * already ticked are skipped (select mode lets a person pick them): they are
- * not stamped again and not counted.
- */
-export async function tickOffGroceryLines(
-    grocery: GroceryListStore,
-    foods: FoodsStore,
-    input: {
-        householdId: string;
-        lineIds: readonly string[];
-        today: string;
-        /** Keeps a failed restock stamp from aborting the batch (see `checkGroceryLine`). */
-        isolate?: <T>(work: () => Promise<T>) => Promise<T>;
-    },
-): Promise<BulkResult> {
-    const lines = new Map(
-        (await grocery.listLines(input.householdId)).map((l) => [l.id, l]),
-    );
-    const todo = settle(input.lineIds, (id): Found<GroceryLine> => {
-        const line = lines.get(id);
-        if (!line) return null;
-        return line.checked ? { kind: "done" } : { kind: "todo", item: line };
-    });
-    if (!todo) return ALREADY;
-    for (const line of todo) {
-        await checkGroceryLine(grocery, input.householdId, line.id, true, {
-            foods,
-            today: input.today,
-            isolate: input.isolate,
-        });
-    }
-    return { status: "applied", count: todo.length };
-}
-
-/** Delete several grocery lines (what Clear checked does to the checked ones). */
-export async function removeGroceryLines(
-    grocery: GroceryListStore,
-    input: { householdId: string; lineIds: readonly string[] },
-): Promise<BulkResult> {
-    const lines = new Map(
-        (await grocery.listLines(input.householdId)).map((l) => [l.id, l]),
-    );
-    const todo = settle(input.lineIds, (id) => {
-        const line = lines.get(id);
-        return line ? { kind: "todo", item: line } : null;
-    });
-    if (!todo) return ALREADY;
-    for (const line of todo) {
-        await grocery.deleteLine(input.householdId, line.id);
-    }
-    return { status: "applied", count: todo.length };
 }
 
 /**

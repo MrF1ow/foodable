@@ -38,7 +38,6 @@ export const TOASTS = {
     },
     "grocery.line.checked": { kind: "success", text: "Checked off" },
     "grocery.line.unchecked": { kind: "success", text: "Unchecked" },
-    "grocery.lines.removed": { kind: "success", text: "Removed from the list" },
     "grocery.checked.cleared": {
         kind: "success",
         text: "Checked items cleared",

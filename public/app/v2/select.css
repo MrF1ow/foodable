@@ -73,8 +73,7 @@
     cursor: pointer;
 }
 /* A rounded square filled with ink when picked, like a selected chip: never
- * the green circle of a ticked grocery line, so a picked line cannot look
- * ticked and a ticked one cannot look picked. */
+ * the green circle of a ticked line, so a picked row cannot look ticked. */
 .fd-row__select-box {
     position: relative;
     box-sizing: border-box;
@@ -106,26 +105,13 @@
     outline-offset: 2px;
 }
 
-/* A grocery line's tick: the button steps aside while selecting (a tap picks),
- * and its state stays in view as a plain circle beside the box. */
-.fd-check.fd-row__select-state {
-    display: none;
-}
-[data-fd-selecting] .fd-check.fd-row__select-state {
-    display: block;
-}
-
 /* In select mode a row only picks: its own actions step aside for the box. */
 [data-fd-selecting] .fd-row--selectable > .fd-row__body {
     cursor: pointer;
 }
 [data-fd-selecting] .fd-row--selectable > .fd-row__action,
 [data-fd-selecting] .fd-row--selectable > .fd-row__body > .fd-row__actions,
-[data-fd-selecting] .fd-row--selectable > .fd-row__body > .fd-row__chevron,
-[data-fd-selecting]
-    .fd-row--grocery.fd-row--selectable
-    > .fd-row__body
-    > .fd-row__lead {
+[data-fd-selecting] .fd-row--selectable > .fd-row__body > .fd-row__chevron {
     display: none;
 }
 /* Only this row's own box tints it, not a product nested under it. */

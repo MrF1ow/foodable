@@ -298,44 +298,19 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(body).toContain("Clear checked");
     });
 
-    test("select mode: every line has a checkbox, with Check off and a confirmed Delete", () => {
+    test("no multi-select: ticking a line does that job, so no Select, bar, checkboxes or bulk posts", () => {
         const body = renderKitchenGroceriesBody(baseView({ openLineCount: 1 }));
-        expect(body).toContain(
-            'class="fd-kitchen-groceries-page" data-fd-select="groceries"',
-        );
-        expect(body).toContain('data-fd-select-toggle="groceries"');
-        expect(body).toContain(
-            '<input type="checkbox" class="fd-row__select-input" data-fd-select-item name="ids[]" value="l1" aria-label="Select Milk">',
-        );
-        expect(body).toContain('action="/kitchen/groceries/bulk/check"');
-        expect(body).toContain(">Check off</button>");
-        expect(body).toContain('action="/kitchen/groceries/bulk/remove"');
-        expect(body).toContain('data-many="Delete {n} items from the list?"');
-        // Both bulk forms come back to this page with its store filter.
-        expect(body).toContain(
-            '<input type="hidden" name="return_to" value="/kitchen/groceries">',
-        );
-        const filtered = renderKitchenGroceriesBody(
-            baseView({ selectedStoreId: "st-1" }),
-        );
-        expect(filtered).toContain(
-            '<input type="hidden" name="return_to" value="/kitchen/groceries?store=st-1">',
-        );
+        expect(body).toContain('class="fd-kitchen-groceries-page"');
+        expect(body).not.toContain("data-fd-select");
+        expect(body).not.toContain("fd-select-");
+        expect(body).not.toContain("fd-row__select");
+        expect(body).not.toContain("/kitchen/groceries/bulk/");
+        expect(body).not.toContain(">Select</button>");
+        // The row's own tick stays.
+        expect(body).toContain("/kitchen/groceries/lines/l1/check");
     });
 
-    test("select mode: nothing to select on an empty list", () => {
-        const body = renderKitchenGroceriesBody(
-            baseView({
-                stores: [],
-                noStoreLines: [],
-                openLineCount: 0,
-            }),
-        );
-        expect(body).not.toContain("data-fd-select-toggle");
-        expect(body).not.toContain("data-fd-select-item");
-    });
-
-    test("select mode: the Fridge overview's grocery rows are not selectable", () => {
+    test("the Fridge overview's grocery rows are not selectable either", () => {
         const rows = renderGroceryOverviewSections(baseView());
         expect(rows).toContain("Milk");
         expect(rows).not.toContain("data-fd-select-item");
@@ -346,10 +321,13 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(body).toContain("8 to get");
     });
 
-    test("without shareEnabled there is no Share button, tools row or sheet", () => {
+    test("without shareEnabled there is no Share button or sheet, only the plus in the tool row", () => {
         const body = renderKitchenGroceriesBody(baseView());
         expect(body).not.toContain("fd-kitchen-grocery-share");
         expect(body).not.toContain("fd-kitchen-grocery-tools");
+        expect(body).toContain(
+            '<div class="fd-kitchen-fridge-top"><button type="button" class="fd-icon-btn fd-kitchen-fridge-add"',
+        );
         expect(body).not.toContain("fd-grocery-share-sheet");
         expect(body).not.toContain("/kitchen/groceries/share");
     });
@@ -367,7 +345,7 @@ describe("renderKitchenGroceriesV2Page", () => {
             /fd-kitchen-overview-head__tools">\n<nav[\s\S]*?<\/nav>\n<button[^>]*fd-kitchen-grocery-share/,
         );
         expect(body).toMatch(
-            /<div class="fd-kitchen-groceries-page" data-fd-select="groceries">\n<div class="fd-kitchen-grocery-tools"><button[^>]*fd-kitchen-grocery-share/,
+            /<div class="fd-kitchen-groceries-page">\n<div class="fd-kitchen-fridge-top"><button[^>]*fd-kitchen-grocery-share[^>]*>[\s\S]*?<\/button><button[^>]*fd-kitchen-fridge-add/,
         );
         expect(body).toContain(
             'commandfor="fd-grocery-share-sheet" command="show-modal"',
@@ -383,11 +361,12 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(body.split("Nope.").length - 1).toBe(1);
     });
 
-    test("add-to-list field opens the grocery add sheet", () => {
+    test("the plus opens the grocery add sheet; there is no search-style bar", () => {
         const body = renderKitchenGroceriesBody(baseView());
-        expect(body).toContain("fd-kitchen-grocery-add");
+        expect(body).not.toContain("fd-kitchen-grocery-add");
+        expect(body).not.toContain("fd-log-search-field");
         expect(body).toContain(
-            `data-fd-open-sheet="${FD_GROCERY_ADD_SHEET_ID}"`,
+            `class="fd-icon-btn fd-kitchen-fridge-add" commandfor="${FD_GROCERY_ADD_SHEET_ID}" command="show-modal" title="Add to list" aria-label="Add to list"`,
         );
         expect(body).toContain(`id="${FD_GROCERY_ADD_SHEET_ID}"`);
         expect(body).toContain('action="/kitchen/groceries/lines"');

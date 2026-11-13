@@ -115,87 +115,24 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
     };
 
     describe("groceries", () => {
-        test("check off ticks the selected lines and answers with a toast", async () => {
-            const [milk, eggs, bread] = await seedLines([
-                "Milk",
-                "Eggs",
-                "Bread",
-            ]);
-            const res = await post("/kitchen/groceries/bulk/check", [
-                ...ids([milk!, bread!]),
-                ["return_to", "/kitchen/groceries?store=abc"],
-            ]);
-            expect(res.status).toBe(303);
-            expect(res.headers.get("location")).toBe(
-                "/kitchen/groceries?store=abc",
-            );
-            expect(toastKey(res)).toBe("grocery.line.checked");
-            expect(await lines()).toEqual([
-                { display_name: "Bread", checked: true },
-                { display_name: "Eggs", checked: false },
-                { display_name: "Milk", checked: true },
-            ]);
-            expect(eggs).toBeDefined();
-        });
-
-        test("delete removes the lines, and the same post again still redirects", async () => {
+        // Ticking a line already does what Select did there, so the list has
+        // no bulk actions: a post to the old paths is not routed.
+        test("the old check-off and delete posts are gone and change nothing", async () => {
             const [milk, eggs] = await seedLines(["Milk", "Eggs"]);
-            const fields = [
-                ...ids([milk!, eggs!]),
-                ["return_to", "/kitchen/groceries"],
-            ] as [string, string][];
-            const first = await post("/kitchen/groceries/bulk/remove", fields);
-            const second = await post("/kitchen/groceries/bulk/remove", fields);
-            expect([first.status, second.status]).toEqual([303, 303]);
-            expect(toastKey(first)).toBe("grocery.lines.removed");
-            // Nothing changed the second time, so nothing is announced.
-            expect(toastKey(second)).toBeNull();
-            expect(second.headers.get("location")).toBe("/kitchen/groceries");
-            expect(await lines()).toEqual([]);
-        });
-
-        test("an id that is not there answers 400 with the page and changes nothing", async () => {
-            const [milk] = await seedLines(["Milk"]);
-            const res = await post(
+            for (const path of [
+                "/kitchen/groceries/bulk/check",
                 "/kitchen/groceries/bulk/remove",
-                ids([milk!, crypto.randomUUID()]),
-            );
-            expect(res.status).toBe(400);
-            const html = await res.text();
-            expect(html).toContain("Reload the page and select again.");
-            expect(html).toContain('role="alert"');
-            expect(await lines()).toHaveLength(1);
-        });
-
-        test("an empty or malformed selection answers 400", async () => {
-            const none = await post("/kitchen/groceries/bulk/check", []);
-            expect(none.status).toBe(400);
-            expect(await none.text()).toContain("Select at least one item.");
-            const bad = await post("/kitchen/groceries/bulk/check", [
-                ["ids[]", "not-a-uuid"],
+            ]) {
+                const res = await post(path, [
+                    ...ids([milk!, eggs!]),
+                    ["return_to", "/kitchen/groceries"],
+                ]);
+                expect(res.status).toBe(404);
+            }
+            expect(await lines()).toEqual([
+                { display_name: "Eggs", checked: false },
+                { display_name: "Milk", checked: false },
             ]);
-            expect(bad.status).toBe(400);
-        });
-
-        test("a return_to that leaves the app falls back to the list", async () => {
-            const [milk] = await seedLines(["Milk"]);
-            const res = await post("/kitchen/groceries/bulk/check", [
-                ...ids([milk!]),
-                ["return_to", "https://evil.example/"],
-            ]);
-            expect(res.status).toBe(303);
-            expect(res.headers.get("location")).toBe("/kitchen/groceries");
-        });
-
-        test("no session is sent to sign in and writes nothing", async () => {
-            const [milk] = await seedLines(["Milk"]);
-            const res = await post(
-                "/kitchen/groceries/bulk/remove",
-                ids([milk!]),
-                null,
-            );
-            expect(res.status).not.toBe(303);
-            expect(await lines()).toHaveLength(1);
         });
     });
 

@@ -40,14 +40,14 @@
 
 /* Centred on the tab row: the row's 18px centre line is 34px above the page
    top (16px margin plus half the 36px row) and the button is 34px tall. */
-.fd-kitchen-fridge-top,
-.fd-kitchen-grocery-tools {
+.fd-kitchen-fridge-top {
     position: absolute;
     top: calc(-34px - 17px);
     right: 0;
     z-index: 1;
     display: flex;
     justify-content: flex-end;
+    gap: var(--fd-s-6);
 }
 
 .fd-kitchen-fridge-add {
@@ -427,11 +427,11 @@
     padding: 0 0 var(--fd-s-12);
 }
 
-/* Share rides level with the tabs at the right (like the Fridge add button),
+/* Share rides level with the tabs at the right, left of the add button,
    as the same 34px circle: icon only, so it can never cover the end of the
    Usuals tab on a narrow phone. The label stays for assistive tech; from
    1024px Share moves into the header's tools. */
-.fd-kitchen-grocery-tools .fd-kitchen-grocery-share {
+.fd-kitchen-fridge-top .fd-kitchen-grocery-share {
     width: 34px;
     min-width: 0;
     height: 34px;
@@ -441,7 +441,7 @@
     aspect-ratio: 1;
 }
 
-.fd-kitchen-grocery-tools .fd-kitchen-grocery-share span {
+.fd-kitchen-fridge-top .fd-kitchen-grocery-share span {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -473,20 +473,6 @@
     margin: 0;
     font: 400 14px/20px var(--font-body);
     color: var(--status-over);
-}
-
-.fd-kitchen-grocery-add {
-    width: 100%;
-    margin: 0;
-    border: 0;
-    cursor: pointer;
-    text-align: left;
-}
-
-.fd-kitchen-grocery-add__label {
-    flex: 1;
-    font: 400 15px/20px var(--font-body);
-    color: var(--text-tertiary);
 }
 
 .fd-kitchen-grocery-put-link {
@@ -546,27 +532,6 @@
     color: var(--text-secondary);
 }
 
-.fd-kitchen-usual-add-wrap {
-    display: flex;
-    justify-content: center;
-    padding: var(--fd-s-4) 0;
-}
-
-.fd-kitchen-usual-add-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: var(--fd-s-6);
-    min-height: 44px;
-    padding: 0 var(--fd-s-10);
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: none;
-    color: var(--accent-text);
-    font: 500 15px/20px var(--font-body);
-    cursor: pointer;
-}
-
 /* A sheet row that is a button looks like the link rows in the fridge
    sheet, not like a native button. */
 button.fd-kitchen-sheet-row {
@@ -581,12 +546,6 @@ button.fd-kitchen-sheet-row {
     color: inherit;
     font: inherit;
     cursor: pointer;
-}
-
-/* "+ Add a usual" is a quiet accent link, as in the design. */
-.fd-kitchen-usual-add-btn::before {
-    content: "+";
-    font: 400 22px/1 var(--font-body);
 }
 
 .fd-kitchen-usual-amount {
@@ -1014,8 +973,17 @@ button.fd-kitchen-sheet-row {
     }
 
     .fd-kitchen-overview-add {
+        display: inline-flex;
         flex: none;
+        align-items: center;
+        gap: var(--fd-s-6);
         text-decoration: none;
+    }
+
+    .fd-kitchen-overview-add .fd-icon {
+        flex: none;
+        width: 18px;
+        height: 18px;
     }
 
     .fd-kitchen-fridge-title--phone,
@@ -1202,10 +1170,6 @@ button.fd-kitchen-sheet-row {
     .fd-kitchen-usual-stores {
         margin: 0;
         padding: 0;
-    }
-
-    .fd-kitchen-grocery-tools {
-        display: none;
     }
 
     /* Usuals as a table in one panel (FigCraft 48217). */

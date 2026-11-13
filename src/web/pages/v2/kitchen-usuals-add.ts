@@ -16,7 +16,8 @@ import { FOOD_QUANTITY_UNITS } from "../../../domain/quantity.js";
 import type { GroceryStore } from "../../../domain/settings.js";
 import { quantityUnitOptionLabel } from "../../display-quantity.js";
 import { field } from "../../components/ui.js";
-import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
+import { sheet } from "../../components/v2/sheet.js";
+import { kitchenAddButton } from "./kitchen-head.js";
 import { FD_BARCODE_SCAN_SHEET_ID } from "./scanner-sheet.js";
 
 export const USUAL_ADD_SHEET_ID = "fd-usual-add";
@@ -426,12 +427,11 @@ ${panel("type", active, typePanel(ctx))}`;
     });
 }
 
-/** The page's "Add a usual" button: always shown, even with nothing to search. */
-export function addUsualTrigger(): string {
-    return sheetTrigger({
+/** The page's add buttons: always shown, even with nothing to search. */
+export function addUsualButton() {
+    return kitchenAddButton({
         target: USUAL_ADD_SHEET_ID,
         label: "Add a usual",
-        className: "fd-kitchen-usual-add-btn",
     });
 }
 

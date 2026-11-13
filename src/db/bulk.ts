@@ -5,33 +5,23 @@
  * Every batch first takes a transaction advisory lock named for the household
  * and the action. A second submit of the same batch (a double tap, a retry)
  * waits for the first to commit, then reads the state it left: for discard,
- * remove and delete the rows are gone or done, and the domain answers
- * `already` instead of acting twice (a tick-off leaves its lines in place, but
- * they are ticked by then, and the domain skips ticked lines). Batches of
- * different actions do not wait for each other.
+ * remove and delete the rows are gone, and the domain answers `already`
+ * instead of acting twice. Batches of different actions do not wait for each
+ * other.
  */
 import {
     deleteSavedItems,
     discardFridgeItems,
-    removeGroceryLines,
     removeUsuals,
-    tickOffGroceryLines,
     type BulkResult,
 } from "../domain/bulk.js";
 import { liveFoodsStore } from "./foods.js";
 import { liveFridgeStore } from "./fridge.js";
-import { liveGroceryStore } from "./grocery.js";
 import { liveRecipesStore } from "./recipes.js";
-import { householdToday } from "./restock.js";
-import { run, type Tx } from "./sql.js";
+import { run } from "./sql.js";
 import { liveStockStore } from "./stock.js";
 
-export type BulkAction =
-    | "grocery-tick"
-    | "grocery-remove"
-    | "fridge-discard"
-    | "usuals-remove"
-    | "saved-delete";
+export type BulkAction = "fridge-discard" | "usuals-remove" | "saved-delete";
 
 /** The advisory-lock name of one household's batches of one action. */
 export function bulkLockKey(householdId: string, action: BulkAction): string {
@@ -45,7 +35,7 @@ export function bulkLockKey(householdId: string, action: BulkAction): string {
 export function inBulkTransaction<T>(
     householdId: string,
     action: BulkAction,
-    fn: (scope: BulkScope) => Promise<T>,
+    fn: () => Promise<T>,
 ): Promise<T> {
     return run(async (tx) => {
         await tx`
@@ -53,53 +43,8 @@ export function inBulkTransaction<T>(
                 hashtextextended(${bulkLockKey(householdId, action)}, 0)
             )
         `;
-        return fn({ isolate: (work) => inSavepoint(tx, work) });
+        return fn();
     });
-}
-
-/** What a batch gets from its transaction. */
-export type BulkScope = {
-    /**
-     * Runs `work` behind a savepoint: if it throws, only its own writes are
-     * undone and the transaction stays usable; the error is rethrown.
-     */
-    isolate: <T>(work: () => Promise<T>) => Promise<T>;
-};
-
-async function inSavepoint<T>(tx: Tx, work: () => Promise<T>): Promise<T> {
-    await tx`savepoint bulk_step`;
-    try {
-        const out = await work();
-        await tx`release savepoint bulk_step`;
-        return out;
-    } catch (err) {
-        await tx`rollback to savepoint bulk_step`;
-        throw err;
-    }
-}
-
-export async function bulkTickOffGroceryLines(input: {
-    householdId: string;
-    lineIds: readonly string[];
-}): Promise<BulkResult> {
-    // The household's day is read before the transaction opens.
-    const today = await householdToday(input.householdId);
-    return inBulkTransaction(input.householdId, "grocery-tick", (scope) =>
-        tickOffGroceryLines(liveGroceryStore(), liveFoodsStore(), {
-            ...input,
-            today,
-            isolate: scope.isolate,
-        }),
-    );
-}
-
-export function bulkRemoveGroceryLines(input: {
-    householdId: string;
-    lineIds: readonly string[];
-}): Promise<BulkResult> {
-    return inBulkTransaction(input.householdId, "grocery-remove", () =>
-        removeGroceryLines(liveGroceryStore(), input),
-    );
 }
 
 export function bulkDiscardFridgeItems(input: {

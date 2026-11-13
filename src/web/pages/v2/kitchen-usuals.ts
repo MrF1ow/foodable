@@ -26,7 +26,7 @@ import {
 import { confirmSheet, sheet } from "../../components/v2/sheet.js";
 import {
     addUsualSheet,
-    addUsualTrigger,
+    addUsualButton,
     USUAL_ADD_SHEET_ID,
     type UsualAddView,
 } from "./kitchen-usuals-add.js";
@@ -37,7 +37,7 @@ import { stepper } from "../../components/v2/stepper.js";
 import type { Notice } from "../../../domain/notices.js";
 import { renderAppShell } from "../../shell.js";
 import { noticeStrip, stripNotices } from "./notice-strip.js";
-import { renderKitchenHead } from "./kitchen-head.js";
+import { kitchenTopTools, renderKitchenHead } from "./kitchen-head.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 
 export const USUALS_V2_RETURN_TO = "/kitchen/usuals";
@@ -710,6 +710,7 @@ function renderUsualsHead(view: KitchenUsualsV2View): string {
         active: "usuals",
         phoneSubtitle: subtitle,
         desktopSubtitle: subtitle,
+        desktopTools: addUsualButton().desktop,
     });
 }
 
@@ -747,7 +748,6 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
     const returnTo = view.selectedStoreId
         ? `${USUALS_V2_RETURN_TO}?store=${encodeURIComponent(view.selectedStoreId)}`
         : USUALS_V2_RETURN_TO;
-    const addTrigger = addUsualTrigger();
     const addSheet = addUsualSheet({
         add: view.add,
         addable: view.addable,
@@ -777,6 +777,7 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
     const selectable = rows.length > 0;
     return `${renderUsualsHead(view)}
 <div class="fd-kitchen-usuals-page"${select.rootAttrs}>
+${kitchenTopTools(addUsualButton().phone)}
 ${pageError}
 <p class="fd-kitchen-usual-intro">${esc(USUALS_INTRO)}</p>
 ${String(runningLowStrip(view.notices))}
@@ -784,7 +785,6 @@ ${view.stores.length > 0 ? storeFilterChips(view) : ""}
 ${selectable ? select.tools + select.bar : ""}
 ${rows.length > 0 ? String(sectionHeader({ title: "Usuals", count: rows.length })) : ""}
 <div class="fd-kitchen-usual-table">${rows.length > 0 ? USUAL_TABLE_HEAD : ""}${list}</div>
-<div class="fd-kitchen-usual-add-wrap">${addTrigger}</div>
 ${sheets}
 ${selectable ? select.sheets : ""}
 ${addSheet}
