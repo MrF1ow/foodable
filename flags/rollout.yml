@@ -35,7 +35,7 @@ flags:
         default: true
         rules: []
     mcp-share-links:
-        default: true
+        default: false
         rules: []
     mcp-widgets-v2:
         default: true
