@@ -28,7 +28,7 @@ import { stepper } from "../../components/v2/stepper.js";
 import type { Notice } from "../../../domain/notices.js";
 import { renderAppShell } from "../../shell.js";
 import { noticeStrip, stripNotices } from "./notice-strip.js";
-import { renderKitchenDesktopSeg } from "./kitchen-overview.js";
+import { renderKitchenHead } from "./kitchen-head.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 
 export const USUALS_V2_RETURN_TO = "/kitchen/usuals";
@@ -724,18 +724,16 @@ function addUsualTrigger(view: KitchenUsualsV2View): string {
     );
 }
 
-function renderUsualsDesktopHead(view: KitchenUsualsV2View): string {
-    const itemCount = esc(
-        kitchenUsualsHeaderSubtitle(view.rows.length, view.restockDay),
+function renderUsualsHead(view: KitchenUsualsV2View): string {
+    const subtitle = kitchenUsualsHeaderSubtitle(
+        view.rows.length,
+        view.restockDay,
     );
-    return `<header class="fd-kitchen-overview-head fd-kitchen-usual-head">
-<div class="fd-kitchen-overview-head__title">
-<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--phone">${itemCount}</span><span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--desktop">${itemCount}</span></h1>
-</div>
-<div class="fd-kitchen-overview-head__tools">
-${renderKitchenDesktopSeg("usuals")}
-</div>
-</header>`;
+    return renderKitchenHead({
+        active: "usuals",
+        phoneSubtitle: subtitle,
+        desktopSubtitle: subtitle,
+    });
 }
 
 /** The usuals running low, with Add to list and Dismiss; empty when none is. */
@@ -769,13 +767,9 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
     const sheets = view.rows
         .map((row) => editUsualSheet(row, view, resolvedOpen))
         .join("");
-    const itemCount = esc(
-        kitchenUsualsHeaderSubtitle(view.rows.length, view.restockDay),
-    );
     const addTrigger = addUsualTrigger(view);
     const addSheet = addUsualSheet(view);
-    return `<h1 class="fd-kitchen-grocery-title fd-kitchen-usual-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-grocery-count fd-kitchen-usual-count">${itemCount}</span></h1>
-${renderUsualsDesktopHead(view)}
+    return `${renderUsualsHead(view)}
 <div class="fd-kitchen-usuals-page">
 ${pageError}
 <p class="fd-kitchen-usual-intro">${esc(USUALS_INTRO)}</p>

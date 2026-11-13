@@ -145,6 +145,42 @@ describe("/app-v2.css", () => {
         expect(css).not.toMatch(/@media[^{]*max-width/);
     });
 
+    test("Kitchen tab pages sit one 16px step under the tabs and keep Add and Share out of flow", () => {
+        const css = readFileSync("./public/app/v2/kitchen.css", "utf8").replace(
+            /\/\*[\s\S]*?\*\//g,
+            "",
+        );
+        // The shell's sibling gap (--gap-section) plus the tabs' 16px bottom
+        // margin made it 30px; the three pages take that gap back, and the
+        // single desktop block puts them back under the header.
+        const pull = css.indexOf(
+            ".fd-kitchen-usuals-page {\n    position: relative",
+        );
+        expect(pull).toBeGreaterThanOrEqual(0);
+        expect(css.slice(pull, css.indexOf("}", pull))).toMatch(
+            /margin-top:\s*calc\(-1 \* var\(--gap-section/,
+        );
+        const desktop = css.slice(css.indexOf("@media (min-width: 1024px)"));
+        expect(desktop).toMatch(
+            /\.fd-kitchen-groceries-page {[^}]*margin-top:\s*0/,
+        );
+        expect(desktop).toMatch(
+            /\.fd-kitchen-usuals-page {[^}]*margin-top:\s*0/,
+        );
+        // Add and Share are absolutely placed beside the tabs: no fixed
+        // negative margins pulling a row up into them.
+        const tools = css.indexOf(".fd-kitchen-fridge-top,");
+        expect(css.slice(tools, css.indexOf("}", tools))).toMatch(
+            /position:\s*absolute/,
+        );
+        expect(css).not.toMatch(/margin-top:\s*calc\(-1 \* \(28px/);
+        // Share is the same 34px circle as Add on the phone (icon only), so
+        // it cannot cover the end of the Usuals tab on a narrow screen.
+        expect(css).toMatch(
+            /\.fd-kitchen-grocery-tools \.fd-kitchen-grocery-share {[^}]*width:\s*34px/,
+        );
+    });
+
     test("one breakpoint: a single 1024px media query", () => {
         const shell = readFileSync("./public/app/v2/shell.css", "utf8");
         expect(shell.match(/@media \(min-width: 1024px\)/g)?.length).toBe(1);

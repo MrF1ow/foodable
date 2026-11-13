@@ -479,6 +479,14 @@ describe("header subtitle", () => {
     });
 });
 
+describe("page header", () => {
+    test("is the same as on Fridge and Groceries", () => {
+        expect(renderKitchenUsualsBody(baseView())).toMatch(
+            /^<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">[^<]+<\/span><\/h1>\n<header class="fd-kitchen-overview-head">\n<div class="fd-kitchen-overview-head__title">\n<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--phone">[^<]+<\/span><span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--desktop">[^<]+<\/span><\/h1>\n<\/div>\n<div class="fd-kitchen-overview-head__tools">\n<nav class="fd-seg fd-kitchen-overview-seg" aria-label="Kitchen sections">/,
+        );
+    });
+});
+
 describe("edit-usual sheet restock controls", () => {
     function bodyFor(over: Partial<Food>, extra: Record<string, unknown> = {}) {
         const row = scheduled(over);

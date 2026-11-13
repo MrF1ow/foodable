@@ -302,10 +302,18 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(body).toContain("8 to get");
     });
 
-    test("Share sits in the title row and opens a sheet that posts to the share route", () => {
+    test("the header is the same as on Fridge and Usuals; Share is a tool, not part of the title", () => {
         const body = renderKitchenGroceriesBody(baseView());
         expect(body).toMatch(
-            /<div class="fd-kitchen-grocery-head"><h1[\s\S]*?<\/h1><button[^>]*fd-kitchen-grocery-share/,
+            /^<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">[^<]+<\/span><\/h1>\n<header class="fd-kitchen-overview-head">\n<div class="fd-kitchen-overview-head__title">\n<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--phone">[^<]+<\/span><span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--desktop">[^<]+<\/span><\/h1>\n<\/div>\n<div class="fd-kitchen-overview-head__tools">\n<nav class="fd-seg fd-kitchen-overview-seg" aria-label="Kitchen sections">/,
+        );
+        expect(body).toContain("Kitchen<span");
+        // Share: a desktop tool in the head, and a phone row under the tabs.
+        expect(body).toMatch(
+            /fd-kitchen-overview-head__tools">\n<nav[\s\S]*?<\/nav>\n<button[^>]*fd-kitchen-grocery-share/,
+        );
+        expect(body).toMatch(
+            /<div class="fd-kitchen-groceries-page">\n<div class="fd-kitchen-grocery-tools"><button[^>]*fd-kitchen-grocery-share/,
         );
         expect(body).toContain(
             'commandfor="fd-grocery-share-sheet" command="show-modal"',

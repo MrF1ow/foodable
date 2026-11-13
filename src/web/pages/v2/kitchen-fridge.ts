@@ -36,7 +36,7 @@ import { formatExpiryWhen, expiryToneClass } from "./today-rail.js";
 import {
     type KitchenFridgeGroceryOverview,
     kitchenFridgeItemCountLabel,
-    renderKitchenOverviewDesktopHead,
+    renderKitchenOverviewHead,
     renderKitchenOverviewGroceriesCard,
     wrapKitchenOverviewColumns,
 } from "./kitchen-overview.js";
@@ -540,18 +540,13 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
         className: "fd-icon-btn fd-kitchen-fridge-add",
         icon: String(iconPlus()),
     });
-    const itemCount = kitchenFridgeItemCountLabel(view.items.length);
     const groceryOpen =
         view.groceryOverview?.openLineCount ??
         (view.groceryLines
             ? view.groceryLines.filter((row) => !row.checked).length
             : 0);
-    const desktopHead = renderKitchenOverviewDesktopHead(
-        view.items.length,
-        groceryOpen,
-    );
-    return `<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">${esc(itemCount)}</span></h1>
-${desktopHead}
+    const head = renderKitchenOverviewHead(view.items.length, groceryOpen);
+    return `${head}
 <div class="fd-kitchen-fridge-page">
 <div class="fd-kitchen-fridge-top">${addBtn}</div>
 ${view.error && !view.openItemId && !view.openAdd ? String(settingsErrorBanner(view.error)) : ""}
