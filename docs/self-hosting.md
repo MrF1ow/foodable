@@ -372,10 +372,10 @@ One deploy, one Postgres database. Sign-up policy is deploy config: set optional
 
 A usual is a plain food the household buys again and again (Eggs, Milk). Add one from the **+** on Kitchen › Usuals (the same round **+** sits on Fridge and Groceries; on a wide screen it is a labelled button). The **Add a usual** sheet has three ways in:
 
-- **Scan:** point the camera at a barcode. Foodable looks the product up and asks **What is it?**: pick the plain food it belongs to, or name a new one. The product is filed under that food and becomes its usual product.
+- **Scan:** point the camera at a barcode. Foodable looks the product up and asks **What is it?**: pick the plain food it belongs to, or name a new one (a new food needs a name). The product is filed under that food and becomes its usual product. A product with no brand and the name of a food you have is that food, and is added as it is.
 - **Search:** pick a food already in the catalog. It is added as it is.
 - **Type it:** for something with no product to scan. Give a name and calories, protein, carbs and fat per 100 g, per 100 ml or per serving (in g or ml). A barcode the lookup did not find is kept, so the next scan knows it.
 
-A food stays a usual until it is removed from Usuals; removing it clears its products and schedule from the list but keeps the food.
+A food added with a product stays a usual while it has a product: take the last product away and it leaves the list. A food added as it is (Search, Type it, or a scan of a plain food) stays until it is removed from Usuals; removing it clears its products and schedule from the list but keeps the food.
 
 Connect an agent at `https://your-host/mcp` with the household account.

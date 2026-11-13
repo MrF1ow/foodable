@@ -108,6 +108,18 @@ describe("groceryRowLabels", () => {
         expect(labels.subtitle).toBe("Eggs");
     });
 
+    test("a typed usual with no product keeps the food's name and gets the tag", () => {
+        const labels = groceryRowLabels(
+            lineView(
+                line({ id: "c", displayName: "Half & Half", foodId: "hh" }),
+            ),
+            { plainFoodName: null, isUsual: true },
+        );
+        expect(labels.tag).toBe("usual");
+        expect(labels.title).toBe("Half & Half");
+        expect(labels.subtitle).toBeUndefined();
+    });
+
     test("escapes hostile names in output via render, not in labels", () => {
         const labels = groceryRowLabels(
             lineView(

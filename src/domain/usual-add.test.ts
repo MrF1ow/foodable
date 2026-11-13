@@ -3,6 +3,7 @@ import {
     createMemoryFoodsStore,
     effectiveFoodsFromListed,
     FoodsInputError,
+    isUsualGroceryLine,
     linkProduct,
     mergeFoods,
     newFood,
@@ -89,7 +90,8 @@ describe("addUsualFromProduct", () => {
         });
         expect(food.id).toBe(milk.id);
         expect(food.usualProductId).toBe(scanned.id);
-        expect(food.usualAddedAt).not.toBeNull();
+        // The product makes it a usual; there is nothing to stamp.
+        expect(food.usualAddedAt).toBeNull();
         const linked = (await store.getFood(HH, scanned.id))!;
         expect(linked.genericFoodId).toBe(milk.id);
         expect(linked.usualStoreId).toBe("store-1");
@@ -359,13 +361,11 @@ describe("addUsualFromProduct", () => {
         ]);
     });
 
-    test("re-adding re-stamps the usual", async () => {
-        const { store, plain, product } = setup();
-        const milk = await plain("Milk");
-        const scanned = await product("Horizon Milk");
+    test("re-adding a scanned plain food re-stamps the usual", async () => {
+        const { store, plain } = setup();
+        const oat = await plain("Oat milk");
         const first = await addUsualFromProduct(store, HH, {
-            productId: scanned.id,
-            foodId: milk.id,
+            productId: oat.id,
             stores,
         });
         await store.updateFoodRow({
@@ -373,11 +373,64 @@ describe("addUsualFromProduct", () => {
             usualAddedAt: "2020-01-01T00:00:00.000Z",
         });
         const second = await addUsualFromProduct(store, HH, {
-            productId: scanned.id,
-            foodId: milk.id,
+            productId: oat.id,
             stores,
         });
         expect(second.usualAddedAt! > "2020-01-01T00:00:00.000Z").toBe(true);
+    });
+
+    test("filing a product under a food does not stamp it, and re-filing it elsewhere leaves no ghost usual", async () => {
+        const { store, plain, product } = setup();
+        const milk = await plain("Milk");
+        const oat = await plain("Oat milk");
+        const oatly = await product("Oatly Barista", { brand: "Oatly" });
+        await addUsualFromProduct(store, HH, {
+            productId: oatly.id,
+            foodId: milk.id,
+            stores,
+        });
+        await addUsualFromProduct(store, HH, {
+            productId: oatly.id,
+            foodId: oat.id,
+            stores,
+        });
+        expect((await store.getFood(HH, milk.id))!.usualAddedAt).toBeNull();
+        const listed = await store.listFoods(HH);
+        const { rows, addable } = usualProductRows({ foods: listed });
+        expect(rows.map((r) => r.food.name)).toEqual(["Oat milk"]);
+        expect(addable.map((f) => f.name)).toContain("Milk");
+        const atZero = usualsAtZeroForDigest({
+            items: [],
+            foods: listed,
+            foodsById: effectiveFoodsFromListed(listed),
+            stores: [{ id: "s1", name: "S", sortOrder: 0 }] as never,
+        });
+        expect(atZero.map((o) => o.displayName)).toEqual(["Oat milk"]);
+    });
+
+    test("a new food with a blank name is refused instead of falling back to the product's own food", async () => {
+        const { store, plain, product } = setup();
+        const milk = await plain("Milk");
+        const scanned = await product("Horizon Milk", {
+            genericFoodId: milk.id,
+        });
+        for (const newFoodName of ["", "   ", null]) {
+            let err: unknown;
+            try {
+                await addUsualFromProduct(store, HH, {
+                    productId: scanned.id,
+                    newFood: true,
+                    newFoodName,
+                    stores,
+                });
+            } catch (e) {
+                err = e;
+            }
+            expect(err).toBeInstanceOf(UsualInputError);
+            expect((err as UsualInputError).field).toBe("food");
+            expect((err as UsualInputError).message).toBe("Name the new food.");
+        }
+        expect((await store.getFood(HH, milk.id))!.usualProductId).toBeNull();
     });
 });
 
@@ -737,7 +790,7 @@ describe("usual membership", () => {
         expect(addable.map((f) => f.id)).toEqual([salt.id]);
     });
 
-    test("removing the only product of a scanned usual leaves it listed, empty, until removeUsual", async () => {
+    test("removing the only product of a scanned usual takes it off the list", async () => {
         const { store, plain, product } = setup();
         const milk = await plain("Milk");
         const scanned = await product("Horizon Milk");
@@ -748,22 +801,30 @@ describe("usual membership", () => {
         });
         await removeProduct(store, HH, milk.id, scanned.id);
         const after = (await store.getFood(HH, milk.id))!;
-        expect(after.usualAddedAt).not.toBeNull();
+        expect(after.usualAddedAt).toBeNull();
         expect(after.usualProductId).toBeNull();
         const listed = usualProductRows({ foods: await store.listFoods(HH) });
-        expect(listed.rows.map((r) => [r.food.id, r.products.length])).toEqual([
-            [milk.id, 0],
-        ]);
-        expect(listed.rows[0]!.usual).toBeNull();
-        expect(listed.addable.map((f) => f.id)).not.toContain(milk.id);
-        await removeUsual(store, HH, milk.id);
-        expect((await store.getFood(HH, milk.id))!.usualAddedAt).toBeNull();
+        expect(listed.rows).toEqual([]);
+        expect(listed.addable.map((f) => f.id)).toContain(milk.id);
+    });
+
+    test("removing a scanned plain food's only stamp is removeUsual", async () => {
+        const { store, plain } = setup();
+        const oat = await plain("Oat milk");
+        await addUsualFromProduct(store, HH, { productId: oat.id, stores });
+        expect(
+            usualProductRows({ foods: await store.listFoods(HH) }).rows.map(
+                (r) => r.food.id,
+            ),
+        ).toEqual([oat.id]);
+        await removeUsual(store, HH, oat.id);
+        expect((await store.getFood(HH, oat.id))!.usualAddedAt).toBeNull();
         expect(
             usualProductRows({ foods: await store.listFoods(HH) }).rows,
         ).toEqual([]);
     });
 
-    test("moving the product to another food through linkProduct leaves the usual listed", async () => {
+    test("moving the product to another food through linkProduct moves the usual with it", async () => {
         const { store, plain, product } = setup();
         const milk = await plain("Milk");
         const other = await plain("Whole milk");
@@ -776,10 +837,34 @@ describe("usual membership", () => {
         await linkProduct(store, HH, scanned.id, other.id);
         const { rows } = usualProductRows({ foods: await store.listFoods(HH) });
         expect(rows.map((r) => [r.food.id, r.products.length])).toEqual([
-            [milk.id, 0],
             [other.id, 1],
         ]);
-        expect((await store.getFood(HH, milk.id))!.usualAddedAt).not.toBeNull();
+    });
+
+    test("filing a typed usual under another food drops its stamp, so removing that food leaves nothing behind", async () => {
+        const { store, plain } = setup();
+        const milk = await plain("Milk");
+        const oat = await addUsualByHand(store, HH, hand({ name: "Oat milk" }));
+        const filed = await linkProduct(store, HH, oat.id, milk.id);
+        expect(filed.usualAddedAt).toBeNull();
+        expect((await store.getFood(HH, oat.id))!.genericFoodId).toBe(milk.id);
+        const names = async () =>
+            usualProductRows({
+                foods: await store.listFoods(HH),
+            }).rows.map((r) => r.food.name);
+        expect(await names()).toEqual(["Milk"]);
+        await removeUsual(store, HH, milk.id);
+        expect(await names()).toEqual([]);
+    });
+
+    test("linking a food to the food it already belongs to still drops its stamp", async () => {
+        const { store, plain } = setup();
+        const milk = await plain("Milk");
+        const oat = await addUsualByHand(store, HH, hand({ name: "Oat milk" }));
+        await store.updateFoodRow({ ...oat, genericFoodId: milk.id });
+        const same = await linkProduct(store, HH, oat.id, milk.id);
+        expect(same.usualAddedAt).toBeNull();
+        expect((await store.getFood(HH, oat.id))!.usualAddedAt).toBeNull();
     });
 
     test("a typed usual that gains and loses a product stays listed", async () => {
@@ -795,7 +880,7 @@ describe("usual membership", () => {
         expect((await store.getFood(HH, oat.id))!.usualAddedAt).not.toBeNull();
     });
 
-    test("Remove on one of two products keeps the stamp", async () => {
+    test("Remove on one of two products keeps the food listed", async () => {
         const { store, plain, product } = setup();
         const milk = await plain("Milk");
         const a = await product("A milk");
@@ -807,7 +892,11 @@ describe("usual membership", () => {
         });
         await setUsualProduct(store, HH, milk.id, b.id);
         await removeProduct(store, HH, milk.id, a.id);
-        expect((await store.getFood(HH, milk.id))!.usualAddedAt).not.toBeNull();
+        expect(
+            usualProductRows({ foods: await store.listFoods(HH) }).rows.map(
+                (r) => [r.food.id, r.products.map((p) => p.id)],
+            ),
+        ).toEqual([[milk.id, [b.id]]]);
     });
 
     test("a usual that is one only through its products behaves as before", async () => {
@@ -991,6 +1080,27 @@ describe("suggestUsualFoods", () => {
             "flo",
         );
         expect(result.matches.map((f) => f.id)).toEqual([flour.id]);
+    });
+});
+
+describe("a typed usual's grocery line", () => {
+    test("is tagged usual once it is on Usuals, and not before", async () => {
+        const { store, plain } = setup();
+        const cream = await plain("Cream");
+        const typed = await addUsualByHand(store, HH, hand());
+        const listed = await store.listFoods(HH);
+        const effective = effectiveFoodsFromListed(listed);
+        const tagged = (id: string) => {
+            const eff = effective.get(id)!;
+            return isUsualGroceryLine({
+                lineFoodId: id,
+                effectiveProductId: eff.product?.id,
+                food: eff,
+                genericOf: () => null,
+            });
+        };
+        expect(tagged(typed.id)).toBe(true);
+        expect(tagged(cream.id)).toBe(false);
     });
 });
 

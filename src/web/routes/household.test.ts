@@ -1847,7 +1847,7 @@ describe("add a usual routes", () => {
         expect(linked?.genericFoodId).toBe(half.id);
         const food = await db.foodsStore.getFood(HH, half.id);
         expect(food?.usualProductId).toBe(product.id);
-        expect(food?.usualAddedAt).not.toBeNull();
+        expect(food?.usualAddedAt).toBeNull();
         resetFlagsForTests();
     });
 
@@ -1965,7 +1965,7 @@ describe("add a usual routes", () => {
         ).toBe(half.id);
         const food = await db.foodsStore.getFood(HH, half.id);
         expect(food?.usualProductId).toBe(product.id);
-        expect(food?.usualAddedAt).not.toBeNull();
+        expect(food?.usualAddedAt).toBeNull();
         const html = await (await get("/kitchen/usuals")).text();
         expect(html).toContain('id="fd-usual-row-' + half.id + '"');
         resetFlagsForTests();
@@ -1989,6 +1989,41 @@ describe("add a usual routes", () => {
             (f) => f.name === "Half and half",
         );
         expect(created?.usualProductId).toBe(product.id);
+        resetFlagsForTests();
+    });
+
+    test("a new food with no name answers 400 under the food input and files nothing", async () => {
+        const milk = await plain("Milk");
+        const scanned = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Horizon Milk",
+                brand: "Horizon",
+                genericFoodId: milk.id,
+            }),
+        );
+        for (const name of ["", "   "]) {
+            const res = await post("/kitchen/usuals/add/product", {
+                product_id: scanned.id,
+                scan_code: HALF_CODE,
+                food_choice: "new",
+                new_food_name: name,
+                return_to: "/kitchen/usuals",
+            });
+            expect(res.status).toBe(400);
+            const html = await res.text();
+            expect(html).toContain("Name the new food.");
+            expect(html).toContain('id="fd-usual-add-food-error"');
+            expect(html).toContain("data-sheet-open-on-load");
+            expect(toastOf(res)).toBeNull();
+        }
+        expect((await db.foodsStore.getFood(HH, milk.id))?.usualProductId).toBe(
+            null,
+        );
+        expect(
+            (await db.foodsStore.listFoods(HH)).filter((f) => !f.archivedAt),
+        ).toHaveLength(2);
         resetFlagsForTests();
     });
 

@@ -210,6 +210,7 @@ usualAddRoutes.post("/kitchen/usuals/add/product", requireMember, async (c) => {
             productId,
             foodId: choice !== "" && choice !== "new" ? choice : null,
             newFoodName: choice === "new" ? newName : null,
+            newFood: choice === "new",
             purchase: purchaseFromBody(body),
             stores: liveSettingsStore(),
             createdBy: c.get("userId"),

@@ -880,6 +880,39 @@ test("isUsualGroceryLine: the usual product and its generic's line are usual", (
     ).toBe(true);
 });
 
+test("isUsualGroceryLine: a plain food that is a usual with no product is usual", () => {
+    const typed = {
+        genericFoodId: null,
+        usualProductId: null,
+        usualAddedAt: "2026-11-13T12:00:00.000Z",
+        archivedAt: null,
+    };
+    expect(
+        isUsualGroceryLine({
+            lineFoodId: "t1",
+            effectiveProductId: undefined,
+            food: typed,
+            genericOf: () => undefined,
+        }),
+    ).toBe(true);
+    expect(
+        isUsualGroceryLine({
+            lineFoodId: "t1",
+            effectiveProductId: undefined,
+            food: { ...typed, usualAddedAt: null },
+            genericOf: () => undefined,
+        }),
+    ).toBe(false);
+    expect(
+        isUsualGroceryLine({
+            lineFoodId: "t1",
+            effectiveProductId: undefined,
+            food: { ...typed, archivedAt: "2026-11-13T12:00:00.000Z" },
+            genericOf: () => undefined,
+        }),
+    ).toBe(false);
+});
+
 test("isUsualGroceryLine: another product of the family is not usual", () => {
     const generic = {
         genericFoodId: null,

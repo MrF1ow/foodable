@@ -1630,8 +1630,10 @@ async function findFoodByLooseKey(
  * that merely goes by its name: a household barcode, the same Open Food Facts
  * id, or a live row with the same name and brand (another pack size of the
  * same product) reuses a row, anything else becomes a product row of its own.
- * An unbranded hit matches by name as usual. The default (match by name) is
- * what the log sheet and the barcode page rely on.
+ * A branded product never merges into a plain food by name, but an unbranded
+ * hit named like a plain food is that food (the unique name index allows one
+ * row per name), so it binds to it. The default (match by name) is what the
+ * log sheet and the barcode page rely on.
  */
 export type BarcodeFoodOptions = { nameMatch?: boolean };
 
@@ -2110,12 +2112,16 @@ export function mergedFoodFields(keep: Food, drop: Food): MergedFoodFieldPick {
     };
 }
 
-type UsualRow = Pick<Food, "genericFoodId" | "usualProductId" | "archivedAt">;
+type UsualRow = Pick<
+    Food,
+    "genericFoodId" | "usualProductId" | "archivedAt"
+> & { usualAddedAt?: string | null };
 
 /**
  * Whether a grocery line is the household's usual product for its food: the
  * line's food is the usual product itself, or a generic whose effective
- * product is. The usual lives on the generic food. An archived row (the line's
+ * product is, or a plain food that is a usual with no product (typed in, or
+ * scanned as itself: `usualAddedAt`). The usual lives on the generic food. An archived row (the line's
  * food or its generic) records no usual, so an archived generic never makes a
  * line usual.
  */
@@ -2134,6 +2140,7 @@ export function isUsualGroceryLine(input: {
     const generic = food?.genericFoodId
         ? live(input.genericOf(food.genericFoodId))
         : food;
+    if (food && !food.genericFoodId && food.usualAddedAt != null) return true;
     const usualProductId = generic?.usualProductId ?? null;
     return (
         usualProductId != null &&
@@ -2957,7 +2964,16 @@ export async function linkProduct(
     }
     assertPlainFoodTarget(food);
     assertSameKindLiveNotSelf(product, food, productId, foodId);
-    if (product.genericFoodId === foodId) return product;
+    // A product is never a usual by itself: filing a food under another drops
+    // its own added-to-Usuals stamp, or it would reappear on Usuals when the
+    // food it now belongs to is removed.
+    const filed =
+        product.usualAddedAt != null
+            ? { ...product, usualAddedAt: null }
+            : product;
+    if (product.genericFoodId === foodId) {
+        return filed === product ? product : saveFood(store, filed);
+    }
     if (product.genericFoodId && product.genericFoodId !== foodId) {
         const oldPlain = await store.getFood(
             householdId,
@@ -2970,7 +2986,7 @@ export async function linkProduct(
             });
         }
     }
-    return saveFood(store, { ...product, genericFoodId: foodId });
+    return saveFood(store, { ...filed, genericFoodId: foodId });
 }
 
 export async function setUsualPurchase(

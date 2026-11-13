@@ -167,6 +167,11 @@ export type UsualFromProductInput = {
     foodId?: string | null;
     /** Or a name for the plain food: reused when one has it, else created. */
     newFoodName?: string | null;
+    /**
+     * The caller chose "a new food" (the sheet's chip), so a blank name is a
+     * refusal rather than a fall back to the product's own food.
+     */
+    newFood?: boolean;
     purchase?: UsualPurchasePatch;
     stores: UsualStoreLookup;
     createdBy?: string | null;
@@ -182,14 +187,17 @@ function underFoodField(err: unknown): unknown {
 /**
  * Adds a scanned product to Usuals. The usual is the plain food the product
  * is: the product is linked under it (the same link Settings › Items "Belongs
- * to…" makes, moving it if it sat under another food), becomes its usual
- * product, and the food is stamped as added. A product already under a food
- * goes to that food unless another is named. Returns the plain food.
+ * to…" makes, moving it if it sat under another food) and becomes its usual
+ * product. That product is what makes the food a usual, so the food is not
+ * stamped: take the product away and it leaves the list, as it always did. A
+ * product already under a food goes to that food unless another is named.
+ * Returns the plain food.
  *
  * A scanned barcode can belong to a plain food itself (one typed by hand with
  * that barcode). Such a row is not filed under anything: when it is the one
  * named, or nothing is named and it is plain (no brand, not a scanned catalog
- * row), it is stamped as the usual as it is, with no link to itself.
+ * row), it is stamped as the usual as it is, with no link to itself. The stamp
+ * is only for a usual that has no product to make it one.
  */
 export async function addUsualFromProduct(
     store: FoodsStore,
@@ -207,6 +215,8 @@ export async function addUsualFromProduct(
     try {
         if (foodId) {
             target = await liveFood(store, householdId, foodId);
+        } else if (input.newFood && !newName) {
+            throw new UsualInputError("Name the new food.", "food");
         } else if (newName) {
             const existing = await findPlainFoodByName(
                 store,
@@ -276,6 +286,7 @@ export async function addUsualFromProduct(
         throw underFoodField(err);
     }
     const refreshed = await liveFood(store, householdId, target.id);
+    if (!self) return refreshed;
     const saved = await store.updateFoodRow({
         ...refreshed,
         usualAddedAt: nowIso(),
