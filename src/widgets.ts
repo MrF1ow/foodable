@@ -533,9 +533,9 @@ export async function getAppJs(): Promise<string> {
     return appJs;
 }
 
-// The new shell's stylesheet and script (flag `ui-v2`), served at /app-v2.css
-// and /app-v2.js next to the old pair, which the new shell also loads. Both are
-// hashed and warmed like the old ones.
+// The shell's own stylesheet and script, served at /app-v2.css and /app-v2.js
+// next to the base pair (/app.css, /app.js), which the shell also loads. Both
+// are hashed and warmed like the base ones.
 //
 // app-v2.css is assembled from public/app/v2/app-v2.css. Its @include markers
 // resolve against public/app/v2/ (APP_V2_CSS_DIR), not public/widgets/src/:

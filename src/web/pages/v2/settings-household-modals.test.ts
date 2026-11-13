@@ -5,6 +5,7 @@ import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     HOUSEHOLD_ADD_STORE_MODAL_ID,
     HOUSEHOLD_MANAGE_ID,
+    HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
     manageFill,
@@ -86,6 +87,26 @@ test("a member who cannot manage gets no add dialogs, and only the owner gets me
     expect(plain).not.toContain(`id="${HOUSEHOLD_ADD_MEMBER_MODAL_ID}"`);
     expect(plain).not.toContain(`id="${HOUSEHOLD_ADD_STORE_MODAL_ID}"`);
     expect(plain).not.toContain('id="household-manage"');
+});
+
+test("only the owner gets the rotate-token confirm, and it opts out of Turbo", () => {
+    const owner = renderHouseholdV2OwnerModals(ownerView);
+    const dialog = dialogHtml(owner, HOUSEHOLD_ROTATE_TOKEN_MODAL_ID);
+    expect(dialog).toMatch(
+        /<form[^>]*method="post"[^>]*action="\/settings\/household\/rotate-token"[^>]*data-turbo="false"/,
+    );
+    expect(dialog).toContain(
+        "Issue a new household bot token? The old token stops working immediately.",
+    );
+    expect(dialog).toContain(">Rotate token</button>");
+    for (const view of [
+        { members: [alice, bob], isOwner: false, canManage: true },
+        { members: [alice, bob], isOwner: false, canManage: false },
+    ]) {
+        const html = renderHouseholdV2OwnerModals(view);
+        expect(html).not.toContain(HOUSEHOLD_ROTATE_TOKEN_MODAL_ID);
+        expect(html).not.toContain("/settings/household/rotate-token");
+    }
 });
 
 test("household server error reopens add-member and remove confirm modals", () => {
@@ -205,8 +226,8 @@ test("member dialog count does not grow with the household", () => {
     const six = modals(6);
     const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
     expect(dialogs(one)).toBe(dialogs(six));
-    // Add member, add store, manage, make owner, remove, and the two readers.
-    expect(dialogs(six)).toBe(7);
+    // Add member, add store, rotate token, manage, make owner, remove, and the two readers.
+    expect(dialogs(six)).toBe(8);
     expect(six.match(/id="household-manage"/g)?.length).toBe(1);
     expect(six.match(/id="household-remove"/g)?.length).toBe(1);
     expect(six.match(/id="household-make-owner"/g)?.length).toBe(1);

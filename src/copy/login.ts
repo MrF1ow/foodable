@@ -29,7 +29,7 @@ export interface LoginDoc {
 export interface LoginErrors {
     /** Sign-in refused because the login or password is wrong. Also what a
      * stranger sees once the owner exists: accounts are created by the owner
-     * in Household › Members, so there is no separate "sign-up closed" case
+     * in Settings › Household, so there is no separate "sign-up closed" case
      * worth telling apart from a typo. */
     invalidCredentials: string;
     /** Auth backend could not answer (database down, timeout, rate limit). Kept apart

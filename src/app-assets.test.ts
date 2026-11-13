@@ -14,7 +14,7 @@ test("app asset hrefs are content-versioned after warm assembly", async () => {
     const js = appScriptHref();
     expect(css).toMatch(/^\/app\.css\?v=[a-f0-9]{12}$/);
     expect(js).toMatch(/^\/app\.js\?v=[a-f0-9]{12}$/);
-    const head = appHead("Test", "system");
+    const head = appHead("Test", "system", "page");
     expect(head).toContain(`href="${css}"`);
     expect(head).toContain(`src="${js}"`);
 });

@@ -133,20 +133,22 @@ test("bare pages stamp page chrome and omit the bottom nav", () => {
 });
 
 test("appHead emits foodable-theme for every preference", () => {
-    expect(appHead("T", "light")).toContain(
+    expect(appHead("T", "light", "page")).toContain(
         '<meta name="foodable-theme" content="light" />',
     );
-    expect(appHead("T", "system")).toContain(
+    expect(appHead("T", "system", "page")).toContain(
         '<meta name="foodable-theme" content="system" />',
     );
 });
 
-test("the gear opts out of Turbo so the toolbar retints on a page load", () => {
-    expect(appBar("app")).toContain('href="/settings" data-turbo="false"');
-    expect(appBar("app")).toContain('class="app-bar-logo" href="/"');
-    expect(appBar("app")).not.toContain(
+test("Log out opts out of Turbo and the logo link does not", () => {
+    expect(appBar()).toContain('href="/logout" data-turbo="false"');
+    expect(appBar()).toContain('class="app-bar-logo" href="/"');
+    expect(appBar()).not.toContain(
         'class="app-bar-logo" href="/" data-turbo="false"',
     );
+    expect(appBar()).not.toContain("/settings");
+    expect(appBar()).not.toContain("app-bar-attention");
 });
 
 test("bare pages get the top bar and can stamp a real data-theme", () => {

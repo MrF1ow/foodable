@@ -33,6 +33,7 @@ export type HouseholdOwnerModalsView = {
 
 export const HOUSEHOLD_ADD_MEMBER_MODAL_ID = "household-add-member";
 export const HOUSEHOLD_ADD_STORE_MODAL_ID = "household-add-store";
+export const HOUSEHOLD_ROTATE_TOKEN_MODAL_ID = "household-rotate-token";
 export const HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID =
     "household-social-reader-tiktok";
 export const HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID =
@@ -304,7 +305,7 @@ ${memberActionsSlot(manageMember)}`,
     );
 }
 
-/** Owner/admin dialogs for the v2 household settings page (add member, stores, role). */
+/** Owner/admin dialogs for the household settings page (add member, stores, token, roles). */
 export function renderHouseholdV2OwnerModals(
     view: HouseholdOwnerModalsView,
 ): string {
@@ -319,6 +320,20 @@ export function renderHouseholdV2OwnerModals(
 ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_name" name="name" required maxlength="80" autocomplete="off" />` })}
 <button type="submit" class="btn-primary">Add store</button>
 </form>`,
+              })
+            : "",
+        view.isOwner
+            ? confirmModal({
+                  id: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
+                  title: "Rotate household token",
+                  message:
+                      "Issue a new household bot token? The old token stops working immediately.",
+                  action: "/settings/household/rotate-token",
+                  confirmLabel: "Rotate token",
+                  formClass: "rotate-token modal-confirm",
+                  // The route answers 200 HTML carrying the one-time secret.
+                  turboFalse: true,
+                  openOnLoad: modalOpen(view, HOUSEHOLD_ROTATE_TOKEN_MODAL_ID),
               })
             : "",
         sharedMemberDialogs(view),

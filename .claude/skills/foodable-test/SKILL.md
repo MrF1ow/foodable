@@ -80,7 +80,7 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
 - **Types, lint, format:** `bun run typecheck`, `bun run lint`, `bun run format:check` (`format` fixes).
 
-`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (the server default is the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if its registration points at the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Household › Members, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
+`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (the server default is the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if its registration points at the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 
 ## Never touch
 

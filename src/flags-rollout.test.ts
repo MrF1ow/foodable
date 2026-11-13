@@ -15,10 +15,10 @@ describe("flags/rollout.yml registry consistency", () => {
     test("reports missing registry flags", async () => {
         const text = await Bun.file(ROLLOUT_PATH).text();
         const doc = parseRolloutYaml(text);
-        delete doc.flags!["ui-v2"];
+        delete doc.flags!["mcp-widgets-v2"];
         const errors = validateRolloutFile(doc);
         expect(errors).toContain(
-            'rollout: registry flag "ui-v2" missing from file',
+            'rollout: registry flag "mcp-widgets-v2" missing from file',
         );
     });
 });

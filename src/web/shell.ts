@@ -4,7 +4,7 @@ import { appScriptHref, appStylesheetHref } from "../widgets.js";
 import type { MemberRole } from "../household.js";
 import type { ViewerFlags } from "../viewer-flags.js";
 import type { AttentionChrome } from "./attention.js";
-import { iconLogOut, iconSettings } from "./components/icons.js";
+import { iconLogOut } from "./components/icons.js";
 import { renderAppShellV2 } from "./shell-v2.js";
 
 export { escapeHtml };
@@ -92,11 +92,11 @@ export function htmlOpen(theme: ThemePref): string {
 
 export type ThemeChromeKind = "page" | "nav";
 
-/** Browser chrome meta tags. "nav" (the default) uses the nav surface the app pages sit
- *  on; login and bare pages pass "page" for the page background (--bg). */
+/** Browser chrome meta tags. "page" is the page background (--bg), which the
+ *  shell, login and bare pages all use; "nav" is the nav surface. */
 export function themeColorMeta(
     theme: ThemePref,
-    kind: ThemeChromeKind = "nav",
+    kind: ThemeChromeKind,
 ): string {
     const colors = kind === "nav" ? THEME_NAV_COLOR : THEME_COLOR;
     if (theme !== "system") {
@@ -106,26 +106,11 @@ export function themeColorMeta(
 <meta name="theme-color" content="${colors.dark}" media="(prefers-color-scheme: dark)" />`;
 }
 
-export type AppBarVariant = "app" | "gate";
-
-// Settings uses page theme chrome and the tabs use nav chrome. Turbo's head
-// merge replaces a theme-color meta whose colour differs, and iOS Safari only
-// retints its toolbar on a page load, so the gear opts out of Turbo.
-export function appBar(
-    variant: AppBarVariant,
-    attention?: AttentionChrome,
-): string {
-    const countBadge =
-        variant === "app" && attention && attention.count > 0
-            ? `<a class="pill app-bar-attention" href="/needs-attention" aria-label="Needs attention: ${attention.count}">${attention.count}</a>`
-            : "";
-    const action =
-        variant === "app"
-            ? `${countBadge}<a class="btn-icon app-bar-action" href="/settings" data-turbo="false" aria-label="Settings" title="Settings">${iconSettings()}</a>`
-            : variant === "gate"
-              ? `<a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a>`
-              : "";
-    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a>${action}</header>`;
+/** The top bar of the bare pages (create-household, forbidden, not found): the
+ *  logo and Log out, with no nav and no search. Log out opts out of Turbo so
+ *  the login form that follows is a real page load. */
+export function appBar(): string {
+    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a><a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a></header>`;
 }
 
 /** Everything in `<head>` before the stylesheet and script tags, which differ
@@ -153,7 +138,7 @@ ${themeColorMeta(theme, themeChrome)}
 export function appHead(
     title: string,
     theme: ThemePref,
-    themeChrome: ThemeChromeKind = "nav",
+    themeChrome: ThemeChromeKind,
 ): string {
     return `${appHeadMeta(title, theme, themeChrome)}
 <link rel="stylesheet" href="${appStylesheetHref()}" data-turbo-track="reload" />
@@ -165,9 +150,10 @@ export function renderAppShell(chrome: AppChrome): string {
     return renderAppShellV2(chrome);
 }
 
-/** Create-household and forbidden: same top bar as the app, no bottom nav.
- *  There is no saved theme yet, so production leaves it as "system". Preview
- *  stamps light/dark so a shot of each is not the same bytes. */
+/** Create-household, forbidden and not found: a bare page with the logo and
+ *  Log out on top and none of the shell around it. There is no saved theme
+ *  yet, so production leaves it as "system". Preview stamps light/dark so a
+ *  shot of each is not the same bytes. */
 export function renderBarePage(
     title: string,
     body: string,
@@ -179,7 +165,7 @@ ${htmlOpen(theme)}
 ${appHead(title, theme, "page")}
 </head>
 <body>
-${appBar("gate")}
+${appBar()}
 <main class="app-main native">${body}</main>
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>

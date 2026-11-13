@@ -141,6 +141,12 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             when: /^(CLAUDE\.md|AGENTS\.md|\.claude\/skills\/|\.agents\/skills)/,
             tests: /^scripts\/conventions\/skills\.test\.ts$/,
         },
+        // docs-drift.test.ts reads CLAUDE.md, the shipped app CSS, .env.example
+        // and the flag table.
+        {
+            when: /^(CLAUDE\.md|AGENTS\.md|\.env\.example|public\/app\/.+\.css|src\/flags\.ts)$/,
+            tests: /^src\/docs-drift\.test\.ts$/,
+        },
         {
             when: /^flags\/rollout\.yml$/,
             tests: /^src\/flags-rollout\.test\.ts$/,
@@ -161,7 +167,8 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             incidental: true,
         },
         // field.test.ts globs src/web/**/*.ts for hand-written labels;
-        // turbo-forms.test.ts reads pages/household.ts, components/ui.ts and shell.ts.
+        // turbo-forms.test.ts reads pages/v2/settings-household-modals.ts,
+        // components/ui.ts and shell.ts.
         {
             when: /^src\/web\/.+\.ts$/,
             tests: /^src\/web\/(components\/field|turbo-forms)\.test\.ts$/,

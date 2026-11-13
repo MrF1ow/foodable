@@ -330,7 +330,7 @@ describeDb(pgAvailable !== null, "feature flags db", (getCtx) => {
             values (
                 ${"user"},
                 ${userId},
-                ${"ui-v2"},
+                ${"mcp-widgets-v2"},
                 ${"true"}::jsonb,
                 ${"x"},
                 ${expires}
@@ -342,7 +342,10 @@ describeDb(pgAvailable !== null, "feature flags db", (getCtx) => {
             where user_id = ${userId}
             order by flag_name
         `) as { flag_name: string }[];
-        expect(names.map((r) => r.flag_name)).toEqual(["Checkout.v2", "ui-v2"]);
+        expect(names.map((r) => r.flag_name)).toEqual([
+            "Checkout.v2",
+            "mcp-widgets-v2",
+        ]);
     });
 
     test("flag_beta_events append-only, cascade, and actor set null", async () => {

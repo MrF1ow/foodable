@@ -294,11 +294,11 @@ function topBar(chrome: AppChrome): string {
     return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span>${scan}<a class="fd-logfood" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${fdIcon("plus")}<span>Log food</span></a></header>`;
 }
 
-/** Head for the new shell: the shared meta, then the old stylesheet and script
- *  (the page bodies still lean on them, and Turbo and the modal code live in
- *  /app.js) followed by the v2 ones. All four are Turbo-tracked, so a member
- *  whose shell changes gets one full reload, never a morph from old markup
- *  into new. */
+/** Head for the shell: the shared meta, then the base stylesheet and script
+ *  (/app.css and /app.js carry the shared form and modal primitives, Turbo and
+ *  the modal code) followed by the shell's own. All four are Turbo-tracked, so
+ *  a deploy that changes any of them gets one full reload rather than a morph
+ *  across versions. */
 export function appHeadV2(title: string, theme: ThemePref): string {
     // "page": the phone page behind the floating nav and the desktop page are
     // both --surface-bg, so the browser chrome takes the page colour.

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import {
     APP_V2_JS_SOURCES,
     appV2ScriptHref,
@@ -308,6 +308,17 @@ describe("chat widgets never get the v2 layer", () => {
             expect(html, key).not.toContain("--surface-bg");
             expect(html, key).not.toMatch(/\bfd-[a-z]/);
             expect(html, key).not.toContain("app-v2");
+        }
+    });
+});
+
+describe("shell stylesheet sources", () => {
+    test("no partial's header names the removed ui-v2 flag", () => {
+        const dir = new URL("../public/app/v2/", import.meta.url);
+        for (const name of readdirSync(dir)) {
+            if (!name.endsWith(".css")) continue;
+            const css = readFileSync(new URL(name, dir), "utf8");
+            expect(css, name).not.toMatch(/ui-v2/);
         }
     });
 });

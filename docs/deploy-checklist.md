@@ -43,15 +43,15 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 
 ## Members and bots
 
-- [ ] Household › Members: add each person (name, email or username, password). Hand them the login yourself.
+- [ ] Settings › Household: add each person (name, email or username, password). Hand them the login yourself.
 - [ ] Each person: Claude.ai → Settings → Connectors → Add custom connector → `https://<domain>/mcp`, then sign in.
       Same URL in ChatGPT and Claude Code. Confirm `tools/list` loads. Remove any old nutrition-mcp connector.
 - [ ] Grok CLI: point the `foodable` MCP server at `https://<domain>/mcp` and sign in again (`/mcps` → foodable → `i`). The local session on `http://localhost:8080/mcp` does not carry over.
 - [ ] A username member signs in by typing just the username.
-- [ ] As a member (not the owner), adding a person and rotating the token in Household › Members are both refused.
-- [ ] Optional: as the owner, hand ownership to a member and back (Household › Members → Manage).
+- [ ] As a member (not the owner), adding a person and rotating the token in Settings › Household are both refused.
+- [ ] Optional: as the owner, hand ownership to a member and back (Settings › Household → Manage).
 - [ ] As the owner, make a member an admin: they can add a person but cannot rotate the token, and you stay the owner. As a plain member, add and remove one of your own rules.
-- [ ] Bots: Household › Members → rotate the token, copy it once, then configure
+- [ ] Bots: Settings › Household → rotate the token, copy it once, then configure
       `Authorization: Bearer nt_hh_…` against `https://<domain>/mcp`. The bot passes `user_id` for the person it acts for.
 
 ## Walk
