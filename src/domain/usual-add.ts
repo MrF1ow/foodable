@@ -258,9 +258,10 @@ export async function addUsualFromProduct(
                     "That food is a product of another food.",
                 );
             }
-            // A scanned catalog product is never a usual by itself: it is
-            // filed under the plain food it is.
-            if (target.offSourceId) {
+            // A scanned branded product is never a usual by itself: it is
+            // filed under the plain food it is. An unbranded catalog row is
+            // the plain food its name says (as the barcode scan treats it).
+            if (target.offSourceId && target.brand != null) {
                 throw new UsualInputError(
                     "Pick the food this product is, or type a name for it.",
                     "food",
@@ -405,6 +406,32 @@ function sameMacro(a: number, b: number): boolean {
  * to the food. Returns the plain food.
  */
 export async function addUsualByHand(
+    store: FoodsStore,
+    householdId: string,
+    input: UsualByHandInput,
+): Promise<Food> {
+    try {
+        return await addUsualByHandOnce(store, householdId, input);
+    } catch (err) {
+        // Two submits of the same new name at once: the second insert loses
+        // the name key. The food exists now, so the retry takes the reuse
+        // path (and its macro check) instead of failing the page.
+        if (err instanceof UsualInputError) throw err;
+        const name = collapseSpaces(input.name ?? "");
+        const now = name
+            ? await findPlainFoodByName(
+                  store,
+                  householdId,
+                  input.kind ?? "food",
+                  name,
+              )
+            : null;
+        if (!now) throw err;
+        return addUsualByHandOnce(store, householdId, input);
+    }
+}
+
+async function addUsualByHandOnce(
     store: FoodsStore,
     householdId: string,
     input: UsualByHandInput,

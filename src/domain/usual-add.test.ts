@@ -1190,3 +1190,57 @@ test("a scanned catalog product is never added as its own usual", async () => {
     const { rows } = usualProductRows({ foods: await store.listFoods(HH) });
     expect(rows).toEqual([]);
 });
+
+test("an unbranded scanned product the household lacks is added under its own name", async () => {
+    const store = createMemoryFoodsStore();
+    const bananas = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Bananas",
+            offSourceId: "00004011",
+        }),
+    );
+    // The sheet's default answer: "A new food", named after the product.
+    const food = await addUsualFromProduct(store, HH, {
+        productId: bananas.id,
+        newFood: true,
+        newFoodName: "Bananas",
+        stores,
+    });
+    expect(food.id).toBe(bananas.id);
+    const { rows } = usualProductRows({ foods: await store.listFoods(HH) });
+    expect(rows.map((row) => row.food.name)).toEqual(["Bananas"]);
+});
+
+test("a Type it that loses a race for the same new name reuses the food the other one made", async () => {
+    const real = createMemoryFoodsStore();
+    let raced = false;
+    const store = {
+        ...real,
+        insertFood: async (row: Food) => {
+            if (!raced) {
+                raced = true;
+                // The other submit wins the name key first.
+                await real.insertFood({ ...row, id: crypto.randomUUID() });
+                throw new Error(
+                    'duplicate key value violates unique constraint "foods_household_name_uniq"',
+                );
+            }
+            return real.insertFood(row);
+        },
+    } as typeof real;
+    const food = await addUsualByHand(store, HH, {
+        name: "Oat milk",
+        basis: "per_100ml",
+        calories: 45,
+        proteinG: 1,
+        carbsG: 6,
+        fatG: 1.5,
+        stores,
+    });
+    expect(food.usualAddedAt).not.toBeNull();
+    const all = (await real.listFoods(HH)).filter((f) => f.name === "Oat milk");
+    expect(all).toHaveLength(1);
+    expect(all[0]!.id).toBe(food.id);
+});
