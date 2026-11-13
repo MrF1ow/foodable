@@ -280,6 +280,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/route-map.test.ts": "web",
     "src/web/legacy-redirects.ts": "web",
     "src/web/route-links.test.ts": "web",
+    "src/domain/agent-actions.ts": "household",
     "src/mcp/tools/household.ts": "household",
     "src/mcp/tools/household-digest.ts": "household",
     "src/db/household-digest.ts": "household",

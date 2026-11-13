@@ -1,5 +1,7 @@
 import { test, expect } from "bun:test";
 import {
+    AGENTS_DESTRUCTIVE_ALLOWED_KEY,
+    agentDestructiveAllowedFromJson,
     createGroceryStore,
     createMemorySettingsStore,
     DEFAULT_STORE_SECTIONS,
@@ -49,4 +51,39 @@ test("section rename updates the stored name", async () => {
     await expect(
         renameSection(store, HH, produce.id, "Household"),
     ).rejects.toThrow(/already exists/i);
+});
+
+test("the agents switch is Allowed unless the stored value is exactly false", () => {
+    expect(AGENTS_DESTRUCTIVE_ALLOWED_KEY).toBe("agents.destructive_allowed");
+    expect(agentDestructiveAllowedFromJson(null)).toBe(true);
+    expect(agentDestructiveAllowedFromJson(undefined)).toBe(true);
+    expect(agentDestructiveAllowedFromJson([])).toBe(true);
+    expect(agentDestructiveAllowedFromJson({})).toBe(true);
+    expect(
+        agentDestructiveAllowedFromJson({
+            [AGENTS_DESTRUCTIVE_ALLOWED_KEY]: true,
+        }),
+    ).toBe(true);
+    for (const junk of ["false", 0, null, "off"]) {
+        expect(
+            agentDestructiveAllowedFromJson({
+                [AGENTS_DESTRUCTIVE_ALLOWED_KEY]: junk,
+            }),
+        ).toBe(true);
+    }
+    expect(
+        agentDestructiveAllowedFromJson({
+            [AGENTS_DESTRUCTIVE_ALLOWED_KEY]: false,
+        }),
+    ).toBe(false);
+});
+
+test("the memory settings store keeps the agents switch per household", async () => {
+    const store = createMemorySettingsStore();
+    expect(await store.getAgentDestructiveAllowed(HH)).toBe(true);
+    expect(await store.setAgentDestructiveAllowed(HH, false)).toBe(false);
+    expect(await store.getAgentDestructiveAllowed(HH)).toBe(false);
+    expect(await store.getAgentDestructiveAllowed("hh-2")).toBe(true);
+    expect(await store.setAgentDestructiveAllowed(HH, true)).toBe(true);
+    expect(await store.getAgentDestructiveAllowed(HH)).toBe(true);
 });

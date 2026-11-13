@@ -14,6 +14,8 @@ import {
 } from "./middleware.js";
 import { handleMcp, closeMcpHandler } from "./mcp.js";
 import { startExportCleanup } from "./domain/export.js";
+import { startAgentActionPurge } from "./domain/agent-actions.js";
+import { liveAgentActionsStore } from "./db/agent-actions.js";
 import { startFlagPinSweep } from "./flag-pins.js";
 import {
     startFetchMemorySweep,
@@ -520,6 +522,9 @@ if (import.meta.main) {
     // was started in, so each job's ticks run as the system actor named here.
     // The flag pin sweep and the restock runner name their own actors.
     void runAsSystem("export sweep", async () => startExportCleanup());
+    void runAsSystem("agent action snapshot purge", async () =>
+        startAgentActionPurge({ store: liveAgentActionsStore() }),
+    );
     void runAsSystem("login session sweep", async () =>
         startLoginSessionCleanup(),
     );

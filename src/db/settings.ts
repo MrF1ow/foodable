@@ -1,4 +1,6 @@
 import {
+    AGENTS_DESTRUCTIVE_ALLOWED_KEY,
+    agentDestructiveAllowedFromJson,
     GROCERY_DEFAULT_STORE_KEY,
     GROCERY_USE_USUAL_STORE_KEY,
     SettingsInputError,
@@ -126,6 +128,51 @@ export function liveSettingsStore(): SettingsStore {
                 } catch (err) {
                     if (err instanceof SettingsInputError) throw err;
                     throw pgError("save grocery preferences", err);
+                }
+            });
+        },
+        async getAgentDestructiveAllowed(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<{ prefs: unknown }>(
+                        tx,
+                        tx`
+                            select household_preferences as prefs
+                            from ${tx.unsafe(HOUSEHOLDS)}
+                            where id = ${householdId}
+                        `,
+                        "load agents switch",
+                    );
+                    return agentDestructiveAllowedFromJson(data?.prefs);
+                } catch (err) {
+                    throw pgError("load agents switch", err);
+                }
+            });
+        },
+        async setAgentDestructiveAllowed(householdId, allowed) {
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<{ prefs: unknown }>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(HOUSEHOLDS)}
+                            set household_preferences =
+                                coalesce(household_preferences, '{}'::jsonb)
+                                || jsonb_build_object(
+                                    ${AGENTS_DESTRUCTIVE_ALLOWED_KEY}::text,
+                                    ${allowed}::boolean
+                                )
+                            where id = ${householdId}
+                            returning household_preferences as prefs
+                        `,
+                        "save agents switch",
+                    );
+                    if (!data)
+                        throw new SettingsInputError("Unknown household.");
+                    return agentDestructiveAllowedFromJson(data.prefs);
+                } catch (err) {
+                    if (err instanceof SettingsInputError) throw err;
+                    throw pgError("save agents switch", err);
                 }
             });
         },

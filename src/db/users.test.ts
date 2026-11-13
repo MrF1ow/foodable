@@ -44,6 +44,8 @@ const EXPECTED_USER_FKS: {
     { table: "household_invites", column: "used_by", deltype: "n" },
     { table: "recipe_plans", column: "created_by", deltype: "n" },
     { table: "share_links", column: "created_by", deltype: "n" },
+    { table: "agent_actions", column: "member_id", deltype: "n" },
+    { table: "agent_actions", column: "undone_by", deltype: "n" },
     { table: "stock_movements", column: "actor_user_id", deltype: "n" },
     { table: "export_archives", column: "user_id", deltype: "c" },
     { table: "flag_assignments", column: "user_id", deltype: "c" },

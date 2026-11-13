@@ -55,6 +55,45 @@ export function runSettingsStoreContract(
             });
         });
 
+        test("the agents switch defaults to Allowed and round-trips beside the grocery preferences", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            expect(await store.getAgentDestructiveAllowed(c.householdId)).toBe(
+                true,
+            );
+            const row = sampleGroceryStoreRow(c, { name: "Switch" });
+            await store.insertStore(row);
+            await store.setGroceryPreferences(c.householdId, {
+                defaultStoreId: row.id,
+                useUsualStore: true,
+            });
+            expect(
+                await store.setAgentDestructiveAllowed(c.householdId, false),
+            ).toBe(false);
+            expect(await store.getAgentDestructiveAllowed(c.householdId)).toBe(
+                false,
+            );
+            // Neither write disturbs the other's keys.
+            expect(await store.getGroceryPreferences(c.householdId)).toEqual({
+                defaultStoreId: row.id,
+                useUsualStore: true,
+            });
+            await store.setGroceryPreferences(c.householdId, {
+                defaultStoreId: null,
+                useUsualStore: false,
+            });
+            expect(await store.getAgentDestructiveAllowed(c.householdId)).toBe(
+                false,
+            );
+            expect(
+                await store.setAgentDestructiveAllowed(c.householdId, true),
+            ).toBe(true);
+            expect(await store.getAgentDestructiveAllowed(c.householdId)).toBe(
+                true,
+            );
+        });
+
         test("listStores and insertStore sort order", async () => {
             await reset();
             const c = ctx();
