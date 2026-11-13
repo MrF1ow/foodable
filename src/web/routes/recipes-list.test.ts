@@ -410,6 +410,20 @@ describe("renderRecipesListPage", () => {
         expect(page.html).toContain('action="/recipes/import"');
     });
 
+    test("the shared-recipe import form follows mcp-share-links", async () => {
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
+        );
+        const off = await renderRecipesListPage(ALICE, {});
+        expect(off.html).toContain('action="/recipes/import"');
+        expect(off.html).not.toContain("/recipes/import-shared");
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
+        );
+        const on = await renderRecipesListPage(ALICE, {});
+        expect(on.html).toContain('action="/recipes/import-shared"');
+    });
+
     test("ui-v2 off keeps the legacy list markup", async () => {
         setFlagsForTests(createMemoryFlags({ "ui-v2": false }));
         const page = await renderRecipesListPage(ALICE, {});
@@ -473,6 +487,21 @@ describe("renderRecipeDetailRoute", () => {
         expect(page.html).toContain("fd-recipe-detail");
         expect(page.html).toContain("fd-recipe-cook");
         expect(page.html).toContain("Pantry");
+    });
+
+    test("Share is offered only while mcp-share-links is on", async () => {
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
+        );
+        const off = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(off.html).not.toContain("fd-recipe-share");
+        expect(off.html).not.toContain("/share");
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
+        );
+        const on = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(on.html).toContain('id="fd-recipe-share-sheet"');
+        expect(on.html).toContain(`action="/recipes/${db.recipeId}/share"`);
     });
 
     test("ui-v2 page carries the cook sheet with a preview of what the cook takes", async () => {

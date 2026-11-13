@@ -154,6 +154,7 @@ describeDb(
             setFlagsForTests(
                 createMemoryFlags({
                     "ui-v2": true,
+                    "mcp-share-links": true,
                     "recipe-link-reader": true,
                 }),
             );
@@ -597,6 +598,7 @@ describeDb(
             setFlagsForTests(
                 createMemoryFlags({
                     "ui-v2": true,
+                    "mcp-share-links": true,
                     "recipe-link-reader": false,
                 }),
             );
@@ -630,6 +632,44 @@ describeDb(
             expect(fetcher.calls).toEqual([]);
             expect(await recipesOf()).toEqual([]);
             expect(await foodNamesOf()).toEqual([]);
+        });
+
+        test("mcp-share-links off: the route does not exist and nothing is fetched or written", async () => {
+            setFlagsForTests(
+                createMemoryFlags({
+                    "ui-v2": true,
+                    "mcp-share-links": false,
+                    "recipe-link-reader": true,
+                }),
+            );
+            const fetcher = serving(documentText());
+            setSharedRecipeFetcherForTests(fetcher);
+            for (const shared of [documentText(), SHARE_PAGE]) {
+                const res = await post("/recipes/import-shared", { shared });
+                expect(res.status).toBe(404);
+            }
+            expect(fetcher.calls).toEqual([]);
+            expect(await recipesOf()).toEqual([]);
+        });
+
+        test("mcp-share-links off: a share link in the link form is not routed to the shared importer", async () => {
+            setFlagsForTests(
+                // The reader is off too, so the ordinary importer stays off the network.
+                createMemoryFlags({
+                    "ui-v2": true,
+                    "mcp-share-links": false,
+                    "recipe-link-reader": false,
+                }),
+            );
+            const fetcher = serving(documentText());
+            setSharedRecipeFetcherForTests(fetcher);
+            const res = await post("/recipes/import", { url: SHARE_PAGE });
+            expect(res.status).not.toBe(303);
+            expect(await res.text()).not.toContain(
+                "fd-recipes-import-shared-error",
+            );
+            expect(fetcher.calls).toEqual([]);
+            expect(await recipesOf()).toEqual([]);
         });
 
         test("ui-v2 off: a share link in the old link form is not routed to the importer", async () => {

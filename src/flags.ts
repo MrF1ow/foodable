@@ -167,7 +167,7 @@ export const FLAGS = {
         kind: "temporary",
         unit: "user",
         fallback: false,
-        why: "The create_share_link, list_share_links, revoke_share_link and import_shared_recipe MCP tools.",
+        why: "Share links: the create_share_link, list_share_links, revoke_share_link and import_shared_recipe MCP tools, the public /s/ pages, and the app's Share, shared-link and shared-recipe import screens and routes.",
         removeWhen:
             "The share link and shared recipe import tools have been on for everyone for a release with no rollback.",
     },

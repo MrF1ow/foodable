@@ -303,6 +303,30 @@ describe("grocery routes", () => {
         expect(html).not.toContain("grocery-store panel");
     });
 
+    test("Share is offered on Groceries only while mcp-share-links is on", async () => {
+        await seedGroceryLines();
+        const fetchPage = async () => {
+            const res = await app.request("http://x/kitchen/groceries", {
+                headers: { cookie: cookie(ALICE) },
+            });
+            expect(res.status).toBe(200);
+            return res.text();
+        };
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": false }),
+        );
+        const off = await fetchPage();
+        expect(off).toContain("fd-kitchen-groceries-page");
+        expect(off).not.toContain("fd-kitchen-grocery-share");
+        expect(off).not.toContain("fd-grocery-share-sheet");
+        setFlagsForTests(
+            createMemoryFlags({ "ui-v2": true, "mcp-share-links": true }),
+        );
+        const on = await fetchPage();
+        expect(on).toContain("fd-kitchen-grocery-share");
+        expect(on).toContain('action="/kitchen/groceries/share"');
+    });
+
     test("GET /kitchen/groceries keeps legacy page when ui-v2 is off", async () => {
         await seedGroceryLines();
         setFlagsForTests(createMemoryFlags({ "ui-v2": false }));

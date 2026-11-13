@@ -346,8 +346,18 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(body).toContain("8 to get");
     });
 
-    test("the header is the same as on Fridge and Usuals; Share is a tool, not part of the title", () => {
+    test("without shareEnabled there is no Share button, tools row or sheet", () => {
         const body = renderKitchenGroceriesBody(baseView());
+        expect(body).not.toContain("fd-kitchen-grocery-share");
+        expect(body).not.toContain("fd-kitchen-grocery-tools");
+        expect(body).not.toContain("fd-grocery-share-sheet");
+        expect(body).not.toContain("/kitchen/groceries/share");
+    });
+
+    test("the header is the same as on Fridge and Usuals; Share is a tool, not part of the title", () => {
+        const body = renderKitchenGroceriesBody(
+            baseView({ shareEnabled: true }),
+        );
         expect(body).toMatch(
             /^<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">[^<]+<\/span><\/h1>\n<header class="fd-kitchen-overview-head">\n<div class="fd-kitchen-overview-head__title">\n<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--phone">[^<]+<\/span><span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--desktop">[^<]+<\/span><\/h1>\n<\/div>\n<div class="fd-kitchen-overview-head__tools">\n<nav class="fd-seg fd-kitchen-overview-seg" aria-label="Kitchen sections">/,
         );
@@ -367,7 +377,7 @@ describe("renderKitchenGroceriesV2Page", () => {
 
     test("a refused share shows its error in the open sheet only", () => {
         const body = renderKitchenGroceriesBody(
-            baseView({ error: "Nope.", openShare: true }),
+            baseView({ error: "Nope.", shareEnabled: true, openShare: true }),
         );
         expect(body).toContain("data-sheet-open-on-load");
         expect(body.split("Nope.").length - 1).toBe(1);

@@ -201,6 +201,7 @@ describe("recipes list v2 page", () => {
             filter: "" as const,
             cards: [],
             totalCount: 0,
+            sharedImportEnabled: true,
         };
 
         function linkPanel(html: string): string {
@@ -228,6 +229,21 @@ describe("recipes list v2 page", () => {
             expect(html).toContain("Import recipe");
             // Explained where it is used.
             expect(html).toMatch(/another Foodable/i);
+        });
+
+        test("without the shared-import switch the panel has only the link form", () => {
+            const { sharedImportEnabled: _off, ...off } = base;
+            const html = renderRecipesListBody(off);
+            expect(html).toContain('action="/recipes/import"');
+            expect(html).not.toContain("/recipes/import-shared");
+            expect(html).not.toContain("data-fd-recipes-shared");
+            expect(html).not.toContain("another Foodable");
+            const withError = renderRecipesListBody({
+                ...off,
+                sharedImport: { error: "Nope.", input: "x" },
+            });
+            expect(withError).not.toContain("/recipes/import-shared");
+            expect(withError).not.toContain("fd-recipes-import-shared-error");
         });
 
         test("the link form still posts to the web importer", () => {

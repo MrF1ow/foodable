@@ -2,9 +2,10 @@
 // or the grocery list, sees its address once, and revokes it from Settings.
 // The public page a link opens is share-links.ts.
 //
-// Signed-in members only, on the `ui-v2` surfaces only (the sheets and the
-// Settings list live there), and the household always comes from the session,
-// never from the form.
+// Signed-in members only, and only while `mcp-share-links` is on (a link opens
+// a public page that needs no sign-in, so it stays off unless asked for; the
+// sheets and the Settings list are left out with it). The household always
+// comes from the session, never from the form.
 //
 // The address is the one thing here that must not leak. It is in the 200 page
 // the create handlers answer with, and nowhere else: not a redirect (a
@@ -78,7 +79,7 @@ async function createdPage(
 shareLinkManageRoutes.post(
     "/recipes/:id/share",
     requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
+    gatedRoute("mcp-share-links", { notFound: true }),
     async (c) => {
         const userId = c.get("userId");
         const member = siteMember(c);
@@ -135,7 +136,7 @@ shareLinkManageRoutes.post(
 shareLinkManageRoutes.post(
     "/kitchen/groceries/share",
     requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
+    gatedRoute("mcp-share-links", { notFound: true }),
     async (c) => {
         const userId = c.get("userId");
         const member = siteMember(c);
@@ -190,7 +191,7 @@ shareLinkManageRoutes.post(
 shareLinkManageRoutes.post(
     "/settings/household/shared-links/:id/revoke",
     requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
+    gatedRoute("mcp-share-links", { notFound: true }),
     async (c) => {
         const userId = c.get("userId");
         const member = siteMember(c);

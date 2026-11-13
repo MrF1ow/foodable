@@ -290,13 +290,13 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
 
     // A link to a recipe another Foodable shared is that deploy's document,
     // not a recipe website: the household app reads it with the shared-recipe
-    // importer. The old app has no such importer and reads it as before.
-    if (
-        !pasteStep &&
-        looksLikeSharedRecipeLink(importUrl) &&
-        (await viewerFlagsFor(member)).uiV2
-    ) {
-        return answerSharedRecipeImport(c, importUrl);
+    // importer while `mcp-share-links` is on. The old app has no such importer
+    // and, with the flag off, a pasted share link is read as any other URL.
+    if (!pasteStep && looksLikeSharedRecipeLink(importUrl)) {
+        const flags = await viewerFlagsFor(member);
+        if (flags.uiV2 && flags.mcpShareLinks) {
+            return answerSharedRecipeImport(c, importUrl);
+        }
     }
 
     if (pasteStep && websiteUrl === "" && text.trim() === "") {

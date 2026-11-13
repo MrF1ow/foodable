@@ -1,8 +1,9 @@
 // Import a recipe another Foodable shared: paste its share link or its JSON on
-// Recipes. Members only, on the `ui-v2` surfaces only, and the household is
-// always the session's. The rules live in domain/sharing-source.ts (what may be
-// fetched) and domain/sharing-import.ts (how it is matched and written); the
-// live wiring is src/sharing-import.ts, shared with the agent tool.
+// Recipes. Members only, and only while `mcp-share-links` is on (the route is a
+// 404 otherwise), and the household is always the session's. The rules live in
+// domain/sharing-source.ts (what may be fetched) and domain/sharing-import.ts
+// (how it is matched and written); the live wiring is src/sharing-import.ts,
+// shared with the agent tool.
 //
 // Success is a 303 to the new recipe with a toast. A refusal re-renders Recipes
 // in place (422) with the import panel open, the reason beside the paste box
@@ -72,7 +73,7 @@ export async function answerSharedRecipeImport(
 sharedRecipeImportRoutes.post(
     "/recipes/import-shared",
     requireMember,
-    gatedRoute("ui-v2", { notFound: true }),
+    gatedRoute("mcp-share-links", { notFound: true }),
     async (c) => {
         const body = await c.req.parseBody();
         return answerSharedRecipeImport(c, formText(body, "shared"));
