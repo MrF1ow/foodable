@@ -34,7 +34,7 @@ Then check the tools on this machine, and install any that are missing (ask firs
 git --version
 bun --version            # https://bun.sh
 railway --version        # https://docs.railway.com/guides/cli
-node --version           # https://nodejs.org, 22.6 or newer; `railway config plan` and `apply` run .railway/railway.ts with it
+node --version           # 22.6+, runs railway config plan/apply
 gh --version             # optional, makes forking one command
 openssl version
 ```
@@ -85,7 +85,7 @@ The first deploy may fail because the variables aren't set yet. That's expected;
 
 Two things are left. Walk them through both:
 
-- **Railway config.** `.railway/railway.ts` sets the Dockerfile build, health check, restart policy, wait-for-CI, region, custom domain and the pre-deploy command `bun run db:migrate`, which applies the database schema before each new version goes live (if a migration fails, the old version keeps running). In their fork, edit it: the repo in `github(...)`, the region key in `replicas`, and delete the `domains` line (`railway config plan` fails on a domain Railway does not know yet; the file records the custom domain once it exists, see step 6). The `service("foodable")` name must match the service from step 3. Then `railway config plan`, read the result with them (nothing should be destroyed), and `railway config apply`. Committing the file changes nothing on Railway by itself. If apply is not possible, set the same things by hand under Settings: Dockerfile builder, health check `/health` with a 60 s timeout, restart on failure, and pre-deploy command `bun run db:migrate`.
+- **Railway config.** In their fork, edit `.railway/railway.ts`: the repo in `github(...)`, the `replicas` region key, and delete the `domains` line until step 6 (plan fails on a domain Railway does not know). Keep `service("foodable")`. Run `railway config plan` with them (nothing should be destroyed), then `railway config apply`: it sets the Dockerfile build, `/health` check, restart policy and pre-deploy `bun run db:migrate`. Pushing the file alone changes nothing. Without apply, set those by hand (docs/self-hosting.md).
 - **Backups.** On the Postgres service, turn on backups now, before any household data exists.
 
 The database needs no public address. The app reaches it over Railway's private network.
@@ -138,7 +138,7 @@ Skip this if they're happy with the Railway address. It needs a domain they own.
 3. Cloudflare SSL/TLS mode: **Full**. Not Flexible, which makes a redirect loop, and not Full (strict), which gives intermittent 526 errors while Railway renews its certificate. This setting is per zone, so ask first if other sites already use that domain.
 4. If Railway stays on "Validating Challenges", turn the orange cloud off until the certificate is issued, then turn it back on. Check with `railway domain status <domain> --service foodable --json`.
 5. `railway variable set 'PUBLIC_ORIGIN=https://<custom-domain>' --service foodable`, then repeat the step 5 checks against the new domain.
-6. Optional: put `domains: [{ domain: "<custom-domain>", port: 8080 }]` back in `.railway/railway.ts` so the file records it. `railway config plan` should then show no change.
+6. Optional: add `domains: [{ domain: "<custom-domain>", port: 8080 }]` back to `.railway/railway.ts`; plan then shows no change.
 
 Use a single-level name like `food.example.com`. A deeper one, like `app.food.example.com`, only works through the proxy with Cloudflare's paid Advanced Certificate Manager.
 
