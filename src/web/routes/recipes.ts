@@ -936,23 +936,23 @@ recipesRoutes.post(
             const servings = checkPlanServingsCapped(
                 servingsInput ?? existing.servings,
             );
-            let moved = await plans.movePlan(
+            // The same recipe already on that day and slot absorbs this plan
+            // (its servings are added), so the week never shows it twice.
+            const moved = await plans.movePlan(
                 member.householdId,
                 existing.id,
                 date,
                 slot,
+                servings,
             );
-            if (moved && servings !== existing.servings) {
-                moved = await plans.updatePlanServings(
-                    member.householdId,
-                    existing.id,
-                    servings,
-                );
-            }
             if (!moved) return redirectWithToast(c, back, "plan.gone");
-            return redirectWithToast(c, back, "plan.moved", {
-                when: planWhen(moved.date, moved.slot),
-            });
+            // The row that comes back is not this plan's when it merged.
+            return redirectWithToast(
+                c,
+                back,
+                moved.id === existing.id ? "plan.moved" : "plan.merged",
+                { when: planWhen(moved.date, moved.slot) },
+            );
         } catch (err) {
             if (!(err instanceof PlanInputError)) throw err;
             const draft: PlanEditDraft = {

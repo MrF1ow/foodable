@@ -143,6 +143,10 @@ export const TOASTS = {
     "plan.added": { kind: "success", text: "Planned for {when}" },
     "plan.already": { kind: "info", text: "Already planned for {when}" },
     "plan.moved": { kind: "success", text: "Moved to {when}" },
+    "plan.merged": {
+        kind: "success",
+        text: "Added to the plan already on {when}",
+    },
     "plan.removed": { kind: "success", text: "Removed from the plan" },
     "plan.gone": { kind: "info", text: "That plan is already gone" },
     "plan.notice": { kind: "warning", text: "{message}" },
