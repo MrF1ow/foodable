@@ -1118,3 +1118,75 @@ describe("addUsualFromProduct from Search", () => {
         expect(food.genericFoodId).toBeNull();
     });
 });
+
+describe("the stamp never rides a merge onto a product", () => {
+    async function milkWithTypedOat() {
+        const store = createMemoryFoodsStore();
+        const milk = await store.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        );
+        const silk = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Silk Oat",
+                brand: "Silk",
+            }),
+        );
+        await linkProduct(store, HH, silk.id, milk.id);
+        const oat = await addUsualByHand(store, HH, {
+            name: "Oat milk",
+            basis: "per_100ml",
+            calories: 45,
+            proteinG: 1,
+            carbsG: 6,
+            fatG: 1.5,
+            stores,
+        });
+        const listed = async () =>
+            usualProductRows({ foods: await store.listFoods(HH) }).rows.map(
+                (row) => row.food.name,
+            );
+        return { store, milk, silk, oat, listed };
+    }
+
+    test("merging a typed usual into a product leaves no stamp on the product", async () => {
+        const { store, milk, silk, oat, listed } = await milkWithTypedOat();
+        const kept = await mergeFoods(store, HH, silk.id, oat.id);
+        expect(kept.genericFoodId).toBe(milk.id);
+        expect(kept.usualAddedAt).toBeNull();
+        await removeUsual(store, HH, milk.id);
+        expect(await listed()).toEqual([]);
+    });
+
+    test("merging a product into a typed usual leaves the kept product unstamped", async () => {
+        const { store, milk, silk, oat, listed } = await milkWithTypedOat();
+        const kept = await mergeFoods(store, HH, oat.id, silk.id);
+        expect(kept.genericFoodId).toBe(milk.id);
+        expect(kept.usualAddedAt).toBeNull();
+        await removeUsual(store, HH, milk.id);
+        expect(await listed()).toEqual([]);
+    });
+});
+
+test("a scanned catalog product is never added as its own usual", async () => {
+    const store = createMemoryFoodsStore();
+    const off = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: "food",
+            name: "Nutella",
+            brand: "Ferrero",
+            offSourceId: "3017620422003",
+        }),
+    );
+    const err = await addUsualFromProduct(store, HH, {
+        productId: off.id,
+        foodId: off.id,
+        stores,
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UsualInputError);
+    expect((err as UsualInputError).field).toBe("food");
+    const { rows } = usualProductRows({ foods: await store.listFoods(HH) });
+    expect(rows).toEqual([]);
+});

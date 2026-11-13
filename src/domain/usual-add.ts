@@ -258,6 +258,14 @@ export async function addUsualFromProduct(
                     "That food is a product of another food.",
                 );
             }
+            // A scanned catalog product is never a usual by itself: it is
+            // filed under the plain food it is.
+            if (target.offSourceId) {
+                throw new UsualInputError(
+                    "Pick the food this product is, or type a name for it.",
+                    "food",
+                );
+            }
             if (input.purchase != null) {
                 await setUsualPurchase(
                     store,

@@ -3776,6 +3776,8 @@ export async function mergeFoods(
         ...mergedFields,
         genericFoodId: mergedGenericId,
         usualProductId: mergedUsualId,
+        // A food filed under another is a product, never a usual by itself.
+        usualAddedAt: mergedGenericId ? null : mergedFields.usualAddedAt,
         usualStoreId: mergedFields.usualStoreId,
         usualAmount:
             mergedFields.usualAmount == null
@@ -4255,6 +4257,7 @@ export function duplicatePairs(
                 ...mergedFields,
                 usualProductId: nextUsual,
                 genericFoodId: nextGeneric,
+                usualAddedAt: nextGeneric ? null : mergedFields.usualAddedAt,
             };
 
             const fieldsFilled = fieldsFilledKeys(state, drop, mergedFields);
