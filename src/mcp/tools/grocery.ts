@@ -1125,7 +1125,7 @@ export const UPDATE_GROCERY_LINE_OUTPUT_SCHEMA = z.object({
         .nullable(),
 });
 
-const ADMIN_UNDO_NOTE =
+export const ADMIN_UNDO_NOTE =
     "Records the change and the household can undo it for 24 hours; refused while the household has turned off destructive agent changes.";
 
 function groceryCount(count: number): string {
@@ -1144,7 +1144,10 @@ function asToolError(err: unknown): never {
  * store tools: each one overwrites or removes what the household put on the
  * list, so each goes through the destructive guard.
  */
-export function registerGroceryAdminTools(server: McpServer, ctx: ToolContext) {
+export function registerGroceryListAdminTools(
+    server: McpServer,
+    ctx: ToolContext,
+) {
     const { analytics, runDestructive } = ctx;
 
     gatedTool(

@@ -152,6 +152,15 @@ import {
     LIST_STORES_OUTPUT_SCHEMA,
 } from "./mcp/tools/stores.js";
 import {
+    MOVE_FRIDGE_ITEMS_OUTPUT_SCHEMA,
+    DELETE_FRIDGE_ITEMS_OUTPUT_SCHEMA,
+} from "./mcp/tools/fridge-admin.js";
+import {
+    DELETE_GROCERY_LINES_OUTPUT_SCHEMA,
+    REMOVE_USUAL_OUTPUT_SCHEMA,
+} from "./mcp/tools/grocery-admin.js";
+import { KITCHEN_ADMIN_TOOL_NAMES } from "./mcp/tools/grocery-admin-names.js";
+import {
     ADD_PLAN_MISSING_OUTPUT_SCHEMA,
     PLAN_RECIPE_OUTPUT_SCHEMA,
     UNPLAN_RECIPE_OUTPUT_SCHEMA,
@@ -9522,6 +9531,353 @@ describe("/mcp destructive tools are guarded", () => {
                             (s) => s.name,
                         ),
                     ).toEqual(["Lidl"]);
+                });
+            },
+        );
+    });
+
+    // The four kitchen admin tools: behind mcp-household-admin, the same guard.
+    // The SQL (the fridge ledger, the snapshot of every affected table, undo)
+    // is tested against Postgres in src/mcp/tools/kitchen-admin.db.test.ts; the
+    // memory stores here cover the tool list, the schemas and both eras.
+    describe("kitchen admin tools (mcp-household-admin)", () => {
+        beforeEach(() =>
+            setFlagsForTests(
+                createMemoryFlags({
+                    "mcp-plan-tools": true,
+                    "mcp-household-admin": true,
+                }),
+            ),
+        );
+
+        const asOwner = (
+            era: EraMode,
+            run: (call: CallTool) => Promise<void>,
+        ) => withClientFor(appWith({ kind: "user", userId: "u1" }), era, run);
+
+        async function fridgeWith(call: CallTool, names: string[]) {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const locationId = loc.structuredContent?.id as string;
+            const ids: string[] = [];
+            for (const name of names) {
+                const food = await call("upsert_food", { name });
+                const item = await call("add_fridge_item", {
+                    location_id: locationId,
+                    kind: "food",
+                    food_id: food.structuredContent?.id,
+                    amount: 100,
+                    unit: "g",
+                });
+                ids.push(item.structuredContent?.id as string);
+            }
+            return { locationId, ids };
+        }
+
+        test.each(ERAS)(
+            "flag off: none of the four kitchen tools is listed and calls are refused (%p)",
+            async (era) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-household-admin": false }),
+                );
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    for (const name of KITCHEN_ADMIN_TOOL_NAMES) {
+                        expect(names).not.toContain(name);
+                        await expect(
+                            client.callTool({ name, arguments: {} }),
+                        ).rejects.toThrow(/not found/i);
+                    }
+                    expect(names).toContain("delete_fridge_item");
+                    expect(names).toContain("delete_grocery_line");
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on: all four are listed, destructive, with an output schema (%p)",
+            async (era) => {
+                await withHttpClient("u1", era, async (client) => {
+                    const byName = new Map(
+                        (await client.listTools()).tools.map((t) => [
+                            t.name,
+                            t,
+                        ]),
+                    );
+                    for (const name of KITCHEN_ADMIN_TOOL_NAMES) {
+                        const tool = byName.get(name);
+                        expect(tool, name).toBeDefined();
+                        expect(tool?.annotations?.destructiveHint, name).toBe(
+                            true,
+                        );
+                        expect(tool?.annotations?.readOnlyHint, name).toBe(
+                            false,
+                        );
+                        expect(tool?.outputSchema, name).toBeDefined();
+                    }
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "move_fridge_items moves the items, records the change and keeps the ledger (%p)",
+            async (era) => {
+                await asOwner(era, async (call) => {
+                    const { ids } = await fridgeWith(call, ["Eggs", "Milk"]);
+                    const freezer = await call("add_fridge_location", {
+                        name: "Freezer",
+                    });
+                    const target = freezer.structuredContent?.id as string;
+                    await mirror();
+                    const moved = await call("move_fridge_items", {
+                        ids,
+                        location_id: target,
+                    });
+                    expect(moved.isError).toBeFalsy();
+                    expect(textOf(moved)).toStartWith(
+                        "Moved 2 fridge items to Freezer: Eggs, Milk.",
+                    );
+                    expect(textOf(moved)).toContain(UNDO_SENTENCE);
+                    const body = MOVE_FRIDGE_ITEMS_OUTPUT_SCHEMA.parse(
+                        moved.structuredContent,
+                    );
+                    expect(body.moved.map((row) => row.id)).toEqual(ids);
+                    expect(body.moved[0]!.from_location).toBe("Fridge");
+                    expect(
+                        (await db.fridgeStore.listItems("hh-1")).map(
+                            (item) => item.locationId,
+                        ),
+                    ).toEqual([target, target]);
+                    expect(db.agentActions.__records()).toMatchObject([
+                        {
+                            tool: "move_fridge_items",
+                            summary: "Moved 2 fridge items to Freezer",
+                        },
+                    ]);
+
+                    // Already there: nothing moves, nothing is recorded.
+                    const again = await call("move_fridge_items", {
+                        ids,
+                        location_id: target,
+                    });
+                    expect(again.isError).toBeFalsy();
+                    expect(textOf(again)).toContain("Nothing moved");
+                    expect(textOf(again)).not.toContain(UNDO_SENTENCE);
+                    expect(db.agentActions.__records()).toHaveLength(1);
+                });
+            },
+        );
+
+        test("move_fridge_items and delete_fridge_items refuse an id that is no item or a location that is none, changing nothing", async () => {
+            await viaHttp(async (call) => {
+                const { ids, locationId } = await fridgeWith(call, ["Eggs"]);
+                await mirror();
+                const before = await domainState();
+                const stranger = crypto.randomUUID();
+                const badItem = await call("move_fridge_items", {
+                    ids: [ids[0], stranger],
+                    location_id: locationId,
+                });
+                expect(badItem.isError).toBe(true);
+                expect(textOf(badItem)).toContain(
+                    `No fridge item found with id ${stranger}`,
+                );
+                const badPlace = await call("move_fridge_items", {
+                    ids,
+                    location_id: stranger,
+                });
+                expect(badPlace.isError).toBe(true);
+                expect(textOf(badPlace)).toContain("No fridge location found");
+                const badDelete = await call("delete_fridge_items", {
+                    ids: [ids[0], stranger],
+                });
+                expect(badDelete.isError).toBe(true);
+                expect(textOf(badDelete)).toContain("Nothing was changed");
+                const notUuid = await call("delete_fridge_items", {
+                    ids: ["eggs"],
+                }).catch((err: Error) => err);
+                expect(
+                    notUuid instanceof Error
+                        ? notUuid.message
+                        : textOf(notUuid),
+                ).toMatch(/each id must be a fridge item id from get_fridge/);
+                expect(await domainState()).toBe(before);
+                expect(db.agentActions.__records()).toEqual([]);
+            });
+        });
+
+        test.each(ERAS)(
+            "delete_fridge_items removes every item through the ledger and records one action (%p)",
+            async (era) => {
+                await asOwner(era, async (call) => {
+                    const { ids } = await fridgeWith(call, [
+                        "Eggs",
+                        "Milk",
+                        "Flour",
+                    ]);
+                    await mirror();
+                    const deleted = await call("delete_fridge_items", {
+                        ids: [ids[0], ids[1]],
+                    });
+                    expect(deleted.isError).toBeFalsy();
+                    expect(textOf(deleted)).toStartWith(
+                        "Deleted 2 fridge items: Eggs (100 g), Milk (100 g).",
+                    );
+                    expect(textOf(deleted)).toContain(UNDO_SENTENCE);
+                    expect(
+                        DELETE_FRIDGE_ITEMS_OUTPUT_SCHEMA.parse(
+                            deleted.structuredContent,
+                        ).deleted.map((row) => row.id),
+                    ).toEqual([ids[0]!, ids[1]!]);
+                    expect(
+                        (await db.fridgeStore.listItems("hh-1")).map(
+                            (item) => item.id,
+                        ),
+                    ).toEqual([ids[2]!]);
+                    for (const food of await db.foodsStore.listFoods("hh-1")) {
+                        expect(
+                            ledgerMatchesStock(
+                                (await db.fridgeStore.listItems("hh-1")).filter(
+                                    (item) => item.foodId === food.id,
+                                ),
+                                await db.stockStore.listMovements(
+                                    "hh-1",
+                                    food.id,
+                                ),
+                                food,
+                            ),
+                        ).toBe(true);
+                    }
+                    expect(db.agentActions.__records()).toMatchObject([
+                        { tool: "delete_fridge_items" },
+                    ]);
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "delete_grocery_lines removes the lines, records one action and refuses a stranger (%p)",
+            async (era) => {
+                await asOwner(era, async (call) => {
+                    await addStore();
+                    const ids: string[] = [];
+                    for (const name of ["Eggs", "Milk", "Flour"]) {
+                        const food = await call("upsert_food", { name });
+                        const line = await call("add_grocery_line", {
+                            store_id: "store-1",
+                            kind: "food",
+                            food_id: food.structuredContent?.id,
+                            amount: 1,
+                            unit: "each",
+                        });
+                        ids.push(line.structuredContent?.id as string);
+                    }
+                    await mirror();
+                    const stranger = crypto.randomUUID();
+                    const refused = await call("delete_grocery_lines", {
+                        ids: [ids[0], stranger],
+                    });
+                    expect(refused.isError).toBe(true);
+                    expect(textOf(refused)).toContain(
+                        `No grocery line found with id ${stranger}`,
+                    );
+                    expect(
+                        await db.groceryStore.listLines("hh-1"),
+                    ).toHaveLength(3);
+                    expect(db.agentActions.__records()).toEqual([]);
+
+                    const deleted = await call("delete_grocery_lines", {
+                        ids: [ids[0], ids[1]],
+                    });
+                    expect(deleted.isError).toBeFalsy();
+                    expect(textOf(deleted)).toStartWith(
+                        "Deleted 2 grocery lines: Eggs, Milk.",
+                    );
+                    expect(textOf(deleted)).toContain(UNDO_SENTENCE);
+                    expect(
+                        DELETE_GROCERY_LINES_OUTPUT_SCHEMA.parse(
+                            deleted.structuredContent,
+                        ).deleted,
+                    ).toHaveLength(2);
+                    expect(
+                        (await db.groceryStore.listLines("hh-1")).map(
+                            (line) => line.id,
+                        ),
+                    ).toEqual([ids[2]!]);
+                    expect(db.agentActions.__records()).toMatchObject([
+                        { tool: "delete_grocery_lines" },
+                    ]);
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "remove_usual takes the products off the food and records it, and a food that is no usual records nothing (%p)",
+            async (era) => {
+                await asOwner(era, async (call) => {
+                    const eggs = await call("upsert_food", { name: "Eggs" });
+                    const brand = await call("upsert_food", {
+                        name: "Kirkland Large Eggs",
+                    });
+                    const plain = eggs.structuredContent?.id as string;
+                    const product = brand.structuredContent?.id as string;
+                    const set = await call("set_usual_product", {
+                        food_id: plain,
+                        product_food_id: product,
+                    });
+                    expect(set.isError).toBeFalsy();
+                    await mirror();
+
+                    const removed = await call("remove_usual", {
+                        food_id: plain,
+                    });
+                    expect(removed.isError).toBeFalsy();
+                    expect(textOf(removed)).toContain(
+                        "Removed Eggs from the Usuals list; Kirkland Large Eggs came off its list.",
+                    );
+                    expect(textOf(removed)).toContain(UNDO_SENTENCE);
+                    expect(
+                        REMOVE_USUAL_OUTPUT_SCHEMA.parse(
+                            removed.structuredContent,
+                        ),
+                    ).toMatchObject({
+                        food_id: plain,
+                        changed: true,
+                        products_removed: [{ id: product }],
+                    });
+                    const after = await db.foodsStore.listFoods("hh-1");
+                    expect(
+                        after.find((f) => f.id === plain)?.usualProductId,
+                    ).toBeNull();
+                    expect(
+                        after.find((f) => f.id === product)?.genericFoodId,
+                    ).toBeNull();
+                    expect(db.agentActions.__records()).toMatchObject([
+                        { tool: "remove_usual" },
+                    ]);
+
+                    // Nothing left to remove: no entry, no undo sentence.
+                    const again = await call("remove_usual", {
+                        food_id: plain,
+                    });
+                    expect(again.isError).toBeFalsy();
+                    expect(textOf(again)).toContain(
+                        "is not on the Usuals list",
+                    );
+                    expect(textOf(again)).not.toContain(UNDO_SENTENCE);
+                    expect(db.agentActions.__records()).toHaveLength(1);
+
+                    // A product is not a usual, and a stranger is no food.
+                    const viaProduct = await call("remove_usual", {
+                        food_id: product,
+                    });
+                    expect(viaProduct.isError).toBeFalsy();
+                    const stranger = await call("remove_usual", {
+                        food_id: crypto.randomUUID(),
+                    });
+                    expect(stranger.isError).toBe(true);
+                    expect(textOf(stranger)).toContain("No food found");
                 });
             },
         );
