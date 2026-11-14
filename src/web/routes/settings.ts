@@ -1,7 +1,10 @@
 import { Hono, type Context } from "hono";
 import { parseAppearanceInput } from "../shell.js";
 
-import { parseNutritionPrefsInput } from "../pages/v2/settings-account.js";
+import {
+    ACCOUNT_TIMEZONE_SHEET_ID,
+    parseNutritionPrefsInput,
+} from "../pages/v2/settings-account.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
@@ -642,7 +645,8 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
             if (!validateTz(prefs.timezone)) {
                 const page = await renderSettingsAccountPage(userId, {
                     backHref,
-                    error: "Enter a valid IANA timezone.",
+                    error: "Choose a time zone from the list.",
+                    openSheetId: ACCOUNT_TIMEZONE_SHEET_ID,
                 });
                 return c.html(page.html, 400);
             }
@@ -650,6 +654,10 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
             delete prefs.timezone;
         }
         await upsertProfile(userId, prefs);
+        // The Account time zone sheet posts only the zone.
+        if (typeof body.timezone === "string") {
+            return redirectWithToast(c, redirectTo, "settings.timezone.saved");
+        }
         return redirectWithToast(c, redirectTo, "settings.nutrition.saved");
     }
     if ("theme" in body) {

@@ -262,6 +262,7 @@ export const TOASTS = {
         kind: "success",
         text: "Nutrition preferences saved",
     },
+    "settings.timezone.saved": { kind: "success", text: "Time zone saved" },
     "settings.goals.saved": { kind: "success", text: "Goals saved" },
     "settings.goals.day-cleared": {
         kind: "success",

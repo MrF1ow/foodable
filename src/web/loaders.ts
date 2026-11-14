@@ -895,7 +895,7 @@ export async function groceryAllergenMembers(householdId: string) {
     );
 }
 
-async function settingsViewerEmail(userId: string): Promise<string> {
+async function settingsViewerEmail(userId: string): Promise<string | null> {
     try {
         return await run(async (tx) => {
             const row = await maybeOne<{ email: string }>(
@@ -907,10 +907,10 @@ async function settingsViewerEmail(userId: string): Promise<string> {
                 `,
                 "settings viewer email",
             );
-            return row?.email ?? "";
+            return row?.email ?? null;
         });
     } catch {
-        return "";
+        return null;
     }
 }
 
@@ -921,7 +921,7 @@ export async function renderSettingsHomeRoute(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const chrome = await viewerChromeWithAttention(profile, gate.viewer);
-    const email = await settingsViewerEmail(viewerUserId);
+    const email = (await settingsViewerEmail(viewerUserId)) ?? "";
     return {
         status: 200,
         html: renderSettingsHomeV2Page({
@@ -938,7 +938,7 @@ export async function renderSettingsHomeRoute(
 
 export async function renderSettingsAccountV2Route(
     viewerUserId: string,
-    opts: { error?: string; backHref?: string } = {},
+    opts: { error?: string; backHref?: string; openSheetId?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -950,12 +950,10 @@ export async function renderSettingsAccountV2Route(
             chrome,
             backHref: opts.backHref ?? "/",
             displayName: gate.viewer.displayName,
+            email: await settingsViewerEmail(viewerUserId),
             timezone: profile?.timezone ?? "",
-            weightUnit: preferredWeightUnitFromProfile(profile) ?? "",
-            widgetsEnabled: widgetsEnabledFromProfile(profile),
-            alcoholTrackingEnabled: alcoholTrackingEnabledFromProfile(profile),
-            drinkUnit: preferredDrinkUnitFromProfile(profile) ?? "",
             error: opts.error,
+            openSheetId: opts.openSheetId,
             photo: {
                 userId: gate.viewer.userId,
                 version:
@@ -1288,7 +1286,7 @@ export async function renderSettingsScoreHouseholdV2Route(
 
 export async function renderSettingsAccountPage(
     viewerUserId: string,
-    opts: { error?: string; backHref?: string } = {},
+    opts: { error?: string; backHref?: string; openSheetId?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };

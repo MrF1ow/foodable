@@ -267,11 +267,8 @@ describe("Settings > Account", () => {
             chrome: base(photo !== undefined, new Map()),
             backHref: "/",
             displayName: "Ethan Flow",
+            email: "ethan@example.com",
             timezone: "UTC",
-            weightUnit: "",
-            widgetsEnabled: true,
-            alcoholTrackingEnabled: false,
-            drinkUnit: "",
             photo,
         });
 

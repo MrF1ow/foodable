@@ -7,6 +7,7 @@ import { seedHousehold } from "../../db/testing/fixtures.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { resetFlagsForTests } from "../../flags.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
+import { decodeToastFlash, readToastCookie } from "../components/toast.js";
 import { nutritionRoutes } from "./nutrition.js";
 import { settingsRoutes } from "./settings.js";
 
@@ -301,6 +302,101 @@ describeDb(
             profile = await getProfile(userId);
             expect(profile?.widgets_enabled).toBe(true);
             expect(profile?.alcohol_tracking_enabled).toBe(false);
+        });
+
+        test("the account page shows the viewer's email and no unit, alcohol or widget fields", async () => {
+            await upsertProfile(userId, { timezone: "US/Pacific" });
+            const res = await get(userId, "/settings/account");
+            expect(res.status).toBe(200);
+            const html = await res.text();
+            expect(html).toContain(`test-${userId}@foodable.test`);
+            expect(html).toContain('<option value="US/Pacific" selected>');
+            expect(html).not.toContain("preferred_weight_unit");
+            expect(html).not.toContain("widgets_enabled");
+            expect(html).not.toContain("alcohol_tracking_enabled");
+        });
+
+        test("a time-zone-only post leaves widgets_enabled, alcohol_tracking_enabled and both units unchanged", async () => {
+            await upsertProfile(userId, {
+                widgets_enabled: false,
+                alcohol_tracking_enabled: true,
+                preferred_weight_unit: "lb",
+                preferred_drink_unit: "uk",
+            });
+            const res = await post(userId, "/settings", {
+                group: "nutrition",
+                timezone: "Europe/Kyiv",
+            });
+            expect(res.status).toBe(303);
+            const profile = await getProfile(userId);
+            expect(profile?.timezone).toBe("Europe/Kyiv");
+            expect(profile?.widgets_enabled).toBe(false);
+            expect(profile?.alcohol_tracking_enabled).toBe(true);
+            expect(profile?.preferred_weight_unit).toBe("lb");
+            expect(profile?.preferred_drink_unit).toBe("uk");
+        });
+
+        test("the zone the page lists is accepted, an alias survives a re-save, and a bad one is a 400", async () => {
+            const alias = await post(userId, "/settings", {
+                group: "nutrition",
+                timezone: "US/Pacific",
+            });
+            expect(alias.status).toBe(303);
+            expect((await getProfile(userId))?.timezone).toBe("US/Pacific");
+            const bad = await post(userId, "/settings", {
+                group: "nutrition",
+                timezone: "Mars/Olympus",
+            });
+            expect(bad.status).toBe(400);
+            const html = await bad.text();
+            expect(html).toContain("Choose a time zone from the list.");
+            expect(html).not.toContain("IANA");
+            expect(html).toContain("data-sheet-open-on-load");
+            expect((await getProfile(userId))?.timezone).toBe("US/Pacific");
+        });
+
+        test("saving the time zone toasts Time zone saved, not nutrition preferences", async () => {
+            const res = await post(userId, "/settings", {
+                group: "nutrition",
+                timezone: "Europe/Kyiv",
+            });
+            expect(res.status).toBe(303);
+            const flash = decodeToastFlash(
+                readToastCookie(res.headers.get("set-cookie") ?? undefined) ??
+                    undefined,
+            );
+            expect(flash?.key).toBe("settings.timezone.saved");
+        });
+
+        test("every field the old account form posted is still writable through its new route", async () => {
+            const tz = await post(userId, "/settings", {
+                group: "nutrition",
+                timezone: "Asia/Tokyo",
+            });
+            const units = await post(userId, "/settings/units", {
+                preferred_weight_unit: "lb",
+                preferred_drink_unit: "uk",
+            });
+            const alcohol = await post(userId, "/settings/nutrients", {
+                nutrient: "alcohol",
+                shown: "1",
+            });
+            const widgets = await post(
+                userId,
+                "/settings/ai-connections/widgets",
+                {
+                    enabled: "0",
+                },
+            );
+            for (const res of [tz, units, alcohol, widgets]) {
+                expect(res.status).toBe(303);
+            }
+            const profile = await getProfile(userId);
+            expect(profile?.timezone).toBe("Asia/Tokyo");
+            expect(profile?.preferred_weight_unit).toBe("lb");
+            expect(profile?.preferred_drink_unit).toBe("uk");
+            expect(profile?.alcohol_tracking_enabled).toBe(true);
+            expect(profile?.widgets_enabled).toBe(false);
         });
     },
 );

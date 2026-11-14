@@ -2059,11 +2059,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             backHref: "/kitchen/fridge",
             displayName: "Ethan Flow",
+            email: "ethan@example.com",
             timezone: "America/Los_Angeles",
-            weightUnit: "kg",
-            widgetsEnabled: true,
-            alcoholTrackingEnabled: false,
-            drinkUnit: "",
         }),
         "settings-display": renderSettingsDisplayV2Page({
             chrome,

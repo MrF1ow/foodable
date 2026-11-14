@@ -531,23 +531,10 @@
     cursor: pointer;
 }
 
-.fd-settings-session {
-    margin: 10px 0 0;
-    font-size: 0.9375rem;
-}
-
-.fd-settings-session a {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 51px;
-    padding: 13px var(--space-section);
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
+/* Account's Log out row: the Household row card with a red label. */
+.fd-settings-account .fd-stores-pref--danger,
+.fd-settings-account .fd-stores-pref--danger .fd-row__title {
     color: var(--status-over);
-    text-decoration: none;
-    font: 400 0.9375rem/1.25 var(--font-body);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
 }
 
 .fd-settings-footnote {
