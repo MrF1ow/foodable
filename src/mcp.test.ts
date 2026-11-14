@@ -10023,6 +10023,105 @@ describe("household notices with actions over HTTP", () => {
             });
         },
     );
+
+    /** The tags of one text line, `[label: value]` by label. */
+    const tagsOf = (line: string): Record<string, string> =>
+        Object.fromEntries(
+            [...line.matchAll(/\[([a-z_]+): ([^\]]+)\]/g)].map((m) => [
+                m[1]!,
+                m[2]!,
+            ]),
+        );
+
+    test.each(ERAS)(
+        "a notice can be dismissed from the list_notices text alone (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: CallTool = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                // A pair notice, whose dismissal also needs the other food.
+                await call("upsert_food", { name: "rolled oat" });
+                const oats = await call("upsert_food", {
+                    name: "rolled oats",
+                    on_similar: "create",
+                });
+                expect(oats.isError).toBeFalsy();
+                const listing = await call("list_notices", {});
+                const lines = textOf(listing)
+                    .split("\n")
+                    .filter((line) => line.includes("[code: "));
+                // Nothing below reads structuredContent: only the text.
+                const codes = lines.map((line) => tagsOf(line).code);
+                for (const code of [...CODES, "food.possible_duplicate"]) {
+                    expect(codes).toContain(code);
+                }
+                // The pair notice needs its related_id to be dismissed at all.
+                expect(
+                    lines.some(
+                        (line) =>
+                            tagsOf(line).code === "food.possible_duplicate" &&
+                            tagsOf(line).related_id,
+                    ),
+                ).toBe(true);
+                for (const line of lines) {
+                    const tags = tagsOf(line);
+                    expect(tags.subject_kind).toBeTruthy();
+                    expect(tags.subject_id).toBeTruthy();
+                    const out = await call("dismiss_notice", {
+                        code: tags.code,
+                        subject_kind: tags.subject_kind,
+                        subject_id: tags.subject_id,
+                        ...(tags.related_id
+                            ? { related_id: tags.related_id }
+                            : {}),
+                    });
+                    expect(
+                        out.isError,
+                        `${line} -> ${textOf(out)}`,
+                    ).toBeFalsy();
+                }
+                const after = await call("list_notices", {});
+                expect(
+                    textOf(after)
+                        .split("\n")
+                        .filter((line) => line.includes("[code: ")),
+                ).toEqual([]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "only dismiss.related_id is labelled related_id; a non-dismissable notice names no dismiss inputs (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: CallTool = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                const sc = await listed(call);
+                const lines = textOf(await call("list_notices", {}))
+                    .split("\n")
+                    .slice(1);
+                expect(lines).toHaveLength(sc.notices.length);
+                sc.notices.forEach((n, i) => {
+                    const tags = tagsOf(lines[i]!);
+                    expect(tags.related_id ?? null).toBe(
+                        n.dismiss?.related_id ?? null,
+                    );
+                    if (n.dismiss == null) {
+                        expect(tags.code).toBeUndefined();
+                        expect(tags.subject_kind).toBeUndefined();
+                    }
+                });
+            });
+        },
+    );
 });
 
 describe("usual tools keep the usual's schedule over HTTP", () => {

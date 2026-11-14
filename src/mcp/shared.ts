@@ -1171,31 +1171,51 @@ export function idTag(value: string, param = "id"): string {
 
 /** Text with every `idTag` removed, for tests that pin the wording around ids. */
 export function stripIdTags(text: string): string {
-    return text.replace(/ \[[a-z_]*id: [^\]]+\]/g, "");
+    return text.replace(/ \[(?:[a-z_]*id|code|subject_kind): [^\]]+\]/g, "");
 }
 
+/** The input that takes a notice's subject or related row, by its kind. */
+const NOTICE_KIND_INPUT: Record<
+    WireNotice["subject"]["kind"] | WireNotice["related"][number]["kind"],
+    string
+> = {
+    food: "food_id",
+    recipe: "recipe_id",
+    recipe_ingredient: "ingredient_id",
+    fridge_item: "id",
+    grocery_line: "id",
+    member: "user_id",
+};
+
 /**
- * The ids a notice carries, for the end of its text line: the subject (what
- * dismiss_notice takes as subject_id), the recipe an ingredient notice belongs
- * to, and the related ids (dismiss_notice's related_id first, as listed).
+ * The ids a notice carries, for the end of its text line. A dismissable one
+ * carries exactly what dismiss_notice takes, under those input names: `code`,
+ * `subject_kind`, `subject_id` and, only when `dismiss.related_id` is set,
+ * `related_id`. Every other id (the recipe an ingredient notice belongs to, the
+ * other rows it names) is labelled by the input that takes it, and a
+ * non-dismissable notice labels its subject the same way.
  */
 export function noticeIdTags(notice: WireNotice): string {
-    const dismissRelated = notice.dismiss?.related_id ?? null;
     const seen = new Set<string>();
-    const tags: string[] = [idTag(notice.subject.id, "subject_id")];
-    seen.add(notice.subject.id);
-    if (notice.subject.recipe_id && !seen.has(notice.subject.recipe_id)) {
-        seen.add(notice.subject.recipe_id);
-        tags.push(idTag(notice.subject.recipe_id, "recipe_id"));
+    const tags: string[] = [];
+    const add = (value: string, label: string) => {
+        if (seen.has(value)) return;
+        seen.add(value);
+        tags.push(idTag(value, label));
+    };
+    const dismiss = notice.dismiss;
+    if (dismiss) {
+        tags.push(
+            ` [code: ${dismiss.code}] [subject_kind: ${dismiss.subject_kind}]`,
+        );
+        add(dismiss.subject_id, "subject_id");
+        if (dismiss.related_id) add(dismiss.related_id, "related_id");
+    } else {
+        add(notice.subject.id, NOTICE_KIND_INPUT[notice.subject.kind]);
     }
-    if (dismissRelated && !seen.has(dismissRelated)) {
-        seen.add(dismissRelated);
-        tags.push(idTag(dismissRelated, "related_id"));
-    }
+    if (notice.subject.recipe_id) add(notice.subject.recipe_id, "recipe_id");
     for (const related of notice.related) {
-        if (seen.has(related.id)) continue;
-        seen.add(related.id);
-        tags.push(idTag(related.id, "related_id"));
+        add(related.id, NOTICE_KIND_INPUT[related.kind]);
     }
     return tags.join("");
 }

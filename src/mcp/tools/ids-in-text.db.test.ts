@@ -8,7 +8,8 @@
 // the call itself passed in (the caller already holds them) and the few nested
 // references listed in NESTED. A second household member is seeded so member
 // ids are checked too. Every row must check at least one id, or say why not
-// with `noIds`. A tool in `tools-list.snapshot.json` with no row in CALLS and
+// with `noIds`. A row key may carry a `#why` suffix to exercise a second path
+// of the same tool. A tool in `tools-list.snapshot.json` with no row in CALLS and
 // no entry in EXCLUDED fails the coverage test by name, so a new tool is
 // covered the day it is added.
 import {
@@ -131,6 +132,9 @@ const CALLS: Record<string, CallRow | CallSpec> = {
     get_week_plan: () => ({}),
     get_household_rules: () => ({}),
     search_food: () => ({ query: "eggs" }),
+    // Only the product matches, so the plain food is in the text only as the
+    // product's generic_food_id.
+    "search_food#product": () => ({ query: "Kirkland" }),
     get_food: (s) => ({ food_id: s.eggs }),
     list_notices: () => ({}),
     list_members: () => ({}),
@@ -173,6 +177,15 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         () => ({ barcode: "5000000000000" }),
     ),
     rate_product: (s) => ({ food_id: s.eggs }),
+    // Looked up by barcode, the product's own food_id is not in the arguments.
+    "rate_product#barcode": async (_s, make) => {
+        await make("upsert_food", {
+            name: "Stabilo Oats",
+            barcode: "4006381333931",
+            on_similar: "create",
+        });
+        return { barcode: "4006381333931" };
+    },
     start_meal_import: noIds(
         "returns only the caller's own id and timezone",
         () => ({}),
@@ -506,6 +519,12 @@ const CALLS: Record<string, CallRow | CallSpec> = {
             return { id: made.id };
         },
     ),
+    // Last, since it empties the list the rows above read: the stores are
+    // still in the text, an agent adding to one needs their ids.
+    "list_grocery_lines#empty": async (_s, make) => {
+        await make("clear_grocery_list");
+        return {};
+    },
 };
 
 // A tool in the snapshot with no row above must be here, with the reason it
@@ -549,9 +568,17 @@ const NESTED: { tool?: string; path: string; reason: string }[] = [
         path: "store_rules[].id",
         reason: "nested reference, no tool takes a rule id",
     },
+    ...["list_grocery_lines", "add_grocery_line", "update_grocery_line"].map(
+        (tool) => ({
+            tool,
+            path: ".product.food_id",
+            reason: "nested reference to the line's usual product, not the line's own id",
+        }),
+    ),
     {
-        path: ".product.food_id",
-        reason: "nested reference, not the row's own actionable id",
+        tool: "get_household_digest",
+        path: ".movement_id",
+        reason: "no tool takes a stock movement id",
     },
     {
         path: ".source_fridge_item_id",
@@ -564,6 +591,9 @@ const NESTED: { tool?: string; path: string; reason: string }[] = [
     },
 ];
 
+/** The tool a CALLS key names: `rate_product#barcode` is rate_product. */
+const toolOf = (key: string) => key.split("#")[0]!;
+
 const normalizePath = (path: string) => path.replace(/\[\d+\]/g, "[]");
 const isNested = (tool: string, path: string) =>
     NESTED.some(
@@ -571,6 +601,14 @@ const isNested = (tool: string, path: string) =>
             (n.tool == null || n.tool === tool) &&
             normalizePath(path).endsWith(n.path),
     );
+
+/**
+ * Whether the text carries the id as a tag, `[some_label: <uuid>]`. A bare
+ * occurrence does not count: a note that repeats the id in prose would hide a
+ * tag that was removed.
+ */
+const tagged = (lowerText: string, id: string) =>
+    new RegExp(`\\[[a-z_]+: ${id}\\]`).test(lowerText);
 
 /** Every uuid anywhere in a value, lower-cased. */
 const uuidsIn = (value: unknown): string[] =>
@@ -599,7 +637,7 @@ export function checkIdsInText(input: {
     return {
         checked: owed.map(({ id }) => id),
         missing: owed
-            .filter(({ id }) => !text.includes(id))
+            .filter(({ id }) => !tagged(text, id))
             .map(({ id, path }) => `${path} = ${id}`),
     };
 }
@@ -679,6 +717,17 @@ describe("the id check itself", () => {
         });
         expect(got.checked).toEqual([a, b]);
         expect(got.missing).toEqual([`structuredContent.rows[1].id = ${b}`]);
+    });
+
+    test("a bare occurrence of the id is not a tag", () => {
+        const got = checkIdsInText({
+            tool: "t",
+            structured: { id: a },
+            text: `see ${a} for details`,
+            args: {},
+            householdId: household,
+        });
+        expect(got.missing).toEqual([`structuredContent.id = ${a}`]);
     });
 
     test("the household id and ids the caller passed in are not owed", () => {
@@ -766,6 +815,7 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
         await ok("set_usual_product", {
             food_id: eggs.id,
             product_food_id: kirkland.id,
+            store_id: store.id,
         });
         const milk = (await ok("upsert_food", {
             name: "Milk",
@@ -854,6 +904,19 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
             amount: 1000,
             unit: "ml",
         });
+        // Used up and thrown out, so the digest has something that ran out.
+        const sugar = (await ok("upsert_food", {
+            name: "Sugar",
+            on_similar: "create",
+        })) as { id: string };
+        const sugarItem = await ok("add_fridge_item", {
+            location_id: location.id,
+            kind: "food",
+            food_id: sugar.id,
+            amount: 1,
+            unit: "g",
+        });
+        await ok("discard_fridge_item", { id: sugarItem.id, amount: 1 });
         const [spare] = (await sql`
             select id from public.fridge_items where food_id = ${milk.id}
         `) as { id: string }[];
@@ -890,15 +953,16 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
         const names = snapshot.map((t: any) =>
             typeof t === "string" ? t : t.name,
         );
+        const called = Object.keys(CALLS).map(toolOf);
         const missing = names.filter(
-            (name) => !(name in CALLS) && !(name in EXCLUDED),
+            (name) => !called.includes(name) && !(name in EXCLUDED),
         );
         expect(missing).toEqual([]);
-        const stale = [...Object.keys(CALLS), ...Object.keys(EXCLUDED)].filter(
+        const stale = [...called, ...Object.keys(EXCLUDED)].filter(
             (name) => !names.includes(name),
         );
         expect(stale).toEqual([]);
-        const both = Object.keys(CALLS).filter((name) => name in EXCLUDED);
+        const both = called.filter((name) => name in EXCLUDED);
         expect(both).toEqual([]);
     });
 
@@ -913,10 +977,11 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
                 setSqlForTests(null);
             });
 
-            for (const [tool, row] of Object.entries(CALLS)) {
+            for (const [key, row] of Object.entries(CALLS)) {
+                const tool = toolOf(key);
                 const spec: CallSpec =
                     typeof row === "function" ? { args: row } : row;
-                test(`${tool}: every id in structuredContent is in the text`, async () => {
+                test(`${key}: every id in structuredContent is in the text`, async () => {
                     const { sql } = getCtx();
                     const make: Make = async (name, input = {}) => {
                         const made = await callTool(
@@ -975,7 +1040,7 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
                         owedInText.push(...added);
                     }
                     const absent = owedInText
-                        .filter((id) => !text.includes(id.toLowerCase()))
+                        .filter((id) => !tagged(text, id.toLowerCase()))
                         .map((id) => `text omits ${id}`);
                     expect(
                         [...missing, ...absent],

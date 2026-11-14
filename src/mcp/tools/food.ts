@@ -597,11 +597,20 @@ function getFoodText(payload: {
     name: string;
     generic_food_id: string | null;
     usual_store_id: string | null;
+    /** What the food reads through its usual product, store included. */
+    effective: { usual_store_id: string | null };
     products: { id: string; name: string; usual: boolean }[];
     notices: WireNotice[];
 }): string {
+    const stores = [
+        ...new Set(
+            [payload.usual_store_id, payload.effective.usual_store_id].filter(
+                (id): id is string => id != null,
+            ),
+        ),
+    ];
     const lines = [
-        `${payload.name}${idTag(payload.id, "food_id")}${payload.generic_food_id ? idTag(payload.generic_food_id, "generic_food_id") : ""}${payload.usual_store_id ? idTag(payload.usual_store_id, "store_id") : ""}`,
+        `${payload.name}${idTag(payload.id, "food_id")}${payload.generic_food_id ? idTag(payload.generic_food_id, "generic_food_id") : ""}${stores.map((id) => idTag(id, "store_id")).join("")}`,
     ];
     if (payload.products.length > 0) {
         lines.push(
@@ -684,13 +693,20 @@ function formatSearchHit(hit: {
     source: string;
     barcode: string | null;
     calories: number | null;
+    generic_food_id: string | null;
     generic_food_name: string | null;
 }): string {
     const bits = [hit.name];
     if (hit.brand) bits.push(hit.brand);
     if (hit.barcode) bits.push(hit.barcode);
     if (hit.calories != null) bits.push(`${hit.calories} kcal`);
-    if (hit.generic_food_name) bits.push(`product of ${hit.generic_food_name}`);
+    if (hit.generic_food_name) {
+        // The plain food a product is filed under: what set_usual_product,
+        // remove_usual and add_grocery_line take as food_id.
+        bits.push(
+            `product of ${hit.generic_food_name}${hit.generic_food_id ? idTag(hit.generic_food_id, "food_id") : ""}`,
+        );
+    }
     bits.push(hit.source);
     return (
         bits.join(" · ") + (hit.food_id ? idTag(hit.food_id, "food_id") : "")

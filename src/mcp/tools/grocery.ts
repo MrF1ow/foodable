@@ -439,7 +439,14 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                     };
                     const text =
                         lineCount === 0
-                            ? "Grocery list is empty."
+                            ? // Nothing to list, but a store id is what adding to one needs.
+                              [
+                                  "Grocery list is empty.",
+                                  ...payload.stores.map(
+                                      (store) =>
+                                          `## ${store.name}${idTag(store.id, "store_id")}`,
+                                  ),
+                              ].join("\n")
                             : payload.stores
                                   .flatMap((store) => [
                                       `## ${store.name}${idTag(store.id, "store_id")}`,
