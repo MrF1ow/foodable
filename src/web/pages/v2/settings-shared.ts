@@ -1,5 +1,5 @@
 import type { AppChromeBase } from "../../attention.js";
-import { initialsOf } from "../../shell-v2.js";
+import { memberAvatar } from "../../components/v2/avatar.js";
 import { esc, join, raw, type Html } from "../../components/v2/html.js";
 import { iconChevronRight } from "../../components/v2/icons.js";
 import { renderAppShell } from "../../shell.js";
@@ -226,6 +226,9 @@ export type SettingsProfile = {
     roleLabel?: string;
     householdName?: string;
     memberCount?: number;
+    /** Set when the profile-pictures flag is on: whose picture, and its version
+     *  (null = none yet). */
+    avatar?: { userId: string; version: Date | null };
 };
 
 export function settingsProfileCard(view: SettingsProfile): Html {
@@ -250,7 +253,7 @@ export function settingsProfileCard(view: SettingsProfile): Html {
             ? `<div class="fd-settings-profile__stats">${stats.join("")}</div>`
             : "";
     return raw(
-        `<section class="fd-settings-profile" aria-label="Your profile"><div class="fd-settings-profile__row"><div class="fd-settings-profile__text"><p class="fd-settings-profile__name">${esc(view.displayName)}</p><p class="fd-settings-profile__email">${esc(view.email)}</p></div><span class="fd-avatar fd-settings-profile__avatar" aria-hidden="true">${esc(initialsOf(view.displayName))}</span></div>${statsRow}</section>`,
+        `<section class="fd-settings-profile" aria-label="Your profile"><div class="fd-settings-profile__row"><div class="fd-settings-profile__text"><p class="fd-settings-profile__name">${esc(view.displayName)}</p><p class="fd-settings-profile__email">${esc(view.email)}</p></div>${String(memberAvatar({ name: view.displayName, userId: view.avatar?.userId, version: view.avatar?.version, enabled: view.avatar !== undefined, className: "fd-settings-profile__avatar" }))}</div>${statsRow}</section>`,
     );
 }
 
@@ -307,7 +310,18 @@ function settingsLayoutMarkup(layout: SettingsV2Layout): string {
         storedTheme: layout.storedTheme,
         inlineDisplayTheme: isHome,
     });
-    const profileSource =
+    const picturesFor = layout.chrome.identity;
+    const avatar =
+        layout.chrome.flags.uiProfilePictures && picturesFor?.viewerUserId
+            ? {
+                  userId: picturesFor.viewerUserId,
+                  version:
+                      picturesFor.avatarVersions?.get(
+                          picturesFor.viewerUserId,
+                      ) ?? null,
+              }
+            : undefined;
+    const base =
         layout.profile ??
         (isHome
             ? {
@@ -318,6 +332,7 @@ function settingsLayoutMarkup(layout: SettingsV2Layout): string {
                   memberCount,
               }
             : undefined);
+    const profileSource = base && avatar ? { avatar, ...base } : base;
     const profileMain =
         isHome && profileSource ? settingsProfileCard(profileSource) : raw("");
     const profilePhone =

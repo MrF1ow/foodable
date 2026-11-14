@@ -5,6 +5,7 @@ import {
     isWeightUnit,
     type WeightUnit,
 } from "../../../domain/units.js";
+import { memberAvatar } from "../../components/v2/avatar.js";
 import { esc } from "../../components/v2/html.js";
 import {
     renderSettingsV2Page,
@@ -24,6 +25,9 @@ export type SettingsAccountV2View = {
     alcoholTrackingEnabled: boolean;
     drinkUnit: DrinkUnit | "";
     error?: string;
+    /** Present only when the profile-pictures flag is on: the viewer's own
+     *  picture (null version = none yet) and the control to change it. */
+    photo?: { userId: string; version: Date | null };
 };
 
 export type NutritionPrefsPatch = {
@@ -91,6 +95,34 @@ function hiddenFrom(backHref: string): string {
     return `<input type="hidden" name="from" value="${esc(backHref)}" />`;
 }
 
+/** "Photo": the member's own picture and the forms to change or remove it.
+ *  The file input posts straight to the server; `data-fd-avatar-upload` lets
+ *  the browser shrink the picture first (app-v2.js), and without it the raw
+ *  file is posted and the server enforces the same limits. */
+function photoSection(view: SettingsAccountV2View, fromField: string): string {
+    const photo = view.photo;
+    if (!photo) return "";
+    const avatar = memberAvatar({
+        name: view.displayName,
+        userId: photo.userId,
+        version: photo.version,
+        enabled: true,
+        className: "fd-settings-photo__avatar",
+    });
+    const change = `<form method="POST" action="/settings/account/photo" enctype="multipart/form-data" class="fd-settings-photo__form" data-turbo="false" data-fd-avatar-upload>
+${fromField}
+<input type="file" id="photo" name="photo" class="fd-settings-photo__input" accept="image/jpeg,image/png,image/webp" aria-label="Choose a photo" required />
+${settingsPrimarySubmit("Change photo")}
+</form>`;
+    const remove = photo.version
+        ? `<form method="POST" action="/settings/account/photo/remove" class="fd-settings-photo__remove" data-turbo="false">
+${fromField}
+<button type="submit" class="fd-settings-btn fd-settings-btn--danger fd-settings-btn--sm">Remove photo</button>
+</form>`
+        : "";
+    return `<p class="fd-settings-section-label">Photo</p><div class="fd-settings-photo">${String(avatar)}<div class="fd-settings-photo__forms">${change}${remove}</div></div>`;
+}
+
 export function renderSettingsAccountV2Body(
     view: SettingsAccountV2View,
 ): string {
@@ -138,7 +170,7 @@ ${String(
 ${settingsPrimarySubmit("Save nutrition prefs")}
 </form>`;
     const logout = `<p class="fd-settings-session"><a href="/logout" data-turbo="false">Log out</a></p><p class="fd-settings-footnote">Your data stays on this household&apos;s server. Export it any time from Settings.</p>`;
-    return `${String(settingsPageHeader("Account"))}${String(settingsErrorBanner(view.error))}${accountForm}${nutritionForm}${logout}`;
+    return `${String(settingsPageHeader("Account"))}${String(settingsErrorBanner(view.error))}${photoSection(view, fromField)}${accountForm}${nutritionForm}${logout}`;
 }
 
 export function renderSettingsAccountV2Page(

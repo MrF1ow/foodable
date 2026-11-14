@@ -14,6 +14,7 @@ import {
 import { noticesFor, type NoticesForResult } from "../domain/notices-for.js";
 import { buildFlagContext } from "../flags.js";
 import type { HouseholdMember } from "../household.js";
+import { getAvatarVersions } from "../db/avatars.js";
 import { getHouseholdConfig, listHouseholdMembers } from "../db/household.js";
 import { loadViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 import type { AppTabId, ShellIdentity, ViewerChrome } from "./shell.js";
@@ -146,6 +147,10 @@ export async function viewerChromeWithAttention(
     loadIdentity: (
         viewer: HouseholdMember,
     ) => Promise<ShellIdentity> = loadShellIdentity,
+    /** Seam for tests: how the household's picture versions are loaded. */
+    loadAvatars: (
+        householdId: string,
+    ) => Promise<ReadonlyMap<string, Date>> = getAvatarVersions,
 ): Promise<AppChromeBase> {
     const flags = await viewerFlagsFor(viewer);
     const noticeResult: Pick<NoticesForResult, "notices"> =
@@ -153,7 +158,18 @@ export async function viewerChromeWithAttention(
         (await loadHouseholdNotices(viewer.householdId, {
             actionable: true,
         }));
-    const identity = await loadIdentity(viewer);
+    const loaded = await loadIdentity(viewer);
+    // One read for the whole page, and none at all with the flag off. A
+    // picture is a nicety: if the read fails every page still renders, with
+    // initials.
+    const identity: ShellIdentity = flags.uiProfilePictures
+        ? {
+              ...loaded,
+              avatarVersions: await loadAvatars(viewer.householdId).catch(
+                  () => new Map<string, Date>(),
+              ),
+          }
+        : loaded;
     const tz =
         profile?.timezone && validateTz(profile.timezone)
             ? profile.timezone
@@ -191,6 +207,7 @@ export async function loadShellIdentity(
         listHouseholdMembers(viewer.householdId),
     ]);
     return {
+        viewerUserId: viewer.userId,
         viewerName: viewer.displayName,
         viewerRole: viewer.role,
         householdName: config.name,

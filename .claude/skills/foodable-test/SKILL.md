@@ -70,18 +70,19 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 ## Which tool fits which change
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
-- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app` (household owner; `src/db/testing/pg.ts`). Needs `initdb` (PATH or `PG_BIN`), else skipped.
-- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed": another run holds them; wait until `ss -ltn` shows both free). No database.
-- **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow: long `timeout`). Clear tmp/app-preview first. Without `--shots`: serves :4787 (`PREVIEW_PORT`). Per page: `-390.png` and `-1440.png`. Chromium; fixture data.
-- **WebKit (Safari-class checks):** Playwright's WPE `MiniBrowser` only starts through a wrapper that exports `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH` and `WEBKIT_INSPECTOR_RESOURCES_PATH` (its `bin`, `lib`, `share`), plus `WEBKIT_FORCE_COMPLEX_TEXT=1` and an `LD_LIBRARY_PATH` with its `lib` and `sys/lib` and an ICU 74 libs directory.
-- **Barcode scans against a running server** hit live Open Food Facts (no fixture on the server), so they need network; unit tests stub it.
+- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app` (`src/db/testing/pg.ts`). Needs `initdb` (PATH or `PG_BIN`), else skipped.
+- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed": another run holds them; wait for `ss -ltn` to show both free). No database.
+- **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow: long `timeout`). Clear tmp/app-preview first. Without `--shots`: serves :4787 (`PREVIEW_PORT`). Fixture data, `-390.png` and `-1440.png` per page.
+- **WebKit (Safari-class checks):** Playwright's WPE `MiniBrowser` only starts through a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH` (its `bin`, `lib`, `share`), `WEBKIT_FORCE_COMPLEX_TEXT=1` and an `LD_LIBRARY_PATH` with its `lib`, `sys/lib` and an ICU 74 libs dir.
+- **Barcode scans against a running server** hit live Open Food Facts so they need network; unit tests stub it.
 - **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
-- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&v2=1&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. `bun --no-env-file test src/widgets.test.ts` guards assembly. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
+- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&v2=1&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. `src/widgets.test.ts` guards assembly. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
+- **App-wide middleware (body limit, CORS):** import `app` from `src/index.ts`, as `src/index.test.ts` does.
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
-- **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked (below).
+- **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked.
 - **Migrations:** `bun run db:dryrun` (throwaway Postgres, never production; needs `initdb`). `bun run db:rehearse` (production copy via `railway ssh`): only when asked.
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
-- **Types, lint, format:** `bun run typecheck`, `bun run lint`, `bun run format:check` (`format` fixes). Both run `bun fmt` and need Bun ≥ 1.4.4 (the default `bun` may be older): `mise exec bun@1.4.4 -- bun run format:check`.
+- **Types, lint, format:** `bun run typecheck`, `bun run lint`, `bun run format:check` (`format` fixes). Both run `bun fmt` and need Bun ≥ 1.4.4 (default `bun` may be older): `mise exec bun@1.4.4 -- bun run format:check`.
 
 `e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if it points at the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 
@@ -90,7 +91,7 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 - Production data: Railway Postgres is internal-only; `bun run db:rehearse` only when asked, no own `railway ssh` queries.
 - `.env`, and any value in it (never print, copy or commit). `docker-compose.yml` loads `.env`, so do not use it for verification.
 - The design file `Foodable Design.figcraft` in the user's designs folder: read-only, read it with the FigCraft tools, never edit or save it.
-- The user's running dev server, `foodable*.service` units and `foodable-db.service`, and anything on :8080 or :54330: never kill, restart or reuse.
+- The user's dev server, `foodable*.service` units, `foodable-db.service`, and anything on :8080 or :54330: never kill, restart or reuse.
 - `main` and the rulesets.
 
 ## When this skill is out of date

@@ -66,6 +66,26 @@ html:has(body.fd-body) {
     font: 400 13px/17px var(--font-body);
     text-decoration: none;
 }
+/* With a picture the chip is the round avatar alone: 29px, picture over the
+   initials. The avatar span is styled here, not through `.fd-avatar`, whose
+   size rules only apply from 1024 px. */
+.fd-account-chip--photo {
+    width: 29px;
+    padding: 0;
+    justify-content: center;
+    overflow: hidden;
+}
+.fd-account-chip__avatar {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 27px;
+    height: 27px;
+    border-radius: var(--radius-pill);
+    color: var(--text-primary);
+    font: 600 11px/13px var(--font-body);
+}
 /* Keep the title, and any actions beside it, clear of the chip: 38px chip +
    10px gap. */
 .fd-main > h1,

@@ -53,7 +53,7 @@ import {
 } from "./settings-household-shared-links.js";
 import { sourceIcon } from "../../components/source-icon.js";
 import { lastActiveLabel } from "../../../domain/last-active.js";
-import { initialsOf } from "../../shell-v2.js";
+import { memberAvatar } from "../../components/v2/avatar.js";
 import { SOCIAL_READER_LABELS } from "../../../copy/social-readers.js";
 
 export type SettingsHouseholdV2View = {
@@ -177,7 +177,7 @@ function memberRow(
           )}</span>`
         : "";
     return raw(
-        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}"><span class="fd-avatar fd-settings-member-avatar" aria-hidden="true">${esc(initialsOf(member.displayName))}</span><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${lastActive}${chevron}</a>${trailing}</div></li>`,
+        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}">${String(memberAvatar({ name: member.displayName, userId: member.userId, version: view.chrome.identity?.avatarVersions?.get(member.userId), enabled: view.chrome.flags.uiProfilePictures, className: "fd-settings-member-avatar" }))}<div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${lastActive}${chevron}</a>${trailing}</div></li>`,
     );
 }
 

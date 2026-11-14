@@ -7,6 +7,7 @@
  * DOM behind the row face (or hover/focus overlay with a fine pointer); the
  * gesture itself is another module's job. See `components.css` "Swipe rows".
  */
+import { memberAvatar } from "./avatar.js";
 import { dot, type DotColor } from "./dot.js";
 import {
     actionButton,
@@ -492,6 +493,9 @@ export function memberCheckRow(opts: {
     initials: Text;
     verdict: "good" | "careful" | "avoid";
     reason: Text;
+    /** Set when the profile-pictures flag is on: whose picture, and its
+     *  version (null = none). The initials stay the fallback. */
+    avatar?: { userId: string; version: Date | null };
 }): Html {
     const verdictLabel =
         opts.verdict === "good"
@@ -509,9 +513,14 @@ export function memberCheckRow(opts: {
     return rowShell({
         variant: "member",
         lead: {
-            html: raw(
-                `<span class="fd-avatar fd-avatar--row" aria-hidden="true">${esc(opts.initials)}</span>`,
-            ),
+            html: memberAvatar({
+                name: String(opts.name),
+                initials: String(opts.initials),
+                userId: opts.avatar?.userId,
+                version: opts.avatar?.version,
+                enabled: opts.avatar !== undefined,
+                className: "fd-avatar--row",
+            }),
         },
         main: join([
             titleLine(

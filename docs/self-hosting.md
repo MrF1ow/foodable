@@ -274,6 +274,8 @@ Unknown flag names and unknown modes log a warning once at startup and are ignor
 
 Share links make public pages that need no sign-in (`/s/:token`). They stay off, with no Share buttons and every link answering 404, unless `mcp-share-links` is on (for example `mcp-share-links:internal`); no other flag turns them on.
 
+Profile pictures are off until `ui-profile-pictures` is on (for example `ui-profile-pictures:internal`). With it on, each member can set their own picture under Settings › Account (Change photo, Remove photo) and it shows wherever the app shows their initials; nobody can set another member's. The browser crops the chosen photo to a square and shrinks it to 256 by 256 before uploading, and the server accepts only a JPEG, PNG or WebP of at most 64 KB that is square and no larger than 256 pixels, judged by the file's own bytes. Pictures live in Postgres (`member_avatars`), are served to signed-in members of the same household at `/avatars/<user id>` with `nosniff` and a policy that never renders them as a page, and are removed with the member. They are not part of the data export. With the flag off there is no control and `/avatars/*` answers 404.
+
 The grocery, store and kitchen admin tools for AI agents (`list_stores`, `create_store`, `update_store`, `delete_store`, `reorder_stores`, `set_store_sections`, `clear_grocery_list`, `move_grocery_lines`, `update_grocery_line`, `delete_grocery_lines`, `move_fridge_items`, `delete_fridge_items`, `remove_usual`) stay out of `tools/list` unless `mcp-household-admin` is on (default off, for example `mcp-household-admin:internal`).
 
 ## Agent changes and undo

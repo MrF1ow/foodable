@@ -303,6 +303,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/domain/last-active.ts": "household",
     "src/domain/avatar.ts": "household",
     "src/domain/avatar.test.ts": "household",
+    "src/web/initials.ts": "household",
+    "src/web/routes/avatars.ts": "household",
     "src/domain/last-active.test.ts": "household",
     "src/domain/household-digest.test.ts": "household",
     "src/mcp/tools/goals.ts": "goals",

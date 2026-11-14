@@ -56,6 +56,52 @@
     border: 1px solid var(--line);
 }
 
+/* Settings > Account > Photo: the picture beside the change and remove forms. */
+.fd-settings-photo {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-12);
+    padding: var(--fd-s-12) var(--space-section);
+    /* The same gap the Nutrition card keeps from the one above it. */
+    margin-bottom: var(--fd-s-12);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+}
+.fd-settings-photo__avatar {
+    box-sizing: border-box;
+    flex: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 4.5rem;
+    height: 4.5rem;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 1.25rem/1.1 var(--font-body);
+    border: 1px solid var(--line);
+}
+.fd-settings-photo__forms {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--fd-s-6);
+    min-width: 0;
+}
+.fd-settings-photo__form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--fd-s-6);
+    max-width: 100%;
+}
+.fd-settings-photo__input {
+    max-width: 100%;
+    font: 400 0.8125rem/1.2 var(--font-body);
+    color: var(--text-secondary);
+}
+
 .fd-settings-profile__name {
     margin: 0;
     font: 600 1rem/1.25 var(--font-body);

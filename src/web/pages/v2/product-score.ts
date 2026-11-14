@@ -53,6 +53,8 @@ export type ProductMemberCard = {
     initials: string;
     verdict: MemberProductVerdict;
     reason: string;
+    /** Set when the profile-pictures flag is on (null version = no picture). */
+    avatar?: { userId: string; version: Date | null };
 };
 
 export type ProductScoreSection = {
@@ -141,6 +143,8 @@ export function buildProductMemberCards(
     food: Food,
     members: readonly ProductCheckMember[],
     noticesByMember: ReadonlyMap<string, Notice[]>,
+    /** Picture versions by user id; given only when pictures are on. */
+    avatarVersions?: ReadonlyMap<string, Date>,
 ): ProductMemberCard[] {
     return members.map((member) => {
         const notices = noticesByMember.get(member.id) ?? [];
@@ -150,6 +154,14 @@ export function buildProductMemberCards(
             initials: initialsOf(member.name),
             verdict: memberProductVerdict(notices),
             reason: productMemberReasonLine(notices),
+            ...(avatarVersions
+                ? {
+                      avatar: {
+                          userId: member.id,
+                          version: avatarVersions.get(member.id) ?? null,
+                      },
+                  }
+                : {}),
         };
     });
 }
@@ -191,6 +203,7 @@ export function renderProductScoreSection(
             initials: card.initials,
             verdict: card.verdict,
             reason: card.reason,
+            avatar: card.avatar,
         }),
     );
     return `<section class="fd-product-score" aria-label="Product score">
@@ -214,6 +227,8 @@ export async function loadProductScoreSection(
     food: Food,
     viewerUserId: string,
     scoreSettings: ScoreSettingsStore = liveScoreSettingsStore(),
+    /** Picture versions by user id; given only when pictures are on. */
+    avatarVersions?: ReadonlyMap<string, Date>,
 ): Promise<ProductScoreSection | null> {
     const viewerSettings = await scoreSettingsForViewer(
         scoreSettings,
@@ -265,7 +280,12 @@ export async function loadProductScoreSection(
                 ? { remaining: viewerRemaining }
                 : { remaining: {} },
     );
-    const memberCards = buildProductMemberCards(food, members, noticesByMember);
+    const memberCards = buildProductMemberCards(
+        food,
+        members,
+        noticesByMember,
+        avatarVersions,
+    );
     return buildProductScoreSection(food, memberCards, {
         weights: viewerSettings.weights,
         preset: viewerSettings.preset,
