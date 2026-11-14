@@ -478,8 +478,8 @@ export function describeUndoConflict(
             const referenced = conflict.referencedTable;
             if (referenced === "foods") {
                 return name
-                    ? `The food ${name} was merged or deleted since.`
-                    : "The food was merged or deleted since.";
+                    ? `The food ${name} was merged, archived or deleted since.`
+                    : "The food was merged, archived or deleted since.";
             }
             const what = isAgentSnapshotTable(referenced)
                 ? TABLE_LABELS[referenced]

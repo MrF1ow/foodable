@@ -812,7 +812,7 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
         const before = await fingerprint();
         const out = await undo(entry.id);
         expect(out.status).toBe("conflict");
-        expect(out.message).toContain("merged or deleted since");
+        expect(out.message).toContain("merged, archived or deleted since");
         expect(await fingerprint()).toBe(before);
         expect(
             (await actions()).find((row) => row.tool === "remove_usual")!

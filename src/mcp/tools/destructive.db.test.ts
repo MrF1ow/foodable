@@ -1209,7 +1209,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
     });
 
     describe("a row is not put back onto a food merged away since", () => {
-        const MERGED = "merged or deleted since";
+        const MERGED = "merged, archived or deleted since";
 
         async function mergeAway(drop: string): Promise<void> {
             const keep = await food(`Kept ${drop.slice(0, 4)}`);
@@ -1443,5 +1443,36 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         const entry = await actionFor("set_nutrition_goals");
         expect((await undo(entry.id)).status).toBe("undone");
         expect(await days()).toEqual(before);
+    });
+
+    test("an override the null leaves untouched is not recorded, so removing it later does not block the undo", async () => {
+        const { sql } = getCtx();
+        await sql`
+            insert into public.nutrition_goal_days (
+                household_id, user_id, date, daily_calories
+            )
+            values (${householdId}, ${ownerId}, '2099-01-01'::date, ${2000})
+        `;
+        await sql`
+            insert into public.nutrition_goal_days (
+                household_id, user_id, date, daily_protein_g
+            )
+            values (${householdId}, ${ownerId}, '2099-01-02'::date, ${150})
+        `;
+        const cleared = await call("set_nutrition_goals", {
+            from: "2099-01-01",
+            to: "2099-01-03",
+            daily_calories: null,
+        });
+        expect(cleared.isError).toBeFalsy();
+        const entry = await actionFor("set_nutrition_goals");
+        expect(entry.summary).not.toContain("rewrote");
+        // A person removes the override the call never changed.
+        await sql`delete from public.nutrition_goal_days where date = '2099-01-02'::date`;
+        expect((await undo(entry.id)).status).toBe("undone");
+        const back = await rows(
+            "select date::text as date, daily_calories from public.nutrition_goal_days order by date",
+        );
+        expect(back).toEqual([{ date: "2099-01-01", daily_calories: 2000 }]);
     });
 });

@@ -664,7 +664,8 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
         });
         expect(out).toEqual({
             status: "conflict",
-            message: "The food Free range eggs was merged or deleted since.",
+            message:
+                "The food Free range eggs was merged, archived or deleted since.",
         });
     });
 

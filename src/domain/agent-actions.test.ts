@@ -684,7 +684,9 @@ describe("undoing an agent action", () => {
             now: T0,
         });
         expect(out.status).toBe("conflict");
-        expect(out.message).toBe("The food Eggs was merged or deleted since.");
+        expect(out.message).toBe(
+            "The food Eggs was merged, archived or deleted since.",
+        );
         expect(s.store.__rows("grocery_lines")).toEqual([]);
     });
 
@@ -2117,7 +2119,7 @@ describe("the ledger is corrected for this action only", () => {
         );
         expect(out).toEqual({
             status: "conflict",
-            message: "The food was merged or deleted since.",
+            message: "The food was merged, archived or deleted since.",
         });
     });
 
@@ -2383,7 +2385,7 @@ describe("undo never puts back what has moved on since", () => {
         s.store.__seed("foods", foodRow(FOOD, AFTER));
         expect(await undoIt(s.deps, action.id)).toEqual({
             status: "conflict",
-            message: "The food was merged or deleted since.",
+            message: "The food was merged, archived or deleted since.",
         });
         expect(s.store.__rows("grocery_lines")).toEqual([]);
 
@@ -2411,7 +2413,7 @@ describe("undo never puts back what has moved on since", () => {
         );
         s.store.__seed("foods", foodRow(FOOD, AFTER));
         expect((await undoIt(s.deps, action.id)).message).toBe(
-            "The food was merged or deleted since.",
+            "The food was merged, archived or deleted since.",
         );
         expect(s.store.__rows("grocery_lines")[0]!.food_id).toBe(KEPT);
     });
@@ -2480,7 +2482,7 @@ describe("undo never puts back what has moved on since", () => {
             s.store.__seed("foods", foodRow(KEPT, AFTER));
             expect(await undoIt(s.deps, action.id)).toEqual({
                 status: "conflict",
-                message: "The food was merged or deleted since.",
+                message: "The food was merged, archived or deleted since.",
             });
             expect(
                 s.store.__rows("foods").find((r) => r.id === FOOD)!,
@@ -2506,7 +2508,7 @@ describe("undo never puts back what has moved on since", () => {
             );
             s.store.__seed("foods", foodRow(KEPT, AFTER));
             expect((await undoIt(s.deps, action.id)).message).toBe(
-                "The food was merged or deleted since.",
+                "The food was merged, archived or deleted since.",
             );
             expect(
                 s.store.__rows("foods").find((r) => r.id === FOOD)!

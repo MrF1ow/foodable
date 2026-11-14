@@ -157,6 +157,20 @@ function overridesEmptiedBy(
     );
 }
 
+/** Whether the patch changes a field this override holds. */
+function overrideChangedBy(
+    row: GoalDayRow,
+    patch: NutritionGoalDayInput,
+): boolean {
+    return GOAL_DAY_FIELDS.some((field) => {
+        const next = patch[field];
+        if (next === undefined) return false;
+        const current = row[field];
+        if (next === null || current == null) return next !== (current ?? null);
+        return Number(next) !== Number(current);
+    });
+}
+
 function overrides(count: number): string {
     return `${count} per-day goal override${count === 1 ? "" : "s"}`;
 }
@@ -481,8 +495,14 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                                     const gone = new Set(
                                         emptied.map((row) => row.id),
                                     );
+                                    // Only the overrides the patch really
+                                    // changes: an untouched one recorded here
+                                    // would make undo refuse once a person
+                                    // removed it, for no reason.
                                     const rewritten = found.filter(
-                                        (row) => !gone.has(row.id),
+                                        (row) =>
+                                            !gone.has(row.id) &&
+                                            overrideChangedBy(row, dayPatch),
                                     );
                                     await rec.captureByIds(
                                         "nutrition_goal_days",
