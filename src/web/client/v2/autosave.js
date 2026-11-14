@@ -26,6 +26,17 @@
 //  - A save that fails on the network says so (a toast) and keeps the field's
 //    text; it is retried after the next save that gets an answer, or when the
 //    field is left again.
+//  - `data-fd-autosave="form"` marks a form of several controls with no single
+//    input to watch (Settings › Product score: preset, four sliders; or a
+//    one-click switch). Its value is the whole form's controls, taken after the
+//    page's own `change` handlers ran, and it is saved when any of them
+//    changes. A click on a switch form is an intent, so it is queued as is.
+//    Its morph is skipped while the form holds an unsaved edit, and a refused
+//    form carries `data-fd-invalid` to keep its draft like a rejected field.
+//    Once a refresh is applied the form is compared with what it now shows, so
+//    picking an earlier value again (after "Use household default") saves.
+//    A reset button is such a form too: queued behind a save in flight, and
+//    behind any edit made after it.
 //  - Leaving the page (a Turbo visit elsewhere) while a save is in flight or
 //    queued posts those fields with `fetch(keepalive)` instead of
 //    `requestSubmit()`, which would stop the visit and bring the user back.
@@ -38,6 +49,10 @@ const AFTER_END_MS = 3000;
 const sent = new WeakMap();
 const waiting = new Set();
 const failed = new Set();
+const forced = new Set();
+// The signature of a whole-form submit last sent, kept after the response so a
+// control moved by the page's own scripts after the submit is not a new edit.
+const saved = new WeakMap();
 let active = null;
 let timer = 0;
 let rendered = false;
@@ -58,10 +73,44 @@ function inputOf(form) {
     return form.querySelector(INPUT);
 }
 
-// The field a form saves: Goals' hidden `field`, else the input's own name.
+function isWhole(form) {
+    return (
+        !!form.getAttribute && form.getAttribute("data-fd-autosave") === "form"
+    );
+}
+
+// What a whole form would post: every named control's value (`defaults` reads
+// what the server rendered instead of what is there now).
+function signature(form, defaults) {
+    const parts = [];
+    for (const el of Array.from(form.elements || [])) {
+        if (!el.name || el.type === "submit" || el.type === "button") continue;
+        if (el.type === "radio" || el.type === "checkbox") {
+            if (defaults ? el.defaultChecked : el.checked) {
+                parts.push([el.name, el.value]);
+            }
+        } else {
+            parts.push([el.name, defaults ? el.defaultValue : el.value]);
+        }
+    }
+    return JSON.stringify(parts);
+}
+
+// A whole form differs from what was last sent (else from what was rendered).
+function wholeChanged(form) {
+    const base = saved.has(form) ? saved.get(form) : signature(form, true);
+    return signature(form) !== base;
+}
+
+// The field a form saves: Goals' hidden `field`, else the input's own name; a
+// whole form is its action plus its `intent`.
 function nameOf(form) {
     const field = form.querySelector('input[name="field"]');
     if (field && field.value) return field.value;
+    if (isWhole(form)) {
+        const intent = form.querySelector('input[name="intent"]');
+        return `${form.getAttribute("action") || ""}|${intent ? intent.value : ""}`;
+    }
     const input = inputOf(form);
     return (input && input.name) || "";
 }
@@ -71,6 +120,13 @@ function findForm(root, name) {
         if (nameOf(form) === name) return form;
     }
     return null;
+}
+
+// Queue a save behind the one in flight. A name already waiting moves to the
+// back: the person's last action is the last one sent.
+function queue(name) {
+    waiting.delete(name);
+    waiting.add(name);
 }
 
 function block(event) {
@@ -94,9 +150,15 @@ function drain() {
     while (waiting.size > 0) {
         const name = waiting.values().next().value;
         waiting.delete(name);
+        const wasForced = forced.delete(name);
         const form = findForm(document, name);
-        const input = form && inputOf(form);
-        if (!input || input.value === input.defaultValue) continue;
+        if (!form) continue;
+        if (isWhole(form)) {
+            if (!wasForced && !wholeChanged(form)) continue;
+        } else {
+            const input = inputOf(form);
+            if (!input || input.value === input.defaultValue) continue;
+        }
         if (typeof form.requestSubmit === "function") form.requestSubmit();
         return;
     }
@@ -115,7 +177,30 @@ function isEditing(input, serverValue) {
     );
 }
 
+// A whole form holding an edit the server has not seen, or one that failed.
+function wholeEditing(form) {
+    const name = nameOf(form);
+    return waiting.has(name) || failed.has(name) || wholeChanged(form);
+}
+
+// Put `from`'s controls' values into the matching controls of `to`.
+function copyState(from, to) {
+    for (const el of Array.from(from.elements || [])) {
+        if (!el.name || el.type === "hidden") continue;
+        if (el.type === "submit" || el.type === "button") continue;
+        for (const other of Array.from(to.elements || [])) {
+            if (other.name !== el.name) continue;
+            if (el.type === "radio" || el.type === "checkbox") {
+                if (other.value === el.value) other.checked = el.checked;
+            } else {
+                other.value = el.value;
+            }
+        }
+    }
+}
+
 function isRejected(form) {
+    if (isWhole(form)) return form.hasAttribute("data-fd-invalid");
     const input = inputOf(form);
     return !!input && input.getAttribute
         ? input.getAttribute("aria-invalid") === "true"
@@ -127,7 +212,7 @@ function sayFailed() {
     if (app && app.toast && typeof app.toast.show === "function") {
         app.toast.show({
             kind: "error",
-            text: "Couldn't save. Check your connection; it saves again when you leave the field.",
+            text: "Couldn't save. Check your connection and try again.",
         });
     }
 }
@@ -137,16 +222,19 @@ document.addEventListener(
     (event) => {
         const form = formOf(event.target);
         if (!form) return;
+        const whole = isWhole(form);
         if (active === form) {
             const input = inputOf(form);
-            if (input && input.value !== sent.get(form)) {
-                waiting.add(nameOf(form));
-            }
+            const again = whole
+                ? signature(form) !== sent.get(form)
+                : input && input.value !== sent.get(form);
+            if (again) queue(nameOf(form));
             block(event);
             return;
         }
         if (active) {
-            waiting.add(nameOf(form));
+            queue(nameOf(form));
+            if (whole) forced.add(nameOf(form));
             block(event);
             return;
         }
@@ -154,7 +242,12 @@ document.addEventListener(
         rendered = false;
         ended = false;
         const input = inputOf(form);
-        sent.set(form, input ? input.value : "");
+        if (whole) {
+            sent.set(form, signature(form));
+            saved.set(form, sent.get(form));
+        } else {
+            sent.set(form, input ? input.value : "");
+        }
         timer = setTimeout(release, SAFETY_MS);
     },
     true,
@@ -170,7 +263,11 @@ document.addEventListener("turbo:submit-end", (event) => {
         // No answer at all (offline, aborted): keep the text, say so.
         const name = nameOf(form);
         const input = inputOf(form);
-        if (name && input && input.value !== input.defaultValue) {
+        if (isWhole(form)) {
+            saved.delete(form);
+            if (wholeChanged(form)) failed.add(name);
+            sayFailed();
+        } else if (name && input && input.value !== input.defaultValue) {
             failed.add(name);
             sayFailed();
         }
@@ -220,6 +317,10 @@ document.addEventListener("turbo:before-morph-element", (event) => {
     if (!input || !input.hasAttribute) return;
     if (input.hasAttribute("data-fd-autosave")) {
         if (input !== active && isRejected(input)) event.preventDefault();
+        else if (isWhole(input) && wholeEditing(input)) event.preventDefault();
+        // The refresh goes ahead: the form now shows what the server has, so
+        // what was last sent is no longer what a new pick must differ from.
+        else if (isWhole(input)) saved.delete(input);
         return;
     }
     if (!input.hasAttribute("data-fd-autosave-input")) return;
@@ -234,6 +335,11 @@ document.addEventListener("turbo:before-render", (event) => {
     if (!body || !body.querySelectorAll) return;
     restoreFocus = null;
     for (const form of document.querySelectorAll(SELECTOR)) {
+        if (isWhole(form)) {
+            const target = findForm(body, nameOf(form));
+            if (target && wholeEditing(form)) copyState(form, target);
+            continue;
+        }
         const input = inputOf(form);
         if (!input || input.value === input.defaultValue) continue;
         const name = nameOf(form);
@@ -288,6 +394,7 @@ document.addEventListener("turbo:before-visit", (event) => {
     }
     waiting.clear();
     failed.clear();
+    forced.clear();
     if (timer) clearTimeout(timer);
     timer = 0;
     active = null;
@@ -298,9 +405,18 @@ document.addEventListener("turbo:before-visit", (event) => {
 function maybeSubmit(event) {
     const target = event.target;
     if (!target || !target.hasAttribute) return;
-    if (!target.hasAttribute("data-fd-autosave-input")) return;
     const form = formOf(target);
     if (!form) return;
+    if (isWhole(form)) {
+        if (target.type === "submit" || target.type === "button") return;
+        // After the page's own change handlers (a preset moving the sliders).
+        setTimeout(() => {
+            if (!wholeChanged(form)) return;
+            if (typeof form.requestSubmit === "function") form.requestSubmit();
+        }, 0);
+        return;
+    }
+    if (!target.hasAttribute("data-fd-autosave-input")) return;
     const last = sent.has(form) ? sent.get(form) : target.defaultValue;
     if (target.value === last) return;
     if (typeof form.requestSubmit === "function") form.requestSubmit();

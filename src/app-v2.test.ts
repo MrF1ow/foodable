@@ -277,7 +277,8 @@ describe("/app-v2.js", () => {
         // +~3.7 KB Profile pictures: shrink the chosen photo before upload.
         // +~1.2 KB Profile pictures: a picture that fails to load shows initials.
         // +~11 KB Settings autosave: a marked form submits when a field is left; one save at a time, an edit in progress survives the response, a rejected or failed field keeps its text, leaving mid-save posts with keepalive.
-        expect(js.length).toBeLessThan(165_700);
+        // +~5.2 KB Settings autosave: whole forms (Product score) save on any control's change, keep an unsaved edit through the refresh, and queue their reset buttons; a refreshed form forgets what it last sent.
+        expect(js.length).toBeLessThan(171_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
@@ -696,6 +697,10 @@ describe("autosave.js", () => {
             });
             t.flush();
             expect(shown.length).toBe(1);
+            // The wording fits every control, not only a text field.
+            expect((shown[0] as { text: string }).text).toBe(
+                "Couldn't save. Check your connection and try again.",
+            );
             // A later morph does not reset the failed field's text.
             expect(t.morph(t.a.input, "")).toBe(false);
             // The next save gets an answer: the failed field goes again after it.
@@ -750,5 +755,284 @@ describe("autosave.js", () => {
         t.leave(t.a, "1");
         expect(before.form).toBe(t.a);
         expect(t.reached()).toBe(1);
+    });
+});
+
+// A whole form (`data-fd-autosave="form"`, Settings › Product score): several
+// controls, saved when any of them changes.
+type WholeControl = {
+    name: string;
+    type: string;
+    value: string;
+    defaultValue: string;
+    checked: boolean;
+    defaultChecked: boolean;
+    hasAttribute: () => boolean;
+};
+type WholeForm = {
+    elements: WholeControl[];
+    requestSubmit: () => void;
+    hasAttribute: (n: string) => boolean;
+    getAttribute: (n: string) => string | null;
+    querySelector: (sel: string) => unknown;
+};
+
+async function wholeSetup() {
+    const map: Record<string, AutosaveListener[]> = {};
+    const timers: { fn: () => void; ms: number }[] = [];
+    const doc = {
+        activeElement: null as unknown,
+        addEventListener: (t: string, fn: AutosaveListener) => {
+            (map[t] ??= []).push(fn);
+        },
+        querySelectorAll: (sel: string): WholeForm[] =>
+            sel === "form[data-fd-autosave]" ? forms : [],
+    };
+    function fire(type: string, event: AutosaveEvent): boolean {
+        let stopped = false;
+        event.preventDefault = () => {
+            stopped = true;
+        };
+        event.stopImmediatePropagation = () => {
+            stopped = true;
+        };
+        for (const fn of map[type] ?? []) fn(event);
+        return !stopped;
+    }
+    let reached = 0;
+    let lastSent: WholeForm | null = null;
+    const control = (
+        name: string,
+        type: string,
+        value: string,
+        checked = false,
+    ): WholeControl => ({
+        name,
+        type,
+        value,
+        defaultValue: value,
+        checked,
+        defaultChecked: checked,
+        hasAttribute: () => false,
+    });
+    function makeForm(intent: string): WholeForm {
+        const hidden = control("intent", "hidden", intent);
+        const form: WholeForm = {
+            elements: [hidden],
+            hasAttribute: (n) => n === "data-fd-autosave",
+            getAttribute: (n) =>
+                n === "data-fd-autosave"
+                    ? "form"
+                    : n === "action"
+                      ? "/settings/product-score"
+                      : null,
+            querySelector: (sel) =>
+                sel === 'input[name="intent"]' ? hidden : null,
+            requestSubmit() {
+                if (fire("submit", { target: form })) {
+                    reached += 1;
+                    lastSent = form;
+                }
+            },
+        };
+        return form;
+    }
+    const choice = makeForm("choice");
+    const preset = ["balanced", "planet", "custom"].map((v) =>
+        control("preset", "radio", v, v === "balanced"),
+    );
+    const slider = control("weight_nutrition", "range", "40");
+    choice.elements.push(...preset, slider);
+    const sw = makeForm("warn_traces");
+    const reset = makeForm("household");
+    const forms = [choice, sw, reset];
+    const src = await Bun.file("./src/web/client/v2/autosave.js").text();
+    new Function("document", "setTimeout", "clearTimeout", "WeakMap", src)(
+        doc,
+        (fn: () => void, ms = 0) => {
+            timers.push({ fn, ms });
+            return timers.length;
+        },
+        () => {},
+        WeakMap,
+    );
+    return {
+        choice,
+        sw,
+        reset,
+        preset,
+        slider,
+        reached: () => reached,
+        last: () => lastSent,
+        // Run the zero-delay timers (change handlers settling, the drain); the
+        // safety timer stays pending.
+        flush() {
+            for (;;) {
+                const at = timers.findIndex((x) => x.ms === 0);
+                if (at < 0) break;
+                timers.splice(at, 1)[0]!.fn();
+            }
+        },
+        fire,
+        end(form: WholeForm) {
+            fire("turbo:submit-end", {
+                target: form,
+                detail: { fetchResponse: {} },
+            });
+        },
+    };
+}
+
+describe("autosave.js whole forms", () => {
+    // `change` hands over the control itself: the module reads `target.form`
+    // and `target.type`, so give it the real object with a form.
+    function edit(
+        t: Awaited<ReturnType<typeof wholeSetup>>,
+        control: WholeControl,
+        value: string,
+    ) {
+        if (control.type === "radio") {
+            for (const r of t.preset) r.checked = r === control;
+        } else {
+            control.value = value;
+        }
+        const target = Object.assign(control, {
+            form: t.choice,
+        }) as WholeControl & { form: WholeForm };
+        t.fire("change", { target });
+    }
+
+    test("a preset change and a slider change both save, none lost to the one in flight", async () => {
+        const t = await wholeSetup();
+        edit(t, t.preset[1]!, "");
+        t.flush();
+        expect(t.reached()).toBe(1);
+        // Dragged while the first save is in flight: held, not dropped.
+        edit(t, t.slider, "70");
+        t.flush();
+        expect(t.reached()).toBe(1);
+        t.end(t.choice);
+        t.fire("turbo:render", {});
+        t.flush();
+        expect(t.reached()).toBe(2);
+    });
+
+    test("one change submits once however change and blur interleave", async () => {
+        const t = await wholeSetup();
+        edit(t, t.slider, "55");
+        const target = Object.assign(t.slider, { form: t.choice });
+        t.fire("focusout", { target });
+        t.flush();
+        expect(t.reached()).toBe(1);
+    });
+
+    test("nothing changed submits nothing", async () => {
+        const t = await wholeSetup();
+        edit(t, t.slider, "40");
+        t.flush();
+        expect(t.reached()).toBe(0);
+    });
+
+    test("a click on another form while one saves is queued and sent", async () => {
+        const t = await wholeSetup();
+        edit(t, t.slider, "70");
+        t.flush();
+        t.sw.requestSubmit();
+        expect(t.reached()).toBe(1);
+        t.end(t.choice);
+        t.fire("turbo:render", {});
+        t.flush();
+        expect(t.reached()).toBe(2);
+    });
+
+    test("the refresh does not revert a form edited after its save was sent", async () => {
+        const t = await wholeSetup();
+        edit(t, t.slider, "70");
+        t.flush();
+        edit(t, t.slider, "90");
+        t.flush();
+        const kept = t.fire("turbo:before-morph-element", {
+            target: t.choice,
+            detail: { newElement: {} },
+        });
+        expect(kept).toBe(false);
+    });
+
+    test("after the refresh renders other values, picking the earlier choice again saves", async () => {
+        const t = await wholeSetup();
+        edit(t, t.slider, "70");
+        t.flush();
+        expect(t.reached()).toBe(1);
+        t.end(t.choice);
+        // The server answers with other values (Use household default): the
+        // refresh goes ahead and the form shows them.
+        expect(
+            t.fire("turbo:before-morph-element", {
+                target: t.choice,
+                detail: { newElement: {} },
+            }),
+        ).toBe(true);
+        t.fire("turbo:render", {});
+        t.flush();
+        t.slider.value = "40";
+        edit(t, t.slider, "70");
+        t.flush();
+        expect(t.reached()).toBe(2);
+    });
+
+    test("a reset form clicked while a choice saves is queued, and it is the last word", async () => {
+        const t = await wholeSetup();
+        edit(t, t.slider, "70");
+        t.flush();
+        expect(t.reached()).toBe(1);
+        // Use household default, clicked mid-save: held, Turbo never sees it.
+        t.reset.requestSubmit();
+        expect(t.reached()).toBe(1);
+        // The person drags again, then the first answer arrives.
+        edit(t, t.slider, "90");
+        t.flush();
+        t.end(t.choice);
+        t.fire("turbo:render", {});
+        t.flush();
+        // The reset goes before the later edit, which then goes after it.
+        expect(t.reached()).toBe(2);
+        expect(t.last()).toBe(t.reset);
+        t.end(t.reset);
+        t.fire("turbo:render", {});
+        t.flush();
+        expect(t.reached()).toBe(3);
+        expect(t.last()).toBe(t.choice);
+    });
+
+    test("a reset clicked after a queued edit is sent after it", async () => {
+        const t = await wholeSetup();
+        edit(t, t.slider, "70");
+        t.flush();
+        edit(t, t.slider, "90");
+        t.flush();
+        t.reset.requestSubmit();
+        // The edit is queued first, then the reset; re-edited, it moves behind.
+        edit(t, t.slider, "95");
+        t.flush();
+        t.end(t.choice);
+        t.fire("turbo:render", {});
+        t.flush();
+        expect(t.last()).toBe(t.reset);
+        t.end(t.reset);
+        t.fire("turbo:render", {});
+        t.flush();
+        expect(t.last()).toBe(t.choice);
+    });
+
+    test("a refresh of a saved form goes ahead", async () => {
+        const t = await wholeSetup();
+        edit(t, t.slider, "70");
+        t.flush();
+        t.end(t.choice);
+        const ok = t.fire("turbo:before-morph-element", {
+            target: t.choice,
+            detail: { newElement: {} },
+        });
+        expect(ok).toBe(true);
     });
 });

@@ -19,7 +19,6 @@ import {
     settingsErrorBanner,
     settingsMenuIcon,
     settingsPageHeader,
-    settingsPrimarySubmit,
 } from "./settings-shared.js";
 
 export const SCORE_PATH = "/settings/product-score";
@@ -214,13 +213,27 @@ function draftPreset(
         : fallback;
 }
 
+/**
+ * The choice form saves itself when the preset or a slider changes
+ * (`autosave.js`). The submit is off-screen: Enter in a control still posts it.
+ * A refused draft marks the form so a later save's refresh keeps it.
+ */
+function choiceForm(opts: {
+    action: string;
+    refused: boolean;
+    fields: string;
+}): string {
+    const invalid = opts.refused ? " data-fd-invalid" : "";
+    return `<form method="post" action="${opts.action}" class="fd-scoreset__form" data-fd-autosave="form"${invalid}><input type="hidden" name="intent" value="choice">${opts.fields}<button type="submit" class="fd-visually-hidden">Save</button></form>`;
+}
+
 function switchForm(opts: {
     intent: "warn_traces" | "compare_goals";
     on: boolean;
     title: string;
     sub: string;
 }): string {
-    return `<li class="fd-scoreset__row"><form method="post" action="${SCORE_PATH}" class="fd-scoreset__switch-form" data-turbo="false"><input type="hidden" name="intent" value="${esc(opts.intent)}"><input type="hidden" name="value" value="${opts.on ? "0" : "1"}"><span class="fd-scoreset__row-text"><span class="fd-scoreset__row-title">${esc(opts.title)}</span><span class="fd-scoreset__row-sub">${esc(opts.sub)}</span></span><button type="submit" class="fd-switch" role="switch" aria-checked="${opts.on ? "true" : "false"}" aria-label="${esc(opts.title)}"><span class="fd-switch__knob" aria-hidden="true"></span></button></form></li>`;
+    return `<li class="fd-scoreset__row"><form method="post" action="${SCORE_PATH}" class="fd-scoreset__switch-form" data-fd-autosave="form"><input type="hidden" name="intent" value="${esc(opts.intent)}"><input type="hidden" name="value" value="${opts.on ? "0" : "1"}"><span class="fd-scoreset__row-text"><span class="fd-scoreset__row-title">${esc(opts.title)}</span><span class="fd-scoreset__row-sub">${esc(opts.sub)}</span></span><button type="submit" class="fd-switch" role="switch" aria-checked="${opts.on ? "true" : "false"}" aria-label="${esc(opts.title)}"><span class="fd-switch__knob" aria-hidden="true"></span></button></form></li>`;
 }
 
 function chevron(): string {
@@ -244,11 +257,15 @@ export function renderSettingsScoreV2Body(view: SettingsScoreV2View): string {
     const selected = draftPreset(draft, view.preset);
     const weights = draft ? draft.weights : stringWeights(view.weights);
     const following = view.followsHousehold
-        ? `<p class="fd-scoreset__note">You are using the household default (${esc(view.householdPresetLabel)}). Save a choice to use your own.</p>`
-        : `<form method="post" action="${SCORE_PATH}" class="fd-scoreset__reset" data-turbo="false"><input type="hidden" name="intent" value="household"><button type="submit" class="fd-scoreset__use-default">Use household default (${esc(view.householdPresetLabel)})</button></form>`;
-    const choiceForm = `<form method="post" action="${SCORE_PATH}" class="fd-scoreset__form" data-turbo="false"><input type="hidden" name="intent" value="choice">${choiceFields({ selected, weights, idPrefix: "fd-score-w" })}${settingsPrimarySubmit("Save weights")}</form>`;
+        ? `<p class="fd-scoreset__note">You are using the household default (${esc(view.householdPresetLabel)}). Change a weight to use your own.</p>`
+        : `<form method="post" action="${SCORE_PATH}" class="fd-scoreset__reset" data-fd-autosave="form"><input type="hidden" name="intent" value="household"><button type="submit" class="fd-scoreset__use-default">Use household default (${esc(view.householdPresetLabel)})</button></form>`;
+    const choice = choiceForm({
+        action: SCORE_PATH,
+        refused: !!draft,
+        fields: choiceFields({ selected, weights, idPrefix: "fd-score-w" }),
+    });
     const checks = `<h2 class="fd-scoreset__label">Checks for you</h2><ul class="fd-scoreset__rows">${allergiesRow(view)}${switchForm({ intent: "warn_traces", on: view.warnTraces, title: "Warn on “may contain”", sub: "Traces of your allergens" })}${switchForm({ intent: "compare_goals", on: view.compareGoals, title: "Compare with today's goals", sub: "Protein, sugar, saturated fat" })}</ul>`;
-    return `${String(settingsPageHeader("Product score"))}${String(settingsErrorBanner(view.error))}<div class="fd-scoreset"><p class="fd-scoreset__lead">How much each part counts when Foodable scores a packaged food. Yours applies to your scans; members without their own use the household default.</p>${choiceForm}${following}${checks}<h2 class="fd-scoreset__label">Household</h2>${householdRow(view)}</div>`;
+    return `${String(settingsPageHeader("Product score"))}${String(settingsErrorBanner(view.error))}<div class="fd-scoreset"><p class="fd-scoreset__lead">How much each part counts when Foodable scores a packaged food. Yours applies to your scans; members without their own use the household default.</p>${choice}${following}${checks}<h2 class="fd-scoreset__label">Household</h2>${householdRow(view)}</div>`;
 }
 
 export function renderSettingsScoreV2Page(view: SettingsScoreV2View): string {
@@ -267,9 +284,9 @@ export function renderSettingsScoreHouseholdV2Body(
     const selected = draftPreset(draft, view.preset);
     const weights = draft ? draft.weights : stringWeights(view.weights);
     const clear = view.isSet
-        ? `<form method="post" action="${SCORE_HOUSEHOLD_PATH}" class="fd-scoreset__reset" data-turbo="false"><input type="hidden" name="intent" value="clear"><button type="submit" class="fd-scoreset__use-default">Clear the household default</button></form>`
+        ? `<form method="post" action="${SCORE_HOUSEHOLD_PATH}" class="fd-scoreset__reset" data-fd-autosave="form"><input type="hidden" name="intent" value="clear"><button type="submit" class="fd-scoreset__use-default">Clear the household default</button></form>`
         : "";
-    return `${String(settingsPageHeader("Household default"))}${String(settingsErrorBanner(view.error))}<div class="fd-scoreset"><p class="fd-scoreset__lead">Members who have not chosen their own weights use this. Only owners and admins can change it.</p><form method="post" action="${SCORE_HOUSEHOLD_PATH}" class="fd-scoreset__form" data-turbo="false"><input type="hidden" name="intent" value="choice">${choiceFields({ selected, weights, idPrefix: "fd-score-hw" })}${settingsPrimarySubmit("Save household default")}</form>${clear}</div>`;
+    return `${String(settingsPageHeader("Household default"))}${String(settingsErrorBanner(view.error))}<div class="fd-scoreset"><p class="fd-scoreset__lead">Members who have not chosen their own weights use this. Only owners and admins can change it.</p>${choiceForm({ action: SCORE_HOUSEHOLD_PATH, refused: !!draft, fields: choiceFields({ selected, weights, idPrefix: "fd-score-hw" }) })}${clear}</div>`;
 }
 
 export function renderSettingsScoreHouseholdV2Page(

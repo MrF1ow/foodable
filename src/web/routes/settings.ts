@@ -310,7 +310,7 @@ settingsRoutes.post(
             await updateHouseholdScoreDefault(store, member.householdId, null);
             return redirectWithToast(
                 c,
-                SCORE_PATH,
+                SCORE_HOUSEHOLD_PATH,
                 "settings.score.household-cleared",
             );
         }
@@ -333,9 +333,10 @@ settingsRoutes.post(
             member.householdId,
             parsed.choice,
         );
+        // Back to the editor: the default saves as it changes.
         return redirectWithToast(
             c,
-            SCORE_PATH,
+            SCORE_HOUSEHOLD_PATH,
             "settings.score.household-saved",
         );
     },

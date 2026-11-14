@@ -160,6 +160,30 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
         expect(html).not.toContain("You are using the household default");
     });
 
+    test("the autosave form posts a preset change and it reads back", async () => {
+        const html = await (await get(memberId)).text();
+        const form = html.match(/<form[^>]*fd-scoreset__form[^>]*>/)?.[0];
+        expect(form).toBeDefined();
+        expect(form).toContain('data-fd-autosave="form"');
+        expect(form).not.toContain("data-turbo");
+        // What the form holds on a preset change: the hidden intent, the
+        // chosen chip, the sliders as rendered.
+        const res = await post(memberId, {
+            intent: "choice",
+            preset: "health_first",
+            weight_nutrition: "40",
+            weight_processing: "25",
+            weight_additives: "20",
+            weight_environment: "15",
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/settings/product-score");
+        const row = await store().getMember(householdId, memberId);
+        expect(row?.preset).toBe("health_first");
+        const after = await (await get(memberId)).text();
+        expect(checkedPreset(after)).toBe("health_first");
+    });
+
     test("custom weights round-trip and show on the sliders", async () => {
         expect((await post(memberId, CUSTOM)).status).toBe(303);
         const row = await store().getMember(householdId, memberId);
@@ -318,7 +342,10 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
             HOUSEHOLD_PATH,
         );
         expect(res.status).toBe(303);
-        expect(res.headers.get("location")).toBe("/settings/product-score");
+        // Back to the editor: the default saves as it changes.
+        expect(res.headers.get("location")).toBe(
+            "/settings/product-score/household",
+        );
         expect(await store().getHouseholdDefault(householdId)).toEqual({
             preset: "less_processed",
             weights: null,
@@ -384,6 +411,10 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
         );
         const res = await post(ownerId, { intent: "clear" }, HOUSEHOLD_PATH);
         expect(res.status).toBe(303);
+        // Stays on the household editor, as a choice does.
+        expect(res.headers.get("location")).toBe(
+            "/settings/product-score/household",
+        );
         expect(await store().getHouseholdDefault(householdId)).toBeNull();
         const html = await (await get(memberId)).text();
         expect(checkedPreset(html)).toBe("balanced");

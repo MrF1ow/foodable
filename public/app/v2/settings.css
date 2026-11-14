@@ -1576,11 +1576,6 @@
     border-radius: var(--radius-pill);
 }
 
-.fd-scoreset__form .fd-settings-submit {
-    align-self: flex-start;
-    margin-top: 16px;
-}
-
 .fd-scoreset__note {
     margin: 12px 0 0;
     font: 400 0.8125rem/1.4 var(--font-body);
