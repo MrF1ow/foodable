@@ -943,6 +943,15 @@ export async function renderSettingsAccountV2Route(
             alcoholTrackingEnabled: alcoholTrackingEnabledFromProfile(profile),
             drinkUnit: preferredDrinkUnitFromProfile(profile) ?? "",
             error: opts.error,
+            photo: chrome.flags.uiProfilePictures
+                ? {
+                      userId: gate.viewer.userId,
+                      version:
+                          chrome.identity?.avatarVersions?.get(
+                              gate.viewer.userId,
+                          ) ?? null,
+                  }
+                : undefined,
         }),
     };
 }

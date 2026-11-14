@@ -42,6 +42,23 @@
     display: contents;
 }
 
+/* A member's picture over their initials. The initials stay in the markup so a
+   missing picture still says who it is; the image covers them, round, and its
+   own background keeps a see-through picture from showing the letters. */
+.fd-avatar--photo {
+    position: relative;
+    overflow: hidden;
+}
+.fd-avatar__img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    object-fit: cover;
+}
+
 .fd-icon {
     display: block;
     flex: none;

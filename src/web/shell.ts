@@ -40,10 +40,16 @@ export type V2KitchenTab = "fridge" | "groceries" | "usuals";
 /** Who is looking and which household, for the shell's sidebar and account
  *  chip (loaded by `viewerChromeWithAttention`). */
 export type ShellIdentity = {
+    /** The viewer's user id, so their picture can be addressed. */
+    viewerUserId?: string;
     viewerName: string;
     viewerRole: MemberRole;
     householdName: string;
     memberCount: number;
+    /** When each member's picture last changed, by user id. Only set when the
+     *  profile-pictures flag is on (read once per page); absent means no
+     *  pictures are shown anywhere on the page. */
+    avatarVersions?: ReadonlyMap<string, Date>;
 };
 
 export type AppChrome = ViewerChrome & {

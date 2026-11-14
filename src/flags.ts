@@ -162,6 +162,15 @@ export const FLAGS = {
         removeWhen:
             "The grocery, store and kitchen admin tools have been on for everyone for a release with no rollback.",
     },
+    "ui-profile-pictures": {
+        type: "bool",
+        kind: "temporary",
+        unit: "household",
+        fallback: false,
+        why: "Member profile pictures: uploading one in Settings and showing it wherever the app shows a member's initials circle.",
+        removeWhen:
+            "profile pictures have been on for the household for a release with no rollback.",
+    },
     "mcp-share-links": {
         type: "bool",
         kind: "temporary",

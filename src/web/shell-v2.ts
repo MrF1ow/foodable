@@ -22,6 +22,8 @@ import {
 import type { HouseholdMember } from "../household.js";
 import { fdIcon, type FdIconName } from "./components/fd-icons.js";
 import { APP_PATHS } from "./route-map.js";
+import { initialsOf } from "./initials.js";
+import { memberAvatar } from "./components/v2/avatar.js";
 import {
     appHeadMeta,
     htmlOpen,
@@ -170,16 +172,7 @@ function kitchenTabs(chrome: AppChrome): string {
     return `<nav class="fd-kitchen-tabs" aria-label="Kitchen sections">${links}</nav>`;
 }
 
-/** "Ethan Flow" → "EF", "Ethan" → "E". First letters of the first and last
- *  word, upper-cased. */
-export function initialsOf(name: string): string {
-    const words = name.trim().split(/\s+/).filter(Boolean);
-    if (words.length === 0) return "?";
-    const first = [...words[0]!][0] ?? "";
-    const last =
-        words.length > 1 ? ([...words[words.length - 1]!][0] ?? "") : "";
-    return (first + last).toLocaleUpperCase("en");
-}
+export { initialsOf };
 
 /** The household avatar's letter: the design shows "F" for "The Flow
  *  household", so a leading "The" is skipped. */
@@ -258,7 +251,7 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
     const nav = `<nav class="fd-sidenav" aria-label="Main navigation">${links}${settings}</nav>`;
 
     const account = identity
-        ? `<a class="fd-account" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(`Account: ${identity.viewerName}, ${roleLabel(identity.viewerRole)}`)}"><span class="fd-avatar" aria-hidden="true">${escapeHtml(initialsOf(identity.viewerName))}</span><span class="fd-account-text"><span class="fd-account-name">${escapeHtml(identity.viewerName)}</span><span class="fd-account-role">${roleLabel(identity.viewerRole)}</span></span>${fdIcon("chevR")}</a>`
+        ? `<a class="fd-account" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(`Account: ${identity.viewerName}, ${roleLabel(identity.viewerRole)}`)}">${String(memberAvatar({ name: identity.viewerName, userId: identity.viewerUserId, version: identity.viewerUserId ? identity.avatarVersions?.get(identity.viewerUserId) : null, enabled: chrome.flags.uiProfilePictures }))}<span class="fd-account-text"><span class="fd-account-name">${escapeHtml(identity.viewerName)}</span><span class="fd-account-role">${roleLabel(identity.viewerRole)}</span></span>${fdIcon("chevR")}</a>`
         : "";
     return `<div class="fd-sidebar">${household}${nav}${account}</div>`;
 }
@@ -271,6 +264,22 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
 function accountChip(chrome: AppChrome): string {
     const name = chrome.identity?.viewerName ?? "";
     const label = name ? `Settings, signed in as ${name}` : "Settings";
+    const identity = chrome.identity;
+    const version = identity?.viewerUserId
+        ? identity.avatarVersions?.get(identity.viewerUserId)
+        : undefined;
+    // With a picture the chip becomes a small round avatar (picture over the
+    // initials); without one it keeps its pill with the initials.
+    if (identity?.viewerUserId && version && chrome.flags.uiProfilePictures) {
+        const avatar = memberAvatar({
+            name,
+            userId: identity.viewerUserId,
+            version,
+            enabled: true,
+            className: "fd-account-chip__avatar",
+        });
+        return `<a class="fd-account-chip fd-account-chip--photo" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(label)}" title="Settings">${String(avatar)}</a>`;
+    }
     return `<a class="fd-account-chip" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(label)}" title="Settings">${escapeHtml(name ? initialsOf(name) : "Me")}</a>`;
 }
 

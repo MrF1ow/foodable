@@ -90,8 +90,10 @@ import { redirectWithToast } from "../components/toast.js";
 import { getBaseUrl } from "../../url.js";
 import { settingsBackHref, settingsUrlWithBack } from "../settings-back.js";
 import { APP_PATHS } from "../route-map.js";
+import { avatarRoutes } from "./avatars.js";
 
 export const settingsRoutes = new Hono();
+settingsRoutes.route("/", avatarRoutes);
 
 function resolveBackHref(c: Context) {
     return settingsBackHref({

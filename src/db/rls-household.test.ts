@@ -101,6 +101,8 @@ insert into public.recipe_portions (recipe_id, household_id, user_id, portion_co
     values ('${RECIPE_B}', '${HH_B}', '${USER_B}', 1);
 insert into public.recipe_favourites (household_id, user_id, recipe_id)
     values ('${HH_B}', '${USER_B}', '${RECIPE_B}');
+insert into public.member_avatars (household_id, user_id, content_type, bytes)
+    values ('${HH_B}', '${USER_B}', 'image/png', '\\x89504e47'::bytea);
 insert into public.member_score_settings (user_id, household_id, preset)
     values ('${USER_B}', '${HH_B}', 'planet');
 insert into public.share_links (household_id, kind, target_id, token_hash, created_by)

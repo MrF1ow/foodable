@@ -178,13 +178,17 @@ app.use("*", async (c, next) => {
     c.header("Referrer-Policy", "no-referrer");
 });
 
-// Body limit
-app.use(
-    "*",
-    bodyLimit({
-        maxSize: 1024 * 1024,
-        onError: (c) => c.json({ error: "payload_too_large" }, 413),
-    }),
+// Body limit. The profile-picture upload is the one route left out: it has a
+// stricter limit of its own that answers with the Settings page, which this
+// JSON refusal would otherwise pre-empt for a photo over 1 MB.
+const appBodyLimit = bodyLimit({
+    maxSize: 1024 * 1024,
+    onError: (c) => c.json({ error: "payload_too_large" }, 413),
+});
+app.use("*", (c, next) =>
+    c.req.method === "POST" && c.req.path === "/settings/account/photo"
+        ? next()
+        : appBodyLimit(c, next),
 );
 
 // CORS
