@@ -33,9 +33,18 @@ import {
 import { liveExportArchiveStore } from "../../db/exports.js";
 import { revokeConnection } from "../../db/tokens.js";
 import {
+    AI_DESTRUCTIVE_PATH,
     AI_DISCONNECT_PATH,
+    AI_PAGE_PATH,
+    parseAiUndoBack,
     UNKNOWN_APP_MARKER,
 } from "../pages/v2/settings-ai.js";
+import { liveAgentActionDeps } from "../../db/agent-actions.js";
+import { liveSettingsStore } from "../../db/settings.js";
+import {
+    undoAgentAction,
+    type AgentUndoStatus,
+} from "../../domain/agent-actions.js";
 import { exportAllData } from "../../domain/export.js";
 import { checkRateLimit } from "../../rate-limit.js";
 import { isValidDisplayTheme } from "../pages/v2/settings-display.js";
@@ -43,6 +52,7 @@ import { formText } from "../form.js";
 import {
     requireManager,
     requireMember,
+    requireOwner,
     requireSiteUser,
     siteMember,
 } from "../middleware.js";
@@ -332,6 +342,84 @@ settingsRoutes.post(AI_DISCONNECT_PATH, requireMember, async (c) => {
             : "settings.ai.already-disconnected",
     );
 });
+
+// The household switch: only the owner flips it (403 for anyone else). The
+// form posts the value the switch should take.
+settingsRoutes.post(AI_DESTRUCTIVE_PATH, requireOwner, async (c) => {
+    const member = siteMember(c);
+    const body = await c.req.parseBody();
+    const value = formText(body, "allowed").trim();
+    if (value !== "0" && value !== "1") {
+        const page = await renderSettingsAiV2Route(c.get("userId"), {
+            mcpUrl: `${getBaseUrl(c)}/mcp`,
+            error: "Choose Allowed or Off.",
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    const allowed = value === "1";
+    await liveSettingsStore().setAgentDestructiveAllowed(
+        member.householdId,
+        allowed,
+    );
+    return redirectWithToast(
+        c,
+        AI_PAGE_PATH,
+        allowed
+            ? "settings.ai.destructive-allowed"
+            : "settings.ai.destructive-off",
+    );
+});
+
+const UNDO_REFUSED_STATUS: Record<
+    Exclude<AgentUndoStatus, "undone">,
+    400 | 404 | 409
+> = {
+    not_found: 404,
+    already_undone: 409,
+    expired: 409,
+    not_undoable: 409,
+    conflict: 409,
+};
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Undo one agent change. Any member may post; the domain lets only the owner
+// and the member the agent acted as through. Called at the top level of the
+// request, since a conflict rolls its transaction back.
+settingsRoutes.post(
+    `${AI_PAGE_PATH}/actions/:id/undo`,
+    requireMember,
+    async (c) => {
+        const member = siteMember(c);
+        const id = c.req.param("id");
+        const body = await c.req.parseBody();
+        const back = parseAiUndoBack(formText(body, "back").trim());
+        const result = UUID.test(id)
+            ? await undoAgentAction(liveAgentActionDeps(), {
+                  householdId: member.householdId,
+                  userId: member.userId,
+                  actionId: id,
+                  now: new Date(),
+              })
+            : ({
+                  status: "not_found",
+                  message: "That change was not found.",
+              } as const);
+        if (result.status === "undone") {
+            return redirectWithToast(c, back, "settings.ai.undone");
+        }
+        const page = await renderSettingsAiV2Route(member.userId, {
+            mcpUrl: `${getBaseUrl(c)}/mcp`,
+            error: result.message,
+        });
+        return c.html(
+            page.html,
+            page.status === 200
+                ? UNDO_REFUSED_STATUS[result.status]
+                : page.status,
+        );
+    },
+);
 
 settingsRoutes.get("/settings/saved", requireSiteUser, async (c) => {
     const page = await renderSettingsSavedV2Route(c.get("userId"), {

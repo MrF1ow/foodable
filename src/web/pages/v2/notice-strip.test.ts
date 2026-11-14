@@ -10,7 +10,12 @@ import {
     renderKitchenUsualsBody,
 } from "./kitchen-usuals.js";
 import { noticeSentence } from "../../../copy/notices.js";
-import { noticeStrip, parseNoticeBack, stripNotices } from "./notice-strip.js";
+import {
+    agentActionStrip,
+    noticeStrip,
+    parseNoticeBack,
+    stripNotices,
+} from "./notice-strip.js";
 import { renderRecipesListBody } from "./recipes-list.js";
 import { buildPreviewTodayPageData, renderTodayV2Page } from "./today.js";
 import { renderTodayRail } from "./today-rail.js";
@@ -422,5 +427,65 @@ describe("where the one-tap notices show", () => {
         const html = renderTodayV2Page(data);
         expect(html).not.toContain("fd-notice-strip");
         expect(html).not.toContain("/notices/");
+    });
+});
+
+describe("agentActionStrip", () => {
+    const notice = {
+        actionId: "a1000000-0000-4000-8000-000000000001",
+        sentence: "Cleared 20 grocery lines (by Claude)",
+    };
+
+    test("is empty with nothing to say", () => {
+        expect(String(agentActionStrip([], { label: "Agent changes" }))).toBe(
+            "",
+        );
+    });
+
+    test("a row with its Undo form, a link to Settings, and no dismiss", () => {
+        const html = String(
+            agentActionStrip([notice], {
+                label: "Agent changes",
+                className: "fd-today-agent",
+            }),
+        );
+        expect(html).toContain('data-notice="agent.action"');
+        expect(html).toContain("Cleared 20 grocery lines (by Claude)");
+        expect(html).toContain(
+            `action="/settings/ai-connections/actions/${notice.actionId}/undo"`,
+        );
+        expect(html).toContain('<input type="hidden" name="back" value="/" />');
+        expect(html).toContain('href="/settings/ai-connections"');
+        expect(html).toContain("fd-today-agent");
+        expect(html).not.toContain("fd-notice-strip__dismiss");
+    });
+
+    test("a sentence made of markup stays inert", () => {
+        const html = String(
+            agentActionStrip(
+                [{ ...notice, sentence: "<img src=x onerror=alert(1)>" }],
+                { label: "Agent changes" },
+            ),
+        );
+        expect(html).not.toContain("<img src=x");
+    });
+
+    test("Today carries it under the title, and not on a peer's read-only day", () => {
+        const data = buildPreviewTodayPageData(chrome as never, "2026-11-10");
+        const withStrip = renderTodayV2Page({
+            ...data,
+            agentNotices: [notice],
+        });
+        expect(withStrip).toContain('data-notice="agent.action"');
+        expect(withStrip.indexOf("fd-today-agent")).toBeLessThan(
+            withStrip.indexOf("fd-today-summary"),
+        );
+        expect(renderTodayV2Page(data)).not.toContain("agent.action");
+        const peer = renderTodayV2Page({
+            ...data,
+            agentNotices: [notice],
+            chrome: { ...data.chrome, subjectLabel: "Sam" } as never,
+        });
+        expect(peer).not.toContain("agent.action");
     });
 });

@@ -190,7 +190,18 @@ import type {
 } from "./pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "./pages/v2/settings-saved.js";
 import { renderSettingsExportV2Page } from "./pages/v2/settings-export.js";
-import { renderSettingsAiV2Page } from "./pages/v2/settings-ai.js";
+import {
+    AI_ACTIVITY_LIMIT,
+    agentActivityRows,
+    renderSettingsAiV2Page,
+} from "./pages/v2/settings-ai.js";
+import { listAgentActions } from "../domain/agent-actions.js";
+import { liveAgentActionDeps } from "../db/agent-actions.js";
+import {
+    AGENT_NOTICE_SCAN,
+    agentActionNotices,
+    type AgentActionNotice,
+} from "../domain/notices-agent.js";
 import { listConnections } from "../db/tokens.js";
 import { getAllGoalDays, getNutritionGoals } from "../db/nutrition.js";
 import { renderSettingsHelpV2Page } from "./pages/v2/settings-help.js";
@@ -373,6 +384,10 @@ export async function renderDashboardPage(
               access.viewer.householdId,
               todayView.householdDate,
           );
+    // A peer's read-only day shows none: the changes are the viewer's.
+    const agentNotices = subjectLabel
+        ? []
+        : await loadAgentActionNotices(access.viewer);
     const plan =
         week && v2Today?.planEdit
             ? (withPlanEditDraft(week, v2Today.planEdit) ?? week)
@@ -383,6 +398,7 @@ export async function renderDashboardPage(
             chrome: { ...chrome, subjectLabel },
             view: todayView,
             plan,
+            agentNotices,
             today: calendarToday,
             memberQuery: viewMemberId,
             logSheet: mergedLogSheet,
@@ -1072,21 +1088,67 @@ export async function renderSettingsAiV2Route(
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
+    const householdId = gate.viewer.householdId;
+    const isOwner = gate.viewer.role === "owner";
     const profile = await getProfile(viewerUserId);
+    const timezone = profile?.timezone?.trim() || "UTC";
+    const now = new Date();
     const chrome = await viewerChromeWithAttention(profile, gate.viewer);
-    // Only the caller's own connections: the id is the session's.
-    const connections = await listConnections(viewerUserId);
+    const [connections, allowed, entries, members] = await Promise.all([
+        // Only the caller's own connections: the id is the session's.
+        listConnections(viewerUserId),
+        liveSettingsStore().getAgentDestructiveAllowed(householdId),
+        listAgentActions(liveAgentActionDeps(), householdId, {
+            limit: AI_ACTIVITY_LIMIT,
+            now,
+        }),
+        listHouseholdMembers(householdId),
+    ]);
     return {
         status: 200,
         html: renderSettingsAiV2Page({
             chrome,
             connections,
-            now: new Date(),
-            timezone: profile?.timezone?.trim() || "UTC",
+            destructive: { allowed, canChange: isOwner },
+            activity: agentActivityRows(entries, {
+                viewerUserId,
+                isOwner,
+                names: new Map(members.map((m) => [m.userId, m.displayName])),
+                now,
+                timezone,
+            }),
+            now,
+            timezone,
             mcpUrl: opts.mcpUrl,
             error: opts.error,
         }),
     };
+}
+
+/**
+ * What an agent changed in the last 24 hours that this viewer can still undo,
+ * for the strip on Today. One indexed read of the household's newest actions.
+ * The strip is an extra: when the read fails Today still renders, without it.
+ */
+export async function loadAgentActionNotices(
+    viewer: HouseholdMember,
+    now: Date = new Date(),
+): Promise<AgentActionNotice[]> {
+    try {
+        const entries = await listAgentActions(
+            liveAgentActionDeps(),
+            viewer.householdId,
+            { limit: AGENT_NOTICE_SCAN, now },
+        );
+        return agentActionNotices(entries, {
+            now,
+            viewerUserId: viewer.userId,
+            isOwner: viewer.role === "owner",
+        });
+    } catch (err) {
+        console.error("Failed to load agent change notices:", err);
+        return [];
+    }
 }
 
 export async function renderSettingsScoreV2Route(

@@ -285,6 +285,39 @@ function previewScoreView(
     };
 }
 
+const PREVIEW_AI_NOW = new Date("2026-11-10T15:00:00.000Z");
+
+/** The activity list: an undoable change, an undone one, one past its 24 hours. */
+const PREVIEW_AI_ACTIVITY = [
+    {
+        id: "a1000000-0000-4000-8000-000000000001",
+        summary: "Cleared 20 grocery lines",
+        connection: "Claude",
+        actingAs: "as Ethan",
+        when: "2 hours ago · Nov 10, 1:04 PM",
+        createdAt: "2026-11-10T13:04:00.000Z",
+        state: { kind: "undo" },
+    },
+    {
+        id: "a1000000-0000-4000-8000-000000000002",
+        summary: "Deleted fridge item Greek yogurt",
+        connection: "Grok CLI",
+        actingAs: "as Sam",
+        when: "Yesterday · Nov 9, 6:30 PM",
+        createdAt: "2026-11-09T18:30:00.000Z",
+        state: { kind: "undone" },
+    },
+    {
+        id: "a1000000-0000-4000-8000-000000000003",
+        summary: "Removed Oat milk from the Usuals list",
+        connection: "household token",
+        actingAs: "",
+        when: "3 days ago · Nov 7, 9:12 AM",
+        createdAt: "2026-11-07T09:12:00.000Z",
+        state: { kind: "expired" },
+    },
+] as const;
+
 const PREVIEW_AI_CONNECTIONS = [
     {
         clientId: "7d3f6c2e-5b1a-4e8f-9a3d-1c2b3a4d5e6f",
@@ -2082,21 +2115,57 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "settings-ai": renderSettingsAiV2Page({
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
-            now: new Date("2026-11-10T15:00:00.000Z"),
+            destructive: { allowed: true, canChange: true },
+            activity: PREVIEW_AI_ACTIVITY,
+            now: PREVIEW_AI_NOW,
+            timezone: "UTC",
+            mcpUrl: "https://food.flow.home/mcp",
+        }),
+        // Switch Off, and a member: the switch is read-only, one change is theirs.
+        "settings-ai-member": renderSettingsAiV2Page({
+            chrome,
+            connections: PREVIEW_AI_CONNECTIONS,
+            destructive: { allowed: false, canChange: false },
+            activity: [
+                PREVIEW_AI_ACTIVITY[0],
+                {
+                    ...PREVIEW_AI_ACTIVITY[0],
+                    id: "a1000000-0000-4000-8000-000000000004",
+                    summary: "Moved 4 grocery lines to Costco",
+                    actingAs: "as Alex",
+                    state: { kind: "other", who: "Alex" },
+                },
+            ],
+            now: PREVIEW_AI_NOW,
             timezone: "UTC",
             mcpUrl: "https://food.flow.home/mcp",
         }),
         "settings-ai-empty": renderSettingsAiV2Page({
             chrome,
             connections: [],
-            now: new Date("2026-11-10T15:00:00.000Z"),
+            destructive: { allowed: true, canChange: true },
+            activity: [],
+            now: PREVIEW_AI_NOW,
             timezone: "UTC",
             mcpUrl: "https://food.flow.home/mcp",
+        }),
+        "nutrition-agent-notice": renderTodayV2Page({
+            ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+            view: buildPreviewTodayViewWithRail("2026-11-10"),
+            plan: previewWeekPlan(),
+            agentNotices: [
+                {
+                    actionId: PREVIEW_AI_ACTIVITY[0].id,
+                    sentence: "Cleared 20 grocery lines (by Claude)",
+                },
+            ],
         }),
         "settings-ai-confirm": renderSettingsAiV2Page({
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
-            now: new Date("2026-11-10T15:00:00.000Z"),
+            destructive: { allowed: true, canChange: true },
+            activity: PREVIEW_AI_ACTIVITY,
+            now: PREVIEW_AI_NOW,
             timezone: "UTC",
             mcpUrl: "https://food.flow.home/mcp",
             openClient: PREVIEW_AI_CONNECTIONS[0]!.clientId!,
@@ -2753,6 +2822,7 @@ if (process.argv.includes("--shots")) {
             shotBase.startsWith("dev-gallery-v2") ||
             shotBase.startsWith("trends-v2") ||
             shotBase === "nutrition" ||
+            shotBase === "nutrition-agent-notice" ||
             shotBase === "settings" ||
             shotBase === "settings-account" ||
             shotBase === "settings-display" ||

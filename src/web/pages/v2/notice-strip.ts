@@ -24,7 +24,9 @@ import {
     type NoticeRouteContext,
 } from "../../components/notices.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
+import type { AgentActionNotice } from "../../../domain/notices-agent.js";
 import { FD_LOG_WEIGH_IN_SHEET_ID } from "./log-sheet.js";
+import { AI_PAGE_PATH, aiUndoPath } from "./settings-ai.js";
 
 /** The pages an action or a dismissal may send the person back to. */
 export const NOTICE_BACK_PATHS = [
@@ -166,6 +168,29 @@ export function noticeStrip(
             });
             return `<li class="fd-notice-strip__row" data-notice="${esc(notice.code)}"><span class="${dotClass(notice)}" aria-hidden="true"></span><span class="fd-notice-strip__text">${esc(noticeShortSentence(notice, { viewerUserId: opts.viewerUserId }) ?? noticeSentence(notice))}</span>${action}${noticeDismissControl(notice, opts.back)}</li>`;
         })
+        .join("");
+    const extra = opts.className ? ` ${esc(opts.className)}` : "";
+    return raw(
+        `<section class="fd-notice-strip${extra}" aria-label="${esc(opts.label)}"><ul class="fd-notice-strip__list">${rows}</ul></section>`,
+    );
+}
+
+/**
+ * What an agent changed in the last 24 hours and can still be undone: one row
+ * per change with its Undo, and a way to Settings › AI connections where the
+ * whole activity is. Not a registry notice, so it has no dismiss: it goes away
+ * when the change is undone or its 24 hours pass.
+ */
+export function agentActionStrip(
+    notices: readonly AgentActionNotice[],
+    opts: { label: string; className?: string },
+): Html {
+    if (notices.length === 0) return raw("");
+    const rows = notices
+        .map(
+            (notice) =>
+                `<li class="fd-notice-strip__row" data-notice="agent.action" data-agent-action="${esc(notice.actionId)}"><span class="fd-notice-strip__dot fd-notice-strip__dot--warn" aria-hidden="true"></span><span class="fd-notice-strip__text">${esc(notice.sentence)}</span><form class="fd-notice-strip__action-form" method="post" action="${esc(aiUndoPath(notice.actionId))}" data-turbo="false">${hidden("back", "/")}<button type="submit" class="fd-notice-strip__action" aria-label="Undo: ${esc(notice.sentence)}">Undo</button></form><a class="fd-notice-strip__action" href="${AI_PAGE_PATH}" data-turbo="false">Review</a></li>`,
+        )
         .join("");
     const extra = opts.className ? ` ${esc(opts.className)}` : "";
     return raw(
