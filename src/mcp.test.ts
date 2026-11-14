@@ -4160,8 +4160,14 @@ describe("household person targeting", () => {
 describe("household config tools", () => {
     const alice = "11111111-1111-4111-8111-111111111111";
 
+    type ListedTools = Awaited<ReturnType<Client["listTools"]>>["tools"];
+
     async function withHousehold(
-        run: (call: CallTool, list: () => Promise<string[]>) => Promise<void>,
+        run: (
+            call: CallTool,
+            list: () => Promise<string[]>,
+            listFull: () => Promise<ListedTools>,
+        ) => Promise<void>,
     ): Promise<void> {
         db.members = [
             {
@@ -4210,6 +4216,7 @@ describe("household config tools", () => {
                     const { tools } = await client.listTools();
                     return tools.map((t) => t.name);
                 },
+                async () => (await client.listTools()).tools,
             );
         } finally {
             await client.close();
@@ -4542,6 +4549,36 @@ describe("household config tools", () => {
         ).json()) as string[];
         await withHousehold(async (_call, list) => {
             expect(await list()).toEqual(snapshot);
+        });
+    });
+
+    // Every tool description is paid for in every conversation's context, so
+    // tools/list is budgeted. These are what main measured on 0d4b3966 (before
+    // the agent-parity work) with every flag on, the same listing the snapshot
+    // test reads: JSON.stringify(tools).length (UTF-16 code units, so
+    // characters, not bytes) and tools.length. To re-measure, copy this
+    // describe block and the `listFull` argument of `withHousehold` onto that
+    // commit (it has neither), add a console.log of both numbers, and run
+    //   bun --no-env-file test src/mcp.test.ts -t "tools/list size"
+    // Raising either constant is a deliberate, reviewed edit: trim a
+    // description first, and say in the PR why the list has to grow.
+    describe("tools/list size", () => {
+        const TOOLS_LIST_MAX_CHARS = 223025;
+        const TOOLS_LIST_MAX_COUNT = 97;
+
+        test("all-flags-on tools/list stays within the size budget", async () => {
+            const snapshot = (await Bun.file(
+                new URL("./mcp/tools-list.snapshot.json", import.meta.url),
+            ).json()) as string[];
+            await withHousehold(async (_call, _list, listFull) => {
+                const tools = await listFull();
+                // The measured set is the all-flags-on list, not a subset.
+                expect(tools.map((tool) => tool.name)).toEqual(snapshot);
+                expect(tools.length).toBeLessThanOrEqual(TOOLS_LIST_MAX_COUNT);
+                expect(JSON.stringify(tools).length).toBeLessThanOrEqual(
+                    TOOLS_LIST_MAX_CHARS,
+                );
+            });
         });
     });
 

@@ -259,7 +259,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "List Grocery Lines",
             description:
-                "List grocery lines grouped by store and section, with already-have against the fridge. Each line includes its id (the `[id: …]` in the text), whether it is checked, and `notices` (e.g. allergens). Pass those ids to check_grocery_line, delete_grocery_line or put_away_grocery_lines.",
+                "List grocery lines grouped by store and section, with already-have against the fridge. Each line has its id (the `[id: …]` in the text), checked state and `notices` (e.g. allergens); pass ids to check_grocery_line, delete_grocery_line or put_away_grocery_lines.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -1036,7 +1036,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "List Usuals",
             description:
-                "List every usual on the household's Usuals list (plain foods with products filed under them, added by hand, or bought on a schedule or when stock runs low), with every product filed under each one and which is the usual product, its schedule, low setting and store, and whether it is due today and why. This is the complete list, not a search, so use it to check or clean up usual products. Call it when the user asks what to restock, or at the start of a chat on the household's restock day. Due usuals come first. To restock one, call add_grocery_line with its food_id.",
+                "List every usual on the Usuals list (plain foods with products filed under them, added by hand, or bought on a schedule or when stock runs low) with all products filed under each and which is the usual, its schedule, low setting and store, and whether it is due today and why. Complete list, not a search: use it to check or clean up usual products. Call it when the user asks what to restock, or at the start of a chat on the household's restock day. Due usuals come first. To restock one, call add_grocery_line with its food_id.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
