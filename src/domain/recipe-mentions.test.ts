@@ -654,6 +654,172 @@ describe("words that are not being used as a food", () => {
     });
 });
 
+describe("a cue only governs the food it acts on", () => {
+    const noodles = [
+        { name: "200 g flat rice noodles" },
+        { name: "2 tbsp oyster sauce" },
+        { name: "1 tbsp soy sauce" },
+    ];
+    const warned = (step: string, ingredients = noodles) =>
+        names(warn([step], ingredients));
+
+    test.each([
+        ["Don't stir the egg until it starts to set.", "egg"],
+        ["Do not overcook the shrimp or they turn rubbery.", "shrimp"],
+        ["Don't crowd the mushrooms in the pan.", "mushroom"],
+        ["Be careful not to burn the garlic.", "garlic"],
+        ["Do not let the butter brown.", "butter"],
+        ["Don't rinse the chicken before cooking.", "chicken"],
+        ["Never wash mushrooms under running water.", "mushroom"],
+        ["Avoid overmixing the eggs into the noodles.", "egg"],
+        ["Toss gently without breaking the tofu.", "tofu"],
+        ["Do not peel the potatoes.", "potato"],
+        ["Don't skip toasting the sesame seeds.", "sesame seed"],
+        ["Do not overcrowd the pan and scramble the eggs.", "egg"],
+        ["Don't stir for a minute and then crack in the egg.", "egg"],
+        ["Stir until no lumps remain and the butter has melted.", "butter"],
+        ["Cook without moving the noodles and scramble the egg.", "egg"],
+        ["No need to salt the water and add the eggs.", "egg"],
+        [
+            "Rinse the rice until not cloudy and add the coconut milk.",
+            "coconut milk",
+        ],
+        ["You cannot skip the eggs here.", "egg"],
+        ["Never omit the butter.", "butter"],
+        ["Do not skip the cheese.", "cheese"],
+        ["Make sure not to burn the garlic.", "garlic"],
+        ["Do not stir the honey in.", "honey"],
+    ])("a step that uses the food warns: %s", (step, food) => {
+        expect(warned(step)).toEqual([food]);
+    });
+
+    test("a negation followed by another food's verb warns the later food", () => {
+        expect(
+            warned("Cook the beef until no longer pink and add the broccoli."),
+        ).toEqual(["beef", "broccoli"]);
+        expect(
+            warned("Without stirring the noodles crack the egg over."),
+        ).toEqual(["egg"]);
+    });
+
+    test("a cue in a compound word is not a cue", () => {
+        expect(
+            warned("This no-bake cake needs cream cheese and sugar."),
+        ).toEqual(["cream cheese", "sugar"]);
+        expect(
+            warned("For no-knead bread, stir the yeast into the flour."),
+        ).toEqual(["yeast", "flour"]);
+        expect(warned("Make a two-egg omelette with cheese.")).toEqual([
+            "cheese",
+        ]);
+    });
+
+    test.each([
+        "Do not add any butter; skip the cheese.",
+        "Without yogurt the sauce will split.",
+        "If you don't have shallots, use onion instead; no cream needed.",
+        "Do not substitute honey for sugar.",
+        "Substitute almond milk for regular milk if vegan.",
+        "Avoid using garlic powder here, it burns.",
+        "Do not add any butter or cheese.",
+        "Skip the cheese and butter.",
+        "Do not stir in the butter.",
+        "You don't need to add the cheese.",
+        "Do not add the cheese until the end.",
+        "Be careful not to add the egg.",
+        "No cream, no butter.",
+        "Without adding the cheese it is lighter.",
+    ])("a food a cue directly leaves out stays quiet: %s", (step) => {
+        expect(warned(step)).toEqual([]);
+    });
+
+    test("a cue silences its object only, not the next verb's", () => {
+        expect(warned("Do not add the butter and scramble the egg.")).toEqual([
+            "egg",
+        ]);
+        expect(warned("Skip the cheese and fold in the egg.")).toEqual(["egg"]);
+    });
+
+    test("'instead of' leaves out what follows and keeps what leads", () => {
+        expect(warned("Use the eggs instead of flax.")).toEqual(["egg"]);
+        expect(warned("Use butter rather than oil.")).toEqual(["butter"]);
+        expect(warned("Use honey instead of sugar.")).toEqual(["honey"]);
+        expect(warned("Use honey in place of sugar.")).toEqual(["honey"]);
+        expect(warned("Use honey instead.")).toEqual([]);
+    });
+});
+
+describe("a hyphen only silences a food next to a modifier", () => {
+    const oil = [{ name: "1 tbsp oil" }];
+    const warned = (step: string) => names(warn([step], oil));
+
+    test("two foods joined by a hyphen are both foods", () => {
+        expect(warned("Stir in the ginger-garlic paste.")).toEqual([
+            "ginger",
+            "garlic",
+        ]);
+        expect(warned("Glaze with a honey-soy mixture.")).toContain("honey");
+    });
+
+    test("a food with a hyphenated non-modifier is still the food", () => {
+        expect(warned("Brush the pastry with egg-wash.")).toEqual(["egg"]);
+        expect(warned("Brush the pastry with egg wash.")).toEqual(["egg"]);
+    });
+
+    test.each([
+        "Use sugar-free syrup.",
+        "This is egg-free and dairy-free.",
+        "Cook in a tomato-based sauce.",
+        "Brush with honey-glazed sauce.",
+        "Use a non-dairy topping.",
+        "Season with lemon-pepper.",
+    ])("a modifier or a seasoning blend stays quiet: %s", (step) => {
+        expect(warned(step)).toEqual([]);
+    });
+
+    test("a spelled-out blend: salt-and-pepper are two foods, half-and-half is not looked up", () => {
+        expect(warned("Season with salt-and-pepper.")).toEqual([
+            "salt",
+            "pepper",
+        ]);
+        expect(warned("Whisk in the half-and-half.")).toEqual([]);
+    });
+
+    test("a hyphenated modifier beside a food keeps the food", () => {
+        expect(warned("Mix in the gluten-free flour.")).toEqual(["flour"]);
+        expect(warned("Pour in the low-fat milk.")).toEqual(["milk"]);
+    });
+
+    test("a rack after a meat is a cut, not gear", () => {
+        expect(warned("Season the lamb rack generously.")).toEqual(["lamb"]);
+        expect(warned("Roast the rack of lamb.")).toEqual(["lamb"]);
+        expect(warned("Set the lamb on the wire rack.")).toEqual(["lamb"]);
+        expect(warned("Use a cooling rack.")).toEqual([]);
+    });
+});
+
+describe("a percentage or a ratio is not an amount", () => {
+    const amountOf = (step: string) => warn([step], [])[0]!.amount;
+
+    test("a number before a percent sign or the word percent is no amount", () => {
+        expect(amountOf("Whisk in 2% milk until smooth.")).toBeNull();
+        expect(amountOf("Pour in 1% milk.")).toBeNull();
+        expect(amountOf("Pour in 2 percent milk.")).toBeNull();
+    });
+
+    test("an N/N that is not a kitchen fraction is no amount", () => {
+        expect(amountOf("Brown the 80/20 ground beef.")).toBeNull();
+        expect(amountOf("Brown the 90/10 ground beef.")).toBeNull();
+    });
+
+    test("a kitchen fraction and a count are still an amount", () => {
+        expect(amountOf("Add 1/2 onion.")).toBe(0.5);
+        expect(amountOf("Add 3/4 onion.")).toBe(0.75);
+        expect(amountOf("Add 2 eggs.")).toBe(2);
+        expect(amountOf("Add 1 1/2 onions.")).toBe(1.5);
+    });
+});
+
 describe("amounts", () => {
     test("a mixed number adds up", () => {
         expect(warn(["Add 1 1/2 onions."], [])[0]!.amount).toBe(1.5);
@@ -965,14 +1131,13 @@ describe("a step that leaves a food out or swaps it is not a mention", () => {
         "Leave out the mustard, or use it rather than ketchup.",
         "Use chicken instead of butter.",
         "Use chicken in place of lemon juice.",
-        "Never add water, and don't stir the honey in.",
+        "Never add the honey, and don't add the butter either.",
     ])("%s", (step) => {
         expect(quiet(step)).toEqual([]);
     });
 
-    test("a substitute named with 'instead' is optional, so it is quiet too", () => {
+    test("a bare trailing 'instead' leaves the food optional, so it is quiet", () => {
         expect(quiet("Use honey instead.")).toEqual([]);
-        expect(quiet("Use honey instead of sugar.")).toEqual([]);
     });
 
     test("a food named after the clause break still warns", () => {

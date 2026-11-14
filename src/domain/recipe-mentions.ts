@@ -138,18 +138,70 @@ const EQUIPMENT_WORDS = new Set([
 ]);
 
 /**
- * Words that, earlier in the same clause, say a food is left out or swapped
- * ("skip the cheese", "instead of butter"): the step is not asking for it.
+ * Words that leave out the food phrase that directly follows them ("no cream",
+ * "skip the cheese", "without yogurt"). "not" is one too ("not the yolks").
  */
 const LEAVE_OUT_CUES = new Set([
     "avoid",
-    "cannot",
-    "never",
     "no",
     "not",
     "omit",
     "skip",
     "without",
+]);
+
+/** Words that, directly before a leave-out cue, turn it into "must have": "never skip". */
+const NEGATIONS = new Set(["cannot", "never", "not"]);
+
+/**
+ * Verbs (and their -ing forms) of putting a food in. "Don't add butter" leaves
+ * it out; "don't stir the egg" is about how to cook an egg the step uses.
+ */
+const INCLUSION_VERBS = new Set([
+    "add",
+    "adding",
+    "buy",
+    "buying",
+    "get",
+    "getting",
+    "have",
+    "having",
+    "include",
+    "including",
+    "need",
+    "needing",
+    "put",
+    "putting",
+    "use",
+    "using",
+    "want",
+    "wanting",
+]);
+
+/** Verbs that mean "put in" only with "in": "do not stir in the butter". */
+const INCLUSION_IN_VERBS = new Set([
+    "fold",
+    "mix",
+    "pour",
+    "stir",
+    "toss",
+    "whisk",
+]);
+
+/** Small words between a cue and the food it governs ("any butter", "the cheese"). */
+const CUE_FILLERS = new Set(["a", "an", "any", "extra", "more", "some", "the"]);
+
+/** Words between a negation and the verb it governs ("do not just add"). */
+const NEGATION_ADVERBS = new Set([
+    "also",
+    "ever",
+    "even",
+    "have",
+    "just",
+    "need",
+    "really",
+    "to",
+    "want",
 ]);
 
 /** Words that, anywhere in a clause, make every food in it optional or swapped. */
@@ -158,6 +210,62 @@ const SUBSTITUTION_WORDS = new Set([
     "substituted",
     "substituting",
     "substitution",
+]);
+
+/**
+ * A hyphenated word that makes the food beside it an adjective ("sugar-free",
+ * "tomato-based"), so the food is not asked for.
+ */
+const HYPHEN_AFTER_MODIFIERS = new Set([
+    "based",
+    "crusted",
+    "filled",
+    "flavored",
+    "flavoured",
+    "free",
+    "friendly",
+    "glazed",
+    "infused",
+    "less",
+    "like",
+    "rich",
+    "safe",
+    "scented",
+    "stuffed",
+    "style",
+]);
+
+/** The same for a food after the hyphen: "non-dairy", "low-sugar", "two-egg". */
+const HYPHEN_BEFORE_MODIFIERS = new Set([
+    "low",
+    "no",
+    "non",
+    "reduced",
+    "zero",
+    "one",
+    "two",
+    "three",
+    "four",
+    "five",
+    "six",
+    "seven",
+    "eight",
+    "nine",
+    "ten",
+]);
+
+/** Two foods that are one seasoning blend when hyphenated. */
+const HYPHEN_BLENDS = new Set(["garlic-herb", "lemon-herb", "lemon-pepper"]);
+
+/** Meats that take "rack" as a cut rather than as gear. */
+const RACK_CUTS = new Set([
+    "beef",
+    "goat",
+    "lamb",
+    "pork",
+    "rib",
+    "veal",
+    "venison",
 ]);
 
 /** Words that describe how a food is prepared; kept as the mention's note. */
@@ -614,6 +722,14 @@ function clipExcerpt(
 const isFraction = (token: string): boolean =>
     token in UNICODE_FRACTIONS || /^\d+\/\d+$/.test(token);
 
+/** "3/4", "1/16": a part of a whole. "80/20" is a ratio, not a quantity. */
+function isRatio(token: string): boolean {
+    const m = /^(\d+)\/(\d+)$/.exec(token);
+    if (!m) return false;
+    const [top, bottom] = [Number(m[1]), Number(m[2])];
+    return !(top > 0 && top < bottom && bottom <= 16);
+}
+
 /** The amount whose last token is `tokens[i]`: "1 1/2" is 1.5, "2-3" is 2. */
 function amountEndingAt(
     tokens: readonly Token[],
@@ -623,6 +739,11 @@ function amountEndingAt(
     const token = tokens[i]!;
     const value = numberOf(token.text);
     if (value == null) return null;
+    // "2% milk" and "80/20 ground beef" name a grade, not how much to add.
+    if (isRatio(token.text)) return null;
+    if (/^\s*(?:%|percent\b|per\s?cent\b)/.test(folded.slice(token.end))) {
+        return null;
+    }
     const before = tokens[i - 1];
     if (before && !token.breakBefore) {
         const beforeValue = numberOf(before.text);
@@ -731,8 +852,81 @@ function isNotUsedAsFood(
     return false;
 }
 
+/** "don't", "doesn't", "can't": the "t" after an n-word, or a negating word. */
+function isNegationAt(
+    tokens: readonly Token[],
+    k: number,
+    from: number,
+): boolean {
+    if (k < from) return false;
+    const text = tokens[k]!.text;
+    if (NEGATIONS.has(text)) return true;
+    return text === "t" && k > from && tokens[k - 1]!.text.endsWith("n");
+}
+
 /**
- * A mention the step does not ask for: a food hyphenated to another word
+ * Whether a cue earlier in the clause leaves out the food starting at token
+ * `first`. A cue only governs the food it acts on: the food phrase that
+ * directly follows "no", "skip", "without", "instead of" and the like, or the
+ * object of an inclusion verb a negation governs ("don't add any butter or
+ * cheese"). A later verb ends that reach, so "do not overcrowd the pan and
+ * scramble the eggs" still asks for the eggs, and so does "don't stir the egg".
+ */
+function isLeftOut(
+    tokens: readonly Token[],
+    foodTokens: ReadonlySet<number>,
+    from: number,
+    first: number,
+): boolean {
+    let j = first - 1;
+    while (j >= from) {
+        const text = tokens[j]!.text;
+        const bridges =
+            CUE_FILLERS.has(text) ||
+            NOTE_WORDS.has(text) ||
+            foodTokens.has(j) ||
+            text === "and" ||
+            text === "or" ||
+            text === "nor" ||
+            text === "either";
+        if (!bridges) break;
+        j--;
+    }
+    if (j < from) return false;
+    const text = tokens[j]!.text;
+    const prev = tokens[j - 1]?.text;
+    const has = (k: number) => k >= from;
+    // "no-knead bread": the dish a "no-" word describes, not a food to add.
+    if (tokens[j]!.hyphenBefore && prev === "no" && has(j - 1)) return true;
+    // "never skip the eggs" and "do not omit it" want the food in.
+    if (LEAVE_OUT_CUES.has(text)) return !isNegationAt(tokens, j - 1, from);
+    if (text === "out" && prev === "leave" && has(j - 1)) {
+        return !isNegationAt(tokens, j - 2, from);
+    }
+    if (text === "of" && prev === "instead" && has(j - 1)) return true;
+    if (text === "than" && prev === "rather" && has(j - 1)) return true;
+    if (text === "of" && prev === "place" && tokens[j - 2]?.text === "in") {
+        return has(j - 2);
+    }
+    let verb = j;
+    if (text === "in" && has(j - 1) && INCLUSION_IN_VERBS.has(prev!)) {
+        verb = j - 1;
+    } else if (!INCLUSION_VERBS.has(text)) {
+        return false;
+    }
+    let k = verb - 1;
+    while (k >= from && NEGATION_ADVERBS.has(tokens[k]!.text)) k--;
+    if (k < from) return false;
+    if (isNegationAt(tokens, k, from)) return true;
+    // "avoid using garlic powder", "skip adding the cheese".
+    return (
+        LEAVE_OUT_CUES.has(tokens[k]!.text) &&
+        !isNegationAt(tokens, k - 1, from)
+    );
+}
+
+/**
+ * A mention the step does not ask for: a food hyphenated to a modifier
  * ("sugar-free"), a piece of gear ("butter knife"), or one the clause leaves
  * out or swaps ("do not add butter", "substitute honey for sugar", "use oil
  * instead"). Quiet is the safe answer.
@@ -742,44 +936,46 @@ function isNotAsked(
     units: readonly Unit[],
     tokens: readonly Token[],
     at: number,
+    foodTokens: ReadonlySet<number>,
 ): boolean {
     const first = units[at]!.first;
     const last = units[at + entry.words.length - 1]!.last;
     const after = tokens[last + 1];
-    if (tokens[first]!.hyphenBefore || after?.hyphenBefore) return true;
-    if (after && !after.breakBefore) {
-        const next = plainWords(after.text)[0] ?? after.text;
-        if (EQUIPMENT_WORDS.has(after.text) || EQUIPMENT_WORDS.has(next)) {
+    const before = tokens[first - 1];
+    // Two foods joined by a hyphen are both foods; only a modifier on the
+    // other side, or a known seasoning blend, makes the word an adjective.
+    if (tokens[first]!.hyphenBefore && before) {
+        if (
+            HYPHEN_BEFORE_MODIFIERS.has(before.text) ||
+            HYPHEN_BLENDS.has(`${before.text}-${tokens[first]!.text}`)
+        ) {
             return true;
         }
-        if (after.text === "instead") return true;
+    }
+    if (after?.hyphenBefore) {
+        if (
+            HYPHEN_AFTER_MODIFIERS.has(after.text) ||
+            HYPHEN_BLENDS.has(`${tokens[last]!.text}-${after.text}`)
+        ) {
+            return true;
+        }
+    }
+    if (after && !after.breakBefore) {
+        const next = plainWords(after.text)[0] ?? after.text;
+        const gear =
+            EQUIPMENT_WORDS.has(after.text) || EQUIPMENT_WORDS.has(next);
+        // "lamb rack" is a cut of meat, not a rack to cook it on.
+        const cut =
+            next === "rack" && entry.words.some((w) => RACK_CUTS.has(w));
+        if (gear && !cut) return true;
+        // "use onion instead" leaves it optional; "eggs instead of flax" asks for eggs.
+        if (after.text === "instead" && tokens[last + 2]?.text !== "of") {
+            return true;
+        }
     }
     let from = first;
     while (from > 0 && !tokens[from]!.breakBefore) from--;
-    for (let i = from; i < first; i++) {
-        const text = tokens[i]!.text;
-        if (LEAVE_OUT_CUES.has(text)) return true;
-        // "don't", "doesn't", "can't": the "t" after an n-word.
-        if (text === "t" && tokens[i - 1]?.text.endsWith("n") && i > from) {
-            return true;
-        }
-        if (text === "out" && tokens[i - 1]?.text === "leave" && i > from) {
-            return true;
-        }
-        if (
-            (text === "instead" || text === "rather") &&
-            (tokens[i + 1]?.text === "of" || tokens[i + 1]?.text === "than")
-        ) {
-            return true;
-        }
-        if (
-            text === "place" &&
-            tokens[i - 1]?.text === "in" &&
-            tokens[i + 1]?.text === "of"
-        ) {
-            return true;
-        }
-    }
+    if (isLeftOut(tokens, foodTokens, from, first)) return true;
     for (let i = from; i < tokens.length; i++) {
         if (i > from && tokens[i]!.breakBefore) break;
         if (SUBSTITUTION_WORDS.has(tokens[i]!.text)) return true;
@@ -807,18 +1003,35 @@ export function findMissingMentions(input: {
             tokens.map((t) => plainWords(t.text)[0] ?? t.text),
             (i) => !tokens[i]!.breakBefore,
         );
-        let at = 0;
-        while (at < units.length) {
-            const entry = vocabulary.byFirstWord
-                .get(units[at]!.word)
+        const matchAt = (from: number) =>
+            vocabulary.byFirstWord
+                .get(units[from]!.word)
                 ?.find((c) =>
                     c.words.every(
                         (w, k) =>
-                            units[at + k]?.word === w &&
+                            units[from + k]?.word === w &&
                             (k === 0 ||
-                                !tokens[units[at + k]!.first]!.breakBefore),
+                                !tokens[units[from + k]!.first]!.breakBefore),
                     ),
                 );
+        // Every token that belongs to a food the vocabulary knows.
+        const foodTokens = new Set<number>();
+        for (let a = 0; a < units.length;) {
+            const found = matchAt(a);
+            if (!found) {
+                a++;
+                continue;
+            }
+            for (let u = a; u < a + found.words.length; u++) {
+                for (let t = units[u]!.first; t <= units[u]!.last; t++) {
+                    foodTokens.add(t);
+                }
+            }
+            a += found.words.length;
+        }
+        let at = 0;
+        while (at < units.length) {
+            const entry = matchAt(at);
             if (!entry) {
                 at++;
                 continue;
@@ -830,7 +1043,7 @@ export function findMissingMentions(input: {
                 isNeverFlagged(entry) ||
                 dismissed.has(entry.id) ||
                 isNotUsedAsFood(entry, units, tokens, here) ||
-                isNotAsked(entry, units, tokens, here) ||
+                isNotAsked(entry, units, tokens, here, foodTokens) ||
                 isCovered(pantry, vocabulary, entry)
             ) {
                 continue;
