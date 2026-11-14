@@ -161,6 +161,14 @@ export const LIST_USUALS_OUTPUT_SCHEMA = z.object({
             kind: z.enum(["food", "supply"]),
             /** The usual product's display name; null when the food has none. */
             product_name: z.string().nullable(),
+            /** Every product filed under the food, as on the app's Usuals list; the usual one has is_usual true. */
+            products: z.array(
+                z.object({
+                    food_id: z.string(),
+                    name: z.string(),
+                    is_usual: z.boolean(),
+                }),
+            ),
             store_id: z.string().nullable(),
             store_name: z.string().nullable(),
             /** The usual amount to add; null means 1 of the unit. */
@@ -195,6 +203,11 @@ function usualWire(row: UsualListRow) {
         name: row.name,
         kind: row.kind,
         product_name: row.productName,
+        products: row.products.map((product) => ({
+            food_id: product.foodId,
+            name: product.name,
+            is_usual: product.isUsual,
+        })),
         store_id: row.storeId,
         store_name: row.storeName,
         amount: row.amount,
@@ -233,7 +246,12 @@ function usualLine(row: UsualListRow): string {
     const status = row.due
         ? `DUE (${row.due.reason})${row.onList ? ", already on the list" : row.dismissed ? ", dismissed" : ""}`
         : "not due";
-    return `- ${what}: ${how.join(", ")}; ${status}`;
+    const settings = how.length > 0 ? how.join(", ") : "no restock schedule";
+    const products =
+        row.products.length > 0
+            ? `; products: ${row.products.map((p) => (p.isUsual ? `${p.name} (usual)` : p.name)).join(", ")}`
+            : "";
+    return `- ${what}: ${settings}; ${status}${products}`;
 }
 
 export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
@@ -243,7 +261,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "List Grocery Lines",
             description:
-                "List grocery lines grouped by store and section, with already-have against the fridge. Each line includes `notices` (e.g. allergens).",
+                "List grocery lines grouped by store and section, with already-have against the fridge. Each line includes its id (the `[id: …]` in the text), whether it is checked, and `notices` (e.g. allergens). Pass those ids to check_grocery_line, delete_grocery_line or put_away_grocery_lines.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -423,7 +441,14 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                                   const lineText = note
                                                       ? `${line.display_name} · ${note}`
                                                       : `${line.display_name} ${line.amount} ${line.unit}`;
-                                                  return `${lineText}${tag}${blockSuffix}`;
+                                                  // The id is what check, delete
+                                                  // and put-away take; hosts that
+                                                  // show the widget give the model
+                                                  // only this text.
+                                                  const checked = line.checked
+                                                      ? " [checked]"
+                                                      : "";
+                                                  return `${lineText}${checked}${tag}${blockSuffix} [id: ${line.id}]`;
                                               })
                                               .join("\n"),
                             },
@@ -1015,7 +1040,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
         {
             title: "List Usuals",
             description:
-                "List the household's usuals (foods bought on a schedule or added when stock runs low) with each one's schedule, low setting, usual product and store, and whether it is due today and why. Call it when the user asks what to restock, or at the start of a chat on the household's restock day. Due usuals come first. To restock one, call add_grocery_line with its food_id.",
+                "List every usual on the household's Usuals list (plain foods with products filed under them, added by hand, or bought on a schedule or when stock runs low), with every product filed under each one and which is the usual product, its schedule, low setting and store, and whether it is due today and why. This is the complete list, not a search, so use it to check or clean up usual products. Call it when the user asks what to restock, or at the start of a chat on the household's restock day. Due usuals come first. To restock one, call add_grocery_line with its food_id.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,

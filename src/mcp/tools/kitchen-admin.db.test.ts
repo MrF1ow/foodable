@@ -745,6 +745,34 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
         expect(await actions()).toEqual([]);
     });
 
+    test("list_usuals lists every usual on the Usuals list with all its products, schedule or not", async () => {
+        const { plain, kirkland, organic } = await usual();
+        await getCtx()
+            .sql`update public.foods set restock_schedule = null, restock_every_weeks = null, restock_when_low = false, restock_low_level = null, usual_added_at = null where id = ${plain}`;
+        const listed = await call("list_usuals");
+        expect(listed.isError).toBeFalsy();
+        const rows = listed.structuredContent!.usuals as {
+            food_id: string;
+            products: { food_id: string; name: string; is_usual: boolean }[];
+        }[];
+        expect(rows.map((row) => [row.food_id, row.products])).toEqual([
+            [
+                plain,
+                [
+                    {
+                        food_id: kirkland,
+                        name: "Kirkland Large Eggs",
+                        is_usual: true,
+                    },
+                    { food_id: organic, name: "Organic Eggs", is_usual: false },
+                ],
+            ],
+        ]);
+        expect(text(listed)).toContain(
+            "products: Kirkland Large Eggs (usual), Organic Eggs",
+        );
+    });
+
     test("remove_usual: a product is no usual and an archived food is unknown", async () => {
         const { kirkland } = await usual();
         const viaProduct = await call("remove_usual", { food_id: kirkland });

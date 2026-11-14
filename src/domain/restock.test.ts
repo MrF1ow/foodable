@@ -1135,6 +1135,50 @@ test("usualsList skips generic, product, archived and non-usual foods", () => {
     expect(rows.map((r) => r.name)).toEqual(["Milk"]);
 });
 
+test("usualsList lists every usual on the app's Usuals list, schedule or not, with all its products", () => {
+    const eggs = newFood({ householdId: HH, kind: "food", name: "Eggs" });
+    const kirkland = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Large Eggs",
+        brand: "Kirkland",
+        genericFoodId: eggs.id,
+    });
+    const organic = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Organic Eggs",
+        genericFoodId: eggs.id,
+    });
+    const gone = newFood({
+        householdId: HH,
+        kind: "food",
+        name: "Old Eggs",
+        genericFoodId: eggs.id,
+    });
+    gone.archivedAt = "2026-01-01T00:00:00.000Z";
+    eggs.usualProductId = kirkland.id;
+    const salt = newFood({ householdId: HH, kind: "food", name: "Salt" });
+    salt.usualAddedAt = "2026-01-01T00:00:00.000Z";
+    const pepper = newFood({ householdId: HH, kind: "food", name: "Pepper" });
+    const { rows } = listUsuals([eggs, kirkland, organic, gone, salt, pepper]);
+    expect(rows.map((r) => [r.name, r.due, r.products])).toEqual([
+        [
+            "Eggs",
+            null,
+            [
+                {
+                    foodId: kirkland.id,
+                    name: "Large Eggs (Kirkland)",
+                    isUsual: true,
+                },
+                { foodId: organic.id, name: "Organic Eggs", isUsual: false },
+            ],
+        ],
+        ["Salt", null, []],
+    ]);
+});
+
 test("usualsList lists a paused usual with due null", () => {
     const rice = newFood({
         householdId: HH,
