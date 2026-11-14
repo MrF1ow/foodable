@@ -5,6 +5,9 @@ import { iconChevronRight } from "../../components/v2/icons.js";
 import { renderAppShell } from "../../shell.js";
 import { APP_PATHS } from "../../route-map.js";
 
+/** The Stores page (`STORES_PATH` in settings-stores.ts; not imported here, since that page imports this module). */
+const STORES_NAV_PATH = APP_PATHS.settingsStores;
+
 /** Which settings screen is active (menu highlight and layout). */
 export type SettingsV2Section =
     | "home"
@@ -12,6 +15,9 @@ export type SettingsV2Section =
     | "display"
     | "help"
     | "household"
+    | "stores"
+    | "units"
+    | "nutrients"
     | "goals"
     | "score"
     | "saved"
@@ -27,7 +33,10 @@ type MenuIcon =
     | "sun"
     | "download"
     | "help"
-    | "code";
+    | "code"
+    | "cart"
+    | "ruler"
+    | "drop";
 
 type MenuRow = {
     id: Exclude<SettingsV2Section, "home">;
@@ -45,6 +54,9 @@ const MENU_ICON_PATHS: Record<MenuIcon, string> = {
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
     download:
         '<path d="M12 5v10"/><path d="M8 11l4 4 4-4"/><path d="M5 19h14"/>',
+    cart: '<path d="M3 4h2l2 11h11l2-8H6.5"/><path d="M7.6 19a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8Z"/><path d="M14.6 19a1.4 1.4 0 1 0 0-2.8 1.4 1.4 0 0 0 0 2.8Z"/>',
+    ruler: '<path d="M4 15 15 4l5 5L9 20Z"/><path d="M8 11l2 2M11 8l2 2M14 5l1.5 1.5"/>',
+    drop: '<path d="M12 3c4 5 6 8 6 11a6 6 0 0 1-12 0c0-3 2-6 6-11Z"/>',
     code: '<path d="M8 8l-4 4 4 4"/><path d="M16 8l4 4-4 4"/>',
     help: '<circle cx="12" cy="12" r="8"/><path d="M9.5 9.2a2.7 2.7 0 0 1 4.8 1.4c0 2-2.8 2.3-2.8 3.9"/><circle cx="12" cy="17.2" r="0.9" fill="currentColor" stroke="none"/>',
 };
@@ -73,12 +85,6 @@ const SETTINGS_MENU_MAIN: readonly MenuRow[] = [
     },
     { id: "goals", label: "Goals", href: "/settings/goals", icon: "target" },
     {
-        id: "score",
-        label: "Product score",
-        href: "/settings/product-score",
-        icon: "gauge",
-    },
-    {
         id: "saved",
         label: "Saved foods & recipes",
         href: "/settings/saved",
@@ -88,6 +94,24 @@ const SETTINGS_MENU_MAIN: readonly MenuRow[] = [
 
 const SETTINGS_MENU_PREFS: readonly MenuRow[] = [
     { id: "display", label: "Display", href: "/settings/display", icon: "sun" },
+    {
+        id: "units",
+        label: "Units",
+        href: APP_PATHS.settingsUnits,
+        icon: "ruler",
+    },
+    {
+        id: "nutrients",
+        label: "Nutrients shown",
+        href: APP_PATHS.settingsNutrients,
+        icon: "drop",
+    },
+    {
+        id: "score",
+        label: "Product score",
+        href: "/settings/product-score",
+        icon: "gauge",
+    },
 ];
 
 const SETTINGS_MENU_CONNECT: readonly MenuRow[] = [
@@ -124,6 +148,96 @@ const SETTINGS_MENU_GROUPS: readonly MenuGroup[] = [
     { key: "connect", label: "Connect", rows: SETTINGS_MENU_CONNECT },
 ];
 
+/** One row of the desktop nav: a flat list in the design's order. `covers`
+ *  lists the sections that make it current (Units & nutrients is two pages). */
+type DesktopNavRow = {
+    id: string;
+    label: string;
+    href: string;
+    icon: MenuIcon;
+    covers: readonly SettingsV2Section[];
+};
+
+const SETTINGS_DESKTOP_NAV: readonly DesktopNavRow[] = [
+    {
+        id: "account",
+        label: "Account",
+        href: "/settings/account",
+        icon: "user",
+        covers: ["account"],
+    },
+    {
+        id: "household",
+        label: "Household",
+        href: APP_PATHS.settingsHousehold,
+        icon: "users",
+        covers: ["household"],
+    },
+    {
+        id: "stores",
+        label: "Stores",
+        href: STORES_NAV_PATH,
+        icon: "cart",
+        covers: ["stores"],
+    },
+    {
+        id: "goals",
+        label: "Goals",
+        href: "/settings/goals",
+        icon: "target",
+        covers: ["goals"],
+    },
+    {
+        id: "saved",
+        label: "Saved foods & recipes",
+        href: "/settings/saved",
+        icon: "bookmark",
+        covers: ["saved"],
+    },
+    {
+        id: "score",
+        label: "Product score",
+        href: "/settings/product-score",
+        icon: "gauge",
+        covers: ["score"],
+    },
+    {
+        id: "display",
+        label: "Display",
+        href: "/settings/display",
+        icon: "sun",
+        covers: ["display"],
+    },
+    {
+        id: "units-nutrients",
+        label: "Units & nutrients",
+        href: APP_PATHS.settingsUnits,
+        icon: "ruler",
+        covers: ["units", "nutrients"],
+    },
+    {
+        id: "ai",
+        label: "AI connections",
+        href: "/settings/ai-connections",
+        icon: "code",
+        covers: ["ai"],
+    },
+    {
+        id: "export",
+        label: "Export data",
+        href: "/settings/export",
+        icon: "download",
+        covers: ["export"],
+    },
+    {
+        id: "help",
+        label: "Help",
+        href: APP_PATHS.settingsHelp,
+        icon: "help",
+        covers: ["help"],
+    },
+];
+
 const THEME_SEG_OPTIONS = [
     { value: "system", label: "Auto" },
     { value: "light", label: "Light" },
@@ -148,14 +262,10 @@ function settingsThemeSegForm(
     return `<form method="POST" action="/settings/display" class="fd-settings-theme-form" data-turbo="false" aria-label="Theme"><input type="hidden" name="return" value="/settings"><div class="fd-settings-theme-seg" role="group">${buttons}</div></form>`;
 }
 
-function settingsDisplayMenuRow(
-    active: SettingsV2Section,
-    storedTheme?: "light" | "dark" | null,
-): Html {
-    const current = active === "display" ? ' aria-current="page"' : "";
+function settingsDisplayMenuRow(storedTheme?: "light" | "dark" | null): Html {
     const themeForm = settingsThemeSegForm(storedTheme);
     return raw(
-        `<li class="fd-settings-menu__item fd-settings-menu__item--display"><a class="fd-settings-menu__link fd-settings-menu__link--display-nav" href="/settings/display"${current}>${settingsMenuIcon("sun")}<span class="fd-settings-menu__label">Display</span><span class="fd-settings-menu__chev" aria-hidden="true">${iconChevronRight()}</span></a><div class="fd-settings-menu__display-row">${settingsMenuIcon("sun")}<span class="fd-settings-menu__label">Display</span>${themeForm}</div></li>`,
+        `<li class="fd-settings-menu__item fd-settings-menu__item--display"><div class="fd-settings-menu__display-row">${settingsMenuIcon("sun")}<span class="fd-settings-menu__label">Display</span>${themeForm}</div></li>`,
     );
 }
 
@@ -194,7 +304,7 @@ function menuGroupMarkup(
 ): string {
     const items = group.rows.map((row) => {
         if (row.id === "display" && opts?.inlineDisplayTheme) {
-            return String(settingsDisplayMenuRow(active, opts?.storedTheme));
+            return String(settingsDisplayMenuRow(opts?.storedTheme));
         }
         return String(menuLink(row, active, opts));
     });
@@ -204,6 +314,23 @@ function menuGroupMarkup(
     return `${label}<ul class="fd-settings-menu__list">${items.join("")}</ul>`;
 }
 
+function desktopNavLink(
+    row: DesktopNavRow,
+    active: SettingsV2Section,
+    opts?: { memberCount?: number },
+): string {
+    const current = row.covers.includes(active) ? ' aria-current="page"' : "";
+    const badge =
+        row.id === "household" &&
+        opts?.memberCount != null &&
+        opts.memberCount > 0
+            ? `<span class="fd-settings-menu__badge">${esc(String(opts.memberCount))}</span>`
+            : "";
+    return `<li class="fd-settings-menu__item"><a class="fd-settings-menu__link" href="${esc(row.href)}"${current}>${settingsMenuIcon(row.icon)}<span class="fd-settings-menu__label">${esc(row.label)}</span>${badge}</a></li>`;
+}
+
+/** The phone Settings home menu (grouped) and the desktop nav (flat, in the
+ *  design's order). CSS shows one and hides the other. */
 export function settingsMenuNav(
     active: SettingsV2Section,
     opts?: {
@@ -215,8 +342,11 @@ export function settingsMenuNav(
     const groups = SETTINGS_MENU_GROUPS.map((group) =>
         menuGroupMarkup(group, active, opts),
     ).join("");
+    const desktopItems = SETTINGS_DESKTOP_NAV.map((row) =>
+        desktopNavLink(row, active, opts),
+    ).join("");
     return raw(
-        `<nav class="fd-settings-menu" aria-label="Settings sections"><div class="fd-settings-menu__groups">${groups}</div></nav>`,
+        `<nav class="fd-settings-menu fd-settings-menu--phone" aria-label="Settings sections"><div class="fd-settings-menu__groups">${groups}</div></nav><nav class="fd-settings-menu fd-settings-menu--desktop" aria-label="Settings"><ul class="fd-settings-menu__list">${desktopItems}</ul></nav>`,
     );
 }
 

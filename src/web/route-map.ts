@@ -12,6 +12,9 @@ export const APP_PATHS = {
     kitchenGroceries: "/kitchen/groceries",
     kitchenUsuals: "/kitchen/usuals",
     settingsHousehold: "/settings/household",
+    settingsStores: "/settings/household/stores",
+    settingsUnits: "/settings/units",
+    settingsNutrients: "/settings/nutrients",
     settingsHouseholdItems: "/settings/household/items",
     settingsHouseholdPossibleDuplicates:
         "/settings/household/possible-duplicates",

@@ -147,6 +147,11 @@
     gap: 10px;
 }
 
+/* The flat desktop nav only shows from 1024px; phones get the grouped menu. */
+.fd-settings-menu--desktop {
+    display: none;
+}
+
 .fd-settings-menu__group-label {
     margin: 0;
     padding: 22px 0 8px 4px;
@@ -300,10 +305,6 @@
 }
 
 .fd-settings-home-pane {
-    display: none;
-}
-
-.fd-settings-menu__link--display-nav {
     display: none;
 }
 
@@ -950,7 +951,7 @@
 /* Hide the side menu on phone subpages (home shows the full menu). */
 .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
     .fd-settings-aside
-    .fd-settings-menu {
+    .fd-settings-menu--phone {
     display: none;
 }
 
@@ -1682,9 +1683,11 @@
         top: var(--fd-s-12);
     }
 
-    .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
-        .fd-settings-aside
-        .fd-settings-menu {
+    .fd-settings-aside .fd-settings-menu--phone {
+        display: none;
+    }
+
+    .fd-settings-aside .fd-settings-menu--desktop {
         display: block;
     }
 
@@ -1694,14 +1697,6 @@
     }
 
     .fd-settings-head--phone {
-        display: none;
-    }
-
-    .fd-settings-menu__link--display-nav {
-        display: flex;
-    }
-
-    .fd-settings-menu__display-row {
         display: none;
     }
 
@@ -1715,23 +1710,10 @@
         display: none;
     }
 
-    .fd-settings-menu__group-label {
-        display: none;
-    }
-
-    .fd-settings-menu__groups {
-        gap: 2px;
-    }
-
     .fd-settings-menu__list {
         border-radius: 0;
         background: transparent;
         box-shadow: none;
-    }
-
-    .fd-settings-menu__list + .fd-settings-menu__list,
-    .fd-settings-menu__group-label + .fd-settings-menu__list {
-        margin-top: 0;
     }
 
     .fd-settings-menu__link {
@@ -1751,10 +1733,6 @@
 
     .fd-settings-menu__item + .fd-settings-menu__item {
         border-top: none;
-    }
-
-    .fd-settings-menu__chev {
-        display: none;
     }
 
     .fd-settings-menu__badge {
