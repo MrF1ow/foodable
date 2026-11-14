@@ -6829,6 +6829,44 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
+    test("list_grocery_lines text gives each line's id and checked state, so a model without structuredContent can check or delete it", async () => {
+        await withPat(async (call) => {
+            await createGroceryStore(db.settingsStore, "hh-1", "Safeway");
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const milk = await call("upsert_food", { name: "Milk" });
+            const eggsLine = await call("add_grocery_line", {
+                kind: "food",
+                food_id: eggs.structuredContent?.id as string,
+            });
+            await call("add_grocery_line", {
+                kind: "food",
+                food_id: milk.structuredContent?.id as string,
+            });
+            const eggsId = eggsLine.structuredContent?.id as string;
+            expect(
+                (
+                    await call("check_grocery_line", {
+                        id: eggsId,
+                        checked: true,
+                    })
+                ).isError,
+            ).toBeFalsy();
+            const text = textOf(await call("list_grocery_lines"));
+            const rows = text.split("\n");
+            const eggsRow = rows.find((row) => row.startsWith("Eggs"));
+            const milkRow = rows.find((row) => row.startsWith("Milk"));
+            expect(eggsRow).toEndWith(`[checked] [id: ${eggsId}]`);
+            expect(milkRow).not.toContain("[checked]");
+            const milkId = /\[id: ([^\]]+)\]$/.exec(milkRow!)?.[1];
+            expect(milkId).toBeTruthy();
+            const deleted = await call("delete_grocery_line", { id: milkId });
+            expect(deleted.isError).toBeFalsy();
+            expect(textOf(await call("list_grocery_lines"))).not.toContain(
+                "Milk",
+            );
+        });
+    });
+
     test("list_grocery_lines returns manual and recipe source on each line", async () => {
         await withPat(async (call) => {
             const store = await createGroceryStore(

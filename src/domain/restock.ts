@@ -5,6 +5,7 @@ import {
     familyOf,
     foodDisplayName,
     usualLowLevel,
+    usualProductRows,
 } from "./foods.js";
 import type { FridgeItem } from "./fridge.js";
 import {
@@ -387,6 +388,11 @@ export type UsualListRow = {
     kind: "food" | "supply";
     /** The usual product's display name, or null when the food has none. */
     productName: string | null;
+    /**
+     * Every live product filed under the food (the app's Usuals list), by
+     * name, with the usual one marked. Empty when the food has none.
+     */
+    products: { foodId: string; name: string; isUsual: boolean }[];
     storeId: string | null;
     storeName: string | null;
     /** The usual amount to add; null means 1 of the default unit. */
@@ -410,9 +416,12 @@ export type UsualListRow = {
 };
 
 /**
- * Every usual of the household with its schedule and low settings and whether
- * it is due today (and why), straight from `usualsDue`. Due usuals come
- * first, then the rest by name; `isRestockDay` is the same check `usualsDue`
+ * Every usual of the household with its products, its schedule and low
+ * settings and whether it is due today (and why), straight from `usualsDue`.
+ * A usual is anything on the app's Usuals list (`usualProductRows`: a plain
+ * food with live products or added by hand) or a plain food with restock
+ * settings (`isUsualFood`), so the list matches what the household sees.
+ * Due usuals come first, then the rest by name; `isRestockDay` is the same check `usualsDue`
  * makes. `listed` is the whole catalog so a usual's
  * product and family stock resolve; `today` is the household-local date.
  */
@@ -431,8 +440,14 @@ export function usualsList(input: {
     const familyById = new Map<string, string>();
     for (const [id, food] of foodsById) familyById.set(id, familyOf(food));
     const listed = listedFamilies(input.lines, familyById);
+    const productRows = new Map(
+        usualProductRows({ foods: input.listed }).rows.map((row) => [
+            row.food.id,
+            row,
+        ]),
+    );
     const usuals = input.listed
-        .filter(isUsualFood)
+        .filter((food) => isUsualFood(food) || productRows.has(food.id))
         .map((food) => foodsById.get(food.id))
         .filter((food): food is EffectiveFood => food != null);
     const due = new Map(
@@ -452,6 +467,13 @@ export function usualsList(input: {
             name: food.name,
             kind: food.kind === "supply" ? "supply" : "food",
             productName: food.product ? foodDisplayName(food.product) : null,
+            products: (productRows.get(food.id)?.products ?? []).map(
+                (product) => ({
+                    foodId: product.id,
+                    name: foodDisplayName(product),
+                    isUsual: product.id === food.usualProductId,
+                }),
+            ),
             storeId: food.usualStoreId,
             storeName:
                 food.usualStoreId != null
