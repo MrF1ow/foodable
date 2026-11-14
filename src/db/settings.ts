@@ -299,6 +299,46 @@ export function liveSettingsStore(): SettingsStore {
                 }
             });
         },
+        async deleteSection(householdId, id) {
+            return run(async (tx) => {
+                // `grocery_lines.section_id` cascades, so deleting a section
+                // deletes any line still in it. This transaction's own delete
+                // count for the lines table, read around the delete, says
+                // whether one went with it, and a line is never lost that way:
+                // the error rolls the delete back.
+                const lineDeletes = async () =>
+                    Number(
+                        (
+                            await maybeOne<{ n: string | number }>(
+                                tx,
+                                tx`select pg_stat_get_xact_tuples_deleted('public.grocery_lines'::regclass) as n`,
+                                "count grocery line deletes",
+                            )
+                        )?.n ?? 0,
+                    );
+                try {
+                    const before = await lineDeletes();
+                    const data = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(GROCERY_SECTIONS)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                            returning id
+                        `,
+                    );
+                    if ((await lineDeletes()) !== before) {
+                        throw new SettingsInputError(
+                            "The list changed. Try again.",
+                        );
+                    }
+                    return data.length > 0;
+                } catch (err) {
+                    if (err instanceof SettingsInputError) throw err;
+                    throw pgError("delete grocery section", err);
+                }
+            });
+        },
     };
 }
 

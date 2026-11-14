@@ -2,7 +2,10 @@ import type { FoodsStore } from "./foods.js";
 import type { GroceryLine, GroceryListStore } from "./grocery.js";
 import type { NoticeDismissalsStore } from "./notice-dismissals.js";
 import {
+    createGroceryStore,
+    sameName,
     SettingsInputError,
+    storeNameTaken,
     type GroceryPreferences,
     type GrocerySection,
     type GroceryStore,
@@ -39,10 +42,6 @@ export type StoreManagementStore = {
     /** Dense positions 0..n-1 in the given order; the ids are the household's stores, validated by the caller. */
     writeStoreOrder(householdId: string, orderedIds: string[]): Promise<void>;
 };
-
-function sameName(a: string, b: string): boolean {
-    return a.trim().toLowerCase() === b.trim().toLowerCase();
-}
 
 /**
  * Where a line from `from` lands in the destination store: the section with
@@ -177,6 +176,64 @@ export async function reorderStores(
     }
     await deps.management.writeStoreOrder(householdId, [...orderedIds]);
     return deps.settings.listStores(householdId);
+}
+
+/**
+ * Creates a store. Without `sectionNames` it is the app's own "add a store"
+ * (`createGroceryStore`, the default sections). With them the store gets
+ * exactly those sections, in that order, and an Other section last: lines with
+ * no section of their own land there, so every store has one. A section named
+ * Other (any case) is that section.
+ */
+export async function createStoreWithSections(
+    settings: SettingsStore,
+    householdId: string,
+    name: string,
+    sectionNames?: readonly string[],
+): Promise<{ store: GroceryStore; sections: GrocerySection[] }> {
+    if (sectionNames === undefined) {
+        const store = await createGroceryStore(settings, householdId, name);
+        return { store, sections: await settings.listSections(store.id) };
+    }
+    const trimmed = name.trim();
+    if (!trimmed) throw new SettingsInputError("Enter a store name.");
+    const wanted: string[] = [];
+    for (const raw of sectionNames) {
+        const section = raw.trim();
+        if (!section) throw new SettingsInputError("Enter a section name.");
+        if (wanted.some((row) => sameName(row, section))) {
+            throw new SettingsInputError("A section is listed twice.");
+        }
+        wanted.push(section);
+    }
+    const existing = await settings.listStores(householdId);
+    if (storeNameTaken(existing, trimmed)) {
+        throw new SettingsInputError("That store already exists.");
+    }
+    const other = wanted.find((row) => sameName(row, "other")) ?? "Other";
+    const ordered = [...wanted.filter((row) => !sameName(row, "other")), other];
+    const store = await settings.insertStore({
+        id: crypto.randomUUID(),
+        householdId,
+        name: trimmed,
+        sortOrder:
+            existing.reduce((max, row) => Math.max(max, row.sortOrder), -1) + 1,
+    });
+    const sections: GrocerySection[] = [];
+    for (const [index, sectionName] of ordered.entries()) {
+        sections.push(
+            await settings.insertSection({
+                id: crypto.randomUUID(),
+                householdId,
+                storeId: store.id,
+                name: sectionName,
+                sortOrder: index,
+                hidden: false,
+                isOther: sectionName === other,
+            }),
+        );
+    }
+    return { store, sections };
 }
 
 /** Merges a patch into the stored preferences; a default store must be one of the household's. */

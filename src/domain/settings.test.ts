@@ -32,6 +32,20 @@ test("creating a store refuses a duplicate name", async () => {
     );
 });
 
+test("creating a store refuses a name another store has in any case, like renaming one", async () => {
+    const store = createMemorySettingsStore();
+    await createGroceryStore(store, HH, "Costco");
+    await expect(createGroceryStore(store, HH, "costco")).rejects.toThrow(
+        "That store already exists.",
+    );
+    await expect(createGroceryStore(store, HH, "  COSTCO ")).rejects.toThrow(
+        "That store already exists.",
+    );
+    expect((await store.listStores(HH)).map((row) => row.name)).toEqual([
+        "Costco",
+    ]);
+});
+
 test("section rename updates the stored name", async () => {
     const store = createMemorySettingsStore();
     const created = await createGroceryStore(store, HH, "Safeway");

@@ -49,7 +49,11 @@ import {
     registerProfileTools,
 } from "./tools/profile.js";
 import { registerFridgeTools } from "./tools/fridge.js";
-import { registerGroceryTools } from "./tools/grocery.js";
+import {
+    registerGroceryAdminTools,
+    registerGroceryTools,
+} from "./tools/grocery.js";
+import { registerStoreTools } from "./tools/stores.js";
 import { registerPlanTools } from "./tools/plan.js";
 import { registerRecipesTools } from "./tools/recipes.js";
 import { registerRulesTools } from "./tools/rules.js";
@@ -77,6 +81,8 @@ The loop: grocery list → put_away_grocery_lines into the fridge → cook_recip
 Imported recipes start unverified until they pass the deterministic check. Unverified recipes cannot go on the grocery list, be cooked, or be logged as portions. Fix them from import data in get_recipe (pasted text, unresolved lines, problems) without opening the original post or inventing amounts, then call verify_recipe. To import a recipe from a link, call import_recipe_from_url with optional text (the pasted caption) and credit. If it returns paste_needed, ask the user to paste the caption; never open the post yourself.
 
 When get_week_plan is available, the household's week plan can be read and changed: get_week_plan shows the next seven days and what the planned recipes still need, plan_recipe and unplan_recipe add and remove entries, and add_plan_missing_to_groceries puts the missing foods on the list (use it rather than add_grocery_line per line).
+
+When list_stores is available, the household's grocery stores can be read and changed: list_stores shows the stores in order with their sections, line counts and the default store (every store and section id comes from there), create_store, update_store, delete_store, reorder_stores and set_store_sections change them, and clear_grocery_list, move_grocery_lines and update_grocery_line clear, move and edit grocery lines. Use them when the person asks for that change; all but list_stores and create_store overwrite or remove what the household set, so they are destructive tools too.
 
 Destructive tools (the ones that delete, remove, discard, clear, unplan or merge) change or remove household data without asking first. Call them only when the person asked for that change, never on your own initiative. After one, tell the person what was removed or changed, and that the household can undo it for 24 hours in Settings › AI connections. If a tool says agents may not make destructive changes, tell the person the setting's name (Agents may make destructive changes, in Settings › AI connections) and do not retry another way.
 
@@ -163,6 +169,8 @@ export function registerTools(
     registerProfileTools(server, ctx);
     registerFridgeTools(server, ctx);
     registerGroceryTools(server, ctx);
+    registerGroceryAdminTools(server, ctx);
+    registerStoreTools(server, ctx);
     registerRecipesTools(server, ctx);
     registerPlanTools(server, ctx);
     registerRulesTools(server, ctx);

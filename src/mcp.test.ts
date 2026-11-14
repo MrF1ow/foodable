@@ -141,7 +141,16 @@ import {
     updateFood,
 } from "./domain/foods.js";
 import { RATE_PRODUCT_OUTPUT_SCHEMA } from "./mcp/tools/product-score.js";
-import { LIST_USUALS_OUTPUT_SCHEMA } from "./mcp/tools/grocery.js";
+import {
+    CLEAR_GROCERY_LIST_OUTPUT_SCHEMA,
+    LIST_USUALS_OUTPUT_SCHEMA,
+    MOVE_GROCERY_LINES_OUTPUT_SCHEMA,
+    UPDATE_GROCERY_LINE_OUTPUT_SCHEMA,
+} from "./mcp/tools/grocery.js";
+import {
+    HOUSEHOLD_ADMIN_TOOL_NAMES,
+    LIST_STORES_OUTPUT_SCHEMA,
+} from "./mcp/tools/stores.js";
 import {
     ADD_PLAN_MISSING_OUTPUT_SCHEMA,
     PLAN_RECIPE_OUTPUT_SCHEMA,
@@ -9152,6 +9161,370 @@ describe("/mcp destructive tools are guarded", () => {
                 }
             });
         });
+    });
+
+    // The grocery and store admin tools: behind mcp-household-admin, the same
+    // guard. The delete_store / reorder_stores / set_store_sections SQL (a
+    // store, its sections and rules, the default store) is tested against
+    // Postgres in src/mcp/tools/household-admin.db.test.ts; the memory stores
+    // here cover the tool list, the schemas and both protocol eras.
+    describe("grocery and store admin tools (mcp-household-admin)", () => {
+        const STORE_A = "11111111-1111-4111-8111-111111111111";
+        const STORE_B = "22222222-2222-4222-8222-222222222222";
+        const SECTION_A_PRODUCE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
+        const SECTION_A_OTHER = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa2";
+        const SECTION_B_PRODUCE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
+        const SECTION_B_OTHER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
+
+        beforeEach(() =>
+            setFlagsForTests(
+                createMemoryFlags({
+                    "mcp-plan-tools": true,
+                    "mcp-household-admin": true,
+                }),
+            ),
+        );
+
+        async function addStores() {
+            for (const [id, name, order, produce, other] of [
+                [STORE_A, "Costco", 0, SECTION_A_PRODUCE, SECTION_A_OTHER],
+                [STORE_B, "Aldi", 1, SECTION_B_PRODUCE, SECTION_B_OTHER],
+            ] as const) {
+                await db.settingsStore.insertStore({
+                    id,
+                    householdId: "hh-1",
+                    name,
+                    sortOrder: order,
+                });
+                for (const [sectionId, sectionName, isOther] of [
+                    [produce, "Produce", false],
+                    [other, "Other", true],
+                ] as const) {
+                    await db.settingsStore.insertSection({
+                        id: sectionId,
+                        householdId: "hh-1",
+                        storeId: id,
+                        name: sectionName,
+                        sortOrder: isOther ? 1 : 0,
+                        hidden: false,
+                        isOther,
+                    });
+                }
+            }
+        }
+
+        async function addLines(call: CallTool) {
+            const ids: string[] = [];
+            for (const [name, store] of [
+                ["Eggs", STORE_A],
+                ["Milk", STORE_A],
+                ["Flour", STORE_B],
+            ] as const) {
+                const food = await call("upsert_food", { name });
+                const line = await call("add_grocery_line", {
+                    store_id: store,
+                    kind: "food",
+                    food_id: food.structuredContent?.id,
+                    amount: 1,
+                    unit: "each",
+                });
+                ids.push(line.structuredContent?.id as string);
+            }
+            return ids;
+        }
+
+        test.each(ERAS)(
+            "flag off: none of the nine tools is listed and calls are refused (%p)",
+            async (era) => {
+                setFlagsForTests(
+                    createMemoryFlags({ "mcp-household-admin": false }),
+                );
+                await withHttpClient("u1", era, async (client) => {
+                    const names = (await client.listTools()).tools.map(
+                        (t) => t.name,
+                    );
+                    for (const name of HOUSEHOLD_ADMIN_TOOL_NAMES) {
+                        expect(names).not.toContain(name);
+                        await expect(
+                            client.callTool({ name, arguments: {} }),
+                        ).rejects.toThrow(/not found/i);
+                    }
+                    expect(names).toContain("clear_checked_grocery_lines");
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "flag on: all nine are listed, with the right hints (%p)",
+            async (era) => {
+                await withHttpClient("u1", era, async (client) => {
+                    const listed = (await client.listTools()).tools;
+                    const byName = new Map(listed.map((t) => [t.name, t]));
+                    for (const name of HOUSEHOLD_ADMIN_TOOL_NAMES) {
+                        expect(byName.has(name), name).toBe(true);
+                    }
+                    for (const name of [
+                        "clear_grocery_list",
+                        "move_grocery_lines",
+                        "update_grocery_line",
+                        "update_store",
+                        "delete_store",
+                        "reorder_stores",
+                        "set_store_sections",
+                    ]) {
+                        expect(
+                            byName.get(name)?.annotations?.destructiveHint,
+                            name,
+                        ).toBe(true);
+                    }
+                    expect(
+                        byName.get("create_store")?.annotations
+                            ?.destructiveHint,
+                    ).toBe(false);
+                    expect(
+                        byName.get("list_stores")?.annotations?.readOnlyHint,
+                    ).toBe(true);
+                    // The tools each name their output.
+                    for (const name of HOUSEHOLD_ADMIN_TOOL_NAMES) {
+                        expect(
+                            byName.get(name)?.outputSchema,
+                            name,
+                        ).toBeDefined();
+                    }
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "list_stores gives the stores, sections, counts and preferences (%p)",
+            async (era) => {
+                await withHttpClient("u1", era, async (client) => {
+                    const call: CallTool = async (name, args = {}) =>
+                        (await client.callTool({
+                            name,
+                            arguments: callToolArguments(name, args),
+                        })) as ToolResult;
+                    await addStores();
+                    await addLines(call);
+                    await db.settingsStore.setGroceryPreferences("hh-1", {
+                        defaultStoreId: STORE_B,
+                        useUsualStore: true,
+                    });
+                    const result = await call("list_stores");
+                    expect(result.isError).toBeFalsy();
+                    const body = LIST_STORES_OUTPUT_SCHEMA.parse(
+                        result.structuredContent,
+                    );
+                    expect(body.default_store_id).toBe(STORE_B);
+                    expect(body.use_usual_store).toBe(true);
+                    expect(
+                        body.stores.map((s) => [
+                            s.name,
+                            s.position,
+                            s.is_default,
+                            s.line_count,
+                        ]),
+                    ).toEqual([
+                        ["Costco", 1, false, 2],
+                        ["Aldi", 2, true, 1],
+                    ]);
+                    expect(body.stores[0]!.sections.map((s) => s.name)).toEqual(
+                        ["Produce", "Other"],
+                    );
+                    expect(textOf(result)).toContain(
+                        "2 stores. Default store: Aldi.",
+                    );
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "clear_grocery_list clears every line, records it and says how to undo (%p)",
+            async (era) => {
+                await withClientFor(
+                    appWith({ kind: "user", userId: "u1" }, "Claude"),
+                    era,
+                    async (call) => {
+                        await addStores();
+                        await addLines(call);
+                        await mirror();
+                        const result = await call("clear_grocery_list");
+                        expect(result.isError).toBeFalsy();
+                        expect(textOf(result)).toStartWith(
+                            "Cleared 3 lines from the grocery list (0 ticked, 3 not).",
+                        );
+                        expect(textOf(result)).toContain(UNDO_SENTENCE);
+                        expect(
+                            CLEAR_GROCERY_LIST_OUTPUT_SCHEMA.parse(
+                                result.structuredContent,
+                            ),
+                        ).toEqual({
+                            removed: 3,
+                            checked: 0,
+                            unchecked: 3,
+                            store_id: null,
+                            store: null,
+                        });
+                        expect(await db.groceryStore.listLines("hh-1")).toEqual(
+                            [],
+                        );
+                        expect(db.agentActions.__records()).toMatchObject([
+                            {
+                                tool: "clear_grocery_list",
+                                memberId: "u1",
+                                connection: "Claude",
+                                destructive: true,
+                                undoable: true,
+                                summary:
+                                    "Cleared 3 lines from the grocery list",
+                            },
+                        ]);
+                    },
+                );
+            },
+        );
+
+        test.each(ERAS)(
+            "clear_grocery_list for one store leaves the others, and the switch Off refuses it while list_grocery_lines and list_stores still work (%p)",
+            async (era) => {
+                await withClientFor(
+                    appWith({ kind: "user", userId: "u1" }, "Claude"),
+                    era,
+                    async (call) => {
+                        await addStores();
+                        await addLines(call);
+                        await mirror();
+                        const one = await call("clear_grocery_list", {
+                            store_id: STORE_A,
+                        });
+                        expect(textOf(one)).toStartWith(
+                            "Cleared 2 lines from Costco (0 ticked, 2 not).",
+                        );
+                        expect(
+                            (await db.groceryStore.listLines("hh-1")).map(
+                                (l) => l.displayName,
+                            ),
+                        ).toEqual(["Flour"]);
+
+                        await db.settingsStore.setAgentDestructiveAllowed(
+                            "hh-1",
+                            false,
+                        );
+                        const refused = await call("clear_grocery_list");
+                        expect(refused.isError).toBe(true);
+                        expect(textOf(refused)).toContain(REFUSAL);
+                        expect(textOf(refused)).toContain(
+                            "Ask the household owner",
+                        );
+                        expect(
+                            await db.groceryStore.listLines("hh-1"),
+                        ).toHaveLength(1);
+                        expect(
+                            textOf(await call("list_grocery_lines")),
+                        ).toContain("Flour");
+                        expect((await call("list_stores")).isError).toBeFalsy();
+                        const row = db.analyticsRows.find(
+                            (r) =>
+                                r.tool_name === "clear_grocery_list" &&
+                                r.success === false,
+                        );
+                        expect(row).toMatchObject({
+                            error_category: "agent_actions_disabled",
+                        });
+                    },
+                );
+            },
+        );
+
+        test("a bad id is refused before anything runs, and an id that is no store is an error naming it", async () => {
+            await viaHttp(async (call) => {
+                await addStores();
+                const before = await domainState();
+                const bad = await call("clear_grocery_list", {
+                    store_id: "costco",
+                }).catch((err: Error) => err);
+                expect(
+                    bad instanceof Error ? bad.message : textOf(bad),
+                ).toMatch(/store_id must be an id taken from list_stores/);
+                const unknown = await call("clear_grocery_list", {
+                    store_id: "33333333-3333-4333-8333-333333333333",
+                });
+                expect(unknown.isError).toBe(true);
+                expect(textOf(unknown)).toContain("Unknown store.");
+                expect(await domainState()).toBe(before);
+                expect(db.agentActions.__records()).toEqual([]);
+            });
+        });
+
+        test("move_grocery_lines and update_grocery_line answer with their schemas and record each change", async () => {
+            await viaHttp(async (call) => {
+                await addStores();
+                const [eggs, milk] = await addLines(call);
+                await mirror();
+                const moved = await call("move_grocery_lines", {
+                    line_ids: [eggs, milk],
+                    store_id: STORE_B,
+                });
+                expect(moved.isError).toBeFalsy();
+                expect(textOf(moved)).toStartWith(
+                    "Moved 2 lines: Aldi (Other).",
+                );
+                expect(textOf(moved)).toContain(UNDO_SENTENCE);
+                const movedBody = MOVE_GROCERY_LINES_OUTPUT_SCHEMA.parse(
+                    moved.structuredContent,
+                );
+                expect(movedBody.moved).toHaveLength(2);
+
+                const edited = await call("update_grocery_line", {
+                    id: eggs,
+                    amount: 12,
+                    note: "large",
+                });
+                expect(edited.isError).toBeFalsy();
+                expect(textOf(edited)).toContain(UNDO_SENTENCE);
+                expect(
+                    UPDATE_GROCERY_LINE_OUTPUT_SCHEMA.parse(
+                        edited.structuredContent,
+                    ).line,
+                ).toMatchObject({ id: eggs, amount: 12, note: "large" });
+                expect(db.agentActions.__records().map((r) => r.tool)).toEqual([
+                    "move_grocery_lines",
+                    "update_grocery_line",
+                ]);
+
+                const none = await call("update_grocery_line", {
+                    id: "44444444-4444-4444-8444-444444444444",
+                    amount: 1,
+                });
+                expect(none.isError).toBeFalsy();
+                expect(textOf(none)).not.toContain(UNDO_SENTENCE);
+                expect(db.agentActions.__records()).toHaveLength(2);
+            });
+        });
+
+        test.each(ERAS)(
+            "create_store works with the switch Off and records nothing (%p)",
+            async (era) => {
+                await withHttpClient("u1", era, async (client) => {
+                    await db.settingsStore.setAgentDestructiveAllowed(
+                        "hh-1",
+                        false,
+                    );
+                    const made = (await client.callTool({
+                        name: "create_store",
+                        arguments: { name: "Lidl", sections: ["Deli"] },
+                    })) as ToolResult;
+                    expect(made.isError).toBeFalsy();
+                    expect(textOf(made)).toContain("Added store Lidl");
+                    expect(db.agentActions.__records()).toEqual([]);
+                    expect(
+                        (await db.settingsStore.listStores("hh-1")).map(
+                            (s) => s.name,
+                        ),
+                    ).toEqual(["Lidl"]);
+                });
+            },
+        );
     });
 });
 

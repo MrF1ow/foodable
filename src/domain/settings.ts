@@ -99,6 +99,14 @@ export type SettingsStore = {
     getSection(householdId: string, id: string): Promise<GrocerySection | null>;
     insertSection(row: GrocerySection): Promise<GrocerySection>;
     updateSection(row: GrocerySection): Promise<GrocerySection | null>;
+    /**
+     * Deletes the household's section; false when it is not there. The
+     * grocery lines still filed under it go with it (`grocery_lines.section_id`
+     * cascades), so a caller that keeps them moves them first. The database
+     * store throws a `SettingsInputError` when a line did go with it, and the
+     * caller's transaction must roll back, so a line is never lost unrecorded.
+     */
+    deleteSection(householdId: string, id: string): Promise<boolean>;
 };
 
 export class SettingsInputError extends Error {
@@ -239,7 +247,36 @@ export function createMemorySettingsStore(): MemorySettingsStore {
             sections[idx] = { ...row };
             return { ...row };
         },
+        async deleteSection(householdId, id) {
+            const idx = sections.findIndex(
+                (section) =>
+                    section.id === id && section.householdId === householdId,
+            );
+            if (idx < 0) return false;
+            sections.splice(idx, 1);
+            return true;
+        },
     };
+}
+
+/** Names are the same to a person when only case or surrounding spaces differ. */
+export function sameName(a: string, b: string): boolean {
+    return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/**
+ * True when a store other than `exceptId` already has this name, in any case
+ * and ignoring surrounding spaces: "costco" next to "Costco" is the same store
+ * to a person. The one check creating and renaming a store share.
+ */
+export function storeNameTaken(
+    stores: readonly Pick<GroceryStore, "id" | "name">[],
+    name: string,
+    exceptId?: string,
+): boolean {
+    return stores.some(
+        (row) => row.id !== exceptId && sameName(row.name, name),
+    );
 }
 
 export async function createGroceryStore(
@@ -250,7 +287,7 @@ export async function createGroceryStore(
     const trimmed = name.trim();
     if (!trimmed) throw new SettingsInputError("Enter a store name.");
     const existing = await store.listStores(householdId);
-    if (existing.some((row) => row.name === trimmed)) {
+    if (storeNameTaken(existing, trimmed)) {
         throw new SettingsInputError("That store already exists.");
     }
     const sortOrder =

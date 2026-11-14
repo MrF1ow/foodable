@@ -153,6 +153,15 @@ export const FLAGS = {
         removeWhen:
             "get_household_digest has been on for everyone for a release with no rollback.",
     },
+    "mcp-household-admin": {
+        type: "bool",
+        kind: "temporary",
+        unit: "user",
+        fallback: false,
+        why: "The grocery and store admin MCP tools: list_stores, create_store, update_store, delete_store, reorder_stores, set_store_sections, clear_grocery_list, move_grocery_lines and update_grocery_line.",
+        removeWhen:
+            "The grocery and store admin tools have been on for everyone for a release with no rollback.",
+    },
     "mcp-share-links": {
         type: "bool",
         kind: "temporary",

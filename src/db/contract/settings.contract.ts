@@ -182,6 +182,41 @@ export function runSettingsStoreContract(
             ).toBeNull();
         });
 
+        test("deleteSection removes the section, is household scoped and false when it is gone", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const section = sampleGrocerySectionRow(c, { name: "Doomed" });
+            const kept = sampleGrocerySectionRow(c, { name: "Kept" });
+            await store.insertSection(section);
+            await store.insertSection(kept);
+            // Another household's id is not this household's to delete.
+            expect(
+                await store.deleteSection(c.otherHouseholdId, section.id),
+            ).toBe(false);
+            expect(
+                await store.getSection(c.householdId, section.id),
+            ).not.toBeNull();
+            expect(await store.deleteSection(c.householdId, section.id)).toBe(
+                true,
+            );
+            expect(
+                await store.getSection(c.householdId, section.id),
+            ).toBeNull();
+            expect(
+                (await store.listSections(c.storeId)).map((s) => s.name),
+            ).toContain("Kept");
+            expect(
+                (await store.listSections(c.storeId)).map((s) => s.name),
+            ).not.toContain("Doomed");
+            expect(await store.deleteSection(c.householdId, section.id)).toBe(
+                false,
+            );
+            expect(
+                await store.deleteSection(c.householdId, crypto.randomUUID()),
+            ).toBe(false);
+        });
+
         test("household scoping on getSection", async () => {
             await reset();
             const c = ctx();
