@@ -26,6 +26,7 @@ import {
     type GroceryListStore,
 } from "./grocery.js";
 import {
+    canonicalUnitText,
     convertQuantity,
     dimensionOf,
     isQuantityUnit,
@@ -456,7 +457,7 @@ async function incrementInto(
         locationId,
         kind: food.kind,
         displayName: food.name,
-        quantity: { amount, unit: input.unit.trim() },
+        quantity: { amount, unit: canonicalUnitText(input.unit) },
         foodId: food.id,
         purchasedOn:
             input.purchasedOn ??
@@ -517,7 +518,7 @@ export function planDecrement(
     if (!(need > 0)) {
         throw new StockInputError("Enter an amount greater than zero.");
     }
-    const unit = input.unit.trim();
+    const unit = canonicalUnitText(input.unit);
     const rawNeedFactors: FoodQuantityFactors = {
         gramsPerEach: needFood.gramsPerEach ?? null,
         gramsPerMl: needFood.gramsPerMl ?? null,
@@ -730,7 +731,7 @@ export async function applyMovement(
     if (!Number.isFinite(input.delta) || input.delta === 0) {
         throw new StockInputError("Enter a non-zero amount.");
     }
-    const unit = input.unit.trim();
+    const unit = canonicalUnitText(input.unit);
     if (!unit) throw new StockInputError("Enter a unit.");
     let food: Food;
     try {

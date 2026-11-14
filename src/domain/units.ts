@@ -12,9 +12,20 @@ const GRAMS_PER_KG = 1000;
 export const GRAMS_PER_LB = 453.59237; // international avoirdupois pound (exact)
 export const GRAMS_PER_OZ = 28.3495;
 export const ML_PER_FL_OZ = 29.5735;
+// Cup, tablespoon and teaspoon are the US nutrition-label measures (FDA,
+// 21 CFR 101.9(b)(5)(viii)): the sizes a pack's serving line is written in.
 export const ML_PER_CUP = 240;
 export const ML_PER_TBSP = 15;
 export const ML_PER_TSP = 5;
+// Pint, quart and gallon are US customary liquid measures, exact by
+// definition (16, 32 and 128 US fl oz); a UK pint is a different size and is
+// not one of these.
+export const ML_PER_PINT = 473.176473;
+export const ML_PER_QUART = 946.352946;
+export const ML_PER_GALLON = 3785.411784;
+export const ML_PER_L = 1000;
+export const GRAMS_PER_MG = 0.001;
+export const GRAMS_PER_KILOGRAM = 1000;
 
 // Plausible human body-weight range, used to reject gross entry errors (values
 // typed in grams, an extra digit, or a sub-unit typo). Note this cannot catch a

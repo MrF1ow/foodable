@@ -1,4 +1,5 @@
 import { destinationSectionId } from "./grocery-stores.js";
+import { canonicalUnitText } from "./quantity.js";
 import {
     GroceryInputError,
     type GroceryLine,
@@ -250,7 +251,7 @@ export function planLineEdit(input: {
         };
     }
     if (edit.unit !== undefined) {
-        const unit = edit.unit.trim();
+        const unit = canonicalUnitText(edit.unit);
         if (!unit) throw new GroceryInputError("Enter a unit.");
         after = { ...after, quantity: { ...after.quantity, unit } };
     }

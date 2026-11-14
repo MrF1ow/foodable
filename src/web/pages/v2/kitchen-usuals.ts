@@ -52,6 +52,44 @@ export const USUAL_SCHEDULE_PATH_SUFFIX = "schedule";
 export const USUAL_WHEN_LOW_FIELD = "restock_when_low";
 export const USUAL_WHEN_LOW_MARKER = "restock_when_low_present";
 
+/**
+ * The edit sheet's weight fields, and the marker that says the sheet posted
+ * them: a post without it (an older form) leaves both factors alone, while a
+ * blank field on the sheet clears that factor.
+ */
+export const USUAL_GRAMS_PER_ML_FIELD = "grams_per_ml";
+export const USUAL_GRAMS_PER_EACH_FIELD = "grams_per_each";
+export const USUAL_WEIGHTS_MARKER = "weights_present";
+
+function formatFactor(value: number | null | undefined): string {
+    return value != null && value > 0 ? String(value) : "";
+}
+
+/**
+ * Grams per ml and grams per item for the plain food: what lets a recipe's
+ * cups, spoons, cloves or cans turn into grams. The usual product's own
+ * factor wins over the plain food's when it has one, so that value shows as
+ * the placeholder.
+ */
+function weightFields(formId: string, row: UsualProductRow): string {
+    const field = (opts: {
+        name: string;
+        label: string;
+        own: number | null;
+        fromProduct: number | null | undefined;
+    }) =>
+        `<p class="fd-kitchen-sheet-label">${esc(opts.label)}</p>
+<div class="fd-kitchen-restock-level">
+<input class="fd-kitchen-restock-level__input" aria-label="${esc(opts.label)}" type="number" inputmode="decimal" min="0" step="any" name="${esc(opts.name)}" form="${esc(formId)}" value="${esc(formatFactor(opts.own))}" placeholder="${esc(formatFactor(opts.fromProduct))}" />
+<span class="fd-kitchen-restock-level__unit">g</span>
+</div>`;
+    return `<input type="hidden" name="${USUAL_WEIGHTS_MARKER}" value="1" />
+${field({ name: USUAL_GRAMS_PER_ML_FIELD, label: "Grams per ml", own: row.food.gramsPerMl, fromProduct: row.usual?.gramsPerMl })}
+<p class="fd-kitchen-restock-hint">For cups and spoons. Water is 1, oil about 0.92, flour about 0.53.</p>
+${field({ name: USUAL_GRAMS_PER_EACH_FIELD, label: "Grams per item", own: row.food.gramsPerEach, fromProduct: row.usual?.gramsPerEach })}
+<p class="fd-kitchen-restock-hint">What one weighs, for counts like a clove, a slice, a can or a bunch.</p>`;
+}
+
 /** The route a usual's restock settings post to. */
 export function usualSchedulePath(foodId: string): string {
     return `${USUALS_V2_RETURN_TO}/${foodId}/${USUAL_SCHEDULE_PATH_SUFFIX}`;
@@ -684,6 +722,7 @@ ${String(
 )}
 ${unitField(formId, unitValue, `${stepperId}-unit`)}
 </div>
+${weightFields(formId, row)}
 </form>
 ${restockGroup(row, restock, formId)}
 ${productPickerSheet(row, formId, pick)}

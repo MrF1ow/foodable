@@ -1639,6 +1639,34 @@ describe("kitchen usuals restock", () => {
         resetFlagsForTests();
     });
 
+    test("the edit sheet's weight fields set grams per ml and per item, blank clears, and no marker leaves them", async () => {
+        const { eggs } = await seedUsual();
+        const base = "product_food_id=&usual_amount=3&usual_unit=each";
+        const r = await postEdit(
+            eggs.id,
+            `${base}&weights_present=1&grams_per_ml=1.03&grams_per_each=50`,
+        );
+        expect(r.status).toBe(303);
+        let food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({ gramsPerMl: 1.03, gramsPerEach: 50 });
+        await postEdit(eggs.id, base);
+        food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({ gramsPerMl: 1.03, gramsPerEach: 50 });
+        await postEdit(
+            eggs.id,
+            `${base}&weights_present=1&grams_per_ml=&grams_per_each=50`,
+        );
+        food = await db.foodsStore.getFood(HH, eggs.id);
+        expect(food).toMatchObject({ gramsPerMl: null, gramsPerEach: 50 });
+        const bad = await postEdit(
+            eggs.id,
+            `${base}&weights_present=1&grams_per_ml=0&grams_per_each=50`,
+        );
+        expect(bad.status).toBe(400);
+        expect(await bad.text()).toContain("must be greater than zero");
+        resetFlagsForTests();
+    });
+
     test("an invalid N re-renders 400 with the Restock sheet open and nothing saved", async () => {
         const { eggs } = await seedUsual();
         const r = await postSchedule(

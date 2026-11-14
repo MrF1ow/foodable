@@ -30,7 +30,7 @@ import type { Notice } from "./notices.js";
 import { NOTICE_SEVERITY } from "./notices.js";
 import { noticeSentence, UNKNOWN_ALLERGEN_TEXT } from "../copy/notices.js";
 import type { FridgeItem, FridgeStore } from "./fridge.js";
-import { isQuantityUnit } from "./quantity.js";
+import { canonicalUnitText, isQuantityUnit } from "./quantity.js";
 import {
     cleanupDismissalsForSubject,
     type MemoryNoticeDismissalsHolder,
@@ -633,7 +633,7 @@ export function pickGroceryAmount(input: {
         };
     }
     const usual = input.usual;
-    const givenUnit = input.unit?.trim() ?? "";
+    const givenUnit = canonicalUnitText(input.unit ?? "");
     if (usual != null && (!givenUnit || givenUnit === usual.unit)) {
         return {
             quantity: { amount: usual.amount, unit: usual.unit },
@@ -1487,7 +1487,7 @@ export async function addGrocerySupply(
             });
             quantity = picked.quantity;
             amountReason = picked.reason;
-            const givenUnit = input.unit?.trim() ?? "";
+            const givenUnit = canonicalUnitText(input.unit ?? "");
             const usual = eff.usualAmount;
             const usualSuppliesUnit =
                 usual != null && (!givenUnit || givenUnit === usual.unit);

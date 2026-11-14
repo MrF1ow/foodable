@@ -6,6 +6,9 @@ import {
 } from "../loaders.js";
 import { formText } from "../form.js";
 import {
+    USUAL_GRAMS_PER_EACH_FIELD,
+    USUAL_GRAMS_PER_ML_FIELD,
+    USUAL_WEIGHTS_MARKER,
     USUAL_WHEN_LOW_FIELD,
     USUAL_WHEN_LOW_MARKER,
 } from "../pages/v2/kitchen-usuals.js";
@@ -299,6 +302,22 @@ householdRoutes.post("/kitchen/usuals/:foodId", requireMember, async (c) => {
                         formText(body, USUAL_WHEN_LOW_FIELD) === "1",
                 },
             );
+        }
+        // The sheet's weight fields: grams per ml and grams per item on the
+        // plain food, which recipes read for cups, spoons and counts. A blank
+        // field clears that factor; only a post that carries the marker
+        // touches them.
+        if (formText(body, USUAL_WEIGHTS_MARKER) === "1") {
+            await updateFood(liveFoodsStore(), member.householdId, foodId, {
+                gramsPerMl: formOptionalNutrient(
+                    body,
+                    USUAL_GRAMS_PER_ML_FIELD,
+                ),
+                gramsPerEach: formOptionalNutrient(
+                    body,
+                    USUAL_GRAMS_PER_EACH_FIELD,
+                ),
+            });
         }
     } catch (err) {
         const page = await usualPickerFormError(

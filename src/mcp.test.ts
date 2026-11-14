@@ -141,6 +141,7 @@ import {
     updateFood,
 } from "./domain/foods.js";
 import { RATE_PRODUCT_OUTPUT_SCHEMA } from "./mcp/tools/product-score.js";
+import { CONVERT_QUANTITY_OUTPUT_SCHEMA } from "./mcp/tools/food.js";
 import {
     CLEAR_GROCERY_LIST_OUTPUT_SCHEMA,
     LIST_USUALS_OUTPUT_SCHEMA,
@@ -10528,6 +10529,117 @@ describe("goal name over HTTP", () => {
                         }
                     ).goals.goal_name,
                 ).toBe("Recomp");
+            });
+        },
+    );
+});
+
+describe("convert_quantity over HTTP", () => {
+    test.each(ERAS)(
+        "is always listed, converts with the usual product's serving line, and refuses without a factor (%p)",
+        async (era) => {
+            const plain = await db.foodsStore.insertFood(
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "Peanut butter",
+                }),
+            );
+            const product = await db.foodsStore.insertFood(
+                newFood({
+                    householdId: "hh-1",
+                    kind: "food",
+                    name: "Jif Creamy",
+                    genericFoodId: plain.id,
+                    serving: { label: "2 tbsp (32 g)", amount: 32, unit: "g" },
+                }),
+            );
+            await db.foodsStore.updateFoodRow({
+                ...plain,
+                usualProductId: product.id,
+            });
+            const bare = await db.foodsStore.insertFood(
+                newFood({ householdId: "hh-1", kind: "food", name: "Flour" }),
+            );
+            await withHttpClient("u1", era, async (client) => {
+                expect(
+                    (await client.listTools()).tools.map((t) => t.name),
+                ).toContain("convert_quantity");
+                const pints = (await client.callTool({
+                    name: "convert_quantity",
+                    arguments: {
+                        amount: 1,
+                        unit: "pints",
+                        to_unit: "cups",
+                    },
+                })) as ToolResult;
+                const p = CONVERT_QUANTITY_OUTPUT_SCHEMA.parse(
+                    pints.structuredContent,
+                );
+                expect(p).toMatchObject({
+                    ok: true,
+                    unit: "cup",
+                    amount: 1.97,
+                });
+
+                const cup = (await client.callTool({
+                    name: "convert_quantity",
+                    arguments: {
+                        amount: 1,
+                        unit: "cup",
+                        to_unit: "g",
+                        food_id: plain.id,
+                    },
+                })) as ToolResult;
+                const c = CONVERT_QUANTITY_OUTPUT_SCHEMA.parse(
+                    cup.structuredContent,
+                );
+                expect(c).toMatchObject({
+                    ok: true,
+                    unit: "g",
+                    amount: 256,
+                });
+                expect(c.factors_used).toEqual([
+                    {
+                        factor: "grams_per_ml",
+                        value: 1.067,
+                        source: "product_serving",
+                        from_food_id: product.id,
+                        from_food_name: "Jif Creamy",
+                        serving_label: "2 tbsp (32 g)",
+                    },
+                ]);
+                expect(textOf(cup)).toContain('serving "2 tbsp (32 g)"');
+
+                const flour = (await client.callTool({
+                    name: "convert_quantity",
+                    arguments: {
+                        amount: 2,
+                        unit: "cups",
+                        to_unit: "g",
+                        food_id: bare.id,
+                    },
+                })) as ToolResult;
+                expect(flour.isError).toBeFalsy();
+                expect(
+                    CONVERT_QUANTITY_OUTPUT_SCHEMA.parse(
+                        flour.structuredContent,
+                    ),
+                ).toMatchObject({
+                    ok: false,
+                    amount: null,
+                    reason: "missing_grams_per_ml",
+                });
+
+                const noFood = (await client.callTool({
+                    name: "convert_quantity",
+                    arguments: { amount: 1, unit: "cup", to_unit: "g" },
+                })) as ToolResult;
+                expect(
+                    CONVERT_QUANTITY_OUTPUT_SCHEMA.parse(
+                        noFood.structuredContent,
+                    ),
+                ).toMatchObject({ ok: false, reason: "needs_food" });
             });
         },
     );

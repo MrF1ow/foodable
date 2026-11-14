@@ -16,6 +16,7 @@ import {
     type MemoryFoodRefHolder,
 } from "./foods.js";
 import { storedFoodUnit } from "./food-quantity.js";
+import { canonicalUnitText } from "./quantity.js";
 import { isCalendarDate } from "./insights.js";
 
 export type FridgeKind = "food" | "supply";
@@ -489,7 +490,7 @@ export async function prepareAddSupply(
     },
 ): Promise<PreparedFridgeAdd> {
     await requireLocation(store, input.householdId, input.locationId);
-    const unit = input.unit.trim();
+    const unit = canonicalUnitText(input.unit);
     if (!unit) throw new FridgeInputError("Enter a unit.");
     const amount = parseAmount(input.amount);
     try {
@@ -543,7 +544,8 @@ export async function updateItemQuantity(
     const current = items.find((item) => item.id === itemId);
     if (!current) return null;
     const amount = parseAmount(quantity.amount);
-    const unit = current.kind === "food" ? "g" : quantity.unit.trim();
+    const unit =
+        current.kind === "food" ? "g" : canonicalUnitText(quantity.unit);
     if (current.kind === "supply" && !unit) {
         throw new FridgeInputError("Enter a unit.");
     }

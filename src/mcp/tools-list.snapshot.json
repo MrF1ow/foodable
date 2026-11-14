@@ -81,6 +81,7 @@
     "set_household_rules",
     "search_food",
     "get_food",
+    "convert_quantity",
     "upsert_food",
     "merge_foods",
     "link_product",
