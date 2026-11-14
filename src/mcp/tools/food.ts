@@ -912,7 +912,7 @@ export async function convertQuantityPayload(
             const where = f.serving_label
                 ? `${f.from_food_name}'s serving "${f.serving_label}"`
                 : f.from_food_name;
-            return `${what} from ${where}`;
+            return `${what} from ${where}${idTag(f.from_food_id, "food_id")}`;
         })
         .join("; ");
     const fromText = `${from.amount} ${resolveQuantityUnit(from.unit) ?? from.unit}`;

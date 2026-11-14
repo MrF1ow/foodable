@@ -4553,7 +4553,7 @@ describe("household config tools", () => {
     });
 
     // Every tool description is paid for in every conversation's context, so
-    // tools/list is budgeted. These are what main measured on 0d4b3966 (before
+    // tools/list is budgeted. These are what main measured on ee31a2f2 (before
     // the agent-parity work) with every flag on, the same listing the snapshot
     // test reads: JSON.stringify(tools).length (UTF-16 code units, so
     // characters, not bytes) and tools.length. To re-measure, copy this
@@ -4563,8 +4563,8 @@ describe("household config tools", () => {
     // Raising either constant is a deliberate, reviewed edit: trim a
     // description first, and say in the PR why the list has to grow.
     describe("tools/list size", () => {
-        const TOOLS_LIST_MAX_CHARS = 223025;
-        const TOOLS_LIST_MAX_COUNT = 97;
+        const TOOLS_LIST_MAX_CHARS = 225795;
+        const TOOLS_LIST_MAX_COUNT = 98;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
             const snapshot = (await Bun.file(

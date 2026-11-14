@@ -353,6 +353,24 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         food_id: s.eggs,
         product_food_id: s.kirkland,
     })),
+    // Reads the density off the usual product, an id the caller never passed.
+    convert_quantity: async (_s, make) => {
+        const oil = await make("upsert_food", {
+            name: "Olive Oil",
+            on_similar: "create",
+        });
+        const bottle = await make("upsert_food", {
+            name: "Filippo Berio Olive Oil",
+            generic_food_id: oil.id,
+            grams_per_ml: 0.91,
+            on_similar: "create",
+        });
+        await make("set_usual_product", {
+            food_id: oil.id,
+            product_food_id: bottle.id,
+        });
+        return { amount: 1, unit: "cup", to_unit: "g", food_id: oil.id };
+    },
     link_product: noIds(
         "echoes only ids the caller passed in",
         async (s, make) => {
