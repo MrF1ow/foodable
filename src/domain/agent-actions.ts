@@ -20,7 +20,11 @@
  * itself change: an updated row gets back only the columns the action changed
  * (a jsonb object key by key), and only while they still hold what the write
  * left, so a column or a key a person changed since is left alone; an inserted
- * row is only removed while nothing points at it. `updated_at` is the one
+ * row is only removed while it is still exactly what the write left (a person
+ * who renamed or hid it since keeps it) and nothing points at it. A fridge
+ * item whose food or amount the action changed is not put back once stock
+ * movements have been written for it since, and a row that names a food is not
+ * put back onto a food that was merged away since. `updated_at` is the one
  * column never compared or restored: it is bookkeeping that every edit moves.
  * Anything else is a conflict the household is told about.
  *
@@ -131,9 +135,10 @@ export type AgentSnapshotChange = {
      */
     row: AgentSnapshotRow;
     /**
-     * For `updated`: the row as the write left it. Undo restores the before
-     * image only while the row still equals this, so a change made since is
-     * never overwritten.
+     * For `updated` and `inserted`: the row as the write left it. Undo
+     * restores an updated row's before-image, and removes an inserted row,
+     * only while the row still equals this, so a change made since is never
+     * overwritten or deleted.
      */
     after?: AgentSnapshotRow;
 };
@@ -367,6 +372,8 @@ export type AgentUndoConflict =
     | { kind: "gone" }
     /** The row was changed after the agent changed it. */
     | { kind: "changed" }
+    /** Stock movements were written for the fridge item after the agent changed it. */
+    | { kind: "used" }
     /** The table now refuses the row as it was (a constraint or a required column). */
     | { kind: "refused" }
     /** The database does not let the account the put-back runs as write the row. */
@@ -498,6 +505,10 @@ export function describeUndoConflict(
             return name
                 ? `The ${label} ${name} was changed since, so its earlier values can't be put back.`
                 : `This ${label} was changed since, so its earlier values can't be put back.`;
+        case "used":
+            return name
+                ? `The ${label} ${name} was used since, so its earlier values can't be put back.`
+                : `This ${label} was used since, so its earlier values can't be put back.`;
         case "refused":
             return name
                 ? `The ${label} ${name} can't be put back as it was: the database no longer accepts it.`
@@ -854,38 +865,43 @@ function createRecorder(
 }
 
 /**
- * Reads every `updated` row again, as the write left it, and keeps it beside
- * the before-image. A row the write removed was recorded under the wrong op.
+ * Reads every `updated` and `inserted` row again, as the write left it, and
+ * keeps it beside the change. A row the write removed was recorded as updated
+ * under the wrong op. An inserted row the write itself removed again has no
+ * after-image: there is nothing of it left for undo to remove or to guard.
  */
 async function recordAfterImages(
     tx: Pick<AgentActionsTx, "readRows">,
     changes: AgentSnapshotChange[],
 ): Promise<void> {
     for (const table of AGENT_SNAPSHOT_TABLES) {
-        const updated = changes.filter(
-            (change) => change.table === table && change.op === "updated",
-        );
-        if (updated.length === 0) continue;
-        const found = await tx.readRows(
-            table,
-            updated.map((change) => agentRowKey(table, change.row)),
-        );
-        const byKey = new Map(
-            found.map((row) => [
-                agentKeyString(table, agentRowKey(table, row)),
-                row,
-            ]),
-        );
-        for (const change of updated) {
-            const after = byKey.get(
-                agentKeyString(table, agentRowKey(table, change.row)),
+        for (const op of ["updated", "inserted"] as const) {
+            const wanted = changes.filter(
+                (change) => change.table === table && change.op === op,
             );
-            if (!after) {
-                throw new TypeError(
-                    `A ${table} row was recorded as updated but the write removed it: record it as deleted`,
+            if (wanted.length === 0) continue;
+            const found = await tx.readRows(
+                table,
+                wanted.map((change) => agentRowKey(table, change.row)),
+            );
+            const byKey = new Map(
+                found.map((row) => [
+                    agentKeyString(table, agentRowKey(table, row)),
+                    row,
+                ]),
+            );
+            for (const change of wanted) {
+                const after = byKey.get(
+                    agentKeyString(table, agentRowKey(table, change.row)),
                 );
+                if (after) {
+                    change.after = jsonRow(after);
+                } else if (op === "updated") {
+                    throw new TypeError(
+                        `A ${table} row was recorded as updated but the write removed it: record it as deleted`,
+                    );
+                }
             }
-            change.after = jsonRow(after);
         }
     }
 }
@@ -1135,10 +1151,14 @@ export async function undoAgentAction(
                 record,
                 input,
                 restoredItems: new Map(),
+                foodRefs: new Map(),
             };
             for (const change of orderForUndo(record.snapshot.changes)) {
                 await replayChange(undoer, change);
             }
+            // Only once every row is back: a food the action itself archived
+            // is live again by now.
+            await refuseArchivedFoods(undoer);
             await compensateLedger(undoer);
             await tx.markUndone(record.id, input.userId, input.now);
             return {
@@ -1173,6 +1193,8 @@ type Undoer = {
     input: UndoAgentActionInput;
     /** A fridge item this undo put back, by food: the item a movement can name. */
     restoredItems: Map<string, string>;
+    /** Foods the rows this undo wrote name, by id, with the table of the first. */
+    foodRefs: Map<string, AgentSnapshotTable>;
 };
 
 /** Rows compared as JSON, so key order and number formatting do not matter. */
@@ -1331,6 +1353,122 @@ export function applyRestorePatch(
     return jsonRow(next);
 }
 
+/** A row as an edit leaves it, minus the column every edit moves. */
+function withoutBookkeeping(row: AgentSnapshotRow): AgentSnapshotRow {
+    const copy = jsonRow(row);
+    for (const column of BOOKKEEPING_COLUMNS) delete copy[column];
+    return copy;
+}
+
+/** True while the row is still exactly what the write left (`updated_at` aside). */
+function unchangedSince(
+    current: AgentSnapshotRow,
+    after: AgentSnapshotRow,
+): boolean {
+    return (
+        canonical(withoutBookkeeping(current)) ===
+        canonical(withoutBookkeeping(after))
+    );
+}
+
+/** The columns of a fridge item whose change moves its stock. */
+const STOCK_COLUMNS: readonly string[] = ["food_id", "amount"];
+
+/**
+ * Refuses to put a fridge item's food or amount back once stock movements
+ * have been written for it after the action. Such a movement sits on the food
+ * the item has now; moving the item back would leave it behind, and both
+ * foods' ledgers would stop matching their fridge. The movements the action
+ * wrote itself, or moved to another food, are on its snapshot and are not
+ * "since"; the ones that were already there are older than the action.
+ */
+async function refuseWhenUsedSince(
+    undoer: Undoer,
+    current: AgentSnapshotRow,
+    changed: readonly ColumnChange[],
+): Promise<void> {
+    const { deps, tx, record } = undoer;
+    if (
+        !changed.some(
+            (change) =>
+                change.kind === "value" &&
+                STOCK_COLUMNS.includes(change.column),
+        )
+    ) {
+        return;
+    }
+    const foodId = current.food_id;
+    const itemId = current.id;
+    if (typeof foodId !== "string" || typeof itemId !== "string") return;
+    const known = new Set<string>(
+        (record.snapshot?.ledger ?? []).map((entry) => entry.id),
+    );
+    for (const change of record.snapshot?.changes ?? []) {
+        if (change.table === "stock_movements") {
+            known.add(String(change.row.id));
+        }
+    }
+    const startedAt = Date.parse(record.createdAt);
+    const movements = await deps.stock.listMovements(
+        record.householdId,
+        foodId,
+        record.createdAt,
+    );
+    if (
+        !movements.some(
+            (movement) =>
+                movement.fridgeItemId === itemId &&
+                !known.has(movement.id) &&
+                Date.parse(movement.createdAt) > startedAt,
+        )
+    ) {
+        return;
+    }
+    const [food] = await tx.readRows("foods", [{ id: foodId }]);
+    const name = typeof food?.name === "string" ? food.name : null;
+    throw new AgentUndoConflictError(
+        { kind: "used" },
+        "fridge_items",
+        name ? { ...current, name } : current,
+    );
+}
+
+/** Notes that a row this undo wrote names a food. */
+function noteFoodReference(
+    undoer: Undoer,
+    table: AgentSnapshotTable,
+    foodId: unknown,
+): void {
+    if (typeof foodId === "string" && !undoer.foodRefs.has(foodId)) {
+        undoer.foodRefs.set(foodId, table);
+    }
+}
+
+/**
+ * Refuses an undo that would leave a row on a food that is archived: the food
+ * was merged into another since, and the rows that named it went with the
+ * merge. The put-back itself cannot tell, since an archived food is still a
+ * row the foreign key accepts.
+ */
+async function refuseArchivedFoods(undoer: Undoer): Promise<void> {
+    if (undoer.foodRefs.size === 0) return;
+    const ids = [...undoer.foodRefs.keys()];
+    const found = await undoer.tx.readRows(
+        "foods",
+        ids.map((id) => ({ id })),
+        { lock: true },
+    );
+    for (const food of found) {
+        if (food.archived_at == null) continue;
+        const id = String(food.id);
+        throw new AgentUndoConflictError(
+            { kind: "missing_reference", referencedTable: "foods" },
+            undoer.foodRefs.get(id)!,
+            { id },
+        );
+    }
+}
+
 async function replayChange(
     undoer: Undoer,
     change: AgentSnapshotChange,
@@ -1341,6 +1479,7 @@ async function replayChange(
     switch (change.op) {
         case "deleted": {
             await tx.insertRow(table, row);
+            noteFoodReference(undoer, table, row.food_id);
             if (
                 table === "fridge_items" &&
                 typeof row.food_id === "string" &&
@@ -1367,14 +1506,31 @@ async function replayChange(
                     current,
                 );
             }
+            if (table === "fridge_items") {
+                await refuseWhenUsedSince(undoer, current, changed);
+            }
             if (!(await tx.replaceColumns(table, key, restorePatch(changed)))) {
                 throw new AgentUndoConflictError({ kind: "gone" }, table, row);
+            }
+            for (const column of changed) {
+                if (column.kind === "value" && column.column === "food_id") {
+                    noteFoodReference(undoer, table, column.before);
+                }
             }
             return;
         }
         case "inserted": {
             const [current] = await tx.readRows(table, [key], { lock: true });
             if (!current) return;
+            // A row a person edited since is theirs now, not the agent's to
+            // remove.
+            if (change.after && !unchangedSince(current, change.after)) {
+                throw new AgentUndoConflictError(
+                    { kind: "changed" },
+                    table,
+                    current,
+                );
+            }
             // Never lean on a cascade or a set-null: whatever was added to
             // this row, or pointed at it, since would go with it.
             const by = await tx.referencingRows(table, key);

@@ -1060,6 +1060,48 @@ describeDb(
             await removeDairyWithALateLine("deleting");
         });
 
+        test("undoing set_store_sections keeps a section a person renamed since, and still removes one nobody touched", async () => {
+            const deli = await makeStore("Deli", ["Meat"]);
+            const done = await call("set_store_sections", {
+                store_id: deli.id,
+                add: ["Olives", "Pickles"],
+            });
+            expect(done.isError).toBeFalsy();
+            const [entry] = (await actions()).filter(
+                (row) => row.tool === "set_store_sections",
+            );
+            // A person renames and hides one of the sections the agent added.
+            await getCtx().sql`
+                update public.grocery_sections
+                set name = ${"Olives & Pickles"}, hidden = true
+                where store_id = ${deli.id} and name = ${"Olives"}
+            `;
+            const before = await fingerprint();
+            const out = await undo(entry!.id);
+            expect(out.status).toBe("conflict");
+            expect(out.message).toContain("was changed since");
+            // Nothing was undone, so the untouched section stays too.
+            expect(await fingerprint()).toBe(before);
+            expect(await sectionNames(deli.id)).toContain("Olives & Pickles");
+            expect(
+                (
+                    await rows(
+                        "select undone_at from public.agent_actions where id = $1",
+                        entry!.id,
+                    )
+                )[0]!.undone_at,
+            ).toBeNull();
+
+            // Once the person's edit is gone from the picture, undo is whole again.
+            await getCtx().sql`
+                update public.grocery_sections
+                set name = ${"Olives"}, hidden = false
+                where store_id = ${deli.id} and name = ${"Olives & Pickles"}
+            `;
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await sectionNames(deli.id)).toEqual(["Meat", "Other"]);
+        });
+
         test("set_store_sections reports no renames when they cancel out, and a chain as one", async () => {
             const costco = await makeStore("Costco");
             const back = await call("set_store_sections", {

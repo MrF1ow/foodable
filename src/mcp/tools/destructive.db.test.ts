@@ -9,7 +9,7 @@ import {
     Client,
     StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
-import { afterEach, beforeEach, expect, spyOn, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Hono } from "hono";
 import { liveAgentActionDeps } from "../../db/agent-actions.js";
 import { liveFoodsStore } from "../../db/foods.js";
@@ -131,6 +131,7 @@ const FINGERPRINT_TABLES = [
     "meal_items",
     "water_log",
     "weight_log",
+    "nutrition_goal_days",
 ];
 
 describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
@@ -308,7 +309,24 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         return { id, ingredient: row!.id as string };
     }
 
-    // ---------- the twelve tools ----------
+    /** Per-day goal overrides for the owner on these dates, as the table holds them. */
+    async function goalDays(dates: string[]): Promise<Record<string, any>[]> {
+        const { sql } = getCtx();
+        for (const date of dates) {
+            await sql`
+                insert into public.nutrition_goal_days (
+                    household_id, user_id, date, daily_calories, daily_protein_g
+                )
+                values (${householdId}, ${ownerId}, ${date}::date, ${2400}, ${150})
+            `;
+        }
+        return rows(
+            "select id, date::text as date, daily_calories, daily_protein_g::float as daily_protein_g from public.nutrition_goal_days where date::text = any($1::text[]) order by date",
+            `{${dates.join(",")}}`,
+        );
+    }
+
+    // ---------- the guarded tools ----------
 
     const scenarios: Record<string, () => Promise<Arranged>> = {
         delete_grocery_line: async () => {
@@ -551,6 +569,28 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 },
             };
         },
+        set_nutrition_goals: async () => {
+            const days = await goalDays(["2099-01-01", "2099-01-02"]);
+            await goalDays(["2099-02-01"]);
+            return {
+                tool: "set_nutrition_goals",
+                args: { from: "2099-01-01", to: "2099-01-03", clear: true },
+                summary: "Cleared 2 per-day goal overrides for 2099-01-01",
+                changed: async () => {
+                    const left = await rows(
+                        "select date::text as date from public.nutrition_goal_days",
+                    );
+                    expect(left).toEqual([{ date: "2099-02-01" }]);
+                },
+                restored: async () => {
+                    expect(
+                        await rows(
+                            "select id, date::text as date, daily_calories, daily_protein_g::float as daily_protein_g from public.nutrition_goal_days where date < '2099-02-01' order by date",
+                        ),
+                    ).toEqual(days);
+                },
+            };
+        },
         merge_foods: async () => {
             const keep = await food("Eggs");
             const drop = await food("Egg");
@@ -665,6 +705,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 "discard_fridge_item",
                 "merge_foods",
                 "remove_recipe_ingredient",
+                "set_nutrition_goals",
                 "unplan_recipe",
             ].sort(),
         );
@@ -1088,5 +1129,227 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         ).toEqual([second]);
         const [entry] = await actions();
         expect(entry!.summary).toContain("Cleared 1 checked grocery line");
+    });
+    // ---------- undo never puts back what has moved on since ----------
+
+    const actionFor = async (tool: string) =>
+        (await actions()).find((entry) => entry.tool === tool)!;
+
+    test("undoing a merge refuses once someone ate from the repointed item, and changes nothing", async () => {
+        const keep = await food("Eggs", true);
+        const drop = await food("Egg", true);
+        const item = await fridgeItem(drop, 300);
+        const merged = await call("merge_foods", {
+            keep_id: keep,
+            drop_id: drop,
+        });
+        expect(merged.isError).toBeFalsy();
+        const ate = await call("eat_fridge_item", { id: item, amount: 100 });
+        expect(ate.isError).toBeFalsy();
+        expect(await ledgerBalanced(keep)).toBe(true);
+
+        const entry = await actionFor("merge_foods");
+        const before = await fingerprint();
+        const out = await undo(entry.id);
+        expect(out.status).toBe("conflict");
+        expect(out.message).toContain("was used since");
+        // Nothing moved: the item and its movements stay on the kept food,
+        // and the entry can still be undone once it is possible.
+        expect(await fingerprint()).toBe(before);
+        expect(await ledgerBalanced(keep)).toBe(true);
+        expect((await actionFor("merge_foods")).undone_at).toBeNull();
+    });
+
+    test("undoing a merge still works when nothing touched the item since", async () => {
+        const keep = await food("Eggs", true);
+        const drop = await food("Egg", true);
+        const item = await fridgeItem(drop, 300);
+        await call("merge_foods", { keep_id: keep, drop_id: drop });
+        const out = await undo((await actionFor("merge_foods")).id);
+        expect(out.status).toBe("undone");
+        expect(
+            (
+                await rows(
+                    "select food_id from public.fridge_items where id = $1",
+                    item,
+                )
+            )[0]!.food_id,
+        ).toBe(drop);
+        expect(await ledgerBalanced(keep)).toBe(true);
+        expect(await ledgerBalanced(drop)).toBe(true);
+    });
+
+    test("undoing a merge refuses once a person changed the alias it added", async () => {
+        const keep = await food("Eggs");
+        const drop = await food("Egg");
+        const other = await food("Hen eggs");
+        await call("merge_foods", { keep_id: keep, drop_id: drop });
+        const [alias] = await rows(
+            "select alias from public.food_aliases where food_id = $1",
+            keep,
+        );
+        expect(alias).toBeDefined();
+        await getCtx().sql`
+            update public.food_aliases set food_id = ${other}
+            where alias = ${alias!.alias}
+        `;
+        const before = await fingerprint();
+        const out = await undo((await actionFor("merge_foods")).id);
+        expect(out.status).toBe("conflict");
+        expect(out.message).toContain("was changed since");
+        expect(await fingerprint()).toBe(before);
+        expect(
+            (
+                await rows(
+                    "select food_id from public.food_aliases where alias = $1",
+                    alias!.alias,
+                )
+            )[0]!.food_id,
+        ).toBe(other);
+    });
+
+    describe("a row is not put back onto a food merged away since", () => {
+        const MERGED = "merged or deleted since";
+
+        async function mergeAway(drop: string): Promise<void> {
+            const keep = await food(`Kept ${drop.slice(0, 4)}`);
+            const merged = await call("merge_foods", {
+                keep_id: keep,
+                drop_id: drop,
+            });
+            expect(merged.isError).toBeFalsy();
+        }
+
+        test("a grocery line", async () => {
+            const eggs = await food("Egg");
+            const line = await groceryLine(eggs);
+            await call("delete_grocery_line", { id: line });
+            await mergeAway(eggs);
+            const out = await undo((await actionFor("delete_grocery_line")).id);
+            expect(out.status).toBe("conflict");
+            expect(out.message).toContain(MERGED);
+            expect(await count("grocery_lines")).toBe(0);
+            expect(
+                (await actionFor("delete_grocery_line")).undone_at,
+            ).toBeNull();
+        });
+
+        test("a recipe ingredient", async () => {
+            const soup = await recipe();
+            const [ingredient] = await rows(
+                "select food_id from public.recipe_ingredients where id = $1",
+                soup.ingredient,
+            );
+            await call("remove_recipe_ingredient", {
+                recipe_id: soup.id,
+                ingredient_id: soup.ingredient,
+            });
+            await mergeAway(ingredient!.food_id);
+            const out = await undo(
+                (await actionFor("remove_recipe_ingredient")).id,
+            );
+            expect(out.status).toBe("conflict");
+            expect(out.message).toContain(MERGED);
+            expect(await count("recipe_ingredients")).toBe(0);
+        });
+
+        test("a meal item", async () => {
+            const oats = await food("Oats", true);
+            const logged = await call("log_meal", {
+                description: "Porridge",
+                meal_type: "breakfast",
+                items: [{ food_id: oats, amount: 100, unit: "g" }],
+            });
+            expect(logged.isError).toBeFalsy();
+            const [meal] = await rows("select id from public.meals");
+            await call("delete_meal", { id: meal!.id });
+            await mergeAway(oats);
+            const out = await undo((await actionFor("delete_meal")).id);
+            expect(out.status).toBe("conflict");
+            expect(out.message).toContain(MERGED);
+            // The meal and its item stay gone together.
+            expect(await count("meals")).toBe(0);
+            expect(await count("meal_items")).toBe(0);
+        });
+    });
+
+    // ---------- per-day goal overrides ----------
+
+    test("clearing per-day goals is refused while destructive changes are off, and keeps the rows", async () => {
+        await goalDays(["2099-01-01", "2099-01-02"]);
+        await asUser(
+            ownerId,
+            () =>
+                liveSettingsStore().setAgentDestructiveAllowed(
+                    householdId,
+                    false,
+                ),
+            householdId,
+        );
+        const result = await call("set_nutrition_goals", {
+            from: "2099-01-01",
+            to: "2099-01-02",
+            clear: true,
+        });
+        expect(result.isError).toBe(true);
+        expect(result.content.map((c) => c.text).join("\n")).toContain(REFUSAL);
+        expect(await count("nutrition_goal_days")).toBe(2);
+        expect(await actions()).toEqual([]);
+    });
+
+    test("emptying a day's last goal removes its override, which is recorded and undone too", async () => {
+        const [day] = await goalDays(["2099-01-01"]);
+        // Set a target and drop the other: the override still has one.
+        const kept = await call("set_nutrition_goals", {
+            date: "2099-01-01",
+            daily_protein_g: null,
+        });
+        expect(kept.isError).toBeFalsy();
+        expect(await count("nutrition_goal_days")).toBe(1);
+        expect(await actions()).toEqual([]);
+
+        const emptied = await call("set_nutrition_goals", {
+            date: "2099-01-01",
+            daily_calories: null,
+        });
+        expect(emptied.isError).toBeFalsy();
+        expect(emptied.content[0]!.text).toContain(UNDO_SENTENCE);
+        expect(await count("nutrition_goal_days")).toBe(0);
+        const entry = await actionFor("set_nutrition_goals");
+        expect((await undo(entry.id)).status).toBe("undone");
+        expect(
+            await rows(
+                "select id, daily_calories, daily_protein_g from public.nutrition_goal_days",
+            ),
+        ).toEqual([
+            {
+                id: day!.id,
+                daily_calories: 2400,
+                daily_protein_g: null,
+            },
+        ]);
+    });
+
+    test("emptying a day's last goal is refused while destructive changes are off", async () => {
+        await goalDays(["2099-01-01"]);
+        await call("set_nutrition_goals", {
+            date: "2099-01-01",
+            daily_protein_g: null,
+        });
+        await asUser(
+            ownerId,
+            () =>
+                liveSettingsStore().setAgentDestructiveAllowed(
+                    householdId,
+                    false,
+                ),
+            householdId,
+        );
+        const result = await call("set_nutrition_goals", {
+            date: "2099-01-01",
+            daily_calories: null,
+        });
+        expect(result.isError).toBe(true);
+        expect(await count("nutrition_goal_days")).toBe(1);
     });
 });

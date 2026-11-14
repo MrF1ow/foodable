@@ -192,6 +192,7 @@ import { fridgeExpiryLine } from "./copy/notices.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import { createMemoryAgentActionsStore } from "./domain/agent-actions.js";
 import { setAgentActionDepsForTests } from "./mcp/shared.js";
+import { setGoalDayRowsForTests } from "./db/agent-actions-goal-days.js";
 import {
     createMemoryRecipesStore,
     addRecipeManualIngredient,
@@ -946,6 +947,7 @@ mock.module("./db/fetch-memory.js", () => ({
 
 afterAll(() => {
     setAgentActionDepsForTests(null);
+    setGoalDayRowsForTests(null);
     mock.module("./db/analytics.js", () => realDbAnalytics);
     mock.module("./db/nutrition.js", () => realNutrition);
     mock.module("./db/profiles.js", () => realProfiles);
@@ -1042,6 +1044,25 @@ beforeEach(() => {
         settings: db.settingsStore,
         stock: db.stockStore,
         foods: db.foodsStore,
+    });
+    // Per-day goal overrides live in db.goalDays; the destructive goal write
+    // reads and removes them by row id.
+    setGoalDayRowsForTests({
+        list: async (userId, _householdId, dates) =>
+            db.goalDays
+                .filter((o) => o.user_id === userId && dates.includes(o.date))
+                .map((o) => ({ ...o, id: `${o.user_id}:${o.date}` })),
+        remove: async (userId, _householdId, ids) => {
+            const before = db.goalDays.length;
+            db.goalDays = db.goalDays.filter(
+                (o) =>
+                    !(
+                        o.user_id === userId &&
+                        ids.includes(`${o.user_id}:${o.date}`)
+                    ),
+            );
+            return before - db.goalDays.length;
+        },
     });
 });
 

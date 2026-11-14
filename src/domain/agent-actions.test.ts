@@ -433,7 +433,12 @@ describe("undoing an agent action", () => {
         expect(s.store.__records()[0]!.snapshot).toEqual({
             v: 1,
             changes: [
-                { table: "grocery_lines", op: "inserted", row: { id: L1 } },
+                {
+                    table: "grocery_lines",
+                    op: "inserted",
+                    row: { id: L1 },
+                    after: made,
+                },
             ],
         });
         const out = await undoAgentAction(s.deps, {
@@ -928,6 +933,10 @@ async function fridgeSetup() {
     });
     const location = await addLocation(fridge, HH, "Fridge");
     s.store.__attach("fridge_items", fridgeTable(fridge));
+    // The movements these tests write are stamped by the real clock, so the
+    // action must be too: undo tells the movements that came after an action
+    // from the ones before it by their time.
+    s.deps.now = () => new Date();
     return { ...s, fridge, eggsFood, location };
 }
 
@@ -2270,6 +2279,242 @@ describe("capturing what a delete takes with it", () => {
         expect(reports[0]).toEqual({ captured: 0, uncaptured: [] });
         // store_rules restricts the delete: the delete would fail, so it is not captured.
         expect(reports[1]).toEqual({ captured: 4, uncaptured: [] });
+    });
+});
+
+describe("undo never puts back what has moved on since", () => {
+    const FOOD = "33333333-3333-4333-8333-333333333333";
+    const KEPT = "44444444-4444-4444-8444-444444444444";
+
+    function foodRow(id: string, archived: boolean) {
+        return {
+            id,
+            household_id: HH,
+            name: "Eggs",
+            archived_at: archived ? "2026-03-04T00:00:00+00:00" : null,
+        };
+    }
+
+    async function undoIt(
+        deps: AgentUndoDeps,
+        actionId: string,
+        now: Date = T0,
+    ) {
+        return undoAgentAction(deps, {
+            householdId: HH,
+            userId: OWNER,
+            actionId,
+            now,
+        });
+    }
+
+    test("an inserted row a person edited since stays, and only an untouched one goes", async () => {
+        const s = setup();
+        const { action } = await withAgentAction(
+            s.deps,
+            asMember,
+            { tool: "set_store_sections", summary: "Added a section" },
+            async (rec) => {
+                s.store.__seed("grocery_lines", groceryLine(L1, "Olives"));
+                rec.inserted("grocery_lines", [L1]);
+            },
+        );
+        s.store.__seed(
+            "grocery_lines",
+            groceryLine(L1, "Olives and pickles", { checked: true }),
+        );
+        const refused = await undoIt(s.deps, action.id);
+        expect(refused).toEqual({
+            status: "conflict",
+            message:
+                "The grocery line Olives and pickles was changed since, so its earlier values can't be put back.",
+        });
+        expect(s.store.__rows("grocery_lines")).toHaveLength(1);
+        expect(s.store.__records()[0]!.undoneAt).toBeNull();
+
+        // An edit that only moves updated_at says nothing about the data.
+        s.store.__seed(
+            "grocery_lines",
+            groceryLine(L1, "Olives", { updated_at: "2026-04-01T00:00:00Z" }),
+        );
+        expect((await undoIt(s.deps, action.id)).status).toBe("undone");
+        expect(s.store.__rows("grocery_lines")).toEqual([]);
+    });
+
+    test("an inserted row the write removed again has nothing left to guard", async () => {
+        const s = setup();
+        const { action } = await withAgentAction(
+            s.deps,
+            asMember,
+            { tool: "x", summary: "Added and dropped" },
+            async (rec) => {
+                s.store.__seed("grocery_lines", groceryLine(L1, "Olives"));
+                rec.inserted("grocery_lines", [L1]);
+                s.store.__remove("grocery_lines", L1);
+            },
+        );
+        expect(s.store.__records()[0]!.snapshot!.changes[0]!.after).toBe(
+            undefined,
+        );
+        expect((await undoIt(s.deps, action.id)).status).toBe("undone");
+    });
+
+    test("a deleted row is not put back onto a food merged away since", async () => {
+        const s = setup();
+        s.store.__seed("foods", foodRow(FOOD, false));
+        s.store.__seed("grocery_lines", groceryLine(L1, "Eggs"));
+        const { action } = await withAgentAction(
+            s.deps,
+            asMember,
+            { tool: "delete_grocery_line", summary: "Deleted Eggs" },
+            async (rec) => {
+                await rec.captureByIds("grocery_lines", [L1], "deleted");
+                s.store.__remove("grocery_lines", L1);
+            },
+        );
+        // The merge archives the food while the line is gone.
+        s.store.__seed("foods", foodRow(FOOD, true));
+        expect(await undoIt(s.deps, action.id)).toEqual({
+            status: "conflict",
+            message: "The food was merged or deleted since.",
+        });
+        expect(s.store.__rows("grocery_lines")).toEqual([]);
+
+        s.store.__seed("foods", foodRow(FOOD, false));
+        expect((await undoIt(s.deps, action.id)).status).toBe("undone");
+        expect(s.store.__rows("grocery_lines")).toHaveLength(1);
+    });
+
+    test("an updated row is not pointed back at a food merged away since", async () => {
+        const s = setup();
+        s.store.__seed("foods", foodRow(FOOD, false));
+        s.store.__seed("foods", foodRow(KEPT, false));
+        s.store.__seed("grocery_lines", groceryLine(L1, "Eggs"));
+        const { action } = await withAgentAction(
+            s.deps,
+            asMember,
+            { tool: "merge_foods", summary: "Merged" },
+            async (rec) => {
+                await rec.captureByIds("grocery_lines", [L1], "updated");
+                s.store.__seed(
+                    "grocery_lines",
+                    groceryLine(L1, "Eggs", { food_id: KEPT }),
+                );
+            },
+        );
+        s.store.__seed("foods", foodRow(FOOD, true));
+        expect((await undoIt(s.deps, action.id)).message).toBe(
+            "The food was merged or deleted since.",
+        );
+        expect(s.store.__rows("grocery_lines")[0]!.food_id).toBe(KEPT);
+    });
+
+    test("a food the action itself archived is live again by the time the rows go back", async () => {
+        const s = setup();
+        s.store.__seed("foods", foodRow(FOOD, false));
+        s.store.__seed("grocery_lines", groceryLine(L1, "Eggs"));
+        const { action } = await withAgentAction(
+            s.deps,
+            asMember,
+            { tool: "merge_foods", summary: "Merged" },
+            async (rec) => {
+                await rec.captureByIds("grocery_lines", [L1], "deleted");
+                s.store.__remove("grocery_lines", L1);
+                await rec.captureByIds("foods", [FOOD], "updated");
+                s.store.__seed("foods", foodRow(FOOD, true));
+            },
+        );
+        expect((await undoIt(s.deps, action.id)).status).toBe("undone");
+        expect(s.store.__rows("grocery_lines")).toHaveLength(1);
+    });
+
+    describe("a fridge item whose food the action changed", () => {
+        async function mergedItem() {
+            const f = await fridgeSetup();
+            const other = await findOrCreateManualFood(
+                f.foods,
+                HH,
+                "food",
+                "Hen eggs",
+            );
+            const added = await addFridgeItemAdjust(
+                f.fridge,
+                f.stock,
+                f.foods,
+                {
+                    householdId: HH,
+                    foodId: f.eggsFood.id,
+                    amount: 12,
+                    unit: "each",
+                    locationId: f.location.id,
+                },
+            );
+            const item = added.item!;
+            const { action } = await withAgentAction(
+                f.deps,
+                asMember,
+                { tool: "merge_foods", summary: "Merged Eggs into Hen eggs" },
+                async (rec) => {
+                    await rec.captureByIds(
+                        "fridge_items",
+                        [item.id],
+                        "updated",
+                    );
+                    await f.fridge.updateItem({ ...item, foodId: other.id });
+                },
+            );
+            return { f, item, other, action };
+        }
+
+        test("is put back while nothing was written for it since", async () => {
+            const { f, item, action } = await mergedItem();
+            expect((await undoIt(f.deps, action.id)).status).toBe("undone");
+            expect((await f.fridge.listItems(HH))[0]!.foodId).toBe(item.foodId);
+        });
+
+        test("is not, once a movement was written for it after the action", async () => {
+            const { f, item, other, action } = await mergedItem();
+            const after = new Date(Date.now() + 1000).toISOString();
+            await f.stock.insertMovement({
+                id: crypto.randomUUID(),
+                householdId: HH,
+                foodId: other.id,
+                fridgeItemId: item.id,
+                delta: -2,
+                unit: "each",
+                reason: "eat",
+                groceryLineId: null,
+                recipeId: null,
+                mealId: null,
+                actorUserId: OWNER,
+                createdAt: after,
+            });
+            const out = await undoIt(f.deps, action.id);
+            expect(out.status).toBe("conflict");
+            expect(out.message).toBe(
+                "The fridge item Eggs was used since, so its earlier values can't be put back.",
+            );
+            expect((await f.fridge.listItems(HH))[0]!.foodId).toBe(other.id);
+        });
+
+        test("ignores movements for other items and the ones before the action", async () => {
+            const { f, other, action } = await mergedItem();
+            await f.stock.insertMovement({
+                id: crypto.randomUUID(),
+                householdId: HH,
+                foodId: other.id,
+                fridgeItemId: crypto.randomUUID(),
+                delta: -2,
+                unit: "each",
+                reason: "eat",
+                groceryLineId: null,
+                recipeId: null,
+                mealId: null,
+                actorUserId: OWNER,
+                createdAt: new Date(Date.now() + 1000).toISOString(),
+            });
+            expect((await undoIt(f.deps, action.id)).status).toBe("undone");
+        });
     });
 });
 
