@@ -89,7 +89,10 @@ import {
 import type { ToolContext } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
 import type { MentionWarning } from "../../domain/recipe-mentions.js";
-import { recipeMentionWarnings } from "../../domain/recipe-mentions-check.js";
+import {
+    recipeMentionWarnings,
+    type LoadedRecipe,
+} from "../../domain/recipe-mentions-check.js";
 import { RecipeInputError } from "../../domain/recipes.js";
 
 export const ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA = z.object({
@@ -159,16 +162,30 @@ function mentionWarningsText(warnings: readonly MentionWarning[]): string {
         .join("\n")}`;
 }
 
+/**
+ * The warnings for a recipe, or none when they cannot be found: they are advice
+ * beside a result that already happened (a saved import, a read), so a lookup
+ * that fails is logged and never becomes the tool's error.
+ */
 async function mentionWarningsFor(
     householdId: string,
     recipeId: string | null,
+    loaded?: LoadedRecipe,
 ): Promise<MentionWarning[]> {
     if (!recipeId) return [];
-    return recipeMentionWarnings(
-        { recipes: liveRecipesStore(), foods: liveFoodsStore() },
-        householdId,
-        recipeId,
-    );
+    try {
+        return await recipeMentionWarnings(
+            { recipes: liveRecipesStore(), foods: liveFoodsStore() },
+            householdId,
+            recipeId,
+            loaded,
+        );
+    } catch (err) {
+        console.error(
+            `[recipes] mention warnings for ${recipeId} failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return [];
+    }
 }
 
 export const IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA = z.object({
@@ -756,6 +773,11 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     const mentionWarnings = await mentionWarningsFor(
                         actor.householdId,
                         args.id,
+                        {
+                            recipe: view,
+                            ingredients: view.ingredients,
+                            importRow,
+                        },
                     );
                     const gapReasonTexts: string[] = [];
                     const seenGapMsg = new Set<string>();

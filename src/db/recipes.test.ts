@@ -128,7 +128,9 @@ describeDb(pgAvailable !== null, "recipes db import", (getCtx) => {
         expect(fresh?.dismissedMentions).toEqual([]);
 
         const keys = ["egg", 'pickled "beets"', "it's", "jalapeño", "豆腐"];
-        await store.upsertImport({ ...fresh!, dismissedMentions: keys });
+        for (const key of keys) {
+            await store.addDismissedMention(householdId, recipe.id, key);
+        }
         expect(
             (await store.getImport(householdId, recipe.id))?.dismissedMentions,
         ).toEqual(keys);

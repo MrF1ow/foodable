@@ -5,8 +5,14 @@ import {
     findOrCreateManualFoodForRecipeImport,
 } from "./foods.js";
 import { recheckRecipe } from "./recipe-import.js";
-import { type MentionWarning, findMissingMentions } from "./recipe-mentions.js";
+import type { RecipeImport } from "./recipe-import.js";
 import {
+    type MentionWarning,
+    findMissingMentions,
+    mentionKey,
+} from "./recipe-mentions.js";
+import {
+    type Recipe,
     type RecipeIngredient,
     type RecipesStore,
     RecipeInputError,
@@ -43,19 +49,32 @@ async function mentionVocabulary(
     return out;
 }
 
+/** What a caller that already loaded the recipe can hand over to skip the reads. */
+export type LoadedRecipe = {
+    recipe?: Recipe;
+    ingredients?: RecipeIngredient[];
+    /** `null` is "loaded, and it has no import row". */
+    importRow?: RecipeImport | null;
+};
+
 export async function recipeMentionWarnings(
     stores: { recipes: RecipesStore; foods: FoodsStore },
     householdId: string,
     recipeId: string,
+    loaded: LoadedRecipe = {},
 ): Promise<MentionWarning[]> {
-    const importRow = await stores.recipes.getImport(householdId, recipeId);
+    const importRow =
+        loaded.importRow !== undefined
+            ? loaded.importRow
+            : await stores.recipes.getImport(householdId, recipeId);
     if (!importRow) return [];
-    const recipe = await stores.recipes.getRecipe(householdId, recipeId);
+    const recipe =
+        loaded.recipe ??
+        (await stores.recipes.getRecipe(householdId, recipeId));
     if (!recipe) return [];
-    const ingredients = await stores.recipes.listIngredients(
-        householdId,
-        recipeId,
-    );
+    const ingredients =
+        loaded.ingredients ??
+        (await stores.recipes.listIngredients(householdId, recipeId));
     const linked = await stores.foods.getFoodsByIds(
         householdId,
         ingredients.flatMap((i) => (i.foodId ? [i.foodId] : [])),
@@ -72,22 +91,79 @@ export async function recipeMentionWarnings(
     });
 }
 
-/** Stop warning about one food. No import row means nothing to dismiss. */
+/** The longest key a dismissal keeps. */
+const DISMISSAL_KEY_MAX = 120;
+
+/**
+ * Stop warning about one food, whatever spelling the key is in. The key is
+ * stored the way the detector writes it, so a later check matches it. No
+ * import row means nothing to dismiss.
+ */
 export async function dismissRecipeMention(
     store: RecipesStore,
     householdId: string,
     recipeId: string,
     key: string,
 ): Promise<void> {
-    const trimmed = key.trim();
-    if (!trimmed) throw new RecipeInputError("Choose a food to dismiss.");
-    const importRow = await store.getImport(householdId, recipeId);
-    if (!importRow) return;
-    if (importRow.dismissedMentions.includes(trimmed)) return;
-    await store.upsertImport({
-        ...importRow,
-        dismissedMentions: [...importRow.dismissedMentions, trimmed],
-    });
+    const normalized = mentionKey(key.trim()).slice(0, DISMISSAL_KEY_MAX);
+    if (!normalized) throw new RecipeInputError("Choose a food to dismiss.");
+    await store.addDismissedMention(householdId, recipeId, normalized);
+}
+
+/**
+ * The warning a key names, or a `RecipeInputError` saying why there is none:
+ * the recipe is unknown, was made by hand (nothing checks its steps), or the
+ * food was already added or dismissed.
+ */
+async function flaggedMention(
+    stores: { recipes: RecipesStore; foods: FoodsStore },
+    householdId: string,
+    recipeId: string,
+    key: string,
+): Promise<{ recipe: Recipe; warning: MentionWarning }> {
+    const recipe = await stores.recipes.getRecipe(householdId, recipeId);
+    if (!recipe) throw new RecipeInputError("Unknown recipe.");
+    const importRow = await stores.recipes.getImport(householdId, recipeId);
+    if (!importRow)
+        throw new RecipeInputError("This recipe has no step check.");
+    const warnings = await recipeMentionWarnings(
+        stores,
+        householdId,
+        recipeId,
+        { recipe, importRow },
+    );
+    const wanted = mentionKey(key.trim());
+    const warning = warnings.find((w) => w.key === wanted);
+    if (!warning) {
+        throw new RecipeInputError(
+            "That food is no longer flagged: it was added or dismissed.",
+        );
+    }
+    return { recipe, warning };
+}
+
+/**
+ * Dismiss a warning that is still showing. A food that is no longer flagged is
+ * an error, so a stale button says so instead of doing nothing.
+ */
+export async function dismissFlaggedMention(
+    stores: { recipes: RecipesStore; foods: FoodsStore },
+    householdId: string,
+    recipeId: string,
+    key: string,
+): Promise<void> {
+    const { warning } = await flaggedMention(
+        stores,
+        householdId,
+        recipeId,
+        key,
+    );
+    await dismissRecipeMention(
+        stores.recipes,
+        householdId,
+        recipeId,
+        warning.key,
+    );
 }
 
 /** What a mentioned food is added as when the steps give no amount. */
@@ -117,28 +193,32 @@ export async function addMentionedIngredient(
     recipeId: string,
     key: string,
 ): Promise<AddedMention> {
-    const warnings = await recipeMentionWarnings(stores, householdId, recipeId);
-    const warning = warnings.find((w) => w.key === key.trim());
-    if (!warning) {
-        throw new RecipeInputError(
-            "That food is no longer flagged: it was added or dismissed.",
-        );
-    }
+    const { recipe, warning } = await flaggedMention(
+        stores,
+        householdId,
+        recipeId,
+        key,
+    );
     let createdFood = false;
     let food: Food;
     if (warning.foodId) {
         food = await findFoodById(stores.foods, householdId, warning.foodId);
     } else {
-        const known = new Set(
-            (await stores.foods.listFoods(householdId)).map((f) => f.id),
-        );
+        // The importer's lookup creates through `insertFood`, so a call there
+        // is exactly "no catalog food matched".
+        const watched: FoodsStore = {
+            ...stores.foods,
+            insertFood: async (row) => {
+                createdFood = true;
+                return stores.foods.insertFood(row);
+            },
+        };
         food = await findOrCreateManualFoodForRecipeImport(
-            stores.foods,
+            watched,
             householdId,
             "food",
             warning.food,
         );
-        createdFood = !known.has(food.id);
     }
     const quantity =
         warning.amount != null
@@ -156,6 +236,9 @@ export async function addMentionedIngredient(
             note: warning.note,
         },
     );
-    await recheckRecipe(stores.recipes, householdId, recipeId);
+    // Adding to an unverified recipe already re-checks it.
+    if (recipe.verification !== "unverified") {
+        await recheckRecipe(stores.recipes, householdId, recipeId);
+    }
     return { ingredient, foodName: food.name, createdFood };
 }

@@ -74,6 +74,7 @@ import { alreadyHaveTag } from "../domain/linking.js";
 import {
     gapFromNotice,
     getRecipeView,
+    type RecipeView,
     listRecipes,
     macrosForPerson,
     RecipeInputError,
@@ -119,6 +120,8 @@ import {
     groceryLineCounts,
 } from "../domain/grocery-sections.js";
 import { renderSettingsMemberV2Page } from "./pages/v2/settings-member.js";
+import { recipeMentionWarnings } from "../domain/recipe-mentions-check.js";
+import type { MentionWarning } from "../domain/recipe-mentions.js";
 import {
     groupRecipeIngredientsByPlace,
     renderRecipeDetailV2Page,
@@ -1750,6 +1753,30 @@ async function planSheetView(
     };
 }
 
+/**
+ * What the steps mention that the ingredients lack, for the recipe page. It is
+ * advice beside a page that works without it, so a lookup that fails is logged
+ * and the page renders without the cards.
+ */
+async function recipeMentionsForPage(
+    householdId: string,
+    view: RecipeView,
+): Promise<MentionWarning[]> {
+    try {
+        return await recipeMentionWarnings(
+            { recipes: liveRecipesStore(), foods: liveFoodsStore() },
+            householdId,
+            view.id,
+            { recipe: view, ingredients: view.ingredients },
+        );
+    } catch (err) {
+        console.error(
+            `[recipes] mention warnings for ${view.id} failed: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return [];
+    }
+}
+
 export async function renderRecipeDetailRoute(
     viewerUserId: string,
     recipeId: string,
@@ -1910,6 +1937,7 @@ export async function renderRecipeDetailRoute(
                     viewerUserId,
                 )
             ).includes(recipeId),
+            mentions: await recipeMentionsForPage(householdId, view),
             cook,
             share: chrome.flags.mcpShareLinks
                 ? { open: opts.openModalId === RECIPE_SHARE_SHEET_ID }

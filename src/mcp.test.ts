@@ -7,6 +7,7 @@ import {
     beforeEach,
     afterAll,
     afterEach,
+    spyOn,
 } from "bun:test";
 import {
     formatProgress,
@@ -12133,6 +12134,83 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                     );
                     expect(after.mention_warnings).toEqual([]);
                 });
+            },
+        );
+
+        test.each(ERAS)(
+            "a failing warning lookup never turns a saved import or a read into an error (%p)",
+            async (mode) => {
+                const {
+                    IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA,
+                    VERIFY_RECIPE_OUTPUT_SCHEMA,
+                } = await import("./mcp/tools/recipes.js");
+                const logged = spyOn(console, "error").mockImplementation(
+                    () => {},
+                );
+                const original = db.foodsStore.listAllAliases;
+                try {
+                    await withHttpClient("u1", mode, async (client) => {
+                        const call = caller(client);
+                        // Only the lookup that finds the warnings breaks (the
+                        // import itself reads aliases too and must keep working).
+                        db.foodsStore.listAllAliases = async (...args) => {
+                            if (
+                                new Error().stack?.includes("mentionVocabulary")
+                            ) {
+                                throw new Error("aliases are down");
+                            }
+                            return original.apply(db.foodsStore, args);
+                        };
+                        const imported = await call("import_recipe_from_text", {
+                            text: "caption",
+                            instructions: STEPS,
+                            name: "Fried rice",
+                            ingredients: [
+                                { name: "rice", amount: 200, unit: "g" },
+                            ],
+                        });
+                        expect(imported.isError).toBeFalsy();
+                        const importBody =
+                            IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA.parse(
+                                imported.structuredContent,
+                            );
+                        expect(importBody.recipe).not.toBeNull();
+                        expect(importBody.mention_warnings).toEqual([]);
+                        const recipeId = importBody.recipe!.id;
+
+                        const got = await call("get_recipe", { id: recipeId });
+                        expect(got.isError).toBeFalsy();
+                        expect(
+                            GET_RECIPE_OUTPUT_SCHEMA.parse(
+                                got.structuredContent,
+                            ).mention_warnings,
+                        ).toEqual([]);
+
+                        const checked = await call("verify_recipe", {
+                            recipe_id: recipeId,
+                        });
+                        expect(checked.isError).toBeFalsy();
+                        const checkedBody = VERIFY_RECIPE_OUTPUT_SCHEMA.parse(
+                            checked.structuredContent,
+                        );
+                        expect(checkedBody.status).toBe("verified");
+                        expect(checkedBody.mention_warnings).toEqual([]);
+                        expect(logged).toHaveBeenCalled();
+
+                        // Healthy again, the warning is back.
+                        db.foodsStore.listAllAliases = original;
+                        const back = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                            (await call("get_recipe", { id: recipeId }))
+                                .structuredContent,
+                        );
+                        expect(back.mention_warnings.map((w) => w.key)).toEqual(
+                            ["egg"],
+                        );
+                    });
+                } finally {
+                    db.foodsStore.listAllAliases = original;
+                    logged.mockRestore();
+                }
             },
         );
 

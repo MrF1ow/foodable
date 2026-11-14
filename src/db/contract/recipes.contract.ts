@@ -1,10 +1,28 @@
 import { describe, expect, test } from "bun:test";
+import type { RecipeImport } from "../../domain/recipe-import.js";
 import type { RecipesStore } from "../../domain/recipes.js";
 import {
     sampleIngredient,
     sampleRecipe,
     type StoreContractCtx,
 } from "./helpers.js";
+
+function importRow(c: StoreContractCtx, recipeId: string): RecipeImport {
+    return {
+        recipeId,
+        householdId: c.householdId,
+        sourceKind: "text",
+        sourceUrl: null,
+        sourceText: "pasted",
+        sourceTextOrigin: "pasted",
+        transcript: null,
+        credit: null,
+        unresolvedLines: [],
+        problems: [],
+        dismissedMentions: [],
+        importedAt: "2026-01-01T00:00:00.000Z",
+    };
+}
 
 export function runRecipesStoreContract(
     label: string,
@@ -237,31 +255,18 @@ export function runRecipesStoreContract(
             );
         });
 
-        test("upsertImport and getImport round-trip dismissed mentions", async () => {
+        test("a new import row keeps the dismissed mentions it is saved with", async () => {
             await reset();
             const c = ctx();
             const store = createStore();
             const recipe = sampleRecipe(c);
             await store.insertRecipe(recipe);
-            const row = {
-                recipeId: recipe.id,
-                householdId: c.householdId,
-                sourceKind: "text" as const,
-                sourceUrl: null,
-                sourceText: "pasted",
-                sourceTextOrigin: "pasted" as const,
-                transcript: null,
-                credit: null,
-                unresolvedLines: [],
-                problems: [],
-                dismissedMentions: [],
-                importedAt: "2026-01-01T00:00:00.000Z",
-            };
-            expect((await store.upsertImport(row)).dismissedMentions).toEqual(
-                [],
-            );
             const dismissed = ["egg", 'pickled "beets"', "jalapeño"];
-            await store.upsertImport({ ...row, dismissedMentions: dismissed });
+            const saved = await store.upsertImport({
+                ...importRow(c, recipe.id),
+                dismissedMentions: dismissed,
+            });
+            expect(saved.dismissedMentions).toEqual(dismissed);
             expect(
                 (await store.getImport(c.householdId, recipe.id))
                     ?.dismissedMentions,
@@ -281,6 +286,74 @@ export function runRecipesStoreContract(
                 (await store.getImport(c.householdId, recipe.id))
                     ?.dismissedMentions,
             ).toEqual(dismissed);
+        });
+
+        test("addDismissedMention appends a key once and says whether the recipe has an import", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const recipe = sampleRecipe(c);
+            await store.insertRecipe(recipe);
+            expect(
+                await store.addDismissedMention(
+                    c.householdId,
+                    recipe.id,
+                    "egg",
+                ),
+            ).toBe(false);
+            await store.upsertImport(importRow(c, recipe.id));
+            expect(
+                await store.addDismissedMention(
+                    c.householdId,
+                    recipe.id,
+                    "egg",
+                ),
+            ).toBe(true);
+            expect(
+                await store.addDismissedMention(
+                    c.householdId,
+                    recipe.id,
+                    "egg",
+                ),
+            ).toBe(true);
+            await store.addDismissedMention(c.householdId, recipe.id, "onion");
+            await store.addDismissedMention(c.householdId, recipe.id, "egg");
+            expect(
+                (await store.getImport(c.householdId, recipe.id))
+                    ?.dismissedMentions,
+            ).toEqual(["egg", "onion"]);
+            // Another household's id finds no row to change.
+            expect(
+                await store.addDismissedMention(
+                    c.otherHouseholdId,
+                    recipe.id,
+                    "salt",
+                ),
+            ).toBe(false);
+            expect(
+                (await store.getImport(c.householdId, recipe.id))
+                    ?.dismissedMentions,
+            ).toEqual(["egg", "onion"]);
+        });
+
+        test("an import row saved from before a dismissal does not undo it", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const recipe = sampleRecipe(c);
+            await store.insertRecipe(recipe);
+            await store.upsertImport(importRow(c, recipe.id));
+            // A slow writer read the row before the dismissal landed...
+            const stale = await store.getImport(c.householdId, recipe.id);
+            await store.addDismissedMention(c.householdId, recipe.id, "egg");
+            // ...and writes it back afterwards, changing something else.
+            await store.upsertImport({
+                ...stale!,
+                unresolvedLines: ["1 mystery"],
+            });
+            const after = await store.getImport(c.householdId, recipe.id);
+            expect(after?.unresolvedLines).toEqual(["1 mystery"]);
+            expect(after?.dismissedMentions).toEqual(["egg"]);
         });
 
         test("household scoping on listRecipes", async () => {

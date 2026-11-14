@@ -435,7 +435,6 @@ export function liveRecipesStore(): RecipesStore {
                                 credit = excluded.credit,
                                 unresolved_lines = excluded.unresolved_lines,
                                 problems = excluded.problems,
-                                dismissed_mentions = excluded.dismissed_mentions,
                                 imported_at = excluded.imported_at
                             returning ${tx.unsafe(RECIPE_IMPORT_COLS)}
                         `,
@@ -444,6 +443,41 @@ export function liveRecipesStore(): RecipesStore {
                     return recipeImportFromRow(data as never);
                 } catch (err) {
                     throw pgError("save recipe import", err);
+                }
+            });
+        },
+        async addDismissedMention(householdId, recipeId, key) {
+            return run(async (tx) => {
+                try {
+                    // One statement appends the key where it is missing, so a
+                    // concurrent write to the row cannot lose it, and a key
+                    // already there changes nothing.
+                    const changed = await rows(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(RECIPE_IMPORTS)}
+                            set dismissed_mentions = dismissed_mentions
+                                || jsonb_build_array(${key}::text)
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}
+                              and not dismissed_mentions
+                                  @> jsonb_build_array(${key}::text)
+                            returning recipe_id
+                        `,
+                    );
+                    if (changed.length > 0) return true;
+                    const present = await rows(
+                        tx,
+                        tx`
+                            select recipe_id
+                            from ${tx.unsafe(RECIPE_IMPORTS)}
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}
+                        `,
+                    );
+                    return present.length > 0;
+                } catch (err) {
+                    throw pgError("dismiss recipe mention", err);
                 }
             });
         },

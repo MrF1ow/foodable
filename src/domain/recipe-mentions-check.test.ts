@@ -1,9 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import type { SafeFetcher } from "../fetch-safe.js";
-import { createMemoryFoodsStore, findOrCreateManualFood } from "./foods.js";
+import {
+    createMemoryFoodsStore,
+    findOrCreateManualFood,
+    findOrCreateManualFoodForRecipeImport,
+    type FoodsStore,
+} from "./foods.js";
 import { importRecipeFromUrl, recheckRecipe } from "./recipe-import.js";
 import {
     addMentionedIngredient,
+    dismissFlaggedMention,
     dismissRecipeMention,
     recipeMentionWarnings,
 } from "./recipe-mentions-check.js";
@@ -302,5 +308,218 @@ describe("addMentionedIngredient", () => {
             "verified",
         );
         expect((await recipes.getImport(HH, recipeId))?.problems).toEqual([]);
+    });
+});
+
+/** A store whose calls are counted, to see what a function really asks for. */
+function counting<T extends object>(store: T, methods: (keyof T)[]) {
+    const calls = new Map<keyof T, number>();
+    const wrapped = { ...store } as Record<keyof T, unknown>;
+    for (const method of methods) {
+        const original = store[method] as (...args: unknown[]) => unknown;
+        wrapped[method] = (...args: unknown[]) => {
+            calls.set(method, (calls.get(method) ?? 0) + 1);
+            return original.apply(store, args);
+        };
+    }
+    return { store: wrapped as T, count: (m: keyof T) => calls.get(m) ?? 0 };
+}
+
+describe("a key is matched however it is spelled", () => {
+    test("Add finds the warning for 'Egg', 'EGGS' and ' egg '", async () => {
+        for (const spelled of ["Egg", "EGGS", " egg "]) {
+            const { recipes, foods, recipeId } = await recipeWith({
+                steps: "Fry the rice.\nAdd 2 eggs and stir.",
+            });
+            const added = await addMentionedIngredient(
+                { recipes, foods },
+                HH,
+                recipeId,
+                spelled,
+            );
+            expect(added.foodName.toLowerCase()).toContain("egg");
+        }
+    });
+
+    test("Dismiss stores the detector's key for any spelling, trimmed", async () => {
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: "Fry the rice.\nAdd 2 eggs and stir.",
+        });
+        await dismissRecipeMention(recipes, HH, recipeId, "  EGGS ");
+        await dismissRecipeMention(recipes, HH, recipeId, "Egg");
+        expect(
+            (await recipes.getImport(HH, recipeId))?.dismissedMentions,
+        ).toEqual(["egg"]);
+        expect(
+            await recipeMentionWarnings({ recipes, foods }, HH, recipeId),
+        ).toEqual([]);
+    });
+
+    test("a household food outside the bundled words keeps its own key", async () => {
+        const { recipes, recipeId } = await recipeWith({
+            steps: "Fry the rice.",
+        });
+        await dismissRecipeMention(recipes, HH, recipeId, "Pickled  Beets");
+        expect(
+            (await recipes.getImport(HH, recipeId))?.dismissedMentions,
+        ).toEqual(["pickled beets"]);
+    });
+
+    test("a dismissal key longer than 120 characters is cut to 120", async () => {
+        const { recipes, recipeId } = await recipeWith({
+            steps: "Fry the rice.",
+        });
+        await dismissRecipeMention(recipes, HH, recipeId, "x".repeat(300));
+        const [stored] =
+            (await recipes.getImport(HH, recipeId))?.dismissedMentions ?? [];
+        expect(stored).toHaveLength(120);
+    });
+});
+
+describe("recipeMentionWarnings with what is already loaded", () => {
+    test("loaded recipe, ingredients and import row are not read again", async () => {
+        const { recipes, foods, recipeId } = await importPadSeeEw();
+        const recipe = (await recipes.getRecipe(HH, recipeId))!;
+        const ingredients = await recipes.listIngredients(HH, recipeId);
+        const importRow = await recipes.getImport(HH, recipeId);
+        const watched = counting(recipes, [
+            "getRecipe",
+            "listIngredients",
+            "getImport",
+        ]);
+        const warnings = await recipeMentionWarnings(
+            { recipes: watched.store, foods },
+            HH,
+            recipeId,
+            { recipe, ingredients, importRow },
+        );
+        expect(warnings.map((w) => w.key)).toEqual(["egg"]);
+        expect(watched.count("getRecipe")).toBe(0);
+        expect(watched.count("listIngredients")).toBe(0);
+        expect(watched.count("getImport")).toBe(0);
+    });
+
+    test("a loaded 'no import row' means no warnings and no reads", async () => {
+        const { recipes, foods, recipeId } = await importPadSeeEw();
+        const watched = counting(recipes, ["getImport"]);
+        expect(
+            await recipeMentionWarnings(
+                { recipes: watched.store, foods },
+                HH,
+                recipeId,
+                { importRow: null },
+            ),
+        ).toEqual([]);
+        expect(watched.count("getImport")).toBe(0);
+    });
+});
+
+describe("addMentionedIngredient's own cost", () => {
+    test("it does not list the catalog again to learn whether it created a food", async () => {
+        const steps = "Fry the rice.\nAdd 2 eggs and stir.";
+        // What finding the warning and resolving the food need on their own.
+        const base = await recipeWith({ steps });
+        const baseline = counting<FoodsStore>(base.foods, ["listFoods"]);
+        await recipeMentionWarnings(
+            { recipes: base.recipes, foods: baseline.store },
+            HH,
+            base.recipeId,
+        );
+        await findOrCreateManualFoodForRecipeImport(
+            baseline.store,
+            HH,
+            "food",
+            "egg",
+        );
+        const { recipes, foods, recipeId } = await recipeWith({ steps });
+        const watched = counting<FoodsStore>(foods, ["listFoods"]);
+        const added = await addMentionedIngredient(
+            { recipes, foods: watched.store },
+            HH,
+            recipeId,
+            "egg",
+        );
+        expect(added.createdFood).toBe(true);
+        expect(watched.count("listFoods")).toBeLessThanOrEqual(
+            baseline.count("listFoods"),
+        );
+    });
+
+    test("a matched catalog food reports createdFood false", async () => {
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: "Fry the rice.\nAdd 2 eggs and stir.",
+        });
+        await findOrCreateManualFood(foods, HH, "food", "Eggs");
+        const added = await addMentionedIngredient(
+            { recipes, foods },
+            HH,
+            recipeId,
+            "egg",
+        );
+        expect(added.createdFood).toBe(false);
+    });
+
+    test("the recipe is re-checked once, verified or not", async () => {
+        for (const verified of [false, true]) {
+            const { recipes, foods, recipeId } = await recipeWith({
+                steps: "Fry the rice.\nAdd 2 eggs and stir.",
+            });
+            if (verified) await recheckRecipe(recipes, HH, recipeId);
+            const watched = counting(recipes, ["setVerification"]);
+            await addMentionedIngredient(
+                { recipes: watched.store, foods },
+                HH,
+                recipeId,
+                "egg",
+            );
+            expect(watched.count("setVerification")).toBe(1);
+        }
+    });
+
+    test("a hand-made recipe gets a clear error", async () => {
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: "Fry the rice.\nAdd 2 eggs and stir.",
+            imported: false,
+        });
+        await expect(
+            addMentionedIngredient({ recipes, foods }, HH, recipeId, "egg"),
+        ).rejects.toThrow("This recipe has no step check.");
+    });
+});
+
+describe("dismissFlaggedMention", () => {
+    test("dismisses a warning that is showing, in any spelling", async () => {
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: "Fry the rice.\nAdd 2 eggs and stir.",
+        });
+        await dismissFlaggedMention({ recipes, foods }, HH, recipeId, "EGGS");
+        expect(
+            (await recipes.getImport(HH, recipeId))?.dismissedMentions,
+        ).toEqual(["egg"]);
+    });
+
+    test("a food that is not flagged, or a recipe nobody checks, is an error", async () => {
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: "Fry the rice.\nAdd 2 eggs and stir.",
+        });
+        await expect(
+            dismissFlaggedMention({ recipes, foods }, HH, recipeId, "kale"),
+        ).rejects.toThrow("no longer flagged");
+        await dismissFlaggedMention({ recipes, foods }, HH, recipeId, "egg");
+        await expect(
+            dismissFlaggedMention({ recipes, foods }, HH, recipeId, "egg"),
+        ).rejects.toThrow("no longer flagged");
+        const handMade = await recipeWith({
+            steps: "Add 2 eggs.",
+            imported: false,
+        });
+        await expect(
+            dismissFlaggedMention(
+                { recipes: handMade.recipes, foods: handMade.foods },
+                HH,
+                handMade.recipeId,
+                "egg",
+            ),
+        ).rejects.toThrow("This recipe has no step check.");
     });
 });

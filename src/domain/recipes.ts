@@ -179,7 +179,22 @@ export type RecipesStore = {
         householdId: string,
         recipeId: string,
     ): Promise<RecipeImport | null>;
+    /**
+     * Save an import row. An existing row keeps the dismissed mentions it has:
+     * they change only through `addDismissedMention`, so a writer holding a
+     * stale copy of the row cannot undo a dismissal.
+     */
     upsertImport(row: RecipeImport): Promise<RecipeImport>;
+    /**
+     * Append a key to the recipe's dismissed mentions unless it is there,
+     * leaving the rest of the row alone. False when the recipe has no import
+     * row.
+     */
+    addDismissedMention(
+        householdId: string,
+        recipeId: string,
+        key: string,
+    ): Promise<boolean>;
     setVerification(
         householdId: string,
         recipeId: string,
@@ -1007,10 +1022,27 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                 ...row,
                 unresolvedLines: [...row.unresolvedLines],
                 problems: [...row.problems],
-                dismissedMentions: [...row.dismissedMentions],
+                dismissedMentions: [
+                    ...(imports.get(row.recipeId)?.dismissedMentions ??
+                        row.dismissedMentions),
+                ],
             };
             imports.set(row.recipeId, saved);
-            return { ...saved };
+            return {
+                ...saved,
+                dismissedMentions: [...saved.dismissedMentions],
+            };
+        },
+        async addDismissedMention(householdId, recipeId, key) {
+            const row = imports.get(recipeId);
+            if (!row || row.householdId !== householdId) return false;
+            if (!row.dismissedMentions.includes(key)) {
+                imports.set(recipeId, {
+                    ...row,
+                    dismissedMentions: [...row.dismissedMentions, key],
+                });
+            }
+            return true;
         },
         async setVerification(householdId, recipeId, verification, problems) {
             const idx = recipes.findIndex(

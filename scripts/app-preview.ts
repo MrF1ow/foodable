@@ -31,6 +31,7 @@ import {
     planEditSheetId,
     withPlanEditDraft,
 } from "../src/web/pages/v2/recipes-plan.js";
+import { findMissingMentions } from "../src/domain/recipe-mentions.js";
 import {
     groupRecipeIngredientsByPlace,
     renderRecipeDetailV2Page,
@@ -1575,6 +1576,88 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             },
             share: { open: shareOpen },
         });
+    // An imported Pad See Ew whose ingredient list never lists the egg its
+    // fourth step scrambles: the warning card with Add and Dismiss.
+    const padSeeEw = () => {
+        const instructions = [
+            "Soak the rice noodles in warm water until pliable, then drain.",
+            "Whisk the soy sauces, oyster sauce, sugar and white pepper into a sauce.",
+            "Sear the chicken in a hot wok until golden, then add the garlic and the Chinese broccoli stems.",
+            "Push the noodles to one side, pour in the lightly beaten egg and scramble 30-45 seconds.",
+            "Toss everything with the sauce until the noodles char at the edges.",
+            "Fold in the broccoli leaves and serve hot.",
+        ].join("\n");
+        const lines: [string, number, string][] = [
+            ["Wide rice noodles", 7, "oz"],
+            ["Dark soy sauce", 1, "tbsp"],
+            ["Light soy sauce", 1, "tbsp"],
+            ["Chicken thigh", 6, "oz"],
+            ["Chinese broccoli", 2, "cup"],
+            ["Garlic", 3, "each"],
+            ["Oyster sauce", 1, "tbsp"],
+            ["Sugar", 1, "tsp"],
+            ["White pepper", 1, "tsp"],
+            ["Vegetable oil", 2, "tbsp"],
+        ];
+        const ingredients = lines.map(([displayName, amount, unit], i) => ({
+            id: `pse${i}`,
+            recipeId: "r1",
+            foodId: `f-pse${i}`,
+            displayName,
+            quantity: { amount, unit },
+            note: null,
+            sortOrder: i,
+            perPortionAmount: amount / 2,
+            personAmount: amount / 2,
+        }));
+        const recipe = {
+            ...RECIPE,
+            name: "Simple Pad See Ew",
+            yieldPortions: 2,
+            instructions,
+            sourceUrl: "https://www.slowfoodmama.com/simple-pad-see-ew",
+            prepMinutes: 15,
+            cookMinutes: 10,
+        };
+        return renderRecipeDetailV2Page({
+            chrome,
+            recipe,
+            ingredients: ingredients as never,
+            ingredientGroups: groupRecipeIngredientsByPlace(
+                ingredients,
+                ingredients.map((ing, i) => ({
+                    id: `fi-pse${i}`,
+                    householdId: H,
+                    locationId: "l2",
+                    kind: "food" as const,
+                    displayName: ing.displayName,
+                    quantity: ing.quantity,
+                    foodId: ing.foodId,
+                    expiresOn: null,
+                })),
+                [{ id: "l2", householdId: H, name: "Pantry", sortOrder: 0 }],
+                new Map(
+                    ingredients.map((ing) => [
+                        ing.foodId,
+                        { id: ing.foodId, genericFoodId: null },
+                    ]),
+                ),
+            ),
+            macrosPerPortion: { ...MACROS, incomplete: false } as never,
+            gapReasons: [],
+            members: recipeView.members,
+            viewerId: recipeView.viewerId,
+            portionCount: 1,
+            mentions: findMissingMentions({
+                instructions,
+                ingredients: ingredients.map((ing) => ({
+                    name: ing.displayName,
+                })),
+                vocabulary: [],
+            }),
+            cook: { ...cookSheet, recipeName: recipe.name },
+        });
+    };
     const recipesListV2 = (
         extra: Partial<Parameters<typeof renderRecipesListV2Page>[0]> = {},
     ) =>
@@ -1856,6 +1939,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ],
         }),
         recipe: recipeV2(cookSheet),
+        "recipe-mentions": padSeeEw(),
         "recipe-cook": recipeV2({ ...cookSheet, open: true }),
         "recipe-plan": recipeV2(cookSheet, true),
         "recipe-share": recipeV2(cookSheet, false, true),

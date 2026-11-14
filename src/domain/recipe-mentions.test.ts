@@ -660,6 +660,66 @@ describe("amounts", () => {
         expect(warn(["Add 2 to 3 eggs."], [])[0]!.amount).toBe(2);
         expect(warn(["Add two to three eggs."], [])[0]!.amount).toBe(2);
     });
+
+    test("a unit or measure word after the food means the number is not a count of it", () => {
+        expect(warn(["Add 3 garlic cloves."], [])[0]!.amount).toBeNull();
+        expect(warn(["Add 2 onion slices."], [])[0]!.amount).toBeNull();
+        expect(warn(["Add 1 onion tin."], [])[0]!.amount).toBeNull();
+        expect(warn(["Add 2 egg pieces."], [])[0]!.amount).toBeNull();
+        // The number still counts when the next word is just more sentence.
+        expect(warn(["Add 2 eggs."], [])[0]!.amount).toBe(2);
+        expect(warn(["Add 2 eggs and stir."], [])[0]!.amount).toBe(2);
+    });
+
+    test("a unit before the food was never an amount of it", () => {
+        expect(warn(["Add 400 g chicken."], [])[0]!.amount).toBeNull();
+        expect(warn(["Add 3 cloves garlic."], [])[0]!.amount).toBeNull();
+    });
+});
+
+describe("where a mention sits", () => {
+    test("the warning says which step and where in the step and the excerpt", () => {
+        const steps = [
+            "Boil the pot.",
+            "Push them aside, pour in the lightly beaten egg and scramble.",
+        ];
+        const [egg] = warn(steps, []);
+        expect(egg!.stepIndex).toBe(1);
+        expect(steps[1]!.slice(egg!.start, egg!.end)).toBe("egg");
+        expect(egg!.excerpt.slice(egg!.excerptStart, egg!.excerptEnd)).toBe(
+            "egg",
+        );
+    });
+
+    test("an accented, upper-case or plural spelling is cut out as written", () => {
+        const steps = ["Fold in the Jalapeño, then add 2 EGGS."];
+        const found = warn(steps, [{ name: "x" }], {
+            vocabulary: [{ name: "jalapeño" }],
+        });
+        const spelled = found.map((w) => steps[0]!.slice(w.start, w.end));
+        expect(spelled).toEqual(["Jalapeño", "EGGS"]);
+    });
+
+    test("a clipped long excerpt still points at the mention", () => {
+        const lead =
+            "Simmer the sauce gently while you stir and taste it ".repeat(4);
+        const tail =
+            " and keep stirring until everything is glossy and thick ".repeat(
+                4,
+            );
+        const steps = [`${lead}pour in the egg${tail}.`];
+        const [egg] = warn(steps, []);
+        expect(egg!.excerpt.startsWith("…")).toBe(true);
+        expect(egg!.excerpt.slice(egg!.excerptStart, egg!.excerptEnd)).toBe(
+            "egg",
+        );
+        expect(steps[0]!.slice(egg!.start, egg!.end)).toBe("egg");
+    });
+
+    test("the step index counts the steps the recipe page lists", () => {
+        const [garlic] = warn(["Boil.", "Drain.", "Add garlic."], []);
+        expect(garlic!.stepIndex).toBe(2);
+    });
 });
 
 describe("keys and spelling", () => {

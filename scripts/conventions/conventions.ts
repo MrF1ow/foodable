@@ -354,6 +354,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "public/app/v2/scanner.css": "web",
     "src/web/pages/v2/recipes-page-cook.ts": "web",
     "src/web/pages/v2/recipes-page-cook.test.ts": "web",
+    "src/web/pages/v2/recipes-page-mentions.ts": "web",
     "src/web/pages/v2/share-sheet.ts": "web",
     "src/web/pages/v2/share-sheet.test.ts": "web",
     "src/web/client/v2/cook-sheet.js": "web",

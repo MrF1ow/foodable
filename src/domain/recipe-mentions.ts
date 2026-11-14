@@ -36,6 +36,18 @@ export type MentionWarning = {
     foodId?: string;
     /** The sentence of the first mention, trimmed and clipped. */
     excerpt: string;
+    /** Which step (index into `recipeSteps`) holds the first mention. */
+    stepIndex: number;
+    /**
+     * Where the mention sits in that step once it is NFC-normalized, as
+     * [start, end) offsets into the string. A page that marks it up
+     * normalizes the step the same way first.
+     */
+    start: number;
+    end: number;
+    /** The same span inside `excerpt`. */
+    excerptStart: number;
+    excerptEnd: number;
     /** A number right before the mention ("add 2 eggs" is 2), else null. */
     amount: number | null;
     /** Descriptive words right before the mention ("lightly beaten"), else null. */
@@ -127,6 +139,62 @@ const NOTE_WORDS = new Set([
     "toasted",
     "warm",
     "whisked",
+]);
+
+/**
+ * Words that measure a food rather than count it: "3 garlic cloves" is not 3
+ * garlic. A number before the mention is dropped when one of these follows.
+ */
+const MEASURE_WORDS = new Set([
+    "bag",
+    "bar",
+    "block",
+    "bottle",
+    "box",
+    "bunch",
+    "bundle",
+    "can",
+    "carton",
+    "clove",
+    "cube",
+    "cup",
+    "dash",
+    "drop",
+    "fillet",
+    "g",
+    "gallon",
+    "gram",
+    "handful",
+    "head",
+    "inch",
+    "jar",
+    "kg",
+    "kilogram",
+    "l",
+    "lb",
+    "liter",
+    "litre",
+    "ml",
+    "ounce",
+    "oz",
+    "packet",
+    "piece",
+    "pinch",
+    "pint",
+    "pound",
+    "quart",
+    "rib",
+    "slice",
+    "sprig",
+    "stalk",
+    "stick",
+    "strip",
+    "tbsp",
+    "teaspoon",
+    "tablespoon",
+    "tin",
+    "tsp",
+    "wedge",
 ]);
 
 const NUMBER_WORDS: Record<string, number> = {
@@ -340,6 +408,26 @@ function buildVocabulary(catalog: readonly MentionVocabEntry[]): Vocabulary {
     return { byId, byFirstWord };
 }
 
+/** The bundled words by identity, to read a typed key the way the detector would. */
+const BUNDLED_CANONICAL: ReadonlyMap<string, string> = (() => {
+    const out = new Map<string, string>();
+    for (const word of BUNDLED_MENTION_WORDS) {
+        const id = idOf(word);
+        if (id) out.set(id, looseFoodKey(fold(word)));
+    }
+    return out;
+})();
+
+/**
+ * The key a warning for `text` carries, whatever spelling `text` is in:
+ * "EGGS", " Egg " and "egg" are all "egg". A bundled food maps to its singular
+ * spelling; any other name is its own loose form. Dismissals are stored and
+ * matched through this.
+ */
+export function mentionKey(text: string): string {
+    return BUNDLED_CANONICAL.get(idOf(text)) ?? looseFoodKey(fold(text));
+}
+
 function isNeverFlagged(entry: IndexedEntry): boolean {
     if (entry.words.some((word) => NEVER_FLAGGED.has(word))) return true;
     return entry.words.length === 1 && NOT_FOOD_STEMS.has(entry.id);
@@ -424,11 +512,18 @@ function sentenceAt(
     return { text: step.slice(start), start };
 }
 
-function clipExcerpt(sentence: string, mentionAt: number): string {
+/**
+ * The sentence clipped to a readable length around the mention, and where the
+ * mention starts inside the clipped text.
+ */
+function clipExcerpt(
+    sentence: string,
+    mentionAt: number,
+): { text: string; at: number } {
     const lead = sentence.length - sentence.trimStart().length;
     const text = sentence.trim();
     const pos = Math.max(0, mentionAt - lead);
-    if (text.length <= EXCERPT_MAX) return text;
+    if (text.length <= EXCERPT_MAX) return { text, at: pos };
     let from = Math.max(0, pos - Math.floor(EXCERPT_MAX / 2));
     const to0 = Math.min(text.length, from + EXCERPT_MAX);
     from = Math.max(0, to0 - EXCERPT_MAX);
@@ -442,7 +537,11 @@ function clipExcerpt(sentence: string, mentionAt: number): string {
         const space = text.lastIndexOf(" ", to);
         if (space > pos) to = space;
     }
-    return `${from > 0 ? "…" : ""}${text.slice(from, to)}${to < text.length ? "…" : ""}`;
+    const ellipsis = from > 0 ? "…" : "";
+    return {
+        text: `${ellipsis}${text.slice(from, to)}${to < text.length ? "…" : ""}`,
+        at: ellipsis.length + pos - from,
+    };
 }
 
 const isFraction = (token: string): boolean =>
@@ -489,6 +588,7 @@ function amountAndNote(
     tokens: readonly Token[],
     folded: string,
     firstToken: number,
+    afterToken: number,
 ): { amount: number | null; note: string | null } {
     // Token `i` leads into token `i + 1` unless a break sits between them.
     const leadsIn = (i: number) => !tokens[i + 1]!.breakBefore;
@@ -503,8 +603,16 @@ function amountAndNote(
         noteWords.unshift(tokens[i]!.text);
         i--;
     }
+    // "3 garlic cloves": the 3 counts cloves, so it is no amount of garlic.
+    const after = tokens[afterToken];
+    const measured =
+        after !== undefined &&
+        !after.breakBefore &&
+        MEASURE_WORDS.has(plainWords(after.text)[0] ?? after.text);
     const amount =
-        i >= 0 && leadsIn(i) ? amountEndingAt(tokens, folded, i) : null;
+        !measured && i >= 0 && leadsIn(i)
+            ? amountEndingAt(tokens, folded, i)
+            : null;
     return {
         amount: amount != null && amount > 0 ? amount : null,
         note: noteWords.length > 0 ? noteWords.join(" ") : null,
@@ -568,7 +676,7 @@ export function findMissingMentions(input: {
     const seen = new Set<string>();
     const warnings: MentionWarning[] = [];
 
-    for (const raw of recipeSteps(input.instructions)) {
+    for (const [stepIndex, raw] of recipeSteps(input.instructions).entries()) {
         const step = raw.normalize("NFC");
         const folded = fold(step);
         const tokens = tokenize(folded);
@@ -605,14 +713,30 @@ export function findMissingMentions(input: {
             }
             seen.add(entry.id);
             const first = units[here]!.first;
+            const last = units[here + entry.words.length - 1]!.last;
             const mentionAt = tokens[first]!.start;
+            const mentionEnd = tokens[last]!.end;
             const sentence = sentenceAt(step, mentionAt);
-            const { amount, note } = amountAndNote(tokens, folded, first);
+            const { amount, note } = amountAndNote(
+                tokens,
+                folded,
+                first,
+                last + 1,
+            );
+            const excerpt = clipExcerpt(
+                sentence.text,
+                mentionAt - sentence.start,
+            );
             warnings.push({
                 food: entry.canonical,
                 key: entry.canonical,
                 ...(entry.foodId !== undefined ? { foodId: entry.foodId } : {}),
-                excerpt: clipExcerpt(sentence.text, mentionAt - sentence.start),
+                excerpt: excerpt.text,
+                stepIndex,
+                start: mentionAt,
+                end: mentionEnd,
+                excerptStart: excerpt.at,
+                excerptEnd: excerpt.at + (mentionEnd - mentionAt),
                 amount,
                 note,
                 message: `The steps mention ${entry.canonical}, which isn't an ingredient.`,
