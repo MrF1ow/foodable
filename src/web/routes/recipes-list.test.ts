@@ -1,4 +1,12 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+    afterAll,
+    beforeEach,
+    describe,
+    expect,
+    mock,
+    spyOn,
+    test,
+} from "bun:test";
 import {
     createMemoryFlags,
     resetFlagsForTests,
@@ -16,6 +24,7 @@ import {
     createMemoryRecipesStore,
     createRecipe,
 } from "../../domain/recipes.js";
+import { recheckRecipe } from "../../domain/recipe-import.js";
 import * as actualAttention from "../attention.js";
 import * as actualNoticeDismissals from "../../db/notice-dismissals.js";
 import * as actualGrocery from "../../db/grocery.js";
@@ -842,6 +851,282 @@ describe("POST /recipes/:id/favourite", () => {
         });
         expect(res.status).toBe(404);
         expect(await favouriteIds(ALICE)).toEqual([]);
+    });
+});
+
+describe("steps-mention warnings on the recipe page", () => {
+    const STEPS = "Fry the rice.\nScramble 2 lightly beaten eggs into it.";
+
+    /** A recipe whose steps use an egg that its one ingredient (rice) never lists. */
+    async function friedRice(opts: { imported?: boolean } = {}) {
+        const recipe = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Fried rice",
+            yieldPortions: 2,
+            instructions: STEPS,
+            verification: "unverified",
+        });
+        const rice = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Rice",
+                calories: 130,
+                proteinG: 3,
+                carbsG: 28,
+                fatG: 0,
+                gramsPerMl: null,
+                gramsPerEach: null,
+            }),
+        );
+        await addRecipeIngredientById(db.recipesStore, db.foodsStore, {
+            householdId: HH,
+            recipeId: recipe.id,
+            foodId: rice.id,
+            amount: 200,
+            unit: "g",
+        });
+        if (opts.imported !== false) {
+            await db.recipesStore.upsertImport({
+                recipeId: recipe.id,
+                householdId: HH,
+                sourceKind: "text",
+                sourceUrl: null,
+                sourceText: "pasted",
+                sourceTextOrigin: "pasted",
+                transcript: null,
+                credit: null,
+                unresolvedLines: [],
+                problems: [],
+                dismissedMentions: [],
+                importedAt: "2026-01-01T00:00:00.000Z",
+            });
+        }
+        await recheckRecipe(db.recipesStore, HH, recipe.id);
+        return recipe.id;
+    }
+
+    function postMention(
+        action: "add" | "dismiss",
+        recipeId: string,
+        key: string,
+        opts: { as?: string } = {},
+    ) {
+        return recipesApp().request(
+            `http://x/recipes/${recipeId}/mentions/${action}`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(opts.as ?? ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({ key }).toString(),
+            },
+        );
+    }
+
+    async function pageOf(recipeId: string): Promise<string> {
+        return (await renderRecipeDetailRoute(ALICE, recipeId)).html;
+    }
+
+    const ingredientNames = async (recipeId: string) =>
+        (await db.recipesStore.listIngredients(HH, recipeId)).map(
+            (i) => i.displayName,
+        );
+
+    test("an imported recipe shows the food its steps miss, and the page still cooks", async () => {
+        const id = await friedRice();
+        const html = await pageOf(id);
+        expect(html).toContain("fd-mention-card");
+        expect(html).toContain(
+            "The steps mention egg, which isn't an ingredient.",
+        );
+        expect(html).toContain(`action="/recipes/${id}/mentions/add"`);
+        expect(html).toContain(`action="/recipes/${id}/mentions/dismiss"`);
+        expect(html).toContain('<span class="fd-mention-mark">eggs</span>');
+        // Advice only: the recipe is still verified and can be cooked.
+        expect((await db.recipesStore.getRecipe(HH, id))?.verification).toBe(
+            "verified",
+        );
+        expect(html).toContain('id="fd-recipe-cook-sheet"');
+    });
+
+    test("a hand-made recipe, and one with nothing missing, show no card", async () => {
+        expect(
+            await pageOf(await friedRice({ imported: false })),
+        ).not.toContain("fd-mention");
+        expect(await pageOf(db.recipeId)).not.toContain("fd-mention");
+    });
+
+    test("Add puts the ingredient on the recipe with the step's amount and note, and the card goes", async () => {
+        const id = await friedRice();
+        const res = await postMention("add", id, "egg");
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${id}`);
+        expect(toastOf(res)).toMatchObject({
+            key: "recipes.mention.added",
+            params: { name: "egg" },
+        });
+        const ingredients = await db.recipesStore.listIngredients(HH, id);
+        const egg = ingredients.find((i) => i.displayName === "egg");
+        expect(egg?.quantity).toEqual({ amount: 2, unit: "each" });
+        expect(egg?.note).toBe("lightly beaten");
+        expect(await pageOf(id)).not.toContain("fd-mention");
+        expect((await db.recipesStore.getRecipe(HH, id))?.verification).toBe(
+            "verified",
+        );
+        expect(await ingredientNames(id)).toContain("egg");
+    });
+
+    test("Dismiss hides the card, adds nothing, and the dismissal survives a re-check", async () => {
+        const id = await friedRice();
+        const res = await postMention("dismiss", id, "egg");
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${id}`);
+        expect(toastOf(res)).toBeNull();
+        expect(await ingredientNames(id)).toEqual(["Rice"]);
+        expect(await pageOf(id)).not.toContain("fd-mention");
+        await recheckRecipe(db.recipesStore, HH, id);
+        expect(await pageOf(id)).not.toContain("fd-mention");
+        expect(
+            (await db.recipesStore.getImport(HH, id))?.dismissedMentions,
+        ).toEqual(["egg"]);
+    });
+
+    test("a key that is no longer flagged goes back with a toast, not a 500", async () => {
+        const id = await friedRice();
+        for (const action of ["add", "dismiss"] as const) {
+            const res = await postMention(action, id, "kale");
+            expect(res.status).toBe(303);
+            expect(res.headers.get("location")).toBe(`/recipes/${id}`);
+            expect(toastOf(res)?.key).toBe("recipes.mention.error");
+        }
+        await postMention("add", id, "egg");
+        const again = await postMention("add", id, "egg");
+        expect(again.status).toBe(303);
+        expect(toastOf(again)?.key).toBe("recipes.mention.error");
+        expect(
+            (await ingredientNames(id)).filter((n) => n === "egg"),
+        ).toHaveLength(1);
+    });
+
+    test("a hand-made recipe has nothing to add or dismiss", async () => {
+        const id = await friedRice({ imported: false });
+        for (const action of ["add", "dismiss"] as const) {
+            const res = await postMention(action, id, "egg");
+            expect(res.status).toBe(303);
+            expect(toastOf(res)?.key).toBe("recipes.mention.error");
+        }
+        expect(await ingredientNames(id)).toEqual(["Rice"]);
+        expect(await db.recipesStore.getImport(HH, id)).toBeNull();
+    });
+
+    test("an unknown recipe or a bad id is a 404", async () => {
+        for (const action of ["add", "dismiss"] as const) {
+            const unknown = await postMention(
+                action,
+                "11111111-1111-4111-8111-1111111111ff",
+                "egg",
+            );
+            expect(unknown.status).toBe(404);
+            expect((await postMention(action, "nope", "egg")).status).toBe(404);
+        }
+    });
+
+    test("another household's recipe is a 404 and is left alone", async () => {
+        const other = await createRecipe(db.recipesStore, {
+            householdId: "hh-other",
+            creatorId: ALICE,
+            name: "Their rice",
+            yieldPortions: 2,
+            instructions: STEPS,
+            verification: "unverified",
+        });
+        for (const action of ["add", "dismiss"] as const) {
+            const res = await postMention(action, other.id, "egg");
+            expect(res.status).toBe(404);
+        }
+        expect(
+            await db.recipesStore.getImport("hh-other", other.id),
+        ).toBeNull();
+        expect(
+            await db.recipesStore.listIngredients("hh-other", other.id),
+        ).toEqual([]);
+    });
+
+    test("a food archived after the page was drawn goes back with a toast, not a 500", async () => {
+        const id = await friedRice();
+        const egg = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Egg",
+                calories: 143,
+                proteinG: 13,
+                carbsG: 1,
+                fatG: 10,
+                gramsPerMl: null,
+                gramsPerEach: 50,
+            }),
+        );
+        const original = db.foodsStore.getFood;
+        db.foodsStore.getFood = async (household, foodId) => {
+            const food = await original.call(db.foodsStore, household, foodId);
+            return food?.id === egg.id
+                ? { ...food, archivedAt: "2026-01-02T00:00:00.000Z" }
+                : food;
+        };
+        try {
+            const res = await postMention("add", id, "egg");
+            expect(res.status).toBe(303);
+            expect(res.headers.get("location")).toBe(`/recipes/${id}`);
+            expect(toastOf(res)?.key).toBe("recipes.mention.error");
+        } finally {
+            db.foodsStore.getFood = original;
+        }
+        expect(await ingredientNames(id)).toEqual(["Rice"]);
+    });
+
+    test("a member can add or dismiss, and a visitor without a session cannot", async () => {
+        const id = await friedRice();
+        expect(
+            (await postMention("dismiss", id, "egg", { as: BOB })).status,
+        ).toBe(303);
+        const visitor = await recipesApp().request(
+            `http://x/recipes/${id}/mentions/add`,
+            {
+                method: "POST",
+                headers: {
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "key=egg",
+            },
+        );
+        expect(visitor.status).not.toBe(303);
+        expect(await ingredientNames(id)).toEqual(["Rice"]);
+    });
+
+    test("a warning lookup that fails leaves the page whole, without the card", async () => {
+        const id = await friedRice();
+        const original = db.foodsStore.listAllAliases;
+        db.foodsStore.listAllAliases = async (...args) => {
+            if (new Error().stack?.includes("mentionVocabulary")) {
+                throw new Error("aliases are down");
+            }
+            return original.apply(db.foodsStore, args);
+        };
+        const logged = spyOn(console, "error").mockImplementation(() => {});
+        try {
+            const page = await renderRecipeDetailRoute(ALICE, id);
+            expect(page.status).toBe(200);
+            expect(page.html).toContain("fd-recipe-detail");
+            expect(page.html).not.toContain("fd-mention");
+            expect(logged).toHaveBeenCalled();
+        } finally {
+            db.foodsStore.listAllAliases = original;
+            logged.mockRestore();
+        }
     });
 });
 

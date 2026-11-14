@@ -112,6 +112,8 @@ export const TOASTS = {
         text: "Already cooked and logged",
     },
     "recipes.deleted": { kind: "success", text: "Recipe deleted" },
+    "recipes.mention.added": { kind: "success", text: "Added {name}" },
+    "recipes.mention.error": { kind: "error", text: "{message}" },
     "plan.added": { kind: "success", text: "Planned for {when}" },
     "plan.already": { kind: "info", text: "Already planned for {when}" },
     "plan.moved": { kind: "success", text: "Moved to {when}" },

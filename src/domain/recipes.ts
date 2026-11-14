@@ -179,7 +179,22 @@ export type RecipesStore = {
         householdId: string,
         recipeId: string,
     ): Promise<RecipeImport | null>;
+    /**
+     * Save an import row. An existing row keeps the dismissed mentions it has:
+     * they change only through `addDismissedMention`, so a writer holding a
+     * stale copy of the row cannot undo a dismissal.
+     */
     upsertImport(row: RecipeImport): Promise<RecipeImport>;
+    /**
+     * Append a key to the recipe's dismissed mentions unless it is there,
+     * leaving the rest of the row alone. False when the recipe has no import
+     * row.
+     */
+    addDismissedMention(
+        householdId: string,
+        recipeId: string,
+        key: string,
+    ): Promise<boolean>;
     setVerification(
         householdId: string,
         recipeId: string,
@@ -999,6 +1014,7 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                 ...row,
                 unresolvedLines: [...row.unresolvedLines],
                 problems: [...row.problems],
+                dismissedMentions: [...row.dismissedMentions],
             };
         },
         async upsertImport(row) {
@@ -1006,9 +1022,27 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                 ...row,
                 unresolvedLines: [...row.unresolvedLines],
                 problems: [...row.problems],
+                dismissedMentions: [
+                    ...(imports.get(row.recipeId)?.dismissedMentions ??
+                        row.dismissedMentions),
+                ],
             };
             imports.set(row.recipeId, saved);
-            return { ...saved };
+            return {
+                ...saved,
+                dismissedMentions: [...saved.dismissedMentions],
+            };
+        },
+        async addDismissedMention(householdId, recipeId, key) {
+            const row = imports.get(recipeId);
+            if (!row || row.householdId !== householdId) return false;
+            if (!row.dismissedMentions.includes(key)) {
+                imports.set(recipeId, {
+                    ...row,
+                    dismissedMentions: [...row.dismissedMentions, key],
+                });
+            }
+            return true;
         },
         async setVerification(householdId, recipeId, verification, problems) {
             const idx = recipes.findIndex(
@@ -1046,6 +1080,7 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                     ...row,
                     unresolvedLines: [...row.unresolvedLines],
                     problems: row.problems.map((p) => ({ ...p })),
+                    dismissedMentions: [...row.dismissedMentions],
                 });
             }
             return out;
@@ -1399,6 +1434,7 @@ export async function addRecipeIngredientById(
         foodId: string;
         amount?: number | null;
         unit?: string;
+        note?: string | null;
     },
 ): Promise<RecipeIngredient> {
     const recipe = await requireRecipe(
@@ -1427,7 +1463,7 @@ export async function addRecipeIngredientById(
             quantity,
             foodId: food.id,
             sortOrder: existing.length,
-            note: noteForUnmeasuredIngredient(quantity, null),
+            note: noteForUnmeasuredIngredient(quantity, input.note ?? null),
         });
         await maybeRecheckUnverified(
             store,
@@ -2271,6 +2307,7 @@ export async function importRecipeFromText(
             credit: null,
             unresolvedLines: [],
             problems: [],
+            dismissedMentions: [],
             importedAt,
         });
         const imported: RecipeIngredient[] = [];

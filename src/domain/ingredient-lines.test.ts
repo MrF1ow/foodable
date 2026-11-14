@@ -214,6 +214,7 @@ describe("parseIngredientLines with verifyRecipe", () => {
                 credit: null,
                 unresolvedLines: [],
                 problems: [],
+                dismissedMentions: [],
                 importedAt: "2026-01-01T00:00:00.000Z",
             }).verified,
         ).toBe(true);
@@ -248,6 +249,7 @@ describe("parseIngredientLines with verifyRecipe", () => {
                 credit: null,
                 unresolvedLines: [],
                 problems: [],
+                dismissedMentions: [],
                 importedAt: "2026-01-01T00:00:00.000Z",
             }).verified,
         ).toBe(true);

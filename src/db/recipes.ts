@@ -37,7 +37,7 @@ const RECIPE_INGREDIENT_COLS =
     "id, household_id, recipe_id, kind, display_name, amount, unit, food_id, sort_order, note";
 const RECIPE_PORTION_COLS = "recipe_id, household_id, user_id, portion_count";
 const RECIPE_IMPORT_COLS =
-    "recipe_id, household_id, source_kind, source_url, source_text, source_text_origin, transcript, credit, unresolved_lines, problems, imported_at";
+    "recipe_id, household_id, source_kind, source_url, source_text, source_text_origin, transcript, credit, unresolved_lines, problems, dismissed_mentions, imported_at";
 
 export function recipeImportSqlValues(
     row: ReturnType<typeof recipeImportToRow>,
@@ -45,6 +45,7 @@ export function recipeImportSqlValues(
     return {
         unresolvedLinesJson: JSON.stringify(row.unresolved_lines),
         problemsJson: JSON.stringify(row.problems),
+        dismissedMentionsJson: JSON.stringify(row.dismissed_mentions),
     };
 }
 
@@ -388,8 +389,11 @@ export function liveRecipesStore(): RecipesStore {
             return run(async (tx) => {
                 try {
                     const payload = recipeImportToRow(row);
-                    const { unresolvedLinesJson, problemsJson } =
-                        recipeImportSqlValues(payload);
+                    const {
+                        unresolvedLinesJson,
+                        problemsJson,
+                        dismissedMentionsJson,
+                    } = recipeImportSqlValues(payload);
                     const data = await one<Record<string, unknown>>(
                         tx,
                         tx`
@@ -404,6 +408,7 @@ export function liveRecipesStore(): RecipesStore {
                                 credit,
                                 unresolved_lines,
                                 problems,
+                                dismissed_mentions,
                                 imported_at
                             )
                             values (
@@ -417,6 +422,7 @@ export function liveRecipesStore(): RecipesStore {
                                 ${payload.credit},
                                 ${unresolvedLinesJson}::jsonb,
                                 ${problemsJson}::jsonb,
+                                ${dismissedMentionsJson}::jsonb,
                                 ${payload.imported_at}
                             )
                             on conflict (recipe_id) do update set
@@ -437,6 +443,41 @@ export function liveRecipesStore(): RecipesStore {
                     return recipeImportFromRow(data as never);
                 } catch (err) {
                     throw pgError("save recipe import", err);
+                }
+            });
+        },
+        async addDismissedMention(householdId, recipeId, key) {
+            return run(async (tx) => {
+                try {
+                    // One statement appends the key where it is missing, so a
+                    // concurrent write to the row cannot lose it, and a key
+                    // already there changes nothing.
+                    const changed = await rows(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(RECIPE_IMPORTS)}
+                            set dismissed_mentions = dismissed_mentions
+                                || jsonb_build_array(${key}::text)
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}
+                              and not dismissed_mentions
+                                  @> jsonb_build_array(${key}::text)
+                            returning recipe_id
+                        `,
+                    );
+                    if (changed.length > 0) return true;
+                    const present = await rows(
+                        tx,
+                        tx`
+                            select recipe_id
+                            from ${tx.unsafe(RECIPE_IMPORTS)}
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}
+                        `,
+                    );
+                    return present.length > 0;
+                } catch (err) {
+                    throw pgError("dismiss recipe mention", err);
                 }
             });
         },

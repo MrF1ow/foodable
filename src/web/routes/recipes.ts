@@ -62,6 +62,10 @@ import {
 import { run } from "../../db/sql.js";
 import { looksLikeSharedRecipeLink } from "../../domain/sharing-source.js";
 import { viewerFlagsFor } from "../attention.js";
+import {
+    addMentionedIngredient,
+    dismissFlaggedMention,
+} from "../../domain/recipe-mentions-check.js";
 import { answerSharedRecipeImport } from "./recipes-shared-import.js";
 import {
     parseV2RecipeListFilter,
@@ -696,6 +700,80 @@ recipesRoutes.post("/recipes/:id/favourite", requireMember, async (c) => {
     // toast: none (the star shows the new state)
     return c.redirect(`/recipes/${recipeId}`, 303);
 });
+
+/**
+ * Add the food a warning names to the recipe, with the amount and note its step
+ * gave, at once. A food that is no longer flagged (added, dismissed, or on a
+ * recipe nobody checks) goes back to the page with a toast saying so.
+ */
+recipesRoutes.post("/recipes/:id/mentions/add", requireMember, async (c) => {
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+    const recipe = await liveRecipesStore().getRecipe(
+        member.householdId,
+        recipeId,
+    );
+    if (!recipe) return c.text("Not found", 404);
+    const body = await c.req.parseBody();
+    try {
+        const added = await addMentionedIngredient(
+            { recipes: liveRecipesStore(), foods: liveFoodsStore() },
+            member.householdId,
+            recipeId,
+            formText(body, "key"),
+        );
+        return redirectWithToast(
+            c,
+            `/recipes/${recipeId}`,
+            "recipes.mention.added",
+            { name: truncateToastParam(added.foodName) },
+        );
+    } catch (err) {
+        if (!(err instanceof RecipeInputError)) throw err;
+        return redirectWithToast(
+            c,
+            `/recipes/${recipeId}`,
+            "recipes.mention.error",
+            { message: truncateToastParam(err.message) },
+        );
+    }
+});
+
+/** Stop warning about a food on this recipe. It never touches the ingredients. */
+recipesRoutes.post(
+    "/recipes/:id/mentions/dismiss",
+    requireMember,
+    async (c) => {
+        const member = siteMember(c);
+        const recipeId = c.req.param("id");
+        if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+        const recipe = await liveRecipesStore().getRecipe(
+            member.householdId,
+            recipeId,
+        );
+        if (!recipe) return c.text("Not found", 404);
+        const body = await c.req.parseBody();
+        try {
+            await dismissFlaggedMention(
+                { recipes: liveRecipesStore(), foods: liveFoodsStore() },
+                member.householdId,
+                recipeId,
+                formText(body, "key"),
+            );
+        } catch (err) {
+            if (!(err instanceof RecipeInputError)) throw err;
+            return redirectWithToast(
+                c,
+                `/recipes/${recipeId}`,
+                "recipes.mention.error",
+                { message: truncateToastParam(err.message) },
+            );
+        }
+        // toast: none (the card is gone)
+        return c.redirect(`/recipes/${recipeId}`, 303);
+    },
+);
 
 /** "Sat 14 Nov · dinner", the toast's words for where a plan landed. */
 function planWhen(date: string, slot: keyof typeof PLAN_SLOT_LABEL): string {

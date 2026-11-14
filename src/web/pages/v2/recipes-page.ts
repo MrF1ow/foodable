@@ -21,6 +21,11 @@ import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
 import { renderAppShell } from "../../shell.js";
 import { favouriteStarForm } from "./recipes-favourite.js";
 import {
+    renderMentionCards,
+    stepWithMentions,
+    type MentionWarningView,
+} from "./recipes-page-mentions.js";
+import {
     renderCookSheet,
     renderCookTrigger,
     type CookSheetView,
@@ -66,6 +71,11 @@ export type RecipeDetailV2View = {
     portionCount: number;
     /** The viewer has starred this recipe. Absent means not. */
     favourite?: boolean;
+    /**
+     * Foods the steps use that the ingredients lack, each with Add and Dismiss.
+     * Advice only; absent or empty shows nothing.
+     */
+    mentions?: MentionWarningView[];
     /** The cook sheet. Absent when the recipe cannot be cooked (unverified). */
     cook?: CookSheetView;
     /** The Add to plan sheet. */
@@ -264,9 +274,12 @@ function ingredientSubline(
     return group.placeName;
 }
 
-function ingredientGroupsHtml(groups: RecipeIngredientPlaceGroup[]): string {
+function ingredientGroupsHtml(
+    groups: RecipeIngredientPlaceGroup[],
+    cards: string,
+): string {
     if (groups.length === 0) {
-        return `<p class="fd-recipe-empty">No ingredients yet.</p>`;
+        return `${cards}<p class="fd-recipe-empty">No ingredients yet.</p>`;
     }
     const count = groups.reduce((n, g) => n + g.lines.length, 0);
     const body = groups
@@ -290,15 +303,18 @@ function ingredientGroupsHtml(groups: RecipeIngredientPlaceGroup[]): string {
 </section>`;
         })
         .join("");
-    return `<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title">Ingredients</h2><span class="fd-recipe-section-head__count">${esc(String(count))}</span></div>${body}`;
+    return `<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title">Ingredients</h2><span class="fd-recipe-section-head__count">${esc(String(count))}</span></div>${cards}${body}`;
 }
 
-function instructionsHtml(instructions: string | null): string {
+function instructionsHtml(
+    instructions: string | null,
+    mentions: readonly MentionWarningView[] | undefined,
+): string {
     const steps = recipeSteps(instructions);
     if (steps.length === 0) {
         return `<p class="fd-recipe-empty">No steps yet.</p>`;
     }
-    return `<ol class="fd-recipe-steps">${steps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>`;
+    return `<ol class="fd-recipe-steps">${steps.map((step, i) => `<li>${stepWithMentions(step, i, mentions)}</li>`).join("")}</ol>`;
 }
 
 function recipeSourceHint(sourceUrl: string | null): string {
@@ -355,13 +371,13 @@ ${macrosBlock(view.macrosPerPortion, view.gapReasons)}
 </section>
 <section class="fd-recipe-section" aria-labelledby="fd-recipe-ingredients-heading">
 <span class="fd-sr" id="fd-recipe-ingredients-heading">Ingredients</span>
-${ingredientGroupsHtml(view.ingredientGroups)}
+${ingredientGroupsHtml(view.ingredientGroups, renderMentionCards(view.recipe.id, view.mentions))}
 </section>
 </div>
 <div class="fd-recipe-col fd-recipe-col--secondary">
 <section class="fd-recipe-section" aria-labelledby="fd-recipe-method-heading">
 <div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title" id="fd-recipe-method-heading">Steps</h2></div>
-${instructionsHtml(view.recipe.instructions)}
+${instructionsHtml(view.recipe.instructions, view.mentions)}
 </section>
 </div>
 </div>

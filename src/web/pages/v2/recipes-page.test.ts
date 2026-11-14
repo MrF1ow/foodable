@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import type { FridgeItem, FridgeLocation } from "../../../domain/fridge.js";
+import { findMissingMentions } from "../../../domain/recipe-mentions.js";
 import type { Recipe, RecipeMacros } from "../../../domain/recipes.js";
 import {
     groupRecipeIngredientsByPlace,
@@ -355,5 +356,149 @@ describe("renderRecipeDetailBody", () => {
         expect(html).toContain("Macros incomplete per portion");
         expect(html).toContain("grams per millilitre");
         expect(html).toContain("Not in stock");
+    });
+});
+
+describe("the steps-mention warnings on the recipe page", () => {
+    const STEPS = [
+        "Boil the pot.",
+        "Push them aside, pour in the lightly beaten egg and scramble.",
+    ].join("\n");
+    const recipe: Recipe = { ...RECIPE, instructions: STEPS };
+    const mentions = () =>
+        findMissingMentions({
+            instructions: STEPS,
+            ingredients: [],
+            vocabulary: [],
+        }).filter((w) => w.key === "egg");
+    const view = (over: Record<string, unknown> = {}) => ({
+        chrome,
+        recipe,
+        ingredients: [],
+        ingredientGroups: [],
+        macrosPerPortion: {
+            calories: 200,
+            protein_g: 8,
+            carbs_g: 30,
+            fat_g: 5,
+            fiber_g: null,
+            sugar_g: null,
+            alcohol_g: null,
+            incomplete: false,
+        },
+        gapReasons: [],
+        members: [{ userId: "u1", displayName: "Alice" }],
+        viewerId: "u1",
+        portionCount: 2,
+        ...over,
+    });
+
+    test("a warning is a card at the top of Ingredients with Add and Dismiss", () => {
+        const html = renderRecipeDetailBody(
+            view({
+                mentions: mentions(),
+                ingredientGroups: [
+                    {
+                        placeId: RECIPE_NOT_IN_STOCK_ID,
+                        placeName: "Not in stock",
+                        lines: [
+                            {
+                                ingredientId: "i1",
+                                displayName: "Wide rice noodles",
+                                amountLabel: "7 oz",
+                                expiresOn: null,
+                            },
+                        ],
+                    },
+                ],
+            }),
+        );
+        const card = html.match(
+            /<aside class="fd-mention-card"[\s\S]*?<\/aside>/,
+        )![0];
+        expect(card).toContain(
+            "The steps mention egg, which isn't an ingredient.",
+        );
+        expect(card).toContain(
+            '<span class="fd-mention-mark">egg</span> and scramble',
+        );
+        expect(card).toContain('action="/recipes/r1/mentions/add"');
+        expect(card).toContain('action="/recipes/r1/mentions/dismiss"');
+        expect(card.match(/name="key" value="egg"/g)).toHaveLength(2);
+        expect(card).toContain(">Add egg</button>");
+        expect(card).toContain(">Dismiss</button>");
+        // Above the ingredient list, below the section head.
+        const head = html.indexOf('fd-recipe-section-head__title">Ingredients');
+        expect(head).toBeGreaterThan(-1);
+        expect(html.indexOf("fd-mention-card")).toBeGreaterThan(head);
+        expect(html.indexOf("fd-mention-card")).toBeLessThan(
+            html.indexOf("Wide rice noodles"),
+        );
+    });
+
+    test("the same food is underlined in its step and only there", () => {
+        const html = renderRecipeDetailBody(view({ mentions: mentions() }));
+        const steps = html.match(
+            /<ol class="fd-recipe-steps">[\s\S]*?<\/ol>/,
+        )![0];
+        const items = [...steps.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(
+            (m) => m[1],
+        );
+        expect(items).toEqual([
+            "Boil the pot.",
+            'Push them aside, pour in the lightly beaten <span class="fd-mention-mark">egg</span> and scramble.',
+        ]);
+    });
+
+    test("no warnings means no card and plain steps", () => {
+        for (const given of [undefined, []]) {
+            const html = renderRecipeDetailBody(view({ mentions: given }));
+            expect(html).not.toContain("fd-mention");
+            expect(html).toContain("<li>Boil the pot.</li>");
+        }
+    });
+
+    test("a warning card shows even when the recipe lists no ingredients yet", () => {
+        const html = renderRecipeDetailBody(
+            view({ mentions: mentions(), ingredientGroups: [] }),
+        );
+        expect(html).toContain("fd-mention-card");
+        expect(html).toContain("No ingredients yet.");
+    });
+
+    test("food names and excerpts are escaped", () => {
+        const [egg] = mentions();
+        const hostile = {
+            ...egg!,
+            food: '<img src=x onerror="a">',
+            key: '"><script>x</script>',
+            excerpt: "<b>bold</b> egg",
+            excerptStart: 12,
+            excerptEnd: 15,
+            message: "<i>hi</i>",
+        };
+        const html = renderRecipeDetailBody(view({ mentions: [hostile] }));
+        expect(html).not.toContain("<script>");
+        expect(html).not.toContain("<img src=x");
+        expect(html).not.toContain("<b>bold</b>");
+        expect(html).toContain(
+            '&lt;b&gt;bold&lt;/b&gt; <span class="fd-mention-mark">egg</span>',
+        );
+    });
+
+    test("a step with a non-normalized accent is still cut at the mention", () => {
+        const steps = "Fold in the jalapen\u0303o and the egg.";
+        const found = findMissingMentions({
+            instructions: steps,
+            ingredients: [],
+            vocabulary: [],
+        }).filter((w) => w.key === "egg");
+        const html = renderRecipeDetailBody(
+            view({
+                recipe: { ...RECIPE, instructions: steps },
+                mentions: found,
+            }),
+        );
+        expect(html).toContain('the <span class="fd-mention-mark">egg</span>.');
     });
 });
