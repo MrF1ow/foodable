@@ -19,6 +19,7 @@ import {
     type FoodsStore,
 } from "./foods.js";
 import { familyIdOf } from "./food-quantity.js";
+import { canonicalUnitText } from "./quantity.js";
 import {
     missingGramsGap,
     placeholderAmountUnit,
@@ -463,7 +464,7 @@ function cloneIngredient(row: RecipeIngredient): RecipeIngredient {
 }
 
 function parseUnit(unit: string | undefined): string {
-    const trimmed = unit?.trim() ?? "";
+    const trimmed = canonicalUnitText(unit ?? "");
     return trimmed || "g";
 }
 

@@ -598,6 +598,28 @@ describe("edit-usual sheet restock controls", () => {
         expect(html).toContain("count");
     });
 
+    test("the edit form carries grams per ml and per item for the plain food, the product's as placeholder", () => {
+        const html = bodyFor({ gramsPerMl: 0.53 });
+        const editForm = "fd-usual-eggs-form";
+        expect(html).toContain('name="weights_present" value="1"');
+        expect(html).toMatch(
+            new RegExp(
+                `name="grams_per_ml" form="${editForm}" value="0.53" placeholder=""`,
+            ),
+        );
+        expect(html).toMatch(
+            new RegExp(
+                `name="grams_per_each" form="${editForm}" value="" placeholder=""`,
+            ),
+        );
+        const row = scheduled({});
+        row.usual = { ...row.usual!, gramsPerEach: 50 };
+        const view = baseView({ rows: [row] });
+        expect(renderKitchenUsualsBody(view as never)).toMatch(
+            /name="grams_per_each"[^>]*value=""[^>]*placeholder="50"/,
+        );
+    });
+
     test("openRestock reopens the Restock sheet and puts the error in it", () => {
         const open = bodyFor(
             {},

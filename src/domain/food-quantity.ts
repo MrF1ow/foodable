@@ -1,4 +1,5 @@
 import {
+    canonicalUnitText,
     convertQuantity,
     dimensionOf,
     isQuantityUnit,
@@ -152,6 +153,6 @@ export function storedFoodUnit(
     unit: string | undefined,
     food: { defaultUnit: string },
 ): string {
-    const trimmed = unit?.trim() ?? "";
+    const trimmed = canonicalUnitText(unit ?? "");
     return trimmed || food.defaultUnit || "g";
 }

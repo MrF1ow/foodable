@@ -986,6 +986,18 @@ const TOOLS_BASE: ToolIdentity[] = [
         hasPhotoHint: false,
     },
     {
+        name: "convert_quantity",
+        category: "logging-food-meals",
+        badges: ["view"],
+        params: [
+            { name: "amount", required: true },
+            { name: "unit", required: true },
+            { name: "to_unit", required: true },
+            { name: "food_id", required: false },
+        ],
+        hasPhotoHint: false,
+    },
+    {
         name: "upsert_food",
         category: "logging-food-meals",
         badges: ["edit"],
@@ -1124,6 +1136,7 @@ export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
     "set_household_rules",
     "search_food",
     "get_food",
+    "convert_quantity",
     "upsert_food",
     "merge_foods",
     "link_product",

@@ -1,6 +1,6 @@
 import { parseIngredient, extractMeasurements } from "parse-ingredient";
 import { isNotMeasuredNote, NOT_MEASURED_PHRASES } from "./not-measured.js";
-import type { QuantityUnit } from "./quantity.js";
+import { resolveQuantityUnit, type QuantityUnit } from "./quantity.js";
 
 export type ParsedIngredient = {
     line: string;
@@ -40,7 +40,7 @@ const COUNT_UNITS = new Set([
 const SIZE_WORDS = new Set(["large", "medium", "small"]);
 
 const RUN_TOGETHER_RE =
-    /\d+(?:\.\d+)?(?:\s+\d+\/\d+)?(?:\s*\/\s*\d+)?\s*(?:kg|kilograms?|g|grams?|mg|lb|lbs|pounds?|oz|ounces?|ml|milliliters?|l|liters?|litres?|cups?|tbsp|tablespoons?|tsp|teaspoons?|fl\s*oz|fluid\s*ounces?|cloves?|cans?|slices?|pieces?|bunch(?:es)?|sprigs?|sticks?|heads?|packages?|pkgs?|jars?|bottles?)\b/gi;
+    /\d+(?:\.\d+)?(?:\s+\d+\/\d+)?(?:\s*\/\s*\d+)?\s*(?:kg|kilograms?|g|grams?|mg|lb|lbs|pounds?|oz|ounces?|ml|milliliters?|l|liters?|litres?|cups?|tbsp|tablespoons?|tsp|teaspoons?|fl\s*oz|fluid\s*ounces?|pints?|quarts?|gallons?|cloves?|cans?|slices?|pieces?|bunch(?:es)?|sprigs?|sticks?|heads?|packages?|pkgs?|jars?|bottles?)\b/gi;
 
 const PARSE_INGREDIENT_OPTS = {
     // Size words (and their abbreviations) describe the food, not a unit.
@@ -140,6 +140,12 @@ export function mapUnit(
     }
     if (volumeMap[id]) {
         return { unit: volumeMap[id]!, countNote: null };
+    }
+    // Anything else the shared unit table knows (pint, quart, gallon) keeps
+    // its own unit; the maps above only exist to fold kg and l into g and ml.
+    const known = resolveQuantityUnit(id) ?? resolveQuantityUnit(text);
+    if (known != null && known !== "each") {
+        return { unit: known, countNote: null };
     }
 
     if (COUNT_UNITS.has(id) || COUNT_UNITS.has(text)) {

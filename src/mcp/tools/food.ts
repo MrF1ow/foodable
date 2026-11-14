@@ -65,6 +65,12 @@ import {
     type AlcoholDisplay,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
+import { dimensionOf, resolveQuantityUnit } from "../../domain/quantity.js";
+import {
+    convertAmount,
+    resolveFactors,
+    type ResolvedFactors,
+} from "../../domain/unit-conversion.js";
 import type { SnapshotRecorder } from "../../domain/agent-actions.js";
 
 /**
@@ -736,6 +742,170 @@ export function registerSearchFoodTool(server: McpServer, ctx: ToolContext) {
     );
 }
 
+export const CONVERT_QUANTITY_OUTPUT_SCHEMA = z.object({
+    ok: z.boolean(),
+    amount: z.number().nullable(),
+    unit: z.string().nullable(),
+    from: z.object({ amount: z.number(), unit: z.string() }),
+    food_id: z.string().nullable(),
+    factors_used: z.array(
+        z.object({
+            factor: z.enum(["grams_per_ml", "grams_per_each"]),
+            value: z.number(),
+            source: z.enum([
+                "product",
+                "product_serving",
+                "food",
+                "food_serving",
+            ]),
+            from_food_id: z.string(),
+            from_food_name: z.string(),
+            serving_label: z.string().nullable(),
+        }),
+    ),
+    reason: z
+        .enum([
+            "unknown_unit",
+            "missing_grams_per_ml",
+            "missing_grams_per_each",
+            "needs_food",
+        ])
+        .nullable(),
+    message: z.string(),
+});
+
+type ConvertQuantityPayload = z.infer<typeof CONVERT_QUANTITY_OUTPUT_SCHEMA>;
+
+/** The rows convert_quantity reads factors from: the plain food and its usual product. */
+async function conversionRowsFor(
+    householdId: string,
+    foodId: string,
+): Promise<{ plain: Food; usual: Food | null }> {
+    const store = liveFoodsStore();
+    const food = await findFoodById(store, householdId, foodId);
+    const listed = await store.listFoods(householdId);
+    const catalog = new Map(listed.map((row) => [row.id, row]));
+    if (food.genericFoodId) {
+        const plain = catalog.get(food.genericFoodId);
+        // A product reads its own factors first, then its plain food's.
+        return plain ? { plain, usual: food } : { plain: food, usual: null };
+    }
+    const product = effectiveFood(food, catalog).product;
+    return {
+        plain: food,
+        usual: product ? (catalog.get(product.id) ?? null) : null,
+    };
+}
+
+export async function convertQuantityPayload(
+    householdId: string,
+    args: { amount: number; unit: string; to_unit: string; food_id?: string },
+): Promise<ConvertQuantityPayload> {
+    const from = { amount: args.amount, unit: args.unit.trim() };
+    const base = {
+        from,
+        food_id: args.food_id ?? null,
+        factors_used: [] as ConvertQuantityPayload["factors_used"],
+    };
+    if (!Number.isFinite(args.amount)) {
+        throw new Error("amount must be a number.");
+    }
+    let factors: ResolvedFactors = { gramsPerMl: null, gramsPerEach: null };
+    let foodName = "This food";
+    if (args.food_id) {
+        const { plain, usual } = await conversionRowsFor(
+            householdId,
+            args.food_id,
+        );
+        factors = resolveFactors(
+            conversionFoodRow(plain),
+            usual ? conversionFoodRow(usual) : null,
+        );
+        foodName = plain.name;
+    }
+    const fromUnit = resolveQuantityUnit(args.unit);
+    const toUnit = resolveQuantityUnit(args.to_unit);
+    if (
+        !args.food_id &&
+        fromUnit != null &&
+        toUnit != null &&
+        dimensionOf(fromUnit) !== dimensionOf(toUnit)
+    ) {
+        return {
+            ...base,
+            ok: false,
+            amount: null,
+            unit: null,
+            reason: "needs_food",
+            message: `Converting ${fromUnit} to ${toUnit} depends on the food: pass food_id.`,
+        };
+    }
+    const result = convertAmount(
+        args.amount,
+        args.unit,
+        args.to_unit,
+        factors,
+        foodName,
+    );
+    if (!result.ok) {
+        return {
+            ...base,
+            ok: false,
+            amount: null,
+            unit: null,
+            reason: result.reason,
+            message: result.message,
+        };
+    }
+    const used = new Map<
+        string,
+        ConvertQuantityPayload["factors_used"][number]
+    >();
+    for (const step of result.steps) {
+        if (step.kind === "table") continue;
+        used.set(step.kind, {
+            factor: step.kind,
+            value: step.factor.value,
+            source: step.factor.source,
+            from_food_id: step.factor.foodId,
+            from_food_name: step.factor.foodName,
+            serving_label: step.factor.servingLabel,
+        });
+    }
+    const factorText = [...used.values()]
+        .map((f) => {
+            const what =
+                f.factor === "grams_per_ml"
+                    ? `${f.value} g per ml`
+                    : `${f.value} g per item`;
+            const where = f.serving_label
+                ? `${f.from_food_name}'s serving "${f.serving_label}"`
+                : f.from_food_name;
+            return `${what} from ${where}`;
+        })
+        .join("; ");
+    const fromText = `${from.amount} ${resolveQuantityUnit(from.unit) ?? from.unit}`;
+    return {
+        ...base,
+        ok: true,
+        amount: result.amount,
+        unit: result.unit,
+        factors_used: [...used.values()],
+        reason: null,
+        message: `${fromText} = ${result.amount} ${result.unit}${factorText ? ` (${factorText})` : ""}.`,
+    };
+}
+
+function conversionFoodRow(row: Food) {
+    return {
+        id: row.id,
+        name: row.name,
+        gramsPerMl: row.gramsPerMl,
+        gramsPerEach: row.gramsPerEach,
+        serving: row.serving,
+    };
+}
+
 export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, analytics, runDestructive } = ctx;
     server.registerTool(
@@ -813,6 +983,50 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                                 text: `${payload.name} ${payload.id}`,
                             },
                         ],
+                        structuredContent: payload,
+                    };
+                },
+                analytics,
+            ),
+    );
+
+    server.registerTool(
+        "convert_quantity",
+        {
+            title: "Convert Quantity",
+            description:
+                "Convert an amount between units, for a food when the units differ in kind. Within weight (mg, g, kg, oz, lb) or within volume (ml, l, tsp, tbsp, fl oz, cup, pint, quart, gallon) the unit table alone converts and food_id is optional. Between weight, volume and count (each) the food's own grams per ml or grams per item is required: read from the usual product first (its stored value, then its serving line when that line states both a volume and a weight, such as '2 tbsp (30 g)'), then the plain food. Nothing is guessed: with no factor the result is ok false with the factor named, and you should ask the person or set it with upsert_food (grams_per_ml, grams_per_each) rather than assume 1 g = 1 ml. Cup, tbsp and tsp are the US nutrition-label sizes (240, 15, 5 ml); pint, quart and gallon are US customary. Writes (fridge, grocery, recipes, usual amounts) accept the same spellings ('cups', 'pints', 'litres') and store the standard unit.",
+            annotations: {
+                readOnlyHint: true,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                amount: z.coerce
+                    .number()
+                    .describe("The amount to convert, in `unit`."),
+                unit: z.string().describe("The unit the amount is in."),
+                to_unit: z.string().describe("The unit to convert to."),
+                food_id: z
+                    .string()
+                    .optional()
+                    .describe(
+                        "Household catalog food (plain food or product). Required to convert between weight, volume and count.",
+                    ),
+            }),
+            outputSchema: CONVERT_QUANTITY_OUTPUT_SCHEMA,
+        },
+        async (args) =>
+            withAnalytics(
+                "convert_quantity",
+                async () => {
+                    const payload = await convertQuantityPayload(
+                        await callerHouseholdId(),
+                        args,
+                    );
+                    return {
+                        content: [{ type: "text", text: payload.message }],
                         structuredContent: payload,
                     };
                 },

@@ -455,6 +455,16 @@ describe("parseUsualPurchase invalid unit before bad amount", () => {
             ),
         ).rejects.toThrow("Pick a known unit for the usual amount.");
     });
+
+    test("a written spelling of a unit is stored as the standard unit", async () => {
+        const settings = createMemorySettingsStore();
+        const parsed = await parseUsualPurchase(
+            HH,
+            { usualAmount: { amount: 2, unit: " Pints " } },
+            settings,
+        );
+        expect(parsed.usualAmount).toEqual({ amount: 2, unit: "pint" });
+    });
 });
 
 describe("usual purchase rejections: exact message and nothing written", () => {

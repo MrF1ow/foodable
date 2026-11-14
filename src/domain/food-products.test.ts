@@ -643,3 +643,52 @@ test("invalid food patch does not commit belongs-to first", async () => {
     const product = (await store.getFood(HH, solo.id))!;
     expect(product.genericFoodId).toBeNull();
 });
+
+test("effectiveFood reads grams per ml from the usual product's serving line, never from a one-sided one", async () => {
+    const store = createMemoryFoodsStore();
+    const plain = await store.insertFood(
+        newFood({ householdId: HH, kind: "food", name: "Peanut butter" }),
+    );
+    const usual = await store.insertFood(
+        newFood({
+            householdId: HH,
+            kind: plain.kind,
+            name: "Jif Creamy",
+            genericFoodId: plain.id,
+            serving: { label: "2 tbsp (32 g)", amount: 32, unit: "g" },
+        }),
+    );
+    const linked = { ...plain, usualProductId: usual.id };
+    const eff = effectiveFood(
+        linked,
+        new Map<string, Food>([
+            [plain.id, linked],
+            [usual.id, usual],
+        ]),
+    );
+    expect(eff.gramsPerMl).toBe(1.067);
+
+    const oneSided = {
+        ...usual,
+        serving: { label: "1 tbsp (15 ml)", amount: 15, unit: "g" as const },
+    };
+    const none = effectiveFood(
+        linked,
+        new Map<string, Food>([
+            [plain.id, linked],
+            [usual.id, oneSided],
+        ]),
+    );
+    expect(none.gramsPerMl).toBeNull();
+    // The plain food's own stored value is the fallback.
+    const withOwn = { ...linked, gramsPerMl: 0.95 };
+    expect(
+        effectiveFood(
+            withOwn,
+            new Map<string, Food>([
+                [plain.id, withOwn],
+                [usual.id, oneSided],
+            ]),
+        ).gramsPerMl,
+    ).toBe(0.95);
+});

@@ -7,7 +7,8 @@ import {
 import { additiveRisk, type AdditiveRisk } from "./additive-risk.js";
 import { filterOffNutrientLevels } from "./off-nutrient-levels.js";
 import type { NutrientLevel } from "./product-score.js";
-import { isQuantityUnit } from "./quantity.js";
+import { canonicalUnitText, isQuantityUnit } from "./quantity.js";
+import { resolveFactors, type ConversionFoodRow } from "./unit-conversion.js";
 import {
     cleanupDismissalsForFood,
     dismissalKeyString,
@@ -365,7 +366,7 @@ export async function parseUsualPurchase(
         } else {
             const row = patch.usualAmount;
             const amt = row.amount;
-            const unitRaw = row.unit?.trim() ?? "";
+            const unitRaw = canonicalUnitText(row.unit ?? "");
             const hasAmt = amt != null && String(amt).trim() !== "";
             const hasUnit = unitRaw !== "";
             if (hasAmt !== hasUnit) {
@@ -2149,7 +2150,38 @@ export function isUsualGroceryLine(input: {
     );
 }
 
+function conversionRow(row: Food): ConversionFoodRow {
+    return {
+        id: row.id,
+        name: row.name,
+        gramsPerMl: row.gramsPerMl,
+        gramsPerEach: row.gramsPerEach,
+        serving: row.serving,
+    };
+}
+
+/**
+ * The food as recipes, stock, groceries and logs see it: the usual product's
+ * nutrition where it has any, and the conversion factors from
+ * `resolveFactors` (the product's stored or label-stated factor first, then
+ * the plain food's).
+ */
 export function effectiveFood(
+    food: Food,
+    catalog: ReadonlyMap<string, Food>,
+): EffectiveFood {
+    const eff = effectiveFoodNutrition(food, catalog);
+    const usual = eff.product ? (catalog.get(eff.product.id) ?? null) : null;
+    const factors = resolveFactors(
+        conversionRow(food),
+        usual ? conversionRow(usual) : null,
+    );
+    eff.gramsPerMl = factors.gramsPerMl?.value ?? null;
+    eff.gramsPerEach = factors.gramsPerEach?.value ?? null;
+    return eff;
+}
+
+function effectiveFoodNutrition(
     food: Food,
     catalog: ReadonlyMap<string, Food>,
 ): EffectiveFood {
