@@ -13,7 +13,13 @@ import {
 } from "./recipe-mention-words.js";
 import { findMissingMentions } from "./recipe-mentions.js";
 
-type Ingredient = { name: string; foodName?: string | null; foodId?: string };
+type Ingredient = {
+    name: string;
+    foodName?: string | null;
+    foodId?: string;
+    genericFoodId?: string | null;
+    genericFoodName?: string | null;
+};
 
 function warn(
     steps: string[],
@@ -767,6 +773,218 @@ describe("keys and spelling", () => {
             ),
         ).toEqual(["gruyere"]);
         expect(warn(["Add the jalapeño."], [{ name: "jalapeno" }])).toEqual([]);
+    });
+});
+
+describe("a product's plain food is covered by the product", () => {
+    test("the plain food's name covers a mention though the product's own name lacks it", () => {
+        expect(
+            names(
+                warn(
+                    ["Beat the cream cheese until smooth."],
+                    [
+                        {
+                            name: "Philadelphia Original",
+                            foodName: "Philadelphia Original",
+                        },
+                    ],
+                ),
+            ),
+        ).toEqual(["cream cheese"]);
+        expect(
+            warn(
+                ["Beat the cream cheese until smooth."],
+                [
+                    {
+                        name: "Philadelphia Original",
+                        foodName: "Philadelphia Original",
+                        genericFoodName: "Cream cheese",
+                    },
+                ],
+            ),
+        ).toEqual([]);
+    });
+
+    test("the plain food's id covers a catalog mention of it", () => {
+        const eggs = { name: "Eggs", foodId: "plain-eggs" };
+        expect(
+            warn(
+                ["Whisk 2 eggs."],
+                [{ name: "Happy Hens", foodId: "product-1" }],
+                { vocabulary: [eggs] },
+            ),
+        ).toHaveLength(1);
+        expect(
+            warn(
+                ["Whisk 2 eggs."],
+                [
+                    {
+                        name: "Happy Hens",
+                        foodId: "product-1",
+                        genericFoodId: "plain-eggs",
+                    },
+                ],
+                { vocabulary: [eggs] },
+            ),
+        ).toEqual([]);
+    });
+});
+
+describe("other spellings of one food", () => {
+    test("parmigiano-reggiano is parmesan", () => {
+        expect(
+            warn(["Top with parmesan."], [{ name: "parmigiano-reggiano" }]),
+        ).toEqual([]);
+        expect(
+            warn(["Top with parmigiano reggiano."], [{ name: "parmesan" }]),
+        ).toEqual([]);
+        expect(
+            names(warn(["Top with parmigiano-reggiano."], [{ name: "flour" }])),
+        ).toEqual(["parmesan"]);
+    });
+
+    test("a listed panko covers the breadcrumbs a step names", () => {
+        expect(
+            warn(["Top with breadcrumbs and bake."], [{ name: "panko" }]),
+        ).toEqual([]);
+        expect(
+            warn(["Top with bread crumbs and bake."], [{ name: "panko" }]),
+        ).toEqual([]);
+        expect(
+            names(
+                warn(["Top with breadcrumbs and bake."], [{ name: "flour" }]),
+            ),
+        ).toEqual(["breadcrumb"]);
+    });
+});
+
+describe("hyphenated compounds and equipment are not a mention", () => {
+    const flour = [{ name: "flour" }];
+    const quiet = (step: string) => names(warn([step], flour));
+
+    test("cream of tartar is its own food, never cream", () => {
+        expect(quiet("Add cream of tartar.")).toEqual(["cream of tartar"]);
+        expect(
+            warn(["Add cream of tartar."], [{ name: "cream of tartar" }]),
+        ).toEqual([]);
+        expect(
+            warn(["Add cream of tartar."], [{ name: "heavy cream" }]),
+        ).toHaveLength(1);
+    });
+
+    test("a food word hyphenated to another word is not that food", () => {
+        expect(quiet("Use sugar-free syrup.")).toEqual([]);
+        expect(quiet("This is egg-free and dairy-free.")).toEqual([]);
+        expect(quiet("Season with lemon-pepper.")).toEqual([]);
+        expect(quiet("A gluten-free, butter-flavored cake.")).toEqual([]);
+    });
+
+    test("a hyphenated compound that is a listed food still matches", () => {
+        expect(quiet("Add the all-purpose flour.")).toEqual([]);
+        expect(quiet("Add olive-oil.")).toEqual(["olive oil"]);
+        expect(
+            names(warn(["Stir in the cashew-milk."], [{ name: "flour" }])),
+        ).toEqual(["cashew milk"]);
+    });
+
+    test("a food word before a piece of equipment is not that food", () => {
+        for (const step of [
+            "Use a butter knife.",
+            "Set an egg timer.",
+            "Crush it in a garlic press.",
+            "Pass it through a salt shaker.",
+            "Cook in the rice cooker.",
+            "Use a pepper grinder.",
+            "Pour into the cheese board.",
+        ]) {
+            expect(quiet(step)).toEqual([]);
+        }
+    });
+
+    test("egg wash is still the egg", () => {
+        expect(quiet("Brush with egg wash.")).toEqual(["egg"]);
+    });
+
+    test("a plain mention beside equipment still warns", () => {
+        expect(quiet("Use a butter knife to spread butter.")).toEqual([
+            "butter",
+        ]);
+    });
+});
+
+describe("plant milks, butters and creams are one food", () => {
+    const flour = [{ name: "flour" }];
+
+    test.each([
+        ["Stir in the almond milk.", "almond milk"],
+        ["Add oat milk.", "oat milk"],
+        ["Add soy milk.", "soy milk"],
+        ["Add rice milk.", "rice milk"],
+        ["Spread almond butter on top.", "almond butter"],
+        ["Spread cashew butter on top.", "cashew butter"],
+        ["Blend in the cashew cream.", "cashew cream"],
+        ["Top with coconut cream.", "coconut cream"],
+    ])("%s warns once, as %s", (step, key) => {
+        expect(names(warn([step], flour))).toEqual([key]);
+    });
+
+    test("a listed milk or butter does not cover the plant version", () => {
+        expect(
+            names(warn(["Stir in the almond milk."], [{ name: "milk" }])),
+        ).toEqual(["almond milk"]);
+        expect(
+            names(warn(["Spread almond butter."], [{ name: "butter" }])),
+        ).toEqual(["almond butter"]);
+        expect(
+            names(warn(["Blend in coconut cream."], [{ name: "cream" }])),
+        ).toEqual(["coconut cream"]);
+    });
+
+    test("the listed plant version covers itself, with a brand or size word", () => {
+        expect(
+            warn(
+                ["Stir in the almond milk."],
+                [{ name: "unsweetened almond milk" }],
+            ),
+        ).toEqual([]);
+    });
+});
+
+describe("a step that leaves a food out or swaps it is not a mention", () => {
+    const base = [{ name: "chicken" }, { name: "onion" }];
+    const quiet = (step: string) => names(warn([step], base));
+
+    test.each([
+        "Do not add any butter; skip the cheese.",
+        "Without yogurt the sauce will split.",
+        "If you don't have shallots, use onion instead; no cream needed.",
+        "Do not substitute honey for sugar.",
+        "Substitute almond milk for regular milk if vegan.",
+        "Avoid using garlic powder here.",
+        "Omit the salt.",
+        "Leave out the mustard, or use it rather than ketchup.",
+        "Use chicken instead of butter.",
+        "Use chicken in place of lemon juice.",
+        "Never add water, and don't stir the honey in.",
+    ])("%s", (step) => {
+        expect(quiet(step)).toEqual([]);
+    });
+
+    test("a substitute named with 'instead' is optional, so it is quiet too", () => {
+        expect(quiet("Use honey instead.")).toEqual([]);
+        expect(quiet("Use honey instead of sugar.")).toEqual([]);
+    });
+
+    test("a food named after the clause break still warns", () => {
+        expect(quiet("Do not stir; add 2 eggs.")).toEqual(["egg"]);
+        expect(quiet("Skip the cheese, then add 2 eggs.")).toEqual(["egg"]);
+    });
+
+    test("an ordinary mention warns, and a later affirmative one of a skipped food too", () => {
+        expect(quiet("Add 2 eggs.")).toEqual(["egg"]);
+        expect(quiet("Skip the butter. Later, stir in the butter.")).toEqual([
+            "butter",
+        ]);
     });
 });
 

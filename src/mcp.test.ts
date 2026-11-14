@@ -12280,6 +12280,61 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                 });
             },
         );
+
+        test.each(ERAS)(
+            "a duplicate import still lists the existing recipe's warnings (%p)",
+            async (mode) => {
+                const { IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA } =
+                    await import("./mcp/tools/recipes.js");
+                const { join } = await import("node:path");
+                const page = await Bun.file(
+                    join(
+                        import.meta.dir,
+                        "domain/fixtures/recipe-pages/pad-see-ew.html",
+                    ),
+                ).text();
+                db.recipeImportFetcher = {
+                    async robotsAllows() {
+                        return true;
+                    },
+                    async fetchPage() {
+                        return {
+                            ok: true as const,
+                            url: "https://example.com/pad-see-ew-again",
+                            status: 200,
+                            contentType: "text/html",
+                            body: page,
+                        };
+                    },
+                };
+                await withHttpClient("u1", mode, async (client) => {
+                    const call = caller(client);
+                    const args = {
+                        url: "https://example.com/pad-see-ew-again",
+                    };
+                    const first = IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                        (await call("import_recipe_from_url", args))
+                            .structuredContent,
+                    );
+                    expect(first.mention_warnings.map((w) => w.key)).toEqual([
+                        "egg",
+                    ]);
+                    const again = await call("import_recipe_from_url", args);
+                    expect(again.isError).toBeFalsy();
+                    const body = IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                        again.structuredContent,
+                    );
+                    expect(body.status).toBe("duplicate");
+                    expect(body.recipe_id).toBe(first.recipe_id);
+                    expect(body.mention_warnings.map((w) => w.key)).toEqual([
+                        "egg",
+                    ]);
+                    expect(textOf(again)).toContain(
+                        "The steps mention egg, which isn't an ingredient.",
+                    );
+                });
+            },
+        );
     });
 
     describe("widget-recipe-card flag", () => {

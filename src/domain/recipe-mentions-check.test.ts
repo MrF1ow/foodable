@@ -4,6 +4,8 @@ import {
     createMemoryFoodsStore,
     findOrCreateManualFood,
     findOrCreateManualFoodForRecipeImport,
+    FoodsInputError,
+    newFood,
     type FoodsStore,
 } from "./foods.js";
 import { importRecipeFromUrl, recheckRecipe } from "./recipe-import.js";
@@ -484,7 +486,7 @@ describe("addMentionedIngredient's own cost", () => {
         expect(added.createdFood).toBe(false);
     });
 
-    test("the recipe is re-checked once, verified or not", async () => {
+    test("an unverified recipe is re-checked once and a verified one is left alone", async () => {
         for (const verified of [false, true]) {
             const { recipes, foods, recipeId } = await recipeWith({
                 steps: "Fry the rice.\nAdd 2 eggs and stir.",
@@ -497,8 +499,68 @@ describe("addMentionedIngredient's own cost", () => {
                 recipeId,
                 "egg",
             );
-            expect(watched.count("setVerification")).toBe(1);
+            expect(watched.count("setVerification")).toBe(verified ? 0 : 1);
         }
+    });
+
+    test("adding a mentioned food keeps a verified recipe verified when another line has no amount", async () => {
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: "Fry the rice and the onion.\nScramble 2 eggs.",
+            verified: true,
+        });
+        const onion = await findOrCreateManualFood(foods, HH, "food", "Onion");
+        await recipes.insertIngredient({
+            id: crypto.randomUUID(),
+            householdId: HH,
+            recipeId,
+            kind: "food",
+            displayName: "Onion",
+            quantity: null,
+            foodId: onion.id,
+            sortOrder: 1,
+            note: "finely chopped",
+        });
+        await addMentionedIngredient({ recipes, foods }, HH, recipeId, "egg");
+        expect((await recipes.getRecipe(HH, recipeId))?.verification).toBe(
+            "verified",
+        );
+        expect(await ingredientNames(recipes, recipeId)).toContain("egg");
+    });
+
+    test("two Adds of one food at once never crash: a new food's loser is an input error", async () => {
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: "Fry the rice.\nAdd 2 eggs and stir.",
+        });
+        const racing: FoodsStore = {
+            ...foods,
+            insertFood: async () => {
+                throw new FoodsInputError("That food already exists.");
+            },
+        };
+        await expect(
+            addMentionedIngredient(
+                { recipes, foods: racing },
+                HH,
+                recipeId,
+                "egg",
+            ),
+        ).rejects.toBeInstanceOf(RecipeInputError);
+        expect(await ingredientNames(recipes, recipeId)).toEqual(["rice"]);
+    });
+
+    test("two Adds of a catalog food at once both succeed and leave two lines (accepted: a member can delete one)", async () => {
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: "Fry the rice.\nAdd 2 eggs and stir.",
+        });
+        await findOrCreateManualFood(foods, HH, "food", "Eggs");
+        const results = await Promise.allSettled([
+            addMentionedIngredient({ recipes, foods }, HH, recipeId, "egg"),
+            addMentionedIngredient({ recipes, foods }, HH, recipeId, "egg"),
+        ]);
+        expect(results.map((r) => r.status)).toEqual([
+            "fulfilled",
+            "fulfilled",
+        ]);
     });
 
     test("a hand-made recipe gets a clear error", async () => {
@@ -509,6 +571,78 @@ describe("addMentionedIngredient's own cost", () => {
         await expect(
             addMentionedIngredient({ recipes, foods }, HH, recipeId, "egg"),
         ).rejects.toThrow("This recipe has no step check.");
+    });
+});
+
+describe("an ingredient that is a brand's product covers the plain food's mention", () => {
+    async function withProduct(
+        plainName: string,
+        productName: string,
+        steps: string,
+    ) {
+        const { recipes, foods, recipeId } = await recipeWith({ steps });
+        const plain = await findOrCreateManualFood(
+            foods,
+            HH,
+            "food",
+            plainName,
+        );
+        const product = await foods.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: productName,
+                brand: "Brand",
+                genericFoodId: plain.id,
+            }),
+        );
+        await recipes.insertIngredient({
+            id: crypto.randomUUID(),
+            householdId: HH,
+            recipeId,
+            kind: "food",
+            displayName: product.name,
+            quantity: { amount: 100, unit: "g" },
+            foodId: product.id,
+            sortOrder: 1,
+            note: null,
+        });
+        return { recipes, foods, recipeId };
+    }
+
+    test("a product of Cream cheese covers 'the cream cheese' though its own name lacks the words", async () => {
+        const { recipes, foods, recipeId } = await withProduct(
+            "Cream cheese",
+            "Philadelphia Original",
+            "Fry the rice.\nBeat the cream cheese until smooth.",
+        );
+        expect(
+            await recipeMentionWarnings({ recipes, foods }, HH, recipeId),
+        ).toEqual([]);
+    });
+
+    test("a product of Eggs covers a scrambled egg", async () => {
+        const { recipes, foods, recipeId } = await withProduct(
+            "Eggs",
+            "Happy Hens Free Range",
+            "Fry the rice.\nWhisk 2 eggs and pour in.",
+        );
+        expect(
+            await recipeMentionWarnings({ recipes, foods }, HH, recipeId),
+        ).toEqual([]);
+    });
+
+    test("a product of another food leaves the gap showing", async () => {
+        const { recipes, foods, recipeId } = await withProduct(
+            "Butter",
+            "Happy Hens Free Range",
+            "Fry the rice.\nWhisk 2 eggs and pour in.",
+        );
+        expect(
+            (await recipeMentionWarnings({ recipes, foods }, HH, recipeId)).map(
+                (w) => w.key,
+            ),
+        ).toEqual(["egg"]);
     });
 });
 

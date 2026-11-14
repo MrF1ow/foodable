@@ -5,7 +5,6 @@ import {
     findFoodById,
     findOrCreateManualFoodForRecipeImport,
 } from "./foods.js";
-import { recheckRecipe } from "./recipe-import.js";
 import type { RecipeImport } from "./recipe-import.js";
 import {
     type MentionWarning,
@@ -80,13 +79,36 @@ export async function recipeMentionWarnings(
         householdId,
         ingredients.flatMap((i) => (i.foodId ? [i.foodId] : [])),
     );
+    // A brand's product stands for the plain food it belongs to.
+    const plainIds = [
+        ...new Set(
+            [...linked.values()].flatMap((f) =>
+                f.genericFoodId && !linked.has(f.genericFoodId)
+                    ? [f.genericFoodId]
+                    : [],
+            ),
+        ),
+    ];
+    const plain =
+        plainIds.length > 0
+            ? await stores.foods.getFoodsByIds(householdId, plainIds)
+            : new Map<string, Food>();
     return findMissingMentions({
         instructions: recipe.instructions,
-        ingredients: ingredients.map((i) => ({
-            name: i.displayName,
-            foodName: i.foodId ? (linked.get(i.foodId)?.name ?? null) : null,
-            foodId: i.foodId,
-        })),
+        ingredients: ingredients.map((i) => {
+            const food = i.foodId ? linked.get(i.foodId) : undefined;
+            const generic = food?.genericFoodId
+                ? (linked.get(food.genericFoodId) ??
+                  plain.get(food.genericFoodId))
+                : undefined;
+            return {
+                name: i.displayName,
+                foodName: food?.name ?? null,
+                foodId: i.foodId,
+                genericFoodId: food?.genericFoodId ?? null,
+                genericFoodName: generic?.name ?? null,
+            };
+        }),
         vocabulary: await mentionVocabulary(stores.foods, householdId),
         dismissed: importRow.dismissedMentions,
     });
@@ -200,7 +222,7 @@ export async function addMentionedIngredient(
     recipeId: string,
     key: string,
 ): Promise<AddedMention> {
-    const { recipe, warning } = await flaggedMention(
+    const { warning } = await flaggedMention(
         stores,
         householdId,
         recipeId,
@@ -233,12 +255,20 @@ export async function addMentionedIngredient(
                 return stores.foods.insertFood(row);
             },
         };
-        food = await findOrCreateManualFoodForRecipeImport(
-            watched,
-            householdId,
-            "food",
-            warning.food,
-        );
+        try {
+            food = await findOrCreateManualFoodForRecipeImport(
+                watched,
+                householdId,
+                "food",
+                warning.food,
+            );
+        } catch (err) {
+            // Two Adds of one new food at once: the loser is told, not crashed.
+            if (err instanceof FoodsInputError) {
+                throw new RecipeInputError(err.message);
+            }
+            throw err;
+        }
     }
     const quantity =
         warning.amount != null
@@ -256,9 +286,7 @@ export async function addMentionedIngredient(
             note: warning.note,
         },
     );
-    // Adding to an unverified recipe already re-checks it.
-    if (recipe.verification !== "unverified") {
-        await recheckRecipe(stores.recipes, householdId, recipeId);
-    }
+    // The ordinary add re-checks an unverified recipe and leaves a verified
+    // one verified; a warning is advice, so this must not do more than that.
     return { ingredient, foodName: food.name, createdFood };
 }

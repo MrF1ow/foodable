@@ -2010,9 +2010,13 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                       retry: args.retry === true,
                                   },
                               );
+                              // A duplicate points at a recipe already saved, whose
+                              // warnings are as live as a fresh import's.
                               const mentionWarnings =
                                   outcome.status === "imported" ||
-                                  outcome.status === "unverified_needs_review"
+                                  outcome.status ===
+                                      "unverified_needs_review" ||
+                                  outcome.status === "duplicate"
                                       ? await mentionWarningsFor(
                                             actor.householdId,
                                             outcome.recipeId,

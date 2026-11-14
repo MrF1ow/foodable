@@ -59,6 +59,9 @@ export type MentionIngredient = {
     name: string;
     foodName?: string | null;
     foodId?: string | null;
+    /** The plain food a brand's product belongs to, and its name. */
+    genericFoodId?: string | null;
+    genericFoodName?: string | null;
 };
 
 const EXCERPT_MAX = 160;
@@ -101,6 +104,60 @@ const ORANGE_LEADS = new Set([
     "some",
     "the",
     "with",
+]);
+
+/** Gear a food word can name without being the food: "butter knife", "egg timer". */
+const EQUIPMENT_WORDS = new Set([
+    "board",
+    "bowl",
+    "brush",
+    "cooker",
+    "cutter",
+    "dish",
+    "grater",
+    "grinder",
+    "keeper",
+    "knife",
+    "knives",
+    "maker",
+    "masher",
+    "mill",
+    "mold",
+    "mould",
+    "pan",
+    "peeler",
+    "pot",
+    "press",
+    "rack",
+    "scale",
+    "shaker",
+    "slicer",
+    "spoon",
+    "steamer",
+    "timer",
+]);
+
+/**
+ * Words that, earlier in the same clause, say a food is left out or swapped
+ * ("skip the cheese", "instead of butter"): the step is not asking for it.
+ */
+const LEAVE_OUT_CUES = new Set([
+    "avoid",
+    "cannot",
+    "never",
+    "no",
+    "not",
+    "omit",
+    "skip",
+    "without",
+]);
+
+/** Words that, anywhere in a clause, make every food in it optional or swapped. */
+const SUBSTITUTION_WORDS = new Set([
+    "substitute",
+    "substituted",
+    "substituting",
+    "substitution",
 ]);
 
 /** Words that describe how a food is prepared; kept as the mention's note. */
@@ -241,6 +298,8 @@ type Token = {
     end: number;
     /** A comma, bracket or sentence end sits between this token and the last. */
     breakBefore: boolean;
+    /** Only a hyphen joins this token to the last one ("sugar-free"). */
+    hyphenBefore: boolean;
 };
 
 const TOKEN_RE = /\p{L}+|\d+(?:[./]\d+)?|[¼½¾⅓⅔]/gu;
@@ -257,6 +316,7 @@ function tokenize(folded: string): Token[] {
             start: m.index,
             end: m.index + m[0].length,
             breakBefore: tokens.length === 0 || BREAK_RE.test(gap),
+            hyphenBefore: gap === "-" || gap === "\u2010",
         });
         previousEnd = m.index + m[0].length;
     }
@@ -444,7 +504,14 @@ function buildPantry(ingredients: readonly MentionIngredient[]): Pantry {
     const names: string[] = [];
     for (const ingredient of ingredients) {
         if (ingredient.foodId != null) foodIds.add(ingredient.foodId);
-        for (const name of [ingredient.name, ingredient.foodName]) {
+        if (ingredient.genericFoodId != null) {
+            foodIds.add(ingredient.genericFoodId);
+        }
+        for (const name of [
+            ingredient.name,
+            ingredient.foodName,
+            ingredient.genericFoodName,
+        ]) {
             if (!name) continue;
             names.push(` ${matchWords(name).join(" ")} `);
         }
@@ -664,6 +731,62 @@ function isNotUsedAsFood(
     return false;
 }
 
+/**
+ * A mention the step does not ask for: a food hyphenated to another word
+ * ("sugar-free"), a piece of gear ("butter knife"), or one the clause leaves
+ * out or swaps ("do not add butter", "substitute honey for sugar", "use oil
+ * instead"). Quiet is the safe answer.
+ */
+function isNotAsked(
+    entry: IndexedEntry,
+    units: readonly Unit[],
+    tokens: readonly Token[],
+    at: number,
+): boolean {
+    const first = units[at]!.first;
+    const last = units[at + entry.words.length - 1]!.last;
+    const after = tokens[last + 1];
+    if (tokens[first]!.hyphenBefore || after?.hyphenBefore) return true;
+    if (after && !after.breakBefore) {
+        const next = plainWords(after.text)[0] ?? after.text;
+        if (EQUIPMENT_WORDS.has(after.text) || EQUIPMENT_WORDS.has(next)) {
+            return true;
+        }
+        if (after.text === "instead") return true;
+    }
+    let from = first;
+    while (from > 0 && !tokens[from]!.breakBefore) from--;
+    for (let i = from; i < first; i++) {
+        const text = tokens[i]!.text;
+        if (LEAVE_OUT_CUES.has(text)) return true;
+        // "don't", "doesn't", "can't": the "t" after an n-word.
+        if (text === "t" && tokens[i - 1]?.text.endsWith("n") && i > from) {
+            return true;
+        }
+        if (text === "out" && tokens[i - 1]?.text === "leave" && i > from) {
+            return true;
+        }
+        if (
+            (text === "instead" || text === "rather") &&
+            (tokens[i + 1]?.text === "of" || tokens[i + 1]?.text === "than")
+        ) {
+            return true;
+        }
+        if (
+            text === "place" &&
+            tokens[i - 1]?.text === "in" &&
+            tokens[i + 1]?.text === "of"
+        ) {
+            return true;
+        }
+    }
+    for (let i = from; i < tokens.length; i++) {
+        if (i > from && tokens[i]!.breakBefore) break;
+        if (SUBSTITUTION_WORDS.has(tokens[i]!.text)) return true;
+    }
+    return false;
+}
+
 export function findMissingMentions(input: {
     instructions: string | null;
     ingredients: readonly MentionIngredient[];
@@ -707,6 +830,7 @@ export function findMissingMentions(input: {
                 isNeverFlagged(entry) ||
                 dismissed.has(entry.id) ||
                 isNotUsedAsFood(entry, units, tokens, here) ||
+                isNotAsked(entry, units, tokens, here) ||
                 isCovered(pantry, vocabulary, entry)
             ) {
                 continue;
