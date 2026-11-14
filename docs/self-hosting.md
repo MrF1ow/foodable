@@ -27,6 +27,7 @@ You can run several Foodable processes behind a load balancer as long as they sh
 - Rate-limit windows and authentication bans (`rate_limit_*`)
 - Sticky flag pins and kill-switch snapshots (`flag_pins`, `flag_snapshots`)
 - Recipe fetch memory (host refusals and dead links)
+- Agent activity (`agent_actions`): what an AI agent deleted, cleared or overwrote, with a snapshot for undo until it is purged
 - Export download archives, notices, and every other table the app writes
 
 **Per instance by design (safe to differ between processes):**
@@ -40,7 +41,7 @@ You can run several Foodable processes behind a load balancer as long as they sh
 
 `GET /robots.txt` reads the file from disk on each request; there is no in-memory cache.
 
-**Background sweeps** (export archives, login sessions, rate limits, flag pins, unverified recipes, fetch-memory expiry, automatic restock checks) start on every instance. Each sweep uses overlap guards so one process does not run two ticks at once. Deletes and expirations target Postgres rows idempotently, so concurrent sweeps on different instances are safe.
+**Background sweeps** (export archives, login sessions, rate limits, flag pins, unverified recipes, fetch-memory expiry, automatic restock checks, agent-action snapshot purge) start on every instance. Each sweep uses overlap guards so one process does not run two ticks at once. Deletes and expirations target Postgres rows idempotently, so concurrent sweeps on different instances are safe.
 
 ## Database
 
@@ -272,6 +273,17 @@ Without `RAILWAY_TOKEN`, Foodable never calls Railway's flag service at runtime.
 Unknown flag names and unknown modes log a warning once at startup and are ignored. Flags you omit use their registry fallback.
 
 Share links make public pages that need no sign-in (`/s/:token`). They stay off, with no Share buttons and every link answering 404, unless `mcp-share-links` is on (for example `mcp-share-links:internal`); no other flag turns them on.
+
+The grocery, store and kitchen admin tools for AI agents (`list_stores`, `create_store`, `update_store`, `delete_store`, `reorder_stores`, `set_store_sections`, `clear_grocery_list`, `move_grocery_lines`, `update_grocery_line`, `delete_grocery_lines`, `move_fridge_items`, `delete_fridge_items`, `remove_usual`) stay out of `tools/list` unless `mcp-household-admin` is on (default off, for example `mcp-household-admin:internal`).
+
+## Agent changes and undo
+
+Destructive MCP tools (the delete, clear, remove, discard, unplan and merge tools, and the admin tools above that change or remove data; not `list_stores`, `create_store` or `delete_account`) change data without asking the agent's user first. Foodable records each one and lets the household undo it:
+
+- **Settings › AI connections** has an "Agents may make destructive changes" switch. It defaults to on and only the household owner can change it. When it is Off, agents can still read and add, but a destructive tool is refused with a message naming the setting, and nothing changes. It is stored in the household preferences, so it works the same with or without feature flags.
+- **Agent activity**, on the same page, lists what agents changed (a sentence saying what, which connection, acting as whom, when). The owner, or the member the agent acted as, can undo an entry within 24 hours; Today shows a strip of recent changes they can undo. An undo restores only what the action changed; if a person has edited the same data since, it can stop with a conflict and change nothing.
+- Each entry keeps a snapshot of the rows it changed for those 24 hours, then a sweep (every 15 minutes, on every instance) clears the snapshot. The entry stays as history. The snapshot is the only place deleted contents survive, so a database backup taken inside the window contains them.
+- Migration `20261114000000_agent_actions.sql` adds the `agent_actions` table; it is additive.
 
 ## Client address (rate limits)
 
