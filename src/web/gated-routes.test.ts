@@ -269,7 +269,7 @@ describe("viewerChromeWithAttention flags", () => {
         expect(chrome.identity?.householdName).toBe("The Test household");
     });
 
-    test("picture versions are read once with ui-profile-pictures on, never with it off", async () => {
+    test("picture versions are read once per page", async () => {
         const identity = async (viewer: HouseholdMember) => ({
             viewerUserId: viewer.userId,
             viewerName: viewer.displayName,
@@ -285,7 +285,6 @@ describe("viewerChromeWithAttention flags", () => {
             return new Map([[ALICE, stamp]]);
         };
 
-        setFlagsForTests(createMemoryFlags({ "ui-profile-pictures": true }));
         const on = await viewerChromeWithAttention(
             { theme: "light" },
             member,
@@ -294,7 +293,6 @@ describe("viewerChromeWithAttention flags", () => {
             versions,
         );
         expect(reads).toBe(1);
-        expect(on.flags.uiProfilePictures).toBe(true);
         expect(on.identity?.avatarVersions?.get(ALICE)).toBe(stamp);
 
         // A failed read leaves initials everywhere rather than failing the page.
@@ -308,18 +306,6 @@ describe("viewerChromeWithAttention flags", () => {
             },
         );
         expect(failed.identity?.avatarVersions?.size).toBe(0);
-
-        setFlagsForTests(createMemoryFlags({ "ui-profile-pictures": false }));
-        reads = 0;
-        const off = await viewerChromeWithAttention(
-            { theme: "light" },
-            member,
-            emptyNotices,
-            identity,
-            versions,
-        );
-        expect(reads).toBe(0);
-        expect(off.identity?.avatarVersions).toBeUndefined();
     });
 
     test("the one-tap notices light Kitchen, Today and Recipes", async () => {

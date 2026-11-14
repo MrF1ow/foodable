@@ -56,12 +56,10 @@ import {
 import { liveScoreSettingsStore } from "../../db/score-settings.js";
 import { todayInTz } from "../../domain/tz.js";
 import type { NutritionGoals } from "../../db/nutrition.js";
-import { isViewerFlagOn } from "../../viewer-flags.js";
-import { gatedTool } from "../gated.js";
 import {
     NOTICE_SCHEMA,
     noticeToWire,
-    registerV2OnlyWidgetResource,
+    registerWidgetResource,
     sumMeals,
     uiMetaForKey,
     type DailyTotals,
@@ -501,23 +499,15 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
         alcohol,
     } = ctx;
 
-    // Only when rate_product is on: a widget for a tool that is hidden would
-    // be a resource nothing links.
-    if (isViewerFlagOn(ctx.flags, "mcp-rate-product")) {
-        registerV2OnlyWidgetResource(server, ctx, {
-            key: "product-score",
-            resourceName: "product-score",
-            title: "Product score",
-            description:
-                "A product's score, what it rests on and each member's check, for rate_product.",
-            flag: "widget-product-score",
-        });
-    }
+    registerWidgetResource(server, {
+        key: "product-score",
+        resourceName: "product-score",
+        title: "Product score",
+        description:
+            "A product's score, what it rests on and each member's check, for rate_product.",
+    });
 
-    gatedTool(
-        server,
-        ctx,
-        "mcp-rate-product",
+    server.registerTool(
         "rate_product",
         {
             title: "Rate Product",
@@ -543,10 +533,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                     ),
             }),
             outputSchema: RATE_PRODUCT_OUTPUT_SCHEMA,
-            ...uiMetaForKey(ctx, "product-score", {
-                v2: true,
-                flag: "widget-product-score",
-            }),
+            ...uiMetaForKey(ctx, "product-score"),
         },
         async ({ food_id, barcode, user_id }) => {
             return withAnalytics(

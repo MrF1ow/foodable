@@ -1,4 +1,4 @@
-/* App-owned copy of the widget base partial; free to drift from public/widgets/src/shared/base.css. */
+/* App-owned base stylesheet, first copied from the retired v1 widget base partial. */
 * {
     box-sizing: border-box;
 }

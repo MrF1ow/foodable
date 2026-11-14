@@ -31,12 +31,7 @@
 //
 // Nothing here is served by the production app; scripts/ is dev-only.
 
-import {
-    getWidgetHtml,
-    harnessNeedsV2,
-    WIDGET_TEMPLATES,
-    WIDGET_TEMPLATES_V2,
-} from "../src/widgets.js";
+import { getWidgetHtml, WIDGET_TEMPLATES } from "../src/widgets.js";
 import { runImport } from "../src/domain/import.js";
 import type { MealInput, MealInsertResult } from "../src/db/nutrition.js";
 
@@ -252,19 +247,13 @@ function weekPlanData(state: string) {
 }
 
 const PORT = Number(process.env.HARNESS_PORT ?? 8787);
-const KEYS = [
-    ...new Set([
-        ...Object.keys(WIDGET_TEMPLATES),
-        ...Object.keys(WIDGET_TEMPLATES_V2),
-    ]),
-];
+const KEYS = Object.keys(WIDGET_TEMPLATES);
 
 function indexPage(): string {
-    const links = KEYS.map((k) => {
-        const v2 = harnessNeedsV2(k);
-        const qs = v2 ? "&v2=1" : "";
-        return `<li><a href="/host?widget=${encodeURIComponent(k)}${qs}">${k}</a></li>`;
-    }).join("");
+    const links = KEYS.map(
+        (k) =>
+            `<li><a href="/host?widget=${encodeURIComponent(k)}">${k}</a></li>`,
+    ).join("");
     return `<!doctype html>
 <html><head><meta charset="utf-8"><title>Widget harness</title>
 <style>
@@ -277,7 +266,7 @@ function indexPage(): string {
   <p>Pick a widget. Append query flags to simulate host behaviour:
      <code>?serverTools=0</code>, <code>?tools=0</code>, <code>?delay=3000</code>,
      <code>?maxHeight=600</code>, <code>?fail=1</code>, <code>?drinkUnit=us</code>,
-     <code>?v2=1</code> (the v2 assembly), <code>?theme=dark</code> (host theme),
+     <code>?theme=dark</code> (host theme),
      <code>?state=full|partial|none</code> (product-score sample),
      <code>?state=costco|stores|onlist|dismissed|empty</code> (restock-nudge sample),
      <code>?state=design|busy|future|empty</code> (week-plan sample).</p>
@@ -291,8 +280,6 @@ function hostPage(widget: string, params: URLSearchParams): string {
     const delay = Number(params.get("delay") ?? 0);
     const maxHeight = params.get("maxHeight");
     const failCalls = params.get("fail") === "1";
-    // ?v2=1 frames the widget's v2 assembly (getWidgetHtml(key, { v2: true })).
-    const v2 = params.get("v2") === "1" || harnessNeedsV2(widget);
     // The alcohol opt-in, as every tool that touches alcohol sends it:
     // "us"/"uk" when the user tracks alcohol, null when they do not. Default
     // null, because that is the default account state and the state the
@@ -1167,7 +1154,7 @@ function hostPage(widget: string, params: URLSearchParams): string {
 <body>
   <strong>${widget}</strong>
   <span class="cfg">serverTools=${serverTools} answerTools=${answerTools} delay=${delay}ms${maxHeight ? " maxHeight=" + maxHeight : ""}${failCalls ? " fail=1" : ""} drinkUnit=${drinkUnit ?? "null (tracking off)"}</span>
-  <div style="margin-top:8px"><iframe id="frame" sandbox="allow-scripts" src="/widget/${encodeURIComponent(widget)}${v2 ? "?v2=1" : ""}"></iframe></div>
+  <div style="margin-top:8px"><iframe id="frame" sandbox="allow-scripts" src="/widget/${encodeURIComponent(widget)}"></iframe></div>
   <div style="margin-top:8px">
     <button onclick="hostRequest(1)">host req id=1</button>
     <button onclick="hostRequest(2)">host req id=2</button>
@@ -1482,8 +1469,7 @@ Bun.serve({
             }
             // Same CSP the MCP Apps sandbox applies, so a widget that reaches
             // for the network here fails here too.
-            const v2 = url.searchParams.get("v2") === "1";
-            return new Response(await getWidgetHtml(key, { v2 }), {
+            return new Response(await getWidgetHtml(key), {
                 headers: {
                     "content-type": "text/html; charset=utf-8",
                     "content-security-policy":

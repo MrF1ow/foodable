@@ -323,9 +323,7 @@ export async function loadProductPageData(
         food,
         userId,
         undefined,
-        chrome.flags.uiProfilePictures
-            ? (chrome.identity?.avatarVersions ?? new Map())
-            : undefined,
+        chrome.identity?.avatarVersions ?? new Map(),
     );
     return {
         chrome,

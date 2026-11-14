@@ -311,16 +311,14 @@ function settingsLayoutMarkup(layout: SettingsV2Layout): string {
         inlineDisplayTheme: isHome,
     });
     const picturesFor = layout.chrome.identity;
-    const avatar =
-        layout.chrome.flags.uiProfilePictures && picturesFor?.viewerUserId
-            ? {
-                  userId: picturesFor.viewerUserId,
-                  version:
-                      picturesFor.avatarVersions?.get(
-                          picturesFor.viewerUserId,
-                      ) ?? null,
-              }
-            : undefined;
+    const avatar = picturesFor?.viewerUserId
+        ? {
+              userId: picturesFor.viewerUserId,
+              version:
+                  picturesFor.avatarVersions?.get(picturesFor.viewerUserId) ??
+                  null,
+          }
+        : undefined;
     const base =
         layout.profile ??
         (isHome

@@ -26,15 +26,13 @@ import {
 } from "../../domain/plan-week.js";
 import { macrosForPerson } from "../../domain/recipes.js";
 import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
-import { gatedTool } from "../gated.js";
 import {
-    registerV2OnlyWidgetResource,
+    registerWidgetResource,
     uiMetaForKey,
     destructiveOutcome,
     withUndo,
     type ToolContext,
 } from "../shared.js";
-import { isViewerFlagOn } from "../../viewer-flags.js";
 
 const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -205,23 +203,15 @@ function kcalPerPortionByRecipe(
 export function registerPlanTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, callerActor, analytics, runDestructive } = ctx;
 
-    // Only when the plan tools are on: a widget for a tool that is hidden
-    // would be a resource nothing links.
-    if (isViewerFlagOn(ctx.flags, "mcp-plan-tools")) {
-        registerV2OnlyWidgetResource(server, ctx, {
-            key: "week-plan",
-            resourceName: "week-plan",
-            title: "Week plan",
-            description:
-                "The week's planned recipes by day, with Remove and add-missing-to-groceries, for get_week_plan.",
-            flag: "widget-week-plan",
-        });
-    }
+    registerWidgetResource(server, {
+        key: "week-plan",
+        resourceName: "week-plan",
+        title: "Week plan",
+        description:
+            "The week's planned recipes by day, with Remove and add-missing-to-groceries, for get_week_plan.",
+    });
 
-    gatedTool(
-        server,
-        ctx,
-        "mcp-plan-tools",
+    server.registerTool(
         "get_week_plan",
         {
             title: "Get Week Plan",
@@ -242,10 +232,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     ),
             }),
             outputSchema: WEEK_PLAN_OUTPUT_SCHEMA,
-            ...uiMetaForKey(ctx, "week-plan", {
-                v2: true,
-                flag: "widget-week-plan",
-            }),
+            ...uiMetaForKey(ctx, "week-plan"),
         },
         async (args) =>
             withAnalytics(
@@ -325,10 +312,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        "mcp-plan-tools",
+    server.registerTool(
         "plan_recipe",
         {
             title: "Plan Recipe",
@@ -406,10 +390,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        "mcp-plan-tools",
+    server.registerTool(
         "unplan_recipe",
         {
             title: "Unplan Recipe",
@@ -480,10 +461,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        "mcp-plan-tools",
+    server.registerTool(
         "add_plan_missing_to_groceries",
         {
             title: "Add Plan Missing To Groceries",

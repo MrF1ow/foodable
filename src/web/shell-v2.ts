@@ -251,7 +251,7 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
     const nav = `<nav class="fd-sidenav" aria-label="Main navigation">${links}${settings}</nav>`;
 
     const account = identity
-        ? `<a class="fd-account" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(`Account: ${identity.viewerName}, ${roleLabel(identity.viewerRole)}`)}">${String(memberAvatar({ name: identity.viewerName, userId: identity.viewerUserId, version: identity.viewerUserId ? identity.avatarVersions?.get(identity.viewerUserId) : null, enabled: chrome.flags.uiProfilePictures }))}<span class="fd-account-text"><span class="fd-account-name">${escapeHtml(identity.viewerName)}</span><span class="fd-account-role">${roleLabel(identity.viewerRole)}</span></span>${fdIcon("chevR")}</a>`
+        ? `<a class="fd-account" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(`Account: ${identity.viewerName}, ${roleLabel(identity.viewerRole)}`)}">${String(memberAvatar({ name: identity.viewerName, userId: identity.viewerUserId, version: identity.viewerUserId ? identity.avatarVersions?.get(identity.viewerUserId) : null, enabled: true }))}<span class="fd-account-text"><span class="fd-account-name">${escapeHtml(identity.viewerName)}</span><span class="fd-account-role">${roleLabel(identity.viewerRole)}</span></span>${fdIcon("chevR")}</a>`
         : "";
     return `<div class="fd-sidebar">${household}${nav}${account}</div>`;
 }
@@ -270,7 +270,7 @@ function accountChip(chrome: AppChrome): string {
         : undefined;
     // With a picture the chip becomes a small round avatar (picture over the
     // initials); without one it keeps its pill with the initials.
-    if (identity?.viewerUserId && version && chrome.flags.uiProfilePictures) {
+    if (identity?.viewerUserId && version) {
         const avatar = memberAvatar({
             name,
             userId: identity.viewerUserId,

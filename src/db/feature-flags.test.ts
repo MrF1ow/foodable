@@ -330,7 +330,7 @@ describeDb(pgAvailable !== null, "feature flags db", (getCtx) => {
             values (
                 ${"user"},
                 ${userId},
-                ${"mcp-widgets-v2"},
+                ${"mcp-share-links"},
                 ${"true"}::jsonb,
                 ${"x"},
                 ${expires}
@@ -344,7 +344,7 @@ describeDb(pgAvailable !== null, "feature flags db", (getCtx) => {
         `) as { flag_name: string }[];
         expect(names.map((r) => r.flag_name)).toEqual([
             "Checkout.v2",
-            "mcp-widgets-v2",
+            "mcp-share-links",
         ]);
     });
 

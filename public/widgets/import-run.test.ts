@@ -13,12 +13,19 @@
 // code a host runs.
 import { test, expect, afterAll } from "bun:test";
 
-// render() calls document.getElementById("root") unconditionally; stubbing
-// it to always return null makes every render() call a harmless no-op
-// (`if (!el) return;`) without pulling in a DOM.
+// The v2 template binds its listeners on #root when the script runs, and
+// render() paints through v2Mount(), so the stub hands back an inert element:
+// listeners are dropped and painted markup goes nowhere, without pulling in a
+// DOM.
+const inertElement = () => ({
+    innerHTML: "",
+    addEventListener: () => {},
+    appendChild: () => {},
+});
 const previousDocument = (globalThis as { document?: unknown }).document;
 (globalThis as { document?: unknown }).document = {
-    getElementById: () => null,
+    getElementById: () => inertElement(),
+    createElement: () => inertElement(),
 };
 afterAll(() => {
     (globalThis as { document?: unknown }).document = previousDocument;
@@ -150,7 +157,7 @@ test("a failed dry run surfaces the server's reason in chunkErrors, not silently
     // still on (S.step never advances to "done" on this path).
     const html = w.previewStep();
     expect(html).toContain("A single call must carry 1 to 50 rows");
-    expect(html).toContain("notice-error");
+    expect(html).toContain('class="ntc over"');
 });
 
 test("a failed dry run stops before writing anything for real", async () => {

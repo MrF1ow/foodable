@@ -591,6 +591,16 @@ test("caffeine is a limit, not a macro", () => {
 // one that reaches for window.parent. Everything below therefore exercises the
 // same code a host runs, not a paraphrase of it.
 const importWidget = await (async () => {
+    // The template binds its listeners on #root when the script runs; an
+    // inert element takes them, and the global is put back right after.
+    const inert = () => ({
+        innerHTML: "",
+        addEventListener: () => {},
+        appendChild: () => {},
+    });
+    const g = globalThis as { document?: unknown };
+    const previousDocument = g.document;
+    g.document = { getElementById: inert, createElement: inert };
     const { getWidgetHtml } = await import("../../src/widgets");
     const html = await getWidgetHtml("import-meals");
     const script = html.slice(
@@ -610,7 +620,9 @@ const importWidget = await (async () => {
              previewStep,
          };`,
     );
-    return factory() as {
+    const api = factory();
+    g.document = previousDocument;
+    return api as {
         S: Record<string, unknown> & {
             mapping: Record<string, number>;
             rows: Record<string, unknown>[];
@@ -707,7 +719,7 @@ test("the notice reuses the gate's alias list, not a looser match", () => {
 // from here; what is pinned is the part that made the leak possible, namely
 // which way an absent drink_unit defaults.
 test("the importer defaults to alcohol tracking OFF", async () => {
-    const html = await Bun.file(`${SRC}/templates/import-meals.html`).text();
+    const html = await Bun.file(`${SRC}/templates/v2/import-meals.html`).text();
     const cfg = html.slice(html.indexOf("let CFG = {"));
     expect(cfg.slice(0, cfg.indexOf("};"))).toContain("drink_unit: null");
     // Only the two values the server's schema can emit turn it on.
@@ -745,9 +757,7 @@ test("a milligram caffeine column auto-maps, with no opt-in to satisfy", () => {
         // column bound — and the sample cell is what the user sees confirm it.
         expect(html).toContain('data-field="caffeine_mg"');
         expect(importWidget.S.mapping.caffeine_mg).toBe(3);
-        expect(html).toContain(
-            '<div class="map-src">Caffeine (mg)</div><div class="map-sample">e.g. 185</div>',
-        );
+        expect(html).toContain('Caffeine (mg)<div class="note">e.g. 185</div>');
         expect(html).not.toContain("is in grams");
     }
 });
@@ -780,18 +790,18 @@ test("caffeine reaches the row only when a column is mapped to it", () => {
     mapStepFor(CAF_MG[0], CAF_MG[1], null);
     importWidget.buildRows();
     expect(importWidget.S.rows[0]!.caffeine_mg).toBe(185);
-    // And the user sees it before confirming, in milligrams. The preview
-    // column is data-driven like fiber and sugar — not gated on an opt-in.
-    const preview = importWidget.previewStep();
-    expect(preview).toContain("Caf mg");
-    expect(preview).toContain("185");
+    // And the user sees the column bound before confirming. The preview
+    // chips are data-driven like fiber and sugar — not gated on an opt-in.
+    expect(importWidget.previewStep()).toContain(
+        "Caffeine (mg) → Caffeine (mg)",
+    );
 
     // No caffeine column at all: the key is absent rather than a fabricated 0,
     // which is what keeps a pre-feature-shaped export out of the averages.
     mapStepFor(NO_ALCOHOL[0], NO_ALCOHOL[1], null);
     importWidget.buildRows();
     expect(importWidget.S.rows[0]!.caffeine_mg).toBeUndefined();
-    expect(importWidget.previewStep()).not.toContain("Caf mg");
+    expect(importWidget.previewStep()).not.toContain("→ Caffeine (mg)");
 
     // And a grams-headed column stays out of the payload entirely.
     mapStepFor(CAF_G[0], CAF_G[1], null);

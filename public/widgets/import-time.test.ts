@@ -15,7 +15,25 @@
 // Same evaluation technique as macros.test.ts and import-run.test.ts: the
 // real assembled widget script is run as one script with only the
 // `initWidget({…})` bootstrap cut off.
-import { test, expect } from "bun:test";
+import { test, expect, afterAll } from "bun:test";
+
+// The v2 template binds its listeners on #root when the script runs, and
+// render() paints through v2Mount(), so the stub hands back an inert element:
+// listeners are dropped and painted markup goes nowhere, without pulling in a
+// DOM.
+const inertElement = () => ({
+    innerHTML: "",
+    addEventListener: () => {},
+    appendChild: () => {},
+});
+const previousDocument = (globalThis as { document?: unknown }).document;
+(globalThis as { document?: unknown }).document = {
+    getElementById: () => inertElement(),
+    createElement: () => inertElement(),
+};
+afterAll(() => {
+    (globalThis as { document?: unknown }).document = previousDocument;
+});
 
 interface ImportRow {
     source_line: number;

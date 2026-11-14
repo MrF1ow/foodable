@@ -32,7 +32,6 @@ import {
     SettingsInputError,
     type GrocerySection,
 } from "../../domain/settings.js";
-import { gatedTool } from "../gated.js";
 import {
     captureDismissals,
     destructiveOutcome,
@@ -42,10 +41,7 @@ import {
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 
-/** One flag gates every grocery and store admin tool. */
-export const HOUSEHOLD_ADMIN_FLAG = "mcp-household-admin" as const;
-
-/** The nine tools behind the flag, in the order they are registered. */
+/** The nine grocery and store admin tools, in the order they are registered. */
 export const HOUSEHOLD_ADMIN_TOOL_NAMES = [
     "clear_grocery_list",
     "move_grocery_lines",
@@ -190,10 +186,7 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
         runDestructive,
     } = ctx;
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "list_stores",
         {
             title: "List Stores",
@@ -266,10 +259,7 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "create_store",
         {
             title: "Create Store",
@@ -325,10 +315,7 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "update_store",
         {
             title: "Update Store",
@@ -489,10 +476,7 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "delete_store",
         {
             title: "Delete Store",
@@ -718,10 +702,7 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "reorder_stores",
         {
             title: "Reorder Stores",
@@ -836,10 +817,7 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "set_store_sections",
         {
             title: "Set Store Sections",

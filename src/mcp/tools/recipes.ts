@@ -83,7 +83,7 @@ import {
     WRITE_STATUS,
     QUANTITY_ITEM,
     recipeAllergenNoticesForView,
-    registerV2OnlyWidgetResource,
+    registerWidgetResource,
     uiMetaForKey,
     captureDismissals,
     destructiveOutcome,
@@ -697,13 +697,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    registerV2OnlyWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "recipe-card",
         resourceName: "recipe-card",
         title: "Recipe",
         description:
             "A recipe with what the fridge covers and Cook behind a confirm step, for get_recipe.",
-        flag: "widget-recipe-card",
     });
 
     server.registerTool(
@@ -723,10 +722,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 member_id: z.string().optional(),
             }),
             outputSchema: GET_RECIPE_OUTPUT_SCHEMA,
-            ...uiMetaForKey(ctx, "recipe-card", {
-                v2: true,
-                flag: "widget-recipe-card",
-            }),
+            ...uiMetaForKey(ctx, "recipe-card"),
         },
         async (args) =>
             withAnalytics(

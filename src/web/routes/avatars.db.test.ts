@@ -1,5 +1,5 @@
 // Profile pictures over HTTP, against real Postgres: upload, serve, remove,
-// who can read what, and what the flag switches off.
+// and who can read what.
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { getAvatar } from "../../db/avatars.js";
@@ -7,11 +7,7 @@ import { setSqlForTests } from "../../db/sql.js";
 import { asUser, seedHousehold } from "../../db/testing/fixtures.js";
 import { describeDb } from "../../db/testing/pg.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
-import {
-    createMemoryFlags,
-    resetFlagsForTests,
-    setFlagsForTests,
-} from "../../flags.js";
+import { resetFlagsForTests } from "../../flags.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
 import { settingsRoutes } from "./settings.js";
 
@@ -114,7 +110,6 @@ describeDb(pgAvailable !== null, "profile pictures routes", (getCtx) => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
         setSqlForTests(sql);
-        setFlagsForTests(createMemoryFlags({ "ui-profile-pictures": true }));
         ({ userId: ownerId, householdId } = await seedHousehold(sql));
         memberId = crypto.randomUUID();
         await sql`
@@ -396,19 +391,5 @@ describeDb(pgAvailable !== null, "profile pictures routes", (getCtx) => {
         html = await (await accountPage(ownerId)).text();
         expect(html).toContain("Remove photo");
         expect(html).toContain(`src="/avatars/${ownerId}?v=`);
-    });
-
-    test("flag off: no control, GET and POSTs are 404, initials only", async () => {
-        await upload(ownerId, png(256));
-        setFlagsForTests(createMemoryFlags({ "ui-profile-pictures": false }));
-        expect((await fetchAvatar(ownerId, ownerId)).status).toBe(404);
-        expect((await upload(ownerId, png(256))).status).toBe(404);
-        expect((await remove(ownerId)).status).toBe(404);
-        const html = await (await accountPage(ownerId)).text();
-        expect(html).not.toContain('name="photo"');
-        expect(html).not.toContain("Change photo");
-        expect(html).not.toContain("/avatars/");
-        // The stored picture is still there, ready for the flag.
-        expect(await stored(ownerId)).not.toBeNull();
     });
 });

@@ -4,12 +4,13 @@
  * secondary 12, small labels 11, system font only.
  *
  * Include after shared/v2/tokens.css and before shared/v2/components.css.
- * Uses only v2 tokens; never include the v1 shared/tokens.css beside it. */
+ * Uses only v2 tokens; never include shared/tokens.css (the app's NEUTRAL
+ * base) beside it. */
 
-/* The v1 scripts a v2 widget still includes (shared/bridge.js for the chat
- * footer, shared/macros.js for MACROS colours and macroBits) name v1 custom
- * properties. Each one maps to its v2 token here, so those scripts paint in
- * the Theme palette without a single edit and v1 widgets stay byte-identical. */
+/* The older shared scripts a widget still includes (shared/bridge.js for the
+ * chat footer, shared/macros.js for MACROS colours and macroBits) name the
+ * v1-era custom properties. Each one maps to its v2 token here, so those
+ * scripts paint in the Theme palette without a single edit. */
 :root {
     --protein: var(--macro-protein);
     --carbs: var(--macro-carbs);

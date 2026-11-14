@@ -33,8 +33,6 @@ import {
     getGoalsForRange,
 } from "./nutrition.js";
 import { getProfile, timezoneFromProfile } from "./profiles.js";
-import type { ViewerFlags } from "../viewer-flags.js";
-import { isViewerFlagOn } from "../viewer-flags.js";
 import type { AlcoholDisplay } from "../mcp/shared.js";
 import { gateAlcohol } from "../mcp/shared.js";
 
@@ -223,8 +221,4 @@ export async function buildHouseholdDigestForViewer(
         viewerAlcohol,
     );
     return buildHouseholdDigest(inputs);
-}
-
-export function householdDigestFlagOn(flags: ViewerFlags): boolean {
-    return isViewerFlagOn(flags, "mcp-household-digest");
 }

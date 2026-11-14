@@ -177,7 +177,7 @@ function memberRow(
           )}</span>`
         : "";
     return raw(
-        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}">${String(memberAvatar({ name: member.displayName, userId: member.userId, version: view.chrome.identity?.avatarVersions?.get(member.userId), enabled: view.chrome.flags.uiProfilePictures, className: "fd-settings-member-avatar" }))}<div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${lastActive}${chevron}</a>${trailing}</div></li>`,
+        `${template}<li class="fd-row fd-row--usual fd-row--settings-member"><div class="fd-row__body fd-row__body--with-trailing"><a class="fd-row__link" href="${esc(href)}">${String(memberAvatar({ name: member.displayName, userId: member.userId, version: view.chrome.identity?.avatarVersions?.get(member.userId), enabled: true, className: "fd-settings-member-avatar" }))}<div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(member.displayName)}</span><span class="fd-row__meta fd-row__meta--lg">${esc(roleLabel(member.role))}</span></span></div>${lastActive}${chevron}</a>${trailing}</div></li>`,
     );
 }
 

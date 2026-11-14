@@ -195,7 +195,7 @@ describe("changedChecks", () => {
         "bun.lock",
         "tsconfig.json",
         "bunfig.toml",
-        "public/widgets/src/shared/base.css",
+        "public/widgets/src/shared/v2/base.css",
         "src/mcp/tools-list.snapshot.json",
     ])("%s runs the full suite", (path) => {
         expect(byId(run([path]), "test").cmd).toEqual(["bun", "test"]);

@@ -159,17 +159,14 @@ export async function viewerChromeWithAttention(
             actionable: true,
         }));
     const loaded = await loadIdentity(viewer);
-    // One read for the whole page, and none at all with the flag off. A
-    // picture is a nicety: if the read fails every page still renders, with
-    // initials.
-    const identity: ShellIdentity = flags.uiProfilePictures
-        ? {
-              ...loaded,
-              avatarVersions: await loadAvatars(viewer.householdId).catch(
-                  () => new Map<string, Date>(),
-              ),
-          }
-        : loaded;
+    // One read for the whole page. A picture is a nicety: if the read fails
+    // every page still renders, with initials.
+    const identity: ShellIdentity = {
+        ...loaded,
+        avatarVersions: await loadAvatars(viewer.householdId).catch(
+            () => new Map<string, Date>(),
+        ),
+    };
     const tz =
         profile?.timezone && validateTz(profile.timezone)
             ? profile.timezone

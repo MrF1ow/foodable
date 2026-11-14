@@ -1,6 +1,6 @@
-/* App-owned copy of the status pills from the widget table partial; free to
-   drift from public/widgets/src/shared/table.css. The widget's preview table
-   rules are not copied: no page of the app renders a table. */
+/* App-owned status pills, first copied from the retired v1 widget table
+   partial. Its preview table rules were not copied: no page of the app renders
+   a table. */
 
 .pill {
     display: inline-block;

@@ -282,9 +282,9 @@ test("sdkContext omits client", () => {
 describe("parseFoodableFlags", () => {
     test("modes and whitespace", () => {
         const { rules } = parseFoodableFlags(
-            " mcp-widgets-v2:internal ,  off-lookups:off  ",
+            " mcp-share-links:internal ,  off-lookups:off  ",
         );
-        expect(rules.get("mcp-widgets-v2")).toBe("internal");
+        expect(rules.get("mcp-share-links")).toBe("internal");
         expect(rules.get("off-lookups")).toBe("off");
     });
 
@@ -301,14 +301,14 @@ describe("parseFoodableFlags", () => {
         console.warn = (msg: string) => lines.push(String(msg));
         try {
             parseFoodableFlags(
-                "mcp-widgets-v2:sideways,mcp-widgets-v2:sideways",
+                "mcp-share-links:sideways,mcp-share-links:sideways",
             );
         } finally {
             console.warn = warn;
         }
         const modeWarnings = lines.filter((l) => l.includes("sideways"));
         expect(modeWarnings.length).toBe(1);
-        expect(parseFoodableFlags("mcp-widgets-v2:sideways").rules.size).toBe(
+        expect(parseFoodableFlags("mcp-share-links:sideways").rules.size).toBe(
             0,
         );
     });
@@ -321,13 +321,13 @@ describe("parseFoodableFlags", () => {
 
     test("duplicate last wins", () => {
         const { warnings } = parseFoodableFlags(
-            "mcp-widgets-v2:off,mcp-widgets-v2:all",
+            "mcp-share-links:off,mcp-share-links:all",
         );
         expect(warnings.some((w) => w.includes("duplicate"))).toBe(true);
         const { rules } = parseFoodableFlags(
-            "mcp-widgets-v2:off,mcp-widgets-v2:all",
+            "mcp-share-links:off,mcp-share-links:all",
         );
-        expect(rules.get("mcp-widgets-v2")).toBe("all");
+        expect(rules.get("mcp-share-links")).toBe("all");
     });
 
     test("empty string", () => {
@@ -338,20 +338,20 @@ describe("parseFoodableFlags", () => {
 
 test("env reader internal vs all vs default", () => {
     const rules = parseFoodableFlags(
-        "mcp-widgets-v2:internal,off-lookups:off",
+        "mcp-share-links:internal,off-lookups:off",
     ).rules;
     const reader = createEnvFlags(rules);
 
-    expect(reader.isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(true);
-    expect(reader.isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(false);
-    expect(reader.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
+    expect(reader.isEnabled("mcp-share-links", userCtx("owner"))).toBe(true);
+    expect(reader.isEnabled("mcp-share-links", userCtx("member"))).toBe(false);
+    expect(reader.evaluate("mcp-share-links", userCtx("owner")).reason).toBe(
         "ENV_INTERNAL",
     );
 
     const hh = buildFlagContext({
         auth: { kind: "household", householdId: "hh-1" },
     });
-    expect(reader.isEnabled("mcp-widgets-v2", hh)).toBe(false);
+    expect(reader.isEnabled("mcp-share-links", hh)).toBe(false);
 
     const hhRules = parseFoodableFlags("restock-runner:internal").rules;
     const hhReader = createEnvFlags(hhRules);
@@ -507,9 +507,9 @@ describe("Railway reader fake SDK", () => {
         });
         const reader = createRailwayFlags(sdk);
         reader.markInitDone();
-        expect(reader.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
-            "STALE",
-        );
+        expect(
+            reader.evaluate("mcp-share-links", userCtx("owner")).reason,
+        ).toBe("STALE");
 
         const sdk2 = fakeSdk({
             evaluateBoolean: () => ({
@@ -520,7 +520,7 @@ describe("Railway reader fake SDK", () => {
         });
         const r2 = createRailwayFlags(sdk2);
         r2.markInitDone();
-        expect(r2.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
+        expect(r2.evaluate("mcp-share-links", userCtx("owner")).reason).toBe(
             "CONFLICT",
         );
 
@@ -533,7 +533,7 @@ describe("Railway reader fake SDK", () => {
         });
         const r3 = createRailwayFlags(sdk3);
         r3.markInitDone();
-        expect(r3.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
+        expect(r3.evaluate("mcp-share-links", userCtx("owner")).reason).toBe(
             "TARGETING_MATCH",
         );
     });
@@ -547,7 +547,7 @@ describe("Railway reader fake SDK", () => {
         const reader = createRailwayFlags(sdk);
         reader.markInitDone();
         expect(
-            reader.evaluate("mcp-widgets-v2", userCtx("owner")),
+            reader.evaluate("mcp-share-links", userCtx("owner")),
         ).toMatchObject({
             value: false,
             reason: "ERROR",
@@ -566,7 +566,7 @@ describe("Railway reader fake SDK", () => {
         await initFlags({
             env: {
                 RAILWAY_TOKEN: "proj.tok",
-                FOODABLE_FLAGS: "mcp-widgets-v2:all",
+                FOODABLE_FLAGS: "mcp-share-links:all",
             },
             sdk,
             timeoutMs: 100,
@@ -615,7 +615,7 @@ describe("Railway reader fake SDK", () => {
                 timeoutMs: 50,
             });
             const ctx = userCtx("owner");
-            expect(getFlags().evaluate("mcp-widgets-v2", ctx).reason).toBe(
+            expect(getFlags().evaluate("mcp-share-links", ctx).reason).toBe(
                 "NOT_READY",
             );
             expect(evalCalls).toBe(0);
@@ -649,13 +649,13 @@ describe("Railway reader fake SDK", () => {
         });
         expect(Date.now() - t0).toBeLessThan(1000);
         const ctx = userCtx("owner");
-        expect(getFlags().evaluate("mcp-widgets-v2", ctx).reason).toBe(
+        expect(getFlags().evaluate("mcp-share-links", ctx).reason).toBe(
             "NOT_READY",
         );
         resolveInit?.();
         await initPromise;
         await new Promise((r) => setTimeout(r, 0));
-        expect(getFlags().evaluate("mcp-widgets-v2", ctx).reason).toBe(
+        expect(getFlags().evaluate("mcp-share-links", ctx).reason).toBe(
             "TARGETING_MATCH",
         );
     });
@@ -673,14 +673,14 @@ describe("initFlags source selection", () => {
         await initFlags({
             env: {
                 RAILWAY_TOKEN: "tok",
-                FOODABLE_FLAGS: "mcp-widgets-v2:all",
+                FOODABLE_FLAGS: "mcp-share-links:all",
                 RAILWAY_API_TOKEN: "api-should-not-matter",
             },
             sdk,
         });
         expect(initCalls).toBe(1);
         expect(
-            getFlags().evaluate("mcp-widgets-v2", userCtx("member")).source,
+            getFlags().evaluate("mcp-share-links", userCtx("member")).source,
         ).toBe("railway");
     });
 
@@ -704,17 +704,17 @@ describe("initFlags source selection", () => {
         };
         await initFlags({
             env: {
-                FOODABLE_FLAGS: "mcp-widgets-v2:all",
+                FOODABLE_FLAGS: "mcp-share-links:all",
                 RAILWAY_API_TOKEN: "ignored",
             },
             sdk,
         });
         expect(initCalls).toBe(0);
-        expect(getFlags().isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(
+        expect(getFlags().isEnabled("mcp-share-links", userCtx("member"))).toBe(
             true,
         );
         expect(
-            getFlags().evaluate("mcp-widgets-v2", userCtx("member")).source,
+            getFlags().evaluate("mcp-share-links", userCtx("member")).source,
         ).toBe("env");
     });
 
@@ -724,7 +724,7 @@ describe("initFlags source selection", () => {
         console.warn = (msg: string) => lines.push(String(msg));
         try {
             await initFlags({
-                env: { FOODABLE_FLAGS: "ui-v2:all,mcp-widgets-v2:all" },
+                env: { FOODABLE_FLAGS: "ui-v2:all,mcp-share-links:all" },
             });
         } finally {
             console.warn = warn;
@@ -732,7 +732,7 @@ describe("initFlags source selection", () => {
         expect(
             lines.filter((l) => l.includes('unknown flag "ui-v2"')),
         ).toHaveLength(1);
-        expect(getFlags().isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(
+        expect(getFlags().isEnabled("mcp-share-links", userCtx("member"))).toBe(
             true,
         );
     });
@@ -746,14 +746,14 @@ describe("initFlags source selection", () => {
         });
         await initFlags({ env: {}, sdk });
         expect(initCalls).toBe(0);
-        expect(getFlags().isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(
+        expect(getFlags().isEnabled("mcp-share-links", userCtx("owner"))).toBe(
             false,
         );
         expect(getFlags().isEnabled("off-lookups", userCtx("owner"))).toBe(
             true,
         );
         expect(
-            getFlags().evaluate("mcp-widgets-v2", userCtx("owner")).source,
+            getFlags().evaluate("mcp-share-links", userCtx("owner")).source,
         ).toBe("fallback");
     });
 
@@ -802,45 +802,47 @@ test("getFlags before init uses fallback", () => {
 });
 
 test("setFlagsForTests override", () => {
-    const mem = createMemoryFlags({ "mcp-widgets-v2": true });
+    const mem = createMemoryFlags({ "mcp-share-links": true });
     setFlagsForTests(mem);
-    expect(getFlags().isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(true);
+    expect(getFlags().isEnabled("mcp-share-links", userCtx("owner"))).toBe(
+        true,
+    );
     setFlagsForTests(null);
 });
 
 test("createFallbackFlags", () => {
     const reader = createFallbackFlags();
-    expect(reader.isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(false);
+    expect(reader.isEnabled("mcp-share-links", userCtx("owner"))).toBe(false);
     expect(reader.isEnabled("off-lookups", userCtx("owner"))).toBe(true);
-    expect(reader.evaluate("mcp-widgets-v2", userCtx("owner")).reason).toBe(
+    expect(reader.evaluate("mcp-share-links", userCtx("owner")).reason).toBe(
         "DEFAULT",
     );
 });
 
 test("memory flags and all-on / all-off helpers", () => {
     const on = createMemoryFlags(allFlagsOn());
-    expect(on.isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(true);
+    expect(on.isEnabled("mcp-share-links", userCtx("member"))).toBe(true);
     expect(on.isEnabled("off-lookups", userCtx("member"))).toBe(true);
 
     const off = createMemoryFlags(allFlagsOff());
-    expect(off.isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(false);
+    expect(off.isEnabled("mcp-share-links", userCtx("member"))).toBe(false);
     expect(off.isEnabled("off-lookups", userCtx("member"))).toBe(false);
 
     const defaults = defaultFlags();
-    expect(defaults["mcp-widgets-v2"]).toBe(false);
+    expect(defaults["mcp-share-links"]).toBe(false);
     expect(defaults["off-lookups"]).toBe(true);
 
     const dynamic = createMemoryFlags({
-        "mcp-widgets-v2": (ctx) => ctx.role === "owner",
+        "mcp-share-links": (ctx) => ctx.role === "owner",
     });
-    expect(dynamic.isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(true);
-    expect(dynamic.isEnabled("mcp-widgets-v2", userCtx("member"))).toBe(false);
+    expect(dynamic.isEnabled("mcp-share-links", userCtx("owner"))).toBe(true);
+    expect(dynamic.isEnabled("mcp-share-links", userCtx("member"))).toBe(false);
 });
 
 test("destructured isEnabled from getFlags", async () => {
     await initFlags({ env: {} });
     const { isEnabled } = getFlags();
-    expect(isEnabled("mcp-widgets-v2", userCtx("owner"))).toBe(false);
+    expect(isEnabled("mcp-share-links", userCtx("owner"))).toBe(false);
 });
 
 describe("round-2 QA fixes", () => {
@@ -914,7 +916,7 @@ describe("round-2 QA fixes", () => {
                 timeoutMs: 20,
             });
             expect(
-                reader.evaluate("mcp-widgets-v2", userCtx("owner")).reason,
+                reader.evaluate("mcp-share-links", userCtx("owner")).reason,
             ).toBe("NOT_READY");
         } finally {
             console.error = errSpy;
@@ -973,7 +975,7 @@ describe("round-2 QA fixes", () => {
 
             const ctx = userCtx("owner");
             expect(getFlags()).toBe(fresh);
-            expect(getFlags().evaluate("mcp-widgets-v2", ctx).source).toBe(
+            expect(getFlags().evaluate("mcp-share-links", ctx).source).toBe(
                 "fallback",
             );
             expect(await initFlags({ env: {} })).toBe(fresh);

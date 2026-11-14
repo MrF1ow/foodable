@@ -76,7 +76,7 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 - **WebKit (Safari-class checks):** Playwright's WPE `MiniBrowser` only starts through a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH` (its `bin`, `lib`, `share`), `WEBKIT_FORCE_COMPLEX_TEXT=1` and an `LD_LIBRARY_PATH` with its `lib`, `sys/lib` and an ICU 74 libs dir.
 - **Barcode scans against a running server** hit live Open Food Facts so they need network; unit tests stub it.
 - **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
-- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&v2=1&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. `src/widgets.test.ts` guards assembly. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
+- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. `src/widgets.test.ts` guards assembly. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
 - **App-wide middleware (body limit, CORS):** import `app` from `src/index.ts`, as `src/index.test.ts` does.
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked.

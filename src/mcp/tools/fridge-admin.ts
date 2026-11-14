@@ -12,7 +12,6 @@ import {
     type FridgeStore,
 } from "../../domain/fridge.js";
 import { deleteFridgeItemAdjust, StockInputError } from "../../domain/stock.js";
-import { gatedTool } from "../gated.js";
 import {
     captureDismissals,
     destructiveOutcome,
@@ -22,7 +21,6 @@ import {
     type ToolContext,
 } from "../shared.js";
 import { ADMIN_UNDO_NOTE } from "./grocery.js";
-import { HOUSEHOLD_ADMIN_FLAG } from "./stores.js";
 
 export const MOVE_FRIDGE_ITEMS_OUTPUT_SCHEMA = z.object({
     location_id: z.string(),
@@ -114,17 +112,14 @@ function watchedFridge(fridge: FridgeStore, doing: string) {
 }
 
 /**
- * Move and delete fridge items several at a time. Behind `mcp-household-admin`
- * with the grocery and store admin tools: each goes through the destructive
- * guard, so what it changed is recorded and the household can undo it.
+ * Move and delete fridge items several at a time. Like the grocery and store
+ * admin tools, each goes through the destructive guard, so what it changed is
+ * recorded and the household can undo it.
  */
 export function registerFridgeAdminTools(server: McpServer, ctx: ToolContext) {
     const { analytics, runDestructive } = ctx;
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "move_fridge_items",
         {
             title: "Move Fridge Items",
@@ -265,10 +260,7 @@ export function registerFridgeAdminTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "delete_fridge_items",
         {
             title: "Delete Fridge Items",
