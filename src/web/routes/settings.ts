@@ -97,11 +97,13 @@ import {
     clearGoalDays,
     getNutritionGoals,
     upsertNutritionGoals,
+    type NutritionGoalsInput,
 } from "../../db/nutrition.js";
 import { isCalendarDate } from "../../domain/insights.js";
 import { todayInTz, validateTz } from "../../domain/tz.js";
 import {
     GOALS_FORM_FIELDS,
+    goalsDraftFrom,
     parseGoalsForm,
     type GoalsFormDraft,
 } from "../pages/v2/settings-goals-form.js";
@@ -155,35 +157,43 @@ settingsRoutes.get("/settings/goals", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
-settingsRoutes.post("/settings/goals", requireMember, async (c) => {
+// One goal at a time: the page edits in place and each field posts alone when
+// it is left. The new value is validated against the stored goals (so the
+// "at least one daily target" rule still holds), and only that column is
+// written, so two quick edits to different fields cannot overwrite each other.
+settingsRoutes.post("/settings/goals/field", requireMember, async (c) => {
     const userId = c.get("userId");
     const body = await c.req.parseBody();
-    const values = Object.fromEntries(
-        GOALS_FORM_FIELDS.map((f) => [f, formText(body, f)]),
-    ) as GoalsFormDraft;
+    const field = formText(body, "field");
+    const known = GOALS_FORM_FIELDS.find((f) => f === field);
     const profile = await getProfile(userId);
+    const alcohol = alcoholOf(profile);
+    // The alcohol field is not on the page with tracking off.
+    if (!known || (known === "daily_alcohol_g" && alcohol == null)) {
+        return c.text("Unknown goals field.", 400);
+    }
+    const value = formText(body, "value");
     const stored = await getNutritionGoals(userId);
-    const parsed = parseGoalsForm(values, {
-        alcohol: alcoholOf(profile),
-        stored,
-    });
+    const values = {
+        ...goalsDraftFrom(stored, alcohol),
+        [known]: value,
+    } as GoalsFormDraft;
+    const parsed = parseGoalsForm(values, { alcohol, stored });
     if (!parsed.ok) {
         const page = await renderSettingsGoalsV2Route(userId, {
             error: parsed.errors.join(" "),
             draft: values,
-            invalid: parsed.invalid,
+            invalid: [known],
         });
         // A non-member gets the membership page with its own status.
-        return c.html(page.html, page.status === 200 ? 400 : page.status);
+        return c.html(page.html, page.status === 200 ? 422 : page.status);
     }
     // A save that changes a target is the day those goals were set; a
     // rename alone is not, the same rule set_nutrition_goals follows.
-    const input = parsed.changesTargets
-        ? {
-              ...parsed.input,
-              goals_set_on: todayInTz(timezoneFromProfile(profile) ?? "UTC"),
-          }
-        : parsed.input;
+    const input: NutritionGoalsInput = { [known]: parsed.input[known] };
+    if (parsed.changesTargets) {
+        input.goals_set_on = todayInTz(timezoneFromProfile(profile) ?? "UTC");
+    }
     await upsertNutritionGoals(userId, input);
     return redirectWithToast(c, "/settings/goals", "settings.goals.saved");
 });

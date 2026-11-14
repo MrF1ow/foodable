@@ -276,7 +276,8 @@ describe("/app-v2.js", () => {
         // +~3.2 KB Add a usual: tabs, and the scanner taking a target per opener.
         // +~3.7 KB Profile pictures: shrink the chosen photo before upload.
         // +~1.2 KB Profile pictures: a picture that fails to load shows initials.
-        expect(js.length).toBeLessThan(155_000);
+        // +~11 KB Settings autosave: a marked form submits when a field is left; one save at a time, an edit in progress survives the response, a rejected or failed field keeps its text, leaving mid-save posts with keepalive.
+        expect(js.length).toBeLessThan(165_700);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
@@ -322,5 +323,432 @@ describe("shell stylesheet sources", () => {
             const css = readFileSync(new URL(name, dir), "utf8");
             expect(css, name).not.toMatch(/ui-v2/);
         }
+    });
+});
+
+// Settings autosave (src/web/client/v2/autosave.js), run against a fake page:
+// a document with capture listeners and a few marked forms.
+
+type AutosaveEvent = {
+    target?: unknown;
+    detail?: unknown;
+    defaultPrevented?: boolean;
+    preventDefault?: () => void;
+    stopImmediatePropagation?: () => void;
+};
+type AutosaveListener = (event: AutosaveEvent) => void;
+
+type FakeInput = {
+    value: string;
+    defaultValue: string;
+    form: FakeForm;
+    selectionStart: number;
+    selectionEnd: number;
+    hasAttribute: (name: string) => boolean;
+    focus: () => void;
+    setSelectionRange: (a: number, b: number) => void;
+};
+type FakeForm = {
+    name: string;
+    input: FakeInput;
+    hasAttribute: (name: string) => boolean;
+    querySelector: (sel: string) => unknown;
+    requestSubmit: () => void;
+};
+
+async function autosaveSetup(names = ["daily_carbs_g", "daily_water_ml"]) {
+    const map: Record<string, AutosaveListener[]> = {};
+    const timers: { id: number; fn: () => void }[] = [];
+    let timerId = 0;
+    const doc: {
+        activeElement: unknown;
+        addEventListener: (t: string, fn: AutosaveListener) => void;
+        querySelectorAll: (sel: string) => FakeForm[];
+    } = {
+        activeElement: null,
+        addEventListener: (t, fn) => {
+            (map[t] ??= []).push(fn);
+        },
+        querySelectorAll: (sel) =>
+            sel === "form[data-fd-autosave]" ? forms : [],
+    };
+    // Returns true when the event got past every listener unstopped, which is
+    // when Turbo's own (later, bubbling) listener would see it.
+    function fire(type: string, event: AutosaveEvent): boolean {
+        let stopped = false;
+        let prevented = false;
+        event.preventDefault = () => {
+            prevented = true;
+            event.defaultPrevented = true;
+        };
+        event.stopImmediatePropagation = () => {
+            stopped = true;
+        };
+        for (const fn of map[type] ?? []) {
+            if (stopped) break;
+            fn(event);
+        }
+        return !stopped && !prevented;
+    }
+    let reached = 0;
+    function makeForm(name: string, initial: string): FakeForm {
+        const field = { value: name };
+        const form: FakeForm = {
+            name,
+            hasAttribute: (n) => n === "data-fd-autosave",
+            querySelector: (sel) =>
+                sel === "[data-fd-autosave-input]"
+                    ? form.input
+                    : sel === 'input[name="field"]'
+                      ? field
+                      : null,
+            // requestSubmit fires the form's own submit event, as a browser does.
+            requestSubmit() {
+                if (fire("submit", { target: form })) reached += 1;
+            },
+            input: undefined as unknown as FakeInput,
+        };
+        form.input = {
+            value: initial,
+            defaultValue: initial,
+            form,
+            selectionStart: initial.length,
+            selectionEnd: initial.length,
+            hasAttribute: (n) => n === "data-fd-autosave-input",
+            focus() {
+                doc.activeElement = form.input;
+            },
+            setSelectionRange(a, b) {
+                form.input.selectionStart = a;
+                form.input.selectionEnd = b;
+            },
+        };
+        return form;
+    }
+    const forms: FakeForm[] = names.map((n) => makeForm(n, ""));
+    const src = await Bun.file("./src/web/client/v2/autosave.js").text();
+    new Function("document", "setTimeout", "clearTimeout", "WeakMap", src)(
+        doc,
+        (fn: () => void) => {
+            timerId += 1;
+            timers.push({ id: timerId, fn });
+            return timerId;
+        },
+        (id: number) => {
+            const at = timers.findIndex((x) => x.id === id);
+            if (at >= 0) timers.splice(at, 1);
+        },
+        WeakMap,
+    );
+    const [a, b] = forms as [FakeForm, FakeForm];
+    const t = {
+        a,
+        b,
+        doc,
+        reached: () => reached,
+        // Edit `form`'s field and leave it, as Tab does.
+        leave(form: FakeForm, value: string) {
+            form.input.value = value;
+            doc.activeElement = null;
+            fire("change", { target: form.input });
+            fire("focusout", { target: form.input });
+        },
+        enter: (form: FakeForm) => {
+            if (fire("submit", { target: form })) reached += 1;
+        },
+        // The response arrives: submit-end, then the page renders it.
+        end(form: FakeForm, fetchResponse: unknown = {}) {
+            fire("turbo:submit-end", {
+                target: form,
+                detail: { fetchResponse },
+            });
+        },
+        render: () => fire("turbo:render", {}),
+        // Run the timers a release queued (the drain), oldest first.
+        flush() {
+            while (timers.length > 0) timers.shift()!.fn();
+        },
+        // Run the safety timer of a submit that never reported back.
+        expire() {
+            timers.shift()!.fn();
+            while (timers.length > 0) timers.shift()!.fn();
+        },
+        morph(input: FakeInput, serverValue: string): boolean {
+            return fire("turbo:before-morph-element", {
+                target: input,
+                detail: { newElement: { value: serverValue } },
+            });
+        },
+        fire,
+    };
+    return t;
+}
+
+describe("autosave.js", () => {
+    test("a changed field submits once, however change and blur interleave", async () => {
+        const t = await autosaveSetup();
+        t.a.input.value = "180";
+        t.fire("change", { target: t.a.input });
+        t.fire("focusout", { target: t.a.input });
+        expect(t.reached()).toBe(1);
+    });
+
+    test("an unchanged field submits nothing", async () => {
+        const t = await autosaveSetup();
+        t.leave(t.a, "");
+        expect(t.reached()).toBe(0);
+    });
+
+    test("blur alone submits an edited field (no change event)", async () => {
+        const t = await autosaveSetup();
+        t.a.input.value = "150";
+        t.fire("focusout", { target: t.a.input });
+        expect(t.reached()).toBe(1);
+    });
+
+    test("Enter after change is not a second submit while one is in flight", async () => {
+        const t = await autosaveSetup();
+        t.a.input.value = "180";
+        t.fire("change", { target: t.a.input });
+        t.enter(t.a);
+        expect(t.reached()).toBe(1);
+    });
+
+    test("after the save has rendered, a later edit submits again", async () => {
+        const t = await autosaveSetup();
+        t.leave(t.a, "180");
+        t.end(t.a);
+        t.render();
+        t.flush();
+        t.a.input.defaultValue = "180";
+        t.leave(t.a, "190");
+        expect(t.reached()).toBe(2);
+    });
+
+    test("events from other controls are ignored", async () => {
+        const t = await autosaveSetup();
+        const other = {
+            value: "x",
+            defaultValue: "",
+            hasAttribute: () => false,
+        };
+        t.fire("change", { target: other });
+        expect(t.reached()).toBe(0);
+    });
+
+    test("a second field left while the first saves is queued, then sent after its render (F24)", async () => {
+        const t = await autosaveSetup();
+        t.leave(t.a, "250");
+        t.leave(t.b, "2500");
+        // Turbo only saw the first: a second submit would stop it and its render.
+        expect(t.reached()).toBe(1);
+        t.end(t.a);
+        expect(t.reached()).toBe(1);
+        t.render();
+        t.flush();
+        expect(t.reached()).toBe(2);
+    });
+
+    test("a render that lands before submit-end also releases the queue", async () => {
+        const t = await autosaveSetup();
+        t.leave(t.a, "250");
+        t.leave(t.b, "2500");
+        t.render();
+        t.end(t.a);
+        t.flush();
+        expect(t.reached()).toBe(2);
+    });
+
+    test("a failed request (no response) releases the queue at once", async () => {
+        const t = await autosaveSetup();
+        t.leave(t.a, "250");
+        t.leave(t.b, "2500");
+        t.end(t.a, undefined);
+        t.flush();
+        expect(t.reached()).toBe(2);
+    });
+
+    test("a timer releases a submit that never reports back", async () => {
+        const t = await autosaveSetup();
+        t.leave(t.a, "250");
+        t.leave(t.b, "2500");
+        t.expire();
+        expect(t.reached()).toBe(2);
+    });
+
+    test("the same field edited again while its save is in flight is sent after", async () => {
+        const t = await autosaveSetup();
+        t.leave(t.a, "250");
+        t.leave(t.a, "260");
+        expect(t.reached()).toBe(1);
+        t.end(t.a);
+        t.render();
+        t.flush();
+        expect(t.reached()).toBe(2);
+    });
+
+    test("a queued field already back at its stored value is not sent", async () => {
+        const t = await autosaveSetup();
+        t.leave(t.a, "250");
+        t.leave(t.b, "2500");
+        t.b.input.value = "";
+        t.end(t.a);
+        t.render();
+        t.flush();
+        expect(t.reached()).toBe(1);
+    });
+
+    test("the morph leaves a focused, edited field alone (F25)", async () => {
+        const t = await autosaveSetup();
+        t.b.input.value = "45";
+        t.doc.activeElement = t.b.input;
+        // The server sent the stored (empty) value: cancelled, so it is kept.
+        expect(t.morph(t.b.input, "")).toBe(false);
+    });
+
+    test("the morph leaves a queued field alone even when it lost the focus", async () => {
+        const t = await autosaveSetup();
+        t.leave(t.a, "250");
+        t.leave(t.b, "2500");
+        expect(t.morph(t.b.input, "")).toBe(false);
+    });
+
+    test("the morph still updates a field that is not being edited", async () => {
+        const t = await autosaveSetup();
+        t.a.input.value = "250";
+        expect(t.morph(t.a.input, "250")).toBe(true);
+        t.b.input.value = "9";
+        // Not focused, not queued: the server's value wins.
+        expect(t.morph(t.b.input, "")).toBe(true);
+        // Focused but not changed: nothing to protect.
+        t.doc.activeElement = t.a.input;
+        expect(t.morph(t.a.input, "250")).toBe(true);
+    });
+
+    test("a 422 body gets the typed text and the focus back, and leaving saves it (F25)", async () => {
+        const t = await autosaveSetup();
+        // The new page's forms, as the server rendered them.
+        const next = await autosaveSetup();
+        const newBody = {
+            querySelectorAll: (sel: string) =>
+                sel === "form[data-fd-autosave]" ? [next.a, next.b] : [],
+        };
+        t.leave(t.a, "abc");
+        t.b.input.value = "45";
+        t.b.input.selectionStart = 1;
+        t.b.input.selectionEnd = 2;
+        t.doc.activeElement = t.b.input;
+        t.fire("turbo:before-render", { detail: { newBody } });
+        // The focused field's text is carried; the one that was sent is not.
+        expect(next.b.input.value).toBe("45");
+        expect(next.a.input.value).toBe("");
+        // The body is swapped: the new page's document is what the module sees.
+        t.doc.querySelectorAll = () => [next.a, next.b];
+        t.doc.activeElement = null;
+        t.fire("turbo:render", {});
+        expect(next.doc.activeElement).toBe(next.b.input);
+        expect(next.b.input.selectionStart).toBe(1);
+        // It still differs from the stored value, so leaving it submits.
+        t.end(t.a);
+        t.flush();
+        t.leave(next.b, "45");
+        expect(t.reached() + next.reached()).toBeGreaterThanOrEqual(2);
+    });
+
+    test("a rejected field keeps its text and error through the next field's morph", async () => {
+        const t = await autosaveSetup();
+        (
+            t.a.input as unknown as {
+                getAttribute: (n: string) => string | null;
+            }
+        ).getAttribute = (n) => (n === "aria-invalid" ? "true" : null);
+        (t.a as unknown as { getAttribute: () => null }).getAttribute = () =>
+            null;
+        // Water is the save being answered; carbs was refused earlier.
+        t.leave(t.b, "2600");
+        const skipped = !t.fire("turbo:before-morph-element", {
+            target: t.a,
+            detail: { newElement: {} },
+        });
+        expect(skipped).toBe(true);
+        // The answered form itself morphs.
+        expect(
+            t.fire("turbo:before-morph-element", {
+                target: t.b,
+                detail: { newElement: {} },
+            }),
+        ).toBe(true);
+    });
+
+    test("a save with no answer keeps its text, says so, and is retried after the next answer", async () => {
+        const shown: unknown[] = [];
+        const g = globalThis as unknown as { window?: unknown };
+        const had = g.window;
+        g.window = {
+            FoodableApp: { toast: { show: (m: unknown) => shown.push(m) } },
+        };
+        try {
+            const t = await autosaveSetup();
+            t.leave(t.a, "31");
+            t.fire("turbo:submit-end", {
+                target: t.a,
+                detail: { error: new Error("offline") },
+            });
+            t.flush();
+            expect(shown.length).toBe(1);
+            // A later morph does not reset the failed field's text.
+            expect(t.morph(t.a.input, "")).toBe(false);
+            // The next save gets an answer: the failed field goes again after it.
+            t.leave(t.b, "2500");
+            t.end(t.b);
+            t.render();
+            t.flush();
+            expect(t.reached()).toBe(3);
+        } finally {
+            g.window = had;
+        }
+    });
+
+    test("leaving the page mid-save posts in-flight and queued fields with keepalive, without requestSubmit", async () => {
+        const g = globalThis as unknown as {
+            fetch: unknown;
+            FormData: unknown;
+        };
+        const realFetch = g.fetch;
+        const realFormData = g.FormData;
+        const posts: { url: unknown; keepalive: unknown }[] = [];
+        g.fetch = (url: unknown, init: { keepalive?: unknown }) => {
+            posts.push({ url, keepalive: init.keepalive });
+            return Promise.resolve();
+        };
+        g.FormData = function FakeFormData() {};
+        try {
+            const t = await autosaveSetup();
+            (t.a as unknown as { action: string }).action =
+                "/settings/goals/field";
+            (t.b as unknown as { action: string }).action =
+                "/settings/goals/field";
+            t.leave(t.a, "250");
+            t.leave(t.b, "2500");
+            expect(t.reached()).toBe(1);
+            t.fire("turbo:before-visit", { detail: { url: "/" } });
+            expect(posts.length).toBe(2);
+            expect(posts.every((p) => p.keepalive === true)).toBe(true);
+            // The aborted submission ends with nothing to drain.
+            t.fire("turbo:submit-end", { target: t.a, detail: {} });
+            t.flush();
+            expect(t.reached()).toBe(1);
+        } finally {
+            g.fetch = realFetch;
+            g.FormData = realFormData;
+        }
+    });
+
+    test("binding is page-wide: no per-form listeners to double up", async () => {
+        const t = await autosaveSetup();
+        const before = t.a.input;
+        t.leave(t.a, "1");
+        expect(before.form).toBe(t.a);
+        expect(t.reached()).toBe(1);
     });
 });

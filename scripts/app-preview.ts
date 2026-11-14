@@ -2093,16 +2093,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             alcohol: "us",
             days: PREVIEW_GOAL_DAYS,
         }),
-        "settings-goals-edit": renderSettingsGoalsV2Page({
-            chrome,
-            goals: PREVIEW_NAMED_GOALS,
-            today: "2026-11-10",
-            weightUnit: "kg",
-            alcohol: "us",
-            days: PREVIEW_GOAL_DAYS,
-            // A draft opens the sheet on load.
-            draft: goalsDraftFrom(PREVIEW_NAMED_GOALS, "us"),
-        }),
         "settings-goals-empty": renderSettingsGoalsV2Page({
             chrome,
             goals: null,
@@ -2111,6 +2101,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             alcohol: null,
             days: [],
         }),
+        // A refused field save: the typed text stays, with the error beside it.
         "settings-goals-error": renderSettingsGoalsV2Page({
             chrome,
             goals: PREVIEW_NAMED_GOALS,
@@ -2120,11 +2111,10 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             days: PREVIEW_GOAL_DAYS,
             draft: {
                 ...goalsDraftFrom(PREVIEW_NAMED_GOALS, "us"),
-                goal_name: "Recomp until the spring wedding photos",
                 daily_calories: "30000",
             },
-            error: "Goal name must be at most 40 characters. Calories must be at most 20000.",
-            invalid: ["goal_name", "daily_calories"],
+            error: "Calories must be at most 20000.",
+            invalid: ["daily_calories"],
         }),
         "settings-saved": renderSettingsSavedV2Page({
             chrome,

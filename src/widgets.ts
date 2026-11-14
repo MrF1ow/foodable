@@ -527,6 +527,7 @@ export const APP_V2_JS_SOURCES = [
     "./src/web/client/v2/copy-yesterday.js",
     "./src/web/client/v2/avatar-upload.js",
     "./src/web/client/v2/avatar-fallback.js",
+    "./src/web/client/v2/autosave.js",
 ] as const;
 
 const SCANNER_ZXING_ENTRY = "./src/web/client/v2/scanner-zxing-entry.js";

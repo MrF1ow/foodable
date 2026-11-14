@@ -963,14 +963,37 @@
     display: none;
 }
 
-/* The goals form: the saved name above it (FigCraft 23562), then rows with a
-   dot and a label on the left and the input on the right. */
-.fd-settings-goals-name {
+/* The goals page edits in place: the name and note under the title (FigCraft
+   23562), then cards whose rows are tap-to-edit fields. Each row is its own
+   form, saved when the field is left. */
+.fd-settings-goals-field {
     margin: 0;
+}
+
+.fd-settings-goals-name,
+.fd-settings-goals-note-input {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    outline: none;
+}
+
+.fd-settings-goals-name {
+    width: 100%;
     font: 600 22px/26px var(--font-display);
     letter-spacing: -0.35px;
-    color: var(--text-primary);
-    overflow-wrap: anywhere;
+}
+
+.fd-settings-goals-note-input {
+    width: 100%;
+    margin-top: var(--fd-s-4);
+    /* 16px keeps iOS from zooming the page on focus. */
+    font: 400 16px/22px var(--font-body);
+    color: var(--text-secondary);
 }
 
 .fd-settings-goals-since {
@@ -980,84 +1003,146 @@
     overflow-wrap: anywhere;
 }
 
-.fd-settings-goals-name:not(:has(+ .fd-settings-goals-since)) {
-    margin-bottom: var(--fd-s-12);
+.fd-settings-goals-name::placeholder,
+.fd-settings-goals-note-input::placeholder,
+.fd-settings-goals-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.fd-settings-goals-name:focus-visible,
+.fd-settings-goals-note-input:focus-visible {
+    border-color: var(--accent-text);
+}
+
+.fd-settings-goals-name[aria-invalid="true"],
+.fd-settings-goals-note-input[aria-invalid="true"] {
+    border-color: var(--status-over);
+}
+
+.fd-settings-goals-fields {
+    padding: 0 16px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-goals-fields .fd-settings-goals-field + .fd-settings-goals-field {
+    border-top: 1px solid var(--line);
+}
+
+.fd-settings-goals-field__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-14);
+    min-height: 52px;
+    /* 32px chip + 13px: the frame's 59px row with its hairline. */
+    padding: 13px 0;
+    cursor: text;
+}
+
+.fd-settings-goals-field__label {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-14);
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 400;
+}
+
+.fd-settings-goals-field__label > .fd-dot {
+    margin-left: 8px;
+}
+
+/* The value is a chip that hugs its text, the unit inside it (FigCraft 23562):
+   a 1px line, a 1.5px accent outline on the field being edited. */
+.fd-settings-goals-field__entry {
+    display: inline-flex;
+    flex: 0 1 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--fd-s-4);
+    min-width: 0;
+    max-width: 60%;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-bg);
+    font-size: 14px;
+    line-height: 18px;
+}
+
+.fd-settings-goals-field__entry:focus-within {
+    border-color: var(--accent-text);
+    box-shadow: inset 0 0 0 0.5px var(--accent-text);
+}
+
+.fd-settings-goals-field__entry:has([aria-invalid="true"]) {
+    border-color: var(--status-over);
+}
+
+.fd-settings-goals-input {
+    /* Hugs its text where field-sizing exists (below), else a fixed width. */
+    width: 7ch;
+    min-width: 2ch;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    outline: none;
+    box-shadow: none;
+    text-align: right;
+    font: 400 14px/18px var(--font-body);
+    /* Not the 44px touch height of a bare input: the chip is the target. */
+    min-height: 0;
+}
+
+/* The chip carries the focus outline, not the input inside it. */
+.fd-settings-goals-input:focus-visible {
+    box-shadow: none;
+}
+
+@supports (field-sizing: content) {
+    .fd-settings-goals-input {
+        field-sizing: content;
+        width: auto;
+    }
 }
 
 .fd-settings-goals-unit {
-    color: var(--text-tertiary);
-}
-
-/* "Edit goals": the full-width pill under the cards (FigCraft 23562). */
-.fd-settings-goals-edit {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 52px;
-    margin: var(--space-gutter) 0 var(--fd-s-12);
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
+    flex: none;
     color: var(--text-primary);
-    font: 600 15px/1 var(--font-body);
-    cursor: pointer;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 18px;
 }
 
-.fd-settings-goals-edit:focus-visible,
+/* The line under the Limits card (FigCraft 23562). */
+.fd-settings-goals-hint {
+    margin: 10px 0 var(--fd-s-12);
+    padding-left: 4px;
+    color: var(--text-secondary);
+    font: 400 12px/16px var(--font-body);
+}
+
+.fd-settings-goals-field__error {
+    margin: 0 0 var(--fd-s-10);
+    color: var(--status-over);
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    text-align: right;
+}
+
+.fd-settings-goals-field--text .fd-settings-goals-field__error {
+    margin: var(--fd-s-4) 0 0;
+    text-align: left;
+}
+
 .fd-settings-goaldays__clear:focus-visible {
     outline: 2px solid var(--accent-text);
     outline-offset: 2px;
-}
-
-/* The edit sheet (FigCraft 48374): a label above each filled field. */
-.fd-settings-goals-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-12);
-    margin: 0;
-}
-
-.fd-settings-goals-form__title {
-    margin: 8px 0 0;
-    font: 600 0.6875rem/1.1 var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-settings-goals-form__title:first-child {
-    margin-top: 0;
-}
-
-.fd-settings-goals-form .fd-settings-field__label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.fd-sheet .fd-settings-goals-form .fd-settings-input {
-    min-height: 48px;
-    padding: 0 var(--fd-s-14);
-    border: 1px solid transparent;
-    border-radius: var(--radius-lg);
-    background: var(--surface-raised);
-    /* 16px keeps iOS from zooming the page on focus. */
-    font: 400 16px/1.25 var(--font-body);
-}
-
-.fd-sheet .fd-settings-goals-form .fd-settings-input::placeholder {
-    color: var(--text-tertiary);
-}
-
-.fd-sheet .fd-settings-goals-form .fd-settings-input:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 1px;
-}
-
-.fd-sheet .fd-settings-goals-form .fd-settings-input[aria-invalid="true"] {
-    border-color: var(--status-over);
 }
 
 /* Per-day overrides: one card, each day with a Clear that posts on its own. */

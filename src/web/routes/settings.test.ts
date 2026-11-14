@@ -475,11 +475,11 @@ const FORM_HEADERS = {
     "Content-Type": "application/x-www-form-urlencoded",
 };
 
-function postGoals(fields: Record<string, string>) {
-    return hono.request("http://test/settings/goals", {
+function postField(field: string, value: string) {
+    return hono.request("http://test/settings/goals/field", {
         method: "POST",
         headers: { cookie: cookie(ALICE), ...FORM_HEADERS },
-        body: new URLSearchParams(fields),
+        body: new URLSearchParams({ field, value }),
     });
 }
 
@@ -491,23 +491,19 @@ function postClearDay(fields: Record<string, string>) {
     });
 }
 
-const FULL_FORM = {
-    goal_name: "Cut",
-    goal_note: "until spring",
-    daily_calories: "2100",
-    daily_protein_g: "150.5",
-    daily_carbs_g: "180",
-    daily_fat_g: "60",
-    daily_water_ml: "3000",
-    daily_fiber_g: "35",
-    daily_sugar_g: "40",
-    // Typed in drinks (US): 0.5 of a 14 g drink.
-    daily_alcohol_g: "0.5",
-    daily_caffeine_mg: "300",
-};
+/** The `value` input of one goal's form in a rendered page. */
+function fieldInput(html: string, field: string): string {
+    const form = html.match(
+        new RegExp(
+            `<form[^>]*data-fd-autosave[^>]*><input type="hidden" name="field" value="${field}" />[\\s\\S]*?</form>`,
+        ),
+    );
+    expect(form).not.toBeNull();
+    return form![0].match(/<input[^>]*name="value"[^>]*>/)![0];
+}
 
-describe("settings goals form routes", () => {
-    test("GET shows the standing goals in the form and the days with their own", async () => {
+describe("settings goals field routes", () => {
+    test("GET shows the standing goals in their fields and the days with their own", async () => {
         goalsState = STORED_GOALS;
         setSystemTime(new Date("2026-11-12T12:00:00Z"));
         goalDaysState = [
@@ -520,189 +516,193 @@ describe("settings goals form routes", () => {
         });
         expect(res.status).toBe(200);
         const html = await res.text();
-        expect(html).toContain(
-            'name="daily_calories" type="text" inputmode="decimal" value="2200"',
-        );
-        // The sheet starts closed: the page reads like the design's cards.
-        expect(html).not.toContain("data-sheet-open-on-load");
-        expect(html).toContain("Edit goals");
+        expect(fieldInput(html, "daily_calories")).toContain('value="2200"');
+        // No Edit sheet: the numbers are the fields.
+        expect(html).not.toContain("Edit goals");
+        expect(html).not.toContain("fd-goals-edit");
         expect(html).toContain("Since Oct 2");
+        // The per-day list stays, with Clear.
         expect(html).toContain("Sat, Nov 14");
+        expect(html).toContain("Clear day");
         // Past days and other members' days are not listed.
         expect(html).not.toContain("Tue, Nov 10");
         expect(html).not.toContain("1999");
     });
 
-    test("POST saves every field and stamps today in the member's timezone", async () => {
-        alcoholTracking = true;
-        profileTimezone = "Pacific/Auckland";
-        // 20:00 UTC on the 12th is already the 13th in Auckland.
-        setSystemTime(new Date("2026-11-12T20:00:00Z"));
-        const res = await postGoals(FULL_FORM);
+    test("POST /settings/goals/field daily_protein_g 180 answers 303 and keeps the other fields", async () => {
+        goalsState = STORED_GOALS;
+        setSystemTime(new Date("2026-11-14T12:00:00Z"));
+        const res = await postField("daily_protein_g", "180");
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/settings/goals");
         expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
-        expect(goalUpserts).toEqual([
-            {
-                goal_name: "Cut",
-                goal_note: "until spring",
-                daily_calories: 2100,
-                daily_protein_g: 150.5,
-                daily_carbs_g: 180,
-                daily_fat_g: 60,
-                daily_water_ml: 3000,
-                daily_fiber_g: 35,
-                daily_sugar_g: 40,
-                daily_alcohol_g: 7,
-                daily_caffeine_mg: 300,
-                goals_set_on: "2026-11-13",
-            },
+        expect(goalsState).toMatchObject({
+            ...STORED_GOALS,
+            daily_protein_g: 180,
+            // A changed target is the day the goals were set.
+            goals_set_on: "2026-11-14",
+            updated_at: STORED_GOALS.updated_at,
+        });
+        // Only that column is written, so a concurrent edit to another field
+        // cannot be overwritten with a stale copy.
+        expect(Object.keys(goalUpserts[0]!).sort()).toEqual([
+            "daily_protein_g",
+            "goals_set_on",
         ]);
     });
 
-    test("POST with only the name or note changed leaves the set day alone", async () => {
-        alcoholTracking = true;
+    test("a changed target stamps today in the member's timezone", async () => {
+        profileTimezone = "Pacific/Auckland";
         goalsState = STORED_GOALS;
-        const res = await postGoals({
-            goal_name: "Maintain",
-            goal_note: "",
-            daily_calories: "2200",
-            daily_protein_g: "140",
-            daily_carbs_g: "200",
-            daily_fat_g: "70",
-            daily_water_ml: "2500",
-            daily_fiber_g: "30",
-            daily_sugar_g: "50",
-            daily_alcohol_g: "1",
-            daily_caffeine_mg: "400",
-        });
+        // 20:00 UTC on the 12th is already the 13th in Auckland.
+        setSystemTime(new Date("2026-11-12T20:00:00Z"));
+        const res = await postField("daily_calories", "2100");
         expect(res.status).toBe(303);
-        expect(goalUpserts).toHaveLength(1);
-        expect(goalUpserts[0]!.goal_name).toBe("Maintain");
-        expect(goalUpserts[0]!.goal_note).toBeNull();
-        expect(goalUpserts[0]!.goals_set_on).toBeUndefined();
+        expect(goalUpserts).toEqual([
+            { daily_calories: 2100, goals_set_on: "2026-11-13" },
+        ]);
+    });
+
+    test("the first goal on an empty account is a target", async () => {
+        setSystemTime(new Date("2026-11-12T12:00:00Z"));
+        const res = await postField("daily_calories", "2000");
+        expect(res.status).toBe(303);
+        expect(goalUpserts).toEqual([
+            { daily_calories: 2000, goals_set_on: "2026-11-12" },
+        ]);
+    });
+
+    test("a name or note alone leaves the set day alone", async () => {
+        goalsState = STORED_GOALS;
+        let res = await postField("goal_name", "Maintain");
+        expect(res.status).toBe(303);
+        res = await postField("goal_note", "");
+        expect(res.status).toBe(303);
+        expect(goalUpserts).toEqual([
+            { goal_name: "Maintain" },
+            { goal_note: null },
+        ]);
         expect(goalsState!.goals_set_on).toBe("2026-10-02");
     });
 
-    test("POST with alcohol tracking off keeps the stored alcohol limit", async () => {
+    test("a value the field already holds does not re-stamp the day", async () => {
         goalsState = STORED_GOALS;
-        const { daily_alcohol_g: _skip, ...noAlcohol } = FULL_FORM;
-        const res = await postGoals(noAlcohol);
+        const res = await postField("daily_protein_g", "140");
         expect(res.status).toBe(303);
-        expect("daily_alcohol_g" in goalUpserts[0]!).toBe(false);
-        expect(goalsState!.daily_alcohol_g).toBe(14);
+        expect(goalUpserts[0]!.goals_set_on).toBeUndefined();
     });
 
-    test("POST takes the alcohol limit in the member's drink unit", async () => {
+    test("alcohol is typed in the member's drink unit", async () => {
         alcoholTracking = true;
         drinkUnit = "uk";
-        const res = await postGoals({ ...FULL_FORM, daily_alcohol_g: "2" });
+        goalsState = STORED_GOALS;
+        const res = await postField("daily_alcohol_g", "2");
         expect(res.status).toBe(303);
         // 2 UK units of 7.893 g.
         expect(goalUpserts[0]!.daily_alcohol_g).toBe(15.79);
     });
 
-    test("GET shows the alcohol limit in drinks on the form", async () => {
-        alcoholTracking = true;
-        goalsState = { ...STORED_GOALS, daily_alcohol_g: 28 };
-        const res = await hono.request("http://test/settings/goals", {
-            headers: { cookie: cookie(ALICE) },
-        });
-        const html = await res.text();
-        expect(html).toContain(
-            'name="daily_alcohol_g" type="text" inputmode="decimal" value="2"',
-        );
-        expect(html).toContain("(US drinks)");
-        expect(html).toContain("<dd>2 US drinks</dd>");
-        expect(html).not.toContain("28 g");
-    });
-
-    test("POST an untouched UK alcohol limit does not rewrite it or re-stamp the day", async () => {
+    test("an untouched UK alcohol limit does not rewrite it or re-stamp the day", async () => {
         alcoholTracking = true;
         drinkUnit = "uk";
-        // 10 g is 1.27 units: the form shows 1.27, and sends it back as is.
+        // 10 g is 1.27 units: the field shows 1.27, and sends it back as is.
         goalsState = { ...STORED_GOALS, daily_alcohol_g: 10 };
-        const res = await postGoals({
-            goal_name: "Recomp",
-            goal_note: "",
-            daily_calories: "2200",
-            daily_protein_g: "140",
-            daily_carbs_g: "200",
-            daily_fat_g: "70",
-            daily_water_ml: "2500",
-            daily_fiber_g: "30",
-            daily_sugar_g: "50",
-            daily_alcohol_g: "1.27",
-            daily_caffeine_mg: "400",
-        });
+        const res = await postField("daily_alcohol_g", "1.27");
         expect(res.status).toBe(303);
         expect(goalUpserts[0]!.daily_alcohol_g).toBe(10);
         expect(goalUpserts[0]!.goals_set_on).toBeUndefined();
     });
 
-    test("POST a decimal calorie count the store rounded does not re-stamp the day", async () => {
+    test("alcohol with tracking off is not a field", async () => {
+        goalsState = STORED_GOALS;
+        const res = await postField("daily_alcohol_g", "1");
+        expect(res.status).toBe(400);
+        expect(goalUpserts).toHaveLength(0);
+        expect(goalsState!.daily_alcohol_g).toBe(14);
+    });
+
+    test("a decimal calorie count the store rounded does not re-stamp the day", async () => {
         goalsState = { ...STORED_GOALS, daily_calories: 1801 };
-        const res = await postGoals({
-            goal_name: "Recomp",
-            goal_note: "",
-            daily_calories: "1800.5",
-            daily_protein_g: "140",
-            daily_carbs_g: "200",
-            daily_fat_g: "70",
-            daily_water_ml: "2500",
-            daily_fiber_g: "30",
-            daily_sugar_g: "50",
-            daily_caffeine_mg: "400",
-        });
+        const res = await postField("daily_calories", "1800.5");
         expect(res.status).toBe(303);
         expect(goalUpserts[0]!.goals_set_on).toBeUndefined();
     });
 
-    test('POST "Calories 0" alone is refused: a floor of 0 is not a target', async () => {
-        const res = await postGoals({ goal_name: "x", daily_calories: "0" });
-        expect(res.status).toBe(400);
+    test("an unknown field answers 400 and writes nothing", async () => {
+        goalsState = STORED_GOALS;
+        for (const field of ["", "target_weight_g", "user_id", "__proto__"]) {
+            const res = await postField(field, "1");
+            expect(res.status).toBe(400);
+        }
+        expect(goalUpserts).toHaveLength(0);
+    });
+
+    test("an out-of-bounds value answers 422 with the error on that field and the stored value unchanged", async () => {
+        goalsState = STORED_GOALS;
+        const res = await postField("daily_calories", "99999");
+        expect(res.status).toBe(422);
+        const html = await res.text();
+        const calories = fieldInput(html, "daily_calories");
+        expect(calories).toContain('value="99999"');
+        expect(calories).toContain('aria-invalid="true"');
+        expect(html).toContain("Calories must be at most 20000.");
+        expect(html.split("fd-settings-goals-field__error")).toHaveLength(2);
+        // Every other field still shows what is stored.
+        expect(fieldInput(html, "daily_protein_g")).toContain('value="140"');
+        expect(goalUpserts).toHaveLength(0);
+        expect(goalsState!.daily_calories).toBe(2200);
+    });
+
+    test("a name over the limit answers 422 on the name field", async () => {
+        goalsState = STORED_GOALS;
+        const res = await postField("goal_name", "x".repeat(41));
+        expect(res.status).toBe(422);
+        expect(await res.text()).toContain(
+            "Goal name must be at most 40 characters.",
+        );
+        expect(goalUpserts).toHaveLength(0);
+    });
+
+    test('"Calories 0" alone is refused: a floor of 0 is not a target', async () => {
+        const res = await postField("daily_calories", "0");
+        expect(res.status).toBe(422);
         expect(await res.text()).toContain("Set at least one daily target.");
         expect(goalUpserts).toHaveLength(0);
     });
 
-    test("a refused save re-renders with the sheet open on load, errors and draft kept", async () => {
-        const res = await postGoals({ ...FULL_FORM, daily_calories: "99999" });
-        expect(res.status).toBe(400);
-        const html = await res.text();
-        expect(html).toMatch(
-            /<dialog[^>]*id="fd-goals-edit"[^>]*data-sheet-open-on-load/,
-        );
-        // The error sits inside the sheet, not under the page header.
-        const sheetHtml = html.slice(html.indexOf('id="fd-goals-edit"'));
-        expect(sheetHtml).toContain("Calories must be at most 20000.");
-        expect(html.slice(0, html.indexOf('id="fd-goals-edit"'))).not.toContain(
-            "Calories must be at most 20000.",
-        );
-        expect(html).toContain('value="99999"');
-    });
-
-    test("POST out-of-bounds values re-render 400 with the typed values and errors", async () => {
-        const res = await postGoals({
-            ...FULL_FORM,
-            daily_calories: "99999",
-            goal_name: "x".repeat(41),
-        });
-        expect(res.status).toBe(400);
-        const html = await res.text();
-        expect(html).toContain("Goal name must be at most 40 characters.");
-        expect(html).toContain("Calories must be at most 20000.");
-        expect(html).toContain('value="99999"');
-        expect(html).toContain(`value="${"x".repeat(41)}"`);
-        expect(html).toContain('value="150.5"');
-        expect(goalUpserts).toHaveLength(0);
-    });
-
-    test("POST with no target at all is refused, so no all-blank row is made", async () => {
-        const res = await postGoals({ goal_name: "Only a name" });
-        expect(res.status).toBe(400);
+    test("a name with no target at all is refused, so no all-blank row is made", async () => {
+        const res = await postField("goal_name", "Only a name");
+        expect(res.status).toBe(422);
         expect(await res.text()).toContain("Set at least one daily target.");
         expect(goalUpserts).toHaveLength(0);
         expect(goalsState).toBeNull();
+    });
+
+    test("clearing the last target is refused", async () => {
+        goalsState = {
+            ...STORED_GOALS,
+            daily_protein_g: null,
+            daily_carbs_g: null,
+            daily_fat_g: null,
+            daily_fiber_g: null,
+            daily_sugar_g: null,
+            daily_alcohol_g: null,
+            daily_caffeine_mg: null,
+            daily_water_ml: null,
+        };
+        const res = await postField("daily_calories", "");
+        expect(res.status).toBe(422);
+        expect(goalUpserts).toHaveLength(0);
+        expect(goalsState!.daily_calories).toBe(2200);
+    });
+
+    test("the old whole-form POST is gone", async () => {
+        const res = await hono.request("http://test/settings/goals", {
+            method: "POST",
+            headers: { cookie: cookie(ALICE), ...FORM_HEADERS },
+            body: new URLSearchParams({ daily_calories: "2000" }),
+        });
+        expect(res.status).toBe(404);
     });
 
     test("POST clear removes that one day and no other", async () => {
