@@ -88,6 +88,8 @@ import {
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
+import type { MentionWarning } from "../../domain/recipe-mentions.js";
+import { recipeMentionWarnings } from "../../domain/recipe-mentions-check.js";
 import { RecipeInputError } from "../../domain/recipes.js";
 
 export const ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA = z.object({
@@ -126,6 +128,49 @@ const RECIPE_PROBLEM = z.object({
     line: z.string().nullable(),
 });
 
+const MENTION_WARNING = z.object({
+    food: z.string(),
+    key: z.string(),
+    food_id: z.string().nullable(),
+    excerpt: z.string(),
+    amount: z.number().nullable(),
+    note: z.string().nullable(),
+    message: z.string(),
+});
+
+/** Foods a recipe's steps name that its ingredients lack, in wire shape. */
+function wireMentionWarnings(warnings: readonly MentionWarning[]) {
+    return warnings.map((w) => ({
+        food: w.food,
+        key: w.key,
+        food_id: w.foodId ?? null,
+        excerpt: w.excerpt,
+        amount: w.amount,
+        note: w.note,
+        message: w.message,
+    }));
+}
+
+/** The warnings as text the agent reads; empty when there are none. */
+function mentionWarningsText(warnings: readonly MentionWarning[]): string {
+    if (warnings.length === 0) return "";
+    return `\nThe steps mention foods that are not ingredients. This never blocks anything: ask the user whether to add each one, and call add_recipe_ingredient only if they say yes.\n${warnings
+        .map((w) => `- ${w.message} ("${w.excerpt}")`)
+        .join("\n")}`;
+}
+
+async function mentionWarningsFor(
+    householdId: string,
+    recipeId: string | null,
+): Promise<MentionWarning[]> {
+    if (!recipeId) return [];
+    return recipeMentionWarnings(
+        { recipes: liveRecipesStore(), foods: liveFoodsStore() },
+        householdId,
+        recipeId,
+    );
+}
+
 export const IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA = z.object({
     status: WRITE_STATUS,
     similar_foods: z.array(SIMILAR_FOODS_ENTRY),
@@ -157,6 +202,7 @@ export const IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA = z.object({
     ),
     verification: z.enum(["verified", "unverified"]).nullable(),
     problems: z.array(RECIPE_PROBLEM),
+    mention_warnings: z.array(MENTION_WARNING),
 });
 
 export const VERIFY_RECIPE_OUTPUT_SCHEMA = z.object({
@@ -164,6 +210,7 @@ export const VERIFY_RECIPE_OUTPUT_SCHEMA = z.object({
     recipe_id: z.string(),
     verification: z.enum(["verified", "unverified"]).nullable(),
     problems: z.array(RECIPE_PROBLEM),
+    mention_warnings: z.array(MENTION_WARNING),
 });
 
 export function importRecipeFromUrlPausedStructuredContent(url: string) {
@@ -186,6 +233,7 @@ export function importRecipeFromUrlPausedStructuredContent(url: string) {
         message: RECIPE_LINK_READER_PAUSED_AGENT_MESSAGE,
         from_memory: outcome.fromMemory,
         remembered_until: outcome.rememberedUntil,
+        mention_warnings: [] as ReturnType<typeof wireMentionWarnings>,
     };
     IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(payload);
     return payload;
@@ -223,6 +271,7 @@ export const IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA = z.object({
     message: z.string(),
     from_memory: z.boolean(),
     remembered_until: z.string().nullable(),
+    mention_warnings: z.array(MENTION_WARNING),
 });
 
 const RECIPE_IMPORT_WIRE = z.object({
@@ -363,6 +412,11 @@ export const GET_RECIPE_OUTPUT_SCHEMA = z.object({
     verification: z.enum(["verified", "unverified"]),
     problems: z.array(RECIPE_PROBLEM),
     import: RECIPE_IMPORT_WIRE.nullable(),
+    mention_warnings: z
+        .array(MENTION_WARNING)
+        .describe(
+            "foods the steps name that the ingredients do not; advice only, it never changes verification",
+        ),
     cook_preview: COOK_PREVIEW_WIRE.nullable().describe(
         "what cooking one serving takes from the fridge; null when the recipe cannot be previewed",
     ),
@@ -634,7 +688,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Recipe",
             description:
-                "Get a recipe as viewed by a household member, including per-portion and per-person amounts. `notices` surface allergens and recipe gaps in one place; when macros are incomplete, `macros_per_portion.incomplete` is true.",
+                "Get a recipe as viewed by a household member, including per-portion and per-person amounts. `notices` surface allergens and recipe gaps in one place; when macros are incomplete, `macros_per_portion.incomplete` is true. `mention_warnings` lists foods an imported recipe's steps use that its ingredients lack; they never block anything, so ask the user and call add_recipe_ingredient only if they say yes.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -699,6 +753,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         args.id,
                     );
                     const problems = importRow?.problems ?? [];
+                    const mentionWarnings = await mentionWarningsFor(
+                        actor.householdId,
+                        args.id,
+                    );
                     const gapReasonTexts: string[] = [];
                     const seenGapMsg = new Set<string>();
                     for (const n of recipeGapNotices) {
@@ -750,6 +808,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         verification: view.verification,
                         problems: wireProblems(problems),
                         import: wireImport(importRow),
+                        mention_warnings: wireMentionWarnings(mentionWarnings),
                         steps,
                         portion_count: view.portionCount,
                         macros_per_portion: wiredMacros,
@@ -793,7 +852,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${perPortionLine}${allergenBlock}\n${ingredientBlock}${stepsLines}${getRecipeImportText(payload)}`,
+                                text: `${perPortionLine}${allergenBlock}\n${ingredientBlock}${stepsLines}${getRecipeImportText(payload)}${mentionWarningsText(mentionWarnings)}`,
                             },
                         ],
                         structuredContent: payload,
@@ -1585,7 +1644,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From Text",
             description:
-                'Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients. Pass the steps in instructions; without them the recipe stays unverified. Leave an ingredient\'s amount out only when it is not measured, and then set its note to "to taste" (or "as needed", "for garnish"); an ingredient with no amount and no such note keeps the recipe unverified. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food. When it returns similar_foods, ask the person about every listed ingredient at once, then call again passing each chosen food_id on that ingredient or new_food: true.',
+                'Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients. Pass the steps in instructions; without them the recipe stays unverified. Leave an ingredient\'s amount out only when it is not measured, and then set its note to "to taste" (or "as needed", "for garnish"); an ingredient with no amount and no such note keeps the recipe unverified. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food. When it returns similar_foods, ask the person about every listed ingredient at once, then call again passing each chosen food_id on that ingredient or new_food: true. mention_warnings lists foods the steps use that the ingredients lack: they never block or unverify a recipe; ask the person, and call add_recipe_ingredient only if they say yes.',
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1667,6 +1726,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             },
                         );
                         const importGapRows = result.gaps;
+                        const mentionWarnings = await mentionWarningsFor(
+                            actor.householdId,
+                            result.recipe.id,
+                        );
                         const payload = {
                             status: "ok" as const,
                             similar_foods: [],
@@ -1690,6 +1753,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             recipe_search_places: places,
                             verification: result.verification,
                             problems: wireProblems(result.problems),
+                            mention_warnings:
+                                wireMentionWarnings(mentionWarnings),
                         };
                         return {
                             content: [
@@ -1704,7 +1769,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         places.length
                                             ? `\nSearch places: ${places.map((place) => place.name).join(", ")}`
                                             : ""
-                                    }`,
+                                    }${mentionWarningsText(mentionWarnings)}`,
                                 },
                             ],
                             structuredContent: payload,
@@ -1727,6 +1792,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                     recipe_search_places: places,
                                     verification: null,
                                     problems: [],
+                                    mention_warnings: [],
                                 },
                             };
                         }
@@ -1745,7 +1811,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Verify Recipe",
             description:
-                "Run the deterministic check on a recipe. Only this check can verify a recipe; there is no override. Use after fixing an unverified import. Pass resolved_lines with the unresolved import lines you have dealt with (added as ingredients, or not needed); they are removed before the check runs, and any other unresolved lines still count.",
+                "Run the deterministic check on a recipe. Only this check can verify a recipe; there is no override. Use after fixing an unverified import. It also lists mention_warnings (foods the steps use that the ingredients lack), which never affect the result. Pass resolved_lines with the unresolved import lines you have dealt with (added as ingredients, or not needed); they are removed before the check runs, and any other unresolved lines still count.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1785,6 +1851,9 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 ingredient_id: string | null;
                                 line: string | null;
                             }[],
+                            mention_warnings: [] as ReturnType<
+                                typeof wireMentionWarnings
+                            >,
                         };
                         return {
                             content: [
@@ -1809,21 +1878,28 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                   actor.householdId,
                                   args.recipe_id,
                               );
+                    const mentionWarnings = await mentionWarningsFor(
+                        actor.householdId,
+                        args.recipe_id,
+                    );
                     const payload = {
                         status: checked.verification,
                         recipe_id: args.recipe_id,
                         verification: checked.verification,
                         problems: wireProblems(checked.problems),
+                        mention_warnings: wireMentionWarnings(mentionWarnings),
                     };
                     return {
                         content: [
                             {
                                 type: "text",
-                                text: checked.verified
-                                    ? `${recipe.name} passed the check.`
-                                    : checked.verification === "verified"
-                                      ? `${recipe.name} was made by hand, so it stays verified. The check found: ${checked.problems.map((row) => row.message).join(" ")}`
-                                      : `${recipe.name} is still unverified (${checked.problems.length} problem${checked.problems.length === 1 ? "" : "s"}): ${checked.problems.map((row) => row.message).join(" ")}`,
+                                text: `${
+                                    checked.verified
+                                        ? `${recipe.name} passed the check.`
+                                        : checked.verification === "verified"
+                                          ? `${recipe.name} was made by hand, so it stays verified. The check found: ${checked.problems.map((row) => row.message).join(" ")}`
+                                          : `${recipe.name} is still unverified (${checked.problems.length} problem${checked.problems.length === 1 ? "" : "s"}): ${checked.problems.map((row) => row.message).join(" ")}`
+                                }${mentionWarningsText(mentionWarnings)}`,
                             },
                         ],
                         structuredContent: payload,
@@ -1838,7 +1914,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From URL",
             description:
-                "Import a recipe from a link. For a recipe website, reads the page's published recipe data. For a social post (Instagram, TikTok, Facebook, Threads, Pinterest, YouTube), returns status paste_needed when no text is given — ask the user to paste the caption (for Pinterest, first ask for the recipe website the pin links to, otherwise the recipe text), then call again with text. The household may have turned on an opt-in TikTok or Facebook reader; if status is still paste_needed, reader_failure explains why and you should ask for the caption. Never open, fetch, or browse the post yourself. When status is no_recipe_in_text, the caption has no recipe — ask the user to type it or send a screenshot. Returns unresolved_lines and problems so you can fix an unverified import and call verify_recipe.",
+                "Import a recipe from a link. For a recipe website, reads the page's published recipe data. For a social post (Instagram, TikTok, Facebook, Threads, Pinterest, YouTube), returns status paste_needed when no text is given — ask the user to paste the caption (for Pinterest, first ask for the recipe website the pin links to, otherwise the recipe text), then call again with text. The household may have turned on an opt-in TikTok or Facebook reader; if status is still paste_needed, reader_failure explains why and you should ask for the caption. Never open, fetch, or browse the post yourself. When status is no_recipe_in_text, the caption has no recipe — ask the user to type it or send a screenshot. Returns unresolved_lines and problems so you can fix an unverified import and call verify_recipe. mention_warnings lists foods the steps use that the ingredients lack: they never block or unverify a recipe; ask the user, and call add_recipe_ingredient only if they say yes.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1885,7 +1961,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         text: args.text,
                         readerEnabled,
                     });
-                    const payload = !paused
+                    const handled = !paused
                         ? await (async () => {
                               const outcome = await importRecipeFromUrl(
                                   {
@@ -1912,6 +1988,14 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                       retry: args.retry === true,
                                   },
                               );
+                              const mentionWarnings =
+                                  outcome.status === "imported" ||
+                                  outcome.status === "unverified_needs_review"
+                                      ? await mentionWarningsFor(
+                                            actor.householdId,
+                                            outcome.recipeId,
+                                        )
+                                      : [];
                               const built = {
                                   status: outcome.status,
                                   recipe_id: outcome.recipeId,
@@ -1930,19 +2014,25 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                   message: importOutcomeMessage(outcome),
                                   from_memory: outcome.fromMemory,
                                   remembered_until: outcome.rememberedUntil,
+                                  mention_warnings:
+                                      wireMentionWarnings(mentionWarnings),
                               };
                               IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(built);
-                              return built;
+                              return {
+                                  payload: built,
+                                  text: `${built.message}${mentionWarningsText(mentionWarnings)}`,
+                              };
                           })()
-                        : importRecipeFromUrlPausedStructuredContent(args.url);
+                        : (() => {
+                              const payload =
+                                  importRecipeFromUrlPausedStructuredContent(
+                                      args.url,
+                                  );
+                              return { payload, text: payload.message };
+                          })();
                     return {
-                        content: [
-                            {
-                                type: "text",
-                                text: payload.message,
-                            },
-                        ],
-                        structuredContent: payload,
+                        content: [{ type: "text", text: handled.text }],
+                        structuredContent: handled.payload,
                     };
                 },
                 analytics,

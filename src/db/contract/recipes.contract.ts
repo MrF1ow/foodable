@@ -237,6 +237,52 @@ export function runRecipesStoreContract(
             );
         });
 
+        test("upsertImport and getImport round-trip dismissed mentions", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const recipe = sampleRecipe(c);
+            await store.insertRecipe(recipe);
+            const row = {
+                recipeId: recipe.id,
+                householdId: c.householdId,
+                sourceKind: "text" as const,
+                sourceUrl: null,
+                sourceText: "pasted",
+                sourceTextOrigin: "pasted" as const,
+                transcript: null,
+                credit: null,
+                unresolvedLines: [],
+                problems: [],
+                dismissedMentions: [],
+                importedAt: "2026-01-01T00:00:00.000Z",
+            };
+            expect((await store.upsertImport(row)).dismissedMentions).toEqual(
+                [],
+            );
+            const dismissed = ["egg", 'pickled "beets"', "jalapeño"];
+            await store.upsertImport({ ...row, dismissedMentions: dismissed });
+            expect(
+                (await store.getImport(c.householdId, recipe.id))
+                    ?.dismissedMentions,
+            ).toEqual(dismissed);
+            expect(
+                (await store.listImports(c.householdId)).find(
+                    (r) => r.recipeId === recipe.id,
+                )?.dismissedMentions,
+            ).toEqual(dismissed);
+            await store.setVerification(
+                c.householdId,
+                recipe.id,
+                "verified",
+                [],
+            );
+            expect(
+                (await store.getImport(c.householdId, recipe.id))
+                    ?.dismissedMentions,
+            ).toEqual(dismissed);
+        });
+
         test("household scoping on listRecipes", async () => {
             await reset();
             const c = ctx();

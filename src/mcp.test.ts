@@ -12042,6 +12042,168 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         );
     });
 
+    describe("recipe mention warnings", () => {
+        const STEPS = "Fry the rice.\nScramble 2 eggs into it and serve.";
+
+        function caller(client: {
+            callTool: (a: {
+                name: string;
+                arguments: Record<string, unknown>;
+            }) => Promise<unknown>;
+        }) {
+            return async (name: string, args: Record<string, unknown>) =>
+                (await client.callTool({
+                    name,
+                    arguments: args,
+                })) as ToolResult;
+        }
+
+        test.each(ERAS)(
+            "an import names the food its steps miss, get_recipe and verify_recipe repeat it, and adding it clears it (%p)",
+            async (mode) => {
+                const {
+                    IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA,
+                    VERIFY_RECIPE_OUTPUT_SCHEMA,
+                } = await import("./mcp/tools/recipes.js");
+                await withHttpClient("u1", mode, async (client) => {
+                    const call = caller(client);
+                    const imported = await call("import_recipe_from_text", {
+                        text: "caption",
+                        instructions: STEPS,
+                        name: "Fried rice",
+                        ingredients: [{ name: "rice", amount: 200, unit: "g" }],
+                    });
+                    expect(imported.isError).toBeFalsy();
+                    const importBody =
+                        IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA.parse(
+                            imported.structuredContent,
+                        );
+                    expect(importBody.verification).toBe("verified");
+                    expect(
+                        importBody.mention_warnings.map((w) => w.key),
+                    ).toEqual(["egg"]);
+                    expect(importBody.mention_warnings[0]).toMatchObject({
+                        food: "egg",
+                        food_id: null,
+                        amount: 2,
+                    });
+                    expect(textOf(imported)).toContain(
+                        "The steps mention egg, which isn't an ingredient.",
+                    );
+                    expect(textOf(imported)).toContain("add_recipe_ingredient");
+                    const recipeId = importBody.recipe!.id;
+
+                    const got = await call("get_recipe", { id: recipeId });
+                    const body = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        got.structuredContent,
+                    );
+                    expect(body.mention_warnings.map((w) => w.key)).toEqual([
+                        "egg",
+                    ]);
+                    // A warning never changes verification.
+                    expect(body.verification).toBe("verified");
+                    expect(body.problems).toEqual([]);
+                    expect(textOf(got)).toContain(
+                        "The steps mention egg, which isn't an ingredient.",
+                    );
+
+                    const checked = await call("verify_recipe", {
+                        recipe_id: recipeId,
+                    });
+                    const checkedBody = VERIFY_RECIPE_OUTPUT_SCHEMA.parse(
+                        checked.structuredContent,
+                    );
+                    expect(checkedBody.status).toBe("verified");
+                    expect(
+                        checkedBody.mention_warnings.map((w) => w.key),
+                    ).toEqual(["egg"]);
+                    expect(textOf(checked)).toContain("passed the check");
+                    expect(textOf(checked)).toContain("mention egg");
+
+                    const added = await call("add_recipe_ingredient", {
+                        recipe_id: recipeId,
+                        name: "egg",
+                        amount: 2,
+                        unit: "each",
+                    });
+                    expect(added.isError).toBeFalsy();
+                    const after = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        (await call("get_recipe", { id: recipeId }))
+                            .structuredContent,
+                    );
+                    expect(after.mention_warnings).toEqual([]);
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "a hand-made recipe always has an empty mention_warnings (%p)",
+            async (mode) => {
+                await withHttpClient("u1", mode, async (client) => {
+                    const call = caller(client);
+                    const made = await call("create_recipe", {
+                        name: "Hand made",
+                        yield_portions: 2,
+                        instructions: STEPS,
+                    });
+                    const got = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        (
+                            await call("get_recipe", {
+                                id: made.structuredContent?.id as string,
+                            })
+                        ).structuredContent,
+                    );
+                    expect(got.mention_warnings).toEqual([]);
+                });
+            },
+        );
+
+        test.each(ERAS)(
+            "import_recipe_from_url lists the egg a Pad See Ew page's steps use (%p)",
+            async (mode) => {
+                const { IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA } =
+                    await import("./mcp/tools/recipes.js");
+                const { join } = await import("node:path");
+                const page = await Bun.file(
+                    join(
+                        import.meta.dir,
+                        "domain/fixtures/recipe-pages/pad-see-ew.html",
+                    ),
+                ).text();
+                db.recipeImportFetcher = {
+                    async robotsAllows() {
+                        return true;
+                    },
+                    async fetchPage() {
+                        return {
+                            ok: true as const,
+                            url: "https://example.com/pad-see-ew",
+                            status: 200,
+                            contentType: "text/html",
+                            body: page,
+                        };
+                    },
+                };
+                await withHttpClient("u1", mode, async (client) => {
+                    const call = caller(client);
+                    const imported = await call("import_recipe_from_url", {
+                        url: "https://example.com/pad-see-ew",
+                    });
+                    expect(imported.isError).toBeFalsy();
+                    const body = IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(
+                        imported.structuredContent,
+                    );
+                    expect(body.mention_warnings.map((w) => w.key)).toEqual([
+                        "egg",
+                    ]);
+                    expect(textOf(imported)).toContain(
+                        "The steps mention egg, which isn't an ingredient.",
+                    );
+                });
+            },
+        );
+    });
+
     describe("widget-recipe-card flag", () => {
         afterEach(() => resetFlagsForTests());
 

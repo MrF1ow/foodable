@@ -80,6 +80,8 @@ export type RecipeImport = {
     credit: string | null;
     unresolvedLines: string[];
     problems: RecipeProblem[];
+    /** Mention warning keys the household chose not to act on. */
+    dismissedMentions: string[];
     importedAt: string;
 };
 
@@ -263,6 +265,7 @@ export function recipeImportFromRow(row: {
     credit?: unknown;
     unresolved_lines?: unknown;
     problems?: unknown;
+    dismissed_mentions?: unknown;
     imported_at: unknown;
 }): RecipeImport {
     return {
@@ -289,6 +292,7 @@ export function recipeImportFromRow(row: {
             row.credit == null || row.credit === "" ? null : String(row.credit),
         unresolvedLines: parseStringArray(row.unresolved_lines),
         problems: parseProblems(row.problems),
+        dismissedMentions: parseStringArray(row.dismissed_mentions),
         importedAt: String(row.imported_at),
     };
 }
@@ -305,6 +309,7 @@ export function recipeImportToRow(row: RecipeImport) {
         credit: row.credit,
         unresolved_lines: row.unresolvedLines,
         problems: row.problems,
+        dismissed_mentions: row.dismissedMentions,
         imported_at: row.importedAt,
     };
 }
@@ -677,6 +682,7 @@ async function saveImportedRecipe(
                 credit: meta.credit,
                 unresolvedLines: parsed.unresolved,
                 problems: [],
+                dismissedMentions: [],
                 importedAt,
             });
 

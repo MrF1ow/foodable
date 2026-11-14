@@ -33,6 +33,7 @@ test("recipeImportSqlValues JSON-stringifies array columns", () => {
                 line: null,
             },
         ],
+        dismissedMentions: [],
         importedAt: "2026-01-01T00:00:00.000Z",
     });
     const sql = recipeImportSqlValues(row);
@@ -97,6 +98,7 @@ describeDb(pgAvailable !== null, "recipes db import", (getCtx) => {
                     line: null,
                 },
             ],
+            dismissedMentions: [],
             importedAt: "2026-01-01T12:00:00.000Z",
         });
         expect(saved.unresolvedLines).toEqual(["mystery line"]);
@@ -104,6 +106,37 @@ describeDb(pgAvailable !== null, "recipes db import", (getCtx) => {
         const loaded = await store.getImport(householdId, recipe.id);
         expect(loaded?.unresolvedLines).toEqual(["mystery line"]);
         expect(loaded?.problems[0]?.code).toBe("no_instructions");
+    });
+
+    test("dismissed_mentions defaults to [] and round-trips quotes and unicode", async () => {
+        const { sql } = getCtx();
+        const store = liveRecipesStore();
+        const recipe = await createRecipe(store, {
+            householdId,
+            creatorId: userId,
+            name: "Dismissals",
+            yieldPortions: 2,
+            verification: "unverified",
+        });
+        // A row written before the column existed: the default fills it in.
+        await sql`
+            insert into public.recipe_imports
+                (recipe_id, household_id, source_kind, imported_at)
+            values (${recipe.id}, ${householdId}, 'text', now())
+        `;
+        const fresh = await store.getImport(householdId, recipe.id);
+        expect(fresh?.dismissedMentions).toEqual([]);
+
+        const keys = ["egg", 'pickled "beets"', "it's", "jalapeño", "豆腐"];
+        await store.upsertImport({ ...fresh!, dismissedMentions: keys });
+        expect(
+            (await store.getImport(householdId, recipe.id))?.dismissedMentions,
+        ).toEqual(keys);
+        const [{ kind }] = await sql`
+            select jsonb_typeof(dismissed_mentions) as kind
+            from public.recipe_imports where recipe_id = ${recipe.id}
+        `;
+        expect(kind).toBe("array");
     });
 
     test("findRecipeBySourceUrl and listImports round-trip", async () => {
@@ -126,6 +159,7 @@ describeDb(pgAvailable !== null, "recipes db import", (getCtx) => {
             credit: null,
             unresolvedLines: [],
             problems: [],
+            dismissedMentions: [],
             importedAt: "2026-01-01T12:00:00.000Z",
         });
         const found = await store.findRecipeBySourceUrl(householdId, [

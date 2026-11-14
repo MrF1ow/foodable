@@ -208,6 +208,7 @@ test("memory deleteRecipe removes recipe import row", async () => {
         credit: null,
         unresolvedLines: [],
         problems: [],
+        dismissedMentions: [],
         importedAt: "2026-01-01T00:00:00.000Z",
     });
     expect(await store.getImport(HH, recipe.id)).not.toBeNull();

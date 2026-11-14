@@ -180,6 +180,7 @@ test("verifyRecipe passes for a complete recipe without nutrition", () => {
         credit: null,
         unresolvedLines: [],
         problems: [],
+        dismissedMentions: [],
         importedAt: "2026-01-01T00:00:00.000Z",
     });
     expect(result.verified).toBe(true);
@@ -223,6 +224,7 @@ test("verifyRecipe failing rules", () => {
             credit: null,
             unresolvedLines: ["bad line"],
             problems: [],
+            dismissedMentions: [],
             importedAt: "2026-01-01T00:00:00.000Z",
         }).problems[0]?.code,
     ).toBe("unresolved_lines");
@@ -251,6 +253,7 @@ test("recipe import row mappers round-trip", () => {
                 line: null,
             },
         ],
+        dismissedMentions: [],
         importedAt: "2026-01-01T00:00:00.000Z",
     };
     const mapped = recipeImportFromRow(recipeImportToRow(row) as never);
@@ -1870,6 +1873,7 @@ test("handled unresolved lines can be cleared so a fixed recipe verifies", async
         credit: null,
         unresolvedLines: ["1 x 400g tin tomatoes", "2 eggs 1 cup flour"],
         problems: [],
+        dismissedMentions: [],
         importedAt: "2026-01-01T00:00:00.000Z",
     });
     // The person added tomatoes by hand; the line still blocks the check.

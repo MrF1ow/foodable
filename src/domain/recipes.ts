@@ -999,6 +999,7 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                 ...row,
                 unresolvedLines: [...row.unresolvedLines],
                 problems: [...row.problems],
+                dismissedMentions: [...row.dismissedMentions],
             };
         },
         async upsertImport(row) {
@@ -1006,6 +1007,7 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                 ...row,
                 unresolvedLines: [...row.unresolvedLines],
                 problems: [...row.problems],
+                dismissedMentions: [...row.dismissedMentions],
             };
             imports.set(row.recipeId, saved);
             return { ...saved };
@@ -1046,6 +1048,7 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                     ...row,
                     unresolvedLines: [...row.unresolvedLines],
                     problems: row.problems.map((p) => ({ ...p })),
+                    dismissedMentions: [...row.dismissedMentions],
                 });
             }
             return out;
@@ -1399,6 +1402,7 @@ export async function addRecipeIngredientById(
         foodId: string;
         amount?: number | null;
         unit?: string;
+        note?: string | null;
     },
 ): Promise<RecipeIngredient> {
     const recipe = await requireRecipe(
@@ -1427,7 +1431,7 @@ export async function addRecipeIngredientById(
             quantity,
             foodId: food.id,
             sortOrder: existing.length,
-            note: noteForUnmeasuredIngredient(quantity, null),
+            note: noteForUnmeasuredIngredient(quantity, input.note ?? null),
         });
         await maybeRecheckUnverified(
             store,
@@ -2271,6 +2275,7 @@ export async function importRecipeFromText(
             credit: null,
             unresolvedLines: [],
             problems: [],
+            dismissedMentions: [],
             importedAt,
         });
         const imported: RecipeIngredient[] = [];
