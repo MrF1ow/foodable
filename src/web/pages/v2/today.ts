@@ -50,7 +50,13 @@ import type { TodayView } from "../../loaders-today.js";
 import { renderAppShell } from "../../shell.js";
 import { renderTodayEditSheets } from "./today-edit-sheet.js";
 import { todayEditSheetId } from "../../../domain/today-edit.js";
-import { noticeStrip, stripNotices, todayNoticeBack } from "./notice-strip.js";
+import type { AgentActionNotice } from "../../../domain/notices-agent.js";
+import {
+    agentActionStrip,
+    noticeStrip,
+    stripNotices,
+    todayNoticeBack,
+} from "./notice-strip.js";
 import { renderTodayRail } from "./today-rail.js";
 import {
     renderMissingSheet,
@@ -76,6 +82,8 @@ export type TodayPageData = {
     editError?: string;
     /** The household's week plan: the rail card, the phone section, their sheets. */
     plan?: WeekPlanView;
+    /** What an agent changed in the last 24 hours that this viewer can still undo. */
+    agentNotices?: readonly AgentActionNotice[];
 };
 
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"] as const;
@@ -728,7 +736,16 @@ export function renderTodayBody(data: TodayPageData): Html {
     const planSheets = plan
         ? `${renderPlanEditSheets(plan, "today")}\n${renderMissingSheet(plan, "today")}`
         : "";
-    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}${weighInPhone}<div class="fd-today-meals">${mealsMarkup(data)}</div>${planPhone}${planMissingPhone}`;
+    // A peer's day is read-only, and the changes are the viewer's to undo.
+    const agentStrip = isReadOnlyPeer(data)
+        ? ""
+        : String(
+              agentActionStrip(data.agentNotices ?? [], {
+                  label: "Agent changes",
+                  className: "fd-today-agent",
+              }),
+          );
+    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}${agentStrip}</div>${summary}${weighInPhone}<div class="fd-today-meals">${mealsMarkup(data)}</div>${planPhone}${planMissingPhone}`;
     const rail = renderTodayRail(data);
     return raw(
         `<div class="fd-today-page"><div class="fd-today-main">${main}</div>${rail}${sheets}${planSheets}</div>`,

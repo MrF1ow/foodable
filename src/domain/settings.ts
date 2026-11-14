@@ -30,6 +30,12 @@ export type GrocerySection = {
 /** Keys in `households.household_preferences`; flat, dotted names. */
 export const GROCERY_DEFAULT_STORE_KEY = "grocery.default_store_id";
 export const GROCERY_USE_USUAL_STORE_KEY = "grocery.use_usual_store";
+/**
+ * The household's switch for destructive agent changes. Missing, or anything
+ * but a stored `false`, means Allowed, so a household that never touched it
+ * and a household whose preferences were rewritten both stay on.
+ */
+export const AGENTS_DESTRUCTIVE_ALLOWED_KEY = "agents.destructive_allowed";
 
 /**
  * How a grocery line with no store of its own picks one. `defaultStoreId` is
@@ -60,6 +66,15 @@ export function groceryPreferencesFromJson(raw: unknown): GroceryPreferences {
     };
 }
 
+/** Reads the agents switch out of a stored preferences object. */
+export function agentDestructiveAllowedFromJson(raw: unknown): boolean {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return true;
+    return (
+        (raw as Record<string, unknown>)[AGENTS_DESTRUCTIVE_ALLOWED_KEY] !==
+        false
+    );
+}
+
 export type SettingsStore = {
     getLocation(householdId: string): Promise<string | null>;
     setLocation(householdId: string, location: string | null): Promise<void>;
@@ -69,6 +84,13 @@ export type SettingsStore = {
         householdId: string,
         prefs: GroceryPreferences,
     ): Promise<GroceryPreferences>;
+    /** Whether agents may make destructive changes (default: yes). */
+    getAgentDestructiveAllowed(householdId: string): Promise<boolean>;
+    /** Writes the switch and returns it. Who may flip it is the caller's rule. */
+    setAgentDestructiveAllowed(
+        householdId: string,
+        allowed: boolean,
+    ): Promise<boolean>;
     listStores(householdId: string): Promise<GroceryStore[]>;
     insertStore(row: GroceryStore): Promise<GroceryStore>;
     /** Writes the store's name; null when the store is not this household's. */
@@ -77,6 +99,14 @@ export type SettingsStore = {
     getSection(householdId: string, id: string): Promise<GrocerySection | null>;
     insertSection(row: GrocerySection): Promise<GrocerySection>;
     updateSection(row: GrocerySection): Promise<GrocerySection | null>;
+    /**
+     * Deletes the household's section; false when it is not there. The
+     * grocery lines still filed under it go with it (`grocery_lines.section_id`
+     * cascades), so a caller that keeps them moves them first. The database
+     * store throws a `SettingsInputError` when a line did go with it, and the
+     * caller's transaction must roll back, so a line is never lost unrecorded.
+     */
+    deleteSection(householdId: string, id: string): Promise<boolean>;
 };
 
 export class SettingsInputError extends Error {
@@ -101,6 +131,7 @@ export type MemorySettingsStore = SettingsStore & {
 export function createMemorySettingsStore(): MemorySettingsStore {
     const locations = new Map<string, string | null>();
     const preferences = new Map<string, GroceryPreferences>();
+    const agentSwitch = new Map<string, boolean>();
     const stores: GroceryStore[] = [];
     const sections: GrocerySection[] = [];
 
@@ -124,6 +155,13 @@ export function createMemorySettingsStore(): MemorySettingsStore {
             }
             preferences.set(householdId, { ...prefs });
             return { ...prefs };
+        },
+        async getAgentDestructiveAllowed(householdId) {
+            return agentSwitch.get(householdId) ?? true;
+        },
+        async setAgentDestructiveAllowed(householdId, allowed) {
+            agentSwitch.set(householdId, allowed);
+            return allowed;
         },
         __removeStore(householdId, storeId) {
             const idx = stores.findIndex(
@@ -209,7 +247,36 @@ export function createMemorySettingsStore(): MemorySettingsStore {
             sections[idx] = { ...row };
             return { ...row };
         },
+        async deleteSection(householdId, id) {
+            const idx = sections.findIndex(
+                (section) =>
+                    section.id === id && section.householdId === householdId,
+            );
+            if (idx < 0) return false;
+            sections.splice(idx, 1);
+            return true;
+        },
     };
+}
+
+/** Names are the same to a person when only case or surrounding spaces differ. */
+export function sameName(a: string, b: string): boolean {
+    return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/**
+ * True when a store other than `exceptId` already has this name, in any case
+ * and ignoring surrounding spaces: "costco" next to "Costco" is the same store
+ * to a person. The one check creating and renaming a store share.
+ */
+export function storeNameTaken(
+    stores: readonly Pick<GroceryStore, "id" | "name">[],
+    name: string,
+    exceptId?: string,
+): boolean {
+    return stores.some(
+        (row) => row.id !== exceptId && sameName(row.name, name),
+    );
 }
 
 export async function createGroceryStore(
@@ -220,7 +287,7 @@ export async function createGroceryStore(
     const trimmed = name.trim();
     if (!trimmed) throw new SettingsInputError("Enter a store name.");
     const existing = await store.listStores(householdId);
-    if (existing.some((row) => row.name === trimmed)) {
+    if (storeNameTaken(existing, trimmed)) {
         throw new SettingsInputError("That store already exists.");
     }
     const sortOrder =

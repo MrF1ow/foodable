@@ -16,7 +16,7 @@ import {
     resolveWriteTimestamp,
     resolveDateWindow,
 } from "../shared.js";
-import type { ToolContext } from "../shared.js";
+import { destructiveOutcome, withUndo, type ToolContext } from "../shared.js";
 import type { WaterEntry } from "../../db/nutrition.js";
 
 export function registerWaterTools(server: McpServer, ctx: ToolContext) {
@@ -26,6 +26,7 @@ export function registerWaterTools(server: McpServer, ctx: ToolContext) {
         actorUserId,
         writeUserId,
         analytics,
+        runDestructive,
     } = ctx;
     server.registerTool(
         "log_water",
@@ -225,19 +226,40 @@ export function registerWaterTools(server: McpServer, ctx: ToolContext) {
                 "delete_water",
                 async () => {
                     const userId = await writeUserId(user_id, target_member);
-                    const deleted = await deleteWater(userId, id);
+                    const run = await runDestructive(
+                        "delete_water",
+                        async (rec) => {
+                            await rec.captureByIds(
+                                "water_log",
+                                [id],
+                                "deleted",
+                            );
+                            const deleted = await deleteWater(userId, id);
+                            return {
+                                value: deleted,
+                                summary: `Deleted water entry ${id}`,
+                                changed: deleted,
+                            };
+                        },
+                    );
+                    if (run.refused) return run.result;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: deleted
-                                    ? `Water entry ${id} deleted.`
-                                    : `No water entry found with id ${id}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value
+                                        ? `Water entry ${id} deleted.`
+                                        : `No water entry found with id ${id}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             );
         },
     );

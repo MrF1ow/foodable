@@ -1,4 +1,6 @@
 import {
+    AGENTS_DESTRUCTIVE_ALLOWED_KEY,
+    agentDestructiveAllowedFromJson,
     GROCERY_DEFAULT_STORE_KEY,
     GROCERY_USE_USUAL_STORE_KEY,
     SettingsInputError,
@@ -129,6 +131,51 @@ export function liveSettingsStore(): SettingsStore {
                 }
             });
         },
+        async getAgentDestructiveAllowed(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<{ prefs: unknown }>(
+                        tx,
+                        tx`
+                            select household_preferences as prefs
+                            from ${tx.unsafe(HOUSEHOLDS)}
+                            where id = ${householdId}
+                        `,
+                        "load agents switch",
+                    );
+                    return agentDestructiveAllowedFromJson(data?.prefs);
+                } catch (err) {
+                    throw pgError("load agents switch", err);
+                }
+            });
+        },
+        async setAgentDestructiveAllowed(householdId, allowed) {
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<{ prefs: unknown }>(
+                        tx,
+                        tx`
+                            update ${tx.unsafe(HOUSEHOLDS)}
+                            set household_preferences =
+                                coalesce(household_preferences, '{}'::jsonb)
+                                || jsonb_build_object(
+                                    ${AGENTS_DESTRUCTIVE_ALLOWED_KEY}::text,
+                                    ${allowed}::boolean
+                                )
+                            where id = ${householdId}
+                            returning household_preferences as prefs
+                        `,
+                        "save agents switch",
+                    );
+                    if (!data)
+                        throw new SettingsInputError("Unknown household.");
+                    return agentDestructiveAllowedFromJson(data.prefs);
+                } catch (err) {
+                    if (err instanceof SettingsInputError) throw err;
+                    throw pgError("save agents switch", err);
+                }
+            });
+        },
         async listStores(householdId) {
             return run(async (tx) => {
                 try {
@@ -249,6 +296,46 @@ export function liveSettingsStore(): SettingsStore {
                     return data ? grocerySectionFromRow(data as never) : null;
                 } catch (err) {
                     throw pgError("update grocery section", err);
+                }
+            });
+        },
+        async deleteSection(householdId, id) {
+            return run(async (tx) => {
+                // `grocery_lines.section_id` cascades, so deleting a section
+                // deletes any line still in it. This transaction's own delete
+                // count for the lines table, read around the delete, says
+                // whether one went with it, and a line is never lost that way:
+                // the error rolls the delete back.
+                const lineDeletes = async () =>
+                    Number(
+                        (
+                            await maybeOne<{ n: string | number }>(
+                                tx,
+                                tx`select pg_stat_get_xact_tuples_deleted('public.grocery_lines'::regclass) as n`,
+                                "count grocery line deletes",
+                            )
+                        )?.n ?? 0,
+                    );
+                try {
+                    const before = await lineDeletes();
+                    const data = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(GROCERY_SECTIONS)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                            returning id
+                        `,
+                    );
+                    if ((await lineDeletes()) !== before) {
+                        throw new SettingsInputError(
+                            "The list changed. Try again.",
+                        );
+                    }
+                    return data.length > 0;
+                } catch (err) {
+                    if (err instanceof SettingsInputError) throw err;
+                    throw pgError("delete grocery section", err);
                 }
             });
         },

@@ -31,6 +31,9 @@ flags:
     mcp-household-digest:
         default: true
         rules: []
+    mcp-household-admin:
+        default: false
+        rules: []
     mcp-share-links:
         default: false
         rules: []

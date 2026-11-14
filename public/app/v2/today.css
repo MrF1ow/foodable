@@ -956,6 +956,12 @@ html:not([data-theme]) .fd-today-week__day--selected .fd-today-week__num {
         gap: var(--fd-s-10);
     }
 
+    /* The agent-change strip takes the row under the title and week strip. */
+    .fd-today-top > .fd-today-agent {
+        flex: 1 1 100%;
+        margin: 0;
+    }
+
     .fd-today-page:has(.fd-settings-error) {
         grid-template-rows: auto auto auto 1fr;
     }

@@ -1234,6 +1234,67 @@
     color: var(--text-secondary);
 }
 
+/* The household switch and the agent activity list sit below the connect
+ * block, in the same card language. The switch is the shared `.fd-switch`. */
+.fd-settings-ai__switch-form {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-12);
+    min-width: 0;
+    margin: 0;
+}
+
+.fd-settings-ai__switch-form .fd-settings-ai__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.fd-settings-ai__row > .fd-settings-ai__text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.fd-settings-ai__status {
+    flex: none;
+    max-width: 45%;
+    font: 400 0.75rem/1.35 var(--font-body);
+    color: var(--text-secondary);
+    text-align: right;
+}
+
+.fd-settings-ai__undo-form {
+    flex: none;
+    margin: 0;
+}
+
+.fd-settings-ai__undo {
+    min-height: 36px;
+    padding: 0 var(--fd-s-6);
+    border: 0;
+    background: transparent;
+    color: var(--accent-text);
+    font: 600 0.8125rem/1 var(--font-body);
+    cursor: pointer;
+}
+
+.fd-settings-ai__undo:focus-visible {
+    outline: 2px solid var(--accent-text);
+    outline-offset: 2px;
+}
+
+.fd-settings-ai__activity-row {
+    align-items: flex-start;
+}
+
+.fd-settings-ai__activity-row .fd-settings-ai__undo-form,
+.fd-settings-ai__activity-row .fd-settings-ai__status {
+    align-self: center;
+}
+
 /* Last active reads on desktop only (FigCraft 49584); the phone list is name and role. */
 .fd-row__last-active,
 .fd-settings-members-head {

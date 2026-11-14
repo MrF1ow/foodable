@@ -13,9 +13,13 @@ import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
+import { listHouseholdMembers } from "../../db/household.js";
 import { liveRecipesStore } from "../../db/recipes.js";
+import { liveRulesStore } from "../../db/rules.js";
+import { getAllMealItems } from "../../db/nutrition.js";
 import { householdToday } from "../../db/restock.js";
 import { liveSettingsStore } from "../../db/settings.js";
+import { liveStockStore } from "../../db/stock.js";
 import { noticesFor } from "../../domain/notices-for.js";
 import {
     assertBarcodeFree,
@@ -29,6 +33,7 @@ import {
     linkProduct,
     findUpsertFoodByName,
     newFood,
+    normalizeFoodName,
     refreshFoodQualityByBarcode,
     similarFoodsForNewName,
     SimilarFoodsError,
@@ -52,10 +57,128 @@ import {
     similarFoodsWire,
     SIMILAR_FOODS_ENTRY,
     WRITE_STATUS,
+    captureDismissals,
+    destructiveOutcome,
+    dismissedOn,
+    withUndo,
     type WireNotice,
     type AlcoholDisplay,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
+import type { SnapshotRecorder } from "../../domain/agent-actions.js";
+
+/**
+ * Records every row a merge of `dropId` into `keepId` will change, before it
+ * runs. A merge deletes nothing: it moves the dropped food's barcodes, aliases
+ * and references onto the kept food, edits the kept food, re-parents the
+ * dropped food's products and archives it. So every row is recorded as it was
+ * and undo puts each column back, while the columns still hold what the merge
+ * left. A meal item or a dislike belongs to one member, but the merge
+ * repoints every member's, so every member's are recorded.
+ */
+async function recordFoodMerge(
+    rec: SnapshotRecorder,
+    householdId: string,
+    keep: Food,
+    drop: Food,
+): Promise<void> {
+    const foods = liveFoodsStore();
+    const catalog = await foods.listFoods(householdId);
+    const foodIds = new Set([keep.id, drop.id]);
+    for (const row of catalog) {
+        if (row.genericFoodId === drop.id || row.usualProductId === drop.id) {
+            foodIds.add(row.id);
+        }
+    }
+    await rec.captureByIds("foods", [...foodIds], "updated");
+
+    const barcodes = await foods.listBarcodes(householdId, drop.id);
+    await rec.captureByKeys(
+        "food_barcodes",
+        barcodes.map((barcode) => ({ household_id: householdId, barcode })),
+        "updated",
+    );
+    const aliases = await foods.listAliases(householdId, drop.id);
+    await rec.captureByKeys(
+        "food_aliases",
+        aliases.map((alias) => ({ household_id: householdId, alias })),
+        "updated",
+    );
+    // The dropped food's own name becomes an alias of the kept one, unless
+    // that alias already exists.
+    const nameAlias = normalizeFoodName(drop.name);
+    if (
+        nameAlias &&
+        nameAlias !== keep.normalizedName &&
+        (await foods.getAliasFoodId(householdId, nameAlias)) === null
+    ) {
+        rec.insertedKeys("food_aliases", [
+            { household_id: householdId, alias: nameAlias },
+        ]);
+    }
+
+    const onDrop = <T extends { foodId: string | null }>(rows: T[]) =>
+        rows.filter((row) => row.foodId === drop.id);
+    await rec.captureByIds(
+        "fridge_items",
+        onDrop(await liveFridgeStore().listItems(householdId)).map(
+            (item) => item.id,
+        ),
+        "updated",
+    );
+    await rec.captureByIds(
+        "grocery_lines",
+        onDrop(await liveGroceryStore().listLines(householdId)).map(
+            (line) => line.id,
+        ),
+        "updated",
+    );
+    await rec.captureByIds(
+        "recipe_ingredients",
+        onDrop(
+            await liveRecipesStore().listIngredientsForHousehold(householdId),
+        ).map((row) => row.id),
+        "updated",
+    );
+    await rec.captureByIds(
+        "stock_movements",
+        (await liveStockStore().listMovements(householdId, drop.id)).map(
+            (movement) => movement.id,
+        ),
+        "updated",
+    );
+    // Meal items and dislikes belong to a member, but the merge repoints every
+    // member's, and the household's session can read them all.
+    const members = await listHouseholdMembers(householdId);
+    const mealItemIds: string[] = [];
+    const dislikeIds: string[] = [];
+    for (const member of members) {
+        for (const item of await getAllMealItems(member.userId)) {
+            if (item.food_id === drop.id && item.household_id === householdId) {
+                mealItemIds.push(item.id);
+            }
+        }
+        // The store does not say which dislike names which food, so each is
+        // recorded: one the merge leaves alone has nothing to undo.
+        for (const dislike of await liveRulesStore().listDislikes(
+            householdId,
+            member.userId,
+        )) {
+            dislikeIds.push(dislike.id);
+        }
+    }
+    await rec.captureByIds("meal_items", mealItemIds, "updated");
+    await rec.captureByIds("member_dislikes", dislikeIds, "updated");
+    // The merge archives the dropped food, which clears the dismissed
+    // notices on it.
+    await captureDismissals(
+        rec,
+        householdId,
+        (dismissal) =>
+            dismissedOn("food", [drop.id])(dismissal) ||
+            dismissal.relatedKey === drop.id,
+    );
+}
 
 function catalogMacro(value: number | null, unit: string): string {
     return value == null ? "unknown" : `${value} ${unit}`;
@@ -614,7 +737,7 @@ export function registerSearchFoodTool(server: McpServer, ctx: ToolContext) {
 }
 
 export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
-    const { callerHouseholdId, analytics } = ctx;
+    const { callerHouseholdId, analytics, runDestructive } = ctx;
     server.registerTool(
         "get_food",
         {
@@ -1071,30 +1194,62 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "merge_foods",
                 async () => {
-                    const householdId = await callerHouseholdId();
-                    const store = liveFoodsStore();
-                    const saved = await mergeLiveFoods(
-                        householdId,
-                        args.keep_id,
-                        args.drop_id,
-                        store,
+                    const run = await runDestructive(
+                        "merge_foods",
+                        async (rec, householdId) => {
+                            const store = liveFoodsStore();
+                            const keep = await store.getFood(
+                                householdId,
+                                args.keep_id,
+                            );
+                            const drop = await store.getFood(
+                                householdId,
+                                args.drop_id,
+                            );
+                            // An unknown food is the merge's own error to raise.
+                            if (keep && drop) {
+                                await recordFoodMerge(
+                                    rec,
+                                    householdId,
+                                    keep,
+                                    drop,
+                                );
+                            }
+                            const saved = await mergeLiveFoods(
+                                householdId,
+                                args.keep_id,
+                                args.drop_id,
+                                store,
+                            );
+                            const [aliases, barcodes] = await Promise.all([
+                                store.listAliases(householdId, saved.id),
+                                store.listBarcodes(householdId, saved.id),
+                            ]);
+                            return {
+                                value: { saved, aliases, barcodes },
+                                summary: `Merged ${drop?.name ?? args.drop_id} into ${saved.name}`,
+                            };
+                        },
                     );
-                    const [aliases, barcodes] = await Promise.all([
-                        store.listAliases(householdId, saved.id),
-                        store.listBarcodes(householdId, saved.id),
-                    ]);
+                    if (run.refused) return run.result;
+                    const { saved, aliases, barcodes } = run.value;
                     const payload = foodPayload(saved, aliases, barcodes);
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: `Merged into ${payload.name} ${payload.id}`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    `Merged into ${payload.name} ${payload.id}`,
+                                    run.undo,
+                                ),
                             },
                         ],
                         structuredContent: payload,
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 

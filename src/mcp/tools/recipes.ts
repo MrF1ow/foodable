@@ -85,6 +85,11 @@ import {
     recipeAllergenNoticesForView,
     registerV2OnlyWidgetResource,
     uiMetaForKey,
+    captureDismissals,
+    destructiveOutcome,
+    dismissedOn,
+    uncapturedNote,
+    withUndo,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
@@ -587,6 +592,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         requireHouseholdMemberId,
         callerActor,
         analytics,
+        runDestructive,
     } = ctx;
     server.registerTool(
         "list_recipes",
@@ -1127,24 +1133,76 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 "delete_recipe",
                 async () => {
                     const actor = await callerActor();
-                    const deleted = await deleteRecipe(
-                        liveRecipesStore(),
-                        actor.householdId,
-                        args.id,
-                        { userId: actor.userId, isOwner: actor.isOwner },
+                    const run = await runDestructive(
+                        "delete_recipe",
+                        async (rec) => {
+                            const store = liveRecipesStore();
+                            const recipe = await store.getRecipe(
+                                actor.householdId,
+                                args.id,
+                            );
+                            const ingredientIds = (
+                                await store.listIngredients(
+                                    actor.householdId,
+                                    args.id,
+                                )
+                            ).map((row) => row.id);
+                            // The recipe with its ingredients, plans, import
+                            // and portions. Favourites are private to each
+                            // member, so the report names them as lost.
+                            const report = recipe
+                                ? await rec.captureCascade("recipes", [
+                                      { id: args.id },
+                                  ])
+                                : { captured: 0, uncaptured: [] };
+                            // The dismissals on the recipe and on each of its
+                            // ingredients go with it.
+                            await captureDismissals(
+                                rec,
+                                actor.householdId,
+                                (dismissal) =>
+                                    dismissedOn("recipe", [args.id])(
+                                        dismissal,
+                                    ) ||
+                                    dismissedOn(
+                                        "recipe_ingredient",
+                                        ingredientIds,
+                                    )(dismissal),
+                            );
+                            const deleted = await deleteRecipe(
+                                store,
+                                actor.householdId,
+                                args.id,
+                                {
+                                    userId: actor.userId,
+                                    isOwner: actor.isOwner,
+                                },
+                            );
+                            return {
+                                value: { deleted },
+                                summary: `Deleted recipe ${recipe?.name ?? args.id}${uncapturedNote(report.uncaptured)}`,
+                                changed: deleted,
+                            };
+                        },
                     );
+                    if (run.refused) return run.result;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: deleted
-                                    ? `Deleted recipe ${args.id}.`
-                                    : `No recipe found with id ${args.id}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value.deleted
+                                        ? `Deleted recipe ${args.id}.`
+                                        : `No recipe found with id ${args.id}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 
@@ -1593,25 +1651,76 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "remove_recipe_ingredient",
                 async () => {
-                    const householdId = await callerHouseholdId();
-                    const removed = await removeRecipeIngredient(
-                        liveRecipesStore(),
-                        householdId,
-                        args.recipe_id,
-                        args.ingredient_id,
+                    const run = await runDestructive(
+                        "remove_recipe_ingredient",
+                        async (rec, householdId) => {
+                            const store = liveRecipesStore();
+                            const recipe = await store.getRecipe(
+                                householdId,
+                                args.recipe_id,
+                            );
+                            const ingredient = (
+                                await store.listIngredients(
+                                    householdId,
+                                    args.recipe_id,
+                                )
+                            ).find((row) => row.id === args.ingredient_id);
+                            await rec.captureByIds(
+                                "recipe_ingredients",
+                                [args.ingredient_id],
+                                "deleted",
+                            );
+                            await captureDismissals(
+                                rec,
+                                householdId,
+                                dismissedOn("recipe_ingredient", [
+                                    args.ingredient_id,
+                                ]),
+                            );
+                            // Removing an ingredient re-checks an unverified
+                            // recipe, which can change what the recipe and
+                            // its import record say.
+                            await rec.captureByIds(
+                                "recipes",
+                                [args.recipe_id],
+                                "updated",
+                            );
+                            await rec.captureByKeys(
+                                "recipe_imports",
+                                [{ recipe_id: args.recipe_id }],
+                                "updated",
+                            );
+                            const removed = await removeRecipeIngredient(
+                                store,
+                                householdId,
+                                args.recipe_id,
+                                args.ingredient_id,
+                            );
+                            return {
+                                value: { removed },
+                                summary: `Removed ${ingredient?.displayName ?? args.ingredient_id} from recipe ${recipe?.name ?? args.recipe_id}`,
+                                changed: removed,
+                            };
+                        },
                     );
+                    if (run.refused) return run.result;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: removed
-                                    ? `Removed ingredient ${args.ingredient_id}.`
-                                    : `No ingredient ${args.ingredient_id}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value.removed
+                                        ? `Removed ingredient ${args.ingredient_id}.`
+                                        : `No ingredient ${args.ingredient_id}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 

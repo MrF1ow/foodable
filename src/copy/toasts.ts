@@ -273,6 +273,15 @@ export const TOASTS = {
         kind: "info",
         text: "That app was already disconnected",
     },
+    "settings.ai.undone": { kind: "success", text: "Change undone" },
+    "settings.ai.destructive-allowed": {
+        kind: "success",
+        text: "Agents may make destructive changes",
+    },
+    "settings.ai.destructive-off": {
+        kind: "success",
+        text: "Agents can no longer make destructive changes",
+    },
     "settings.profile.saved": { kind: "success", text: "Profile updated" },
     "settings.household.created": {
         kind: "success",

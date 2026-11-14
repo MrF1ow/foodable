@@ -27,7 +27,6 @@ import {
     addGrocerySupply,
     allergenNotices,
     checkGroceryLine,
-    clearCheckedLines,
     GROCERY_LINE_SOURCES,
     listGrocery,
     type GroceryAmountPickReason,
@@ -52,6 +51,8 @@ import {
     StockInputError,
 } from "../../domain/stock.js";
 import {
+    captureDismissals,
+    dismissedOn,
     groceryLineExtras,
     householdAllergenMembers,
     NOTICE_SCHEMA,
@@ -66,12 +67,25 @@ import {
     registerWidgetResource,
     registerV2OnlyWidgetResource,
     uiMetaForKey,
+    destructiveOutcome,
+    uncapturedNote,
+    withUndo,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { isViewerFlagOn } from "../../viewer-flags.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
 import { GroceryInputError } from "../../domain/grocery.js";
+import {
+    applyLineEdit,
+    applyLinePlacements,
+    lineEditChanges,
+    linesToClear,
+    planGroceryLineEdit,
+    planGroceryLineMoves,
+} from "../../domain/grocery-lines.js";
+import { SettingsInputError } from "../../domain/settings.js";
 import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
+import { ADMIN_ID, HOUSEHOLD_ADMIN_FLAG } from "./stores.js";
 
 export const ADD_GROCERY_LINE_OUTPUT_SCHEMA = z.object({
     status: WRITE_STATUS,
@@ -223,7 +237,7 @@ function usualLine(row: UsualListRow): string {
 }
 
 export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
-    const { callerHouseholdId, analytics, uiMeta } = ctx;
+    const { callerHouseholdId, analytics, uiMeta, runDestructive } = ctx;
     server.registerTool(
         "list_grocery_lines",
         {
@@ -727,23 +741,51 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "delete_grocery_line",
                 async () => {
-                    const householdId = await callerHouseholdId();
-                    const deleted = await liveGroceryStore().deleteLine(
-                        householdId,
-                        args.id,
+                    const run = await runDestructive(
+                        "delete_grocery_line",
+                        async (rec, householdId) => {
+                            const store = liveGroceryStore();
+                            const line = (
+                                await store.listLines(householdId)
+                            ).find((row) => row.id === args.id);
+                            const report = await rec.captureCascade(
+                                "grocery_lines",
+                                [{ id: args.id }],
+                            );
+                            await captureDismissals(
+                                rec,
+                                householdId,
+                                dismissedOn("grocery_line", [args.id]),
+                            );
+                            const deleted = await store.deleteLine(
+                                householdId,
+                                args.id,
+                            );
+                            return {
+                                value: { deleted },
+                                summary: `Deleted grocery line ${line?.displayName ?? args.id}${uncapturedNote(report.uncaptured)}`,
+                                changed: deleted,
+                            };
+                        },
                     );
+                    if (run.refused) return run.result;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: deleted
-                                    ? `Deleted grocery line ${args.id}.`
-                                    : `No grocery line found with id ${args.id}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value.deleted
+                                        ? `Deleted grocery line ${args.id}.`
+                                        : `No grocery line found with id ${args.id}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 
@@ -763,21 +805,59 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "clear_checked_grocery_lines",
                 async () => {
-                    const householdId = await callerHouseholdId();
-                    const removed = await clearCheckedLines(
-                        liveGroceryStore(),
-                        householdId,
+                    const run = await runDestructive(
+                        "clear_checked_grocery_lines",
+                        async (rec, householdId) => {
+                            const store = liveGroceryStore();
+                            const checked = (
+                                await store.listLines(householdId)
+                            ).filter((line) => line.checked);
+                            const report = await rec.captureCascade(
+                                "grocery_lines",
+                                checked.map((line) => ({ id: line.id })),
+                            );
+                            await captureDismissals(
+                                rec,
+                                householdId,
+                                dismissedOn(
+                                    "grocery_line",
+                                    checked.map((line) => line.id),
+                                ),
+                            );
+                            // Exactly the lines recorded above: one checked
+                            // since is not deleted without being recorded.
+                            let removed = 0;
+                            for (const line of checked) {
+                                if (
+                                    await store.deleteLine(householdId, line.id)
+                                ) {
+                                    removed += 1;
+                                }
+                            }
+                            return {
+                                value: { removed },
+                                summary: `Cleared ${removed} checked grocery line${removed === 1 ? "" : "s"}${uncapturedNote(report.uncaptured)}`,
+                                changed: removed > 0,
+                            };
+                        },
                     );
+                    if (run.refused) return run.result;
+                    const { removed } = run.value;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: `Cleared ${removed} checked line${removed === 1 ? "" : "s"}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    `Cleared ${removed} checked line${removed === 1 ? "" : "s"}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 
@@ -1005,4 +1085,465 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 analytics,
             ),
     );
+}
+
+export const CLEAR_GROCERY_LIST_OUTPUT_SCHEMA = z.object({
+    removed: z.number().int(),
+    checked: z.number().int(),
+    unchecked: z.number().int(),
+    store_id: z.string().nullable(),
+    store: z.string().nullable(),
+});
+
+const placedLineSchema = z.object({
+    id: z.string(),
+    display_name: z.string(),
+    store_id: z.string(),
+    store: z.string(),
+    section_id: z.string(),
+    section: z.string(),
+});
+
+export const MOVE_GROCERY_LINES_OUTPUT_SCHEMA = z.object({
+    moved: z.array(placedLineSchema),
+    /** Lines already where they should be. */
+    unchanged: z.array(z.string()),
+    /** Ids that are not grocery lines of this household. */
+    not_found: z.array(z.string()),
+});
+
+export const UPDATE_GROCERY_LINE_OUTPUT_SCHEMA = z.object({
+    found: z.boolean(),
+    changed: z.boolean(),
+    line: placedLineSchema
+        .extend({
+            amount: z.number(),
+            unit: z.string(),
+            note: z.string().nullable(),
+            checked: z.boolean(),
+        })
+        .nullable(),
+});
+
+export const ADMIN_UNDO_NOTE =
+    "Records the change and the household can undo it for 24 hours; refused while the household has turned off destructive agent changes.";
+
+function groceryCount(count: number): string {
+    return `${count} ${count === 1 ? "line" : "lines"}`;
+}
+
+function asToolError(err: unknown): never {
+    if (err instanceof SettingsInputError || err instanceof GroceryInputError) {
+        throw new Error(err.message);
+    }
+    throw err;
+}
+
+/**
+ * Clear, move and edit the grocery list. Behind `mcp-household-admin` with the
+ * store tools: each one overwrites or removes what the household put on the
+ * list, so each goes through the destructive guard.
+ */
+export function registerGroceryListAdminTools(
+    server: McpServer,
+    ctx: ToolContext,
+) {
+    const { analytics, runDestructive } = ctx;
+
+    gatedTool(
+        server,
+        ctx,
+        HOUSEHOLD_ADMIN_FLAG,
+        "clear_grocery_list",
+        {
+            title: "Clear Grocery List",
+            description: `Remove every grocery line, ticked or not, or only one store's lines (store_id from list_stores). clear_checked_grocery_lines removes just the ticked ones. ${ADMIN_UNDO_NOTE}`,
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                store_id: ADMIN_ID("store_id").optional(),
+            }),
+            outputSchema: CLEAR_GROCERY_LIST_OUTPUT_SCHEMA,
+        },
+        async (args) =>
+            withAnalytics(
+                "clear_grocery_list",
+                async () => {
+                    try {
+                        const run = await runDestructive(
+                            "clear_grocery_list",
+                            async (rec, householdId) => {
+                                const grocery = liveGroceryStore();
+                                const stores =
+                                    await liveSettingsStore().listStores(
+                                        householdId,
+                                    );
+                                const store = args.store_id
+                                    ? stores.find(
+                                          (row) => row.id === args.store_id,
+                                      )
+                                    : undefined;
+                                const target = linesToClear(
+                                    await grocery.listLines(householdId),
+                                    stores,
+                                    args.store_id,
+                                );
+                                const report = await rec.captureCascade(
+                                    "grocery_lines",
+                                    target.map((line) => ({ id: line.id })),
+                                );
+                                await captureDismissals(
+                                    rec,
+                                    householdId,
+                                    dismissedOn(
+                                        "grocery_line",
+                                        target.map((line) => line.id),
+                                    ),
+                                );
+                                // Exactly the lines recorded above: one added since is
+                                // not deleted without being recorded.
+                                let removed = 0;
+                                let checked = 0;
+                                for (const line of target) {
+                                    if (
+                                        await grocery.deleteLine(
+                                            householdId,
+                                            line.id,
+                                        )
+                                    ) {
+                                        removed += 1;
+                                        if (line.checked) checked += 1;
+                                    }
+                                }
+                                return {
+                                    value: {
+                                        removed,
+                                        checked,
+                                        unchecked: removed - checked,
+                                        store_id: store?.id ?? null,
+                                        store: store?.name ?? null,
+                                    },
+                                    summary: `Cleared ${groceryCount(removed)} from ${store?.name ?? "the grocery list"}${uncapturedNote(report.uncaptured)}`,
+                                    changed: removed > 0,
+                                };
+                            },
+                        );
+                        if (run.refused) return run.result;
+                        const { value } = run;
+                        const from = value.store ?? "the grocery list";
+                        return {
+                            content: [
+                                {
+                                    type: "text" as const,
+                                    text: withUndo(
+                                        value.removed === 0
+                                            ? `${from === "the grocery list" ? "The grocery list" : from} has no lines; nothing to clear.`
+                                            : `Cleared ${groceryCount(value.removed)} from ${from} (${value.checked} ticked, ${value.unchecked} not).`,
+                                        run.undo,
+                                    ),
+                                },
+                            ],
+                            structuredContent: value,
+                        };
+                    } catch (err) {
+                        return asToolError(err);
+                    }
+                },
+                analytics,
+                undefined,
+                { outcome: destructiveOutcome },
+            ),
+    );
+
+    gatedTool(
+        server,
+        ctx,
+        HOUSEHOLD_ADMIN_FLAG,
+        "move_grocery_lines",
+        {
+            title: "Move Grocery Lines",
+            description: `Move grocery lines to another store and/or section. Pass store_id, section (a section of the destination store, by name or id) or both. Moving to another store without a section keeps each line's aisle by name, else puts it in that store's Other section. Ids that are not lines are reported, not an error. ${ADMIN_UNDO_NOTE}`,
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                line_ids: z
+                    .array(
+                        z.uuid(
+                            "each line id must be an id from list_grocery_lines",
+                        ),
+                    )
+                    .min(1)
+                    .max(200),
+                store_id: ADMIN_ID("store_id").optional(),
+                section: z
+                    .string()
+                    .trim()
+                    .min(1)
+                    .optional()
+                    .describe(
+                        "A section of the destination store (the line's own store when store_id is left out), by name or id.",
+                    ),
+            }),
+            outputSchema: MOVE_GROCERY_LINES_OUTPUT_SCHEMA,
+        },
+        async (args) =>
+            withAnalytics(
+                "move_grocery_lines",
+                async () => {
+                    try {
+                        const run = await runDestructive(
+                            "move_grocery_lines",
+                            async (rec, householdId) => {
+                                const grocery = liveGroceryStore();
+                                const plan = await planGroceryLineMoves(
+                                    {
+                                        grocery,
+                                        settings: liveSettingsStore(),
+                                    },
+                                    householdId,
+                                    args.line_ids,
+                                    {
+                                        storeId: args.store_id,
+                                        section: args.section,
+                                    },
+                                );
+                                await rec.captureByIds(
+                                    "grocery_lines",
+                                    plan.moves.map((row) => row.line.id),
+                                    "updated",
+                                );
+                                const moved = await applyLinePlacements(
+                                    grocery,
+                                    plan.moves,
+                                );
+                                const storeName = (id: string) =>
+                                    plan.layout.stores.find(
+                                        (row) => row.id === id,
+                                    )?.name ?? "";
+                                const sectionName = (
+                                    storeId: string,
+                                    id: string,
+                                ) =>
+                                    plan.layout.sectionsByStore
+                                        .get(storeId)
+                                        ?.find((row) => row.id === id)?.name ??
+                                    "";
+                                const value = {
+                                    moved: moved.map((line) => ({
+                                        id: line.id,
+                                        display_name: line.displayName,
+                                        store_id: line.storeId,
+                                        store: storeName(line.storeId),
+                                        section_id: line.sectionId,
+                                        section: sectionName(
+                                            line.storeId,
+                                            line.sectionId,
+                                        ),
+                                    })),
+                                    unchanged: plan.unchanged.map(
+                                        (line) => line.id,
+                                    ),
+                                    not_found: plan.notFound,
+                                };
+                                const stores = new Set(
+                                    value.moved.map((row) => row.store),
+                                );
+                                const sections = new Set(
+                                    value.moved.map((row) => row.section),
+                                );
+                                const where = `${[...stores].join(", ")}${sections.size === 1 ? ` (${[...sections][0]})` : ""}`;
+                                return {
+                                    value,
+                                    summary: `Moved ${groceryCount(moved.length)} to ${where}`,
+                                    changed: moved.length > 0,
+                                };
+                            },
+                        );
+                        if (run.refused) return run.result;
+                        const { value } = run;
+                        const said = [
+                            value.moved.length > 0
+                                ? `Moved ${groceryCount(value.moved.length)}: ${[
+                                      ...new Set(
+                                          value.moved.map(
+                                              (row) =>
+                                                  `${row.store} (${row.section})`,
+                                          ),
+                                      ),
+                                  ].join(", ")}.`
+                                : "No lines moved.",
+                            value.unchanged.length > 0
+                                ? `${groceryCount(value.unchanged.length)} already there.`
+                                : "",
+                            value.not_found.length > 0
+                                ? `Not found: ${value.not_found.join(", ")}.`
+                                : "",
+                        ].filter(Boolean);
+                        return {
+                            content: [
+                                {
+                                    type: "text" as const,
+                                    text: withUndo(said.join(" "), run.undo),
+                                },
+                            ],
+                            structuredContent: value,
+                        };
+                    } catch (err) {
+                        return asToolError(err);
+                    }
+                },
+                analytics,
+                undefined,
+                { outcome: destructiveOutcome },
+            ),
+    );
+
+    gatedTool(
+        server,
+        ctx,
+        HOUSEHOLD_ADMIN_FLAG,
+        "update_grocery_line",
+        {
+            title: "Update Grocery Line",
+            description: `Change one grocery line: its amount, unit or note (note null removes it), or the store and/or section it sits in (a section of the destination store, by name or id; moving store without a section keeps the aisle by name, else Other). Overwrites what is there. ${ADMIN_UNDO_NOTE}`,
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                id: z.uuid(
+                    "id must be a grocery line id from list_grocery_lines",
+                ),
+                amount: z.coerce.number().optional(),
+                unit: z.string().trim().min(1).max(40).optional(),
+                note: z.string().max(500).nullable().optional(),
+                store_id: ADMIN_ID("store_id").optional(),
+                section: z.string().trim().min(1).optional(),
+            }),
+            outputSchema: UPDATE_GROCERY_LINE_OUTPUT_SCHEMA,
+        },
+        async (args) =>
+            withAnalytics(
+                "update_grocery_line",
+                async () => {
+                    try {
+                        const run = await runDestructive<
+                            z.infer<typeof UPDATE_GROCERY_LINE_OUTPUT_SCHEMA>
+                        >("update_grocery_line", async (rec, householdId) => {
+                            const grocery = liveGroceryStore();
+                            const plan = await planGroceryLineEdit(
+                                {
+                                    grocery,
+                                    settings: liveSettingsStore(),
+                                },
+                                householdId,
+                                args.id,
+                                {
+                                    amount: args.amount,
+                                    unit: args.unit,
+                                    note: args.note,
+                                    storeId: args.store_id,
+                                    section: args.section,
+                                },
+                            );
+                            if (!plan) {
+                                return {
+                                    value: {
+                                        found: false,
+                                        changed: false,
+                                        line: null,
+                                    },
+                                    summary: "",
+                                    changed: false,
+                                };
+                            }
+                            if (!lineEditChanges(plan)) {
+                                return {
+                                    value: {
+                                        found: true,
+                                        changed: false,
+                                        line: wireLine(plan.before, plan),
+                                    },
+                                    summary: "",
+                                    changed: false,
+                                };
+                            }
+                            await rec.captureByIds(
+                                "grocery_lines",
+                                [plan.before.id],
+                                "updated",
+                            );
+                            const saved = await applyLineEdit(grocery, plan);
+                            return {
+                                value: {
+                                    found: true,
+                                    changed: true,
+                                    line: wireLine(saved, plan),
+                                },
+                                summary: `Updated grocery line ${saved.displayName}`,
+                                changed: true,
+                            };
+                        });
+                        if (run.refused) return run.result;
+                        const { value } = run;
+                        const line = value.line;
+                        const text = !value.found
+                            ? `No grocery line found with id ${args.id}.`
+                            : !value.changed
+                              ? `${line!.display_name} already has those values; nothing changed.`
+                              : `Updated ${line!.display_name}: ${line!.amount} ${line!.unit} at ${line!.store} (${line!.section})${line!.note ? `, note "${line!.note}"` : ""}.`;
+                        return {
+                            content: [
+                                {
+                                    type: "text" as const,
+                                    text: withUndo(text, run.undo),
+                                },
+                            ],
+                            structuredContent: value,
+                        };
+                    } catch (err) {
+                        return asToolError(err);
+                    }
+                },
+                analytics,
+                undefined,
+                { outcome: destructiveOutcome },
+            ),
+    );
+}
+
+/** One line for the tool result, with the names of its store and section. */
+function wireLine(
+    line: import("../../domain/grocery.js").GroceryLine,
+    plan: {
+        layout: import("../../domain/grocery-lines.js").StoreLayout;
+    },
+) {
+    return {
+        id: line.id,
+        display_name: line.displayName,
+        amount: line.quantity.amount,
+        unit: line.quantity.unit,
+        note: line.note,
+        checked: line.checked,
+        store_id: line.storeId,
+        store:
+            plan.layout.stores.find((row) => row.id === line.storeId)?.name ??
+            "",
+        section_id: line.sectionId,
+        section:
+            plan.layout.sectionsByStore
+                .get(line.storeId)
+                ?.find((row) => row.id === line.sectionId)?.name ?? "",
+    };
 }

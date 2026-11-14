@@ -9,6 +9,7 @@ import { createMemoryFoodsStore } from "./foods.js";
 import { createMemoryNoticeDismissalsStore } from "./notice-dismissals.js";
 import {
     createMemoryStoreManagement,
+    createStoreWithSections,
     deleteStore,
     destinationSectionId,
     planStoreDeletion,
@@ -351,4 +352,84 @@ test("reorderStores returns the stores in the new order", async () => {
         [b.id, 0],
         [a.id, 1],
     ]);
+});
+
+test("createStoreWithSections without names is the app's own add-a-store", async () => {
+    const settings = createMemorySettingsStore();
+    const made = await createStoreWithSections(settings, HH, " Costco ");
+    expect(made.store.name).toBe("Costco");
+    expect(made.sections.map((row) => row.name)).toEqual([
+        "Produce",
+        "Dairy",
+        "Meat & seafood",
+        "Bakery",
+        "Frozen",
+        "Pantry",
+        "Beverages",
+        "Household",
+        "Other",
+    ]);
+    await expect(
+        createStoreWithSections(settings, HH, "Costco"),
+    ).rejects.toThrow("That store already exists.");
+});
+
+test("createStoreWithSections with names gets exactly those, in order, and Other last", async () => {
+    const settings = createMemorySettingsStore();
+    await createGroceryStore(settings, HH, "First");
+    const made = await createStoreWithSections(settings, HH, "Deli", [
+        "Meat",
+        " Cheese ",
+    ]);
+    expect(made.store.sortOrder).toBe(1);
+    expect(
+        made.sections.map((row) => [row.name, row.sortOrder, row.isOther]),
+    ).toEqual([
+        ["Meat", 0, false],
+        ["Cheese", 1, false],
+        ["Other", 2, true],
+    ]);
+    expect(
+        (await settings.listSections(made.store.id)).map((row) => row.name),
+    ).toEqual(["Meat", "Cheese", "Other"]);
+});
+
+test("createStoreWithSections refuses a store name another store has in any case, with or without sections", async () => {
+    const settings = createMemorySettingsStore();
+    await createGroceryStore(settings, HH, "Costco");
+    await expect(
+        createStoreWithSections(settings, HH, "costco"),
+    ).rejects.toThrow("That store already exists.");
+    await expect(
+        createStoreWithSections(settings, HH, " COSTCO ", ["Meat"]),
+    ).rejects.toThrow("That store already exists.");
+    expect((await settings.listStores(HH)).map((row) => row.name)).toEqual([
+        "Costco",
+    ]);
+});
+
+test("a section named Other (any case) is that section, moved last", async () => {
+    const settings = createMemorySettingsStore();
+    const made = await createStoreWithSections(settings, HH, "Deli", [
+        "other",
+        "Meat",
+    ]);
+    expect(made.sections.map((row) => [row.name, row.isOther])).toEqual([
+        ["Meat", false],
+        ["other", true],
+    ]);
+});
+
+test("createStoreWithSections refuses a blank name, a twice-listed section and a blank section, writing nothing", async () => {
+    const settings = createMemorySettingsStore();
+    await expect(
+        createStoreWithSections(settings, HH, "  ", ["A"]),
+    ).rejects.toThrow("Enter a store name.");
+    await expect(
+        createStoreWithSections(settings, HH, "X", ["A", "a"]),
+    ).rejects.toThrow("A section is listed twice.");
+    await expect(
+        createStoreWithSections(settings, HH, "X", ["A", " "]),
+    ).rejects.toThrow("Enter a section name.");
+    expect(await settings.listStores(HH)).toEqual([]);
 });

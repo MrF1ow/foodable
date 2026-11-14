@@ -56,6 +56,11 @@ import {
     similarFoodsWire,
     SIMILAR_FOODS_ENTRY,
     WRITE_STATUS,
+    captureDismissals,
+    destructiveOutcome,
+    dismissedOn,
+    uncapturedNote,
+    withUndo,
     type ToolContext,
 } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
@@ -129,6 +134,13 @@ export const LIST_EXPIRING_OUTPUT_SCHEMA = z.object({
         .nullable(),
 });
 
+// The stock ledger rounds amounts to one decimal place (`roundAmount` in
+// domain/stock.ts); so does the check that decides whether tossing an amount
+// leaves anything of the item.
+function roundStockAmount(amount: number): number {
+    return Math.round(amount * 10) / 10;
+}
+
 function shortfallText(
     rows: { displayName: string; amount: number; unit: string }[],
 ): string {
@@ -149,6 +161,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
         actorUserId,
         requireHouseholdMemberId,
         uiMeta,
+        runDestructive,
     } = ctx;
     server.registerTool(
         "get_fridge",
@@ -325,24 +338,67 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "delete_fridge_location",
                 async () => {
-                    const householdId = await callerHouseholdId();
-                    const deleted = await deleteLocation(
-                        liveFridgeStore(),
-                        householdId,
-                        args.id,
+                    const run = await runDestructive(
+                        "delete_fridge_location",
+                        async (rec, householdId) => {
+                            const store = liveFridgeStore();
+                            const location = (
+                                await store.listLocations(householdId)
+                            ).find((row) => row.id === args.id);
+                            const items = location
+                                ? (await store.listItems(householdId)).filter(
+                                      (item) => item.locationId === args.id,
+                                  ).length
+                                : 0;
+                            // The items go with their location, so they are
+                            // recorded with it.
+                            const report = await rec.captureCascade(
+                                "fridge_locations",
+                                [{ id: args.id }],
+                            );
+                            await captureDismissals(
+                                rec,
+                                householdId,
+                                dismissedOn(
+                                    "fridge_item",
+                                    (await store.listItems(householdId))
+                                        .filter(
+                                            (item) =>
+                                                item.locationId === args.id,
+                                        )
+                                        .map((item) => item.id),
+                                ),
+                            );
+                            const deleted = await deleteLocation(
+                                store,
+                                householdId,
+                                args.id,
+                            );
+                            return {
+                                value: { deleted },
+                                summary: `Deleted fridge location ${location?.name ?? args.id}${items > 0 ? ` and its ${items} item${items === 1 ? "" : "s"}` : ""}${uncapturedNote(report.uncaptured)}`,
+                                changed: deleted,
+                            };
+                        },
                     );
+                    if (run.refused) return run.result;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: deleted
-                                    ? `Deleted location ${args.id}.`
-                                    : `No location found with id ${args.id}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value.deleted
+                                        ? `Deleted location ${args.id}.`
+                                        : `No location found with id ${args.id}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 
@@ -598,24 +654,48 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "delete_fridge_item",
                 async () => {
-                    const householdId = await callerHouseholdId();
                     try {
-                        const deleted = await deleteFridgeItemAdjust(
-                            liveFridgeStore(),
-                            liveStockStore(),
-                            liveFoodsStore(),
-                            {
-                                householdId,
-                                itemId: args.id,
+                        const run = await runDestructive(
+                            "delete_fridge_item",
+                            async (rec, householdId) => {
+                                const fridge = liveFridgeStore();
+                                const item = (
+                                    await fridge.listItems(householdId)
+                                ).find((row) => row.id === args.id);
+                                // Captured before the write, so the stock
+                                // movement it adds is recorded too.
+                                await rec.captureCascade("fridge_items", [
+                                    { id: args.id },
+                                ]);
+                                await captureDismissals(
+                                    rec,
+                                    householdId,
+                                    dismissedOn("fridge_item", [args.id]),
+                                );
+                                const deleted = await deleteFridgeItemAdjust(
+                                    fridge,
+                                    liveStockStore(),
+                                    liveFoodsStore(),
+                                    { householdId, itemId: args.id },
+                                );
+                                return {
+                                    value: { deleted },
+                                    summary: `Deleted fridge item ${item?.displayName ?? args.id}`,
+                                    changed: deleted,
+                                };
                             },
                         );
+                        if (run.refused) return run.result;
                         return {
                             content: [
                                 {
-                                    type: "text",
-                                    text: deleted
-                                        ? `Deleted fridge item ${args.id}.`
-                                        : `No fridge item found with id ${args.id}.`,
+                                    type: "text" as const,
+                                    text: withUndo(
+                                        run.value.deleted
+                                            ? `Deleted fridge item ${args.id}.`
+                                            : `No fridge item found with id ${args.id}.`,
+                                        run.undo,
+                                    ),
                                 },
                             ],
                         };
@@ -630,6 +710,8 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                     }
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 
@@ -959,27 +1041,88 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "discard_fridge_item",
                 async () => {
-                    const householdId = await callerHouseholdId();
                     try {
-                        const tossed = await discardFridgeItem(
-                            liveFridgeStore(),
-                            liveStockStore(),
-                            liveFoodsStore(),
-                            {
-                                householdId,
-                                itemId: args.id,
-                                amount: args.amount,
+                        const run = await runDestructive(
+                            "discard_fridge_item",
+                            async (rec, householdId) => {
+                                const fridge = liveFridgeStore();
+                                const item = (
+                                    await fridge.listItems(householdId)
+                                ).find((row) => row.id === args.id);
+                                // Tossing all of an item removes it; tossing
+                                // part of it lowers the amount. The row is
+                                // recorded as the one it will become.
+                                const tossing =
+                                    args.amount ?? item?.quantity.amount ?? 0;
+                                const removes =
+                                    !item ||
+                                    roundStockAmount(
+                                        item.quantity.amount -
+                                            Math.min(
+                                                item.quantity.amount,
+                                                tossing,
+                                            ),
+                                    ) <= 0;
+                                if (removes) {
+                                    // The row goes, and with it what points
+                                    // at it: movements and grocery sources.
+                                    await rec.captureCascade("fridge_items", [
+                                        { id: args.id },
+                                    ]);
+                                    await captureDismissals(
+                                        rec,
+                                        householdId,
+                                        dismissedOn("fridge_item", [args.id]),
+                                    );
+                                } else {
+                                    await rec.captureByIds(
+                                        "fridge_items",
+                                        [args.id],
+                                        "updated",
+                                    );
+                                }
+                                const tossed = await discardFridgeItem(
+                                    fridge,
+                                    liveStockStore(),
+                                    liveFoodsStore(),
+                                    {
+                                        householdId,
+                                        itemId: args.id,
+                                        amount: args.amount,
+                                    },
+                                );
+                                // The row was recorded as the state it was
+                                // expected to end in. If the ledger decided
+                                // otherwise, record nothing rather than a
+                                // snapshot that cannot be undone.
+                                const remains = (
+                                    await fridge.listItems(householdId)
+                                ).some((row) => row.id === args.id);
+                                if (remains === removes) {
+                                    throw new Error(
+                                        "The fridge item changed while it was being tossed. Nothing was changed; try again.",
+                                    );
+                                }
+                                return {
+                                    value: { tossed },
+                                    summary: `Tossed ${Math.abs(tossed.movement.delta)} ${tossed.movement.unit} of ${item?.displayName ?? args.id}`,
+                                };
                             },
                         );
+                        if (run.refused) return run.result;
+                        const { tossed } = run.value;
                         return {
                             content: [
                                 {
-                                    type: "text",
-                                    text: `Tossed ${Math.abs(tossed.movement.delta)} ${tossed.movement.unit}.${shortfallText(
-                                        tossed.shortfall
-                                            ? [tossed.shortfall]
-                                            : [],
-                                    )}`,
+                                    type: "text" as const,
+                                    text: withUndo(
+                                        `Tossed ${Math.abs(tossed.movement.delta)} ${tossed.movement.unit}.${shortfallText(
+                                            tossed.shortfall
+                                                ? [tossed.shortfall]
+                                                : [],
+                                        )}`,
+                                        run.undo,
+                                    ),
                                 },
                             ],
                         };
@@ -991,6 +1134,8 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                     }
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 }

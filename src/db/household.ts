@@ -13,6 +13,7 @@ import {
 } from "../household.js";
 import { AlreadyRegisteredError, signUp } from "../domain/auth.js";
 import {
+    AGENTS_DESTRUCTIVE_ALLOWED_KEY,
     GROCERY_DEFAULT_STORE_KEY,
     GROCERY_USE_USUAL_STORE_KEY,
 } from "../domain/settings.js";
@@ -484,7 +485,7 @@ export async function updateHouseholdConfig(
                             ),
                             true
                         )
-                        -- The grocery and score keys are not part of the typed config; keep them.
+                        -- The grocery, score and agents keys are not part of the typed config; keep them.
                         || jsonb_strip_nulls(jsonb_build_object(
                             ${GROCERY_DEFAULT_STORE_KEY}::text,
                             household_preferences ->
@@ -494,7 +495,10 @@ export async function updateHouseholdConfig(
                                 ${GROCERY_USE_USUAL_STORE_KEY}::text,
                             ${SCORE_DEFAULT_KEY}::text,
                             household_preferences ->
-                                ${SCORE_DEFAULT_KEY}::text
+                                ${SCORE_DEFAULT_KEY}::text,
+                            ${AGENTS_DESTRUCTIVE_ALLOWED_KEY}::text,
+                            household_preferences ->
+                                ${AGENTS_DESTRUCTIVE_ALLOWED_KEY}::text
                         ))
                     where id = ${householdId}
                     returning name, recipe_search_places, household_preferences
