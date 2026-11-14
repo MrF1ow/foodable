@@ -30,6 +30,8 @@ import { gatedTool } from "../gated.js";
 import {
     registerV2OnlyWidgetResource,
     uiMetaForKey,
+    destructiveOutcome,
+    withUndo,
     type ToolContext,
 } from "../shared.js";
 import { isViewerFlagOn } from "../../viewer-flags.js";
@@ -201,7 +203,7 @@ function kcalPerPortionByRecipe(
 }
 
 export function registerPlanTools(server: McpServer, ctx: ToolContext) {
-    const { callerHouseholdId, callerActor, analytics } = ctx;
+    const { callerHouseholdId, callerActor, analytics, runDestructive } = ctx;
 
     // Only when the plan tools are on: a widget for a tool that is hidden
     // would be a resource nothing links.
@@ -426,17 +428,44 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "unplan_recipe",
                 async () => {
-                    const householdId = await callerHouseholdId();
-                    const removed = await liveRecipePlansStore().removePlan(
-                        householdId,
-                        args.plan_id,
+                    const run = await runDestructive(
+                        "unplan_recipe",
+                        async (rec, householdId) => {
+                            const plans = liveRecipePlansStore();
+                            const plan = await plans.getPlan(
+                                householdId,
+                                args.plan_id,
+                            );
+                            if (!plan) throw new Error("Plan not found.");
+                            const recipe = await liveRecipesStore().getRecipe(
+                                householdId,
+                                plan.recipeId,
+                            );
+                            await rec.captureByIds(
+                                "recipe_plans",
+                                [args.plan_id],
+                                "deleted",
+                            );
+                            const removed = await plans.removePlan(
+                                householdId,
+                                args.plan_id,
+                            );
+                            if (!removed) throw new Error("Plan not found.");
+                            return {
+                                value: null,
+                                summary: `Removed ${recipe?.name ?? "a recipe"} from the plan for ${plan.date} (${plan.slot})`,
+                            };
+                        },
                     );
-                    if (!removed) throw new Error("Plan not found.");
+                    if (run.refused) return run.result;
                     return {
                         content: [
                             {
                                 type: "text" as const,
-                                text: `Removed plan ${args.plan_id}.`,
+                                text: withUndo(
+                                    `Removed plan ${args.plan_id}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                         structuredContent: {
@@ -446,6 +475,8 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 

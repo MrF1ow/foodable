@@ -172,6 +172,8 @@ import { WEEKDAY_NAMES } from "./domain/weekdays.js";
 import { PLAN_UNKNOWN_LINE_NOTE } from "./copy/toasts.js";
 import { fridgeExpiryLine } from "./copy/notices.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
+import { createMemoryAgentActionsStore } from "./domain/agent-actions.js";
+import { setAgentActionDepsForTests } from "./mcp/shared.js";
 import {
     createMemoryRecipesStore,
     addRecipeManualIngredient,
@@ -427,6 +429,7 @@ const db = {
     foodSearchError: null as Error | null,
     recipeImportFetcher: null as import("./fetch-safe.js").SafeFetcher | null,
     fetchMemoryStore: createMemoryFetchMemoryStore(),
+    agentActions: createMemoryAgentActionsStore(),
     socialReaderStatusStore: createMemorySocialReaderStatusStore(),
 };
 
@@ -529,6 +532,8 @@ mock.module("./db/nutrition.js", () => ({
             idempotency_key: null,
         } as WeightEntry;
     },
+    getMealById: async (_userId: string, id: string) =>
+        db.meals.find((m) => m.id === id) ?? null,
     deleteMeal: async (_userId: string, id: string) => {
         const before = db.meals.length;
         db.meals = db.meals.filter((m) => m.id !== id);
@@ -922,6 +927,7 @@ mock.module("./db/fetch-memory.js", () => ({
 }));
 
 afterAll(() => {
+    setAgentActionDepsForTests(null);
     mock.module("./db/analytics.js", () => realDbAnalytics);
     mock.module("./db/nutrition.js", () => realNutrition);
     mock.module("./db/profiles.js", () => realProfiles);
@@ -1010,6 +1016,15 @@ beforeEach(() => {
     db.foodSearchError = null;
     db.recipeImportFetcher = null;
     db.fetchMemoryStore = createMemoryFetchMemoryStore();
+    // The destructive tools record into this one, on the same memory stores
+    // the tools write to.
+    db.agentActions = createMemoryAgentActionsStore();
+    setAgentActionDepsForTests({
+        store: db.agentActions,
+        settings: db.settingsStore,
+        stock: db.stockStore,
+        foods: db.foodsStore,
+    });
 });
 
 interface ToolResult {
@@ -2571,7 +2586,7 @@ describe("delete tools distinguish deleted from not-found", () => {
         test(`${c.tool} confirms a row it removed`, async () => {
             c.seed(c.id);
             await withTools(null, async (call) => {
-                expect(textOf(await call(c.tool, { id: c.id }))).toBe(
+                expect(textOf(await call(c.tool, { id: c.id }))).toStartWith(
                     c.deleted,
                 );
             });
@@ -8578,6 +8593,567 @@ async function sseFrame(r: Response): Promise<Record<string, unknown>> {
         .find((l) => l.startsWith("data:"));
     return JSON.parse(line?.slice(5) ?? "{}") as Record<string, unknown>;
 }
+
+// ---------- destructive tools: recorded, undoable, switchable ----------
+//
+// Twelve tools delete, clear, discard, unplan or merge. Each runs through the
+// household's agent-action guard: it records an entry (with the rows it
+// removed), says in its result that the household can undo it, and is refused
+// while the household's switch is Off. These tests run on the memory stores
+// this file mocks, and on both protocol eras; the SQL (the snapshot really
+// holding the rows, undo putting them back) is tested against Postgres in
+// src/mcp/tools/destructive.db.test.ts.
+
+describe("/mcp destructive tools are guarded", () => {
+    const UNDO_SENTENCE =
+        "The household can undo this for 24 hours in Settings › AI connections.";
+    const REFUSAL =
+        "Agents may make destructive changes is Off in Settings › AI connections.";
+
+    // unplan_recipe is only registered while the plan tools are on.
+    beforeEach(() =>
+        setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true })),
+    );
+    afterEach(() => resetFlagsForTests());
+
+    function appWith(
+        auth:
+            | { kind: "user"; userId: string }
+            | { kind: "household"; householdId: string },
+        client?: string,
+    ) {
+        const app = new Hono();
+        app.all("/mcp", (c) => {
+            c.set("authContext", auth);
+            if (client) c.set("tokenClient", client);
+            return handleMcp(c);
+        });
+        return app;
+    }
+
+    async function withClientFor<T>(
+        app: Hono,
+        mode: EraMode,
+        run: (call: CallTool) => Promise<T>,
+    ): Promise<T> {
+        const transport = new StreamableHTTPClientTransport(
+            new URL("http://test.local/mcp"),
+            {
+                fetch: async (url, init) =>
+                    app.request(new Request(String(url), init)),
+            },
+        );
+        const client = new Client(
+            { name: "t", version: "0" },
+            { versionNegotiation: { mode } },
+        );
+        await client.connect(transport);
+        try {
+            return await run(
+                (name, args = {}) =>
+                    client.callTool({
+                        name,
+                        arguments: callToolArguments(name, args),
+                    }) as Promise<ToolResult>,
+            );
+        } finally {
+            await client.close();
+        }
+    }
+
+    test.each(ERAS)(
+        "the server instructions name remove among the destructive verbs (%p)",
+        async (era) => {
+            const app = appWith({ kind: "user", userId: "u1" });
+            const client = new Client(
+                { name: "t", version: "0" },
+                { versionNegotiation: { mode: era } },
+            );
+            await client.connect(
+                new StreamableHTTPClientTransport(
+                    new URL("http://test.local/mcp"),
+                    {
+                        fetch: async (url, init) =>
+                            app.request(new Request(String(url), init)),
+                    },
+                ),
+            );
+            try {
+                expect(client.getInstructions()).toContain(
+                    "the ones that delete, remove, discard, clear, unplan or merge",
+                );
+            } finally {
+                await client.close();
+            }
+        },
+    );
+
+    /** The tools over the real /mcp handler on the legacy era, as the owner. */
+    const viaHttp = (run: (call: CallTool) => Promise<void>) =>
+        withClientFor(appWith({ kind: "user", userId: "u1" }), "legacy", run);
+
+    async function addStore() {
+        await db.settingsStore.insertStore({
+            id: "store-1",
+            householdId: "hh-1",
+            name: "Corner",
+            sortOrder: 0,
+        });
+        await db.settingsStore.insertSection({
+            id: "section-1",
+            householdId: "hh-1",
+            storeId: "store-1",
+            name: "Other",
+            sortOrder: 0,
+            hidden: false,
+            isOther: true,
+        });
+    }
+
+    /**
+     * The guard records against its own memory store, so what a tool is about
+     * to remove is mirrored there by id: that stands in for the database the
+     * real guard reads the rows from.
+     */
+    async function mirror() {
+        const agent = db.agentActions;
+        const row = (id: string, more: Record<string, unknown> = {}) => ({
+            id,
+            household_id: "hh-1",
+            ...more,
+        });
+        for (const food of await db.foodsStore.listFoods("hh-1")) {
+            agent.__seed("foods", row(food.id));
+        }
+        for (const line of await db.groceryStore.listLines("hh-1")) {
+            agent.__seed("grocery_lines", row(line.id));
+        }
+        for (const loc of await db.fridgeStore.listLocations("hh-1")) {
+            agent.__seed("fridge_locations", row(loc.id));
+        }
+        for (const item of await db.fridgeStore.listItems("hh-1")) {
+            agent.__seed(
+                "fridge_items",
+                row(item.id, { food_id: item.foodId }),
+            );
+        }
+        for (const recipe of await db.recipesStore.listRecipes("hh-1")) {
+            agent.__seed("recipes", row(recipe.id));
+        }
+        for (const ingredient of await db.recipesStore.listIngredientsForHousehold(
+            "hh-1",
+        )) {
+            agent.__seed("recipe_ingredients", row(ingredient.id));
+        }
+        for (const plan of await db.plansStore.listPlans(
+            "hh-1",
+            "2000-01-01",
+            "2999-12-31",
+        )) {
+            agent.__seed("recipe_plans", row(plan.id));
+        }
+        for (const meal of db.meals) agent.__seed("meals", row(meal.id));
+        for (const id of db.rowIds) {
+            agent.__seed("water_log", row(id));
+            agent.__seed("weight_log", row(id));
+        }
+    }
+
+    /** What the tools could have changed, as one comparable value. */
+    async function domainState(): Promise<string> {
+        return JSON.stringify({
+            lines: await db.groceryStore.listLines("hh-1"),
+            locations: await db.fridgeStore.listLocations("hh-1"),
+            items: await db.fridgeStore.listItems("hh-1"),
+            movements: await db.stockStore.listMovements("hh-1"),
+            recipes: await db.recipesStore.listRecipes("hh-1"),
+            ingredients:
+                await db.recipesStore.listIngredientsForHousehold("hh-1"),
+            plans: await db.plansStore.listPlans(
+                "hh-1",
+                "2000-01-01",
+                "2999-12-31",
+            ),
+            foods: await db.foodsStore.listFoods("hh-1"),
+            meals: db.meals,
+            rowIds: [...db.rowIds],
+        });
+    }
+
+    type Arranged = {
+        tool: string;
+        args: Record<string, unknown>;
+        summary: string;
+        /** Text the tool says first, before the undo sentence. */
+        text?: string;
+    };
+
+    const scenarios: Record<string, (call: CallTool) => Promise<Arranged>> = {
+        delete_grocery_line: async (call) => {
+            await addStore();
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const line = await call("add_grocery_line", {
+                store_id: "store-1",
+                kind: "food",
+                food_id: eggs.structuredContent?.id,
+                amount: 2,
+                unit: "each",
+            });
+            const id = line.structuredContent?.id as string;
+            return {
+                tool: "delete_grocery_line",
+                args: { id },
+                summary: "Deleted grocery line",
+                text: `Deleted grocery line ${id}.`,
+            };
+        },
+        clear_checked_grocery_lines: async (call) => {
+            await addStore();
+            for (const name of ["Eggs", "Milk"]) {
+                const food = await call("upsert_food", { name });
+                const line = await call("add_grocery_line", {
+                    store_id: "store-1",
+                    kind: "food",
+                    food_id: food.structuredContent?.id,
+                    amount: 1,
+                    unit: "each",
+                });
+                await call("check_grocery_line", {
+                    id: line.structuredContent?.id,
+                    checked: true,
+                });
+            }
+            return {
+                tool: "clear_checked_grocery_lines",
+                args: {},
+                summary: "Cleared 2 checked grocery lines",
+                text: "Cleared 2 checked lines.",
+            };
+        },
+        delete_fridge_location: async (call) => {
+            const loc = await call("add_fridge_location", { name: "Freezer" });
+            const peas = await call("upsert_food", { name: "Peas" });
+            await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id,
+                kind: "food",
+                food_id: peas.structuredContent?.id,
+                amount: 100,
+                unit: "g",
+            });
+            return {
+                tool: "delete_fridge_location",
+                args: { id: loc.structuredContent?.id },
+                summary: "Deleted fridge location Freezer and its 1 item",
+            };
+        },
+        delete_fridge_item: async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const item = await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id,
+                kind: "food",
+                food_id: eggs.structuredContent?.id,
+                amount: 300,
+                unit: "g",
+            });
+            return {
+                tool: "delete_fridge_item",
+                args: { id: item.structuredContent?.id },
+                summary: "Deleted fridge item",
+            };
+        },
+        discard_fridge_item: async (call) => {
+            const loc = await call("add_fridge_location", { name: "Fridge" });
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const item = await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id,
+                kind: "food",
+                food_id: eggs.structuredContent?.id,
+                amount: 10,
+                unit: "g",
+            });
+            return {
+                tool: "discard_fridge_item",
+                args: { id: item.structuredContent?.id, amount: 4 },
+                summary: "Tossed 4 g of",
+                text: "Tossed 4 g.",
+            };
+        },
+        delete_meal: async () => {
+            db.meals = [storedMeal({ id: "m1", description: "Porridge" })];
+            return {
+                tool: "delete_meal",
+                args: { id: "m1" },
+                summary: 'Deleted meal "Porridge"',
+                text: "Meal m1 deleted.",
+            };
+        },
+        delete_water: async () => {
+            db.rowIds.add("w1");
+            return {
+                tool: "delete_water",
+                args: { id: "w1" },
+                summary: "Deleted water entry w1",
+                text: "Water entry w1 deleted.",
+            };
+        },
+        delete_weight: async () => {
+            db.rowIds.add("k1");
+            return {
+                tool: "delete_weight",
+                args: { id: "k1" },
+                summary: "Deleted weight entry k1",
+                text: "Weight entry k1 deleted.",
+            };
+        },
+        delete_recipe: async (call) => {
+            const recipe = await call("create_recipe", {
+                name: "Soup",
+                yield_portions: 2,
+            });
+            return {
+                tool: "delete_recipe",
+                args: { id: recipe.structuredContent?.id },
+                summary: "Deleted recipe Soup",
+            };
+        },
+        remove_recipe_ingredient: async (call) => {
+            const flour = await call("upsert_food", { name: "Flour" });
+            const recipe = await call("create_recipe", {
+                name: "Soup",
+                yield_portions: 2,
+            });
+            const added = await call("add_recipe_ingredient", {
+                recipe_id: recipe.structuredContent?.id,
+                food_id: flour.structuredContent?.id,
+                amount: 200,
+                unit: "g",
+            });
+            const [ingredient] =
+                await db.recipesStore.listIngredientsForHousehold("hh-1");
+            expect(added.isError).toBeFalsy();
+            return {
+                tool: "remove_recipe_ingredient",
+                args: {
+                    recipe_id: recipe.structuredContent?.id,
+                    ingredient_id: ingredient!.id,
+                },
+                summary: "Removed Flour from recipe Soup",
+            };
+        },
+        unplan_recipe: async (call) => {
+            const recipe = await call("create_recipe", {
+                name: "Soup",
+                yield_portions: 2,
+            });
+            const planned = await call("plan_recipe", {
+                recipe_id: recipe.structuredContent?.id,
+                date: addUtcDaysForDestructive(2),
+                slot: "dinner",
+            });
+            expect(planned.isError).toBeFalsy();
+            const plan = planned.structuredContent?.plan as { plan_id: string };
+            return {
+                tool: "unplan_recipe",
+                args: { plan_id: plan.plan_id },
+                summary: "Removed Soup from the plan for",
+            };
+        },
+        merge_foods: async (call) => {
+            const keep = await call("upsert_food", { name: "Eggs" });
+            const drop = await call("upsert_food", {
+                name: "Egg",
+                on_similar: "create",
+            });
+            return {
+                tool: "merge_foods",
+                args: {
+                    keep_id: keep.structuredContent?.id,
+                    drop_id: drop.structuredContent?.id,
+                },
+                summary: "Merged Egg into Eggs",
+            };
+        },
+    };
+
+    function addUtcDaysForDestructive(days: number): string {
+        const d = new Date(Date.now() + days * 86_400_000);
+        return d.toISOString().slice(0, 10);
+    }
+
+    test("every guarded tool has a scenario", () => {
+        expect(Object.keys(scenarios).sort()).toEqual(
+            [
+                "clear_checked_grocery_lines",
+                "delete_fridge_item",
+                "delete_fridge_location",
+                "delete_grocery_line",
+                "delete_meal",
+                "delete_recipe",
+                "delete_water",
+                "delete_weight",
+                "discard_fridge_item",
+                "merge_foods",
+                "remove_recipe_ingredient",
+                "unplan_recipe",
+            ].sort(),
+        );
+    });
+
+    for (const [tool, arrange] of Object.entries(scenarios)) {
+        test(`${tool} records the action and says how to undo it`, async () => {
+            await viaHttp(async (call) => {
+                const arranged = await arrange(call);
+                await mirror();
+                const before = await domainState();
+                const result = await call(arranged.tool, arranged.args);
+                expect(result.isError).toBeFalsy();
+                expect(await domainState()).not.toBe(before);
+                const text = textOf(result);
+                expect(text).toContain(UNDO_SENTENCE);
+                if (arranged.text) expect(text).toStartWith(arranged.text);
+
+                const records = db.agentActions.__records();
+                expect(records).toHaveLength(1);
+                expect(records[0]).toMatchObject({
+                    householdId: "hh-1",
+                    memberId: "u1",
+                    connection: "OAuth app",
+                    tool,
+                    destructive: true,
+                    undoable: true,
+                });
+                expect(records[0]!.summary).toContain(arranged.summary);
+                expect(records[0]!.snapshot).not.toBeNull();
+            });
+        });
+
+        test(`${tool} is refused while the switch is Off, and changes nothing`, async () => {
+            await viaHttp(async (call) => {
+                const arranged = await arrange(call);
+                await mirror();
+                await db.settingsStore.setAgentDestructiveAllowed(
+                    "hh-1",
+                    false,
+                );
+                const before = await domainState();
+                const result = await call(arranged.tool, arranged.args);
+                expect(result.isError).toBe(true);
+                expect(textOf(result)).toContain(REFUSAL);
+                expect(textOf(result)).toContain("Ask the household owner");
+                expect(await domainState()).toBe(before);
+                expect(db.agentActions.__records()).toEqual([]);
+                // A refusal is a failure with its own category.
+                const row = db.analyticsRows.find((r) => r.tool_name === tool);
+                expect(row).toMatchObject({
+                    success: false,
+                    error_category: "agent_actions_disabled",
+                });
+            });
+        });
+    }
+
+    test("a call that names nothing records nothing and promises no undo", async () => {
+        await viaHttp(async (call) => {
+            await addStore();
+            const result = await call("delete_grocery_line", { id: "nope" });
+            expect(result.isError).toBeFalsy();
+            expect(textOf(result)).toBe("No grocery line found with id nope.");
+            expect(db.agentActions.__records()).toEqual([]);
+        });
+    });
+
+    test("an action that cannot be put back says so instead of promising an undo", async () => {
+        await viaHttp(async (call) => {
+            // Nothing is mirrored: the guard has no rows to snapshot.
+            db.rowIds.add("w1");
+            const result = await call("delete_water", { id: "w1" });
+            expect(result.isError).toBeFalsy();
+            expect(textOf(result)).not.toContain(UNDO_SENTENCE);
+            expect(textOf(result)).toContain(
+                "This change can't be undone, but it is recorded in Settings › AI connections.",
+            );
+            expect(db.agentActions.__records()).toHaveLength(1);
+            expect(db.agentActions.__records()[0]!.undoable).toBe(false);
+        });
+    });
+
+    describe("over HTTP", () => {
+        test.each(ERAS)(
+            "a destructive call records an action and says how to undo it (%p)",
+            async (era) => {
+                await withClientFor(
+                    appWith({ kind: "user", userId: "u1" }, "Claude"),
+                    era,
+                    async (call) => {
+                        const arranged =
+                            await scenarios.delete_grocery_line!(call);
+                        await mirror();
+                        const result = await call(arranged.tool, arranged.args);
+                        expect(result.isError).toBeFalsy();
+                        expect(textOf(result)).toContain(UNDO_SENTENCE);
+                        expect(db.agentActions.__records()).toMatchObject([
+                            {
+                                tool: "delete_grocery_line",
+                                memberId: "u1",
+                                connection: "Claude",
+                            },
+                        ]);
+                    },
+                );
+            },
+        );
+
+        test.each(ERAS)(
+            "the refusal reads the same on both eras (%p)",
+            async (era) => {
+                await withClientFor(
+                    appWith({ kind: "user", userId: "u1" }, "Claude"),
+                    era,
+                    async (call) => {
+                        const arranged = await scenarios.delete_water!(call);
+                        await mirror();
+                        await db.settingsStore.setAgentDestructiveAllowed(
+                            "hh-1",
+                            false,
+                        );
+                        const result = await call(arranged.tool, arranged.args);
+                        expect(result.isError).toBe(true);
+                        expect(textOf(result)).toContain(REFUSAL);
+                        expect(db.rowIds.has("w1")).toBe(true);
+                    },
+                );
+            },
+        );
+
+        test("the household token records no member", async () => {
+            await withClientFor(
+                appWith({ kind: "household", householdId: "hh-1" }),
+                "legacy",
+                async (call) => {
+                    const arranged = await scenarios.delete_grocery_line!(call);
+                    await mirror();
+                    const result = await call(arranged.tool, arranged.args);
+                    expect(result.isError).toBeFalsy();
+                    expect(textOf(result)).toContain(UNDO_SENTENCE);
+                    expect(db.agentActions.__records()).toMatchObject([
+                        { memberId: null, connection: "household token" },
+                    ]);
+                },
+            );
+        });
+
+        test("tools/list still pins the guarded tools as destructive", async () => {
+            await withHttpClient("u1", "legacy", async (client) => {
+                const listed = (await client.listTools()).tools;
+                for (const tool of Object.keys(scenarios)) {
+                    const found = listed.find((t) => t.name === tool);
+                    expect(found?.annotations?.destructiveHint).toBe(true);
+                }
+            });
+        });
+    });
+});
 
 describe("household config plurals_same_food over HTTP", () => {
     test.each(ERAS)("update and get round-trip (%p)", async (era) => {

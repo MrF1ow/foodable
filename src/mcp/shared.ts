@@ -26,6 +26,9 @@ import { liveFridgeStore } from "../db/fridge.js";
 import { liveFoodsStore } from "../db/foods.js";
 import { liveRecipesStore } from "../db/recipes.js";
 import { liveRulesStore } from "../db/rules.js";
+import { liveAgentActionDeps } from "../db/agent-actions.js";
+import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
+import type { NoticeDismissal } from "../domain/notice-dismissals.js";
 import type {
     Meal,
     NutritionGoals,
@@ -58,6 +61,16 @@ export {
     MAX_ALCOHOL_G,
     MAX_CAFFEINE_MG,
 } from "../domain/import.js";
+import {
+    AgentActionsDisabledError,
+    agentUndoHint,
+    withAgentAction,
+    type AgentActionActor,
+    type AgentActionDeps,
+    type AgentActionEntry,
+    type AgentUndoDeps,
+    type SnapshotRecorder,
+} from "../domain/agent-actions.js";
 import { alreadyHaveTag } from "../domain/linking.js";
 import { listFridge } from "../domain/fridge.js";
 import {
@@ -1526,7 +1539,147 @@ export type ToolContext = {
     }>;
     analytics: { userId: string };
     uiMeta: (widgetKey: string) => Record<string, unknown>;
+    /**
+     * Runs a destructive write through the household's agent-action guard: the
+     * switch is checked first, the rows the write will change are recorded as
+     * it goes, and the change can be undone for 24 hours. See `runDestructive`.
+     */
+    runDestructive: <T>(
+        tool: string,
+        write: (
+            rec: SnapshotRecorder,
+            householdId: string,
+        ) => Promise<DestructiveWrite<T>>,
+    ) => Promise<DestructiveRun<T>>;
 };
+
+/** What the household's setting is called, as a person sees it. */
+export const AGENT_DESTRUCTIVE_SETTING = "Agents may make destructive changes";
+
+/** What a refused destructive call tells the agent. Names the setting. */
+export const AGENT_ACTIONS_OFF_TEXT =
+    `${AGENT_DESTRUCTIVE_SETTING} is Off in Settings › AI connections. ` +
+    "Ask the household owner to turn it on, or make this change in the app. " +
+    "Nothing was changed.";
+
+/** Analytics bucket for a call the household's switch refused. */
+export const AGENT_ACTIONS_OFF_CATEGORY = "agent_actions_disabled";
+
+/** What a destructive write hands back: its result, and how to log it. */
+export type DestructiveWrite<T> = {
+    value: T;
+    /** One line for the household's activity list. */
+    summary: string;
+    /**
+     * False when the write changed nothing (the id named nothing): no action
+     * is recorded and nothing is said about undo.
+     */
+    changed?: boolean;
+};
+
+export type DestructiveRun<T> =
+    | {
+          refused: true;
+          /** The tool's whole result: an error that names the setting. */
+          result: {
+              content: [{ type: "text"; text: string }];
+              isError: true;
+          };
+      }
+    | {
+          refused: false;
+          value: T;
+          /** The sentence to append to the tool's text; empty when nothing was recorded. */
+          undo: string;
+      };
+
+/** The tool's text, then the undo sentence when there is one. */
+export function withUndo(text: string, undo: string): string {
+    return undo ? `${text} ${undo}` : text;
+}
+
+/** `analytics` outcome for a destructive tool: a refusal is a failure. */
+export function destructiveOutcome(result: object): {
+    success: boolean;
+    errorCategory?: string;
+} {
+    return "isError" in result && result.isError === true
+        ? { success: false, errorCategory: AGENT_ACTIONS_OFF_CATEGORY }
+        : { success: true };
+}
+
+const UNCAPTURED_LABELS: Record<string, string> = {
+    recipe_favourites: "favourites",
+};
+
+/**
+ * What undo will not bring back, for a summary: the tables a delete reached
+ * that the undo does not cover. Empty when there are none.
+ */
+export function uncapturedNote(uncaptured: readonly string[]): string {
+    if (uncaptured.length === 0) return "";
+    const labels = uncaptured.map(
+        (table) => UNCAPTURED_LABELS[table] ?? table.replaceAll("_", " "),
+    );
+    return ` (${labels.join(" and ")} ${labels.length > 1 || labels[0]!.endsWith("s") ? "are" : "is"} not restored by undo)`;
+}
+
+/**
+ * Records the dismissed notices a delete is about to clear. The stores drop
+ * them in the same write (`cleanupDismissals…`), so each is recorded first and
+ * undo brings them back with the thing they were dismissed on. `matches` is
+ * the same selection the cleanup makes.
+ */
+export async function captureDismissals(
+    rec: SnapshotRecorder,
+    householdId: string,
+    matches: (dismissal: NoticeDismissal) => boolean,
+): Promise<number> {
+    const all = await liveNoticeDismissalsStore().listForHousehold(householdId);
+    return rec.captureByIds(
+        "notice_dismissals",
+        all.filter(matches).map((dismissal) => dismissal.id),
+        "deleted",
+    );
+}
+
+/** Dismissals on one subject (`cleanupDismissalsForSubjectTx`). */
+export function dismissedOn(
+    subjectKind: NoticeDismissal["subjectKind"],
+    subjectIds: readonly string[],
+): (dismissal: NoticeDismissal) => boolean {
+    const ids = new Set(subjectIds);
+    return (dismissal) =>
+        dismissal.subjectKind === subjectKind && ids.has(dismissal.subjectId);
+}
+
+const NOT_UNDOABLE_TEXT =
+    "This change can't be undone, but it is recorded in Settings › AI connections.";
+
+function undoSentence(action: AgentActionEntry): string {
+    return agentUndoHint(action) || NOT_UNDOABLE_TEXT;
+}
+
+class NothingChanged extends Error {
+    constructor(readonly value: unknown) {
+        super("nothing changed");
+        this.name = "NothingChanged";
+    }
+}
+
+// Tests swap this for memory stores; production always reads Postgres.
+let agentActionDepsOverride: (AgentActionDeps & AgentUndoDeps) | null = null;
+
+/** Test harness only: the stores the destructive guard runs on (null clears it). */
+export function setAgentActionDepsForTests(
+    deps: (AgentActionDeps & AgentUndoDeps) | null,
+): void {
+    agentActionDepsOverride = deps;
+}
+
+function agentActionDeps(): AgentActionDeps & AgentUndoDeps {
+    return agentActionDepsOverride ?? liveAgentActionDeps();
+}
 
 export function createToolContext(
     auth: AuthContext,
@@ -1536,6 +1689,7 @@ export function createToolContext(
     baseUrl = "http://localhost",
     hasGoals = true,
     flags: ViewerFlags = defaultViewerFlags(auth),
+    client?: string,
 ): ToolContext {
     const requireUser = () => requireActorUserId(auth);
     const userIdArg =
@@ -1689,6 +1843,64 @@ export function createToolContext(
             householdId: check.member.householdId,
         };
     }
+    // What the household's activity list calls this agent: the OAuth app the
+    // token was issued to, or the shared token.
+    const connection =
+        auth.kind === "household" ? "household token" : (client ?? "OAuth app");
+    async function runDestructive<T>(
+        tool: string,
+        write: (
+            rec: SnapshotRecorder,
+            householdId: string,
+        ) => Promise<DestructiveWrite<T>>,
+    ): Promise<DestructiveRun<T>> {
+        const householdId = await callerHouseholdId();
+        const actor: AgentActionActor = {
+            householdId,
+            memberId: auth.kind === "user" ? auth.userId : null,
+            connection,
+        };
+        try {
+            const { result, action } = await withAgentAction(
+                agentActionDeps(),
+                actor,
+                {
+                    tool,
+                    summary: (done: DestructiveWrite<T>) => done.summary,
+                },
+                async (rec) => {
+                    const done = await write(rec, householdId);
+                    // Throwing rolls the transaction back, so a call that
+                    // changed nothing leaves no entry behind.
+                    if (done.changed === false) {
+                        throw new NothingChanged(done.value);
+                    }
+                    return done;
+                },
+            );
+            return {
+                refused: false,
+                value: result.value,
+                undo: undoSentence(action),
+            };
+        } catch (err) {
+            if (err instanceof NothingChanged) {
+                return { refused: false, value: err.value as T, undo: "" };
+            }
+            if (err instanceof AgentActionsDisabledError) {
+                return {
+                    refused: true,
+                    result: {
+                        content: [
+                            { type: "text", text: AGENT_ACTIONS_OFF_TEXT },
+                        ],
+                        isError: true,
+                    },
+                };
+            }
+            throw err;
+        }
+    }
     // clientInfo is a getter, not a value: at registration time the SDK has not
     // yet resolved who is calling, and on the modern leg it backfills the
     // identity per request before dispatch.
@@ -1737,5 +1949,6 @@ export function createToolContext(
         callerActor,
         analytics,
         uiMeta,
+        runDestructive,
     };
 }

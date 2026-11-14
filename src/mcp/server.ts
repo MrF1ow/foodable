@@ -78,6 +78,8 @@ Imported recipes start unverified until they pass the deterministic check. Unver
 
 When get_week_plan is available, the household's week plan can be read and changed: get_week_plan shows the next seven days and what the planned recipes still need, plan_recipe and unplan_recipe add and remove entries, and add_plan_missing_to_groceries puts the missing foods on the list (use it rather than add_grocery_line per line).
 
+Destructive tools (the ones that delete, remove, discard, clear, unplan or merge) change or remove household data without asking first. Call them only when the person asked for that change, never on your own initiative. After one, tell the person what was removed or changed, and that the household can undo it for 24 hours in Settings › AI connections. If a tool says agents may not make destructive changes, tell the person the setting's name (Agents may make destructive changes, in Settings › AI connections) and do not retry another way.
+
 Member targeting — nutrition is per person. On an OAuth user token, omit user_id to act as the caller; pass target_member on writes (log_meal, update_meal, delete_meal, bulk_import_meals, log_water, delete_water, log_weight, update_weight, delete_weight, set_nutrition_goals, log_recipe_portion) to log for another household member. user_id on those writes is not a way to sudo. On a household token, pass user_id to pick whose nutrition to read or write. Call list_members when you need ids. Fridge, grocery, recipes, and the food catalog are household-scoped.
 
 When get_household_digest is available, call it (or read the household://weekly-digest resource) at the start of a weekly household check-in for expiring fridge stock, what ran out, nutrition by member, and grocery suggestions.
@@ -134,6 +136,7 @@ export function registerTools(
     baseUrl = "http://localhost",
     hasGoals = true,
     flags?: ViewerFlags,
+    client?: string,
 ) {
     const ctx = createToolContext(
         auth,
@@ -143,6 +146,7 @@ export function registerTools(
         baseUrl,
         hasGoals,
         flags,
+        client,
     );
     // Original registerTool order is not grouped by domain. Call consecutive
     // runs so tools/list stays byte-identical, including order.
@@ -261,6 +265,7 @@ async function buildMcpServer(
         baseUrl,
         goals !== null,
         flags,
+        client,
     );
     return server;
 }

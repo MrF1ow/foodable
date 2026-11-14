@@ -5,6 +5,7 @@ import {
     getMealsByDate,
     getWaterByDate,
     deleteMeal,
+    getMealById,
     updateMeal,
     getGoalsForDate,
     countMeals,
@@ -60,7 +61,12 @@ import {
     WRITE_STATUS,
 } from "../shared.js";
 import { SimilarFoodsError, type OnSimilar } from "../../domain/foods.js";
-import type { ToolContext } from "../shared.js";
+import {
+    destructiveOutcome,
+    uncapturedNote,
+    withUndo,
+    type ToolContext,
+} from "../shared.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import {
@@ -947,6 +953,7 @@ export function registerNutritionEditTools(
         analytics,
         uiMeta,
         hasGoals,
+        runDestructive,
     } = ctx;
     const mealLoggedUiMeta = hasGoals ? uiMeta("meal-logged") : {};
     server.registerTool(
@@ -969,19 +976,40 @@ export function registerNutritionEditTools(
                 "delete_meal",
                 async () => {
                     const userId = await writeUserId(user_id, target_member);
-                    const deleted = await deleteMeal(userId, id);
+                    const run = await runDestructive(
+                        "delete_meal",
+                        async (rec) => {
+                            const meal = await getMealById(userId, id);
+                            // The meal and its items, which go with it.
+                            const report = await rec.captureCascade("meals", [
+                                { id },
+                            ]);
+                            const deleted = await deleteMeal(userId, id);
+                            return {
+                                value: { deleted },
+                                summary: `Deleted meal ${meal?.description ? `"${meal.description}"` : id}${uncapturedNote(report.uncaptured)}`,
+                                changed: deleted,
+                            };
+                        },
+                    );
+                    if (run.refused) return run.result;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: deleted
-                                    ? `Meal ${id} deleted.`
-                                    : `No meal found with id ${id}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value.deleted
+                                        ? `Meal ${id} deleted.`
+                                        : `No meal found with id ${id}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             );
         },
     );

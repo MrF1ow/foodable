@@ -27,7 +27,6 @@ import {
     addGrocerySupply,
     allergenNotices,
     checkGroceryLine,
-    clearCheckedLines,
     GROCERY_LINE_SOURCES,
     listGrocery,
     type GroceryAmountPickReason,
@@ -52,6 +51,8 @@ import {
     StockInputError,
 } from "../../domain/stock.js";
 import {
+    captureDismissals,
+    dismissedOn,
     groceryLineExtras,
     householdAllergenMembers,
     NOTICE_SCHEMA,
@@ -66,6 +67,9 @@ import {
     registerWidgetResource,
     registerV2OnlyWidgetResource,
     uiMetaForKey,
+    destructiveOutcome,
+    uncapturedNote,
+    withUndo,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { isViewerFlagOn } from "../../viewer-flags.js";
@@ -223,7 +227,7 @@ function usualLine(row: UsualListRow): string {
 }
 
 export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
-    const { callerHouseholdId, analytics, uiMeta } = ctx;
+    const { callerHouseholdId, analytics, uiMeta, runDestructive } = ctx;
     server.registerTool(
         "list_grocery_lines",
         {
@@ -727,23 +731,51 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "delete_grocery_line",
                 async () => {
-                    const householdId = await callerHouseholdId();
-                    const deleted = await liveGroceryStore().deleteLine(
-                        householdId,
-                        args.id,
+                    const run = await runDestructive(
+                        "delete_grocery_line",
+                        async (rec, householdId) => {
+                            const store = liveGroceryStore();
+                            const line = (
+                                await store.listLines(householdId)
+                            ).find((row) => row.id === args.id);
+                            const report = await rec.captureCascade(
+                                "grocery_lines",
+                                [{ id: args.id }],
+                            );
+                            await captureDismissals(
+                                rec,
+                                householdId,
+                                dismissedOn("grocery_line", [args.id]),
+                            );
+                            const deleted = await store.deleteLine(
+                                householdId,
+                                args.id,
+                            );
+                            return {
+                                value: { deleted },
+                                summary: `Deleted grocery line ${line?.displayName ?? args.id}${uncapturedNote(report.uncaptured)}`,
+                                changed: deleted,
+                            };
+                        },
                     );
+                    if (run.refused) return run.result;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: deleted
-                                    ? `Deleted grocery line ${args.id}.`
-                                    : `No grocery line found with id ${args.id}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value.deleted
+                                        ? `Deleted grocery line ${args.id}.`
+                                        : `No grocery line found with id ${args.id}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 
@@ -763,21 +795,59 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "clear_checked_grocery_lines",
                 async () => {
-                    const householdId = await callerHouseholdId();
-                    const removed = await clearCheckedLines(
-                        liveGroceryStore(),
-                        householdId,
+                    const run = await runDestructive(
+                        "clear_checked_grocery_lines",
+                        async (rec, householdId) => {
+                            const store = liveGroceryStore();
+                            const checked = (
+                                await store.listLines(householdId)
+                            ).filter((line) => line.checked);
+                            const report = await rec.captureCascade(
+                                "grocery_lines",
+                                checked.map((line) => ({ id: line.id })),
+                            );
+                            await captureDismissals(
+                                rec,
+                                householdId,
+                                dismissedOn(
+                                    "grocery_line",
+                                    checked.map((line) => line.id),
+                                ),
+                            );
+                            // Exactly the lines recorded above: one checked
+                            // since is not deleted without being recorded.
+                            let removed = 0;
+                            for (const line of checked) {
+                                if (
+                                    await store.deleteLine(householdId, line.id)
+                                ) {
+                                    removed += 1;
+                                }
+                            }
+                            return {
+                                value: { removed },
+                                summary: `Cleared ${removed} checked grocery line${removed === 1 ? "" : "s"}${uncapturedNote(report.uncaptured)}`,
+                                changed: removed > 0,
+                            };
+                        },
                     );
+                    if (run.refused) return run.result;
+                    const { removed } = run.value;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: `Cleared ${removed} checked line${removed === 1 ? "" : "s"}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    `Cleared ${removed} checked line${removed === 1 ? "" : "s"}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             ),
     );
 

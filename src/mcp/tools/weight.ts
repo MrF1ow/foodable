@@ -30,7 +30,7 @@ import {
     assertPlausibleWeight,
     resolveDateWindow,
 } from "../shared.js";
-import type { ToolContext } from "../shared.js";
+import { destructiveOutcome, withUndo, type ToolContext } from "../shared.js";
 
 export function registerWeightTools(server: McpServer, ctx: ToolContext) {
     const {
@@ -40,6 +40,7 @@ export function registerWeightTools(server: McpServer, ctx: ToolContext) {
         writeUserId,
         analytics,
         uiMeta,
+        runDestructive,
     } = ctx;
     server.registerTool(
         "log_weight",
@@ -494,19 +495,40 @@ export function registerWeightTools(server: McpServer, ctx: ToolContext) {
                 "delete_weight",
                 async () => {
                     const userId = await writeUserId(user_id, target_member);
-                    const deleted = await deleteWeight(userId, id);
+                    const run = await runDestructive(
+                        "delete_weight",
+                        async (rec) => {
+                            await rec.captureByIds(
+                                "weight_log",
+                                [id],
+                                "deleted",
+                            );
+                            const deleted = await deleteWeight(userId, id);
+                            return {
+                                value: deleted,
+                                summary: `Deleted weight entry ${id}`,
+                                changed: deleted,
+                            };
+                        },
+                    );
+                    if (run.refused) return run.result;
                     return {
                         content: [
                             {
-                                type: "text",
-                                text: deleted
-                                    ? `Weight entry ${id} deleted.`
-                                    : `No weight entry found with id ${id}.`,
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value
+                                        ? `Weight entry ${id} deleted.`
+                                        : `No weight entry found with id ${id}.`,
+                                    run.undo,
+                                ),
                             },
                         ],
                     };
                 },
                 analytics,
+                undefined,
+                { outcome: destructiveOutcome },
             );
         },
     );
