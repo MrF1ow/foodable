@@ -9,27 +9,26 @@
 
 .fd-trends-header {
     display: flex;
-    flex-direction: row;
-    align-items: flex-start;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: stretch;
     gap: var(--fd-s-6);
     padding-top: var(--space-gap);
-    padding-bottom: var(--fd-s-14);
-    /* Leave the floating account chip (shell.css) clear of the range toggle. */
+    padding-bottom: var(--fd-s-6);
+    /* Leave the floating account chip (shell.css) clear of the title. */
     padding-right: 48px;
 }
 
 .fd-trends-header__top {
-    flex: 1;
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: var(--fd-s-4);
 }
 
-.fd-trends-range {
-    flex-shrink: 0;
-    margin-top: var(--space-gap);
+/* The range tabs are the shared underline tabs (shell.css); only the gap under
+   the subtitle differs from the Kitchen row. */
+.fd-trends-header .fd-trends-range {
+    margin: 0;
 }
 
 .fd-trends-title {
@@ -61,56 +60,15 @@
     text-align: center;
 }
 
-.fd-trends-page .fd-seg {
-    display: inline-flex;
-    gap: 2px;
-    padding: 3px;
-    border-radius: var(--radius-pill);
-    background: var(--surface-panel);
-    /* The design's overlay/shadow token: 0 4px 14px. */
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-trends-page .fd-seg-btn {
-    /* /app.css floors every .native button at min-height: 44px: the compact
-       pill (24px segments in a 30px pill) opts out. */
-    min-width: 0;
-    min-height: 0;
-    height: 24px;
-    margin: 0;
-    border: 0;
-    background: transparent;
-    padding: 0 10px;
-    border-radius: var(--radius-pill);
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-    cursor: pointer;
-}
-
-/* The year is the fourth segment, desktop only: the phone pill reads 7 · 30 · 90.
-   While the year is the active range (?range=365, or a desktop pick then a
-   narrower window) it shows, so the pill never has no highlighted segment. */
-.fd-trends-page .fd-seg-btn--desktop-only {
+/* The year is the fourth tab, desktop only: the phone row reads 7 · 30 · 90
+   days. While the year is the active range (?range=365, or a desktop pick then
+   a narrower window) it shows, so the row never has no highlighted tab. */
+.fd-utab--desktop-only {
     display: none;
 }
 
-.fd-trends-page .fd-seg-btn--desktop-only.fd-seg-btn--on,
-.fd-trends-page .fd-seg-btn--desktop-only[aria-pressed="true"] {
-    display: inline-block;
-}
-
-.fd-trends-page .fd-seg-btn--on,
-.fd-trends-page .fd-seg-btn[aria-pressed="true"] {
-    background: var(--text-primary);
-    color: var(--surface-bg);
-}
-
-@media (prefers-reduced-motion: no-preference) {
-    .fd-trends-page .fd-seg-btn {
-        transition:
-            background 0.15s ease,
-            color 0.15s ease;
-    }
+.fd-utab--desktop-only[aria-pressed="true"] {
+    display: flex;
 }
 
 .fd-trends-section {
@@ -657,10 +615,6 @@
 /* Desktop: last, so it wins over the phone rules above. */
 @media (min-width: 1024px) {
     .fd-trends-header {
-        flex-direction: row;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: var(--fd-s-12);
         padding: 0;
     }
 
@@ -670,23 +624,8 @@
         text-overflow: unset;
     }
 
-    .fd-trends-range {
-        margin-top: 0;
-    }
-
-    .fd-trends-page .fd-seg {
-        border: 1px solid var(--line);
-        box-shadow: none;
-    }
-
-    .fd-trends-page .fd-seg-btn {
-        height: 27px;
-        padding: 0 12px;
-        font: 400 13px/17px var(--font-body);
-    }
-
-    .fd-trends-page .fd-seg-btn--desktop-only {
-        display: inline-block;
+    .fd-utab--desktop-only {
+        display: flex;
     }
 
     .fd-trends-body {

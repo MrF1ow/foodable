@@ -115,29 +115,26 @@ describe("/app-v2.css", () => {
         }
     });
 
-    test("the Trends range picker is a compact pill with the year on desktop only", () => {
+    test("the Trends range tabs share the Kitchen tab CSS and the year shows on desktop only", () => {
         const css = readFileSync("./public/app/v2/trends.css", "utf8").replace(
             /\/\*[\s\S]*?\*\//g,
             "",
         );
-        const at = css.indexOf(".fd-trends-page .fd-seg-btn {");
-        expect(at).toBeGreaterThanOrEqual(0);
-        const block = css.slice(at, css.indexOf("}", at));
-        expect(block).toMatch(/min-height:\s*0\b/);
-        expect(block).toMatch(/height:\s*24px/);
-        expect(css).toMatch(/\.fd-seg-btn--desktop-only\s*{\s*display:\s*none/);
-        // The year shows on the phone while it is the active range, so the
-        // pill never has no highlighted segment (?range=365).
-        expect(css).toMatch(
-            /\.fd-seg-btn--desktop-only\.fd-seg-btn--on[^{]*{\s*display:\s*inline-block/,
+        const shell = readFileSync("./public/app/v2/shell.css", "utf8");
+        // One rule set for both: Kitchen and Trends tabs share selectors, the
+        // track ends at the last tab and the active tab is the green underline.
+        expect(shell).toMatch(
+            /\.fd-kitchen-tabs,\s*\.fd-utabs\s*{[^}]*width:\s*fit-content/,
         );
-        expect(css).toMatch(
-            /\.fd-seg-btn--desktop-only\[aria-pressed="true"\]\s*{\s*display:\s*inline-block/,
+        expect(shell).toMatch(
+            /\.fd-kitchen-tab\[aria-current="page"\]::after,\s*\.fd-utab\[aria-pressed="true"\]::after\s*{\s*background:\s*var\(--accent-fill\)/,
         );
-        // Regular labels (the design's weight) and the overlay/shadow token.
-        expect(block).toMatch(/font:\s*400 12px/);
+        expect(css).not.toContain(".fd-seg");
+        expect(css).toMatch(/\.fd-utab--desktop-only\s*{\s*display:\s*none/);
+        // The year shows on the phone while it is the active range
+        // (?range=365), so the row never has no highlighted tab.
         expect(css).toMatch(
-            /\.fd-trends-page \.fd-seg {[^}]*box-shadow:\s*0 4px 14px var\(--overlay-shadow\)/,
+            /\.fd-utab--desktop-only\[aria-pressed="true"\]\s*{\s*display:\s*flex/,
         );
         // The single desktop block stays last; no max-width queries.
         expect(css.match(/@media \(min-width: 1024px\)/g)?.length).toBe(1);

@@ -15,7 +15,6 @@ function subtitleForRange(range) {
 function setActiveRange(root, range) {
     for (const btn of root.querySelectorAll("[data-fd-trends-range]")) {
         const on = btn.getAttribute("data-fd-trends-range") === String(range);
-        btn.classList.toggle("fd-seg-btn--on", on);
         btn.setAttribute("aria-pressed", on ? "true" : "false");
     }
     for (const panel of root.querySelectorAll("[data-fd-trends-panel]")) {
