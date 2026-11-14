@@ -237,35 +237,35 @@ export function registerNutritionReadTools(
         },
     );
 
-    registerWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "nutrition-summary",
         resourceName: "nutrition-summary-widget",
         title: "Nutrition Summary Dashboard",
         description:
             "Interactive dashboard UI for get_nutrition_summary: macro tiles vs goals and a per-day breakdown, with automatic light/dark theming.",
     });
-    registerWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "goal-progress",
         resourceName: "goal-progress-widget",
         title: "Goal Progress",
         description:
             "Interactive UI for get_goal_progress: intake-vs-goal rings for a single day plus body-weight progress, with automatic light/dark theming.",
     });
-    registerWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "meal-logged",
         resourceName: "meal-logged-widget",
         title: "Meal Logged",
         description:
             "Interactive UI shown after log_meal: the day's running intake-vs-goal rings, with automatic light/dark theming. Shows nothing when no nutrition goals are set.",
     });
-    registerWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "trends",
         resourceName: "trends-widget",
         title: "Trends",
         description:
             "Interactive UI for get_trends: a 7/14/30-day toggle over a daily calories chart and trailing-average-vs-goal rings, with automatic light/dark theming.",
     });
-    registerWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "weight-trends",
         resourceName: "weight-trends-widget",
         title: "Weight Trends",

@@ -678,8 +678,8 @@ describe("non-Railway readers", () => {
     test("env, fallback and memory readers never pin and never query", async () => {
         const readers = [
             createFallbackFlags(),
-            createEnvFlags(new Map([["mcp-widgets-v2", "all" as const]])),
-            createMemoryFlags({ "mcp-widgets-v2": true }),
+            createEnvFlags(new Map([["mcp-share-links", "all" as const]])),
+            createMemoryFlags({ "mcp-share-links": true }),
         ];
         for (const reader of readers) {
             const store = createMemoryFlagPinStore();
@@ -743,7 +743,7 @@ describe("loadViewerFlags with the Railway reader", () => {
         } as RailwayFlagsSdk;
     }
 
-    test("pins mcp-widgets-v2 and keeps it when the SDK goes stale", async () => {
+    test("pins mcp-share-links and keeps it when the SDK goes stale", async () => {
         const store = createMemoryFlagPinStore();
         const runtime = createFlagPinRuntime({ store });
         const ctx = ctxFor();
@@ -752,11 +752,11 @@ describe("loadViewerFlags with the Railway reader", () => {
             sdkWith({ value: true, reason: "TARGETING_MATCH" }),
         );
         live.markInitDone();
-        expect((await loadViewerFlags(ctx, live, runtime)).mcpWidgetsV2).toBe(
+        expect((await loadViewerFlags(ctx, live, runtime)).mcpShareLinks).toBe(
             true,
         );
         expect(
-            store.pins.get(`user:${USER}`)?.get("mcp-widgets-v2")?.value,
+            store.pins.get(`user:${USER}`)?.get("mcp-share-links")?.value,
         ).toBe(true);
 
         const stale = createRailwayFlags(
@@ -764,7 +764,7 @@ describe("loadViewerFlags with the Railway reader", () => {
         );
         stale.markInitDone();
         const flags = await loadViewerFlags(ctx, stale, runtime);
-        expect(flags.mcpWidgetsV2).toBe(true);
+        expect(flags.mcpShareLinks).toBe(true);
         // Kill switches stayed on.
         expect(flags.offLookups).toBe(true);
     });
@@ -798,7 +798,7 @@ describe("loadViewerFlags with the Railway reader", () => {
         );
         live.markInitDone();
         const flags = await loadViewerFlags(ctxFor(), live, runtime);
-        expect(flags.mcpWidgetsV2).toBe(true);
+        expect(flags.mcpShareLinks).toBe(true);
         expect("uiV2" in flags).toBe(false);
     });
 
@@ -809,7 +809,7 @@ describe("loadViewerFlags with the Railway reader", () => {
             sdkWith({ value: true, reason: "TARGETING_MATCH" }),
         );
         const flags = await loadViewerFlags(ctxFor(), reader, runtime);
-        expect(flags.mcpWidgetsV2).toBe(false);
+        expect(flags.mcpShareLinks).toBe(false);
         expect(flags.offLookups).toBe(true);
         expect(store.calls.upsertPin).toBe(0);
         expect(store.calls.saveSnapshot).toBe(0);

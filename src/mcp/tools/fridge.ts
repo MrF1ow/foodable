@@ -44,7 +44,6 @@ import {
 import { insertMeal, snapshotToMealItemWrite } from "../../db/nutrition.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import {
-    registerV2OnlyWidgetResource,
     registerWidgetResource,
     uiMetaForKey,
     NOTICE_SCHEMA,
@@ -264,7 +263,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    registerWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "fridge",
         resourceName: "fridge-widget",
         title: "Fridge",
@@ -715,13 +714,12 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    registerV2OnlyWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "use-soon",
         resourceName: "use-soon",
         title: "Use soon",
         description:
             "Items about to expire and the recipe that uses them, for list_expiring.",
-        flag: "widget-use-soon",
     });
 
     server.registerTool(
@@ -740,10 +738,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                 days: z.coerce.number().int().min(0).max(365).optional(),
             }),
             outputSchema: LIST_EXPIRING_OUTPUT_SCHEMA,
-            ...uiMetaForKey(ctx, "use-soon", {
-                v2: true,
-                flag: "widget-use-soon",
-            }),
+            ...uiMetaForKey(ctx, "use-soon"),
         },
         async (args) =>
             withAnalytics(

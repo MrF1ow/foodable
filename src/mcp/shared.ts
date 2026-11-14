@@ -95,11 +95,7 @@ import {
 import type { FlagName } from "../flags.js";
 import { type McpServer } from "@modelcontextprotocol/server";
 import { getWidgetHtml, widgetTemplateName } from "../widgets.js";
-import {
-    defaultViewerFlags,
-    isViewerFlagOn,
-    type ViewerFlags,
-} from "../viewer-flags.js";
+import { defaultViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 
 // MCP Apps UI (https://blog.modelcontextprotocol.io/posts/2026-01-26-mcp-apps/):
 // the get_nutrition_summary tool links to an HTML dashboard served as a ui://
@@ -111,16 +107,17 @@ import {
 // self-contained document for each ui:// resource below.
 export const APP_UI_MIME_TYPE = "text/html;profile=mcp-app";
 
-export function widgetUri(templateName: string, v2 = false): string {
-    return v2
-        ? `ui://widget/v2/${templateName}`
-        : `ui://widget/${templateName}`;
+// Every widget lives under ui://widget/v2/: the v1 widgets that used the bare
+// ui://widget/ prefix are retired, and keeping the v2 path means a host that
+// cached a v1 template by URI can never serve it again.
+export function widgetUri(templateName: string): string {
+    return `ui://widget/v2/${templateName}`;
 }
 
-export function widgetUriForKey(widgetKey: string, v2 = false): string {
-    const name = widgetTemplateName(widgetKey, { v2 });
+export function widgetUriForKey(widgetKey: string): string {
+    const name = widgetTemplateName(widgetKey);
     if (!name) throw new Error(`unknown widget key: ${widgetKey}`);
-    return widgetUri(name, v2);
+    return widgetUri(name);
 }
 
 export const SUMMARY_WIDGET_URI = widgetUri("nutrition-summary.html");
@@ -131,7 +128,7 @@ export const WEIGHT_TRENDS_WIDGET_URI = widgetUri("weight-trends.html");
 export const IMPORT_MEALS_WIDGET_URI = widgetUri("import-meals.html");
 export const GROCERY_LIST_WIDGET_URI = widgetUri("grocery-list.html");
 export const FRIDGE_WIDGET_URI = widgetUri("fridge.html");
-export const ATTENTION_WIDGET_URI = widgetUri("attention.html", true);
+export const ATTENTION_WIDGET_URI = widgetUri("attention.html");
 
 export type WidgetResourceDef = {
     key: string;
@@ -140,46 +137,13 @@ export type WidgetResourceDef = {
     description: string;
 };
 
-export type V2OnlyWidgetResourceDef = WidgetResourceDef & { flag: FlagName };
-
-/** Register a v2-only ui:// resource when `flag` is on for this caller. */
-export function registerV2OnlyWidgetResource(
-    server: McpServer,
-    ctx: ToolContext,
-    def: V2OnlyWidgetResourceDef,
-): void {
-    if (!isViewerFlagOn(ctx.flags, def.flag)) return;
-    const { key, resourceName, title, description } = def;
-    const listing = { title, description, mimeType: APP_UI_MIME_TYPE };
-    server.registerResource(
-        resourceName,
-        widgetUriForKey(key, true),
-        listing,
-        async (uri) => ({
-            contents: [
-                {
-                    uri: uri.href,
-                    mimeType: APP_UI_MIME_TYPE,
-                    text: await getWidgetHtml(key, { v2: true }),
-                    _meta: { ui: { prefersBorder: true } },
-                },
-            ],
-        }),
-    );
-}
-
-/** Link a tool to a widget, optionally gated and forced to a v2 URI. */
+/** Link a tool to its widget when this user has widgets enabled. */
 export function uiMetaForKey(
-    ctx: Pick<ToolContext, "widgetsEnabled" | "flags">,
+    ctx: Pick<ToolContext, "widgetsEnabled">,
     widgetKey: string,
-    opts?: { v2?: boolean; flag?: FlagName },
 ): Record<string, unknown> {
     if (!ctx.widgetsEnabled) return {};
-    if (opts?.flag && !isViewerFlagOn(ctx.flags, opts.flag)) return {};
-    const uri = widgetUriForKey(
-        widgetKey,
-        opts?.v2 ?? isViewerFlagOn(ctx.flags, "mcp-widgets-v2"),
-    );
+    const uri = widgetUriForKey(widgetKey);
     return {
         _meta: {
             ui: { resourceUri: uri },
@@ -188,18 +152,16 @@ export function uiMetaForKey(
     };
 }
 
-/** Register the v1 ui:// resource and, when mcp-widgets-v2 is on, its v2 twin. */
+/** Register a widget's ui:// resource. */
 export function registerWidgetResource(
     server: McpServer,
-    ctx: ToolContext,
     def: WidgetResourceDef,
 ): void {
     const { key, resourceName, title, description } = def;
-    const listing = { title, description, mimeType: APP_UI_MIME_TYPE };
     server.registerResource(
         resourceName,
-        widgetUriForKey(key, false),
-        listing,
+        widgetUriForKey(key),
+        { title, description, mimeType: APP_UI_MIME_TYPE },
         async (uri) => ({
             contents: [
                 {
@@ -211,23 +173,6 @@ export function registerWidgetResource(
             ],
         }),
     );
-    if (isViewerFlagOn(ctx.flags, "mcp-widgets-v2")) {
-        server.registerResource(
-            `${resourceName}-v2`,
-            widgetUriForKey(key, true),
-            listing,
-            async (uri) => ({
-                contents: [
-                    {
-                        uri: uri.href,
-                        mimeType: APP_UI_MIME_TYPE,
-                        text: await getWidgetHtml(key, { v2: true }),
-                        _meta: { ui: { prefersBorder: true } },
-                    },
-                ],
-            }),
-        );
-    }
 }
 
 const NOTICE_CODE_ENUM = NOTICE_CODES as unknown as [
@@ -1918,10 +1863,7 @@ export function createToolContext(
     // silently if the alias points at an unregistered URI.
     const uiMeta = (widgetKey: string) => {
         if (!widgetsEnabled) return {};
-        const uri = widgetUriForKey(
-            widgetKey,
-            isViewerFlagOn(flags, "mcp-widgets-v2"),
-        );
+        const uri = widgetUriForKey(widgetKey);
         return {
             _meta: {
                 ui: { resourceUri: uri },

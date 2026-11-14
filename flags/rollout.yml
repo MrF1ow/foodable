@@ -19,47 +19,8 @@ flags:
     restock-runner:
         default: true
         rules: []
-    mcp-rate-product:
-        default: true
-        rules: []
-    mcp-list-usuals:
-        default: true
-        rules: []
-    mcp-plan-tools:
-        default: true
-        rules: []
-    mcp-household-digest:
-        default: true
-        rules: []
-    mcp-household-admin:
-        default: false
-        rules: []
     mcp-share-links:
         default: false
-        rules: []
-    ui-profile-pictures:
-        default: true
-        rules: []
-    mcp-widgets-v2:
-        default: true
-        rules: []
-    widget-attention:
-        default: true
-        rules: []
-    widget-use-soon:
-        default: true
-        rules: []
-    widget-recipe-card:
-        default: true
-        rules: []
-    widget-product-score:
-        default: true
-        rules: []
-    widget-restock-nudge:
-        default: true
-        rules: []
-    widget-week-plan:
-        default: true
         rules: []
     flags-epoch:
         default: 1

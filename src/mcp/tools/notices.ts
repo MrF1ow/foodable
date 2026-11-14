@@ -19,7 +19,7 @@ import { NoticeDismissError } from "../../domain/notice-dismissals.js";
 import {
     NOTICE_SCHEMA,
     noticeToWire,
-    registerV2OnlyWidgetResource,
+    registerWidgetResource,
     uiMetaForKey,
     type ToolContext,
 } from "../shared.js";
@@ -56,13 +56,12 @@ function noticeDeps(): NoticesForDeps {
 
 export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
     const { callerHouseholdId, actorUserId, analytics } = ctx;
-    registerV2OnlyWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "attention",
         resourceName: "attention",
         title: "Needs attention",
         description:
             "Household notices grouped for the Needs attention digest card.",
-        flag: "widget-attention",
     });
 
     server.registerTool(
@@ -83,10 +82,7 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                 subject_kind: SUBJECT_KIND_SCHEMA.optional(),
             }),
             outputSchema: LIST_NOTICES_OUTPUT_SCHEMA,
-            ...uiMetaForKey(ctx, "attention", {
-                v2: true,
-                flag: "widget-attention",
-            }),
+            ...uiMetaForKey(ctx, "attention"),
         },
         async (input) => {
             return withAnalytics(

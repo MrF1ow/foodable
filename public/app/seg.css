@@ -1,4 +1,4 @@
-/* App-owned copy of the widget seg partial; free to drift from public/widgets/src/shared/seg.css. */
+/* App-owned seg stylesheet, first copied from the retired v1 widget seg partial. */
 .seg {
     display: inline-flex;
     gap: 2px;

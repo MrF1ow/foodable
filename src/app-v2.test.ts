@@ -301,11 +301,13 @@ describe("/app-v2-scanner", () => {
     });
 });
 
-describe("chat widgets never get the v2 layer", () => {
-    test("no widget carries v2 tokens or fd- classes", async () => {
+describe("chat widgets never get the app shell", () => {
+    // Widgets share the Theme token names with the shell by design (their own
+    // generated shared/v2/tokens.css), but never the shell's fd- components or
+    // its stylesheet.
+    test("no widget carries fd- classes or the app-v2 stylesheet", async () => {
         for (const key of Object.keys(WIDGET_TEMPLATES)) {
             const html = await getWidgetHtml(key);
-            expect(html, key).not.toContain("--surface-bg");
             expect(html, key).not.toMatch(/\bfd-[a-z]/);
             expect(html, key).not.toContain("app-v2");
         }

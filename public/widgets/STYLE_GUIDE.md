@@ -12,6 +12,17 @@ a stack of separate cards — spent most of a phone screen on chrome before the 
 number, and is gone. `.panel` (§3a) is the outermost thing every widget builds, and
 the macro strip (§4a) is the block most of them drop inside it.
 
+**The v1 widgets are retired.** Every widget is a v2 template in
+`templates/v2/`, built on the `shared/v2/` partials (Theme tokens, `base.css`,
+`components.css`, `ui.js`, `macros.js`) plus the scripts both generations
+shared: `bridge.js`, `util.js`, `macros.js`, `date.js` and `trend-chart.js`. The
+v1 CSS partials (`base.css`, `ring.css`, `macros.css`, `trend.css`, `seg.css`,
+`form.css`, `table.css`) went with them. Sections 2 to 9 below still describe
+those partials: they are the record of the rules the v2 look kept (tabular
+numbers, role-driven layout, the strip's wording and breakpoints) and of what
+the app's own copies under `public/app/` grew from, until they are rewritten
+for `shared/v2/`.
+
 ## Build system (how the shared code is reused)
 
 Each widget is still a **single self-contained HTML file** — inline `<style>` +
@@ -20,10 +31,11 @@ inline `<script>`, zero network requests — because the iframe CSP is deny-by-d
 duplicated: it is assembled from partials at server startup (`src/widgets.ts`,
 warmed in `src/index.ts`). Nothing generated is committed.
 
-- **Sources** live in `public/widgets/src/`: shared partials in `shared/`
-  (`tokens.css`, `base.css`, `ring.css`, `macros.css`, `trend.css`, `seg.css`,
-  `form.css`, `table.css`, `macros.js`, `bridge.js`, `util.js`) and one template per widget
-  in `templates/`.
+- **Sources** live in `public/widgets/src/`: the v2 partials in `shared/v2/`
+  (`tokens.css`, `base.css`, `components.css`, `ui.js`, `macros.js`), the shared
+  scripts in `shared/` (`bridge.js`, `util.js`, `macros.js`, `date.js`,
+  `trend-chart.js`, and `tokens.css`, which only the app's `/app.css` still
+  includes), and one template per widget in `templates/v2/`.
 - **Include marker** — a partial is inlined with a comment that is valid CSS _and_
   JS, so a template still parses on its own:
   `/*@include shared/tokens.css@*/`, `/*@include shared/bridge.js@*/`.
@@ -41,14 +53,15 @@ warmed in `src/index.ts`). Nothing generated is committed.
   way the assembler splices it into a page. If you change a caption string, expect
   to change it there too.
 
-When the design changes, edit the partial in `src/shared/` once — every widget
+When the design changes, edit the partial in `shared/v2/` once — every widget
 picks it up on next assembly. The blocks below document those partials; keep this
 spec in sync when you change them.
 
 ## The household app keeps its own copies
 
 `public/app/app.css` `@include`s the generated `shared/tokens.css` and its own
-copies of the base, form, table and seg partials (`public/app/*.css`), and
+base, form, table and seg stylesheets (`public/app/*.css`, first copied from the
+retired v1 widget partials), and
 `getAppCss()` (`src/widgets.ts`) assembles it into `/app.css`. Changing a widget
 partial other than `tokens.css` leaves the web app alone; the two copies are free
 to drift. A token change reaches both: check it with `bun run harness` and
@@ -73,7 +86,8 @@ every primary button. `.seg-btn[aria-selected="true"]` is the same state as
 
 ## Design language
 
-**v1 widgets** stay Apple-like and neutral: grays/whites surfaces, one brand
+**v1 widgets** (retired; kept here because sections 2 to 9 describe them) were
+Apple-like and neutral: grays/whites surfaces, one brand
 **green accent** (`--accent`, the logo green `BRAND_GREEN` in `src/brand.ts`, the
 same in both themes), **bold** headline weights (800), and
 `font-variant-numeric: tabular-nums` on every number so figures don't jitter.

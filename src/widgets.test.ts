@@ -6,9 +6,6 @@ import {
     minifyWidgetHtml,
     WIDGET_BUDGETS,
     WIDGET_TEMPLATES,
-    WIDGET_TEMPLATES_V2,
-    harnessNeedsV2,
-    widgetAssemblies,
     widgetTemplateName,
 } from "./widgets.js";
 
@@ -109,8 +106,8 @@ test.each(KEYS)("%s assembles into a self-contained widget", async (key) => {
     expect(html).toContain("function initWidget(config)");
     expect((html.match(/initWidget\(\{/g) ?? []).length).toBe(1);
 
-    // Shared design tokens got inlined.
-    expect(html).toContain("--accent: #28cf8b");
+    // The v2 Theme tokens got inlined.
+    expect(html).toContain("--surface-panel");
 
     // Every inlined <script> body parses as JS after minification.
     for (const script of widgetScriptBodies(html)) {
@@ -125,7 +122,7 @@ test.each(KEYS)("%s assembles into a self-contained widget", async (key) => {
 // must appear verbatim in the unminified assembly.
 test.each(KEYS)("%s inlines each @include'd partial in full", async (key) => {
     const template = await Bun.file(
-        `${SRC}/templates/${WIDGET_TEMPLATES[key]}`,
+        `${SRC}/templates/v2/${WIDGET_TEMPLATES[key]}`,
     ).text();
     const includes = [...template.matchAll(INCLUDE_RE)].map((m) => m[1]!);
     expect(includes.length).toBeGreaterThan(0);
@@ -140,52 +137,19 @@ test.each(KEYS)("%s inlines each @include'd partial in full", async (key) => {
 test("minified widgets fit size budgets", async () => {
     const rows: string[] = [];
     rows.push("widget".padEnd(22) + "raw".padStart(10) + "gzip".padStart(10));
-    for (const { key, v2 } of widgetAssemblies()) {
+    for (const key of KEYS) {
         const budget = WIDGET_BUDGETS[key];
         expect(budget).toBeDefined();
-        const html = await getWidgetHtml(key, { v2 });
+        const html = await getWidgetHtml(key);
         const raw = new TextEncoder().encode(html).byteLength;
         const gzip = gzipByteLength(html);
-        const label = v2 ? `${key}:v2` : key;
         rows.push(
-            label.padEnd(22) + `${raw}`.padStart(10) + `${gzip}`.padStart(10),
+            key.padEnd(22) + `${raw}`.padStart(10) + `${gzip}`.padStart(10),
         );
         expect(raw).toBeLessThanOrEqual(budget!.raw);
         expect(gzip).toBeLessThanOrEqual(budget!.gzip);
     }
     console.log(rows.join("\n"));
-});
-
-test("v2 assembly falls back to the v1 template when no v2 file exists", async () => {
-    // A key whose v1 file has no twin under templates/v2/.
-    const key = "__v1_only_fixture__";
-    (WIDGET_TEMPLATES as Record<string, string>)[key] = "../shared/bridge.js";
-    try {
-        const v1 = await getWidgetHtml(key);
-        const v2 = await getWidgetHtml(key, { v2: true });
-        expect(v2).toBe(v1);
-    } finally {
-        delete (WIDGET_TEMPLATES as Record<string, string>)[key];
-    }
-});
-
-test("v2-only keys resolve only through the v2 variant", () => {
-    const v2Only = "__v2_only_fixture__";
-    (WIDGET_TEMPLATES_V2 as Record<string, string>)[v2Only] =
-        "fixture-only.html";
-    try {
-        expect(widgetTemplateName(v2Only)).toBe("");
-        expect(widgetTemplateName(v2Only, { v2: true })).toBe(
-            "fixture-only.html",
-        );
-        // A v2-only key is assembled only as v2: warming and the budget
-        // test must never ask for its v1 twin.
-        expect(widgetAssemblies().filter((a) => a.key === v2Only)).toEqual([
-            { key: v2Only, v2: true },
-        ]);
-    } finally {
-        delete (WIDGET_TEMPLATES_V2 as Record<string, string>)[v2Only];
-    }
 });
 
 test("unknown widget key throws", async () => {
@@ -213,8 +177,8 @@ test.each(V2_TEMPLATES)(
     "v2 %s assembles self-contained on v2 partials only",
     async (file) => {
         const key = file.replace(/\.html$/, "");
-        const source = await assembleSource(key, { v2: true });
-        const html = await getWidgetHtml(key, { v2: true });
+        const source = await assembleSource(key);
+        const html = await getWidgetHtml(key);
 
         expect(source.match(/\/\*@include/g)).toBeNull();
         expect(source.match(/\/\*@inlinets/g)).toBeNull();
@@ -1154,7 +1118,7 @@ function mealPayload(totals: object, goals: object | null, extra = {}) {
 }
 
 async function v2Widget(key: string) {
-    const html = await getWidgetHtml(key, { v2: true });
+    const html = await getWidgetHtml(key);
     // The v2 template, not the v1 fallback: only v2 tokens name this.
     expect(html).toContain("--surface-panel");
     return html;
@@ -4383,16 +4347,9 @@ test("recipe-card v2: names and the source reach the markup escaped", async () =
     expect(body).not.toContain("<img");
 });
 
-// ---- widget harness (v2-only keys) ------------------------------------------
+// ---- widget harness ---------------------------------------------------------
 
-test("harnessNeedsV2 marks attention and not v1 twins", () => {
-    expect(harnessNeedsV2("attention")).toBe(true);
-    expect(harnessNeedsV2("use-soon")).toBe(true);
-    expect(harnessNeedsV2("recipe-card")).toBe(true);
-    expect(harnessNeedsV2("trends")).toBe(false);
-});
-
-test("harness index and widget route serve v2-only attention", async () => {
+test("harness index and widget route serve every widget", async () => {
     const port = 18840;
     const proc = Bun.spawn(["bun", "run", "scripts/widget-harness.ts"], {
         cwd: import.meta.dir + "/..",
@@ -4413,10 +4370,8 @@ test("harness index and widget route serve v2-only attention", async () => {
         }
         expect(ready).toBe(true);
         const index = await (await fetch(`http://127.0.0.1:${port}/`)).text();
-        expect(index).toContain('href="/host?widget=attention&v2=1"');
-        const widget = await fetch(
-            `http://127.0.0.1:${port}/widget/attention?v2=1`,
-        );
+        expect(index).toContain('href="/host?widget=attention"');
+        const widget = await fetch(`http://127.0.0.1:${port}/widget/attention`);
         expect(widget.status).toBe(200);
     } finally {
         proc.kill();

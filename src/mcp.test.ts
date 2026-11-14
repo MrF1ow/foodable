@@ -4606,7 +4606,7 @@ describe("household config tools", () => {
         test("gatedTool stays out of tools/list when off and keeps neighbor order", async () => {
             const offFlags = evaluateViewerFlags(
                 viewerFlagCtx(),
-                createMemoryFlags({ "mcp-widgets-v2": false }),
+                createMemoryFlags({ "mcp-share-links": false }),
             );
             const { names, gated } = await toolNamesFor(
                 offFlags,
@@ -4636,7 +4636,7 @@ describe("household config tools", () => {
                     gatedTool(
                         server,
                         ctx,
-                        "mcp-widgets-v2",
+                        "mcp-share-links",
                         "test_gated_tool",
                         {
                             title: "Gated",
@@ -4669,7 +4669,7 @@ describe("household config tools", () => {
             expect(gated).toEqual([
                 {
                     name: "test_gated_tool",
-                    flag: "mcp-widgets-v2",
+                    flag: "mcp-share-links",
                     registered: false,
                 },
             ]);
@@ -4678,7 +4678,7 @@ describe("household config tools", () => {
         test("gated tool off answers unknown-tool; on is listed and callable", async () => {
             const offFlags = evaluateViewerFlags(
                 viewerFlagCtx(),
-                createMemoryFlags({ "mcp-widgets-v2": false }),
+                createMemoryFlags({ "mcp-share-links": false }),
             );
             const server = new McpServer(
                 { name: "foodable-test", version: "0.0.0" },
@@ -4696,7 +4696,7 @@ describe("household config tools", () => {
             gatedTool(
                 server,
                 ctx,
-                "mcp-widgets-v2",
+                "mcp-share-links",
                 "test_gated_tool",
                 {
                     title: "Gated",
@@ -4731,7 +4731,7 @@ describe("household config tools", () => {
 
             const onFlags = evaluateViewerFlags(
                 viewerFlagCtx(),
-                createMemoryFlags({ "mcp-widgets-v2": true }),
+                createMemoryFlags({ "mcp-share-links": true }),
             );
             const { names } = await toolNamesFor(onFlags, (server, auth) => {
                 const ctxOn = createToolContext(
@@ -4746,7 +4746,7 @@ describe("household config tools", () => {
                 gatedTool(
                     server,
                     ctxOn,
-                    "mcp-widgets-v2",
+                    "mcp-share-links",
                     "test_gated_tool",
                     {
                         title: "Gated",
@@ -4776,7 +4776,7 @@ describe("household config tools", () => {
             gatedTool(
                 onServer,
                 ctxOn,
-                "mcp-widgets-v2",
+                "mcp-share-links",
                 "test_gated_tool",
                 {
                     title: "Gated",
@@ -4838,8 +4838,7 @@ describe("household config tools", () => {
         }
     });
 
-    async function withRateProductFlag(
-        on: boolean,
+    async function withRateProductClient(
         run: (call: CallTool) => Promise<void>,
     ) {
         const member = db.members[0];
@@ -4854,10 +4853,7 @@ describe("household config tools", () => {
                   }
                 : undefined,
         });
-        const flags = evaluateViewerFlags(
-            flagCtx,
-            createMemoryFlags({ "mcp-rate-product": on }),
-        );
+        const flags = evaluateViewerFlags(flagCtx, createMemoryFlags({}));
         const server = new McpServer(
             { name: "foodable-test", version: "0.0.0" },
             { capabilities: { tools: {}, resources: {} } },
@@ -4969,7 +4965,7 @@ describe("household config tools", () => {
                 hitFor(inCatalog) as never,
             );
             db.barcodeFoods[notInCatalog] = hitFor(notInCatalog) as never;
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 for (const barcode of [inCatalog, notInCatalog]) {
                     const r = await call("rate_product", { barcode });
                     const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
@@ -4980,51 +4976,6 @@ describe("household config tools", () => {
                     ).toEqual([["food.product_gluten", "warn"]]);
                 }
             });
-        });
-
-        test("flag off hides tool and rejects calls", async () => {
-            const server = new McpServer(
-                { name: "foodable-test", version: "0.0.0" },
-                { capabilities: { tools: {}, resources: {} } },
-            );
-            const flagCtx = buildFlagContext({
-                auth: { kind: "user", userId: "u1" },
-            });
-            const flags = evaluateViewerFlags(
-                flagCtx,
-                createMemoryFlags({ "mcp-rate-product": false }),
-            );
-            registerTools(
-                server,
-                { kind: "user", userId: "u1" },
-                true,
-                null,
-                undefined,
-                "http://localhost",
-                true,
-                flags,
-            );
-            const [ct, st] = InMemoryTransport.createLinkedPair();
-            const client = new Client({
-                name: "test-client",
-                version: "0.0.0",
-            });
-            await Promise.all([server.connect(st), client.connect(ct)]);
-            try {
-                const list = (await client.listTools()).tools.map(
-                    (t) => t.name,
-                );
-                expect(list).not.toContain("rate_product");
-                await expect(
-                    client.callTool({
-                        name: "rate_product",
-                        arguments: { barcode: "12345678" },
-                    }),
-                ).rejects.toThrow(/not found/i);
-            } finally {
-                await client.close();
-                await server.close();
-            }
         });
 
         test("a household-scoped off-lookups kill switch stops Open Food Facts requests", async () => {
@@ -5063,7 +5014,7 @@ describe("household config tools", () => {
                             "off-lookups": (ctx) => ctx.household_id !== offFor,
                         }),
                     );
-                    await withRateProductFlag(true, async (call) => {
+                    await withRateProductClient(async (call) => {
                         const r = await call("rate_product", { barcode });
                         const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                             r.structuredContent,
@@ -5096,7 +5047,7 @@ describe("household config tools", () => {
                 allergen: "milk",
             });
             const foodId = await seedMilkProduct();
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", { food_id: foodId });
                 expect(r.isError).toBeFalsy();
                 const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
@@ -5161,7 +5112,7 @@ describe("household config tools", () => {
             });
             await db.foodsStore.insertFood(food);
             await db.foodsStore.setBarcode("hh-1", barcode, food.id);
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 for (const args of [
                     { barcode },
                     { food_id: food.id },
@@ -5213,7 +5164,7 @@ describe("household config tools", () => {
                     fetched_at: "2026-11-09T12:00:00.000Z",
                 },
             } as never;
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", { barcode });
                 const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                     r.structuredContent,
@@ -5259,7 +5210,7 @@ describe("household config tools", () => {
             };
             const before = (await db.foodsStore.listFoods("hh-1")).length;
             db.goals = goals({ daily_sugar_g: 40 });
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", { barcode });
                 const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                     r.structuredContent,
@@ -5294,7 +5245,7 @@ describe("household config tools", () => {
                 offQuality: null,
             });
             await db.foodsStore.insertFood(food);
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", { food_id: food.id });
                 const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                     r.structuredContent,
@@ -5315,7 +5266,7 @@ describe("household config tools", () => {
                 gramsPerEach: 40,
             });
             await db.foodsStore.insertFood(food);
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", { food_id: food.id });
                 const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                     r.structuredContent,
@@ -5338,7 +5289,7 @@ describe("household config tools", () => {
                 gramsPerEach: 330,
             });
             await db.foodsStore.insertFood(food);
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", { food_id: food.id });
                 const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                     r.structuredContent,
@@ -5350,7 +5301,7 @@ describe("household config tools", () => {
 
         test("missing food_id returns found false", async () => {
             const missing = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", { food_id: missing });
                 const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                     r.structuredContent,
@@ -5389,7 +5340,7 @@ describe("household config tools", () => {
                 source_name: "openfoodfacts",
                 barcode,
             };
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", { barcode });
                 const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                     r.structuredContent,
@@ -5421,7 +5372,7 @@ describe("household config tools", () => {
                 allergen: "milk",
             });
             const foodId = await seedMilkProduct();
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", {
                     food_id: foodId,
                     user_id: "u2",
@@ -5486,7 +5437,7 @@ describe("household config tools", () => {
             test("the caller's own weights score the product", async () => {
                 const foodId = await seedProcessedProduct();
                 let byDefault: number | null = null;
-                await withRateProductFlag(true, async (call) => {
+                await withRateProductClient(async (call) => {
                     const r = await call("rate_product", { food_id: foodId });
                     const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                         r.structuredContent,
@@ -5505,7 +5456,7 @@ describe("household config tools", () => {
                         },
                     },
                 );
-                await withRateProductFlag(true, async (call) => {
+                await withRateProductClient(async (call) => {
                     const r = await call("rate_product", { food_id: foodId });
                     const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                         r.structuredContent,
@@ -5526,7 +5477,7 @@ describe("household config tools", () => {
                     "hh-1",
                     { preset: "planet", weights: null },
                 );
-                await withRateProductFlag(true, async (call) => {
+                await withRateProductClient(async (call) => {
                     const r = await call("rate_product", { food_id: foodId });
                     const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                         r.structuredContent,
@@ -5554,7 +5505,7 @@ describe("household config tools", () => {
                         },
                     },
                 );
-                await withRateProductFlag(true, async (call) => {
+                await withRateProductClient(async (call) => {
                     const own = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                         (await call("rate_product", { food_id: foodId }))
                             .structuredContent,
@@ -5583,7 +5534,7 @@ describe("household config tools", () => {
                     "u2",
                     { warnTraces: false },
                 );
-                await withRateProductFlag(true, async (call) => {
+                await withRateProductClient(async (call) => {
                     const bob = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                         (
                             await call("rate_product", {
@@ -5614,7 +5565,7 @@ describe("household config tools", () => {
                 await db.foodsStore.insertFood(food);
                 const goalNotices = async () => {
                     let found = 0;
-                    await withRateProductFlag(true, async (call) => {
+                    await withRateProductClient(async (call) => {
                         const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
                             (await call("rate_product", { food_id: food.id }))
                                 .structuredContent,
@@ -5647,7 +5598,7 @@ describe("household config tools", () => {
                 displayName: "Elsewhere",
             });
             const foodId = await seedMilkProduct();
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", {
                     food_id: foodId,
                     user_id: other,
@@ -5658,7 +5609,7 @@ describe("household config tools", () => {
         });
 
         test("unknown barcode returns found false", async () => {
-            await withRateProductFlag(true, async (call) => {
+            await withRateProductClient(async (call) => {
                 const r = await call("rate_product", {
                     barcode: "9999888877776",
                 });
@@ -8650,9 +8601,7 @@ describe("/mcp destructive tools are guarded", () => {
         "Agents may make destructive changes is Off in Settings › AI connections.";
 
     // unplan_recipe is only registered while the plan tools are on.
-    beforeEach(() =>
-        setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true })),
-    );
+    beforeEach(() => setFlagsForTests(createMemoryFlags({})));
     afterEach(() => resetFlagsForTests());
 
     function appWith(
@@ -9193,12 +9142,12 @@ describe("/mcp destructive tools are guarded", () => {
         });
     });
 
-    // The grocery and store admin tools: behind mcp-household-admin, the same
-    // guard. The delete_store / reorder_stores / set_store_sections SQL (a
+    // The grocery and store admin tools go through the same guard. The
+    // delete_store / reorder_stores / set_store_sections SQL (a
     // store, its sections and rules, the default store) is tested against
     // Postgres in src/mcp/tools/household-admin.db.test.ts; the memory stores
     // here cover the tool list, the schemas and both protocol eras.
-    describe("grocery and store admin tools (mcp-household-admin)", () => {
+    describe("grocery and store admin tools", () => {
         const STORE_A = "11111111-1111-4111-8111-111111111111";
         const STORE_B = "22222222-2222-4222-8222-222222222222";
         const SECTION_A_PRODUCE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaa1";
@@ -9206,14 +9155,7 @@ describe("/mcp destructive tools are guarded", () => {
         const SECTION_B_PRODUCE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb1";
         const SECTION_B_OTHER = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbb2";
 
-        beforeEach(() =>
-            setFlagsForTests(
-                createMemoryFlags({
-                    "mcp-plan-tools": true,
-                    "mcp-household-admin": true,
-                }),
-            ),
-        );
+        beforeEach(() => setFlagsForTests(createMemoryFlags({})));
 
         async function addStores() {
             for (const [id, name, order, produce, other] of [
@@ -9264,28 +9206,7 @@ describe("/mcp destructive tools are guarded", () => {
         }
 
         test.each(ERAS)(
-            "flag off: none of the nine tools is listed and calls are refused (%p)",
-            async (era) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "mcp-household-admin": false }),
-                );
-                await withHttpClient("u1", era, async (client) => {
-                    const names = (await client.listTools()).tools.map(
-                        (t) => t.name,
-                    );
-                    for (const name of HOUSEHOLD_ADMIN_TOOL_NAMES) {
-                        expect(names).not.toContain(name);
-                        await expect(
-                            client.callTool({ name, arguments: {} }),
-                        ).rejects.toThrow(/not found/i);
-                    }
-                    expect(names).toContain("clear_checked_grocery_lines");
-                });
-            },
-        );
-
-        test.each(ERAS)(
-            "flag on: all nine are listed, with the right hints (%p)",
+            "all nine are listed, with the right hints (%p)",
             async (era) => {
                 await withHttpClient("u1", era, async (client) => {
                     const listed = (await client.listTools()).tools;
@@ -9557,19 +9478,12 @@ describe("/mcp destructive tools are guarded", () => {
         );
     });
 
-    // The four kitchen admin tools: behind mcp-household-admin, the same guard.
+    // The four kitchen admin tools go through the same guard.
     // The SQL (the fridge ledger, the snapshot of every affected table, undo)
     // is tested against Postgres in src/mcp/tools/kitchen-admin.db.test.ts; the
     // memory stores here cover the tool list, the schemas and both eras.
-    describe("kitchen admin tools (mcp-household-admin)", () => {
-        beforeEach(() =>
-            setFlagsForTests(
-                createMemoryFlags({
-                    "mcp-plan-tools": true,
-                    "mcp-household-admin": true,
-                }),
-            ),
-        );
+    describe("kitchen admin tools", () => {
+        beforeEach(() => setFlagsForTests(createMemoryFlags({})));
 
         const asOwner = (
             era: EraMode,
@@ -9595,29 +9509,7 @@ describe("/mcp destructive tools are guarded", () => {
         }
 
         test.each(ERAS)(
-            "flag off: none of the four kitchen tools is listed and calls are refused (%p)",
-            async (era) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "mcp-household-admin": false }),
-                );
-                await withHttpClient("u1", era, async (client) => {
-                    const names = (await client.listTools()).tools.map(
-                        (t) => t.name,
-                    );
-                    for (const name of KITCHEN_ADMIN_TOOL_NAMES) {
-                        expect(names).not.toContain(name);
-                        await expect(
-                            client.callTool({ name, arguments: {} }),
-                        ).rejects.toThrow(/not found/i);
-                    }
-                    expect(names).toContain("delete_fridge_item");
-                    expect(names).toContain("delete_grocery_line");
-                });
-            },
-        );
-
-        test.each(ERAS)(
-            "flag on: all four are listed, destructive, with an output schema (%p)",
+            "all four are listed, destructive, with an output schema (%p)",
             async (era) => {
                 await withHttpClient("u1", era, async (client) => {
                     const byName = new Map(
@@ -10642,44 +10534,41 @@ describe("goal name over HTTP", () => {
 });
 
 describe("rate_product over HTTP", () => {
-    test.each(ERAS)(
-        "flag on lists and returns structuredContent (%p)",
-        async (era) => {
-            const food = newFood({
-                householdId: "hh-1",
-                kind: "food",
-                name: "Rated Bar",
-                offQuality: {
-                    nutriscoreGrade: "c",
-                    novaGroup: 3,
-                    ecoscoreGrade: "b",
-                    additives: null,
-                    allergensTags: null,
-                    tracesTags: null,
-                    ingredientsAnalysisTags: null,
-                    labelsTags: null,
-                    fetchedAt: "2026-11-09T12:00:00.000Z",
-                },
+    test.each(ERAS)("lists and returns structuredContent (%p)", async (era) => {
+        const food = newFood({
+            householdId: "hh-1",
+            kind: "food",
+            name: "Rated Bar",
+            offQuality: {
+                nutriscoreGrade: "c",
+                novaGroup: 3,
+                ecoscoreGrade: "b",
+                additives: null,
+                allergensTags: null,
+                tracesTags: null,
+                ingredientsAnalysisTags: null,
+                labelsTags: null,
+                fetchedAt: "2026-11-09T12:00:00.000Z",
+            },
+        });
+        await db.foodsStore.insertFood(food);
+        setFlagsForTests(createMemoryFlags({}));
+        try {
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(names).toContain("rate_product");
+                const r = (await client.callTool({
+                    name: "rate_product",
+                    arguments: { food_id: food.id },
+                })) as ToolResult;
+                RATE_PRODUCT_OUTPUT_SCHEMA.parse(r.structuredContent);
             });
-            await db.foodsStore.insertFood(food);
-            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
-            try {
-                await withHttpClient("u1", era, async (client) => {
-                    const names = (await client.listTools()).tools.map(
-                        (t) => t.name,
-                    );
-                    expect(names).toContain("rate_product");
-                    const r = (await client.callTool({
-                        name: "rate_product",
-                        arguments: { food_id: food.id },
-                    })) as ToolResult;
-                    RATE_PRODUCT_OUTPUT_SCHEMA.parse(r.structuredContent);
-                });
-            } finally {
-                resetFlagsForTests();
-            }
-        },
-    );
+        } finally {
+            resetFlagsForTests();
+        }
+    });
 
     test.each(ERAS)(
         "each member carries the Product screen's verdict and reason, and each part its display and status (%p)",
@@ -10727,7 +10616,7 @@ describe("rate_product over HTTP", () => {
                 },
             });
             await db.foodsStore.insertFood(food);
-            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
+            setFlagsForTests(createMemoryFlags({}));
             try {
                 await withHttpClient("u1", era, async (client) => {
                     const out = RATE_PRODUCT_OUTPUT_SCHEMA.parse(
@@ -10801,7 +10690,7 @@ describe("rate_product over HTTP", () => {
                 },
             });
             await db.foodsStore.insertFood(food);
-            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": true }));
+            setFlagsForTests(createMemoryFlags({}));
             try {
                 await withHttpClient("u1", era, async (client) => {
                     const rate = async () =>
@@ -10850,29 +10739,6 @@ describe("rate_product over HTTP", () => {
                     ]) {
                         expect(Object.keys(after)).toContain(field);
                     }
-                });
-            } finally {
-                resetFlagsForTests();
-            }
-        },
-    );
-
-    test.each(ERAS)(
-        "flag off omits rate_product from tools/list (%p)",
-        async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-rate-product": false }));
-            try {
-                await withHttpClient("u1", era, async (client) => {
-                    const names = (await client.listTools()).tools.map(
-                        (t) => t.name,
-                    );
-                    expect(names).not.toContain("rate_product");
-                    await expect(
-                        client.callTool({
-                            name: "rate_product",
-                            arguments: { barcode: "12345678" },
-                        }),
-                    ).rejects.toThrow(/not found/i);
                 });
             } finally {
                 resetFlagsForTests();
@@ -10963,11 +10829,11 @@ describe("list_usuals over HTTP", () => {
     type UsualsOut = z.infer<typeof LIST_USUALS_OUTPUT_SCHEMA>;
 
     test.each(ERAS)(
-        "flag on: each usual says whether it is due and why (%p)",
+        "each usual says whether it is due and why (%p)",
         async (era) => {
             const { today, milk, eggs, rice, salt } = await seedUsuals();
             setRestockWeekday(weekdayOf(today));
-            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const names = (await client.listTools()).tools.map(
                     (t) => t.name,
@@ -11086,12 +10952,7 @@ describe("list_usuals over HTTP", () => {
                 mk("Soap", { kind: "supply", defaultUnit: "bottle" }),
             ];
             for (const food of foods) await db.foodsStore.insertFood(food);
-            setFlagsForTests(
-                createMemoryFlags({
-                    "mcp-list-usuals": true,
-                    "widget-restock-nudge": true,
-                }),
-            );
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const r = (await client.callTool({
                     name: "list_usuals",
@@ -11209,7 +11070,7 @@ describe("list_usuals over HTTP", () => {
                 "hh-1",
                 "Market",
             );
-            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const list = async () =>
                     LIST_USUALS_OUTPUT_SCHEMA.parse(
@@ -11267,7 +11128,7 @@ describe("list_usuals over HTTP", () => {
                 "hh-1",
                 "Market",
             );
-            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            setFlagsForTests(createMemoryFlags({}));
             const stamp = async (lastRestockedOn: string | null) => {
                 await db.foodsStore.updateFoodRow({
                     ...(await db.foodsStore.getFood("hh-1", eggs.id))!,
@@ -11359,7 +11220,7 @@ describe("list_usuals over HTTP", () => {
                 }),
             );
             setRestockWeekday(0, false);
-            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const r = (await client.callTool({
                     name: "list_usuals",
@@ -11384,7 +11245,7 @@ describe("list_usuals over HTTP", () => {
         async (era) => {
             const { today, milk, eggs } = await seedUsuals();
             setRestockWeekday((weekdayOf(today) + 1) % 7);
-            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const r = (await client.callTool({
                     name: "list_usuals",
@@ -11404,7 +11265,7 @@ describe("list_usuals over HTTP", () => {
     test.each(ERAS)(
         "no usuals still returns structuredContent (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const r = (await client.callTool({
                     name: "list_usuals",
@@ -11415,22 +11276,6 @@ describe("list_usuals over HTTP", () => {
                 );
                 expect(out.usuals).toEqual([]);
                 expect(r.content[0]?.text).toMatch(/no usuals/i);
-            });
-        },
-    );
-
-    test.each(ERAS)(
-        "flag off omits list_usuals from tools/list and refuses calls (%p)",
-        async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-list-usuals": false }));
-            await withHttpClient("u1", era, async (client) => {
-                const names = (await client.listTools()).tools.map(
-                    (t) => t.name,
-                );
-                expect(names).not.toContain("list_usuals");
-                await expect(
-                    client.callTool({ name: "list_usuals", arguments: {} }),
-                ).rejects.toThrow(/not found/i);
             });
         },
     );
@@ -11510,27 +11355,9 @@ describe("plan tools over HTTP", () => {
     }
 
     test.each(ERAS)(
-        "flag off: none of the plan tools is listed and calls are refused (%p)",
+        "plan_recipe then get_week_plan shows it, unplan_recipe then removes it (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": false }));
-            await withHttpClient("u1", era, async (client) => {
-                const names = (await client.listTools()).tools.map(
-                    (t) => t.name,
-                );
-                for (const name of PLAN_TOOLS) {
-                    expect(names).not.toContain(name);
-                    await expect(
-                        client.callTool({ name, arguments: {} }),
-                    ).rejects.toThrow(/not found/i);
-                }
-            });
-        },
-    );
-
-    test.each(ERAS)(
-        "flag on: plan_recipe then get_week_plan shows it, unplan_recipe then removes it (%p)",
-        async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const names = (await client.listTools()).tools.map(
                     (t) => t.name,
@@ -11628,7 +11455,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "get_week_plan starts at from and a recipe with nutrition shows kcal per portion (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const call = callerOf(client);
                 const oats = await call("upsert_food", {
@@ -11674,7 +11501,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "plan_recipe refuses a bad slot, a bad or past date, bad servings and an unknown recipe (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const call = callerOf(client);
                 const { recipeId } = await seedBread(call);
@@ -11732,7 +11559,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "planning the same recipe on the same day and slot twice is one plan (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const call = callerOf(client);
                 const { recipeId } = await seedBread(call);
@@ -11762,7 +11589,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "unplan_recipe with an unknown plan id is a clear error (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const call = callerOf(client);
                 expect(
@@ -11782,7 +11609,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "add_plan_missing_to_groceries puts the missing lines on the list with source plan and a second call adds nothing (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await addStore();
             await withHttpClient("u1", era, async (client) => {
                 const call = callerOf(client);
@@ -11833,7 +11660,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "add_plan_missing_to_groceries notes an unmeasured ingredient and a line whose stock cannot be counted (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await addStore();
             await withHttpClient("u1", era, async (client) => {
                 const call = callerOf(client);
@@ -11904,7 +11731,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "add_plan_missing_to_groceries with nothing planned adds nothing, and with no store says to add one (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const call = callerOf(client);
                 const none = ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
@@ -11933,7 +11760,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "a household far from UTC plans by its own calendar: from, yesterday refused, today accepted (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             const now = new Date();
             // UTC+14 and UTC-11: at every instant at least one of them is on a
             // different calendar day from UTC.
@@ -11980,7 +11807,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "add_plan_missing_to_groceries takes an optional `from`: a later day adds that window's needs, a past day is refused, and a past plan is never listed (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await addStore();
             await withHttpClient("u1", era, async (client) => {
                 const call = callerOf(client);
@@ -12049,7 +11876,7 @@ describe("plan tools over HTTP", () => {
     test.each(ERAS)(
         "get_week_plan says the household's today whatever `from` is (%p)",
         async (era) => {
-            setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+            setFlagsForTests(createMemoryFlags({}));
             await withHttpClient("u1", era, async (client) => {
                 const call = callerOf(client);
                 const today = utcTodayFromDate();
@@ -12069,46 +11896,14 @@ describe("plan tools over HTTP", () => {
         },
     );
 
-    describe("widget-week-plan flag", () => {
-        const WEEK_PLAN_V2_URI = widgetUri("week-plan.html", true);
+    describe("week-plan widget", () => {
+        const WEEK_PLAN_V2_URI = widgetUri("week-plan.html");
 
         test.each(ERAS)(
-            "plan tools on and the widget flag off: get_week_plan has no ui meta and there is no week-plan resource (%p)",
+            "get_week_plan links the week-plan uri, which lists and reads (%p)",
             async (era) => {
-                setFlagsForTests(
-                    createMemoryFlags({
-                        "mcp-plan-tools": true,
-                        "widget-week-plan": false,
-                    }),
-                );
-                await withHttpClient("u1", era, async (client) => {
-                    const { tools } = await client.listTools();
-                    const week = tools.find((t) => t.name === "get_week_plan");
-                    expect(week).toBeDefined();
-                    expect(week?._meta?.ui).toBeUndefined();
-                    expect(
-                        week?._meta?.["openai/outputTemplate"],
-                    ).toBeUndefined();
-                    const { resources } = await client.listResources();
-                    expect(resources.map((r) => r.uri)).not.toContain(
-                        WEEK_PLAN_V2_URI,
-                    );
-                });
-            },
-        );
-
-        test.each(ERAS)(
-            "both flags on: get_week_plan links the v2 week-plan uri, which lists and reads (%p)",
-            async (era) => {
-                setFlagsForTests(
-                    createMemoryFlags({
-                        "mcp-plan-tools": true,
-                        "widget-week-plan": true,
-                    }),
-                );
-                const assembled = await getWidgetHtml("week-plan", {
-                    v2: true,
-                });
+                setFlagsForTests(createMemoryFlags({}));
+                const assembled = await getWidgetHtml("week-plan");
                 await withHttpClient("u1", era, async (client) => {
                     const { tools } = await client.listTools();
                     const week = tools.find((t) => t.name === "get_week_plan");
@@ -12141,36 +11936,13 @@ describe("plan tools over HTTP", () => {
                 });
             },
         );
-
-        test.each(ERAS)(
-            "plan tools off: the widget flag alone adds neither the tools nor the resource (%p)",
-            async (era) => {
-                setFlagsForTests(
-                    createMemoryFlags({
-                        "mcp-plan-tools": false,
-                        "widget-week-plan": true,
-                    }),
-                );
-                await withHttpClient("u1", era, async (client) => {
-                    const { tools } = await client.listTools();
-                    expect(tools.map((t) => t.name)).not.toContain(
-                        "get_week_plan",
-                    );
-                    const { resources } = await client.listResources();
-                    expect(resources.map((r) => r.uri)).not.toContain(
-                        WEEK_PLAN_V2_URI,
-                    );
-                });
-            },
-        );
     });
 });
 
 describe("get_household_digest", () => {
     const bob = "22222222-2222-4222-8222-222222222222";
 
-    async function withHouseholdDigestFlag(
-        on: boolean,
+    async function withHouseholdDigestClient(
         run: (call: CallTool) => Promise<void>,
     ) {
         const member = db.members[0];
@@ -12185,10 +11957,7 @@ describe("get_household_digest", () => {
                   }
                 : undefined,
         });
-        const flags = evaluateViewerFlags(
-            flagCtx,
-            createMemoryFlags({ "mcp-household-digest": on }),
-        );
+        const flags = evaluateViewerFlags(flagCtx, createMemoryFlags({}));
         const server = new McpServer(
             { name: "foodable-test", version: "0.0.0" },
             { capabilities: { tools: {}, resources: {} } },
@@ -12222,56 +11991,7 @@ describe("get_household_digest", () => {
         }
     }
 
-    test("flag off hides tool and rejects calls", async () => {
-        const server = new McpServer(
-            { name: "foodable-test", version: "0.0.0" },
-            { capabilities: { tools: {}, resources: {} } },
-        );
-        const flagCtx = buildFlagContext({
-            auth: { kind: "user", userId: "u1" },
-        });
-        const flags = evaluateViewerFlags(
-            flagCtx,
-            createMemoryFlags({ "mcp-household-digest": false }),
-        );
-        registerTools(
-            server,
-            { kind: "user", userId: "u1" },
-            true,
-            null,
-            undefined,
-            "http://localhost",
-            true,
-            flags,
-        );
-        const [ct, st] = InMemoryTransport.createLinkedPair();
-        const client = new Client({
-            name: "test-client",
-            version: "0.0.0",
-        });
-        await Promise.all([server.connect(st), client.connect(ct)]);
-        try {
-            const list = (await client.listTools()).tools.map((t) => t.name);
-            expect(list).not.toContain("get_household_digest");
-            const resources = await client.listResources();
-            expect(
-                resources.resources.some(
-                    (r) => r.uri === "household://weekly-digest",
-                ),
-            ).toBe(false);
-            await expect(
-                client.callTool({
-                    name: "get_household_digest",
-                    arguments: {},
-                }),
-            ).rejects.toThrow(/not found/i);
-        } finally {
-            await client.close();
-            await server.close();
-        }
-    });
-
-    test("flag on returns schema output and respects week_of", async () => {
+    test("returns schema output and respects week_of", async () => {
         db.profile = { ...PROFILE_BASE, timezone: "UTC" };
         db.members = [
             {
@@ -12281,7 +12001,7 @@ describe("get_household_digest", () => {
                 displayName: "U1",
             },
         ];
-        await withHouseholdDigestFlag(true, async (call) => {
+        await withHouseholdDigestClient(async (call) => {
             const r = await call("get_household_digest", {
                 week_of: "2026-08-07",
             });
@@ -12298,7 +12018,7 @@ describe("get_household_digest", () => {
     });
 
     test("invalid week_of is an error", async () => {
-        await withHouseholdDigestFlag(true, async (call) => {
+        await withHouseholdDigestClient(async (call) => {
             const r = await call("get_household_digest", {
                 week_of: "not-a-date",
             });
@@ -12308,7 +12028,7 @@ describe("get_household_digest", () => {
     });
 
     test("impossible calendar week_of is an error", async () => {
-        await withHouseholdDigestFlag(true, async (call) => {
+        await withHouseholdDigestClient(async (call) => {
             for (const bad of ["2026-02-31", "2026-13-01"]) {
                 const r = await call("get_household_digest", { week_of: bad });
                 expect(r.isError).toBe(true);
@@ -12333,7 +12053,7 @@ describe("get_household_digest", () => {
                 displayName: "Bob",
             },
         ];
-        await withHouseholdDigestFlag(true, async (call) => {
+        await withHouseholdDigestClient(async (call) => {
             const r = await call("get_household_digest", {});
             expect(r.isError).toBeFalsy();
             const out = HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(
@@ -12347,63 +12067,33 @@ describe("get_household_digest", () => {
 });
 
 describe("get_household_digest over HTTP", () => {
-    test.each(ERAS)(
-        "flag on lists and returns structuredContent (%p)",
-        async (era) => {
-            db.profile = { ...PROFILE_BASE, timezone: "UTC" };
-            db.members = [
-                {
-                    householdId: "hh-1",
-                    userId: "u1",
-                    role: "owner",
-                    displayName: "U1",
-                },
-            ];
-            setFlagsForTests(
-                createMemoryFlags({ "mcp-household-digest": true }),
-            );
-            try {
-                await withHttpClient("u1", era, async (client) => {
-                    const names = (await client.listTools()).tools.map(
-                        (t) => t.name,
-                    );
-                    expect(names).toContain("get_household_digest");
-                    const r = (await client.callTool({
-                        name: "get_household_digest",
-                        arguments: {},
-                    })) as ToolResult;
-                    HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(r.structuredContent);
-                });
-            } finally {
-                resetFlagsForTests();
-            }
-        },
-    );
-
-    test.each(ERAS)(
-        "flag off omits get_household_digest from tools/list (%p)",
-        async (era) => {
-            setFlagsForTests(
-                createMemoryFlags({ "mcp-household-digest": false }),
-            );
-            try {
-                await withHttpClient("u1", era, async (client) => {
-                    const names = (await client.listTools()).tools.map(
-                        (t) => t.name,
-                    );
-                    expect(names).not.toContain("get_household_digest");
-                    const resources = await client.listResources();
-                    expect(
-                        resources.resources.some(
-                            (r) => r.uri === "household://weekly-digest",
-                        ),
-                    ).toBe(false);
-                });
-            } finally {
-                resetFlagsForTests();
-            }
-        },
-    );
+    test.each(ERAS)("lists and returns structuredContent (%p)", async (era) => {
+        db.profile = { ...PROFILE_BASE, timezone: "UTC" };
+        db.members = [
+            {
+                householdId: "hh-1",
+                userId: "u1",
+                role: "owner",
+                displayName: "U1",
+            },
+        ];
+        setFlagsForTests(createMemoryFlags({}));
+        try {
+            await withHttpClient("u1", era, async (client) => {
+                const names = (await client.listTools()).tools.map(
+                    (t) => t.name,
+                );
+                expect(names).toContain("get_household_digest");
+                const r = (await client.callTool({
+                    name: "get_household_digest",
+                    arguments: {},
+                })) as ToolResult;
+                HOUSEHOLD_DIGEST_OUTPUT_SCHEMA.parse(r.structuredContent);
+            });
+        } finally {
+            resetFlagsForTests();
+        }
+    });
 });
 
 describe("household PAT over HTTP has no default userId", () => {
@@ -12494,9 +12184,7 @@ describe("household PAT over HTTP has no default userId", () => {
                     displayName: "U1",
                 },
             ];
-            setFlagsForTests(
-                createMemoryFlags({ "mcp-household-digest": true }),
-            );
+            setFlagsForTests(createMemoryFlags({}));
             try {
                 await withHouseholdHttp(mode, async (client) => {
                     const r = (await client.callTool({
@@ -12684,7 +12372,7 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                 expect(tools.length).toBeGreaterThan(30);
                 const logMeal = tools.find((t) => t.name === "log_meal");
                 expect(logMeal?._meta?.ui).toEqual({
-                    resourceUri: "ui://widget/meal-logged.html",
+                    resourceUri: "ui://widget/v2/meal-logged.html",
                 });
                 expect(logMeal?.outputSchema?.type).toBe("object");
             });
@@ -12715,9 +12403,9 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                 expect(
                     tools.find((t) => t.name === "get_goal_progress")?._meta
                         ?.ui,
-                ).toEqual({ resourceUri: "ui://widget/goal-progress.html" });
+                ).toEqual({ resourceUri: "ui://widget/v2/goal-progress.html" });
                 const res = await client.readResource({
-                    uri: "ui://widget/meal-logged.html",
+                    uri: "ui://widget/v2/meal-logged.html",
                 });
                 expect(res.contents).toHaveLength(1);
             });
@@ -12773,7 +12461,7 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
             const assembled = await getWidgetHtml("meal-logged");
             await withHttpClient("u1", mode, async (client) => {
                 const res = await client.readResource({
-                    uri: "ui://widget/meal-logged.html",
+                    uri: "ui://widget/v2/meal-logged.html",
                 });
                 const c = res.contents[0] as {
                     mimeType?: string;
@@ -12805,44 +12493,29 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         "fridge.html",
     ] as const;
 
-    const V1_WIDGET_URIS = MCP_WIDGET_FILES.map((f) => widgetUri(f)).sort();
-    const ATTENTION_V2_URI = widgetUri("attention.html", true);
+    // Every ui:// resource the server lists: the eight cards above plus the
+    // six that were v2-only (component-gallery is dev-only and never listed).
+    const ALL_WIDGET_URIS = [
+        ...MCP_WIDGET_FILES,
+        "attention.html",
+        "use-soon.html",
+        "recipe-card.html",
+        "product-score.html",
+        "restock-nudge.html",
+        "week-plan.html",
+    ]
+        .map((f) => widgetUri(f))
+        .sort();
+    const ATTENTION_V2_URI = widgetUri("attention.html");
 
-    describe("widget-attention flag", () => {
+    describe("attention widget", () => {
         afterEach(() => resetFlagsForTests());
 
         test.each(ERAS)(
-            "flag off leaves list_notices without ui meta and no attention resource (%p)",
+            "links attention uri, lists and reads the resource (%p)",
             async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "widget-attention": false }),
-                );
-                await withHttpClient("u1", mode, async (client) => {
-                    const { tools } = await client.listTools();
-                    const list = tools.find((t) => t.name === "list_notices");
-                    expect(list?._meta?.ui).toBeUndefined();
-                    expect(
-                        list?._meta?.["openai/outputTemplate"],
-                    ).toBeUndefined();
-
-                    const { resources } = await client.listResources();
-                    const widgetUris = resources
-                        .map((r) => r.uri)
-                        .filter((u) => u.startsWith("ui://widget/"));
-                    expect(widgetUris).not.toContain(ATTENTION_V2_URI);
-                });
-            },
-        );
-
-        test.each(ERAS)(
-            "flag on links attention uri, lists and reads the v2 resource (%p)",
-            async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "widget-attention": true }),
-                );
-                const assembled = await getWidgetHtml("attention", {
-                    v2: true,
-                });
+                setFlagsForTests(createMemoryFlags({}));
+                const assembled = await getWidgetHtml("attention");
                 await withHttpClient("u1", mode, async (client) => {
                     const { tools } = await client.listTools();
                     const list = tools.find((t) => t.name === "list_notices");
@@ -12881,11 +12554,9 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         );
 
         test.each(ERAS)(
-            "flag on list_notices output parses with notices present (%p)",
+            "list_notices output parses with notices present (%p)",
             async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "widget-attention": true }),
-                );
+                setFlagsForTests(createMemoryFlags({}));
                 function addDaysUtc(iso: string, delta: number): string {
                     const [y, m, d] = iso.split("-").map(Number);
                     return new Date(Date.UTC(y!, m! - 1, d! + delta))
@@ -12938,48 +12609,16 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         );
     });
 
-    describe("widget-product-score flag", () => {
+    describe("product-score widget", () => {
         afterEach(() => resetFlagsForTests());
 
-        const PRODUCT_SCORE_V2_URI = widgetUri("product-score.html", true);
+        const PRODUCT_SCORE_V2_URI = widgetUri("product-score.html");
 
         test.each(ERAS)(
-            "rate_product on and the widget flag off: no ui meta and no product-score resource (%p)",
+            "rate_product links the product-score uri, which lists and reads (%p)",
             async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({
-                        "mcp-rate-product": true,
-                        "widget-product-score": false,
-                    }),
-                );
-                await withHttpClient("u1", mode, async (client) => {
-                    const { tools } = await client.listTools();
-                    const rate = tools.find((t) => t.name === "rate_product");
-                    expect(rate).toBeDefined();
-                    expect(rate?._meta?.ui).toBeUndefined();
-                    expect(
-                        rate?._meta?.["openai/outputTemplate"],
-                    ).toBeUndefined();
-                    const { resources } = await client.listResources();
-                    expect(resources.map((r) => r.uri)).not.toContain(
-                        PRODUCT_SCORE_V2_URI,
-                    );
-                });
-            },
-        );
-
-        test.each(ERAS)(
-            "both flags on: rate_product links the v2 product-score uri, which lists and reads (%p)",
-            async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({
-                        "mcp-rate-product": true,
-                        "widget-product-score": true,
-                    }),
-                );
-                const assembled = await getWidgetHtml("product-score", {
-                    v2: true,
-                });
+                setFlagsForTests(createMemoryFlags({}));
+                const assembled = await getWidgetHtml("product-score");
                 await withHttpClient("u1", mode, async (client) => {
                     const { tools } = await client.listTools();
                     const rate = tools.find((t) => t.name === "rate_product");
@@ -13003,72 +12642,18 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                 });
             },
         );
-
-        test.each(ERAS)(
-            "rate_product off: the widget flag alone adds neither the tool nor the resource (%p)",
-            async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({
-                        "mcp-rate-product": false,
-                        "widget-product-score": true,
-                    }),
-                );
-                await withHttpClient("u1", mode, async (client) => {
-                    const { tools } = await client.listTools();
-                    expect(tools.map((t) => t.name)).not.toContain(
-                        "rate_product",
-                    );
-                    const { resources } = await client.listResources();
-                    expect(resources.map((r) => r.uri)).not.toContain(
-                        PRODUCT_SCORE_V2_URI,
-                    );
-                });
-            },
-        );
     });
 
-    describe("widget-restock-nudge flag", () => {
+    describe("restock-nudge widget", () => {
         afterEach(() => resetFlagsForTests());
 
-        const RESTOCK_V2_URI = widgetUri("restock-nudge.html", true);
+        const RESTOCK_V2_URI = widgetUri("restock-nudge.html");
 
         test.each(ERAS)(
-            "list_usuals on and the widget flag off: no ui meta and no restock-nudge resource (%p)",
+            "list_usuals links the restock-nudge uri, which lists and reads (%p)",
             async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({
-                        "mcp-list-usuals": true,
-                        "widget-restock-nudge": false,
-                    }),
-                );
-                await withHttpClient("u1", mode, async (client) => {
-                    const { tools } = await client.listTools();
-                    const usuals = tools.find((t) => t.name === "list_usuals");
-                    expect(usuals).toBeDefined();
-                    expect(usuals?._meta?.ui).toBeUndefined();
-                    expect(
-                        usuals?._meta?.["openai/outputTemplate"],
-                    ).toBeUndefined();
-                    const { resources } = await client.listResources();
-                    expect(resources.map((r) => r.uri)).not.toContain(
-                        RESTOCK_V2_URI,
-                    );
-                });
-            },
-        );
-
-        test.each(ERAS)(
-            "both flags on: list_usuals links the v2 restock-nudge uri, which lists and reads (%p)",
-            async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({
-                        "mcp-list-usuals": true,
-                        "widget-restock-nudge": true,
-                    }),
-                );
-                const assembled = await getWidgetHtml("restock-nudge", {
-                    v2: true,
-                });
+                setFlagsForTests(createMemoryFlags({}));
+                const assembled = await getWidgetHtml("restock-nudge");
                 await withHttpClient("u1", mode, async (client) => {
                     const { tools } = await client.listTools();
                     const usuals = tools.find((t) => t.name === "list_usuals");
@@ -13092,34 +12677,12 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                 });
             },
         );
-
-        test.each(ERAS)(
-            "list_usuals off: the widget flag alone adds neither the tool nor the resource (%p)",
-            async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({
-                        "mcp-list-usuals": false,
-                        "widget-restock-nudge": true,
-                    }),
-                );
-                await withHttpClient("u1", mode, async (client) => {
-                    const { tools } = await client.listTools();
-                    expect(tools.map((t) => t.name)).not.toContain(
-                        "list_usuals",
-                    );
-                    const { resources } = await client.listResources();
-                    expect(resources.map((r) => r.uri)).not.toContain(
-                        RESTOCK_V2_URI,
-                    );
-                });
-            },
-        );
     });
 
-    describe("widget-use-soon flag", () => {
+    describe("use-soon widget", () => {
         afterEach(() => resetFlagsForTests());
 
-        const USE_SOON_V2_URI = widgetUri("use-soon.html", true);
+        const USE_SOON_V2_URI = widgetUri("use-soon.html");
 
         function addDaysUtc(iso: string, delta: number): string {
             const [y, m, d] = iso.split("-").map(Number);
@@ -13129,47 +12692,10 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         }
 
         test.each(ERAS)(
-            "flag off leaves list_expiring without ui meta and no use-soon resource, and the empty path still carries structuredContent (%p)",
+            "links the use-soon uri and lists and reads the resource (%p)",
             async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "widget-use-soon": false }),
-                );
-                await withHttpClient("u1", mode, async (client) => {
-                    const { tools } = await client.listTools();
-                    const list = tools.find((t) => t.name === "list_expiring");
-                    expect(list?._meta?.ui).toBeUndefined();
-                    expect(
-                        list?._meta?.["openai/outputTemplate"],
-                    ).toBeUndefined();
-
-                    const { resources } = await client.listResources();
-                    expect(resources.map((r) => r.uri)).not.toContain(
-                        USE_SOON_V2_URI,
-                    );
-
-                    const empty = await client.callTool({
-                        name: "list_expiring",
-                        arguments: {},
-                    });
-                    expect((empty.content as { text: string }[])[0]!.text).toBe(
-                        "Nothing expiring soon.",
-                    );
-                    expect(
-                        LIST_EXPIRING_OUTPUT_SCHEMA.parse(
-                            empty.structuredContent,
-                        ),
-                    ).toEqual({ items: [], featured: null });
-                });
-            },
-        );
-
-        test.each(ERAS)(
-            "flag on links the use-soon uri and lists and reads the v2 resource (%p)",
-            async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "widget-use-soon": true }),
-                );
-                const assembled = await getWidgetHtml("use-soon", { v2: true });
+                setFlagsForTests(createMemoryFlags({}));
+                const assembled = await getWidgetHtml("use-soon");
                 await withHttpClient("u1", mode, async (client) => {
                     const { tools } = await client.listTools();
                     const list = tools.find((t) => t.name === "list_expiring");
@@ -13663,10 +13189,10 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         );
     });
 
-    describe("widget-recipe-card flag", () => {
+    describe("recipe-card widget", () => {
         afterEach(() => resetFlagsForTests());
 
-        const RECIPE_CARD_V2_URI = widgetUri("recipe-card.html", true);
+        const RECIPE_CARD_V2_URI = widgetUri("recipe-card.html");
 
         async function stockedRecipe(client: {
             callTool: (a: {
@@ -13704,42 +13230,10 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         }
 
         test.each(ERAS)(
-            "flag off leaves get_recipe without ui meta and no recipe-card resource (%p)",
+            "links the recipe-card uri and lists and reads the resource (%p)",
             async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "widget-recipe-card": false }),
-                );
-                await withHttpClient("u1", mode, async (client) => {
-                    const { tools } = await client.listTools();
-                    const tool = tools.find((t) => t.name === "get_recipe");
-                    expect(tool?._meta?.ui).toBeUndefined();
-                    expect(
-                        tool?._meta?.["openai/outputTemplate"],
-                    ).toBeUndefined();
-                    const { resources } = await client.listResources();
-                    expect(resources.map((r) => r.uri)).not.toContain(
-                        RECIPE_CARD_V2_URI,
-                    );
-                    const { call, recipeId } = await stockedRecipe(client);
-                    const got = await call("get_recipe", { id: recipeId });
-                    expect(got.isError).toBeFalsy();
-                    expect(
-                        GET_RECIPE_OUTPUT_SCHEMA.parse(got.structuredContent)
-                            .name,
-                    ).toBe("Rice bowl");
-                });
-            },
-        );
-
-        test.each(ERAS)(
-            "flag on links the recipe-card uri and lists and reads the v2 resource (%p)",
-            async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "widget-recipe-card": true }),
-                );
-                const assembled = await getWidgetHtml("recipe-card", {
-                    v2: true,
-                });
+                setFlagsForTests(createMemoryFlags({}));
+                const assembled = await getWidgetHtml("recipe-card");
                 await withHttpClient("u1", mode, async (client) => {
                     const { tools } = await client.listTools();
                     const tool = tools.find((t) => t.name === "get_recipe");
@@ -13826,15 +13320,10 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         );
     });
 
-    describe("mcp-widgets-v2 flag", () => {
-        afterEach(() => resetFlagsForTests());
-
+    describe("widget URIs", () => {
         test.each(ERAS)(
-            "flag off keeps v1 tool _meta URIs and resources/list unchanged (%p)",
+            "tools link the v2 URIs and every widget is listed once (%p)",
             async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "mcp-widgets-v2": false }),
-                );
                 db.goals = goals({ user_id: "u1" });
                 await withHttpClient("u1", mode, async (client) => {
                     const { tools } = await client.listTools();
@@ -13845,45 +13334,8 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                     expect(logMeal?._meta?.["openai/outputTemplate"]).toBe(
                         MEAL_LOGGED_WIDGET_URI,
                     );
-                    const summary = tools.find(
-                        (t) => t.name === "get_nutrition_summary",
-                    );
-                    expect(
-                        (summary?._meta?.ui as { resourceUri?: string })
-                            ?.resourceUri,
-                    ).toBe(widgetUri("nutrition-summary.html"));
-
-                    const { resources } = await client.listResources();
-                    const widgetUris = resources
-                        .map((r) => r.uri)
-                        .filter((u) => u.startsWith("ui://widget/"))
-                        .sort();
-                    expect(widgetUris).toEqual(V1_WIDGET_URIS);
-                    expect(widgetUris.some((u) => u.includes("/v2/"))).toBe(
-                        false,
-                    );
-                });
-            },
-        );
-
-        test.each(ERAS)(
-            "flag on links v2 URIs, lists v1 and v2 resources, v2 read matches assembly (%p)",
-            async (mode) => {
-                setFlagsForTests(createMemoryFlags({ "mcp-widgets-v2": true }));
-                db.goals = goals({ user_id: "u1" });
-                const assembledV2 = await getWidgetHtml("meal-logged", {
-                    v2: true,
-                });
-                const v2Uri = widgetUri("meal-logged.html", true);
-                await withHttpClient("u1", mode, async (client) => {
-                    const { tools } = await client.listTools();
-                    const logMeal = tools.find((t) => t.name === "log_meal");
-                    expect(
-                        (logMeal?._meta?.ui as { resourceUri?: string })
-                            ?.resourceUri,
-                    ).toBe(v2Uri);
-                    expect(logMeal?._meta?.["openai/outputTemplate"]).toBe(
-                        v2Uri,
+                    expect(MEAL_LOGGED_WIDGET_URI).toBe(
+                        "ui://widget/v2/meal-logged.html",
                     );
 
                     const { resources } = await client.listResources();
@@ -13891,40 +13343,28 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         .map((r) => r.uri)
                         .filter((u) => u.startsWith("ui://widget/"))
                         .sort();
-                    const expected = [
-                        ...V1_WIDGET_URIS,
-                        ...MCP_WIDGET_FILES.map((f) => widgetUri(f, true)),
-                    ].sort();
-                    expect(widgetUris).toEqual(expected);
-
-                    const res = await client.readResource({ uri: v2Uri });
-                    const c = res.contents[0] as {
-                        mimeType?: string;
-                        text?: string;
-                        _meta?: { ui?: { prefersBorder?: boolean } };
-                    };
-                    expect(c.mimeType).toBe("text/html;profile=mcp-app");
-                    expect(c._meta?.ui?.prefersBorder).toBe(true);
-                    expect(c.text).toBe(assembledV2);
+                    expect(widgetUris).toEqual(ALL_WIDGET_URIS);
+                    // The retired v1 URIs are gone, not served alongside.
                     expect(
-                        c.text?.trimStart().startsWith("<!doctype html>"),
+                        widgetUris.every((u) =>
+                            u.startsWith("ui://widget/v2/"),
+                        ),
                     ).toBe(true);
-                    expect(c.text).toContain("function initWidget(config)");
+                    await expect(
+                        client.readResource({
+                            uri: "ui://widget/meal-logged.html",
+                        }),
+                    ).rejects.toThrow();
                 });
             },
         );
-    });
-
-    describe("grocery-list and fridge v2 resources", () => {
-        afterEach(() => resetFlagsForTests());
 
         test.each(ERAS)(
-            "flag on reads both v2 cards and they match their assembly (%p)",
+            "the grocery-list and fridge cards read as their assembly (%p)",
             async (mode) => {
-                setFlagsForTests(createMemoryFlags({ "mcp-widgets-v2": true }));
                 for (const key of ["grocery-list", "fridge"] as const) {
-                    const assembled = await getWidgetHtml(key, { v2: true });
-                    const uri = widgetUri(`${key}.html`, true);
+                    const assembled = await getWidgetHtml(key);
+                    const uri = widgetUri(`${key}.html`);
                     await withHttpClient("u1", mode, async (client) => {
                         const res = await client.readResource({ uri });
                         const c = res.contents[0] as {
@@ -13933,32 +13373,8 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         };
                         expect(c.mimeType).toBe("text/html;profile=mcp-app");
                         expect(c.text).toBe(assembled);
-                        expect(c.text).not.toBe(
-                            await getWidgetHtml(key, { v2: false }),
-                        );
                     });
                 }
-            },
-        );
-
-        test.each(ERAS)(
-            "flag off lists neither v2 card and refuses to read them (%p)",
-            async (mode) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "mcp-widgets-v2": false }),
-                );
-                await withHttpClient("u1", mode, async (client) => {
-                    const { resources } = await client.listResources();
-                    const uris = resources.map((r) => r.uri);
-                    for (const key of ["grocery-list", "fridge"]) {
-                        const v2 = widgetUri(`${key}.html`, true);
-                        expect(uris).not.toContain(v2);
-                        expect(uris).toContain(widgetUri(`${key}.html`));
-                        await expect(
-                            client.readResource({ uri: v2 }),
-                        ).rejects.toThrow();
-                    }
-                });
             },
         );
     });
@@ -14077,7 +13493,7 @@ describe("/mcp still serves 2025-era clients unchanged", () => {
             expect(client.getServerCapabilities()?.tools).toBeDefined();
             const { tools } = await client.listTools();
             expect(tools.find((t) => t.name === "log_meal")?._meta?.ui).toEqual(
-                { resourceUri: "ui://widget/meal-logged.html" },
+                { resourceUri: "ui://widget/v2/meal-logged.html" },
             );
         });
     });

@@ -697,7 +697,7 @@ export function registerNutritionWriteTools(
         },
     );
 
-    registerWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "import-meals",
         resourceName: "import-meals-widget",
         title: "Import Meals",

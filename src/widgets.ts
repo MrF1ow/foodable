@@ -60,7 +60,8 @@ async function inlineTs(relPath: string): Promise<string> {
         .replace(/^\s*export\s*\{[^}]*\};?\s*$/gm, "");
 }
 
-// ui:// resource name → template file under src/templates/.
+// ui:// resource name → template file under public/widgets/src/templates/v2/.
+// The v1 widgets are retired; v2 is the only set, kept in its v2/ folder.
 export const WIDGET_TEMPLATES: Record<string, string> = {
     "nutrition-summary": "nutrition-summary.html",
     "goal-progress": "goal-progress.html",
@@ -70,32 +71,22 @@ export const WIDGET_TEMPLATES: Record<string, string> = {
     "import-meals": "import-meals.html",
     "grocery-list": "grocery-list.html",
     fridge: "fridge.html",
-    // Dev-only visual reference for the shared components. Listed here so it is
-    // assembled and covered by widgets.test.ts, but NO ui:// resource and no
-    // tool reference it, so no client can reach it. View via `bun run harness`.
-    "component-gallery": "component-gallery.html",
-};
-
-// Widget keys with a v2 template but no v1 twin (later phases). v1 getWidgetHtml
-// does not resolve these keys; MCP v2 URIs may once templates land.
-export const WIDGET_TEMPLATES_V2: Record<string, string> = {
     attention: "attention.html",
     "use-soon": "use-soon.html",
     "recipe-card": "recipe-card.html",
     "product-score": "product-score.html",
     "restock-nudge": "restock-nudge.html",
     "week-plan": "week-plan.html",
+    // Dev-only visual reference for the shared components. Listed here so it is
+    // assembled and covered by widgets.test.ts, but NO ui:// resource and no
+    // tool reference it, so no client can reach it. View via `bun run harness`.
+    "component-gallery": "component-gallery.html",
 };
 
 /** Per-widget size caps for assembled MCP widget HTML (bytes = 1024). */
 export const WIDGET_BUDGETS: Record<string, { raw: number; gzip: number }> =
     Object.fromEntries(
-        [
-            ...new Set([
-                ...Object.keys(WIDGET_TEMPLATES),
-                ...Object.keys(WIDGET_TEMPLATES_V2),
-            ]),
-        ].map((key) => [
+        Object.keys(WIDGET_TEMPLATES).map((key) => [
             key,
             key === "import-meals"
                 ? { raw: 80 * 1024, gzip: 24 * 1024 }
@@ -103,60 +94,17 @@ export const WIDGET_BUDGETS: Record<string, { raw: number; gzip: number }> =
         ]),
     );
 
-export type WidgetHtmlOptions = { v2?: boolean };
-
-/** v2 template with no v1 twin — the harness must frame the v2 assembly. */
-export function harnessNeedsV2(key: string): boolean {
-    return key in WIDGET_TEMPLATES_V2 && !(key in WIDGET_TEMPLATES);
-}
-
-/** Every assembly the server can serve: v1 for each v1 template, v2 for every key. */
-export function widgetAssemblies(): { key: string; v2: boolean }[] {
-    return [
-        ...Object.keys(WIDGET_TEMPLATES).map((key) => ({ key, v2: false })),
-        ...[
-            ...new Set([
-                ...Object.keys(WIDGET_TEMPLATES),
-                ...Object.keys(WIDGET_TEMPLATES_V2),
-            ]),
-        ].map((key) => ({ key, v2: true })),
-    ];
-}
-
-function cacheKey(key: string, v2: boolean): string {
-    return v2 ? `${key}:v2` : key;
-}
-
-// Per instance by design: assembled widget HTML keyed by widget key and variant; identical bytes on every instance for the same build.
+// Per instance by design: assembled widget HTML keyed by widget key; identical bytes on every instance for the same build.
 const cache = new Map<string, string>();
 
-async function resolveTemplateRelPath(
-    key: string,
-    v2: boolean,
-): Promise<string> {
-    if (v2) {
-        const v2Only = WIDGET_TEMPLATES_V2[key];
-        if (v2Only) return `templates/v2/${v2Only}`;
-        const v1File = WIDGET_TEMPLATES[key];
-        if (!v1File) throw new Error(`unknown widget: ${key}`);
-        const v2Rel = `templates/v2/${v1File}`;
-        if (await Bun.file(`${SRC_DIR}/${v2Rel}`).exists()) return v2Rel;
-        return `templates/${v1File}`;
-    }
-    const v1File = WIDGET_TEMPLATES[key];
-    if (!v1File) throw new Error(`unknown widget: ${key}`);
-    return `templates/${v1File}`;
+function resolveTemplateRelPath(key: string): string {
+    const file = WIDGET_TEMPLATES[key];
+    if (!file) throw new Error(`unknown widget: ${key}`);
+    return `templates/v2/${file}`;
 }
 
 /** Template filename (no v2/ prefix) for a widget key — used for ui:// URIs. */
-export function widgetTemplateName(
-    key: string,
-    opts?: WidgetHtmlOptions,
-): string {
-    const v2 = opts?.v2 === true;
-    if (v2) {
-        return WIDGET_TEMPLATES_V2[key] ?? WIDGET_TEMPLATES[key] ?? "";
-    }
+export function widgetTemplateName(key: string): string {
     return WIDGET_TEMPLATES[key] ?? "";
 }
 
@@ -226,13 +174,8 @@ async function assembleTemplateRelPath(templateRel: string): Promise<string> {
 }
 
 /** Unminified widget document (partials expanded). */
-export async function assembleSource(
-    key: string,
-    opts?: WidgetHtmlOptions,
-): Promise<string> {
-    return assembleTemplateRelPath(
-        await resolveTemplateRelPath(key, opts?.v2 === true),
-    );
+export async function assembleSource(key: string): Promise<string> {
+    return assembleTemplateRelPath(resolveTemplateRelPath(key));
 }
 
 function stripCssBlockComments(css: string): string {
@@ -397,17 +340,12 @@ export function minifyWidgetHtml(html: string): string {
 }
 
 // Return the fully-inlined HTML for a widget, assembling+caching on first use.
-export async function getWidgetHtml(
-    key: string,
-    opts?: WidgetHtmlOptions,
-): Promise<string> {
-    const v2 = opts?.v2 === true;
-    const ck = cacheKey(key, v2);
-    const cached = cache.get(ck);
+export async function getWidgetHtml(key: string): Promise<string> {
+    const cached = cache.get(key);
     if (cached !== undefined) return cached;
-    const raw = await assembleSource(key, opts);
+    const raw = await assembleSource(key);
     const html = minifyWidgetHtml(raw);
-    cache.set(ck, html);
+    cache.set(key, html);
     return html;
 }
 
@@ -738,7 +676,7 @@ export async function getAppV2Js(): Promise<string> {
 // rather than on a client's first request.
 export async function warmWidgets(): Promise<void> {
     await Promise.all([
-        ...widgetAssemblies().map(({ key, v2 }) => getWidgetHtml(key, { v2 })),
+        ...Object.keys(WIDGET_TEMPLATES).map((key) => getWidgetHtml(key)),
         getAppCss(),
         getAppJs(),
         getAppV2Css(),

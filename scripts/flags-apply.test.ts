@@ -19,7 +19,7 @@ function syncFile(): RolloutFile {
     return {
         internal: ["842478ef-82e8-41c9-b86a-5ce7f5644a0d"],
         flags: {
-            "mcp-widgets-v2": { default: false, rules: [] },
+            "mcp-share-links": { default: false, rules: [] },
             "off-lookups": { default: true, rules: [] },
             "recipe-link-reader": { default: true, rules: [] },
             "barcode-camera": { default: true, rules: [] },
@@ -32,7 +32,7 @@ function syncFile(): RolloutFile {
 function syncRailway(): RailwayFlag[] {
     return [
         {
-            name: "mcp-widgets-v2",
+            name: "mcp-share-links",
             type: "bool",
             default: false,
             rules: [],
@@ -79,14 +79,14 @@ describe("planFlagChanges", () => {
 
     test("changed default yields one set command", () => {
         const file = syncFile();
-        file.flags!["mcp-widgets-v2"] = { default: true, rules: [] };
+        file.flags!["mcp-share-links"] = { default: true, rules: [] };
         const plan = planFlagChanges(file, syncRailway(), PROJECT);
         expect(plan.commands).toEqual([
             [
                 "railway",
                 "flag",
                 "set",
-                "mcp-widgets-v2",
+                "mcp-share-links",
                 "true",
                 "--scope",
                 SCOPE,
@@ -97,7 +97,7 @@ describe("planFlagChanges", () => {
     test("missing flag plans create with type", () => {
         const file = syncFile();
         const railway = syncRailway().filter(
-            (f) => f.name !== "mcp-widgets-v2",
+            (f) => f.name !== "mcp-share-links",
         );
         const plan = planFlagChanges(file, railway, PROJECT);
         expect(plan.commands).toEqual([
@@ -105,7 +105,7 @@ describe("planFlagChanges", () => {
                 "railway",
                 "flag",
                 "set",
-                "mcp-widgets-v2",
+                "mcp-share-links",
                 "false",
                 "--type",
                 "bool",
@@ -117,7 +117,10 @@ describe("planFlagChanges", () => {
 
     test("internal rule expands to key expressions", () => {
         const file = syncFile();
-        file.flags!["mcp-widgets-v2"] = { default: false, rules: ["internal"] };
+        file.flags!["mcp-share-links"] = {
+            default: false,
+            rules: ["internal"],
+        };
         const plan = planFlagChanges(file, syncRailway(), PROJECT);
         const when = expandInternalRule(file.internal ?? []);
         expect(plan.commands).toEqual([
@@ -125,7 +128,7 @@ describe("planFlagChanges", () => {
                 "railway",
                 "flag",
                 "set",
-                "mcp-widgets-v2",
+                "mcp-share-links",
                 "true",
                 "--when",
                 when,
@@ -140,7 +143,7 @@ describe("planFlagChanges", () => {
     test("removed rule plans unset", () => {
         const file = syncFile();
         const railway = syncRailway().map((f) =>
-            f.name === "mcp-widgets-v2"
+            f.name === "mcp-share-links"
                 ? {
                       ...f,
                       rules: [
@@ -159,7 +162,7 @@ describe("planFlagChanges", () => {
                 "railway",
                 "flag",
                 "unset",
-                "mcp-widgets-v2",
+                "mcp-share-links",
                 "--rule-id",
                 "stale",
                 "--scope",
@@ -196,7 +199,7 @@ describe("planFlagChanges", () => {
 
     test("retired flags do not hide real drift", () => {
         const file = syncFile();
-        file.flags!["mcp-widgets-v2"] = { default: true, rules: [] };
+        file.flags!["mcp-share-links"] = { default: true, rules: [] };
         const railway: RailwayFlag[] = [
             ...syncRailway(),
             { name: "ui-v2", type: "bool", default: true, rules: [] },

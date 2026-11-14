@@ -4,7 +4,6 @@ import { createHash } from "node:crypto";
 import { deleteAvatar, getAvatar, setAvatar } from "../../db/avatars.js";
 import { AVATAR_MAX_BYTES, validateAvatar } from "../../domain/avatar.js";
 import { getBaseUrl } from "../../url.js";
-import { viewerFlagsFor } from "../attention.js";
 import { formText } from "../form.js";
 import { renderSettingsAccountV2Route } from "../loaders.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
@@ -21,11 +20,6 @@ const TOO_LARGE_MESSAGE = `Pictures must be ${AVATAR_MAX_BYTES / 1024} KB or sma
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function picturesOn(c: Context): Promise<boolean> {
-    const flags = await viewerFlagsFor(siteMember(c));
-    return flags.uiProfilePictures;
-}
-
 function notFound(c: Context): Response {
     return c.text("Not found", 404);
 }
@@ -38,7 +32,6 @@ function notFound(c: Context): Response {
 avatarRoutes.get("/avatars/:userId", requireSiteUser, async (c) => {
     const viewer = c.get("member");
     if (!viewer) return notFound(c);
-    if (!(await picturesOn(c))) return notFound(c);
     const target = c.req.param("userId");
     if (!UUID.test(target)) return notFound(c);
     // Scoped to the viewer's household, so another household's id finds nothing.
@@ -93,7 +86,6 @@ avatarRoutes.post(
     "/settings/account/photo",
     requireMember,
     async (c, next) => {
-        if (!(await picturesOn(c))) return notFound(c);
         return next();
     },
     bodyLimit({
@@ -147,7 +139,6 @@ avatarRoutes.post(
     "/settings/account/photo/remove",
     requireMember,
     async (c) => {
-        if (!(await picturesOn(c))) return notFound(c);
         const body = await c.req.parseBody();
         const backHref = settingsBackHref({
             from: formText(body, "from"),

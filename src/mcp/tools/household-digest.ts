@@ -5,8 +5,6 @@ import {
     buildHouseholdDigestForViewer,
     parseDigestWeekEnd,
 } from "../../db/household-digest.js";
-import { gatedTool } from "../gated.js";
-import { isViewerFlagOn } from "../../viewer-flags.js";
 import type {
     HouseholdDigest,
     HouseholdDigestMemberNutrition,
@@ -196,10 +194,7 @@ export function registerHouseholdDigestTools(
         };
     }
 
-    gatedTool(
-        server,
-        ctx,
-        "mcp-household-digest",
+    server.registerTool(
         "get_household_digest",
         {
             title: "Get Household Digest",
@@ -235,28 +230,26 @@ export function registerHouseholdDigestTools(
         },
     );
 
-    if (isViewerFlagOn(ctx.flags, "mcp-household-digest")) {
-        server.registerResource(
-            "weekly-household-digest",
-            "household://weekly-digest",
-            {
-                title: "Weekly Household Digest",
-                description:
-                    "Rolling household digest: expiring fridge stock, ran-out items, nutrition by member, and grocery suggestions. Good to pull at the start of a weekly check-in.",
-                mimeType: "text/plain",
-            },
-            async (uri) => {
-                const payload = await digestForCaller(undefined);
-                return {
-                    contents: [
-                        {
-                            uri: uri.href,
-                            mimeType: "text/plain",
-                            text: payload.content[0]!.text,
-                        },
-                    ],
-                };
-            },
-        );
-    }
+    server.registerResource(
+        "weekly-household-digest",
+        "household://weekly-digest",
+        {
+            title: "Weekly Household Digest",
+            description:
+                "Rolling household digest: expiring fridge stock, ran-out items, nutrition by member, and grocery suggestions. Good to pull at the start of a weekly check-in.",
+            mimeType: "text/plain",
+        },
+        async (uri) => {
+            const payload = await digestForCaller(undefined);
+            return {
+                contents: [
+                    {
+                        uri: uri.href,
+                        mimeType: "text/plain",
+                        text: payload.content[0]!.text,
+                    },
+                ],
+            };
+        },
+    );
 }

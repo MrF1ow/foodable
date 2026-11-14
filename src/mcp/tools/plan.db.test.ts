@@ -98,7 +98,7 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
         setSqlForTests(sql);
-        setFlagsForTests(createMemoryFlags({ "mcp-plan-tools": true }));
+        setFlagsForTests(createMemoryFlags({}));
         ({ householdId, userId: ownerId } = await seedHousehold(sql));
         recipeId = crypto.randomUUID();
         await sql`

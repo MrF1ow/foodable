@@ -58,7 +58,7 @@ function base(on: boolean, versions = VERSIONS): AppChromeBase {
     return {
         theme: "light",
         attention: { count: 0, tabs: {} },
-        flags: { ...FIXTURE_APP_CHROME_FLAGS, uiProfilePictures: on },
+        flags: FIXTURE_APP_CHROME_FLAGS,
         identity: identity(on, versions),
     };
 }
@@ -79,7 +79,7 @@ describe("shell sidebar account", () => {
             body: "<h1>B</h1>",
         } as AppChrome);
 
-    test("flag on with a picture: the img, with the initials kept under it", () => {
+    test("with a picture: the img, with the initials kept under it", () => {
         const html = shell(true);
         expect(html).toContain(`${imgFor(ME)}${T.getTime()}"`);
         expect(html).toContain("fd-avatar--photo");
@@ -89,20 +89,8 @@ describe("shell sidebar account", () => {
         expect(html.match(/<img class="fd-avatar__img"/g)?.length).toBe(2);
     });
 
-    test("flag on, no picture yet: initials only", () => {
+    test("no picture yet: initials only", () => {
         const html = shell(true, new Map());
-        expect(html).not.toContain("/avatars/");
-        expect(html).toContain(">EF<");
-    });
-
-    test("flag off: initials only even if versions were somehow present", () => {
-        const html = renderAppShell({
-            ...base(false),
-            identity: identity(true),
-            title: "T",
-            active: "nutrition",
-            body: "<h1>B</h1>",
-        } as AppChrome);
         expect(html).not.toContain("/avatars/");
         expect(html).toContain(">EF<");
     });
@@ -119,7 +107,7 @@ describe("phone header account chip", () => {
         return html.match(/<a class="fd-account-chip[^>]*>[\s\S]*?<\/a>/)![0];
     };
 
-    test("flag on with a picture: the viewer's img, initials kept under it", () => {
+    test("with a picture: the viewer's img, initials kept under it", () => {
         const html = chip(true);
         expect(html).toContain(`${imgFor(ME)}${T.getTime()}"`);
         expect(html).toContain("fd-account-chip--photo");
@@ -131,24 +119,10 @@ describe("phone header account chip", () => {
         );
     });
 
-    test("flag on, no picture yet: the plain initials chip", () => {
+    test("no picture yet: the plain initials chip", () => {
         const html = chip(true, new Map());
         expect(html).not.toContain("/avatars/");
         expect(html).not.toContain("fd-account-chip--photo");
-        expect(html).toContain(">EF</a>");
-    });
-
-    test("flag off: the plain initials chip", () => {
-        const html = renderAppShell({
-            ...base(false),
-            identity: identity(true),
-            title: "T",
-            active: "nutrition",
-            body: "<h1>B</h1>",
-        } as AppChrome).match(
-            /<a class="fd-account-chip[^>]*>[\s\S]*?<\/a>/,
-        )![0];
-        expect(html).not.toContain("/avatars/");
         expect(html).toContain(">EF</a>");
     });
 });
@@ -161,12 +135,12 @@ describe("Settings profile card", () => {
             email: "e@example.com",
         });
 
-    test("shows the viewer's picture when on", () => {
+    test("shows the viewer's picture", () => {
         const html = home(true);
         expect(html).toContain(imgFor(ME));
         expect(html).toContain("fd-settings-profile__avatar");
     });
-    test("initials when there is no picture or the flag is off", () => {
+    test("initials when there is no picture or the pictures did not load", () => {
         expect(home(true, new Map())).not.toContain("/avatars/");
         const off = home(false);
         expect(off).not.toContain("/avatars/");
@@ -198,7 +172,7 @@ describe("Household member rows", () => {
             '<span class="fd-avatar fd-settings-member-avatar" aria-hidden="true">EF</span>',
         );
     });
-    test("flag off: initials for everyone", () => {
+    test("pictures not loaded: initials for everyone", () => {
         const html = view(false);
         expect(html).not.toContain("/avatars/");
         expect(html).toContain(
@@ -255,7 +229,7 @@ describe("Product score member rows", () => {
             '<span class="fd-avatar fd-avatar--row" aria-hidden="true">EF</span>',
         );
     });
-    test("no versions given (flag off): initials only", () => {
+    test("no versions given: initials only", () => {
         expect(render(undefined)).not.toContain("/avatars/");
     });
 });
@@ -290,7 +264,7 @@ describe("Settings > Account", () => {
             photo,
         });
 
-    test("flag off: no photo control at all", () => {
+    test("no photo data: no photo control at all", () => {
         const html = page(undefined);
         expect(html).not.toContain('name="photo"');
         expect(html).not.toContain("Change photo");

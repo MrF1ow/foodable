@@ -381,14 +381,14 @@ describe("shareLinksEnabledFor", () => {
     test("another flag alone keeps nothing open", async () => {
         setFlagsForTests(
             createMemoryFlags({
-                "mcp-widgets-v2": true,
+                "barcode-camera": true,
                 "mcp-share-links": false,
             }),
         );
         expect(await shareLinksEnabledFor(link)).toBe(false);
         setFlagsForTests(
             createMemoryFlags({
-                "mcp-widgets-v2": false,
+                "barcode-camera": false,
                 "mcp-share-links": true,
             }),
         );

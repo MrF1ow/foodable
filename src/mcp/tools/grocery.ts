@@ -44,7 +44,6 @@ import {
 } from "../../domain/restock.js";
 import { RESTOCK_SCHEDULES } from "../../domain/foods.js";
 import { householdTodayAt } from "../../household.js";
-import { gatedTool } from "../gated.js";
 import {
     NotedGroceryLineAmountRequiredError,
     putAwayGroceryLines,
@@ -65,14 +64,12 @@ import {
     SIMILAR_FOODS_ENTRY,
     WRITE_STATUS,
     registerWidgetResource,
-    registerV2OnlyWidgetResource,
     uiMetaForKey,
     destructiveOutcome,
     uncapturedNote,
     withUndo,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
-import { isViewerFlagOn } from "../../viewer-flags.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
 import { GroceryInputError } from "../../domain/grocery.js";
 import {
@@ -85,7 +82,7 @@ import {
 } from "../../domain/grocery-lines.js";
 import { SettingsInputError } from "../../domain/settings.js";
 import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
-import { ADMIN_ID, HOUSEHOLD_ADMIN_FLAG } from "./stores.js";
+import { ADMIN_ID } from "./stores.js";
 
 export const ADD_GROCERY_LINE_OUTPUT_SCHEMA = z.object({
     status: WRITE_STATUS,
@@ -435,7 +432,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    registerWidgetResource(server, ctx, {
+    registerWidgetResource(server, {
         key: "grocery-list",
         resourceName: "grocery-list-widget",
         title: "Grocery List",
@@ -994,23 +991,15 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    // Only when list_usuals is on: a widget for a tool that is hidden would be
-    // a resource nothing links.
-    if (isViewerFlagOn(ctx.flags, "mcp-list-usuals")) {
-        registerV2OnlyWidgetResource(server, ctx, {
-            key: "restock-nudge",
-            resourceName: "restock-nudge",
-            title: "Restock",
-            description:
-                "The usuals that are due or running low, with Add to list, for list_usuals.",
-            flag: "widget-restock-nudge",
-        });
-    }
+    registerWidgetResource(server, {
+        key: "restock-nudge",
+        resourceName: "restock-nudge",
+        title: "Restock",
+        description:
+            "The usuals that are due or running low, with Add to list, for list_usuals.",
+    });
 
-    gatedTool(
-        server,
-        ctx,
-        "mcp-list-usuals",
+    server.registerTool(
         "list_usuals",
         {
             title: "List Usuals",
@@ -1023,10 +1012,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                 openWorldHint: false,
             },
             outputSchema: LIST_USUALS_OUTPUT_SCHEMA,
-            ...uiMetaForKey(ctx, "restock-nudge", {
-                v2: true,
-                flag: "widget-restock-nudge",
-            }),
+            ...uiMetaForKey(ctx, "restock-nudge"),
         },
         async () =>
             withAnalytics(
@@ -1140,9 +1126,9 @@ function asToolError(err: unknown): never {
 }
 
 /**
- * Clear, move and edit the grocery list. Behind `mcp-household-admin` with the
- * store tools: each one overwrites or removes what the household put on the
- * list, so each goes through the destructive guard.
+ * Clear, move and edit the grocery list. Like the store tools, each one
+ * overwrites or removes what the household put on the list, so each goes
+ * through the destructive guard.
  */
 export function registerGroceryListAdminTools(
     server: McpServer,
@@ -1150,10 +1136,7 @@ export function registerGroceryListAdminTools(
 ) {
     const { analytics, runDestructive } = ctx;
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "clear_grocery_list",
         {
             title: "Clear Grocery List",
@@ -1259,10 +1242,7 @@ export function registerGroceryListAdminTools(
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "move_grocery_lines",
         {
             title: "Move Grocery Lines",
@@ -1406,10 +1386,7 @@ export function registerGroceryListAdminTools(
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "update_grocery_line",
         {
             title: "Update Grocery Line",

@@ -1,11 +1,10 @@
-// The four kitchen admin tools (flag mcp-household-admin) against real
-// Postgres, through the real /mcp handler: move_fridge_items,
-// delete_fridge_items, delete_grocery_lines and remove_usual. Each records
-// what it changed in the household's activity log, says so in its result, can
-// be undone for 24 hours, and does nothing while the household's switch is Off.
-// The in-memory tests in src/mcp.test.ts cover the tool list with the flag on
-// and off and both protocol eras; what only the database can show is that the
-// snapshot holds every affected row (items, their stock movements, the lines
+// The four kitchen admin tools against real Postgres, through the real /mcp
+// handler: move_fridge_items, delete_fridge_items, delete_grocery_lines and
+// remove_usual. Each records what it changed in the household's activity log,
+// says so in its result, can be undone for 24 hours, and does nothing while the
+// household's switch is Off. The in-memory tests in src/mcp.test.ts cover the
+// tool list and both protocol eras; what only the database can show is that
+// the snapshot holds every affected row (items, their stock movements, the lines
 // that point at them, dismissed notices, a usual's products and schedule) and
 // that undo puts them all back exactly.
 import {
@@ -157,12 +156,7 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
         const { sql, truncateAll } = getCtx();
         await truncateAll();
         setSqlForTests(sql);
-        setFlagsForTests(
-            createMemoryFlags({
-                "mcp-household-admin": true,
-                "mcp-list-usuals": true,
-            }),
-        );
+        setFlagsForTests(createMemoryFlags({}));
         ({ householdId, userId: ownerId } = await seedHousehold(sql));
         storeId = await seedGroceryStore(sql, householdId);
         await sql`
@@ -1036,17 +1030,5 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
         });
         expect((await undo(entry!.id)).status).toBe("undone");
         expect(await count("fridge_items")).toBe(1);
-    });
-
-    test("with the flag off the four tools are not there to call", async () => {
-        setFlagsForTests(createMemoryFlags({ "mcp-household-admin": false }));
-        for (const name of KITCHEN_ADMIN_TOOL_NAMES) {
-            const result = await call(name, {}).catch((err: Error) => err);
-            expect(
-                result instanceof Error ? result.message : text(result),
-                name,
-            ).toMatch(/not found/i);
-        }
-        expect(await actions()).toEqual([]);
     });
 });

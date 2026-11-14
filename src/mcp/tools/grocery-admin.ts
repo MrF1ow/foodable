@@ -7,7 +7,6 @@ import { BULK_MAX_IDS } from "../../domain/bulk.js";
 import { FoodsInputError, type FoodsStore } from "../../domain/foods.js";
 import { GroceryInputError } from "../../domain/grocery.js";
 import { removeUsual } from "../../domain/usual-add.js";
-import { gatedTool } from "../gated.js";
 import {
     captureDismissals,
     destructiveOutcome,
@@ -17,7 +16,6 @@ import {
     type ToolContext,
 } from "../shared.js";
 import { ADMIN_UNDO_NOTE } from "./grocery.js";
-import { HOUSEHOLD_ADMIN_FLAG } from "./stores.js";
 
 /** The tool names this module registers, in registration order. */
 export const GROCERY_ADMIN_TOOL_NAMES = [
@@ -62,17 +60,14 @@ function asToolError(err: unknown): never {
 }
 
 /**
- * Delete several grocery lines and take a food off the Usuals list. Behind
- * `mcp-household-admin` with the other admin tools: each goes through the
- * destructive guard, so what it changed is recorded and can be undone.
+ * Delete several grocery lines and take a food off the Usuals list. Like the
+ * other admin tools, each goes through the destructive guard, so what it
+ * changed is recorded and can be undone.
  */
 export function registerGroceryAdminTools(server: McpServer, ctx: ToolContext) {
     const { analytics, runDestructive } = ctx;
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "delete_grocery_lines",
         {
             title: "Delete Grocery Lines",
@@ -180,10 +175,7 @@ export function registerGroceryAdminTools(server: McpServer, ctx: ToolContext) {
             ),
     );
 
-    gatedTool(
-        server,
-        ctx,
-        HOUSEHOLD_ADMIN_FLAG,
+    server.registerTool(
         "remove_usual",
         {
             title: "Remove Usual",

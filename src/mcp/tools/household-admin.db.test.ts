@@ -1,12 +1,11 @@
-// The grocery and store admin tools (flag mcp-household-admin) against real
-// Postgres, through the real /mcp handler. Each destructive one records what it
-// removed or changed in the household's activity log, says so in its result,
-// can be undone for 24 hours, and does nothing at all while the household's
-// switch is Off. The in-memory tests in src/mcp.test.ts cover the tool list
-// with the flag on and off and both protocol eras; what only the database can
-// show is that the snapshot holds every affected row (lines, sections, store
-// rules, the default store in the household's preferences, a food's usual
-// store, dismissed notices) and that undo puts them all back exactly.
+// The grocery and store admin tools against real Postgres, through the real
+// /mcp handler. Each destructive one records what it removed or changed in the
+// household's activity log, says so in its result, can be undone for 24 hours,
+// and does nothing at all while the household's switch is Off. The in-memory
+// tests in src/mcp.test.ts cover the tool list and both protocol eras; what
+// only the database can show is that the snapshot holds every affected row
+// (lines, sections, store rules, the default store in the household's
+// preferences, a food's usual store, dismissed notices) and that undo puts them all back exactly.
 import {
     Client,
     StreamableHTTPClientTransport,
@@ -151,9 +150,7 @@ describeDb(
             const { sql, truncateAll } = getCtx();
             await truncateAll();
             setSqlForTests(sql);
-            setFlagsForTests(
-                createMemoryFlags({ "mcp-household-admin": true }),
-            );
+            setFlagsForTests(createMemoryFlags({}));
             ({ householdId, userId: ownerId } = await seedHousehold(sql));
         });
 
@@ -1583,54 +1580,6 @@ describeDb(
                 expect(refused.isError).toBe(true);
                 expect(text(refused)).toContain(REFUSAL);
                 expect(await storeNames()).toEqual(["Aldi", "Costco"]);
-            },
-        );
-
-        test.each(ERAS)(
-            "with the flag off none of the nine tools is listed or callable (%p)",
-            async (era) => {
-                setFlagsForTests(
-                    createMemoryFlags({ "mcp-household-admin": false }),
-                );
-                const app = new Hono();
-                app.all("/mcp", (c) => {
-                    c.set("authContext", { kind: "user", userId: ownerId });
-                    return handleMcp(c);
-                });
-                const client = new Client(
-                    { name: "t", version: "0" },
-                    { versionNegotiation: { mode: era } },
-                );
-                await client.connect(
-                    new StreamableHTTPClientTransport(
-                        new URL("http://test.local/mcp"),
-                        {
-                            fetch: async (url, init) =>
-                                app.request(new Request(String(url), init)),
-                        },
-                    ),
-                );
-                try {
-                    const listed = (await client.listTools()).tools.map(
-                        (tool) => tool.name,
-                    );
-                    for (const name of ADMIN_TOOLS) {
-                        expect(listed, name).not.toContain(name);
-                    }
-                    // The tools that were always there stay.
-                    expect(listed).toContain("clear_checked_grocery_lines");
-                    const called = await client
-                        .callTool({ name: "clear_grocery_list", arguments: {} })
-                        .catch((err: Error) => err);
-                    expect(
-                        called instanceof Error
-                            ? called.message
-                            : JSON.stringify(called),
-                    ).toMatch(/not found|unknown|Unknown/i);
-                    expect(await count("agent_actions")).toBe(0);
-                } finally {
-                    await client.close();
-                }
             },
         );
     },
