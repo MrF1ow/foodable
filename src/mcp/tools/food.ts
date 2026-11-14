@@ -341,6 +341,22 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                         }
                     }
 
+                    // Whatever answered the nutrition (cache, paused catalog,
+                    // online), a household food filed under this barcode is
+                    // the one an agent passes on, so its id ends the text.
+                    const householdTag = async () => {
+                        try {
+                            const foodId =
+                                await liveFoodsStore().getBarcodeFoodId(
+                                    householdId,
+                                    normalized,
+                                );
+                            return foodId ? idTag(foodId, "food_id") : "";
+                        } catch {
+                            return "";
+                        }
+                    };
+
                     if (!food) {
                         const miss = pausedNote
                             ? `No saved food found for barcode ${normalized} in your household catalog. Ask the user what the product is, or estimate the macros, then log the meal.`
@@ -349,9 +365,11 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: pausedNote
-                                        ? `${pausedNote}\n\n${miss}`
-                                        : miss,
+                                    text: `${
+                                        pausedNote
+                                            ? `${pausedNote}\n\n${miss}`
+                                            : miss
+                                    }${await householdTag()}`,
                                 },
                             ],
                         };
@@ -376,9 +394,11 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: pausedNote
-                                    ? `${pausedNote}\n\n${body}`
-                                    : body,
+                                text: `${
+                                    pausedNote
+                                        ? `${pausedNote}\n\n${body}`
+                                        : body
+                                }${await householdTag()}`,
                             },
                         ],
                     };

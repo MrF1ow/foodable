@@ -164,7 +164,23 @@ function wireMentionWarnings(warnings: readonly MentionWarning[]) {
 function mentionWarningsText(warnings: readonly MentionWarning[]): string {
     if (warnings.length === 0) return "";
     return `\nThe steps mention foods that are not ingredients. This never blocks anything: ask the user whether to add each one, and call add_recipe_ingredient only if they say yes.\n${warnings
-        .map((w) => `- ${w.message} ("${w.excerpt}")`)
+        .map(
+            (w) =>
+                `- ${w.message} ("${w.excerpt}")${w.foodId ? idTag(w.foodId, "food_id") : ""}`,
+        )
+        .join("\n")}`;
+}
+
+/** What cooking one portion takes from the fridge, naming each item by id. */
+function cookPreviewText(
+    cook: ReturnType<typeof cookPreviewWire> | null,
+): string {
+    if (!cook || cook.lines.length === 0) return "";
+    return `\nCooking one portion takes from the fridge:\n${cook.lines
+        .map(
+            (line) =>
+                `- ${line.display_name} ${line.before} → ${line.after} ${line.unit}${idTag(line.from_item_id)}`,
+        )
         .join("\n")}`;
 }
 
@@ -894,7 +910,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${perPortionLine}${allergenBlock}\n${ingredientBlock}${stepsLines}${getRecipeImportText(payload)}${mentionWarningsText(mentionWarnings)}`,
+                                text: `${perPortionLine}${allergenBlock}\n${ingredientBlock}${stepsLines}${getRecipeImportText(payload)}${cookPreviewText(cookWire)}${mentionWarningsText(mentionWarnings)}`,
                             },
                         ],
                         structuredContent: payload,

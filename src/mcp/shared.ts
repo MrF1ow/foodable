@@ -1220,6 +1220,20 @@ export function noticeIdTags(notice: WireNotice): string {
     return tags.join("");
 }
 
+/**
+ * The ids a row's notices relate it to (a member whose allergy it trips), each
+ * labelled by the input that takes it. The row's own id is tagged by the
+ * caller, so a notice's subject is not repeated here.
+ */
+export function noticeRelatedTags(notices: readonly WireNotice[]): string {
+    const seen = new Set<string>();
+    return notices
+        .flatMap((notice) => notice.related)
+        .filter((related) => !seen.has(related.id) && seen.add(related.id))
+        .map((related) => idTag(related.id, NOTICE_KIND_INPUT[related.kind]))
+        .join("");
+}
+
 export function formatWeightEntry(
     entry: WeightEntry,
     unit: WeightUnit,

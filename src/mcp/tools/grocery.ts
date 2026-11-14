@@ -69,6 +69,7 @@ import {
     uncapturedNote,
     withUndo,
     idTag,
+    noticeRelatedTags,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
@@ -435,7 +436,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             ? `${line.display_name} · ${note}`
                             : `${line.display_name} ${line.amount} ${line.unit}`;
                         const checked = line.checked ? " [checked]" : "";
-                        return `${lineText}${checked}${tag}${blockSuffix}${idTag(line.id)}`;
+                        return `${lineText}${checked}${tag}${blockSuffix}${idTag(line.id)}${noticeRelatedTags(line.notices)}`;
                     };
                     const text =
                         lineCount === 0
@@ -661,7 +662,7 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: `${bits.join(". ")}${idTag(line.id)}${args.store_id ? "" : idTag(line.storeId, "store_id")}`,
+                                    text: `${bits.join(". ")}${idTag(line.id)}${args.store_id ? "" : idTag(line.storeId, "store_id")}${noticeRelatedTags(extras.notices.map(noticeToWire))}`,
                                 },
                             ],
                             structuredContent: {

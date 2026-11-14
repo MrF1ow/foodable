@@ -33,6 +33,7 @@ import {
     resetFlagsForTests,
     setFlagsForTests,
 } from "../../flags.js";
+import { putCachedFood, type FoodResult } from "../../foods.js";
 import { handleMcp } from "../server.js";
 import { stripIdTags } from "../shared.js";
 
@@ -87,6 +88,8 @@ type Seed = {
     /** A food saved with a barcode, for the paused-lookup path. */
     barcoded: string;
     barcode: string;
+    /** An allergenic food (peanut) the second member cannot eat. */
+    peanutOil: string;
 };
 
 /** Runs one seeding tool call as the caller; a row may use it to make what it acts on. */
@@ -127,6 +130,67 @@ const withNewRow = (args: CallRow, newRow: RowTable): CallSpec => ({
     newRow,
 });
 
+/** A servable Open Food Facts cache row, so a lookup needs no network. */
+function cachedOff(barcode: string): FoodResult {
+    const per100 = {
+        calories: 50,
+        protein_g: 1,
+        carbs_g: 10,
+        fat_g: 1,
+        fiber_g: null,
+        sugar_g: 5,
+        saturated_fat_g: null,
+        alcohol_g: null,
+    };
+    return {
+        name: "Cached Soda",
+        brand: "Fizz",
+        serving: "100 g",
+        ...per100,
+        per_100: per100,
+        nutrition_basis: "100g",
+        nutrient_levels: null,
+        nutriscore_grade: null,
+        nova_group: null,
+        quality: {
+            nutriscore_grade: null,
+            nova_group: null,
+            ecoscore_grade: null,
+            additives_tags: null,
+            allergens_tags: null,
+            traces_tags: null,
+            ingredients_analysis_tags: null,
+            labels_tags: null,
+            fetched_at: new Date().toISOString(),
+        },
+        source: `off:${barcode}`,
+        source_name: "openfoodfacts",
+        barcode,
+    };
+}
+
+/** Saves a household food under the barcode and caches an OFF row for it. */
+const cachedFoods: Record<string, string> = {};
+async function cachedBarcodeFood(make: Make, barcode: string) {
+    const food = await make("upsert_food", {
+        name: `Cached ${barcode}`,
+        barcode,
+        on_similar: "create",
+    });
+    cachedFoods[barcode] = food.id as string;
+    await putCachedFood("openfoodfacts", barcode, cachedOff(barcode));
+    return { barcode };
+}
+
+/** Eggs in stock, milk only in the steps. */
+const scrambleArgs = (s: Seed) => ({
+    text: "Scramble",
+    name: "Scramble",
+    yield_portions: 2,
+    ingredients: [{ name: "Eggs", amount: 2, unit: "each", food_id: s.eggs }],
+    instructions: "1. Whisk the eggs with milk.\n2. Fry until set.",
+});
+
 const URL_IMPORT_TEXT =
     "Pancakes\n\nIngredients\n2 cups flour\n1 egg\nbutter\nsome mystery batter\n\nMethod\nMix and fry.";
 
@@ -142,6 +206,13 @@ const CALLS: Record<string, CallRow | CallSpec> = {
     list_stores: () => ({}),
     list_recipes: () => ({}),
     get_recipe: (s) => ({ id: s.recipe }),
+    // A verified recipe whose eggs the fridge covers (cook_preview names the
+    // fridge item a cook would take from) and whose steps name milk, which the
+    // ingredients lack (mention_warnings).
+    "get_recipe#cook-preview": async (s, make) => {
+        const made = await make("import_recipe_from_text", scrambleArgs(s));
+        return { id: (made.recipe as { id: string }).id };
+    },
     get_week_plan: () => ({}),
     get_household_rules: () => ({}),
     search_food: () => ({ query: "eggs" }),
@@ -206,6 +277,18 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         flags: { "off-lookups": false },
         textIds: (s) => [s.barcoded],
     },
+    // The product is in the lookup cache, so something other than the household
+    // catalog answers the nutrition: the household food's id is still owed.
+    "lookup_barcode#cached-paused": {
+        args: (_s, make) => cachedBarcodeFood(make, "5449000000101"),
+        flags: { "off-lookups": false },
+        textIds: () => [cachedFoods["5449000000101"]!],
+    },
+    "lookup_barcode#cached-online": {
+        args: (_s, make) => cachedBarcodeFood(make, "5449000000202"),
+        flags: { "off-lookups": true },
+        textIds: () => [cachedFoods["5449000000202"]!],
+    },
     start_meal_import: noIds(
         "returns only the caller's own id and timezone",
         () => ({}),
@@ -241,6 +324,14 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         amount: 1,
         unit: "each",
     }),
+    // A peanut food: the allergen notice names Bee, whose id is owed.
+    "add_grocery_line#allergen": (s) => ({
+        store_id: s.storeId,
+        kind: "food",
+        food_id: s.peanutOil,
+        amount: 1,
+        unit: "each",
+    }),
     create_store: () => ({ name: "Aldi", sections: ["Dairy", "Bakery"] }),
     create_recipe: () => ({ name: "Pancakes", yield_portions: 2 }),
     add_recipe_ingredient: (s) => ({
@@ -256,6 +347,9 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         ingredients: [{ name: "Bread", amount: 2, unit: "each" }],
         on_similar: "create",
     }),
+    // The steps name milk, which the ingredients lack: the warning says to call
+    // add_recipe_ingredient, so its food_id must be in the text.
+    "import_recipe_from_text#mentions": (s) => scrambleArgs(s),
     // Pasted text and a URL that cannot resolve, so it runs offline. The
     // bare "butter" has no amount, so the import carries a problem on an ingredient.
     import_recipe_from_url: () => ({
@@ -1043,6 +1137,29 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
             unit: "g",
         });
         await ok("discard_fridge_item", { id: sugarItem.id, amount: 1 });
+        // Bee is allergic to peanuts, so a peanut food on the list carries an
+        // allergen notice that names Bee.
+        await sql`
+            insert into public.member_allergens (household_id, user_id, allergen)
+            values (${householdId}, ${member}, 'peanut')
+        `;
+        const peanutButter = (await ok("upsert_food", {
+            name: "Peanut Butter",
+            allergens: ["peanut"],
+            on_similar: "create",
+        })) as { id: string };
+        await ok("add_grocery_line", {
+            store_id: store.id,
+            kind: "food",
+            food_id: peanutButter.id,
+            amount: 1,
+            unit: "each",
+        });
+        const peanutOil = (await ok("upsert_food", {
+            name: "Peanut Oil",
+            allergens: ["peanut"],
+            on_similar: "create",
+        })) as { id: string };
         const barcode = "5449000000996";
         const barcoded = (await ok("upsert_food", {
             name: "Seltzer Bottle",
@@ -1075,6 +1192,7 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
             spareItem: spare!.id,
             barcoded: barcoded.id,
             barcode,
+            peanutOil: peanutOil.id,
         };
     }
 
