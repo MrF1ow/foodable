@@ -639,11 +639,20 @@
     gap: var(--fd-s-12);
 }
 
-.fd-settings-household-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--fd-s-6);
-    margin-bottom: var(--fd-s-6);
+/* The household name as the page title, the count under it (FigCraft
+ * 62119 / 62121). */
+.fd-settings-hh-head {
+    margin-bottom: var(--fd-s-12);
+}
+
+.fd-settings-title.fd-settings-hh-title {
+    font: 600 22px/28px var(--font-body);
+}
+
+.fd-settings-hh-sub {
+    margin: 4px 0 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
 }
 
 .fd-settings-household-name {
@@ -1818,4 +1827,81 @@
     .fd-settings-members-card {
         padding: var(--fd-s-6) 22px;
     }
+}
+
+/* Settings › Household › the nine-row group, and the pages behind its rows
+ * (Restock, Recipe link readers, Dismissed notices). The rows are the stores
+ * page's `fd-stores-pref`; the card is drawn here because the stores rules are
+ * scoped to `.fd-stores`. */
+.fd-settings-hh .fd-list--card {
+    padding: 0;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-hh .fd-list--card > .fd-row:last-child {
+    border-bottom: 0;
+}
+
+.fd-settings-hh .fd-list--card > .fd-row > .fd-row__body {
+    padding-inline: 16px;
+}
+
+.fd-restock-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--fd-s-12);
+    margin: 0;
+}
+
+.fd-restock-form .fd-settings-field {
+    flex: 1 1 9rem;
+}
+
+.fd-readers .fd-stores-pref .fd-switch,
+.fd-restock .fd-stores-pref .fd-switch {
+    margin-left: auto;
+}
+
+.fd-dismissed .fd-row--dismissed .fd-row__body {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-12);
+    padding-block: var(--fd-s-10);
+}
+
+.fd-dismissed .fd-row--dismissed .fd-row__main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fd-dismissed .fd-row--dismissed .fd-row__actions {
+    flex: none;
+    margin: 0;
+}
+
+@media (min-width: 1024px) {
+    .fd-settings-hh .fd-list--card > .fd-row > .fd-row__body {
+        padding-inline: 18px;
+    }
+}
+
+/* Long values (a household name, a time zone) shrink with an ellipsis; the
+ * label keeps its full width. */
+.fd-settings-hh .fd-stores-pref__main {
+    flex: 1 0 auto;
+}
+
+.fd-settings-hh .fd-stores-pref__value {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fd-restock-form .fd-settings-submit {
+    flex: none;
 }

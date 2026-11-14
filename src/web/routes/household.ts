@@ -1,7 +1,11 @@
 import { Hono, type Context } from "hono";
 
 import {
+    listAllRefusalHosts,
+    renderHouseholdDismissedRoute,
     renderHouseholdMemberRoute,
+    renderHouseholdReadersRoute,
+    renderHouseholdRestockRoute,
     renderHouseholdSettingsRoute,
 } from "../loaders.js";
 import { formText } from "../form.js";
@@ -24,8 +28,9 @@ import {
     checkManagedMember,
     type HouseholdMember,
     parseMemberInput,
-    parseUnverifiedRecipeExpiryDays,
     mergeHouseholdConfig,
+    parseHouseholdConfigPatch,
+    parseHouseholdSettingsForm,
 } from "../../household.js";
 import {
     generateHouseholdToken,
@@ -107,6 +112,14 @@ import {
     HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
 } from "../pages/v2/settings-household-modals.js";
+import {
+    HOUSEHOLD_EXPIRY_SHEET_ID,
+    HOUSEHOLD_LOCATION_SHEET_ID,
+    HOUSEHOLD_NAME_SHEET_ID,
+    HOUSEHOLD_TIMEZONE_SHEET_ID,
+} from "../pages/v2/settings-household.js";
+import { RESTOCK_PATH } from "../pages/v2/settings-restock.js";
+import { READERS_PATH } from "../pages/v2/settings-readers.js";
 import { SOCIAL_READER_LABELS } from "../../copy/social-readers.js";
 import {
     FOODS_MERGE_MODAL_ID,
@@ -135,7 +148,7 @@ import { settingsBackHref } from "../settings-back.js";
 import { getBaseUrl } from "../../url.js";
 import { forbiddenDashboardHtml } from "../loaders.js";
 
-// TOAST_KEYS: "household.fetch-refusal.cleared"
+// TOAST_KEYS: "household.fetch-refusal.cleared", "household.fetch-refusals.cleared-all", "household.restock.saved", "household.timezone.saved"
 
 import { usualAddRoutes } from "./usual-add.js";
 
@@ -180,22 +193,153 @@ householdRoutes.get(
     },
 );
 
+async function readersFormError(
+    userId: string,
+    message: string,
+    openModalId?: string,
+) {
+    const page = await renderHouseholdReadersRoute(userId, {
+        error: message,
+        openModalId,
+    });
+    return { html: page.html, status: 400 as const };
+}
+
+/** The form fields an owner/admin settings post carries, by name. */
+function householdFormFields(
+    body: Record<string, unknown>,
+    keys: readonly string[],
+): Record<string, string | undefined> {
+    const out: Record<string, string | undefined> = {};
+    for (const key of keys) {
+        if (key in body) out[key] = formText(body as never, key);
+    }
+    return out;
+}
+
+/** Parses a household settings form and saves it over the current config. */
+async function saveHouseholdSettingsForm(
+    householdId: string,
+    body: Record<string, unknown>,
+    keys: readonly string[],
+): Promise<{ ok: true } | { ok: false; error: string }> {
+    const patch = parseHouseholdConfigPatch(
+        parseHouseholdSettingsForm(householdFormFields(body, keys)),
+    );
+    if (!patch.ok) return patch;
+    const config = await getHouseholdConfig(householdId);
+    await updateHouseholdConfig(
+        householdId,
+        mergeHouseholdConfig(config, patch.value),
+    );
+    return { ok: true };
+}
+
+householdRoutes.get(
+    "/settings/household/restock",
+    requireSiteUser,
+    async (c) => {
+        const page = await renderHouseholdRestockRoute(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/restock",
+    requireManager,
+    async (c) => {
+        const manager = siteMember(c);
+        const body = await c.req.parseBody();
+        const saved = await saveHouseholdSettingsForm(
+            manager.householdId,
+            body,
+            ["restock_enabled", "restock_weekday", "restock_time"],
+        );
+        if (!saved.ok) {
+            const page = await renderHouseholdRestockRoute(c.get("userId"), {
+                error: saved.error,
+            });
+            return c.html(page.html, 400);
+        }
+        return redirectWithToast(c, RESTOCK_PATH, "household.restock.saved");
+    },
+);
+
+householdRoutes.get(
+    "/settings/household/readers",
+    requireSiteUser,
+    async (c) => {
+        const page = await renderHouseholdReadersRoute(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+householdRoutes.get(
+    "/settings/household/dismissed",
+    requireSiteUser,
+    async (c) => {
+        const page = await renderHouseholdDismissedRoute(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/timezone",
+    requireManager,
+    async (c) => {
+        const manager = siteMember(c);
+        const body = await c.req.parseBody();
+        const saved = await saveHouseholdSettingsForm(
+            manager.householdId,
+            body,
+            ["timezone"],
+        );
+        if (!saved.ok) {
+            const page = await renderHouseholdSettingsRoute(c.get("userId"), {
+                error: saved.error,
+                openModalId: HOUSEHOLD_TIMEZONE_SHEET_ID,
+            });
+            return c.html(page.html, 400);
+        }
+        return redirectWithToast(
+            c,
+            "/settings/household",
+            "household.timezone.saved",
+        );
+    },
+);
+
+// Clears blocked links: one host when `host` is posted, otherwise every one
+// the household has.
 householdRoutes.post(
     "/settings/household/fetch-refusals/clear",
     requireManager,
     async (c) => {
+        const userId = c.get("userId");
         const member = siteMember(c);
         const body = await c.req.parseBody();
         const hostRaw = formText(body, "host").trim();
+        const memory: FetchMemoryStore = recipeFetchMemory();
+        if (hostRaw === "") {
+            const hosts = await listAllRefusalHosts(memory, member.householdId);
+            for (const host of hosts) {
+                await memory.clearRefusal(member.householdId, host);
+            }
+            return redirectWithToast(
+                c,
+                READERS_PATH,
+                "household.fetch-refusals.cleared-all",
+            );
+        }
         const host = normalizeMemoryHost(hostRaw);
         if (!host) {
-            return c.text("Bad Request", 400);
+            const page = await readersFormError(userId, "Enter a valid host.");
+            return c.html(page.html, page.status);
         }
-        const memory: FetchMemoryStore = recipeFetchMemory();
         await memory.clearRefusal(member.householdId, host);
         return redirectWithToast(
             c,
-            "/settings/household",
+            READERS_PATH,
             "household.fetch-refusal.cleared",
             { host: truncateToastParam(host) },
         );
@@ -477,6 +621,7 @@ householdRoutes.post("/settings/household/name", requireManager, async (c) => {
     if (!name) {
         const page = await renderHouseholdSettingsRoute(userId, {
             error: "Enter a household name.",
+            openModalId: HOUSEHOLD_NAME_SHEET_ID,
         });
         return c.html(page.html, 400);
     }
@@ -510,22 +655,21 @@ householdRoutes.post(
                   ? HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID
                   : undefined;
         if (!reader || (enabledRaw !== "1" && enabledRaw !== "0")) {
-            const page = await renderHouseholdSettingsRoute(userId, {
-                error: "Unknown reader.",
-            });
-            return c.html(page.html, 400);
+            const page = await readersFormError(userId, "Unknown reader.");
+            return c.html(page.html, page.status);
         }
         if (enabled && formText(body, "confirm").trim() !== "1") {
-            const page = await renderHouseholdSettingsRoute(userId, {
-                error: "Confirm you understand the terms before turning this on.",
-                openModalId: modalId,
-            });
-            return c.html(page.html, 400);
+            const page = await readersFormError(
+                userId,
+                "Confirm you understand the terms before turning this on.",
+                modalId,
+            );
+            return c.html(page.html, page.status);
         }
         await updateSocialReaderEnabled(owner.householdId, reader, enabled);
         return redirectWithToast(
             c,
-            "/settings/household",
+            READERS_PATH,
             enabled
                 ? "household.social-reader.on"
                 : "household.social-reader.off",
@@ -558,24 +702,18 @@ householdRoutes.post(
         const userId = c.get("userId");
         const manager = siteMember(c);
         const body = await c.req.parseBody();
-        const raw = formText(body, "unverified_recipe_expiry_days").trim();
-        const parsed = parseUnverifiedRecipeExpiryDays(
-            raw === "" ? null : raw,
-            false,
+        const saved = await saveHouseholdSettingsForm(
+            manager.householdId,
+            body,
+            ["unverified_recipe_expiry_days"],
         );
-        if (!parsed.ok) {
+        if (!saved.ok) {
             const page = await renderHouseholdSettingsRoute(userId, {
-                error: parsed.error,
+                error: saved.error,
+                openModalId: HOUSEHOLD_EXPIRY_SHEET_ID,
             });
             return c.html(page.html, 400);
         }
-        const config = await getHouseholdConfig(manager.householdId);
-        await updateHouseholdConfig(
-            manager.householdId,
-            mergeHouseholdConfig(config, {
-                preferences: { unverifiedRecipeExpiryDays: parsed.value },
-            }),
-        );
         return redirectWithToast(
             c,
             "/settings/household",
@@ -588,13 +726,23 @@ householdRoutes.post(
     "/settings/household/location",
     requireManager,
     async (c) => {
+        const userId = c.get("userId");
         const manager = siteMember(c);
         const body = await c.req.parseBody();
-        await setHouseholdLocation(
-            liveSettingsStore(),
-            manager.householdId,
-            formText(body, "location"),
-        );
+        try {
+            await setHouseholdLocation(
+                liveSettingsStore(),
+                manager.householdId,
+                formText(body, "location"),
+            );
+        } catch (err) {
+            const page = await householdFormError(
+                userId,
+                err,
+                HOUSEHOLD_LOCATION_SHEET_ID,
+            );
+            return c.html(page.html, page.status);
+        }
         return redirectWithToast(
             c,
             "/settings/household",

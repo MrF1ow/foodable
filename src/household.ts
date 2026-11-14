@@ -36,6 +36,8 @@ export type RestockPreferences = {
     weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6;
     time: string;
     lastRunOn: string | null;
+    /** Grocery lines the last run added; missing means unknown (older runs). */
+    lastRunAdded?: number | null;
 };
 
 export const DEFAULT_RESTOCK: RestockPreferences = {
@@ -262,6 +264,11 @@ function parseRestockFromStorage(value: unknown): RestockPreferences {
             LOCAL_DATE_RE.test(raw.lastRunOn)
                 ? raw.lastRunOn
                 : null,
+        ...(typeof raw.lastRunAdded === "number" &&
+        Number.isInteger(raw.lastRunAdded) &&
+        raw.lastRunAdded >= 0
+            ? { lastRunAdded: raw.lastRunAdded }
+            : {}),
     };
 }
 
@@ -1055,6 +1062,58 @@ export function parseHouseholdConfigPatch(
     return { ok: true, value: patch };
 }
 
+const FORM_SWITCH_ON = new Set(["on", "1", "true"]);
+const FORM_SWITCH_OFF = new Set(["off", "0", "false"]);
+
+/**
+ * Coerces the strings a Household settings form posts into the typed shape
+ * `parseHouseholdConfigPatch` checks: `on`/`off` become booleans, the weekday
+ * a number, `HH:MM` stays text and an empty field is null. Only fields the
+ * form carries appear, and a value that does not coerce is passed through
+ * as it came so the patch parser names the error.
+ */
+export function parseHouseholdSettingsForm(
+    form: Readonly<Record<string, string | undefined>>,
+): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    const text = (key: string): string | undefined => {
+        const value = form[key];
+        return value === undefined ? undefined : value.trim();
+    };
+    const enabled = text("restock_enabled");
+    if (enabled !== undefined) {
+        const lower = enabled.toLowerCase();
+        out.restock_enabled = FORM_SWITCH_ON.has(lower)
+            ? true
+            : FORM_SWITCH_OFF.has(lower)
+              ? false
+              : enabled === ""
+                ? null
+                : enabled;
+    }
+    const weekday = text("restock_weekday");
+    if (weekday !== undefined) {
+        out.restock_weekday =
+            weekday === ""
+                ? null
+                : /^\d+$/.test(weekday)
+                  ? Number(weekday)
+                  : weekday;
+    }
+    const time = text("restock_time");
+    if (time !== undefined) out.restock_time = time === "" ? null : time;
+    const timezone = text("timezone");
+    if (timezone !== undefined)
+        out.timezone = timezone === "" ? null : timezone;
+    const expiry = text("unverified_recipe_expiry_days");
+    if (expiry !== undefined) {
+        out.preferences = {
+            unverified_recipe_expiry_days: expiry === "" ? null : expiry,
+        };
+    }
+    return out;
+}
+
 export function mergeHouseholdConfig(
     current: HouseholdConfig,
     patch: HouseholdConfigPatch,
@@ -1094,6 +1153,9 @@ export function mergeHouseholdConfig(
                         ? patch.preferences.restock.time
                         : current.preferences.restock.time,
                 lastRunOn: current.preferences.restock.lastRunOn,
+                ...(current.preferences.restock.lastRunAdded != null
+                    ? { lastRunAdded: current.preferences.restock.lastRunAdded }
+                    : {}),
             },
             unverifiedRecipeExpiryDays:
                 patch.preferences?.unverifiedRecipeExpiryDays !== undefined

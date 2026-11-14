@@ -63,9 +63,10 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
         const store = liveRestockStore();
         const line = sampleLine(householdId, storeId, sectionId, foodId);
         const ok = await store.commitRestockRun(householdId, runOn, [line]);
-        expect(ok).toBe(true);
+        expect(ok).toBe(1);
         const config = await getHouseholdConfig(householdId);
         expect(config.preferences.restock.lastRunOn).toBe(runOn);
+        expect(config.preferences.restock.lastRunAdded).toBe(1);
         const lines = await sql`
             select id, source from grocery_lines where household_id = ${householdId}
         `;
@@ -122,7 +123,7 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
         const restock = liveRestockStore();
         const line = sampleLine(householdId, storeId, sectionId, foodId);
         expect(await restock.commitRestockRun(householdId, runOn, [line])).toBe(
-            true,
+            1,
         );
         const second = sampleLine(householdId, storeId, sectionId, foodId);
         expect(
@@ -188,13 +189,15 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
                 [runLine],
                 new Map([[runLine.id, family]]),
             ),
-        ).toBe(true);
+        ).toBe(0);
         const lines = await sql`
             select id from grocery_lines where household_id = ${householdId}
         `;
         expect(lines).toEqual([{ id: cardLine.id }]);
         const config = await getHouseholdConfig(householdId);
         expect(config.preferences.restock.lastRunOn).toBe("2026-06-12");
+        // The card's line was already listed, so the run added none.
+        expect(config.preferences.restock.lastRunAdded).toBe(0);
     });
 
     test("a card add and the restock run racing leave one line", async () => {
@@ -222,7 +225,8 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
             ),
             liveGroceryStore().insertLineUnlessListed(cardLine, family),
         ]);
-        expect(committed).toBe(true);
+        // Whichever side lost the race added nothing, but the day is claimed.
+        expect(committed).not.toBe(false);
         const lines = await sql`
             select id from grocery_lines where household_id = ${householdId}
         `;
@@ -269,6 +273,72 @@ describeDb(pgAvailable !== null, "restock commit (live)", (getCtx) => {
             preferences: patch.preferences,
         });
         expect(updated.preferences.restock.lastRunOn).toBe(runOn);
+    });
+
+    test("a config save after a run still reads lastRunAdded", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        const storeId = await seedGroceryStore(sql, householdId, "Costco");
+        const sectionId = await seedGrocerySection(
+            sql,
+            householdId,
+            storeId,
+            "Dairy",
+        );
+        const milk = await seedFood(sql, householdId, { name: "Milk" });
+        const eggs = await seedFood(sql, householdId, { name: "Eggs" });
+        const runOn = "2026-06-14";
+        const added = await liveRestockStore().commitRestockRun(
+            householdId,
+            runOn,
+            [
+                sampleLine(householdId, storeId, sectionId, milk),
+                sampleLine(householdId, storeId, sectionId, eggs),
+            ],
+        );
+        expect(added).toBe(2);
+        const before = await getHouseholdConfig(householdId);
+        expect(before.preferences.restock.lastRunAdded).toBe(2);
+        // A settings save (what the Restock page posts) must not wipe it.
+        const saved = await updateHouseholdConfig(householdId, {
+            name: before.name,
+            recipeSearchPlaces: before.recipeSearchPlaces,
+            preferences: {
+                ...before.preferences,
+                restock: {
+                    ...before.preferences.restock,
+                    enabled: true,
+                    weekday: 2,
+                    lastRunAdded: 99,
+                },
+            },
+        });
+        expect(saved.preferences.restock.lastRunOn).toBe(runOn);
+        expect(saved.preferences.restock.lastRunAdded).toBe(2);
+        const after = await getHouseholdConfig(householdId);
+        expect(after.preferences.restock.lastRunAdded).toBe(2);
+        expect(after.preferences.restock.weekday).toBe(2);
+    });
+
+    test("an older run with no count reads as unknown, not zero", async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const { householdId } = await seedHousehold(sql);
+        await sql`
+            update public.households
+            set household_preferences = jsonb_build_object(
+                'restock', jsonb_build_object('lastRunOn', '2026-06-01')
+            )
+            where id = ${householdId}::uuid
+        `;
+        const config = await getHouseholdConfig(householdId);
+        expect(config.preferences.restock.lastRunOn).toBe("2026-06-01");
+        expect(config.preferences.restock.lastRunAdded).toBeUndefined();
+        const saved = await updateHouseholdConfig(householdId, config);
+        expect(saved.preferences.restock.lastRunAdded).toBeUndefined();
     });
 
     test("runRestockCheck live deps inserts restock line when due", async () => {

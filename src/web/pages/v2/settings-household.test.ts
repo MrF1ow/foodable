@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
-import type { HouseholdMember } from "../../../household.js";
+import { DEFAULT_RESTOCK, type HouseholdMember } from "../../../household.js";
 import type { NoticesForResult } from "../../../domain/notices-for.js";
 
 const EMPTY_NOTICES: NoticesForResult = {
@@ -54,7 +54,19 @@ function baseView(
         chrome,
         householdName: "Home",
         members: [alice, bob],
-        stores: [{ id: "s1", householdId: HH, name: "Safeway", sortOrder: 0 }],
+        storeCount: 3,
+        location: "Denver, CO",
+        householdTimezone: "America/Denver",
+        effectiveTimezone: "America/Denver",
+        restock: {
+            ...DEFAULT_RESTOCK,
+            enabled: true,
+            weekday: 0 as const,
+            time: "09:00",
+        },
+        unverifiedRecipeExpiryDays: 30,
+        dismissedCount: 2,
+        socialReaders: { tiktok: true, facebook: false },
         isOwner: true,
         canManage: true,
         viewerUserId: alice.userId,
@@ -74,6 +86,75 @@ describe("settings household v2", () => {
         );
     });
 
+    test("the household name is the page title with the member count under it", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        expect(html).toContain('<h1 class="fd-settings-title');
+        expect(html).toMatch(/<h1 class="fd-settings-title[^"]*">Home<\/h1>/);
+        expect(html).not.toContain('fd-settings-title">Household</h1>');
+        expect(html).toContain("2 members · one fridge, one grocery list");
+        expect(html).not.toContain(">Members</h2>");
+        const one = renderSettingsHouseholdV2Page(
+            baseView({ members: [alice] }),
+        );
+        expect(one).toContain("1 member · one fridge, one grocery list");
+    });
+
+    test("Add a member is the last row of the members card, with the sign-in hint", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        const start = html.indexOf('class="fd-settings-members-card"');
+        const card = html.slice(
+            start,
+            html.indexOf('aria-label="Household"', start),
+        );
+        expect(card).toContain('commandfor="household-add-member"');
+        expect(card).toContain("Add a member");
+        // The row follows the last member, inside the card.
+        expect(card.indexOf("Add a member")).toBeGreaterThan(
+            card.lastIndexOf("fd-row--settings-member"),
+        );
+        expect(html).not.toContain(
+            'commandfor="household-add-member">Add member',
+        );
+        expect(html).not.toContain("fd-settings-btn--primary");
+        const hint =
+            "Members sign in with the email or username and password you give them.";
+        expect(html).toContain(hint);
+        expect(html.indexOf(hint)).toBeGreaterThan(
+            html.indexOf("Add a member"),
+        );
+    });
+
+    test("a viewer who cannot add members gets no Add a member row and no hint", () => {
+        const html = renderSettingsHouseholdV2Page(
+            baseView({
+                isOwner: false,
+                canManage: false,
+                viewerUserId: bob.userId,
+            }),
+        );
+        expect(html).not.toContain("Add a member");
+        expect(html).not.toContain("Members sign in with the email");
+    });
+
+    test("with no household zone and no owner zone the Time zone row says the zone is a default", () => {
+        const html = renderSettingsHouseholdV2Page(
+            baseView({
+                householdTimezone: null,
+                effectiveTimezone: "UTC",
+                effectiveTimezoneDefaulted: true,
+            }),
+        );
+        expect(html).toContain("UTC (default)");
+        expect(html).not.toMatch(/UTC \(owner/);
+        const owners = renderSettingsHouseholdV2Page(
+            baseView({
+                householdTimezone: null,
+                effectiveTimezone: "Europe/Kyiv",
+            }),
+        );
+        expect(owners).toMatch(/Europe\/Kyiv \(owner(?:&#0?39;|')s\)/);
+    });
+
     test("owner page shows household menu and management targets", () => {
         const html = renderSettingsHouseholdV2Page(baseView());
         expect(html).toContain(SETTINGS_HOUSEHOLD_V2_MARKER);
@@ -82,6 +163,7 @@ describe("settings household v2", () => {
         );
         expect(html).toContain('action="/settings/household/name"');
         expect(html).toContain('commandfor="household-add-member"');
+        expect(html).toContain('commandfor="fd-household-name"');
         expect(html).toContain(`/settings/household/members/${bob.userId}`);
         expect(html).toContain('id="fd-dup-section"');
     });
@@ -140,33 +222,6 @@ describe("settings household v2", () => {
         );
     });
 
-    test("add store trigger sits in the grocery stores section", () => {
-        const html = renderSettingsHouseholdV2Page(baseView());
-        const storesIdx = html.indexOf(">Grocery stores</");
-        const addStoreIdx = html.indexOf('commandfor="household-add-store"');
-        const membersIdx = html.indexOf(">Members</");
-        expect(storesIdx).toBeGreaterThan(-1);
-        expect(addStoreIdx).toBeGreaterThan(storesIdx);
-        expect(addStoreIdx).toBeLessThan(
-            html.indexOf("Social post readers", storesIdx),
-        );
-        const memberAddIdx = html.indexOf('commandfor="household-add-member"');
-        expect(memberAddIdx).toBeGreaterThan(membersIdx);
-        expect(memberAddIdx).toBeLessThan(storesIdx);
-    });
-
-    test("each store links to its page and every member can open the stores page", () => {
-        for (const canManage of [true, false]) {
-            const html = renderSettingsHouseholdV2Page(
-                baseView({ canManage, isOwner: canManage }),
-            );
-            expect(html).toContain('href="/settings/household/stores/s1"');
-            expect(html).toContain(
-                'href="/settings/household/stores">Manage stores</a>',
-            );
-        }
-    });
-
     test("validation error with add-member modal does not duplicate page banner", () => {
         const html = renderSettingsHouseholdV2Page(
             baseView({
@@ -200,28 +255,6 @@ describe("settings household v2", () => {
         );
     });
 
-    test("owner sees plurals_same_food control", () => {
-        const html = renderSettingsHouseholdV2Page(baseView());
-        expect(html).toContain(
-            'action="/settings/household/plurals-same-food"',
-        );
-        expect(html).toContain("Treat singular and plural as the same food");
-    });
-
-    test("member viewer sees plurals_same_food as read-only", () => {
-        const html = renderSettingsHouseholdV2Page(
-            baseView({
-                isOwner: false,
-                canManage: false,
-                pluralsSameFood: true,
-            }),
-        );
-        expect(html).not.toContain(
-            'action="/settings/household/plurals-same-food"',
-        );
-        expect(html).toContain(">On</span>");
-    });
-
     test("member viewer is read-only for household name and stores", () => {
         const html = renderSettingsHouseholdV2Page(
             baseView({
@@ -232,7 +265,112 @@ describe("settings household v2", () => {
         );
         expect(html).not.toContain('action="/settings/household/name"');
         expect(html).not.toContain('commandfor="household-add-member"');
-        expect(html).not.toContain('commandfor="household-add-store"');
         expect(html).not.toContain('action="/settings/household/stores"');
+        // The rows still show their values, without a form or a sheet.
+        expect(html).toContain("Denver, CO");
+        expect(html).not.toContain('commandfor="fd-household-name"');
+        expect(html).not.toContain('action="/settings/household/location"');
+        expect(html).not.toContain('action="/settings/household/timezone"');
+        expect(html).not.toContain(
+            'action="/settings/household/recipe-settings"',
+        );
+        expect(html).not.toContain("Rotate join token");
+    });
+
+    const GROUP_ROWS = [
+        "Household name",
+        "Location",
+        "Time zone",
+        "Stores",
+        "Restock day",
+        "Recipe link readers",
+        "Unverified recipes",
+        "Dismissed notices",
+        "Rotate join token",
+    ];
+
+    function groupRows(html: string): string[] {
+        const group = html.slice(html.indexOf('aria-label="Household"><li'));
+        return [
+            ...group.matchAll(
+                /fd-stores-pref__main"><span class="fd-row__title">([^<]*)</g,
+            ),
+        ].map((m) => m[1]!);
+    }
+
+    test("the Household group shows the nine rows in the design's order with their values", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        expect(groupRows(html)).toEqual(GROUP_ROWS);
+        expect(html).toContain("America/Denver");
+        expect(html).toContain("Sunday, 9:00 AM");
+        expect(html).toContain("TikTok on");
+        expect(html).toContain("30 days");
+        expect(html).toContain('href="/settings/household/stores"');
+        expect(html).toContain('href="/settings/household/restock"');
+        expect(html).toContain('href="/settings/household/readers"');
+        expect(html).toContain('href="/settings/household/dismissed"');
+    });
+
+    test("the store list, plurals block and readers section are gone", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        expect(html).not.toContain(">Grocery stores</");
+        expect(html).not.toContain("Manage stores");
+        expect(html).not.toContain('commandfor="household-add-store"');
+        expect(html).not.toContain("plurals-same-food");
+        expect(html).not.toContain("Treat singular and plural");
+        expect(html).not.toContain(">Social post readers</");
+        expect(html).not.toContain("/settings/household/social-readers");
+        expect(html).not.toContain(">Dismissed notices</h2>");
+        // Possible duplicates stays on this page for now.
+        expect(html).toContain('id="fd-dup-section"');
+    });
+
+    test("Shared links sits below the Household group, only when the page has links", () => {
+        const withLinks = renderSettingsHouseholdV2Page(
+            baseView({ sharedLinks: [] }),
+        );
+        const groupIdx = withLinks.indexOf('aria-label="Household"><li');
+        const linksIdx = withLinks.indexOf("Shared links");
+        expect(linksIdx).toBeGreaterThan(groupIdx);
+        expect(linksIdx).toBeLessThan(withLinks.indexOf('id="fd-dup-section"'));
+        expect(renderSettingsHouseholdV2Page(baseView())).not.toContain(
+            "Shared links",
+        );
+    });
+
+    test("the rotate-token confirm keeps data-turbo=false (the one-time secret is a 200 page)", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        const form = html.match(
+            /<form[^>]*action="\/settings\/household\/rotate-token"[^>]*>/,
+        )?.[0];
+        expect(form).toBeDefined();
+        expect(form).toContain('data-turbo="false"');
+    });
+
+    test("an admin edits household rows but does not see Rotate join token", () => {
+        const html = renderSettingsHouseholdV2Page(
+            baseView({ isOwner: false, canManage: true }),
+        );
+        expect(html).toContain('commandfor="fd-household-name"');
+        expect(html).toContain('action="/settings/household/timezone"');
+        expect(groupRows(html)).toEqual(GROUP_ROWS.slice(0, -1));
+    });
+
+    test("the time zone picker keeps a stored alias that the runtime list lacks", () => {
+        const html = renderSettingsHouseholdV2Page(
+            baseView({ householdTimezone: "US/Pacific" }),
+        );
+        expect(html).toContain('<option value="US/Pacific" selected>');
+    });
+
+    test("an error from a household sheet reopens it and stays out of the page banner", () => {
+        const html = renderSettingsHouseholdV2Page(
+            baseView({
+                error: "Enter a valid IANA timezone.",
+                openModalId: "fd-household-timezone",
+            }),
+        );
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(html.match(/Enter a valid IANA timezone\./g)).toHaveLength(1);
     });
 });

@@ -229,6 +229,18 @@ export const TOASTS = {
         kind: "success",
         text: "Recipe settings saved",
     },
+    "household.restock.saved": {
+        kind: "success",
+        text: "Restock saved",
+    },
+    "household.timezone.saved": {
+        kind: "success",
+        text: "Time zone saved",
+    },
+    "household.fetch-refusals.cleared-all": {
+        kind: "success",
+        text: "Blocked links cleared",
+    },
     "household.plurals-same-food.saved": {
         kind: "success",
         text: "Food name matching updated",

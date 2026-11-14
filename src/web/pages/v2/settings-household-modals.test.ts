@@ -3,7 +3,6 @@ import type { HouseholdMember } from "../../../household.js";
 import { modalTrigger } from "../../components/ui.js";
 import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
-    HOUSEHOLD_ADD_STORE_MODAL_ID,
     HOUSEHOLD_MANAGE_ID,
     HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
@@ -11,6 +10,7 @@ import {
     manageFill,
     memberActionsTemplate,
     renderHouseholdV2OwnerModals,
+    renderSocialReaderModals,
 } from "./settings-household-modals.js";
 
 const alice: HouseholdMember = {
@@ -51,13 +51,14 @@ function expectErrorOnceInModal(
     expect(dialog.match(/error-banner/g)?.length).toBe(1);
 }
 
-test("the owner dialogs are modals: add member, add store, and one shared dialog per member action", () => {
+test("the owner dialogs are modals: add member and one shared dialog per member action", () => {
     const html = renderHouseholdV2OwnerModals(ownerView);
     expect(html).toContain(`id="${HOUSEHOLD_ADD_MEMBER_MODAL_ID}"`);
-    expect(html).toContain(`id="${HOUSEHOLD_ADD_STORE_MODAL_ID}"`);
+    // Stores are added on the Stores page now.
+    expect(html).not.toContain("household-add-store");
+    expect(html).not.toContain('action="/settings/household/stores"');
     expect(html).toContain('action="/settings/household"');
     expect(html).toContain('class="add-member"');
-    expect(html).toContain('action="/settings/household/stores"');
     expect(html).not.toContain('id="household-manage-u2"');
     expect(html).not.toContain('id="household-remove-u2"');
     expect(html).not.toContain('id="household-make-owner-u2"');
@@ -85,7 +86,6 @@ test("a member who cannot manage gets no add dialogs, and only the owner gets me
         canManage: false,
     });
     expect(plain).not.toContain(`id="${HOUSEHOLD_ADD_MEMBER_MODAL_ID}"`);
-    expect(plain).not.toContain(`id="${HOUSEHOLD_ADD_STORE_MODAL_ID}"`);
     expect(plain).not.toContain('id="household-manage"');
 });
 
@@ -146,15 +146,15 @@ test("household server error reopens add-member and remove confirm modals", () =
 });
 
 test("household modal errors render inside the reopening dialog", () => {
-    const addStore = renderHouseholdV2OwnerModals({
+    const addMember = renderHouseholdV2OwnerModals({
         ...ownerView,
-        error: "Enter a store name.",
-        openModalId: HOUSEHOLD_ADD_STORE_MODAL_ID,
+        error: "Enter a name.",
+        openModalId: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     });
     expectErrorOnceInModal(
-        addStore,
-        HOUSEHOLD_ADD_STORE_MODAL_ID,
-        "Enter a store name.",
+        addMember,
+        HOUSEHOLD_ADD_MEMBER_MODAL_ID,
+        "Enter a name.",
     );
     const makeOwner = renderHouseholdV2OwnerModals({
         ...ownerView,
@@ -226,8 +226,8 @@ test("member dialog count does not grow with the household", () => {
     const six = modals(6);
     const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
     expect(dialogs(one)).toBe(dialogs(six));
-    // Add member, add store, rotate token, manage, make owner, remove, and the two readers.
-    expect(dialogs(six)).toBe(8);
+    // Add member, rotate token, manage, make owner and remove (the readers' dialogs moved to their own page).
+    expect(dialogs(six)).toBe(5);
     expect(six.match(/id="household-manage"/g)?.length).toBe(1);
     expect(six.match(/id="household-remove"/g)?.length).toBe(1);
     expect(six.match(/id="household-make-owner"/g)?.length).toBe(1);
@@ -273,8 +273,14 @@ test("member action template and trigger fill escape a hostile display name", ()
     expect(html).not.toContain("onerror=alert(1)>");
 });
 
-test("the social reader dialogs carry the risk text and the research link", () => {
+test("the household dialogs no longer carry the reader dialogs", () => {
     const html = renderHouseholdV2OwnerModals(ownerView);
+    expect(html).not.toContain(HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID);
+    expect(html).not.toContain(HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID);
+});
+
+test("the social reader dialogs carry the risk text and the research link", () => {
+    const html = renderSocialReaderModals({});
     expect(html).toContain(`id="${HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID}"`);
     expect(html).toContain(`id="${HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID}"`);
     expect(html).toContain("Turn on TikTok reader");

@@ -15370,7 +15370,9 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain('<h1 class="fd-settings-title">Household</h1>');
+        expect(html).toMatch(
+            /<h1 class="fd-settings-title fd-settings-hh-title">[^<]+<\/h1>/,
+        );
         expect(html).toContain('action="/settings/household"');
         expect(html).toContain("Alice");
         expect(html).toContain("Bob");
@@ -15429,7 +15431,9 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain('<h1 class="fd-settings-title">Household</h1>');
+        expect(html).toMatch(
+            /<h1 class="fd-settings-title fd-settings-hh-title">[^<]+<\/h1>/,
+        );
         expect(html).not.toContain('commandfor="household-add-member"');
         expect(html).not.toContain('action="/settings/household/stores"');
     });

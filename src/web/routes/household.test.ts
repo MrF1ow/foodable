@@ -110,6 +110,7 @@ const db: {
     recipesStore: ReturnType<typeof createMemoryRecipesStore>;
     settingsStore: ReturnType<typeof createMemorySettingsStore>;
     rulesStore: ReturnType<typeof createMemoryRulesStore>;
+    fetchMemory: ReturnType<typeof createMemoryFetchMemoryStore>;
     barcodeFoods: Record<string, FoodResult>;
     barcodeLookupThrows: boolean;
     lookupsPaused: boolean;
@@ -142,6 +143,7 @@ const db: {
     recipesStore: createMemoryRecipesStore(),
     settingsStore: createMemorySettingsStore(),
     rulesStore: createMemoryRulesStore(),
+    fetchMemory: createMemoryFetchMemoryStore(),
     barcodeFoods: {} as Record<string, FoodResult>,
     barcodeLookupThrows: false,
     lookupsPaused: false,
@@ -245,7 +247,7 @@ mock.module("../../db/social-readers.js", () => ({
 }));
 mock.module("../../db/fetch-memory.js", () => ({
     ...realDbFetchMemory,
-    recipeFetchMemory: () => createMemoryFetchMemoryStore(),
+    recipeFetchMemory: () => db.fetchMemory,
 }));
 mock.module("../../db/profiles.js", () => ({
     ...realDbProfiles,
@@ -1219,6 +1221,7 @@ describe("social reader settings", () => {
             },
         );
         expect(r.status).toBe(303);
+        expect(r.headers.get("location")).toBe("/settings/household/readers");
         expect(db.household.preferences.socialReaders.tiktok).toBe(true);
     });
 
@@ -1235,6 +1238,10 @@ describe("social reader settings", () => {
             },
         );
         expect(r.status).toBe(400);
+        // The error re-renders the readers page, with the terms dialog open.
+        const html = await r.text();
+        expect(html).toContain("data-fd-readers");
+        expect(html).toContain("Confirm you understand the terms");
         expect(db.household.preferences.socialReaders.tiktok).toBe(false);
     });
 
@@ -3087,5 +3094,456 @@ describe("settings stores routes", () => {
         );
         expect(stranger.status).toBe(400);
         expect(await stranger.text()).toContain("Unknown store.");
+    });
+});
+
+describe("household settings sub-pages", () => {
+    const ADMIN = "33333333-3333-4333-8333-333333333333";
+    const form = "application/x-www-form-urlencoded";
+
+    function post(path: string, as: string, body = "") {
+        return app().request(`http://x${path}`, {
+            method: "POST",
+            headers: { cookie: cookieFor(as), "content-type": form },
+            body,
+        });
+    }
+    function get(path: string, as: string) {
+        return app().request(`http://x${path}`, {
+            headers: { cookie: cookieFor(as) },
+        });
+    }
+
+    beforeEach(() => {
+        db.household = {
+            name: "Home",
+            recipeSearchPlaces: [],
+            preferences: {
+                ...EMPTY_HOUSEHOLD_PREFERENCES,
+                restock: { ...DEFAULT_RESTOCK, lastRunOn: "2026-09-15" },
+            },
+        };
+        db.members = [
+            {
+                householdId: HH,
+                userId: ALICE,
+                role: "owner",
+                displayName: "Alice",
+            },
+            {
+                householdId: HH,
+                userId: ADMIN,
+                role: "admin",
+                displayName: "Admin",
+            },
+            {
+                householdId: HH,
+                userId: BOB,
+                role: "member",
+                displayName: "Bob",
+            },
+        ];
+        db.fetchMemory = createMemoryFetchMemoryStore();
+        db.settingsStore = createMemorySettingsStore();
+    });
+
+    describe("restock", () => {
+        const body =
+            "restock_enabled=on&restock_weekday=2&restock_time=08%3A30";
+
+        test("owner and admin save it (303 back to the page), a member gets 403", async () => {
+            for (const who of [ALICE, ADMIN]) {
+                const r = await post("/settings/household/restock", who, body);
+                expect(r.status).toBe(303);
+                expect(r.headers.get("location")).toBe(
+                    "/settings/household/restock",
+                );
+            }
+            expect(db.household.preferences.restock).toMatchObject({
+                enabled: true,
+                weekday: 2,
+                time: "08:30",
+                // The run marker is the runner's, never the form's.
+                lastRunOn: "2026-09-15",
+            });
+            const before = db.configWrites;
+            const refused = await post(
+                "/settings/household/restock",
+                BOB,
+                body,
+            );
+            expect(refused.status).toBe(403);
+            expect(db.configWrites).toBe(before);
+        });
+
+        test("the switch posts alone and leaves the day and time", async () => {
+            db.household.preferences.restock = {
+                ...DEFAULT_RESTOCK,
+                weekday: 4,
+                time: "18:15",
+                lastRunOn: null,
+            };
+            const r = await post(
+                "/settings/household/restock",
+                ALICE,
+                "restock_enabled=on",
+            );
+            expect(r.status).toBe(303);
+            expect(db.household.preferences.restock).toMatchObject({
+                enabled: true,
+                weekday: 4,
+                time: "18:15",
+            });
+            await post(
+                "/settings/household/restock",
+                ALICE,
+                "restock_enabled=off",
+            );
+            expect(db.household.preferences.restock.enabled).toBe(false);
+        });
+
+        test("a bad day or time re-renders the page with the error and writes nothing", async () => {
+            const before = db.configWrites;
+            const day = await post(
+                "/settings/household/restock",
+                ALICE,
+                "restock_weekday=9",
+            );
+            expect(day.status).toBe(400);
+            expect(await day.text()).toContain("Pick a day from Sunday");
+            const time = await post(
+                "/settings/household/restock",
+                ALICE,
+                "restock_time=25%3A00",
+            );
+            expect(time.status).toBe(400);
+            expect(db.configWrites).toBe(before);
+        });
+
+        test("the page says when it last ran and how many usuals it added", async () => {
+            db.household.preferences.restock = {
+                ...DEFAULT_RESTOCK,
+                enabled: true,
+                lastRunOn: "2026-09-15",
+                lastRunAdded: 3,
+            };
+            const html = await (
+                await get("/settings/household/restock", ALICE)
+            ).text();
+            expect(html).toContain("Last ran Sep 15 · added 3 usuals");
+            expect(html).toContain('action="/settings/household/restock"');
+            // An older run has no count: the date alone.
+            db.household.preferences.restock = {
+                ...DEFAULT_RESTOCK,
+                lastRunOn: "2026-09-15",
+            };
+            const older = await (
+                await get("/settings/household/restock", ALICE)
+            ).text();
+            expect(older).toContain("Last ran Sep 15<");
+            expect(older).not.toContain("added");
+        });
+
+        test("a member reads the page without forms", async () => {
+            const r = await get("/settings/household/restock", BOB);
+            expect(r.status).toBe(200);
+            const html = await r.text();
+            expect(html).toContain("data-fd-restock");
+            expect(html).not.toContain('action="/settings/household/restock"');
+        });
+    });
+
+    describe("time zone", () => {
+        test("an owner saves an alias such as US/Pacific, an admin an IANA name, a member gets 403", async () => {
+            const alias = await post(
+                "/settings/household/timezone",
+                ALICE,
+                "timezone=US%2FPacific",
+            );
+            expect(alias.status).toBe(303);
+            expect(db.household.preferences.timezone).toBe("US/Pacific");
+            const admin = await post(
+                "/settings/household/timezone",
+                ADMIN,
+                "timezone=Europe%2FKyiv",
+            );
+            expect(admin.status).toBe(303);
+            expect(db.household.preferences.timezone).toBe("Europe/Kyiv");
+            const member = await post(
+                "/settings/household/timezone",
+                BOB,
+                "timezone=UTC",
+            );
+            expect(member.status).toBe(403);
+        });
+
+        test("an empty value clears it; an unknown zone re-renders Household with the sheet open", async () => {
+            db.household.preferences.timezone = "America/Denver";
+            const cleared = await post(
+                "/settings/household/timezone",
+                ALICE,
+                "timezone=",
+            );
+            expect(cleared.status).toBe(303);
+            expect(db.household.preferences.timezone).toBeNull();
+            db.household.preferences.timezone = "America/Denver";
+            const bad = await post(
+                "/settings/household/timezone",
+                ALICE,
+                "timezone=Not%2FAZone",
+            );
+            expect(bad.status).toBe(400);
+            const html = await bad.text();
+            expect(html).toContain("Enter a valid IANA timezone.");
+            expect(html).toContain("data-sheet-open-on-load");
+            expect(db.household.preferences.timezone).toBe("America/Denver");
+        });
+    });
+
+    describe("location and recipe settings", () => {
+        test("location: 303 for an owner and an admin, 403 for a member", async () => {
+            for (const who of [ALICE, ADMIN]) {
+                const r = await post(
+                    "/settings/household/location",
+                    who,
+                    "location=Denver%2C+CO",
+                );
+                expect(r.status).toBe(303);
+                expect(r.headers.get("location")).toBe("/settings/household");
+            }
+            expect(await db.settingsStore.getLocation(HH)).toBe("Denver, CO");
+            const refused = await post(
+                "/settings/household/location",
+                BOB,
+                "location=Nope",
+            );
+            expect(refused.status).toBe(403);
+            expect(await db.settingsStore.getLocation(HH)).toBe("Denver, CO");
+        });
+
+        test("recipe-settings: 303 for an owner and an admin, 403 for a member", async () => {
+            for (const who of [ALICE, ADMIN]) {
+                const r = await post(
+                    "/settings/household/recipe-settings",
+                    who,
+                    "unverified_recipe_expiry_days=45",
+                );
+                expect(r.status).toBe(303);
+                expect(r.headers.get("location")).toBe("/settings/household");
+            }
+            expect(db.household.preferences.unverifiedRecipeExpiryDays).toBe(
+                45,
+            );
+            const refused = await post(
+                "/settings/household/recipe-settings",
+                BOB,
+                "unverified_recipe_expiry_days=1",
+            );
+            expect(refused.status).toBe(403);
+            expect(db.household.preferences.unverifiedRecipeExpiryDays).toBe(
+                45,
+            );
+        });
+
+        test("empty keeps unverified recipes; a bad number reopens its sheet", async () => {
+            db.household.preferences.unverifiedRecipeExpiryDays = 30;
+            await post(
+                "/settings/household/recipe-settings",
+                ALICE,
+                "unverified_recipe_expiry_days=",
+            );
+            expect(
+                db.household.preferences.unverifiedRecipeExpiryDays,
+            ).toBeNull();
+            const bad = await post(
+                "/settings/household/recipe-settings",
+                ALICE,
+                "unverified_recipe_expiry_days=0",
+            );
+            expect(bad.status).toBe(400);
+            expect(await bad.text()).toContain("data-sheet-open-on-load");
+        });
+    });
+
+    describe("recipe link readers", () => {
+        test("social-readers answers 303 to the readers page for the owner and 403 for a member and an admin", async () => {
+            const owner = await post(
+                "/settings/household/social-readers",
+                ALICE,
+                "reader=facebook&enabled=1&confirm=1",
+            );
+            expect(owner.status).toBe(303);
+            expect(owner.headers.get("location")).toBe(
+                "/settings/household/readers",
+            );
+            expect(db.household.preferences.socialReaders.facebook).toBe(true);
+            for (const who of [BOB, ADMIN]) {
+                const r = await post(
+                    "/settings/household/social-readers",
+                    who,
+                    "reader=tiktok&enabled=1&confirm=1",
+                );
+                expect(r.status).toBe(403);
+            }
+            expect(db.household.preferences.socialReaders.tiktok).toBe(false);
+        });
+
+        test("clear with no host empties every refusal and goes back to the readers page", async () => {
+            const now = new Date();
+            for (const host of ["a.example", "b.example", "c.example"]) {
+                await db.fetchMemory.recordRefusal(HH, host, 403, now);
+            }
+            const r = await post(
+                "/settings/household/fetch-refusals/clear",
+                ALICE,
+            );
+            expect(r.status).toBe(303);
+            expect(r.headers.get("location")).toBe(
+                "/settings/household/readers",
+            );
+            expect(
+                await db.fetchMemory.listRefusals(HH, { limit: 50, now }),
+            ).toEqual([]);
+        });
+
+        test("clear with a host clears only that host", async () => {
+            const now = new Date();
+            await db.fetchMemory.recordRefusal(HH, "a.example", 403, now);
+            await db.fetchMemory.recordRefusal(HH, "b.example", 429, now);
+            const r = await post(
+                "/settings/household/fetch-refusals/clear",
+                ADMIN,
+                "host=a.example",
+            );
+            expect(r.status).toBe(303);
+            expect(r.headers.get("location")).toBe(
+                "/settings/household/readers",
+            );
+            const left = await db.fetchMemory.listRefusals(HH, {
+                limit: 50,
+                now,
+            });
+            expect(left.map((row) => row.host)).toEqual(["b.example"]);
+        });
+
+        test("a member gets 403 and nothing is cleared", async () => {
+            const now = new Date();
+            await db.fetchMemory.recordRefusal(HH, "a.example", 403, now);
+            const r = await post(
+                "/settings/household/fetch-refusals/clear",
+                BOB,
+            );
+            expect(r.status).toBe(403);
+            expect(
+                await db.fetchMemory.listRefusals(HH, { limit: 50, now }),
+            ).toHaveLength(1);
+        });
+
+        test("clear-all pages past one page of refusals", async () => {
+            const now = new Date();
+            for (let i = 0; i < 205; i++) {
+                await db.fetchMemory.recordRefusal(
+                    HH,
+                    `h${String(i).padStart(3, "0")}.example`,
+                    403,
+                    new Date(now.getTime() - i * 1000),
+                );
+            }
+            const r = await post(
+                "/settings/household/fetch-refusals/clear",
+                ALICE,
+            );
+            expect(r.status).toBe(303);
+            expect(
+                await db.fetchMemory.listRefusals(HH, { limit: 500, now }),
+            ).toEqual([]);
+        });
+
+        test("the page shows the blocked count with a Clear button, or None without one", async () => {
+            const now = new Date();
+            await db.fetchMemory.recordRefusal(HH, "a.example", 403, now);
+            await db.fetchMemory.recordRefusal(HH, "b.example", 403, now);
+            const some = await (
+                await get("/settings/household/readers", ALICE)
+            ).text();
+            expect(some).toContain("2 links");
+            expect(some).toContain(
+                'action="/settings/household/fetch-refusals/clear"',
+            );
+            await post("/settings/household/fetch-refusals/clear", ALICE);
+            const none = await (
+                await get("/settings/household/readers", ALICE)
+            ).text();
+            expect(none).toContain(">None<");
+            expect(none).not.toContain(
+                'action="/settings/household/fetch-refusals/clear"',
+            );
+        });
+
+        test("only the owner gets the switches and the terms dialogs", async () => {
+            const owner = await (
+                await get("/settings/household/readers", ALICE)
+            ).text();
+            expect(owner).toContain("household-social-reader-tiktok");
+            const admin = await (
+                await get("/settings/household/readers", ADMIN)
+            ).text();
+            expect(admin).not.toContain("household-social-reader-tiktok");
+            expect(admin).toContain(
+                "Only the household owner can change this.",
+            );
+        });
+    });
+
+    describe("dismissed notices", () => {
+        test("lists dismissals grouped by kind with Undo back to the page", async () => {
+            const food = await db.foodsStore.insertFood(
+                newFood({ householdId: HH, kind: "food", name: "Milk" }),
+            );
+            await db.dismissalsStore.insert({
+                householdId: HH,
+                code: "recipe.no_food",
+                subjectKind: "food",
+                subjectId: food.id,
+                relatedKey: "",
+                dismissedBy: ALICE,
+            });
+            const r = await get("/settings/household/dismissed", BOB);
+            expect(r.status).toBe(200);
+            const html = await r.text();
+            expect(html).toContain("data-fd-dismissed");
+            expect(html).toContain('action="/needs-attention/undo"');
+            expect(html).toContain(
+                'name="return_to" value="/settings/household/dismissed"',
+            );
+        });
+
+        test("an empty list says so", async () => {
+            const html = await (
+                await get("/settings/household/dismissed", ALICE)
+            ).text();
+            expect(html).toContain("No dismissed notices.");
+        });
+    });
+
+    test("Household shows the nine rows and no longer the store list, plurals or readers", async () => {
+        const html = await (await get("/settings/household", ALICE)).text();
+        for (const label of [
+            "Household name",
+            "Location",
+            "Time zone",
+            "Stores",
+            "Restock day",
+            "Recipe link readers",
+            "Unverified recipes",
+            "Dismissed notices",
+            "Rotate join token",
+        ]) {
+            expect(html).toContain(
+                `<span class="fd-row__title">${label}</span>`,
+            );
+        }
+        expect(html).not.toContain("plurals-same-food");
+        expect(html).not.toContain("Social post readers");
     });
 });

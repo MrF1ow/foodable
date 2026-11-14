@@ -2,6 +2,7 @@ import { peekSiteMembership } from "../db/actor.js";
 import {
     canManageHousehold,
     dashboardAccess,
+    householdTimezone,
     type HouseholdMember,
 } from "../household.js";
 import { type AlcoholDisplay } from "../mcp/shared.js";
@@ -14,7 +15,6 @@ import {
 } from "../db/profiles.js";
 import {
     getHouseholdConfig,
-    getPluralsSameFood,
     getHouseholdMembership,
     householdExists,
     listHouseholdMembers,
@@ -47,7 +47,6 @@ import {
 import { liveScoreSettingsStore } from "../db/score-settings.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveRecipesStore } from "../db/recipes.js";
-import { liveSocialReaderStatusStore } from "../db/social-readers.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveSettingsStore } from "../db/settings.js";
 import {
@@ -113,6 +112,14 @@ import {
     type KitchenUsualsRowMeta,
 } from "./pages/v2/kitchen-usuals.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
+import { renderSettingsRestockV2Page } from "./pages/v2/settings-restock.js";
+import { renderSettingsReadersV2Page } from "./pages/v2/settings-readers.js";
+import {
+    dismissedNotices,
+    renderSettingsDismissedV2Page,
+} from "./pages/v2/settings-dismissed.js";
+import { recipeFetchMemory } from "../db/fetch-memory.js";
+import type { FetchMemoryStore } from "../domain/fetch-memory.js";
 import { renderSettingsStoresV2Page } from "./pages/v2/settings-stores.js";
 import { renderSettingsStoreV2Page } from "./pages/v2/settings-stores-detail.js";
 import {
@@ -1431,12 +1438,30 @@ export async function renderHouseholdSettingsRoute(
     const householdId = gate.viewer.householdId;
     const store = liveFoodsStore();
     const refCounts = await store.countFoodRefs(householdId);
-    const [config, members, stores, socialReaderStatus] = await Promise.all([
+    const [config, members, stores, location] = await Promise.all([
         getHouseholdConfig(householdId),
         listHouseholdMembers(householdId),
         liveSettingsStore().listStores(householdId),
-        liveSocialReaderStatusStore().get(householdId),
+        liveSettingsStore().getLocation(householdId),
     ]);
+    const ownerId = members.find((m) => m.role === "owner")?.userId;
+    const ownerProfile =
+        ownerId === viewerUserId
+            ? profile
+            : ownerId
+              ? await getProfile(ownerId)
+              : null;
+    const effectiveTimezone = householdTimezone(
+        config.preferences,
+        ownerProfile,
+    );
+    // UTC here is only the fallback when neither side has a valid zone.
+    const ownerZone = ownerProfile?.timezone;
+    const effectiveTimezoneDefaulted =
+        !(
+            config.preferences.timezone != null &&
+            validateTz(config.preferences.timezone)
+        ) && !(ownerZone != null && validateTz(ownerZone));
 
     const noticeResult = await loadViewerNotices(gate.viewer, {
         refCounts,
@@ -1446,7 +1471,6 @@ export async function renderHouseholdSettingsRoute(
         gate.viewer,
         noticeResult,
     );
-    const pluralsSameFood = await getPluralsSameFood(householdId);
     // No catch: this section is the only place on the web to revoke a
     // public link, so a failed read must fail the page, not hide it. With
     // `mcp-share-links` off there are no links to list and no section.
@@ -1464,12 +1488,7 @@ export async function renderHouseholdSettingsRoute(
             householdName: config.name,
             lastSeen,
             members,
-            stores: stores.map((row) => ({
-                id: row.id,
-                householdId: row.householdId,
-                name: row.name,
-                sortOrder: row.sortOrder,
-            })),
+            storeCount: stores.length,
             isOwner: gate.viewer.role === "owner",
             canManage: canManageHousehold(gate.viewer),
             viewerUserId: gate.viewer.userId,
@@ -1477,14 +1496,117 @@ export async function renderHouseholdSettingsRoute(
             issuedToken: opts.issuedToken,
             openModalId: opts.openModalId,
             socialReaders: config.preferences.socialReaders,
-            socialReaderStatus,
+            location,
+            householdTimezone: config.preferences.timezone,
+            effectiveTimezone,
+            effectiveTimezoneDefaulted,
+            restock: config.preferences.restock,
+            unverifiedRecipeExpiryDays:
+                config.preferences.unverifiedRecipeExpiryDays,
+            dismissedCount: dismissedNotices(noticeResult).length,
             timezone: profile?.timezone ?? "UTC",
             noticeResult,
             duplicatePairs: noticeResult.possibleDuplicatePairs,
             refCounts,
             mergePost: opts.mergePost,
-            pluralsSameFood,
             sharedLinks,
+        }),
+    };
+}
+
+/** Every unexpired refusal host, paged with `after` until a page comes back empty. */
+export async function listAllRefusalHosts(
+    memory: FetchMemoryStore,
+    householdId: string,
+    now = new Date(),
+): Promise<string[]> {
+    const hosts: string[] = [];
+    let after: { refusedAt: string; host: string } | undefined;
+    for (;;) {
+        const page = await memory.listRefusals(householdId, {
+            limit: 200,
+            after,
+            now,
+        });
+        if (page.length === 0) return hosts;
+        for (const row of page) hosts.push(row.host);
+        const last = page[page.length - 1]!;
+        after = { refusedAt: last.refusedAt, host: last.host };
+    }
+}
+
+export async function renderHouseholdRestockRoute(
+    viewerUserId: string,
+    opts: { error?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const config = await getHouseholdConfig(gate.viewer.householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsRestockV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            restock: config.preferences.restock,
+            canManage: canManageHousehold(gate.viewer),
+            error: opts.error,
+        }),
+    };
+}
+
+export async function renderHouseholdReadersRoute(
+    viewerUserId: string,
+    opts: { error?: string; openModalId?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const [config, blocked] = await Promise.all([
+        getHouseholdConfig(householdId),
+        listAllRefusalHosts(recipeFetchMemory(), householdId),
+    ]);
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsReadersV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            socialReaders: config.preferences.socialReaders,
+            blockedCount: blocked.length,
+            isOwner: gate.viewer.role === "owner",
+            canManage: canManageHousehold(gate.viewer),
+            error: opts.error,
+            openModalId: opts.openModalId,
+        }),
+    };
+}
+
+export async function renderHouseholdDismissedRoute(
+    viewerUserId: string,
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsDismissedV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            dismissals: dismissedNotices(noticeResult),
+            subjectNames: noticeResult.subjectNames,
         }),
     };
 }

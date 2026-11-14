@@ -46,15 +46,31 @@ export function liveRestockStore(): RestockStore {
                 // Inside this transaction: the same lock and check a card add
                 // takes, so the two cannot both miss the other's line.
                 const grocery = liveGroceryStore();
+                let added = 0;
                 for (const line of lines) {
                     const family = families?.get(line.id);
                     if (family) {
-                        await grocery.insertLineUnlessListed(line, family);
+                        const { existed } =
+                            await grocery.insertLineUnlessListed(line, family);
+                        if (!existed) added += 1;
                     } else {
                         await grocery.insertLine(line);
+                        added += 1;
                     }
                 }
-                return true;
+                // The claim above had to come first so two instances cannot
+                // both insert; the count is only known now.
+                await tx`
+                    update ${tx.unsafe(HOUSEHOLDS)}
+                    set household_preferences = jsonb_set(
+                        household_preferences,
+                        '{restock,lastRunAdded}',
+                        to_jsonb(${added}::int),
+                        true
+                    )
+                    where id = ${householdId}
+                `;
+                return added;
             });
         },
     };

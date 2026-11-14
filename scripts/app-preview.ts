@@ -86,6 +86,9 @@ import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-accoun
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
+import { renderSettingsRestockV2Page } from "../src/web/pages/v2/settings-restock.js";
+import { renderSettingsReadersV2Page } from "../src/web/pages/v2/settings-readers.js";
+import { renderSettingsDismissedV2Page } from "../src/web/pages/v2/settings-dismissed.js";
 import type { SharedLinkRow } from "../src/web/pages/v2/settings-household-shared-links.js";
 import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
@@ -1497,11 +1500,23 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 [RILEY.userId, new Date("2026-10-21T15:00:00Z")],
                 [ALEX.userId, null],
             ]),
-            stores: PREVIEW_STORES,
+            storeCount: PREVIEW_STORES.length,
             isOwner: true,
             canManage: true,
             viewerUserId: ME.userId,
-            socialReaders: EMPTY_HOUSEHOLD_PREFERENCES.socialReaders,
+            socialReaders: { tiktok: true, facebook: false },
+            location: "Denver, CO",
+            householdTimezone: "America/Denver",
+            effectiveTimezone: "America/Denver",
+            restock: {
+                enabled: true,
+                weekday: 0,
+                time: "09:00",
+                lastRunOn: "2026-11-08",
+                lastRunAdded: 3,
+            },
+            unverifiedRecipeExpiryDays: 30,
+            dismissedCount: 2,
             timezone: "America/Los_Angeles",
             noticeResult: {
                 notices: previewNotices(),
@@ -1522,7 +1537,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             },
             duplicatePairs: dupPairs,
             refCounts: new Map(),
-            pluralsSameFood: true,
             sharedLinks,
         } as never);
     };
@@ -2213,6 +2227,53 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             preset: "planet",
             weights: SCORE_PRESETS.planet,
             isSet: true,
+        }),
+        "settings-restock": renderSettingsRestockV2Page({
+            chrome,
+            restock: {
+                enabled: true,
+                weekday: 0,
+                time: "09:00",
+                lastRunOn: "2026-11-08",
+                lastRunAdded: 3,
+            },
+            canManage: true,
+        }),
+        "settings-readers": renderSettingsReadersV2Page({
+            chrome,
+            socialReaders: { tiktok: true, facebook: false },
+            blockedCount: 3,
+            isOwner: true,
+            canManage: true,
+        }),
+        "settings-dismissed": renderSettingsDismissedV2Page({
+            chrome,
+            dismissals: [
+                {
+                    id: "d1",
+                    householdId: H,
+                    code: "fridge.expiring",
+                    subjectKind: "fridge_item",
+                    subjectId: "fi-1",
+                    relatedKey: "",
+                    dismissedBy: ME.userId,
+                    createdAt: "2026-11-10T12:00:00Z",
+                },
+                {
+                    id: "d2",
+                    householdId: H,
+                    code: "fridge.expiring",
+                    subjectKind: "fridge_item",
+                    subjectId: "fi-2",
+                    relatedKey: "",
+                    dismissedBy: ME.userId,
+                    createdAt: "2026-11-10T12:05:00Z",
+                },
+            ],
+            subjectNames: new Map([
+                ["fridge_item:fi-1", "Greek yogurt"],
+                ["fridge_item:fi-2", "Spinach"],
+            ]),
         }),
         "settings-stores": renderSettingsStoresV2Page({
             chrome,

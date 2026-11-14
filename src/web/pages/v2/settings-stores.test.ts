@@ -34,7 +34,14 @@ describe("settings stores page", () => {
     test("lists each store with its sections and lines, linked to its page", () => {
         const html = renderSettingsStoresV2Page(view());
         expect(html).toContain(SETTINGS_STORES_V2_MARKER);
-        expect(html).toContain('data-fd-settings-page="household"');
+        expect(html).toContain('data-fd-settings-page="stores"');
+        // The desktop nav highlights Stores, not Household.
+        expect(html).toContain(
+            'href="/settings/household/stores" aria-current="page"',
+        );
+        expect(html).not.toContain(
+            'href="/settings/household" aria-current="page"',
+        );
         expect(html).toContain('href="/settings/household/stores/s1"');
         expect(html).toContain("6 sections");
         expect(html).toContain("5 on the list");

@@ -1,3 +1,4 @@
+import { EMPTY_HOUSEHOLD_PREFERENCES } from "../../household.js";
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import { resetFlagsForTests } from "../../flags.js";
 import { Hono } from "hono";
@@ -94,6 +95,7 @@ const db = {
         name: "Home",
         recipeSearchPlaces: [] as string[],
         preferences: {
+            ...EMPTY_HOUSEHOLD_PREFERENCES,
             drink_unit: null,
             grocery_default_store_id: null,
         },
