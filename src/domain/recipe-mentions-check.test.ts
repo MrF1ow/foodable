@@ -205,6 +205,31 @@ describe("recipeMentionWarnings", () => {
 });
 
 describe("addMentionedIngredient", () => {
+    test("a catalog food archived after the warning was found is an input error, not a crash", async () => {
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: "Fry the rice.\nScramble the egg into it.",
+        });
+        const egg = await findOrCreateManualFood(foods, HH, "food", "Eggs");
+        const archivedLater: FoodsStore = {
+            ...foods,
+            getFood: async (household, id) => {
+                const food = await foods.getFood(household, id);
+                return food?.id === egg.id
+                    ? { ...food, archivedAt: "2026-01-02T00:00:00.000Z" }
+                    : food;
+            },
+        };
+        await expect(
+            addMentionedIngredient(
+                { recipes, foods: archivedLater },
+                HH,
+                recipeId,
+                "egg",
+            ),
+        ).rejects.toBeInstanceOf(RecipeInputError);
+        expect(await ingredientNames(recipes, recipeId)).toEqual(["rice"]);
+    });
+
     test("adds the egg the steps give an amount for, in each", async () => {
         const { recipes, foods, recipeId } = await recipeWith({
             steps: "Fry the rice.\nAdd 2 lightly beaten eggs and stir.",
@@ -488,6 +513,30 @@ describe("addMentionedIngredient's own cost", () => {
 });
 
 describe("dismissFlaggedMention", () => {
+    test("dismisses a catalog food whose name is longer than a raw key may be", async () => {
+        const longName = `${"stone ground whole wheat ".repeat(7)}flour`;
+        expect(longName.length).toBeGreaterThan(120);
+        const { recipes, foods, recipeId } = await recipeWith({
+            steps: `Fry the rice.\nStir in the ${longName}.`,
+        });
+        await findOrCreateManualFood(foods, HH, "food", longName);
+        const before = await recipeMentionWarnings(
+            { recipes, foods },
+            HH,
+            recipeId,
+        );
+        expect(before).toHaveLength(1);
+        await dismissFlaggedMention(
+            { recipes, foods },
+            HH,
+            recipeId,
+            before[0]!.key,
+        );
+        expect(
+            await recipeMentionWarnings({ recipes, foods }, HH, recipeId),
+        ).toEqual([]);
+    });
+
     test("dismisses a warning that is showing, in any spelling", async () => {
         const { recipes, foods, recipeId } = await recipeWith({
             steps: "Fry the rice.\nAdd 2 eggs and stir.",

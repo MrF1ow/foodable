@@ -1,7 +1,7 @@
 ---
 name: foodable-test
 description: Run, start, verify, test, preview or screenshot Foodable safely - isolated local stack (Postgres plus server on its own ports), which verification tool fits which change, and what never to touch. Use before running the server, tests, check:nav, previews, the widget harness or e2e.
-updated: "e4f2f39c09b8a1110943c74b58d56618828370a4"
+updated: "3d110a3d34a1d5cfde5aa6bf93e8ee547373c5e2"
 watches:
     - package.json#scripts
     - docker-compose.yml

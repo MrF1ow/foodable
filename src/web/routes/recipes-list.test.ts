@@ -1034,6 +1034,60 @@ describe("steps-mention warnings on the recipe page", () => {
         }
     });
 
+    test("another household's recipe is a 404 and is left alone", async () => {
+        const other = await createRecipe(db.recipesStore, {
+            householdId: "hh-other",
+            creatorId: ALICE,
+            name: "Their rice",
+            yieldPortions: 2,
+            instructions: STEPS,
+            verification: "unverified",
+        });
+        for (const action of ["add", "dismiss"] as const) {
+            const res = await postMention(action, other.id, "egg");
+            expect(res.status).toBe(404);
+        }
+        expect(
+            await db.recipesStore.getImport("hh-other", other.id),
+        ).toBeNull();
+        expect(
+            await db.recipesStore.listIngredients("hh-other", other.id),
+        ).toEqual([]);
+    });
+
+    test("a food archived after the page was drawn goes back with a toast, not a 500", async () => {
+        const id = await friedRice();
+        const egg = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Egg",
+                calories: 143,
+                proteinG: 13,
+                carbsG: 1,
+                fatG: 10,
+                gramsPerMl: null,
+                gramsPerEach: 50,
+            }),
+        );
+        const original = db.foodsStore.getFood;
+        db.foodsStore.getFood = async (household, foodId) => {
+            const food = await original.call(db.foodsStore, household, foodId);
+            return food?.id === egg.id
+                ? { ...food, archivedAt: "2026-01-02T00:00:00.000Z" }
+                : food;
+        };
+        try {
+            const res = await postMention("add", id, "egg");
+            expect(res.status).toBe(303);
+            expect(res.headers.get("location")).toBe(`/recipes/${id}`);
+            expect(toastOf(res)?.key).toBe("recipes.mention.error");
+        } finally {
+            db.foodsStore.getFood = original;
+        }
+        expect(await ingredientNames(id)).toEqual(["Rice"]);
+    });
+
     test("a member can add or dismiss, and a visitor without a session cannot", async () => {
         const id = await friedRice();
         expect(

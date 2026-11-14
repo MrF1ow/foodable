@@ -1,6 +1,7 @@
 import {
     type Food,
     type FoodsStore,
+    FoodsInputError,
     findFoodById,
     findOrCreateManualFoodForRecipeImport,
 } from "./foods.js";
@@ -91,21 +92,26 @@ export async function recipeMentionWarnings(
     });
 }
 
-/** The longest key a dismissal keeps. */
+/** The longest raw key a caller may hand in. */
 const DISMISSAL_KEY_MAX = 120;
 
 /**
  * Stop warning about one food, whatever spelling the key is in. The key is
  * stored the way the detector writes it, so a later check matches it. No
- * import row means nothing to dismiss.
+ * import row means nothing to dismiss. A raw key is capped; a key already
+ * read off a warning (`stored`) is kept whole, since cutting it would stop
+ * it ever matching that warning again.
  */
 export async function dismissRecipeMention(
     store: RecipesStore,
     householdId: string,
     recipeId: string,
     key: string,
+    opts: { stored?: boolean } = {},
 ): Promise<void> {
-    const normalized = mentionKey(key.trim()).slice(0, DISMISSAL_KEY_MAX);
+    const normalized = opts.stored
+        ? key
+        : mentionKey(key.trim()).slice(0, DISMISSAL_KEY_MAX);
     if (!normalized) throw new RecipeInputError("Choose a food to dismiss.");
     await store.addDismissedMention(householdId, recipeId, normalized);
 }
@@ -163,6 +169,7 @@ export async function dismissFlaggedMention(
         householdId,
         recipeId,
         warning.key,
+        { stored: true },
     );
 }
 
@@ -202,7 +209,20 @@ export async function addMentionedIngredient(
     let createdFood = false;
     let food: Food;
     if (warning.foodId) {
-        food = await findFoodById(stores.foods, householdId, warning.foodId);
+        try {
+            food = await findFoodById(
+                stores.foods,
+                householdId,
+                warning.foodId,
+            );
+        } catch (err) {
+            // Archived between the warning and this lookup: say so like any
+            // other stale button.
+            if (!(err instanceof FoodsInputError)) throw err;
+            throw new RecipeInputError(
+                "That food is no longer in the catalog.",
+            );
+        }
     } else {
         // The importer's lookup creates through `insertFood`, so a call there
         // is exactly "no catalog food matched".
