@@ -94,43 +94,62 @@ html:has(body.fd-body) {
     color: var(--text-primary);
 }
 
-/* Kitchen text tabs under the page header (design: Kitchen tabs). Each tab is
-   35px: 8px, the 18px label, 7px, then a 2px underline; the row has a 1px
-   bottom border. */
-.fd-kitchen-tabs {
+/* Underline text tabs (design: Kitchen tabs), shared by the Kitchen sections
+   (`.fd-kitchen-tabs`, links) and the Trends range (`.fd-utabs`, buttons).
+   Each tab is 35px: 8px, the 18px label, 7px, then a 2px underline. The track
+   is the row's 1px bottom border and ends right after the last tab: the row is
+   as wide as its tabs, so a trailing action (Kitchen's round "+") has no line
+   beneath it. The active tab is `aria-current` (links) or `aria-pressed`
+   (buttons). */
+.fd-kitchen-tabs,
+.fd-utabs {
     box-sizing: border-box;
     display: flex;
+    width: fit-content;
     gap: 18px;
     margin: 0 0 16px;
     border-bottom: 1px solid var(--line);
 }
-.fd-kitchen-tab {
+.fd-kitchen-tab,
+.fd-utab {
     box-sizing: border-box;
     height: 35px;
-    padding-top: 8px;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 8px 0 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
     display: flex;
     flex-direction: column;
     gap: 7px;
     color: var(--text-secondary);
     font: 400 14px/18px var(--font-body);
+    text-align: left;
     text-decoration: none;
+    cursor: pointer;
 }
-.fd-kitchen-tab::after {
+.fd-kitchen-tab::after,
+.fd-utab::after {
     content: "";
     flex: none;
     height: 2px;
     border-radius: 2px;
     background: transparent;
 }
-.fd-kitchen-tab[aria-current="page"] {
+.fd-kitchen-tab[aria-current="page"],
+.fd-utab[aria-pressed="true"] {
     color: var(--text-primary);
     font-weight: 500;
 }
-.fd-kitchen-tab[aria-current="page"]::after {
+.fd-kitchen-tab[aria-current="page"]::after,
+.fd-utab[aria-pressed="true"]::after {
     background: var(--accent-fill);
 }
 @media (hover: hover) and (pointer: fine) {
-    .fd-kitchen-tab:not([aria-current="page"]):hover {
+    .fd-kitchen-tab:not([aria-current="page"]):hover,
+    .fd-utab:not([aria-pressed="true"]):hover {
         color: var(--text-primary);
     }
 }
@@ -213,6 +232,7 @@ body.fd-body .toast-region {
     .fd-account-chip,
     .fd-household,
     .fd-kitchen-tab,
+    .fd-utab,
     .fd-tab,
     .fd-log,
     .fd-sidelink,

@@ -121,7 +121,7 @@ describe("renderTrendsV2Page", () => {
         expect(html).toContain("fd-trends-bars-wrap");
     });
 
-    test("range picker labels are numbers only; 365 is the desktop-only fourth segment", () => {
+    test("range picker is the shared underline tab row under the title; 365 is desktop-only", () => {
         const today = "2026-08-15";
         const html = renderTrendsV2Page(
             buildPreviewTrendsPageData(
@@ -142,13 +142,37 @@ describe("renderTrendsV2Page", () => {
                 /<button[^>]*data-fd-trends-range="(\d+)"([^>]*)>([^<]*)<\/button>/g,
             ),
         ].map((m) => ({ range: m[1], attrs: m[2], label: m[3] }));
-        expect(buttons.map((b) => b.label)).toEqual(["7", "30", "90", "365"]);
+        expect(buttons.map((b) => b.label)).toEqual([
+            "7 days",
+            "30 days",
+            "90 days",
+            "365 days",
+        ]);
         expect(buttons.map((b) => b.range)).toEqual(["7", "30", "90", "365"]);
-        // Phone shows 7 · 30 · 90; only the 365 segment is desktop-only.
-        expect(html.match(/fd-seg-btn--desktop-only/g)?.length).toBe(1);
+        // Only the 365 tab is desktop-only; the default (30) is pressed.
+        expect(html.match(/fd-utab--desktop-only/g)?.length).toBe(1);
         expect(html).toContain(
-            'class="fd-seg-btn fd-seg-btn--desktop-only" data-fd-trends-range="365"',
+            'class="fd-utab fd-utab--desktop-only" data-fd-trends-range="365"',
         );
+        expect(
+            buttons.filter((b) => b.attrs?.includes('aria-pressed="true"')),
+        ).toEqual([expect.objectContaining({ range: "30" })]);
+        // The title row carries no range control: the tab row comes after the
+        // title and subtitle, in the shared tab component (not the pill).
+        const headerAt = html.indexOf('<header class="fd-trends-header">');
+        const header = html.slice(
+            headerAt,
+            html.indexOf("</header>", headerAt),
+        );
+        const title = header.indexOf("fd-trends-title");
+        const subtitle = header.indexOf("fd-trends-subtitle");
+        const tabs = header.indexOf('<div class="fd-utabs');
+        expect(title).toBeGreaterThanOrEqual(0);
+        expect(subtitle).toBeGreaterThan(title);
+        expect(tabs).toBeGreaterThan(subtitle);
+        const top = header.slice(0, header.indexOf("</div>"));
+        expect(top).not.toContain("data-fd-trends-range");
+        expect(html).not.toContain("fd-seg");
         expect(html).toContain("How the last 30 days went");
     });
 

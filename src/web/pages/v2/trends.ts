@@ -678,20 +678,17 @@ function rangePanel(
 }
 
 function rangeToggle(active: TrendsRange): Html {
-    // Numbers only, as days. The phone pill has three segments (7 · 30 · 90);
-    // the year (365) is the fourth and shows from the desktop breakpoint.
+    // The shared underline tabs (the Kitchen section tabs' component): 7 · 30 ·
+    // 90 days on the phone, the year (365) a fourth tab from the desktop
+    // breakpoint. Buttons keep aria-pressed; the client flips it on a pick.
     const buttons = TRENDS_RANGES.map((r) => {
-        const cls = [
-            "fd-seg-btn",
-            r === active ? "fd-seg-btn--on" : "",
-            r === 365 ? "fd-seg-btn--desktop-only" : "",
-        ]
+        const cls = ["fd-utab", r === 365 ? "fd-utab--desktop-only" : ""]
             .filter(Boolean)
             .join(" ");
-        return `<button type="button" class="${cls}" data-fd-trends-range="${r}" aria-pressed="${r === active}" aria-label="${r} days">${r}</button>`;
+        return `<button type="button" class="${cls}" data-fd-trends-range="${r}" aria-pressed="${r === active}">${r} days</button>`;
     }).join("");
     return raw(
-        `<div class="fd-seg fd-trends-range" role="group" aria-label="Trends range in days">${buttons}</div>`,
+        `<div class="fd-utabs fd-trends-range" role="group" aria-label="Trends range in days">${buttons}</div>`,
     );
 }
 
