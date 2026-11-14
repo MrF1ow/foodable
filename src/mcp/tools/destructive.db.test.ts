@@ -27,7 +27,7 @@ import {
 import { describeDb } from "../../db/testing/pg.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { undoAgentAction } from "../../domain/agent-actions.js";
-import { findFoodById } from "../../domain/foods.js";
+import { findFoodById, updateFood } from "../../domain/foods.js";
 import { ledgerMatchesStock } from "../../domain/stock.js";
 import {
     createMemoryFlags,
@@ -1273,6 +1273,54 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         });
     });
 
+    describe("a food archived before the action does not block the put-back", () => {
+        // Archiving a food in Settings leaves the rows that name it alone, so
+        // what was deleted pointed at an archived food all along: putting it
+        // back is exact, and refusing would lose it for good.
+        async function archive(id: string): Promise<void> {
+            await asUser(
+                ownerId,
+                () =>
+                    updateFood(liveFoodsStore(), householdId, id, {
+                        archived: true,
+                    }),
+                householdId,
+            );
+        }
+
+        test("a grocery line", async () => {
+            const eggs = await food("Egg");
+            const line = await groceryLine(eggs);
+            await archive(eggs);
+            expect(await count("grocery_lines")).toBe(1);
+            const before = await fingerprint();
+            const deleted = await call("delete_grocery_line", { id: line });
+            expect(deleted.isError).toBeFalsy();
+            expect(await count("grocery_lines")).toBe(0);
+            const out = await undo((await actionFor("delete_grocery_line")).id);
+            expect(out.status).toBe("undone");
+            expect(await fingerprint()).toBe(before);
+        });
+
+        test("a recipe and its ingredient", async () => {
+            const soup = await recipe();
+            const [ingredient] = await rows(
+                "select food_id from public.recipe_ingredients where id = $1",
+                soup.ingredient,
+            );
+            await archive(ingredient!.food_id);
+            const before = await fingerprint();
+            const deleted = await call("delete_recipe", { id: soup.id });
+            expect(deleted.isError).toBeFalsy();
+            expect(await count("recipes")).toBe(0);
+            const out = await undo((await actionFor("delete_recipe")).id);
+            expect(out.status).toBe("undone");
+            expect(await count("recipes")).toBe(1);
+            expect(await count("recipe_ingredients")).toBe(1);
+            expect(await fingerprint()).toBe(before);
+        });
+    });
+
     // ---------- per-day goal overrides ----------
 
     test("clearing per-day goals is refused while destructive changes are off, and keeps the rows", async () => {
@@ -1351,5 +1399,49 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         });
         expect(result.isError).toBe(true);
         expect(await count("nutrition_goal_days")).toBe(1);
+    });
+
+    test("nulling a target over a range records every override it changes, so undo puts the whole call back", async () => {
+        const { sql } = getCtx();
+        // One override holds only calories (nulling it empties the day), one
+        // holds calories and protein (nulling calories only rewrites it), and
+        // the third day has none.
+        await sql`
+            insert into public.nutrition_goal_days (
+                household_id, user_id, date, daily_calories
+            )
+            values (${householdId}, ${ownerId}, '2099-01-01'::date, ${2000})
+        `;
+        await sql`
+            insert into public.nutrition_goal_days (
+                household_id, user_id, date, daily_calories, daily_protein_g
+            )
+            values (${householdId}, ${ownerId}, '2099-01-02'::date, ${2200}, ${150})
+        `;
+        const days = () =>
+            rows(
+                "select id, date::text as date, daily_calories, daily_protein_g::float as daily_protein_g from public.nutrition_goal_days order by date",
+            );
+        const before = await days();
+
+        const cleared = await call("set_nutrition_goals", {
+            from: "2099-01-01",
+            to: "2099-01-03",
+            daily_calories: null,
+        });
+        expect(cleared.isError).toBeFalsy();
+        expect(cleared.content[0]!.text).toContain(UNDO_SENTENCE);
+        expect(await days()).toEqual([
+            {
+                id: before[1]!.id,
+                date: "2099-01-02",
+                daily_calories: null,
+                daily_protein_g: 150,
+            },
+        ]);
+
+        const entry = await actionFor("set_nutrition_goals");
+        expect((await undo(entry.id)).status).toBe("undone");
+        expect(await days()).toEqual(before);
     });
 });

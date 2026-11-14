@@ -795,6 +795,31 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
         expect(row!.usual_product_id).toBeNull();
     });
 
+    test("undoing a removed usual refuses once the plain food was merged away, and changes nothing", async () => {
+        const { plain } = await usual();
+        const hen = await food("Hen Eggs");
+        await call("remove_usual", { food_id: plain });
+        const entry = (await actions()).find(
+            (row) => row.tool === "remove_usual",
+        )!;
+        // The household merges Eggs into Hen Eggs afterwards. The products
+        // the removal let go would come back onto the archived Eggs.
+        const merged = await call("merge_foods", {
+            keep_id: hen,
+            drop_id: plain,
+        });
+        expect(merged.isError).toBeFalsy();
+        const before = await fingerprint();
+        const out = await undo(entry.id);
+        expect(out.status).toBe("conflict");
+        expect(out.message).toContain("merged or deleted since");
+        expect(await fingerprint()).toBe(before);
+        expect(
+            (await actions()).find((row) => row.tool === "remove_usual")!
+                .undone_at,
+        ).toBeNull();
+    });
+
     test("remove_usual refuses and changes nothing when a product is filed under the food after it was recorded", async () => {
         const plain = await food("Eggs");
         const kirkland = await food("Kirkland Eggs");

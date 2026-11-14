@@ -23,8 +23,11 @@
  * row is only removed while it is still exactly what the write left (a person
  * who renamed or hid it since keeps it) and nothing points at it. A fridge
  * item whose food or amount the action changed is not put back once stock
- * movements have been written for it since, and a row that names a food is not
- * put back onto a food that was merged away since. `updated_at` is the one
+ * movements have been written for it since, and a row that names a food (its
+ * `food_id`, or a food's `generic_food_id` or `usual_product_id`) is not put
+ * back onto a food that was merged away or deleted since the action began; a
+ * food that was already archived then is exactly what the row pointed at, so
+ * the row goes back. `updated_at` is the one
  * column never compared or restored: it is bookkeeping that every edit moves.
  * Anything else is a conflict the household is told about.
  *
@@ -1433,6 +1436,13 @@ async function refuseWhenUsedSince(
     );
 }
 
+/** The columns that point at a food. */
+const FOOD_REFERENCE_COLUMNS: readonly string[] = [
+    "food_id",
+    "generic_food_id",
+    "usual_product_id",
+];
+
 /** Notes that a row this undo wrote names a food. */
 function noteFoodReference(
     undoer: Undoer,
@@ -1444,11 +1454,20 @@ function noteFoodReference(
     }
 }
 
+/** A timestamp column as milliseconds: NaN when it is not a time. */
+function instantOf(value: unknown): number {
+    if (value instanceof Date) return value.getTime();
+    return typeof value === "string" ? Date.parse(value) : Number.NaN;
+}
+
 /**
- * Refuses an undo that would leave a row on a food that is archived: the food
- * was merged into another since, and the rows that named it went with the
- * merge. The put-back itself cannot tell, since an archived food is still a
- * row the foreign key accepts.
+ * Refuses an undo that would leave a row on a food that was archived after the
+ * action began: the food was merged into another since, and the rows that
+ * named it went with the merge. The put-back itself cannot tell, since an
+ * archived food is still a row the foreign key accepts. A food that was
+ * already archived when the action began is what the row pointed at then
+ * (archiving a food in Settings leaves the rows that name it alone), so
+ * putting it back is exact.
  */
 async function refuseArchivedFoods(undoer: Undoer): Promise<void> {
     if (undoer.foodRefs.size === 0) return;
@@ -1458,8 +1477,11 @@ async function refuseArchivedFoods(undoer: Undoer): Promise<void> {
         ids.map((id) => ({ id })),
         { lock: true },
     );
+    const startedAt = Date.parse(undoer.record.createdAt);
     for (const food of found) {
         if (food.archived_at == null) continue;
+        // Not provably before the action means after it.
+        if (instantOf(food.archived_at) <= startedAt) continue;
         const id = String(food.id);
         throw new AgentUndoConflictError(
             { kind: "missing_reference", referencedTable: "foods" },
@@ -1479,7 +1501,9 @@ async function replayChange(
     switch (change.op) {
         case "deleted": {
             await tx.insertRow(table, row);
-            noteFoodReference(undoer, table, row.food_id);
+            for (const column of FOOD_REFERENCE_COLUMNS) {
+                noteFoodReference(undoer, table, row[column]);
+            }
             if (
                 table === "fridge_items" &&
                 typeof row.food_id === "string" &&
@@ -1513,7 +1537,10 @@ async function replayChange(
                 throw new AgentUndoConflictError({ kind: "gone" }, table, row);
             }
             for (const column of changed) {
-                if (column.kind === "value" && column.column === "food_id") {
+                if (
+                    column.kind === "value" &&
+                    FOOD_REFERENCE_COLUMNS.includes(column.column)
+                ) {
                     noteFoodReference(undoer, table, column.before);
                 }
             }

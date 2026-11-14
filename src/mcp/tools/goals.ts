@@ -448,25 +448,51 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         // Nulling a day's last target removes its override, so
                         // that goes through the guard like a clear does. A write
                         // that leaves every override standing does not.
-                        const emptied = Object.values(dayPatch).includes(null)
-                            ? overridesEmptiedBy(
-                                  await goalDayRows().list(
-                                      userId,
-                                      householdId,
-                                      days,
-                                  ),
-                                  dayPatch,
-                              )
-                            : [];
+                        const emptiesOne =
+                            Object.values(dayPatch).includes(null) &&
+                            overridesEmptiedBy(
+                                await goalDayRows().list(
+                                    userId,
+                                    householdId,
+                                    days,
+                                ),
+                                dayPatch,
+                            ).length > 0;
                         let undoNote = "";
-                        if (emptied.length > 0) {
+                        if (emptiesOne) {
                             const run = await runDestructive(
                                 "set_nutrition_goals",
                                 async (rec) => {
+                                    // The same call also rewrites the overrides
+                                    // it leaves standing, and undo puts back all
+                                    // of it, so all of it is recorded, read again
+                                    // here inside the write. A patch that empties
+                                    // an override holds nothing but nulls, so it
+                                    // adds no row for undo to remove.
+                                    const found = await goalDayRows().list(
+                                        userId,
+                                        householdId,
+                                        days,
+                                    );
+                                    const emptied = overridesEmptiedBy(
+                                        found,
+                                        dayPatch,
+                                    );
+                                    const gone = new Set(
+                                        emptied.map((row) => row.id),
+                                    );
+                                    const rewritten = found.filter(
+                                        (row) => !gone.has(row.id),
+                                    );
                                     await rec.captureByIds(
                                         "nutrition_goal_days",
                                         emptied.map((row) => row.id),
                                         "deleted",
+                                    );
+                                    await rec.captureByIds(
+                                        "nutrition_goal_days",
+                                        rewritten.map((row) => row.id),
+                                        "updated",
                                     );
                                     await upsertGoalDays(
                                         userId,
@@ -476,7 +502,11 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                                     );
                                     return {
                                         value: null,
-                                        summary: `Removed ${overrides(emptied.length)} for ${label} by clearing every target`,
+                                        summary: `Cleared a goal target for ${label}: removed ${overrides(emptied.length)}${
+                                            rewritten.length > 0
+                                                ? `, rewrote ${overrides(rewritten.length)}`
+                                                : ""
+                                        }`,
                                     };
                                 },
                             );

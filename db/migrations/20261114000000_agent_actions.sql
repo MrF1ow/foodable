@@ -7,14 +7,16 @@
 -- a sweep nulls the snapshot and the entry stays as history.
 --
 -- `snapshot` is `{ "v": 1, "changes": [{ "table", "op", "row", "after" }],
--- "ledger": [...] }`: the full row before the change for a delete or an update
--- (with the row as the write left it in `after` for an update, so an undo can
--- tell which columns the action changed and whether they changed since), the
--- new row's key columns for an insert, and the stock movements the action
--- wrote (`ledger`, absent when there are none), which an undo reverses. It is
--- null once purged, and for an action that cannot be undone (`undoable`
--- false). `member_id` is the user the agent acted as, null for the household
--- token. Deleting a user keeps the entry and forgets who.
+-- "ledger": [...] }`: the full row before the change for a delete or an update,
+-- the new row's key columns for an insert, and for an update or an insert the
+-- row as the write left it in `after`, so an undo can tell which columns the
+-- action changed and whether a person changed the row since (an update's
+-- earlier values go back, and an inserted row is removed, only while the row
+-- still equals its `after`). `ledger` holds the stock movements the action
+-- wrote (absent when there are none), which an undo reverses. It is null once
+-- purged, and for an action that cannot be undone (`undoable` false).
+-- `member_id` is the user the agent acted as, null for the household token.
+-- Deleting a user keeps the entry and forgets who.
 --
 -- Additive only. The household policy is the same one the other household
 -- tables use: the household token acts with no user but sets

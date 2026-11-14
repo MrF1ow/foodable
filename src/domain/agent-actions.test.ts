@@ -2286,12 +2286,19 @@ describe("undo never puts back what has moved on since", () => {
     const FOOD = "33333333-3333-4333-8333-333333333333";
     const KEPT = "44444444-4444-4444-8444-444444444444";
 
-    function foodRow(id: string, archived: boolean) {
+    // The action runs at T0 (12:00): a food archived before that was already
+    // archived when it began, one archived after it was archived since.
+    const BEFORE = "2026-11-13T11:00:00+00:00";
+    const AFTER = "2026-11-13T12:30:00+00:00";
+
+    function foodRow(id: string, archivedAt: string | null = null) {
         return {
             id,
             household_id: HH,
             name: "Eggs",
-            archived_at: archived ? "2026-03-04T00:00:00+00:00" : null,
+            archived_at: archivedAt,
+            generic_food_id: null as string | null,
+            usual_product_id: null as string | null,
         };
     }
 
@@ -2361,7 +2368,7 @@ describe("undo never puts back what has moved on since", () => {
 
     test("a deleted row is not put back onto a food merged away since", async () => {
         const s = setup();
-        s.store.__seed("foods", foodRow(FOOD, false));
+        s.store.__seed("foods", foodRow(FOOD));
         s.store.__seed("grocery_lines", groceryLine(L1, "Eggs"));
         const { action } = await withAgentAction(
             s.deps,
@@ -2373,22 +2380,22 @@ describe("undo never puts back what has moved on since", () => {
             },
         );
         // The merge archives the food while the line is gone.
-        s.store.__seed("foods", foodRow(FOOD, true));
+        s.store.__seed("foods", foodRow(FOOD, AFTER));
         expect(await undoIt(s.deps, action.id)).toEqual({
             status: "conflict",
             message: "The food was merged or deleted since.",
         });
         expect(s.store.__rows("grocery_lines")).toEqual([]);
 
-        s.store.__seed("foods", foodRow(FOOD, false));
+        s.store.__seed("foods", foodRow(FOOD));
         expect((await undoIt(s.deps, action.id)).status).toBe("undone");
         expect(s.store.__rows("grocery_lines")).toHaveLength(1);
     });
 
     test("an updated row is not pointed back at a food merged away since", async () => {
         const s = setup();
-        s.store.__seed("foods", foodRow(FOOD, false));
-        s.store.__seed("foods", foodRow(KEPT, false));
+        s.store.__seed("foods", foodRow(FOOD));
+        s.store.__seed("foods", foodRow(KEPT));
         s.store.__seed("grocery_lines", groceryLine(L1, "Eggs"));
         const { action } = await withAgentAction(
             s.deps,
@@ -2402,7 +2409,7 @@ describe("undo never puts back what has moved on since", () => {
                 );
             },
         );
-        s.store.__seed("foods", foodRow(FOOD, true));
+        s.store.__seed("foods", foodRow(FOOD, AFTER));
         expect((await undoIt(s.deps, action.id)).message).toBe(
             "The food was merged or deleted since.",
         );
@@ -2411,7 +2418,7 @@ describe("undo never puts back what has moved on since", () => {
 
     test("a food the action itself archived is live again by the time the rows go back", async () => {
         const s = setup();
-        s.store.__seed("foods", foodRow(FOOD, false));
+        s.store.__seed("foods", foodRow(FOOD));
         s.store.__seed("grocery_lines", groceryLine(L1, "Eggs"));
         const { action } = await withAgentAction(
             s.deps,
@@ -2421,11 +2428,101 @@ describe("undo never puts back what has moved on since", () => {
                 await rec.captureByIds("grocery_lines", [L1], "deleted");
                 s.store.__remove("grocery_lines", L1);
                 await rec.captureByIds("foods", [FOOD], "updated");
-                s.store.__seed("foods", foodRow(FOOD, true));
+                s.store.__seed("foods", foodRow(FOOD, AFTER));
             },
         );
         expect((await undoIt(s.deps, action.id)).status).toBe("undone");
         expect(s.store.__rows("grocery_lines")).toHaveLength(1);
+    });
+
+    test("a row is put back onto a food that was already archived when the action began", async () => {
+        const s = setup();
+        s.store.__seed("foods", foodRow(FOOD, BEFORE));
+        s.store.__seed("grocery_lines", groceryLine(L1, "Eggs"));
+        const { action } = await withAgentAction(
+            s.deps,
+            asMember,
+            { tool: "delete_grocery_line", summary: "Deleted Eggs" },
+            async (rec) => {
+                await rec.captureByIds("grocery_lines", [L1], "deleted");
+                s.store.__remove("grocery_lines", L1);
+            },
+        );
+        expect((await undoIt(s.deps, action.id)).status).toBe("undone");
+        expect(s.store.__rows("grocery_lines")).toHaveLength(1);
+    });
+
+    describe("a food's own links to other foods", () => {
+        // remove_usual lets the products of a plain food go and clears its
+        // usual product; undo points them back.
+        async function removedUsual() {
+            const s = setup();
+            s.store.__seed("foods", foodRow(KEPT));
+            s.store.__seed("foods", {
+                ...foodRow(FOOD),
+                name: "Kirkland",
+                generic_food_id: KEPT,
+            });
+            const { action } = await withAgentAction(
+                s.deps,
+                asMember,
+                { tool: "remove_usual", summary: "Removed Eggs" },
+                async (rec) => {
+                    await rec.captureByIds("foods", [FOOD], "updated");
+                    s.store.__seed("foods", foodRow(FOOD));
+                },
+            );
+            return { s, action };
+        }
+
+        test("a generic food merged away since refuses the undo", async () => {
+            const { s, action } = await removedUsual();
+            s.store.__seed("foods", foodRow(KEPT, AFTER));
+            expect(await undoIt(s.deps, action.id)).toEqual({
+                status: "conflict",
+                message: "The food was merged or deleted since.",
+            });
+            expect(
+                s.store.__rows("foods").find((r) => r.id === FOOD)!,
+            ).toMatchObject({ generic_food_id: null });
+            expect(s.store.__records()[0]!.undoneAt).toBeNull();
+        });
+
+        test("a usual product merged away since refuses the undo", async () => {
+            const s = setup();
+            s.store.__seed("foods", foodRow(KEPT));
+            s.store.__seed("foods", {
+                ...foodRow(FOOD),
+                usual_product_id: KEPT,
+            });
+            const { action } = await withAgentAction(
+                s.deps,
+                asMember,
+                { tool: "remove_usual", summary: "Removed Eggs" },
+                async (rec) => {
+                    await rec.captureByIds("foods", [FOOD], "updated");
+                    s.store.__seed("foods", foodRow(FOOD));
+                },
+            );
+            s.store.__seed("foods", foodRow(KEPT, AFTER));
+            expect((await undoIt(s.deps, action.id)).message).toBe(
+                "The food was merged or deleted since.",
+            );
+            expect(
+                s.store.__rows("foods").find((r) => r.id === FOOD)!
+                    .usual_product_id,
+            ).toBeNull();
+        });
+
+        test("the same links go back when their food was archived before the action", async () => {
+            const { s, action } = await removedUsual();
+            s.store.__seed("foods", foodRow(KEPT, BEFORE));
+            expect((await undoIt(s.deps, action.id)).status).toBe("undone");
+            expect(
+                s.store.__rows("foods").find((r) => r.id === FOOD)!
+                    .generic_food_id,
+            ).toBe(KEPT);
+        });
     });
 
     describe("a fridge item whose food the action changed", () => {
