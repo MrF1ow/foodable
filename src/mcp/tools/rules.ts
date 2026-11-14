@@ -10,7 +10,7 @@ import {
     addPersonRule,
     addStoreRule,
 } from "../../domain/rules.js";
-import { ALLERGEN_SCHEMA } from "../shared.js";
+import { ALLERGEN_SCHEMA, idTag } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 
 const RULE_BODY = z.object({
@@ -118,7 +118,7 @@ export function registerRulesTools(server: McpServer, ctx: ToolContext) {
                             : store_rules
                                   .map(
                                       (rule) =>
-                                          `${rule.store_name}: ${rule.body}`,
+                                          `${rule.store_name}: ${rule.body}${idTag(rule.store_id, "store_id")}`,
                                   )
                                   .join("\n");
                     const personText =
@@ -144,7 +144,10 @@ export function registerRulesTools(server: McpServer, ctx: ToolContext) {
                                               ? `dislikes: ${row.dislikes.join(", ")}`
                                               : "no dislikes",
                                       ];
-                                      return bits.join(" — ");
+                                      return (
+                                          bits.join(" — ") +
+                                          idTag(row.user_id, "user_id")
+                                      );
                                   })
                                   .join("\n");
                     return {

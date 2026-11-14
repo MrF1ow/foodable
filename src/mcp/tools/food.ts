@@ -52,6 +52,7 @@ import {
     NEW_FOOD_INPUT,
     ON_SIMILAR_INPUT,
     noticeToWire,
+    noticeIdTags,
     onSimilarFor,
     similarFoodsText,
     similarFoodsWire,
@@ -63,6 +64,7 @@ import {
     withUndo,
     type WireNotice,
     type AlcoholDisplay,
+    idTag,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { dimensionOf, resolveQuantityUnit } from "../../domain/quantity.js";
@@ -226,7 +228,7 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
         {
             title: "Look Up Barcode",
             description:
-                "Look up a packaged product's label nutrition by barcode via Open Food Facts. The figures come from the product's own label as transcribed by the Open Food Facts community, so they beat estimating — but they are not verified by this server and can be wrong, stale, or missing entirely. Pass the barcode digits (EAN/UPC, 8–14 digits). The user can type them, or you can read them from a photo of the package — transcribe the human-readable digits printed beneath the barcode. Returns the product name, serving, and macros, which you can then pass to log_meal scaled to the amount eaten. When Open Food Facts has computed them, it also returns the Nutri-Score (A–E, a nutritional-quality grade) and NOVA group (1–4, how processed the product is) — pass these along if the user is asking about the product's quality, not just its macros; they're omitted, not \"n/a\", when OFF hasn't computed one for that product. If no product is found, fall back to web search or estimation. When online lookups are paused, saved household foods for that barcode are returned instead. When the product is not in the household catalog yet, add it with upsert_food passing barcode (and generic_food_id to file it under a plain food), with nutrition per 100 g. Two gaps to close yourself before logging: a fiber or sugar figure shown as n/a is missing data rather than a zero, so estimate it and pass it anyway; and Open Food Facts carries no caffeine at all, so for a coffee, tea, cola, energy drink or other caffeinated product get caffeine_mg from the label or a web search.",
+                "Look up a packaged product's label nutrition by barcode via Open Food Facts. The figures are label data transcribed by the OFF community: better than estimating, but unverified and possibly wrong, stale or missing. Pass the barcode digits (EAN/UPC, 8–14 digits). The user can type them, or you can read the digits printed under the barcode from a photo of the package. Returns the product name, serving, and macros, which you can then pass to log_meal scaled to the amount eaten. When Open Food Facts has computed them, it also returns the Nutri-Score (A–E, a nutritional-quality grade) and NOVA group (1–4, how processed the product is) — pass these along if the user asks about the product's quality; they're omitted, not \"n/a\", when OFF hasn't computed one. If no product is found, fall back to web search or estimation. When online lookups are paused, saved household foods for that barcode are returned instead. When the product is not in the household catalog yet, add it with upsert_food passing barcode (and generic_food_id to file it under a plain food), with nutrition per 100 g. Two gaps to close yourself before logging: a fiber or sugar figure shown as n/a is missing data rather than a zero, so estimate it and pass it anyway; and Open Food Facts carries no caffeine at all, so for a coffee, tea, cola, energy drink or other caffeinated product get caffeine_mg from the label or a web search.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -329,7 +331,7 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                                     content: [
                                         {
                                             type: "text",
-                                            text: `${pausedNote}\n\n${body}`,
+                                            text: `${pausedNote}\n\n${body}${idTag(foodId, "food_id")}`,
                                         },
                                     ],
                                 };
@@ -339,6 +341,22 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                         }
                     }
 
+                    // Whatever answered the nutrition (cache, paused catalog,
+                    // online), a household food filed under this barcode is
+                    // the one an agent passes on, so its id ends the text.
+                    const householdTag = async () => {
+                        try {
+                            const foodId =
+                                await liveFoodsStore().getBarcodeFoodId(
+                                    householdId,
+                                    normalized,
+                                );
+                            return foodId ? idTag(foodId, "food_id") : "";
+                        } catch {
+                            return "";
+                        }
+                    };
+
                     if (!food) {
                         const miss = pausedNote
                             ? `No saved food found for barcode ${normalized} in your household catalog. Ask the user what the product is, or estimate the macros, then log the meal.`
@@ -347,9 +365,11 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: pausedNote
-                                        ? `${pausedNote}\n\n${miss}`
-                                        : miss,
+                                    text: `${
+                                        pausedNote
+                                            ? `${pausedNote}\n\n${miss}`
+                                            : miss
+                                    }${await householdTag()}`,
                                 },
                             ],
                         };
@@ -374,9 +394,11 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: pausedNote
-                                    ? `${pausedNote}\n\n${body}`
-                                    : body,
+                                text: `${
+                                    pausedNote
+                                        ? `${pausedNote}\n\n${body}`
+                                        : body
+                                }${await householdTag()}`,
                             },
                         ],
                     };
@@ -589,6 +611,56 @@ function foodPayload(
     };
 }
 
+/**
+ * The rows a saved food points at, for the end of an edit tool's text: the
+ * plain food it is a product of, its usual store, and its usual product on a
+ * line of its own so the first `[food_id]` in the text stays the food's own.
+ */
+function foodReferenceTags(payload: {
+    generic_food_id: string | null;
+    usual_product_id: string | null;
+    usual_store_id: string | null;
+}): string {
+    return `${payload.generic_food_id ? idTag(payload.generic_food_id, "generic_food_id") : ""}${payload.usual_store_id ? idTag(payload.usual_store_id, "store_id") : ""}${payload.usual_product_id ? `\nUsual product${idTag(payload.usual_product_id, "food_id")}` : ""}`;
+}
+
+/** get_food's text: the food with its id, then its products and notices, each with theirs. */
+function getFoodText(payload: {
+    id: string;
+    name: string;
+    generic_food_id: string | null;
+    usual_store_id: string | null;
+    /** What the food reads through its usual product, store included. */
+    effective: { usual_store_id: string | null };
+    products: { id: string; name: string; usual: boolean }[];
+    notices: WireNotice[];
+}): string {
+    const stores = [
+        ...new Set(
+            [payload.usual_store_id, payload.effective.usual_store_id].filter(
+                (id): id is string => id != null,
+            ),
+        ),
+    ];
+    const lines = [
+        `${payload.name}${idTag(payload.id, "food_id")}${payload.generic_food_id ? idTag(payload.generic_food_id, "generic_food_id") : ""}${stores.map((id) => idTag(id, "store_id")).join("")}`,
+    ];
+    if (payload.products.length > 0) {
+        lines.push(
+            `Products: ${payload.products
+                .map(
+                    (product) =>
+                        `${product.name}${product.usual ? " (usual)" : ""}${idTag(product.id, "food_id")}`,
+                )
+                .join(", ")}`,
+        );
+    }
+    for (const notice of payload.notices) {
+        lines.push(`${notice.message}${noticeIdTags(notice)}`);
+    }
+    return lines.join("\n");
+}
+
 function qualityPayload(q: FoodQuality | null) {
     if (q == null) return null;
     return {
@@ -654,16 +726,24 @@ function formatSearchHit(hit: {
     source: string;
     barcode: string | null;
     calories: number | null;
+    generic_food_id: string | null;
     generic_food_name: string | null;
 }): string {
     const bits = [hit.name];
     if (hit.brand) bits.push(hit.brand);
-    if (hit.food_id) bits.push(`food_id ${hit.food_id}`);
     if (hit.barcode) bits.push(hit.barcode);
     if (hit.calories != null) bits.push(`${hit.calories} kcal`);
-    if (hit.generic_food_name) bits.push(`product of ${hit.generic_food_name}`);
+    if (hit.generic_food_name) {
+        // The plain food a product is filed under: what set_usual_product,
+        // remove_usual and add_grocery_line take as food_id.
+        bits.push(
+            `product of ${hit.generic_food_name}${hit.generic_food_id ? idTag(hit.generic_food_id, "food_id") : ""}`,
+        );
+    }
     bits.push(hit.source);
-    return bits.join(" · ");
+    return (
+        bits.join(" · ") + (hit.food_id ? idTag(hit.food_id, "food_id") : "")
+    );
 }
 
 export function registerSearchFoodTool(server: McpServer, ctx: ToolContext) {
@@ -881,7 +961,7 @@ export async function convertQuantityPayload(
             const where = f.serving_label
                 ? `${f.from_food_name}'s serving "${f.serving_label}"`
                 : f.from_food_name;
-            return `${what} from ${where}`;
+            return `${what} from ${where}${idTag(f.from_food_id, "food_id")}`;
         })
         .join("; ");
     const fromText = `${from.amount} ${resolveQuantityUnit(from.unit) ?? from.unit}`;
@@ -980,7 +1060,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${payload.name} ${payload.id}`,
+                                text: getFoodText(payload),
                             },
                         ],
                         structuredContent: payload,
@@ -1326,7 +1406,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: `Saved ${payload.name} ${payload.id}`,
+                                    text: `Saved ${payload.name}${idTag(payload.id, "food_id")}${foodReferenceTags(payload)}`,
                                 },
                             ],
                             structuredContent: {
@@ -1453,7 +1533,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                             {
                                 type: "text" as const,
                                 text: withUndo(
-                                    `Merged into ${payload.name} ${payload.id}`,
+                                    `Merged into ${payload.name}${idTag(payload.id, "food_id")}`,
                                     run.undo,
                                 ),
                             },
@@ -1506,7 +1586,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${args.food_id ? "Linked" : "Unlinked"} ${payload.name} ${payload.id}`,
+                                text: `${args.food_id ? "Linked" : "Unlinked"} ${payload.name}${foodReferenceTags(payload)}`,
                             },
                         ],
                         structuredContent: payload,
@@ -1578,9 +1658,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         store.listBarcodes(householdId, saved.id),
                     ]);
                     const payload = foodPayload(saved, aliases, barcodes);
-                    const bits = [
-                        `Saved usual product for ${payload.name} ${payload.id}`,
-                    ];
+                    const bits = [`Saved usual product for ${payload.name}`];
                     if (
                         args.store_id !== undefined ||
                         args.amount !== undefined ||

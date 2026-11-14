@@ -38,6 +38,7 @@ import {
     dismissedOn,
     uncapturedNote,
     withUndo,
+    idTag,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 
@@ -229,11 +230,11 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
                     const header = `${plural(stores.length, "store")}. Default store: ${defaultName ?? "none"}. Use a food's usual store first: ${prefs.useUsualStore ? "on" : "off"}.`;
                     const body = stores.map(
                         (store) =>
-                            `${store.position}. ${store.name}${store.is_default ? " (default)" : ""} — ${plural(store.line_count, "line")}\n   Sections: ${
+                            `${store.position}. ${store.name}${store.is_default ? " (default)" : ""} — ${plural(store.line_count, "line")}${idTag(store.id, "store_id")}\n   Sections: ${
                                 store.sections
                                     .map(
                                         (section) =>
-                                            `${section.name}${section.hidden ? " (hidden)" : ""}${section.line_count > 0 ? ` [${section.line_count}]` : ""}`,
+                                            `${section.name}${section.hidden ? " (hidden)" : ""}${section.line_count > 0 ? ` [${section.line_count}]` : ""}${idTag(section.id, "section_id")}`,
                                     )
                                     .join(", ") || "none"
                             }`,
@@ -295,7 +296,7 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text" as const,
-                                    text: `Added store ${made.store.name} with ${plural(made.sections.length, "section")}: ${made.sections.map((row) => row.name).join(", ")}.`,
+                                    text: `Added store ${made.store.name} with ${plural(made.sections.length, "section")}: ${made.sections.map((row) => `${row.name}${idTag(row.id, "section_id")}`).join(", ")}.${idTag(made.store.id, "store_id")}`,
                                 },
                             ],
                             structuredContent: {
@@ -676,6 +677,10 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
                                     : value.deleted_lines > 0
                                       ? ` and its ${plural(value.deleted_lines, "line")}`
                                       : " (it had no lines)"
+                            }${
+                                value.moved_to
+                                    ? idTag(value.moved_to.id, "store_id")
+                                    : ""
                             }.`,
                             value.cleared_default
                                 ? "It was the default store, so the household has no default store now."
@@ -1020,7 +1025,7 @@ export function registerStoreTools(server: McpServer, ctx: ToolContext) {
                         const order = value.sections
                             .map(
                                 (row) =>
-                                    `${row.name}${row.hidden ? " (hidden)" : ""}`,
+                                    `${row.name}${row.hidden ? " (hidden)" : ""}${idTag(row.id, "section_id")}`,
                             )
                             .join(", ");
                         return {

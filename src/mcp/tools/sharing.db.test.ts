@@ -144,6 +144,10 @@ describeDb(pgAvailable !== null, "share link tools (db)", (getCtx) => {
                     );
                     const token = parsed.url.split("/s/")[1]!;
                     expect(parsed.url).toBe(`http://test.local/s/${token}`);
+                    // The id is a tag in the text, labelled by the input that takes it.
+                    expect(made.content[0]!.text).toContain(
+                        `[id: ${parsed.id}]`,
+                    );
 
                     const link = await resolve(token);
                     expect(link).toMatchObject({
@@ -158,6 +162,9 @@ describeDb(pgAvailable !== null, "share link tools (db)", (getCtx) => {
                         (await call("list_share_links")).structuredContent,
                     );
                     expect(listed.links).toHaveLength(1);
+                    expect(
+                        (await call("list_share_links")).content[0]!.text,
+                    ).toContain(`[id: ${parsed.id}]`);
                     expect(listed.links[0]).toMatchObject({
                         id: parsed.id,
                         recipe_name: "Lentil soup",
@@ -169,6 +176,9 @@ describeDb(pgAvailable !== null, "share link tools (db)", (getCtx) => {
                         id: parsed.id,
                     });
                     expect(revoked.isError).toBeFalsy();
+                    expect(revoked.content[0]!.text).toContain(
+                        `[id: ${parsed.id}]`,
+                    );
                     expect(await resolve(token)).toBeNull();
                     // Revoking again is not an error.
                     expect(

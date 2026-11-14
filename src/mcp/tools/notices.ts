@@ -22,6 +22,8 @@ import {
     registerWidgetResource,
     uiMetaForKey,
     type ToolContext,
+    idTag,
+    noticeIdTags,
 } from "../shared.js";
 
 export const LIST_NOTICES_OUTPUT_SCHEMA = z.object({
@@ -116,7 +118,9 @@ export function registerNoticeTools(server: McpServer, ctx: ToolContext) {
                         count === 0
                             ? "Nothing needs attention."
                             : `${count} notice(s) need attention.\n` +
-                              wire.map((n) => n.message).join("\n");
+                              wire
+                                  .map((n) => `${n.message}${noticeIdTags(n)}`)
+                                  .join("\n");
                     return {
                         content: [{ type: "text", text }],
                         structuredContent: { count, notices: wire },

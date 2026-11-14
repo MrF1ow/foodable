@@ -39,6 +39,7 @@ import {
     setFlagsForTests,
 } from "../../flags.js";
 import { handleMcp } from "../server.js";
+import { stripIdTags } from "../shared.js";
 import { KITCHEN_ADMIN_TOOL_NAMES } from "./grocery-admin-names.js";
 
 const pgAvailable = await findPgBin();
@@ -541,7 +542,7 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
             const before = await fingerprint();
             const result = await call(arranged.tool, arranged.args);
             expect(result.isError).toBeFalsy();
-            expect(text(result)).toStartWith(arranged.text);
+            expect(stripIdTags(text(result))).toStartWith(arranged.text);
             expect(text(result)).toContain(UNDO_SENTENCE);
             await arranged.changed();
 
@@ -737,6 +738,46 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
             ).toMatch(/must be|too_big|too_small|Too (big|small)|at least/i);
         }
         expect(await actions()).toEqual([]);
+    });
+
+    test("list_usuals lists every usual on the Usuals list with all its products, schedule or not", async () => {
+        const { plain, kirkland, organic } = await usual();
+        await getCtx()
+            .sql`update public.foods set restock_schedule = null, restock_every_weeks = null, restock_when_low = false, restock_low_level = null, usual_added_at = null where id = ${plain}`;
+        const listed = await call("list_usuals");
+        expect(listed.isError).toBeFalsy();
+        const rows = listed.structuredContent!.usuals as {
+            food_id: string;
+            products: { food_id: string; name: string; is_usual: boolean }[];
+        }[];
+        expect(rows.map((row) => [row.food_id, row.products])).toEqual([
+            [
+                plain,
+                [
+                    {
+                        food_id: kirkland,
+                        name: "Kirkland Large Eggs",
+                        is_usual: true,
+                    },
+                    { food_id: organic, name: "Organic Eggs", is_usual: false },
+                ],
+            ],
+        ]);
+        expect(stripIdTags(text(listed))).toContain(
+            "products: Kirkland Large Eggs (usual), Organic Eggs",
+        );
+        // Each product and the usual itself carry their ids in the text.
+        expect(text(listed)).toContain(
+            `Kirkland Large Eggs (usual) [food_id: ${kirkland}], Organic Eggs [food_id: ${organic}]`,
+        );
+        // The usual's own id comes first on its line, before any product's, so
+        // taking the first `[food_id]` adds the plain food and not a brand.
+        expect(text(listed).match(/\[food_id: ([0-9a-f-]{36})\]/)![1]).toBe(
+            plain,
+        );
+        expect(text(listed)).toContain(
+            `Eggs [food_id: ${plain}] → Kirkland Large Eggs`,
+        );
     });
 
     test("remove_usual: a product is no usual and an archived food is unknown", async () => {

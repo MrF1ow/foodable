@@ -32,6 +32,7 @@ import {
     destructiveOutcome,
     withUndo,
     type ToolContext,
+    idTag,
 } from "../shared.js";
 
 const UUID_RE =
@@ -283,12 +284,12 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     const lines = days.flatMap((day) =>
                         day.plans.map(
                             (plan) =>
-                                `- ${day.weekday} ${day.date} · ${plan.slot}: ${plan.recipe_name} (${plan.servings} servings) [${plan.plan_id}]`,
+                                `- ${day.weekday} ${day.date} · ${plan.slot}: ${plan.recipe_name} (${plan.servings} servings)${idTag(plan.plan_id, "plan_id")}${idTag(plan.recipe_id, "recipe_id")}`,
                         ),
                     );
                     const missingLines = missing.map(
                         (m) =>
-                            `- ${m.display_name}${m.amount != null ? ` ${m.amount} ${m.unit ?? ""}`.trimEnd() : ""}${m.unknown ? " (stock could not be counted)" : ""}`,
+                            `- ${m.display_name}${m.amount != null ? ` ${m.amount} ${m.unit ?? ""}`.trimEnd() : ""}${m.unknown ? " (stock could not be counted)" : ""}${m.food_id ? idTag(m.food_id, "food_id") : ""}`,
                     );
                     const text = [
                         `Week plan ${inputs.today} to ${last}: ${plannedCount} planned.`,
@@ -376,8 +377,8 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             {
                                 type: "text" as const,
                                 text: alreadyPlanned
-                                    ? `Already planned: ${planLine(wire)} [${wire.plan_id}]`
-                                    : `Planned: ${planLine(wire)} [${wire.plan_id}]`,
+                                    ? `Already planned: ${planLine(wire)}${idTag(wire.plan_id, "plan_id")}`
+                                    : `Planned: ${planLine(wire)}${idTag(wire.plan_id, "plan_id")}`,
                             },
                         ],
                         structuredContent: {
@@ -585,16 +586,18 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             reason: entry.reason,
                         });
                     }
+                    const foodTag = (row: { food_id: string | null }) =>
+                        row.food_id ? idTag(row.food_id, "food_id") : "";
                     const text = [
-                        `Added ${structured.added.length} to the grocery list${structured.added.length > 0 ? `: ${structured.added.map((a) => a.display_name).join(", ")}` : ""}.`,
+                        `Added ${structured.added.length} to the grocery list${structured.added.length > 0 ? `: ${structured.added.map((a) => `${a.display_name}${idTag(a.line_id)}${foodTag(a)}${a.store_id ? idTag(a.store_id, "store_id") : ""}`).join(", ")}` : ""}.`,
                         structured.on_list.length > 0
-                            ? `Already on the list: ${structured.on_list.map((a) => a.display_name).join(", ")}.`
+                            ? `Already on the list: ${structured.on_list.map((a) => `${a.display_name}${idTag(a.existing_line_id)}${foodTag(a)}`).join(", ")}.`
                             : null,
                         structured.unknown.length > 0
-                            ? `Check what you have: ${structured.unknown.map((a) => a.display_name).join(", ")}.`
+                            ? `Check what you have: ${structured.unknown.map((a) => `${a.display_name}${foodTag(a)}`).join(", ")}.`
                             : null,
                         structured.skipped.length > 0
-                            ? `Skipped: ${structured.skipped.map((a) => `${a.display_name} (${a.reason})`).join(", ")}.`
+                            ? `Skipped: ${structured.skipped.map((a) => `${a.display_name} (${a.reason})${foodTag(a)}`).join(", ")}.`
                             : null,
                     ]
                         .filter((part): part is string => part != null)

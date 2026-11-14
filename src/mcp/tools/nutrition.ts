@@ -32,6 +32,7 @@ import {
     MAX_ALCOHOL_G,
     MAX_CAFFEINE_MG,
     type BulkImportArgs,
+    type ImportResult,
 } from "../../domain/import.js";
 import {
     NUTRIENT_COVERAGE,
@@ -59,6 +60,7 @@ import {
     similarFoodsWire,
     SIMILAR_FOODS_ENTRY,
     WRITE_STATUS,
+    idTag,
 } from "../shared.js";
 import { SimilarFoodsError, type OnSimilar } from "../../domain/foods.js";
 import {
@@ -82,6 +84,13 @@ import {
 import { mealWriteFromItems as mealWriteFromItemsCore } from "../../meal-write.js";
 
 // ---------- bulk_import_meals ----------
+
+/** One line per row that has a meal, so an agent can update or delete it by id. */
+function importMealIdLines(result: ImportResult): string {
+    const rows = result.results.filter((r) => r.meal_id);
+    if (rows.length === 0) return "";
+    return `\n${rows.map((r) => `Line ${r.source_line}: ${r.status}${idTag(r.meal_id!)}`).join("\n")}`;
+}
 
 // Ceiling on total rows per user. Rate limiting is per HTTP request, so one
 // batched call writes up to MAX_ROWS_PER_CALL rows for a single limiter hit;
@@ -384,7 +393,7 @@ export function registerNutritionWriteTools(
                 // NUTRIENT_COVERAGE rather than restated, because
                 // SERVER_INSTRUCTIONS carries the same paragraph and many hosts
                 // surface only one of the two.
-                "Log a meal entry with nutritional information. If the user doesn't specify the quantity or portion size, ask how much they ate before estimating calories and macros. When the user gives a barcode — typed, or read from a photo of the package (transcribe the digits printed under the barcode) — call lookup_barcode first to get the product's label data, then scale it to the amount eaten. Fall back to web search or estimation only when no product is found. Use web search for branded products when no barcode is available. When logging from a photo of a plated or prepared meal (no package/barcode): first identify each dish, then establish whether it is a restaurant/takeout meal or homemade before anything else. If it is from a restaurant, ask which restaurant and where, then search the web for its menu — chains publish per-item nutrition worth using directly, independent places usually publish ingredient lists that reveal the butter, cream, and oil the photo hides; if you cannot find the menu or cannot tell which dish it is, say so and put your assumption to the user as a question rather than presenting a guess as menu data. Either way, estimate portions in household measures the user can eyeball (a glass of, a handful of, a tablespoon of — NOT grams; for restaurant servings ask how much of it they actually ate), call search_meals to see how similar meals were logged before and to surface ingredients that may be invisible in the photo, then interview the user across multiple turns — one question per message, covering which variation each dish is, how much they ate, and photo-invisible ingredients (oil, sugar, sauce, what a drink was made with) — until nothing is left open. Do NOT call this tool after a single question-and-answer round; a lone confirmation is not enough. Only call it once every open question is resolved and the user has approved a full summary of the meal (or has told you to stop asking and just log it). Write the confirmed household-measure portions into the description itself (e.g. 'Oatmeal (1 glass raw oats, 2 glasses milk) with banana') so future searches are self-describing, and for a restaurant meal name the venue and city too (e.g. 'Pad thai with chicken (1 plate, finished) at Thai Basil, Podil, Kyiv').\n\n" +
+                "Log a meal entry with nutritional information. If the user doesn't specify the quantity or portion size, ask how much they ate before estimating calories and macros. When the user gives a barcode (typed, or read from a package photo), call lookup_barcode first, then scale its label data to the amount eaten. Fall back to web search or estimation only when no product is found, and use web search for branded products without a barcode. When logging from a photo of a plated or prepared meal (no package/barcode): first identify each dish, then establish whether it is a restaurant/takeout meal or homemade before anything else. If it is from a restaurant, ask which restaurant and where, then search the web for its menu — chains publish per-item nutrition, independent places list ingredients that reveal the butter, cream and oil the photo hides; if you cannot find the menu or tell which dish it is, say so and ask rather than guess. Either way, estimate portions in household measures the user can eyeball (a glass of, a handful of, a tablespoon of — NOT grams; for restaurant servings ask how much of it they actually ate), call search_meals to see how similar meals were logged and surface ingredients invisible in the photo, then interview the user across multiple turns — one question per message, covering which variation each dish is, how much they ate, and photo-invisible ingredients (oil, sugar, sauce, what a drink was made with) — until nothing is left open. Do NOT call this tool after a single question-and-answer round: only once every open question is resolved and the user has approved a full summary of the meal (or said to stop asking and just log it). Write the confirmed household-measure portions into the description itself (e.g. 'Oatmeal (1 glass raw oats, 2 glasses milk) with banana') so future searches are self-describing, and for a restaurant meal name the venue and city too (e.g. 'Pad thai with chicken (1 plate, finished) at Thai Basil, Podil, Kyiv').\n\n" +
                 NUTRIENT_COVERAGE +
                 "\nPutting '180 mg caffeine' or '6 g fiber' in notes or in the description instead of in the field leaves it out of every total, goal and chart.\nFor items from the household catalog, pass the plain food (\"eggs\", or its food_id) rather than a brand, so the household's usual product supplies the nutrition.",
             annotations: {
@@ -911,6 +920,7 @@ export function registerNutritionWriteTools(
                                 type: "text" as const,
                                 text:
                                     buildSummaryText(result) +
+                                    importMealIdLines(result) +
                                     alcoholHiddenNote(
                                         carriedAlcohol,
                                         alcohol,

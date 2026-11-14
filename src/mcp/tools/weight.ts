@@ -30,7 +30,12 @@ import {
     assertPlausibleWeight,
     resolveDateWindow,
 } from "../shared.js";
-import { destructiveOutcome, withUndo, type ToolContext } from "../shared.js";
+import {
+    destructiveOutcome,
+    idTag,
+    withUndo,
+    type ToolContext,
+} from "../shared.js";
 
 export function registerWeightTools(server: McpServer, ctx: ToolContext) {
     const {
@@ -120,7 +125,7 @@ export function registerWeightTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${prefix}: ${formatWeight(entry.weight_g, unit)} at ${entry.logged_at}${entry.notes ? ` (${entry.notes})` : ""}. ID: ${entry.id}${note}`,
+                                text: `${prefix}: ${formatWeight(entry.weight_g, unit)} at ${entry.logged_at}${entry.notes ? ` (${entry.notes})` : ""}${idTag(entry.id)}${note}`,
                             },
                         ],
                     };

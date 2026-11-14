@@ -14,6 +14,7 @@ import {
     uncapturedNote,
     withUndo,
     type ToolContext,
+    idTag,
 } from "../shared.js";
 import { ADMIN_UNDO_NOTE } from "./grocery.js";
 
@@ -317,7 +318,7 @@ export function registerGroceryAdminTools(server: McpServer, ctx: ToolContext) {
                             ? `${value.name} is not on the Usuals list; nothing changed.`
                             : `Removed ${value.name} from the Usuals list${
                                   value.products_removed.length > 0
-                                      ? `; ${value.products_removed.map((row) => row.name).join(", ")} came off its list`
+                                      ? `; ${value.products_removed.map((row) => `${row.name}${idTag(row.id, "food_id")}`).join(", ")} came off its list`
                                       : ""
                               }.`;
                         return {

@@ -18,7 +18,7 @@ import {
     type ShareLink,
 } from "../../domain/sharing.js";
 import { gatedTool } from "../gated.js";
-import type { ToolContext } from "../shared.js";
+import { idTag, type ToolContext } from "../shared.js";
 import {
     importSharedRecipeForHousehold,
     sharedImportFailure,
@@ -207,7 +207,7 @@ export function registerSharingTools(server: McpServer, ctx: ToolContext) {
                                     link.expiresAt
                                         ? `It expires ${link.expiresAt}.`
                                         : "It never expires."
-                                } Revoke it with revoke_share_link id ${link.id}.`,
+                                } Revoke it with revoke_share_link.${idTag(link.id)}`,
                             },
                         ],
                         structuredContent: {
@@ -286,7 +286,7 @@ export function registerSharingTools(server: McpServer, ctx: ToolContext) {
                             : wire
                                   .map(
                                       (l) =>
-                                          `${l.id} ${
+                                          `${
                                               l.recipe_name
                                                   ? `recipe "${l.recipe_name}"`
                                                   : l.kind === "recipe"
@@ -300,7 +300,7 @@ export function registerSharingTools(server: McpServer, ctx: ToolContext) {
                                               l.expires_at
                                                   ? `expires ${l.expires_at}`
                                                   : "never expires"
-                                          }`,
+                                          }${idTag(l.id)}`,
                                   )
                                   .join("\n");
                     return {
@@ -348,7 +348,7 @@ export function registerSharingTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text" as const,
-                                text: `Revoked the ${KIND_LABEL[link.kind]} share link ${link.id}. It no longer works.`,
+                                text: `Revoked the ${KIND_LABEL[link.kind]} share link${idTag(link.id)}. It no longer works.`,
                             },
                         ],
                         structuredContent: {
@@ -441,7 +441,7 @@ export function registerSharingTools(server: McpServer, ctx: ToolContext) {
                         result.renamedFrom === null
                             ? ""
                             : ` It was saved as "${result.recipe.name}" because the household already has "${result.renamedFrom}".`;
-                    structuredContent.message = `Imported "${result.recipe.name}" as recipe ${result.recipe.id}: ${plural(result.matched, "ingredient", "ingredients")} matched foods the household already had, ${plural(result.created, "ingredient", "ingredients")} added as new foods.${renamed}`;
+                    structuredContent.message = `Imported "${result.recipe.name}" as a recipe${idTag(result.recipe.id, "recipe_id")}: ${plural(result.matched, "ingredient", "ingredients")} matched foods the household already had, ${plural(result.created, "ingredient", "ingredients")} added as new foods.${renamed}`;
                     return {
                         content: [
                             {

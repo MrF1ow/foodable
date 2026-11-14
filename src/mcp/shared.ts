@@ -767,7 +767,7 @@ export function similarFoodsWire(
 export function similarFoodsText(entries: SimilarFoodsEntry[]): string {
     const parts = entries.map((entry) => {
         const names = entry.candidates
-            .map((c) => `${c.food.name} (${c.food.id})`)
+            .map((c) => `${c.food.name}${idTag(c.food.id, "food_id")}`)
             .join(", ");
         return `"${entry.name}" → ${names}`;
     });
@@ -1158,11 +1158,87 @@ export function formatGoals(
     return parts.join("\n");
 }
 
+/**
+ * The one way a tool's text names an id an agent can act on: ` [food_id: …]`,
+ * the label being the input that takes it. A host that shows a widget hands
+ * the model only the text, never `structuredContent`, so an id left out of the
+ * text is one the agent cannot pass on. `ids-in-text.db.test.ts` fails when a
+ * tool carries an id in `structuredContent` that its text omits.
+ */
+export function idTag(value: string, param = "id"): string {
+    return ` [${param}: ${value}]`;
+}
+
+/** Text with every `idTag` removed, for tests that pin the wording around ids. */
+export function stripIdTags(text: string): string {
+    return text.replace(/ \[(?:[a-z_]*id|code|subject_kind): [^\]]+\]/g, "");
+}
+
+/** The input that takes a notice's subject or related row, by its kind. */
+const NOTICE_KIND_INPUT: Record<
+    WireNotice["subject"]["kind"] | WireNotice["related"][number]["kind"],
+    string
+> = {
+    food: "food_id",
+    recipe: "recipe_id",
+    recipe_ingredient: "ingredient_id",
+    fridge_item: "id",
+    grocery_line: "id",
+    member: "user_id",
+};
+
+/**
+ * The ids a notice carries, for the end of its text line. A dismissable one
+ * carries exactly what dismiss_notice takes, under those input names: `code`,
+ * `subject_kind`, `subject_id` and, only when `dismiss.related_id` is set,
+ * `related_id`. Every other id (the recipe an ingredient notice belongs to, the
+ * other rows it names) is labelled by the input that takes it, and a
+ * non-dismissable notice labels its subject the same way.
+ */
+export function noticeIdTags(notice: WireNotice): string {
+    const seen = new Set<string>();
+    const tags: string[] = [];
+    const add = (value: string, label: string) => {
+        if (seen.has(value)) return;
+        seen.add(value);
+        tags.push(idTag(value, label));
+    };
+    const dismiss = notice.dismiss;
+    if (dismiss) {
+        tags.push(
+            ` [code: ${dismiss.code}] [subject_kind: ${dismiss.subject_kind}]`,
+        );
+        add(dismiss.subject_id, "subject_id");
+        if (dismiss.related_id) add(dismiss.related_id, "related_id");
+    } else {
+        add(notice.subject.id, NOTICE_KIND_INPUT[notice.subject.kind]);
+    }
+    if (notice.subject.recipe_id) add(notice.subject.recipe_id, "recipe_id");
+    for (const related of notice.related) {
+        add(related.id, NOTICE_KIND_INPUT[related.kind]);
+    }
+    return tags.join("");
+}
+
+/**
+ * The ids a row's notices relate it to (a member whose allergy it trips), each
+ * labelled by the input that takes it. The row's own id is tagged by the
+ * caller, so a notice's subject is not repeated here.
+ */
+export function noticeRelatedTags(notices: readonly WireNotice[]): string {
+    const seen = new Set<string>();
+    return notices
+        .flatMap((notice) => notice.related)
+        .filter((related) => !seen.has(related.id) && seen.add(related.id))
+        .map((related) => idTag(related.id, NOTICE_KIND_INPUT[related.kind]))
+        .join("");
+}
+
 export function formatWeightEntry(
     entry: WeightEntry,
     unit: WeightUnit,
 ): string {
-    return `- ${formatWeight(entry.weight_g, unit)} at ${entry.logged_at}${entry.notes ? ` (${entry.notes})` : ""} [id: ${entry.id}]`;
+    return `- ${formatWeight(entry.weight_g, unit)} at ${entry.logged_at}${entry.notes ? ` (${entry.notes})` : ""}${idTag(entry.id)}`;
 }
 
 // Shared `logged_at` description for every manual write tool. The three forms
@@ -1236,7 +1312,7 @@ export {
 
 export function formatMeal(meal: Meal, alcohol: AlcoholDisplay = null): string {
     const parts = [
-        `ID: ${meal.id}`,
+        idTag(meal.id).trimStart(),
         `Time: ${meal.logged_at}`,
         meal.meal_type ? `Type: ${meal.meal_type}` : null,
         `Description: ${meal.description}`,

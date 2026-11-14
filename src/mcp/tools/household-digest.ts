@@ -9,7 +9,7 @@ import type {
     HouseholdDigest,
     HouseholdDigestMemberNutrition,
 } from "../../domain/household-digest.js";
-import type { ToolContext } from "../shared.js";
+import { idTag, type ToolContext } from "../shared.js";
 
 const DIGEST_TARGET_SCHEMA = z.discriminatedUnion("kind", [
     z.object({
@@ -171,6 +171,40 @@ export function householdDigestToWire(digest: HouseholdDigest): WireDigest {
     };
 }
 
+/**
+ * The ids behind the digest's lines, after its text: the text is written in
+ * the domain without them, and an agent can only act on what the text carries.
+ */
+function digestIdLines(wire: WireDigest): string[] {
+    const lines: string[] = [];
+    if (wire.expiring.length > 0) {
+        lines.push(
+            `Expiring: ${wire.expiring.map((item) => `${item.display_name}${idTag(item.fridge_item_id)}`).join(", ")}`,
+        );
+    }
+    if (wire.ran_out.length > 0) {
+        lines.push(
+            `Ran out: ${wire.ran_out.map((row) => `${row.display_name}${row.food_id ? idTag(row.food_id, "food_id") : ""}`).join(", ")}`,
+        );
+    }
+    if (wire.suggestions.length > 0) {
+        lines.push(
+            `Suggested: ${wire.suggestions
+                .map(
+                    (row) =>
+                        `${row.display_name}${row.food_id ? idTag(row.food_id, "food_id") : ""}${row.store_id ? idTag(row.store_id, "store_id") : ""}`,
+                )
+                .join(", ")}`,
+        );
+    }
+    if (wire.members.length > 0) {
+        lines.push(
+            `Members: ${wire.members.map((row) => `${row.display_name}${idTag(row.member_id, "user_id")}`).join(", ")}`,
+        );
+    }
+    return lines;
+}
+
 export function registerHouseholdDigestTools(
     server: McpServer,
     ctx: ToolContext,
@@ -189,7 +223,15 @@ export function registerHouseholdDigestTools(
         );
         const structuredContent = householdDigestToWire(digest);
         return {
-            content: [{ type: "text" as const, text: digest.text }],
+            content: [
+                {
+                    type: "text" as const,
+                    text: [
+                        digest.text,
+                        ...digestIdLines(structuredContent),
+                    ].join("\n"),
+                },
+            ],
             structuredContent,
         };
     }

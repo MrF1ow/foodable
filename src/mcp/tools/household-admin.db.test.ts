@@ -25,6 +25,7 @@ import {
     setFlagsForTests,
 } from "../../flags.js";
 import { handleMcp } from "../server.js";
+import { stripIdTags } from "../shared.js";
 
 const pgAvailable = await findPgBin();
 if (!pgAvailable) {
@@ -670,7 +671,7 @@ describeDb(
                 const result = await call(tool, arranged.args);
                 expect(result.isError).toBeFalsy();
                 const said = text(result);
-                expect(said).toStartWith(arranged.text);
+                expect(stripIdTags(said)).toStartWith(arranged.text);
                 expect(said).toContain(UNDO_SENTENCE);
                 await arranged.changed();
                 expect(await fingerprint()).not.toBe(before);

@@ -192,7 +192,7 @@ import { PLAN_UNKNOWN_LINE_NOTE } from "./copy/toasts.js";
 import { fridgeExpiryLine } from "./copy/notices.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import { createMemoryAgentActionsStore } from "./domain/agent-actions.js";
-import { setAgentActionDepsForTests } from "./mcp/shared.js";
+import { setAgentActionDepsForTests, stripIdTags } from "./mcp/shared.js";
 import { setGoalDayRowsForTests } from "./db/agent-actions-goal-days.js";
 import {
     createMemoryRecipesStore,
@@ -4160,8 +4160,14 @@ describe("household person targeting", () => {
 describe("household config tools", () => {
     const alice = "11111111-1111-4111-8111-111111111111";
 
+    type ListedTools = Awaited<ReturnType<Client["listTools"]>>["tools"];
+
     async function withHousehold(
-        run: (call: CallTool, list: () => Promise<string[]>) => Promise<void>,
+        run: (
+            call: CallTool,
+            list: () => Promise<string[]>,
+            listFull: () => Promise<ListedTools>,
+        ) => Promise<void>,
     ): Promise<void> {
         db.members = [
             {
@@ -4210,6 +4216,7 @@ describe("household config tools", () => {
                     const { tools } = await client.listTools();
                     return tools.map((t) => t.name);
                 },
+                async () => (await client.listTools()).tools,
             );
         } finally {
             await client.close();
@@ -4542,6 +4549,36 @@ describe("household config tools", () => {
         ).json()) as string[];
         await withHousehold(async (_call, list) => {
             expect(await list()).toEqual(snapshot);
+        });
+    });
+
+    // Every tool description is paid for in every conversation's context, so
+    // tools/list is budgeted. These are what main measured on ee31a2f2 (before
+    // the agent-parity work) with every flag on, the same listing the snapshot
+    // test reads: JSON.stringify(tools).length (UTF-16 code units, so
+    // characters, not bytes) and tools.length. To re-measure, copy this
+    // describe block and the `listFull` argument of `withHousehold` onto that
+    // commit (it has neither), add a console.log of both numbers, and run
+    //   bun --no-env-file test src/mcp.test.ts -t "tools/list size"
+    // Raising either constant is a deliberate, reviewed edit: trim a
+    // description first, and say in the PR why the list has to grow.
+    describe("tools/list size", () => {
+        const TOOLS_LIST_MAX_CHARS = 225795;
+        const TOOLS_LIST_MAX_COUNT = 98;
+
+        test("all-flags-on tools/list stays within the size budget", async () => {
+            const snapshot = (await Bun.file(
+                new URL("./mcp/tools-list.snapshot.json", import.meta.url),
+            ).json()) as string[];
+            await withHousehold(async (_call, _list, listFull) => {
+                const tools = await listFull();
+                // The measured set is the all-flags-on list, not a subset.
+                expect(tools.map((tool) => tool.name)).toEqual(snapshot);
+                expect(tools.length).toBeLessThanOrEqual(TOOLS_LIST_MAX_COUNT);
+                expect(JSON.stringify(tools).length).toBeLessThanOrEqual(
+                    TOOLS_LIST_MAX_CHARS,
+                );
+            });
         });
     });
 
@@ -6778,6 +6815,44 @@ describe("phone-app domain MCP tools", () => {
             expect(full.effective.usual_store_id).toBe(costco.id);
             expect(full.effective.usual_amount).toBe(12);
             expect(full.effective.usual_unit).toBe("each");
+        });
+    });
+
+    test("list_grocery_lines text gives each line's id and checked state, so a model without structuredContent can check or delete it", async () => {
+        await withPat(async (call) => {
+            await createGroceryStore(db.settingsStore, "hh-1", "Safeway");
+            const eggs = await call("upsert_food", { name: "Eggs" });
+            const milk = await call("upsert_food", { name: "Milk" });
+            const eggsLine = await call("add_grocery_line", {
+                kind: "food",
+                food_id: eggs.structuredContent?.id as string,
+            });
+            await call("add_grocery_line", {
+                kind: "food",
+                food_id: milk.structuredContent?.id as string,
+            });
+            const eggsId = eggsLine.structuredContent?.id as string;
+            expect(
+                (
+                    await call("check_grocery_line", {
+                        id: eggsId,
+                        checked: true,
+                    })
+                ).isError,
+            ).toBeFalsy();
+            const text = textOf(await call("list_grocery_lines"));
+            const rows = text.split("\n");
+            const eggsRow = rows.find((row) => row.startsWith("Eggs"));
+            const milkRow = rows.find((row) => row.startsWith("Milk"));
+            expect(eggsRow).toEndWith(`[checked] [id: ${eggsId}]`);
+            expect(milkRow).not.toContain("[checked]");
+            const milkId = /\[id: ([^\]]+)\]$/.exec(milkRow!)?.[1];
+            expect(milkId).toBeTruthy();
+            const deleted = await call("delete_grocery_line", { id: milkId });
+            expect(deleted.isError).toBeFalsy();
+            expect(textOf(await call("list_grocery_lines"))).not.toContain(
+                "Milk",
+            );
         });
     });
 
@@ -9418,7 +9493,7 @@ describe("/mcp destructive tools are guarded", () => {
                     store_id: STORE_B,
                 });
                 expect(moved.isError).toBeFalsy();
-                expect(textOf(moved)).toStartWith(
+                expect(stripIdTags(textOf(moved))).toStartWith(
                     "Moved 2 lines: Aldi (Other).",
                 );
                 expect(textOf(moved)).toContain(UNDO_SENTENCE);
@@ -9747,7 +9822,7 @@ describe("/mcp destructive tools are guarded", () => {
                         food_id: plain,
                     });
                     expect(removed.isError).toBeFalsy();
-                    expect(textOf(removed)).toContain(
+                    expect(stripIdTags(textOf(removed))).toContain(
                         "Removed Eggs from the Usuals list; Kirkland Large Eggs came off its list.",
                     );
                     expect(textOf(removed)).toContain(UNDO_SENTENCE);
@@ -9945,6 +10020,105 @@ describe("household notices with actions over HTTP", () => {
                 expect(
                     after.notices.filter((n) => CODES.includes(n.code)),
                 ).toEqual([]);
+            });
+        },
+    );
+
+    /** The tags of one text line, `[label: value]` by label. */
+    const tagsOf = (line: string): Record<string, string> =>
+        Object.fromEntries(
+            [...line.matchAll(/\[([a-z_]+): ([^\]]+)\]/g)].map((m) => [
+                m[1]!,
+                m[2]!,
+            ]),
+        );
+
+    test.each(ERAS)(
+        "a notice can be dismissed from the list_notices text alone (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: CallTool = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                // A pair notice, whose dismissal also needs the other food.
+                await call("upsert_food", { name: "rolled oat" });
+                const oats = await call("upsert_food", {
+                    name: "rolled oats",
+                    on_similar: "create",
+                });
+                expect(oats.isError).toBeFalsy();
+                const listing = await call("list_notices", {});
+                const lines = textOf(listing)
+                    .split("\n")
+                    .filter((line) => line.includes("[code: "));
+                // Nothing below reads structuredContent: only the text.
+                const codes = lines.map((line) => tagsOf(line).code);
+                for (const code of [...CODES, "food.possible_duplicate"]) {
+                    expect(codes).toContain(code);
+                }
+                // The pair notice needs its related_id to be dismissed at all.
+                expect(
+                    lines.some(
+                        (line) =>
+                            tagsOf(line).code === "food.possible_duplicate" &&
+                            tagsOf(line).related_id,
+                    ),
+                ).toBe(true);
+                for (const line of lines) {
+                    const tags = tagsOf(line);
+                    expect(tags.subject_kind).toBeTruthy();
+                    expect(tags.subject_id).toBeTruthy();
+                    const out = await call("dismiss_notice", {
+                        code: tags.code,
+                        subject_kind: tags.subject_kind,
+                        subject_id: tags.subject_id,
+                        ...(tags.related_id
+                            ? { related_id: tags.related_id }
+                            : {}),
+                    });
+                    expect(
+                        out.isError,
+                        `${line} -> ${textOf(out)}`,
+                    ).toBeFalsy();
+                }
+                const after = await call("list_notices", {});
+                expect(
+                    textOf(after)
+                        .split("\n")
+                        .filter((line) => line.includes("[code: ")),
+                ).toEqual([]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "only dismiss.related_id is labelled related_id; a non-dismissable notice names no dismiss inputs (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: CallTool = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                const sc = await listed(call);
+                const lines = textOf(await call("list_notices", {}))
+                    .split("\n")
+                    .slice(1);
+                expect(lines).toHaveLength(sc.notices.length);
+                sc.notices.forEach((n, i) => {
+                    const tags = tagsOf(lines[i]!);
+                    expect(tags.related_id ?? null).toBe(
+                        n.dismiss?.related_id ?? null,
+                    );
+                    if (n.dismiss == null) {
+                        expect(tags.code).toBeUndefined();
+                        expect(tags.subject_kind).toBeUndefined();
+                    }
+                });
             });
         },
     );
@@ -12842,7 +13016,7 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         );
 
         test.each(ERAS)(
-            "list_expiring names each item's location, days left and recipe, and the recipe using the most of them; the text is unchanged (%p)",
+            "list_expiring names each item's location, days left and recipe, and the recipe using the most of them; the wording is unchanged and the ids ride at the line ends (%p)",
             async (mode) => {
                 await withHttpClient("u1", mode, async (client) => {
                     const call = async (
@@ -12945,8 +13119,10 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         carbs_g: 40,
                         fat_g: 10,
                     });
-                    expect(listed.content[0]!.text.split("\n")).toEqual(
-                        parsed.items.map((item) =>
+                    expect(
+                        stripIdTags(listed.content[0]!.text).split("\n"),
+                    ).toEqual([
+                        ...parsed.items.map((item) =>
                             fridgeExpiryLine({
                                 name: item.display_name,
                                 amount: item.amount,
@@ -12954,7 +13130,8 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                                 expiresOn: item.expires_on,
                             }),
                         ),
-                    );
+                        `Best use: ${parsed.featured!.name}`,
+                    ]);
                 });
             },
         );

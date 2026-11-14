@@ -22,7 +22,7 @@ import {
     DELETED_ACCOUNT_ANALYTICS_ID,
     withAnalytics,
 } from "../../analytics.js";
-import type { ToolContext } from "../shared.js";
+import { idTag, type ToolContext } from "../shared.js";
 import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
 
 export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
@@ -74,7 +74,7 @@ export function registerHouseholdTools(server: McpServer, ctx: ToolContext) {
                             : payload
                                   .map(
                                       (member) =>
-                                          `${member.display_name} (${member.role}) ${member.user_id}`,
+                                          `${member.display_name} (${member.role})${idTag(member.user_id, "user_id")}`,
                                   )
                                   .join("\n");
                     return {
