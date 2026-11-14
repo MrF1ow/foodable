@@ -5,7 +5,7 @@ import type { AgentActionEntry } from "../../../domain/agent-actions.js";
 import {
     activityWhen,
     agentActivityRows,
-    AI_DESTRUCTIVE_HELP,
+    AI_UNDO_FOOTER,
     aiUndoPath,
     parseAiUndoBack,
     renderSettingsAiV2Body,
@@ -37,6 +37,7 @@ const MCP_URL = "https://food.example.test/mcp";
 
 const BASE_VIEW = {
     destructive: { allowed: true, canChange: true },
+    showCards: true,
     activity: [],
 };
 
@@ -58,6 +59,7 @@ function render(
         chrome,
         connections,
         destructive: { allowed: true, canChange: true },
+        showCards: true,
         activity: [],
         now: NOW,
         timezone: extra.timezone ?? "UTC",
@@ -186,7 +188,8 @@ describe("settings AI connections page", () => {
                 `Disconnect ${payload}`,
                 `Disconnect x ${payload}`,
                 "Copy address",
-                "Agents may make destructive changes",
+                "Show cards in chat",
+                "Allow destructive changes",
                 "Close",
                 "Close",
             ]);
@@ -322,6 +325,7 @@ function withActivity(
         chrome,
         connections: [],
         destructive,
+        showCards: true,
         activity,
         now: NOW,
         timezone: "UTC",
@@ -332,12 +336,13 @@ function withActivity(
 describe("the destructive switch", () => {
     test("the owner gets a switch that posts the opposite value", () => {
         const on = withActivity([]);
-        expect(on).toContain("Agents may make destructive changes");
+        expect(on).toContain("Allow destructive changes");
         expect(on).toContain('action="/settings/ai-connections/destructive"');
         expect(on).toContain('name="allowed" value="0"');
         expect(on).toContain('role="switch" aria-checked="true"');
         expect(on).toContain('data-turbo="false"');
-        expect(on).toContain(AI_DESTRUCTIVE_HELP);
+        // The old "Off: agents can still read and add…" paragraph is gone.
+        expect(on).not.toContain("Off: agents can still read");
         const off = withActivity([], { allowed: false, canChange: true });
         expect(off).toContain('name="allowed" value="1"');
         expect(off).toContain('aria-checked="false"');
@@ -345,10 +350,55 @@ describe("the destructive switch", () => {
 
     test("anyone else gets the value as text, no form", () => {
         const html = withActivity([], { allowed: false, canChange: false });
-        expect(html).toContain("Agents may make destructive changes");
+        expect(html).toContain("Allow destructive changes");
         expect(html).not.toContain("/settings/ai-connections/destructive");
-        expect(html).not.toContain('role="switch"');
-        expect(html).toContain("Only the household owner can change this.");
+        // Only the member's own cards switch is left.
+        expect(html.match(/role="switch"/g)).toHaveLength(1);
+        expect(html).toContain("Owner only");
+        expect(html).not.toContain("Only the household owner can change this.");
+    });
+});
+
+describe("the Agents group", () => {
+    test("Show cards in chat sits beside the destructive switch and posts the opposite value", () => {
+        const on = withActivity([]);
+        expect(on).toContain(">Agents</h2>");
+        expect(on).toContain("Show cards in chat");
+        expect(on).toContain("Your goals and meals as widgets");
+        expect(on).toContain('action="/settings/ai-connections/widgets"');
+        expect(on).toContain('name="enabled" value="0"');
+        // The cards form takes part in Turbo (no full reload); the owner-only
+        // destructive form keeps its existing opt-out.
+        const cards = on.match(
+            /<form[^>]*action="\/settings\/ai-connections\/widgets"[^>]*>/,
+        )?.[0];
+        expect(cards).toBeDefined();
+        expect(cards).not.toContain("data-turbo");
+        expect(on.indexOf("Show cards in chat")).toBeLessThan(
+            on.indexOf("Allow destructive changes"),
+        );
+        expect(on.indexOf("Allow destructive changes")).toBeLessThan(
+            on.indexOf("Recent agent changes"),
+        );
+        const off = renderSettingsAiV2Body({
+            chrome,
+            connections: [],
+            destructive: { allowed: true, canChange: true },
+            showCards: false,
+            activity: [],
+            now: NOW,
+            timezone: "UTC",
+            mcpUrl: MCP_URL,
+        });
+        expect(off).toContain('name="enabled" value="1"');
+        expect(off).toMatch(
+            /aria-checked="false"[^>]*aria-label="Show cards in chat"/,
+        );
+    });
+
+    test("a member still gets the cards switch, since it is their own", () => {
+        const html = withActivity([], { allowed: true, canChange: false });
+        expect(html).toContain('action="/settings/ai-connections/widgets"');
     });
 });
 
@@ -401,8 +451,24 @@ describe("agentActivityRows", () => {
 describe("the activity list", () => {
     test("is empty-stated", () => {
         const html = withActivity([]);
-        expect(html).toContain("Agent activity");
+        expect(html).toContain("Recent agent changes");
         expect(html).toContain("Nothing yet.");
+        expect(html).not.toContain(AI_UNDO_FOOTER);
+    });
+
+    test("a list of changes ends with the undo footer, and the Agents group has no help paragraph", () => {
+        const html = withActivity(rows([action()]));
+        expect(AI_UNDO_FOOTER).toBe(
+            "Agent changes can be undone for 24 hours.",
+        );
+        const list = html.indexOf("data-fd-ai-activity");
+        expect(list).toBeGreaterThan(-1);
+        expect(html.indexOf(AI_UNDO_FOOTER)).toBeGreaterThan(list);
+        const agents = html.slice(
+            html.indexOf("data-fd-ai-agents"),
+            html.indexOf("Recent agent changes"),
+        );
+        expect(agents).not.toContain("fd-settings-ai__help");
     });
 
     test("renders each state: Undo form, Undone, Can no longer be undone, who else can", () => {

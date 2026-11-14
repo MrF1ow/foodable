@@ -84,6 +84,8 @@ import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
+import { renderSettingsUnitsV2Page } from "../src/web/pages/v2/settings-units.js";
+import { renderSettingsNutrientsV2Page } from "../src/web/pages/v2/settings-nutrients.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
 import { renderSettingsRestockV2Page } from "../src/web/pages/v2/settings-restock.js";
@@ -2067,6 +2069,17 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             storedTheme: null,
         }),
+        "settings-units": renderSettingsUnitsV2Page({
+            chrome,
+            weightUnit: "lb",
+            drinkUnit: "us",
+        }),
+        // Sugar and alcohol off, the rest on.
+        "settings-nutrients": renderSettingsNutrientsV2Page({
+            chrome,
+            hidden: ["sugar"],
+            alcoholTrackingEnabled: false,
+        }),
         "settings-household-v2": settingsHouseholdV2(PREVIEW_SHARED_LINKS),
         "settings-household-v2-empty": settingsHouseholdV2([]),
         "settings-household-v2-member": renderSettingsMemberV2Page({
@@ -2130,6 +2143,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
             destructive: { allowed: true, canChange: true },
+            showCards: true,
             activity: PREVIEW_AI_ACTIVITY,
             now: PREVIEW_AI_NOW,
             timezone: "UTC",
@@ -2140,6 +2154,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
             destructive: { allowed: false, canChange: false },
+            showCards: false,
             activity: [
                 PREVIEW_AI_ACTIVITY[0],
                 {
@@ -2158,6 +2173,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             connections: [],
             destructive: { allowed: true, canChange: true },
+            showCards: true,
             activity: [],
             now: PREVIEW_AI_NOW,
             timezone: "UTC",
@@ -2178,6 +2194,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
             destructive: { allowed: true, canChange: true },
+            showCards: true,
             activity: PREVIEW_AI_ACTIVITY,
             now: PREVIEW_AI_NOW,
             timezone: "UTC",

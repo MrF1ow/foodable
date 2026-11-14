@@ -62,6 +62,7 @@ export {
     MAX_CAFFEINE_MG,
 } from "../domain/import.js";
 import {
+    AGENT_DESTRUCTIVE_SETTING,
     AgentActionsDisabledError,
     agentUndoHint,
     withAgentAction,
@@ -720,6 +721,12 @@ export const TRENDS_DAY_ITEM = TOTALS_ITEM.extend({
 // widget hides the stat line entirely rather than picking a default.
 export const DRINK_UNIT_FIELD = z.enum(["us", "uk"]).nullable();
 
+// The optional nutrients the viewer switched off under Settings › Nutrients
+// shown ("fiber", "sugar", "caffeine"); the chat cards leave them out of the
+// limits row. Optional in the schema so a payload from before the field still
+// validates, and every tool that carries a card emits it, `[]` when none.
+export const HIDDEN_NUTRIENTS_FIELD = z.array(z.string()).optional();
+
 // "Did you mean…?": the six tools that
 // create a food by name answer status "similar_foods" instead of writing.
 export const SIMILAR_FOOD_CANDIDATE = z.object({
@@ -792,6 +799,7 @@ export const MEAL_PROGRESS_OUTPUT_SCHEMA = z.object({
     similar_foods: z.array(SIMILAR_FOODS_ENTRY),
     date: z.string(),
     drink_unit: DRINK_UNIT_FIELD,
+    hidden_nutrients: HIDDEN_NUTRIENTS_FIELD,
     logged_meal: z
         .object({
             description: z.string(),
@@ -1525,6 +1533,8 @@ export type ToolContext = {
     gatedTools: GatedToolEntry[];
     widgetsEnabled: boolean;
     alcohol: AlcoholDisplay;
+    // The nutrients the caller switched off; the chat cards omit them.
+    hiddenNutrients: readonly string[];
     protocolEra?: "legacy" | "modern";
     // Whether the caller has nutrition goals. The meal-logged widget is only a
     // progress strip against goals, so without them it would paint an empty
@@ -1575,7 +1585,7 @@ export type ToolContext = {
 };
 
 /** What the household's setting is called, as a person sees it. */
-export const AGENT_DESTRUCTIVE_SETTING = "Agents may make destructive changes";
+export { AGENT_DESTRUCTIVE_SETTING };
 
 /** What a refused destructive call tells the agent. Names the setting. */
 export const AGENT_ACTIONS_OFF_TEXT =
@@ -1711,6 +1721,7 @@ export function createToolContext(
     hasGoals = true,
     flags: ViewerFlags = defaultViewerFlags(auth),
     client?: string,
+    hiddenNutrients: readonly string[] = [],
 ): ToolContext {
     const requireUser = () => requireActorUserId(auth);
     const userIdArg =
@@ -1954,6 +1965,7 @@ export function createToolContext(
         gatedTools: [],
         widgetsEnabled,
         alcohol,
+        hiddenNutrients,
         protocolEra,
         hasGoals,
         requireUser,

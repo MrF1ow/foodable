@@ -211,7 +211,7 @@ describe("recording an agent action", () => {
         );
         await expect(attempt).rejects.toBeInstanceOf(AgentActionsDisabledError);
         await expect(attempt).rejects.toThrow(
-            "Settings › AI connections › Agents may make destructive changes is Off",
+            "Settings › AI connections › Allow destructive changes is Off",
         );
         expect(ran).toBe(false);
         expect(store.__records()).toEqual([]);

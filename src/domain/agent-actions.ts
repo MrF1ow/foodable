@@ -353,13 +353,20 @@ export type AgentActionEntry = {
     canUndo: boolean;
 };
 
+/**
+ * What the household's switch is called on Settings › AI connections. The page,
+ * the MCP refusal, the guard's error and the server instructions all read it
+ * from here, so an agent is never sent to a name the page does not show.
+ */
+export const AGENT_DESTRUCTIVE_SETTING = "Allow destructive changes";
+
 export class AgentActionsDisabledError extends Error {
     readonly code = "agent_actions_disabled" as const;
 
     constructor() {
         super(
             "The household has turned destructive agent changes off: " +
-                "Settings › AI connections › Agents may make destructive changes is Off. " +
+                `Settings › AI connections › ${AGENT_DESTRUCTIVE_SETTING} is Off. ` +
                 "Nothing was changed. Tell the person to turn it on if they want you to do this.",
         );
         this.name = "AgentActionsDisabledError";

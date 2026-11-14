@@ -83,10 +83,15 @@ import {
 } from "./flags.js";
 import { evaluateViewerFlags, type ViewerFlags } from "./viewer-flags.js";
 import {
+    AGENT_ACTIONS_OFF_TEXT,
+    AGENT_DESTRUCTIVE_SETTING,
     createToolContext,
     MEAL_LOGGED_WIDGET_URI,
     widgetUri,
 } from "./mcp/shared.js";
+import { SERVER_INSTRUCTIONS } from "./mcp/server.js";
+import { AgentActionsDisabledError } from "./domain/agent-actions.js";
+import { renderSettingsAiV2Body } from "./web/pages/v2/settings-ai.js";
 import { gatedTool } from "./mcp/gated.js";
 import { toolNamesFor } from "./test-support/flag-harness.js";
 
@@ -8674,7 +8679,36 @@ describe("/mcp destructive tools are guarded", () => {
     const UNDO_SENTENCE =
         "The household can undo this for 24 hours in Settings › AI connections.";
     const REFUSAL =
-        "Agents may make destructive changes is Off in Settings › AI connections.";
+        "Allow destructive changes is Off in Settings › AI connections.";
+
+    test("every place that names the switch names the one the AI page shows", () => {
+        const html = renderSettingsAiV2Body({
+            chrome: {} as never,
+            connections: [],
+            destructive: { allowed: false, canChange: true },
+            showCards: true,
+            activity: [],
+            now: new Date(),
+            timezone: "UTC",
+            mcpUrl: "https://example.test/mcp",
+        } as never);
+        expect(html).toContain("Allow destructive changes");
+        expect(AGENT_DESTRUCTIVE_SETTING).toBe("Allow destructive changes");
+        expect(AGENT_ACTIONS_OFF_TEXT).toContain(REFUSAL);
+        expect(new AgentActionsDisabledError().message).toContain(
+            "Settings › AI connections › Allow destructive changes is Off",
+        );
+        expect(SERVER_INSTRUCTIONS).toContain(
+            "(Allow destructive changes, in Settings › AI connections)",
+        );
+        for (const text of [
+            AGENT_ACTIONS_OFF_TEXT,
+            new AgentActionsDisabledError().message,
+            SERVER_INSTRUCTIONS,
+        ]) {
+            expect(text).not.toContain("Agents may make destructive changes");
+        }
+    });
 
     // unplan_recipe is only registered while the plan tools are on.
     beforeEach(() => setFlagsForTests(createMemoryFlags({})));

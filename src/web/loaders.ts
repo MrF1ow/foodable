@@ -9,6 +9,7 @@ import { type AlcoholDisplay } from "../mcp/shared.js";
 import {
     alcoholTrackingEnabledFromProfile,
     getProfile,
+    hiddenNutrientsFromProfile,
     preferredDrinkUnitFromProfile,
     preferredWeightUnitFromProfile,
     widgetsEnabledFromProfile,
@@ -190,6 +191,11 @@ import { maybeOne, run } from "../db/sql.js";
 import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "./pages/v2/settings-display.js";
+import {
+    renderSettingsUnitsV2Page,
+    type SettingsUnitsV2View,
+} from "./pages/v2/settings-units.js";
+import { renderSettingsNutrientsV2Page } from "./pages/v2/settings-nutrients.js";
 import { renderSettingsGoalsV2Page } from "./pages/v2/settings-goals.js";
 import type {
     GoalsFormDraft,
@@ -982,6 +988,45 @@ export async function renderSettingsDisplayV2Route(
     };
 }
 
+export async function renderSettingsUnitsV2Route(
+    viewerUserId: string,
+    opts: { error?: string; openSheet?: SettingsUnitsV2View["openSheet"] } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsUnitsV2Page({
+            chrome,
+            weightUnit: preferredWeightUnitFromProfile(profile) ?? "",
+            drinkUnit: preferredDrinkUnitFromProfile(profile) ?? "",
+            error: opts.error,
+            openSheet: opts.openSheet,
+        }),
+    };
+}
+
+export async function renderSettingsNutrientsV2Route(
+    viewerUserId: string,
+    opts: { error?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsNutrientsV2Page({
+            chrome,
+            hidden: hiddenNutrientsFromProfile(profile),
+            alcoholTrackingEnabled: alcoholTrackingEnabledFromProfile(profile),
+            error: opts.error,
+        }),
+    };
+}
+
 export async function renderSettingsGoalsV2Route(
     viewerUserId: string,
     opts: {
@@ -1123,6 +1168,7 @@ export async function renderSettingsAiV2Route(
             chrome,
             connections,
             destructive: { allowed, canChange: isOwner },
+            showCards: widgetsEnabledFromProfile(profile),
             activity: agentActivityRows(entries, {
                 viewerUserId,
                 isOwner,

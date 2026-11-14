@@ -1905,3 +1905,8 @@
 .fd-restock-form .fd-settings-submit {
     flex: none;
 }
+
+/* Settings › Nutrients shown: each row's switch is its own small form. */
+.fd-nutrients .fd-stores-pref .fd-switch {
+    margin-left: auto;
+}

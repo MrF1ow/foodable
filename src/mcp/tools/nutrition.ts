@@ -262,6 +262,8 @@ export async function buildMealProgress(
         loggedAtIso?: string;
         status?: z.infer<typeof WRITE_STATUS>;
         similarFoods?: z.infer<typeof SIMILAR_FOODS_ENTRY>[];
+        // The viewer's switched-off nutrients, for the card's limits row.
+        hiddenNutrients?: readonly string[];
     },
 ) {
     const profile = await getProfile(userId);
@@ -290,6 +292,7 @@ export async function buildMealProgress(
         similar_foods: opts?.similarFoods ?? [],
         date: mealDate,
         drink_unit: alcohol,
+        hidden_nutrients: [...(opts?.hiddenNutrients ?? [])],
         logged_meal: meal
             ? {
                   description: meal.description,
@@ -374,6 +377,7 @@ export function registerNutritionWriteTools(
     const {
         widgetsEnabled,
         alcohol,
+        hiddenNutrients,
         personSchema,
         nutritionWriteSchema,
         actorUserId,
@@ -550,6 +554,7 @@ export function registerNutritionWriteTools(
                                         "logged",
                                         alcohol,
                                         {
+                                            hiddenNutrients,
                                             loggedAtIso:
                                                 iso ?? new Date().toISOString(),
                                             status: "similar_foods",
@@ -586,6 +591,7 @@ export function registerNutritionWriteTools(
                             meal,
                             "logged",
                             alcohol,
+                            { hiddenNutrients },
                         );
 
                     return {
@@ -686,6 +692,7 @@ export function registerNutritionWriteTools(
                             meal,
                             "logged",
                             alcohol,
+                            { hiddenNutrients },
                         );
                     return {
                         content: [
@@ -957,6 +964,7 @@ export function registerNutritionEditTools(
 ) {
     const {
         alcohol,
+        hiddenNutrients,
         nutritionWriteSchema,
         writeUserId,
         callerHouseholdId,
@@ -1149,6 +1157,7 @@ export function registerNutritionEditTools(
                             meal,
                             "updated",
                             alcohol,
+                            { hiddenNutrients },
                         );
                     return {
                         content: [

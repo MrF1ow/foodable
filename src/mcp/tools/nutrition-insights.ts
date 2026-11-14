@@ -39,6 +39,7 @@ import {
     TOTALS_ITEM,
     TRENDS_DAY_ITEM,
     DRINK_UNIT_FIELD,
+    HIDDEN_NUTRIENTS_FIELD,
     goalsPayloadOf,
     totalsPayloadOf,
     trendsDayPayloadOf,
@@ -53,7 +54,14 @@ export function registerNutritionReadTools(
     server: McpServer,
     ctx: ToolContext,
 ) {
-    const { alcohol, personSchema, actorUserId, analytics, uiMeta } = ctx;
+    const {
+        alcohol,
+        hiddenNutrients,
+        personSchema,
+        actorUserId,
+        analytics,
+        uiMeta,
+    } = ctx;
     server.registerTool(
         "get_meals",
         {
@@ -300,6 +308,7 @@ export function registerNutritionReadTools(
                 // client cannot tell a full month from a fortnight of gaps.
                 days_in_range: z.number(),
                 drink_unit: DRINK_UNIT_FIELD,
+                hidden_nutrients: HIDDEN_NUTRIENTS_FIELD,
                 goals: GOALS_ITEM.nullable(),
                 averages: TOTALS_ITEM,
                 // How many of `logged_days` actually record each of the
@@ -367,6 +376,7 @@ export function registerNutritionReadTools(
                                 logged_days: 0,
                                 days_in_range: daysInRange,
                                 drink_unit: alcohol,
+                                hidden_nutrients: [...hiddenNutrients],
                                 goals: goalsPayload,
                                 averages: totalsPayloadOf(
                                     emptyTotals(),
@@ -515,6 +525,7 @@ export function registerNutritionReadTools(
                             logged_days: days.length,
                             days_in_range: daysInRange,
                             drink_unit: alcohol,
+                            hidden_nutrients: [...hiddenNutrients],
                             goals: goalsPayload,
                             averages,
                             recorded_days: {
@@ -544,6 +555,7 @@ export function registerNutritionInsightTools(
 ) {
     const {
         alcohol,
+        hiddenNutrients,
         requireUser,
         personSchema,
         actorUserId,
@@ -580,6 +592,7 @@ export function registerNutritionInsightTools(
                 // Which toggle the widget opens on (nearest of 7/14/30).
                 default_range: z.number(),
                 drink_unit: DRINK_UNIT_FIELD,
+                hidden_nutrients: HIDDEN_NUTRIENTS_FIELD,
                 goals: GOALS_ITEM.nullable(),
                 // Up to 30 days of daily series; the widget slices to 7/14/30.
                 days: z.array(TRENDS_DAY_ITEM),
@@ -641,6 +654,7 @@ export function registerNutritionInsightTools(
                                 ? windowDays
                                 : 30,
                             drink_unit: alcohol,
+                            hidden_nutrients: [...hiddenNutrients],
                             goals: goalsPayload,
                             // Rounded through trendsDayPayloadOf, which nulls
                             // out fiber/sugar/alcohol on days that didn't

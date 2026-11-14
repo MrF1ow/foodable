@@ -426,19 +426,21 @@ function alsoTrackedMarkup(view: TodayView): Html {
     const fiber = emptyDayZero(totals.fiber_g, hasMeals);
     const sugar = emptyDayZero(totals.sugar_g, hasMeals);
     const caffeine = emptyDayZero(totals.caffeine_mg, hasMeals);
+    // What the member switched off under Settings › Nutrients shown.
+    const hidden = new Set(view.hiddenNutrients ?? []);
     const bits: string[] = [
         esc(fmtWater(totals.water_ml, goals?.daily_water_ml ?? null)),
     ];
-    if (fiber != null) {
+    if (fiber != null && !hidden.has("fiber")) {
         bits.push(`Fiber ${esc(fmtGrams(fiber))}`);
     }
-    if (sugar != null) {
+    if (sugar != null && !hidden.has("sugar")) {
         bits.push(`Sugar ${esc(fmtGrams(sugar))}`);
     }
     if (view.alcoholTrackingEnabled && totals.alcohol_g != null) {
         bits.push(`Alcohol ${esc(fmtGrams(totals.alcohol_g))}`);
     }
-    if (caffeine != null) {
+    if (caffeine != null && !hidden.has("caffeine")) {
         bits.push(`Caffeine ${esc(fmtWholeMg(caffeine))} mg`);
     }
     const line = bits
@@ -457,25 +459,41 @@ function alsoTrackedMarkup(view: TodayView): Html {
             nums: water.nums,
             pct: water.pct,
         }),
-        alsoTrackedColumn({
-            key: "fiber",
-            label: "Fiber",
-            ...fmtAlsoGrams(fiber, goals?.daily_fiber_g ?? null),
-        }),
-        alsoTrackedColumn({
-            key: "sugar",
-            label: "Sugar",
-            ...fmtAlsoGrams(sugar, goals?.daily_sugar_g ?? null),
-        }),
-        alsoTrackedColumn({
-            key: "caffeine",
-            label: "Caffeine",
-            nums:
-                goals?.daily_caffeine_mg != null && goals.daily_caffeine_mg > 0
-                    ? `${esc(fmtWholeMg(caffeine))} / ${esc(fmtWholeMg(goals.daily_caffeine_mg))} mg`
-                    : esc(`${fmtWholeMg(caffeine)} mg`),
-            pct: alsoBarFill(caffeine, goals?.daily_caffeine_mg ?? null),
-        }),
+        ...(hidden.has("fiber")
+            ? []
+            : [
+                  alsoTrackedColumn({
+                      key: "fiber",
+                      label: "Fiber",
+                      ...fmtAlsoGrams(fiber, goals?.daily_fiber_g ?? null),
+                  }),
+              ]),
+        ...(hidden.has("sugar")
+            ? []
+            : [
+                  alsoTrackedColumn({
+                      key: "sugar",
+                      label: "Sugar",
+                      ...fmtAlsoGrams(sugar, goals?.daily_sugar_g ?? null),
+                  }),
+              ]),
+        ...(hidden.has("caffeine")
+            ? []
+            : [
+                  alsoTrackedColumn({
+                      key: "caffeine",
+                      label: "Caffeine",
+                      nums:
+                          goals?.daily_caffeine_mg != null &&
+                          goals.daily_caffeine_mg > 0
+                              ? `${esc(fmtWholeMg(caffeine))} / ${esc(fmtWholeMg(goals.daily_caffeine_mg))} mg`
+                              : esc(`${fmtWholeMg(caffeine)} mg`),
+                      pct: alsoBarFill(
+                          caffeine,
+                          goals?.daily_caffeine_mg ?? null,
+                      ),
+                  }),
+              ]),
     ];
     if (view.alcoholTrackingEnabled) {
         cols.push(

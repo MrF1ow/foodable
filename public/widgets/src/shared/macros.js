@@ -421,7 +421,15 @@ function macroBarTile(m, ctx, interactive) {
 // What the gate prevents is a "0 mg of 400 mg" line invented for someone who
 // has never recorded any — the same suppression the model-facing text applies
 // (recordedGoalLine in src/mcp.ts).
+//
+// A member can also switch a limit off for good (Settings › Nutrients shown):
+// ctx.hidden lists the nutrients they hid ("fiber", "sugar", "caffeine"), and
+// a hidden one never earns a cell, whatever the day's figure is. The names are
+// the metric keys without their unit ("sugar_g" -> "sugar").
 function limitShown(m, ctx) {
+    if (ctx.hidden && ctx.hidden.includes(m.key.replace(/_(g|mg)$/, ""))) {
+        return false;
+    }
     const v = ctx.vals?.[m.key];
     if (v == null) return false;
     if (m.signal === "null") return true;
@@ -502,6 +510,10 @@ function macroCtxOf(vals, goal, wording, meals, opts) {
         // unrecognised unit: "us" is what src/mcp.ts uses for an
         // alcohol-tracking user with no saved preference.
         drinkUnit: DRINK_GRAMS[unit] ? unit : "us",
+        // The nutrients this viewer switched off. The server sends
+        // `hidden_nutrients` on every strip payload; a template forwards it as
+        // opts.hidden, and an absent or malformed value hides nothing.
+        hidden: Array.isArray(opts && opts.hidden) ? opts.hidden : [],
         // The shared default calorie-ring label, translated via
         // MACRO_COPY.caloriesToday. goal-progress.html and meal-logged.html
         // pass this same default explicitly when data.date is the viewer's
@@ -534,7 +546,7 @@ function gridCols(n) {
 // contributed to becomes tappable and reveals those meals (see macroToggle) —
 // the limits row included, not just calories and the three bars.
 //
-// `opts` is optional: { drinkUnit: "us" | "uk", calLabel: string,
+// `opts` is optional: { drinkUnit: "us" | "uk", hidden: string[], calLabel: string,
 // divided: boolean }.
 function macroPanel(vals, goal, wording, meals, opts) {
     const ctx = macroCtxOf(vals, goal, wording, meals, opts);

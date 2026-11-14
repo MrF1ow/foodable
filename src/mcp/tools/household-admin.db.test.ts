@@ -52,7 +52,7 @@ type Who =
 const UNDO_SENTENCE =
     "The household can undo this for 24 hours in Settings › AI connections.";
 const REFUSAL =
-    "Agents may make destructive changes is Off in Settings › AI connections.";
+    "Allow destructive changes is Off in Settings › AI connections.";
 
 const ADMIN_TOOLS = [
     "clear_grocery_list",

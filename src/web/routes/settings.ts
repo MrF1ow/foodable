@@ -10,6 +10,8 @@ import {
     renderSettingsAccountV2Route,
     renderSettingsDisplayV2Route,
     renderSettingsExportV2Route,
+    renderSettingsNutrientsV2Route,
+    renderSettingsUnitsV2Route,
     alcoholOf,
     renderSettingsGoalsV2Route,
     renderSettingsHelpRoute,
@@ -36,6 +38,7 @@ import {
     AI_DESTRUCTIVE_PATH,
     AI_DISCONNECT_PATH,
     AI_PAGE_PATH,
+    AI_WIDGETS_PATH,
     parseAiUndoBack,
     UNKNOWN_APP_MARKER,
 } from "../pages/v2/settings-ai.js";
@@ -71,9 +74,22 @@ import {
 } from "../../domain/signup.js";
 import {
     getProfile,
+    isHideableNutrient,
+    setNutrientHidden,
     timezoneFromProfile,
     upsertProfile,
 } from "../../db/profiles.js";
+import {
+    isSwitchableNutrient,
+    NUTRIENTS_PATH,
+} from "../pages/v2/settings-nutrients.js";
+import {
+    UNITS_DRINKS_SHEET_ID,
+    UNITS_PATH,
+    UNITS_WEIGHT_SHEET_ID,
+} from "../pages/v2/settings-units.js";
+import { isDrinkUnit } from "../../alcohol.js";
+import { isWeightUnit } from "../../domain/units.js";
 import {
     clearGoalDays,
     getNutritionGoals,
@@ -113,6 +129,16 @@ settingsRoutes.get("/settings/account", requireSiteUser, async (c) => {
     const page = await renderSettingsAccountV2Route(c.get("userId"), {
         backHref,
     });
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.get("/settings/units", requireSiteUser, async (c) => {
+    const page = await renderSettingsUnitsV2Route(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.get("/settings/nutrients", requireSiteUser, async (c) => {
+    const page = await renderSettingsNutrientsV2Route(c.get("userId"));
     return c.html(page.html, page.status);
 });
 
@@ -372,6 +398,23 @@ settingsRoutes.post(AI_DESTRUCTIVE_PATH, requireOwner, async (c) => {
     );
 });
 
+// "Show cards in chat": the member's own switch (profiles.widgets_enabled).
+settingsRoutes.post(AI_WIDGETS_PATH, requireMember, async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.parseBody();
+    const value = formText(body, "enabled").trim();
+    if (value !== "0" && value !== "1") {
+        const page = await renderSettingsAiV2Route(userId, {
+            mcpUrl: `${getBaseUrl(c)}/mcp`,
+            error: "Choose On or Off.",
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    await upsertProfile(userId, { widgets_enabled: value === "1" });
+    // toast: none the switch shows the new state
+    return c.redirect(AI_PAGE_PATH, 303);
+});
+
 const UNDO_REFUSED_STATUS: Record<
     Exclude<AgentUndoStatus, "undone">,
     400 | 404 | 409
@@ -460,6 +503,70 @@ settingsRoutes.post("/settings/export", requireSiteUser, async (c) => {
     return c.redirect(result.downloadPath, 303);
 });
 
+// Weight and drink units (Settings › Units). Each field is written only when
+// the form carries it, and an empty value clears the choice.
+settingsRoutes.post(UNITS_PATH, requireMember, async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.parseBody();
+    const weight = formText(body, "preferred_weight_unit").trim();
+    const drink = formText(body, "preferred_drink_unit").trim();
+    const hasWeight = "preferred_weight_unit" in body;
+    const hasDrink = "preferred_drink_unit" in body;
+    if (hasWeight && weight !== "" && !isWeightUnit(weight)) {
+        const page = await renderSettingsUnitsV2Route(userId, {
+            error: "Choose kg or lb.",
+            openSheet: UNITS_WEIGHT_SHEET_ID,
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    if (hasDrink && drink !== "" && !isDrinkUnit(drink)) {
+        const page = await renderSettingsUnitsV2Route(userId, {
+            error: "Choose US drinks or UK units.",
+            openSheet: UNITS_DRINKS_SHEET_ID,
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    const prefs = parseNutritionPrefsInput({
+        preferred_weight_unit: hasWeight ? weight : undefined,
+        preferred_drink_unit: hasDrink ? drink : undefined,
+    });
+    if (
+        prefs.preferred_weight_unit !== undefined ||
+        prefs.preferred_drink_unit !== undefined
+    ) {
+        await upsertProfile(userId, {
+            preferred_weight_unit: prefs.preferred_weight_unit,
+            preferred_drink_unit: prefs.preferred_drink_unit,
+        });
+    }
+    // toast: none the row shows the new value
+    return c.redirect(UNITS_PATH, 303);
+});
+
+// One Nutrients shown switch. Alcohol is its own opt-in; fiber, sugar and
+// caffeine are kept in the member's hidden list, edited in place.
+settingsRoutes.post(NUTRIENTS_PATH, requireMember, async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.parseBody();
+    const nutrient = formText(body, "nutrient").trim();
+    const shown = formText(body, "shown").trim();
+    if (!isSwitchableNutrient(nutrient) || (shown !== "0" && shown !== "1")) {
+        const page = await renderSettingsNutrientsV2Route(userId, {
+            error: "Choose a nutrient and On or Off.",
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    if (nutrient === "alcohol") {
+        await upsertProfile(userId, {
+            alcohol_tracking_enabled: shown === "1",
+        });
+    } else if (isHideableNutrient(nutrient)) {
+        await setNutrientHidden(userId, nutrient, shown === "0");
+    }
+    // toast: none the switch shows the new state
+    return c.redirect(NUTRIENTS_PATH, 303);
+});
+
 settingsRoutes.post("/settings/display", requireMember, async (c) => {
     const userId = c.get("userId");
     const body = await c.req.parseBody();
@@ -496,6 +603,18 @@ settingsRoutes.get("/settings/household-settings", async (c) => {
     return c.redirect(APP_PATHS.settingsHousehold, 301);
 });
 
+// A checkbox posts nothing when it is off, so "absent" cannot tell Off from
+// "this form has no such field". A form that has the checkbox says so with a
+// hidden `has_<name>` marker; without the marker or the value the field is
+// left out of the patch, and the stored choice survives a partial save.
+function carriedCheckbox(
+    body: Parameters<typeof formText>[0],
+    name: string,
+): boolean | undefined {
+    if (!(name in body) && !(`has_${name}` in body)) return undefined;
+    return formText(body, name) === "true";
+}
+
 settingsRoutes.post("/settings", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
@@ -512,9 +631,11 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
         const prefs = parseNutritionPrefsInput({
             timezone: body.timezone,
             preferred_weight_unit: body.preferred_weight_unit,
-            widgets_enabled: formText(body, "widgets_enabled") === "true",
-            alcohol_tracking_enabled:
-                formText(body, "alcohol_tracking_enabled") === "true",
+            widgets_enabled: carriedCheckbox(body, "widgets_enabled"),
+            alcohol_tracking_enabled: carriedCheckbox(
+                body,
+                "alcohol_tracking_enabled",
+            ),
             preferred_drink_unit: body.preferred_drink_unit,
         });
         if (prefs.timezone) {

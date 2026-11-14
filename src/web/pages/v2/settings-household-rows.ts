@@ -46,7 +46,8 @@ export const ROW_ICONS = {
 } as const;
 
 export type HouseholdRowOpts = {
-    icon: Html;
+    /** Left of the label; a row with none is label, value, chevron. */
+    icon?: Html;
     label: string;
     /** Plain text shown at the right. */
     value?: string;
@@ -65,7 +66,10 @@ function rowInner(opts: HouseholdRowOpts, chevron: boolean): string {
     const chev = chevron
         ? `<span class="fd-row__chevron" aria-hidden="true">${iconChevronRight()}</span>`
         : "";
-    return `<span class="fd-stores-pref__icon" aria-hidden="true">${opts.icon}</span><span class="fd-stores-pref__main"><span class="fd-row__title">${esc(opts.label)}</span></span>${value}${chev}`;
+    const icon = opts.icon
+        ? `<span class="fd-stores-pref__icon" aria-hidden="true">${opts.icon}</span>`
+        : "";
+    return `${icon}<span class="fd-stores-pref__main"><span class="fd-row__title">${esc(opts.label)}</span></span>${value}${chev}`;
 }
 
 export function householdRow(opts: HouseholdRowOpts): Html {

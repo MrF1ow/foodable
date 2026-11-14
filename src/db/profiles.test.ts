@@ -7,6 +7,8 @@ import {
     getProfile,
     getUserTimezone,
     getWidgetsEnabled,
+    hiddenNutrientsFromProfile,
+    isHideableNutrient,
     preferredDrinkUnitFromProfile,
     preferredWeightUnitFromProfile,
     timezoneFromProfile,
@@ -113,9 +115,80 @@ describeDb(pgAvailable !== null, "profiles db", (getCtx) => {
             widgets_enabled: true,
             alcohol_tracking_enabled: false,
             preferred_drink_unit: null,
+            hidden_nutrients: [],
             theme: "dark",
             created_at: expect.any(String),
             updated_at: expect.any(String),
         });
+    });
+
+    test("hidden_nutrients defaults to none and round-trips", async () => {
+        const created = await upsertProfile(userId, { timezone: "UTC" });
+        expect(created.hidden_nutrients).toEqual([]);
+        expect(hiddenNutrientsFromProfile(created)).toEqual([]);
+
+        const hidden = await upsertProfile(userId, {
+            hidden_nutrients: ["sugar", "caffeine"],
+        });
+        expect(hidden.hidden_nutrients).toEqual(["sugar", "caffeine"]);
+        expect(hiddenNutrientsFromProfile(await getProfile(userId))).toEqual([
+            "sugar",
+            "caffeine",
+        ]);
+
+        // A patch that omits it leaves it alone; an empty list clears it.
+        await upsertProfile(userId, { timezone: "Europe/Kyiv" });
+        expect(hiddenNutrientsFromProfile(await getProfile(userId))).toEqual([
+            "sugar",
+            "caffeine",
+        ]);
+        const cleared = await upsertProfile(userId, { hidden_nutrients: [] });
+        expect(cleared.hidden_nutrients).toEqual([]);
+    });
+
+    test("hidden_nutrients refuses a value the check does not know", async () => {
+        await upsertProfile(userId, { timezone: "UTC" });
+        await expect(
+            upsertProfile(userId, { hidden_nutrients: ["sugar", "alcohol"] }),
+        ).rejects.toThrow(/profiles_hidden_nutrients_known/);
+        await expect(
+            upsertProfile(userId, { hidden_nutrients: ["Sugar"] }),
+        ).rejects.toThrow(/profiles_hidden_nutrients_known/);
+        expect(hiddenNutrientsFromProfile(await getProfile(userId))).toEqual(
+            [],
+        );
+    });
+});
+
+describe("hiddenNutrientsFromProfile", () => {
+    test("missing row, missing column and unknown values read as none hidden", () => {
+        expect(hiddenNutrientsFromProfile(null)).toEqual([]);
+        expect(hiddenNutrientsFromProfile(undefined)).toEqual([]);
+        const base = {
+            user_id: "u",
+            timezone: null,
+            preferred_weight_unit: null,
+            widgets_enabled: true,
+            alcohol_tracking_enabled: false,
+            preferred_drink_unit: null,
+            theme: null,
+            created_at: "",
+            updated_at: "",
+        } as const;
+        expect(hiddenNutrientsFromProfile(base)).toEqual([]);
+        expect(
+            hiddenNutrientsFromProfile({
+                ...base,
+                hidden_nutrients: ["caffeine", "alcohol", "fiber"],
+            }),
+        ).toEqual(["fiber", "caffeine"]);
+    });
+
+    test("isHideableNutrient names fiber, sugar and caffeine only", () => {
+        expect(["fiber", "sugar", "caffeine"].every(isHideableNutrient)).toBe(
+            true,
+        );
+        expect(isHideableNutrient("alcohol")).toBe(false);
+        expect(isHideableNutrient(undefined)).toBe(false);
     });
 });

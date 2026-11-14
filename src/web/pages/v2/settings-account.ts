@@ -158,6 +158,8 @@ ${String(
         control: `<select class="fd-settings-select" id="preferred_weight_unit" name="preferred_weight_unit">${optionList(WEIGHT_UNITS, view.weightUnit)}</select>`,
     }),
 )}
+<input type="hidden" name="has_widgets_enabled" value="1" />
+<input type="hidden" name="has_alcohol_tracking_enabled" value="1" />
 <span class="fd-settings-check"><input type="checkbox" name="widgets_enabled" value="true" id="widgets_enabled"${widgetsChecked} /><span class="fd-settings-check__text">Show in-chat widgets</span></span>
 <span class="fd-settings-check"><input type="checkbox" name="alcohol_tracking_enabled" value="true" id="alcohol_tracking_enabled"${alcoholChecked} /><span class="fd-settings-check__text">Alcohol tracking</span></span>
 ${String(

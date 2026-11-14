@@ -288,11 +288,11 @@ export const TOASTS = {
     "settings.ai.undone": { kind: "success", text: "Change undone" },
     "settings.ai.destructive-allowed": {
         kind: "success",
-        text: "Agents may make destructive changes",
+        text: "Allow destructive changes is on",
     },
     "settings.ai.destructive-off": {
         kind: "success",
-        text: "Agents can no longer make destructive changes",
+        text: "Allow destructive changes is off",
     },
     "settings.profile.saved": { kind: "success", text: "Profile updated" },
     "settings.household.created": {
