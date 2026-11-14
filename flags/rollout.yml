@@ -37,6 +37,9 @@ flags:
     mcp-share-links:
         default: false
         rules: []
+    ui-profile-pictures:
+        default: false
+        rules: []
     mcp-widgets-v2:
         default: true
         rules: []
