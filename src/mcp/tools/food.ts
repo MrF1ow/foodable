@@ -331,7 +331,7 @@ export function registerLookupBarcodeTool(server: McpServer, ctx: ToolContext) {
                                     content: [
                                         {
                                             type: "text",
-                                            text: `${pausedNote}\n\n${body}`,
+                                            text: `${pausedNote}\n\n${body}${idTag(foodId, "food_id")}`,
                                         },
                                     ],
                                 };
@@ -589,6 +589,19 @@ function foodPayload(
         usual_amount: food.usualAmount?.amount ?? null,
         usual_unit: food.usualAmount?.unit ?? null,
     };
+}
+
+/**
+ * The rows a saved food points at, for the end of an edit tool's text: the
+ * plain food it is a product of, its usual store, and its usual product on a
+ * line of its own so the first `[food_id]` in the text stays the food's own.
+ */
+function foodReferenceTags(payload: {
+    generic_food_id: string | null;
+    usual_product_id: string | null;
+    usual_store_id: string | null;
+}): string {
+    return `${payload.generic_food_id ? idTag(payload.generic_food_id, "generic_food_id") : ""}${payload.usual_store_id ? idTag(payload.usual_store_id, "store_id") : ""}${payload.usual_product_id ? `\nUsual product${idTag(payload.usual_product_id, "food_id")}` : ""}`;
 }
 
 /** get_food's text: the food with its id, then its products and notices, each with theirs. */
@@ -1373,7 +1386,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: `Saved ${payload.name}${idTag(payload.id, "food_id")}`,
+                                    text: `Saved ${payload.name}${idTag(payload.id, "food_id")}${foodReferenceTags(payload)}`,
                                 },
                             ],
                             structuredContent: {
@@ -1553,7 +1566,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${args.food_id ? "Linked" : "Unlinked"} ${payload.name}`,
+                                text: `${args.food_id ? "Linked" : "Unlinked"} ${payload.name}${foodReferenceTags(payload)}`,
                             },
                         ],
                         structuredContent: payload,

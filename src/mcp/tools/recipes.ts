@@ -317,6 +317,19 @@ function wireProblems(problems: RecipeProblem[]) {
     }));
 }
 
+/** One `[ingredient_id: …]` tag per distinct ingredient a problem names. */
+function problemIngredientTags(problems: RecipeProblem[]): string {
+    return [
+        ...new Set(
+            problems.flatMap((row) =>
+                row.ingredientId ? [row.ingredientId] : [],
+            ),
+        ),
+    ]
+        .map((id) => idTag(id, "ingredient_id"))
+        .join("");
+}
+
 function wireImport(row: RecipeImport | null) {
     if (!row) return null;
     return {
@@ -2034,17 +2047,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         : checked.verification === "verified"
                                           ? `${recipe.name} was made by hand, so it stays verified. The check found: ${checked.problems.map((row) => row.message).join(" ")}`
                                           : `${recipe.name} is still unverified (${checked.problems.length} problem${checked.problems.length === 1 ? "" : "s"}): ${checked.problems.map((row) => row.message).join(" ")}`
-                                }${mentionWarningsText(mentionWarnings)}${[
-                                    ...new Set(
-                                        checked.problems.flatMap((row) =>
-                                            row.ingredientId
-                                                ? [row.ingredientId]
-                                                : [],
-                                        ),
-                                    ),
-                                ]
-                                    .map((id) => idTag(id, "ingredient_id"))
-                                    .join("")}`,
+                                }${mentionWarningsText(mentionWarnings)}${problemIngredientTags(checked.problems)}`,
                             },
                         ],
                         structuredContent: payload,
@@ -2169,7 +2172,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                               IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(built);
                               return {
                                   payload: built,
-                                  text: `${built.message}${mentionWarningsText(mentionWarnings)}`,
+                                  text: `${built.message}${built.recipe_id ? idTag(built.recipe_id, "recipe_id") : ""}${problemIngredientTags(outcome.problems)}${mentionWarningsText(mentionWarnings)}`,
                               };
                           })()
                         : (() => {

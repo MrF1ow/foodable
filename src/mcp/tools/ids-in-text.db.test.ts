@@ -11,7 +11,11 @@
 // with `noIds`. A row key may carry a `#why` suffix to exercise a second path
 // of the same tool. A tool in `tools-list.snapshot.json` with no row in CALLS and
 // no entry in EXCLUDED fails the coverage test by name, so a new tool is
-// covered the day it is added.
+// covered the day it is added. A tag's label must be the name of an input
+// property of some tool in tools/list (all flags on), so a made-up label fails;
+// whether a label names the input that really takes that id is checked against
+// real input names only, and whether it points at the right path is reviewed by
+// hand.
 import {
     Client,
     StreamableHTTPClientTransport,
@@ -24,6 +28,7 @@ import { asUser, seedHousehold } from "../../db/testing/fixtures.js";
 import { describeDb } from "../../db/testing/pg.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import {
+    allFlagsOn,
     createMemoryFlags,
     resetFlagsForTests,
     setFlagsForTests,
@@ -79,6 +84,9 @@ type Seed = {
     meal: string;
     water: string;
     weight: string;
+    /** A food saved with a barcode, for the paused-lookup path. */
+    barcoded: string;
+    barcode: string;
 };
 
 /** Runs one seeding tool call as the caller; a row may use it to make what it acts on. */
@@ -100,6 +108,8 @@ type RowTable = "meals" | "water_log" | "weight_log";
  */
 type CallSpec = {
     args: CallRow;
+    /** Flag values for this call only, over the defaults; reset after it. */
+    flags?: Record<string, boolean>;
     textIds?: (s: Seed) => string[];
     newRow?: RowTable;
     noIds?: string;
@@ -116,6 +126,9 @@ const withNewRow = (args: CallRow, newRow: RowTable): CallSpec => ({
     args,
     newRow,
 });
+
+const URL_IMPORT_TEXT =
+    "Pancakes\n\nIngredients\n2 cups flour\n1 egg\nbutter\nsome mystery batter\n\nMethod\nMix and fry.";
 
 // Every tool that is read-only, plus every write that returns a new id, in the
 // order they run: reads first, then the writes that add rows without removing
@@ -186,6 +199,13 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         });
         return { barcode: "4006381333931" };
     },
+    // Online lookups paused, so the saved household food answers: the text is
+    // all there is, and it must carry the food's id.
+    "lookup_barcode#household": {
+        args: (s) => ({ barcode: s.barcode }),
+        flags: { "off-lookups": false },
+        textIds: (s) => [s.barcoded],
+    },
     start_meal_import: noIds(
         "returns only the caller's own id and timezone",
         () => ({}),
@@ -236,6 +256,20 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         ingredients: [{ name: "Bread", amount: 2, unit: "each" }],
         on_similar: "create",
     }),
+    // Pasted text and a URL that cannot resolve, so it runs offline. The
+    // bare "butter" has no amount, so the import carries a problem on an ingredient.
+    import_recipe_from_url: () => ({
+        url: "https://recipes.invalid/pancakes",
+        text: URL_IMPORT_TEXT,
+    }),
+    "import_recipe_from_url#duplicate": async (_s, make) => {
+        const args = {
+            url: "https://recipes.invalid/pancakes-twice",
+            text: URL_IMPORT_TEXT,
+        };
+        await make("import_recipe_from_url", args);
+        return args;
+    },
     plan_recipe: (s) => ({
         recipe_id: s.recipe,
         date: new Date(Date.now() + 86_400_000).toISOString().slice(0, 10),
@@ -383,6 +417,30 @@ const CALLS: Record<string, CallRow | CallSpec> = {
             product_food_id: bottle.id,
         });
         return { amount: 1, unit: "cup", to_unit: "g", food_id: oil.id };
+    },
+    // Edit paths: the row's own references (its plain food, its usual store and
+    // usual product) were never in the arguments.
+    "upsert_food#edit-product": (s) => ({
+        food_id: s.kirkland,
+        calories: 70,
+    }),
+    "upsert_food#edit-plain": (s) => ({ food_id: s.eggs, calories: 140 }),
+    "link_product#link": async (s, make) => {
+        const product = await make("upsert_food", {
+            name: "Pasture Eggs",
+            usual_store_id: s.storeId,
+            on_similar: "create",
+        });
+        return { product_food_id: product.id, food_id: s.eggs };
+    },
+    "link_product#unlink": async (s, make) => {
+        const product = await make("upsert_food", {
+            name: "Farm Eggs",
+            generic_food_id: s.eggs,
+            usual_store_id: s.storeId,
+            on_similar: "create",
+        });
+        return { product_food_id: product.id, food_id: null };
     },
     link_product: noIds(
         "echoes only ids the caller passed in",
@@ -538,8 +596,6 @@ const EXCLUDED: Record<string, string> = {
     set_alcohol_tracking: "returns a setting, no row ids",
     set_timezone: "returns a setting, no row ids",
     export_all_data: "returns a download link, no row ids",
-    import_recipe_from_url:
-        "fetches a public page, so it cannot be seeded offline",
     set_household_rules: "returns counts of what it added, no row ids",
     update_household_config: "returns the household's own config",
     delete_account: "destroys the account the test runs as",
@@ -603,12 +659,19 @@ const isNested = (tool: string, path: string) =>
     );
 
 /**
- * Whether the text carries the id as a tag, `[some_label: <uuid>]`. A bare
- * occurrence does not count: a note that repeats the id in prose would hide a
- * tag that was removed.
+ * Whether the text carries the id as a tag, `[label: <uuid>]`, the label being
+ * the name of an input property some tool takes. A bare occurrence does not
+ * count (a note that repeats the id in prose would hide a tag that was
+ * removed), and neither does a label no tool has.
  */
-const tagged = (lowerText: string, id: string) =>
-    new RegExp(`\\[[a-z_]+: ${id}\\]`).test(lowerText);
+const tagged = (
+    lowerText: string,
+    id: string,
+    inputNames: ReadonlySet<string>,
+) =>
+    [...lowerText.matchAll(new RegExp(`\\[([a-z_]+): ${id}\\]`, "g"))].some(
+        (match) => inputNames.has(match[1]!),
+    );
 
 /** Every uuid anywhere in a value, lower-cased. */
 const uuidsIn = (value: unknown): string[] =>
@@ -620,6 +683,8 @@ const uuidsIn = (value: unknown): string[] =>
  * NESTED paths), and the ones it misses.
  */
 export function checkIdsInText(input: {
+    /** Every input property name of every tool in tools/list. */
+    inputNames: ReadonlySet<string>;
     tool: string;
     structured: unknown;
     text: string;
@@ -637,7 +702,7 @@ export function checkIdsInText(input: {
     return {
         checked: owed.map(({ id }) => id),
         missing: owed
-            .filter(({ id }) => !tagged(text, id))
+            .filter(({ id }) => !tagged(text, id, input.inputNames))
             .map(({ id, path }) => `${path} = ${id}`),
     };
 }
@@ -650,12 +715,11 @@ export function rowChecksNothing(
     return checkedCount === 0 && !spec.noIds;
 }
 
-async function callTool(
+async function withClient<T>(
     userId: string,
     era: Era,
-    name: string,
-    args: Record<string, unknown> = {},
-): Promise<Result> {
+    fn: (client: Client) => Promise<T>,
+): Promise<T> {
     const app = new Hono();
     app.all("/mcp", (c) => {
         c.set("authContext", { kind: "user", userId });
@@ -673,9 +737,43 @@ async function callTool(
         }),
     );
     try {
-        return (await client.callTool({ name, arguments: args })) as Result;
+        return await fn(client);
     } finally {
         await client.close();
+    }
+}
+
+async function callTool(
+    userId: string,
+    era: Era,
+    name: string,
+    args: Record<string, unknown> = {},
+): Promise<Result> {
+    return withClient(
+        userId,
+        era,
+        async (client) =>
+            (await client.callTool({ name, arguments: args })) as Result,
+    );
+}
+
+/** Every input property name of every tool, with every flag on. */
+async function listInputNames(userId: string): Promise<Set<string>> {
+    setFlagsForTests(createMemoryFlags(allFlagsOn()));
+    try {
+        const { tools } = await withClient(userId, "legacy", (client) =>
+            client.listTools(),
+        );
+        return new Set(
+            tools.flatMap((tool) =>
+                Object.keys(
+                    (tool.inputSchema as { properties?: object }).properties ??
+                        {},
+                ),
+            ),
+        );
+    } finally {
+        setFlagsForTests(createMemoryFlags({}));
     }
 }
 
@@ -705,10 +803,12 @@ describe("the id check itself", () => {
     const a = "11111111-1111-4111-8111-111111111111";
     const b = "22222222-2222-4222-8222-222222222222";
     const household = "33333333-3333-4333-8333-333333333333";
+    const inputNames = new Set(["id", "food_id"]);
 
     test("an owed id the text omits is reported, one it carries is not", () => {
         const structured = { rows: [{ id: a }, { id: b }] };
         const got = checkIdsInText({
+            inputNames,
             tool: "t",
             structured,
             text: `row [id: ${a}]`,
@@ -721,6 +821,7 @@ describe("the id check itself", () => {
 
     test("a bare occurrence of the id is not a tag", () => {
         const got = checkIdsInText({
+            inputNames,
             tool: "t",
             structured: { id: a },
             text: `see ${a} for details`,
@@ -730,8 +831,30 @@ describe("the id check itself", () => {
         expect(got.missing).toEqual([`structuredContent.id = ${a}`]);
     });
 
+    test("a tag whose label no tool takes does not count", () => {
+        const got = checkIdsInText({
+            inputNames,
+            tool: "t",
+            structured: { id: a },
+            text: `row [nonsense_id: ${a}]`,
+            args: {},
+            householdId: household,
+        });
+        expect(got.missing).toEqual([`structuredContent.id = ${a}`]);
+        const real = checkIdsInText({
+            inputNames,
+            tool: "t",
+            structured: { id: a },
+            text: `row [food_id: ${a}]`,
+            args: {},
+            householdId: household,
+        });
+        expect(real.missing).toEqual([]);
+    });
+
     test("the household id and ids the caller passed in are not owed", () => {
         const got = checkIdsInText({
+            inputNames,
             tool: "t",
             structured: { household_id: household, id: a, other: b },
             text: "",
@@ -757,6 +880,7 @@ describe("the id check itself", () => {
 describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
     let householdId: string;
     let ownerId: string;
+    let inputNames: Set<string>;
 
     async function setUp(): Promise<Seed> {
         const { sql, truncateAll } = getCtx();
@@ -773,7 +897,9 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
                 ),
             householdId,
         );
-        return seed();
+        const seeded = await seed();
+        inputNames = await listInputNames(ownerId);
+        return seeded;
     }
 
     /** One seeded call: any error here is the fixture's, not the rule's. */
@@ -917,6 +1043,12 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
             unit: "g",
         });
         await ok("discard_fridge_item", { id: sugarItem.id, amount: 1 });
+        const barcode = "5449000000996";
+        const barcoded = (await ok("upsert_food", {
+            name: "Seltzer Bottle",
+            barcode,
+            on_similar: "create",
+        })) as { id: string };
         const [spare] = (await sql`
             select id from public.fridge_items where food_id = ${milk.id}
         `) as { id: string }[];
@@ -941,6 +1073,8 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
             water: await only("water_log"),
             weight: await only("weight_log"),
             spareItem: spare!.id,
+            barcoded: barcoded.id,
+            barcode,
         };
     }
 
@@ -1009,16 +1143,27 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
                         ? await idsOf(spec.newRow)
                         : new Set<string>();
                     const callArgs = await spec.args(seeded, make);
-                    const result = await callTool(
-                        seeded.owner,
-                        era,
-                        tool,
-                        callArgs,
-                    );
+                    if (spec.flags) {
+                        setFlagsForTests(createMemoryFlags(spec.flags));
+                    }
+                    let result: Result;
+                    try {
+                        result = await callTool(
+                            seeded.owner,
+                            era,
+                            tool,
+                            callArgs,
+                        );
+                    } finally {
+                        if (spec.flags) {
+                            setFlagsForTests(createMemoryFlags({}));
+                        }
+                    }
                     if (result.isError) {
                         throw new Error(`${tool} failed: ${textOf(result)}`);
                     }
                     const { checked, missing } = checkIdsInText({
+                        inputNames,
                         tool,
                         structured: result.structuredContent,
                         text: textOf(result),
@@ -1040,7 +1185,9 @@ describeDb(pgAvailable !== null, "ids in every tool's text (db)", (getCtx) => {
                         owedInText.push(...added);
                     }
                     const absent = owedInText
-                        .filter((id) => !tagged(text, id.toLowerCase()))
+                        .filter(
+                            (id) => !tagged(text, id.toLowerCase(), inputNames),
+                        )
                         .map((id) => `text omits ${id}`);
                     expect(
                         [...missing, ...absent],

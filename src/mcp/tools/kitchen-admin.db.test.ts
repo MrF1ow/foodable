@@ -770,7 +770,14 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
         expect(text(listed)).toContain(
             `Kirkland Large Eggs (usual) [food_id: ${kirkland}], Organic Eggs [food_id: ${organic}]`,
         );
-        expect(text(listed)).toEndWith(`[food_id: ${plain}]`);
+        // The usual's own id comes first on its line, before any product's, so
+        // taking the first `[food_id]` adds the plain food and not a brand.
+        expect(text(listed).match(/\[food_id: ([0-9a-f-]{36})\]/)![1]).toBe(
+            plain,
+        );
+        expect(text(listed)).toContain(
+            `Eggs [food_id: ${plain}] → Kirkland Large Eggs`,
+        );
     });
 
     test("remove_usual: a product is no usual and an archived food is unknown", async () => {

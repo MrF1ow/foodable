@@ -238,9 +238,9 @@ function usualLine(row: UsualListRow): string {
             : null,
         row.paused ? "paused" : null,
     ].filter((part): part is string => part != null);
-    const what = row.productName
-        ? `${row.name} → ${row.productName}`
-        : row.name;
+    // The usual's own food id sits right after its name, so the first
+    // `[food_id]` on the line is the plain food an agent adds, not a product.
+    const what = `${row.name}${idTag(row.foodId, "food_id")}${row.productName ? ` → ${row.productName}` : ""}`;
     const status = row.due
         ? `DUE (${row.due.reason})${row.onList ? ", already on the list" : row.dismissed ? ", dismissed" : ""}`
         : "not due";
@@ -249,7 +249,7 @@ function usualLine(row: UsualListRow): string {
         row.products.length > 0
             ? `; products: ${row.products.map((p) => `${p.isUsual ? `${p.name} (usual)` : p.name}${idTag(p.foodId, "food_id")}`).join(", ")}`
             : "";
-    return `- ${what}: ${settings}; ${status}${products}${row.storeId ? idTag(row.storeId, "store_id") : ""}${idTag(row.foodId, "food_id")}`;
+    return `- ${what}: ${settings}; ${status}${row.storeId ? idTag(row.storeId, "store_id") : ""}${products}`;
 }
 
 export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
