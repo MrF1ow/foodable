@@ -52,6 +52,7 @@ import {
     NEW_FOOD_INPUT,
     ON_SIMILAR_INPUT,
     noticeToWire,
+    noticeIdTags,
     onSimilarFor,
     similarFoodsText,
     similarFoodsWire,
@@ -63,6 +64,7 @@ import {
     withUndo,
     type WireNotice,
     type AlcoholDisplay,
+    idTag,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { dimensionOf, resolveQuantityUnit } from "../../domain/quantity.js";
@@ -589,6 +591,34 @@ function foodPayload(
     };
 }
 
+/** get_food's text: the food with its id, then its products and notices, each with theirs. */
+function getFoodText(payload: {
+    id: string;
+    name: string;
+    generic_food_id: string | null;
+    usual_store_id: string | null;
+    products: { id: string; name: string; usual: boolean }[];
+    notices: WireNotice[];
+}): string {
+    const lines = [
+        `${payload.name}${idTag(payload.id, "food_id")}${payload.generic_food_id ? idTag(payload.generic_food_id, "generic_food_id") : ""}${payload.usual_store_id ? idTag(payload.usual_store_id, "store_id") : ""}`,
+    ];
+    if (payload.products.length > 0) {
+        lines.push(
+            `Products: ${payload.products
+                .map(
+                    (product) =>
+                        `${product.name}${product.usual ? " (usual)" : ""}${idTag(product.id, "food_id")}`,
+                )
+                .join(", ")}`,
+        );
+    }
+    for (const notice of payload.notices) {
+        lines.push(`${notice.message}${noticeIdTags(notice)}`);
+    }
+    return lines.join("\n");
+}
+
 function qualityPayload(q: FoodQuality | null) {
     if (q == null) return null;
     return {
@@ -658,12 +688,13 @@ function formatSearchHit(hit: {
 }): string {
     const bits = [hit.name];
     if (hit.brand) bits.push(hit.brand);
-    if (hit.food_id) bits.push(`food_id ${hit.food_id}`);
     if (hit.barcode) bits.push(hit.barcode);
     if (hit.calories != null) bits.push(`${hit.calories} kcal`);
     if (hit.generic_food_name) bits.push(`product of ${hit.generic_food_name}`);
     bits.push(hit.source);
-    return bits.join(" · ");
+    return (
+        bits.join(" · ") + (hit.food_id ? idTag(hit.food_id, "food_id") : "")
+    );
 }
 
 export function registerSearchFoodTool(server: McpServer, ctx: ToolContext) {
@@ -980,7 +1011,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${payload.name} ${payload.id}`,
+                                text: getFoodText(payload),
                             },
                         ],
                         structuredContent: payload,
@@ -1326,7 +1357,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: `Saved ${payload.name} ${payload.id}`,
+                                    text: `Saved ${payload.name}${idTag(payload.id, "food_id")}`,
                                 },
                             ],
                             structuredContent: {
@@ -1453,7 +1484,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                             {
                                 type: "text" as const,
                                 text: withUndo(
-                                    `Merged into ${payload.name} ${payload.id}`,
+                                    `Merged into ${payload.name}${idTag(payload.id, "food_id")}`,
                                     run.undo,
                                 ),
                             },
@@ -1506,7 +1537,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${args.food_id ? "Linked" : "Unlinked"} ${payload.name} ${payload.id}`,
+                                text: `${args.food_id ? "Linked" : "Unlinked"} ${payload.name}`,
                             },
                         ],
                         structuredContent: payload,
@@ -1578,9 +1609,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         store.listBarcodes(householdId, saved.id),
                     ]);
                     const payload = foodPayload(saved, aliases, barcodes);
-                    const bits = [
-                        `Saved usual product for ${payload.name} ${payload.id}`,
-                    ];
+                    const bits = [`Saved usual product for ${payload.name}`];
                     if (
                         args.store_id !== undefined ||
                         args.amount !== undefined ||

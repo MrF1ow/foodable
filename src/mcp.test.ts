@@ -192,7 +192,7 @@ import { PLAN_UNKNOWN_LINE_NOTE } from "./copy/toasts.js";
 import { fridgeExpiryLine } from "./copy/notices.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import { createMemoryAgentActionsStore } from "./domain/agent-actions.js";
-import { setAgentActionDepsForTests } from "./mcp/shared.js";
+import { setAgentActionDepsForTests, stripIdTags } from "./mcp/shared.js";
 import { setGoalDayRowsForTests } from "./db/agent-actions-goal-days.js";
 import {
     createMemoryRecipesStore,
@@ -9456,7 +9456,7 @@ describe("/mcp destructive tools are guarded", () => {
                     store_id: STORE_B,
                 });
                 expect(moved.isError).toBeFalsy();
-                expect(textOf(moved)).toStartWith(
+                expect(stripIdTags(textOf(moved))).toStartWith(
                     "Moved 2 lines: Aldi (Other).",
                 );
                 expect(textOf(moved)).toContain(UNDO_SENTENCE);
@@ -9785,7 +9785,7 @@ describe("/mcp destructive tools are guarded", () => {
                         food_id: plain,
                     });
                     expect(removed.isError).toBeFalsy();
-                    expect(textOf(removed)).toContain(
+                    expect(stripIdTags(textOf(removed))).toContain(
                         "Removed Eggs from the Usuals list; Kirkland Large Eggs came off its list.",
                     );
                     expect(textOf(removed)).toContain(UNDO_SENTENCE);
@@ -12880,7 +12880,7 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
         );
 
         test.each(ERAS)(
-            "list_expiring names each item's location, days left and recipe, and the recipe using the most of them; the text is unchanged (%p)",
+            "list_expiring names each item's location, days left and recipe, and the recipe using the most of them; the wording is unchanged and the ids ride at the line ends (%p)",
             async (mode) => {
                 await withHttpClient("u1", mode, async (client) => {
                     const call = async (
@@ -12983,8 +12983,10 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         carbs_g: 40,
                         fat_g: 10,
                     });
-                    expect(listed.content[0]!.text.split("\n")).toEqual(
-                        parsed.items.map((item) =>
+                    expect(
+                        stripIdTags(listed.content[0]!.text).split("\n"),
+                    ).toEqual([
+                        ...parsed.items.map((item) =>
                             fridgeExpiryLine({
                                 name: item.display_name,
                                 amount: item.amount,
@@ -12992,7 +12994,8 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                                 expiresOn: item.expires_on,
                             }),
                         ),
-                    );
+                        `Best use: ${parsed.featured!.name}`,
+                    ]);
                 });
             },
         );

@@ -778,6 +778,8 @@ describe("changedChecks: tests that read files are mapped", () => {
             "reads the tracked tree only to build this guard; a change to check-changed.ts selects it as its sibling",
         "src/db/migrate.test.ts":
             "reads db/migrations/ and db/bootstrap.sql, and src/db/ changes; FULL_SUITE already runs everything for all three",
+        "src/mcp/tools/ids-in-text.db.test.ts":
+            "reads only src/mcp/tools-list.snapshot.json, which is in FULL_SUITE",
         "src/db/testing/pg-temp.test.ts":
             "reads only the postmaster.pid of a temp cluster it starts, never a repo file; src/db/ changes already run FULL_SUITE",
     };

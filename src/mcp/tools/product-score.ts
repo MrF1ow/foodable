@@ -64,6 +64,7 @@ import {
     uiMetaForKey,
     type DailyTotals,
     type ToolContext,
+    idTag,
 } from "../shared.js";
 
 const SCORE_PART_SCHEMA = z.enum([
@@ -396,13 +397,21 @@ function formatChecksSummary(checks: RateProductOutput["checks"]): string {
     return lines.join(" ");
 }
 
-function formatContent(out: RateProductOutput): string {
+/**
+ * The text of a rating. The food's id is named only when the caller looked the
+ * product up by barcode: a call that passed food_id already holds it.
+ */
+function formatContent(out: RateProductOutput, askedByFood: boolean): string {
+    const tag =
+        out.product.food_id && !askedByFood
+            ? idTag(out.product.food_id, "food_id")
+            : "";
     if (!out.found) {
         const id =
             out.product.barcode != null
                 ? `barcode ${out.product.barcode}`
                 : "product";
-        return `No product found for ${id}.`;
+        return `No product found for ${id}.${tag}`;
     }
     const scored =
         out.score != null
@@ -410,7 +419,14 @@ function formatContent(out: RateProductOutput): string {
             : `Not enough data to score (${out.label})`;
     const parts = `scored on ${out.parts_used} of ${out.parts_total}`;
     const member = formatChecksSummary(out.checks);
-    return member ? `${scored}, ${parts}. ${member}` : `${scored}, ${parts}.`;
+    // Each member checked, with the user_id that limits a later call to them.
+    const checked =
+        out.checks.length > 0
+            ? ` Checked: ${out.checks.map((row) => `${row.name} (${row.verdict})${idTag(row.user_id, "user_id")}`).join(", ")}.`
+            : "";
+    return member
+        ? `${scored}, ${parts}. ${member}${checked}${tag}`
+        : `${scored}, ${parts}.${checked}${tag}`;
 }
 
 async function buildOutputAsync(args: {
@@ -663,7 +679,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                                 content: [
                                     {
                                         type: "text",
-                                        text: formatContent(out),
+                                        text: formatContent(out, hasFood),
                                     },
                                 ],
                                 structuredContent: out,
@@ -709,7 +725,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: formatContent(out),
+                                    text: formatContent(out, hasFood),
                                 },
                             ],
                             structuredContent: out,
@@ -769,7 +785,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                                 content: [
                                     {
                                         type: "text",
-                                        text: formatContent(out),
+                                        text: formatContent(out, hasFood),
                                     },
                                 ],
                                 structuredContent: out,
@@ -804,7 +820,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: formatContent(out),
+                                    text: formatContent(out, hasFood),
                                 },
                             ],
                             structuredContent: out,
@@ -840,7 +856,7 @@ export function registerRateProductTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: formatContent(out),
+                                text: formatContent(out, hasFood),
                             },
                         ],
                         structuredContent: out,

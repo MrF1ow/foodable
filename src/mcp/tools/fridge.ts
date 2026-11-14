@@ -61,6 +61,7 @@ import {
     uncapturedNote,
     withUndo,
     type ToolContext,
+    idTag,
 } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
 
@@ -238,7 +239,10 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                             ? "No fridge locations."
                             : itemCount === 0
                               ? payload.locations
-                                    .map((row) => `${row.name} ${row.id}`)
+                                    .map(
+                                        (row) =>
+                                            `${row.name}${idTag(row.id, "location_id")}`,
+                                    )
                                     .join("\n") + "\nFridge is empty."
                               : payload.locations
                                     .map((row) => {
@@ -248,10 +252,10 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                                 : row.items
                                                       .map(
                                                           (item) =>
-                                                              `  ${item.display_name} ${item.amount} ${item.unit}${item.expires_on ? ` exp ${item.expires_on}` : ""} ${item.id}`,
+                                                              `  ${item.display_name} ${item.amount} ${item.unit}${item.expires_on ? ` exp ${item.expires_on}` : ""}${idTag(item.id)}`,
                                                       )
                                                       .join("\n");
-                                        return `${row.name} ${row.id}\n${lines}`;
+                                        return `${row.name}${idTag(row.id, "location_id")}\n${lines}`;
                                     })
                                     .join("\n");
                     return {
@@ -304,7 +308,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `Added ${location.name} ${location.id}`,
+                                text: `Added ${location.name}${idTag(location.id, "location_id")}`,
                             },
                         ],
                         structuredContent: {
@@ -510,7 +514,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: `Added ${item.displayName} ${item.quantity.amount} ${item.quantity.unit} ${item.id}`,
+                                    text: `Added ${item.displayName} ${item.quantity.amount} ${item.quantity.unit}${idTag(item.id)}`,
                                 },
                             ],
                             structuredContent: {
@@ -836,17 +840,30 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                 text:
                                     payload.items.length === 0
                                         ? "Nothing expiring soon."
-                                        : payload.items
-                                              .map((item) =>
-                                                  fridgeExpiryLine({
-                                                      name: item.display_name,
-                                                      amount: item.amount,
-                                                      unit: item.unit,
-                                                      expiresOn:
-                                                          item.expires_on,
-                                                  }),
-                                              )
-                                              .join("\n"),
+                                        : [
+                                              ...payload.items.map(
+                                                  (item) =>
+                                                      fridgeExpiryLine({
+                                                          name: item.display_name,
+                                                          amount: item.amount,
+                                                          unit: item.unit,
+                                                          expiresOn:
+                                                              item.expires_on,
+                                                      }) +
+                                                      idTag(item.id) +
+                                                      (item.recipe
+                                                          ? idTag(
+                                                                item.recipe.id,
+                                                                "recipe_id",
+                                                            )
+                                                          : ""),
+                                              ),
+                                              ...(payload.featured
+                                                  ? [
+                                                        `Best use: ${payload.featured.name}${idTag(payload.featured.id, "recipe_id")}`,
+                                                    ]
+                                                  : []),
+                                          ].join("\n"),
                             },
                         ],
                         structuredContent: payload,
@@ -996,7 +1013,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                                         eaten.shortfall
                                             ? [eaten.shortfall]
                                             : [],
-                                    )}${unknownNote}`,
+                                    )}${unknownNote}${mealId ? ` Meal logged:${idTag(mealId)}` : ""}`,
                                 },
                             ],
                             structuredContent: payload,

@@ -767,7 +767,7 @@ export function similarFoodsWire(
 export function similarFoodsText(entries: SimilarFoodsEntry[]): string {
     const parts = entries.map((entry) => {
         const names = entry.candidates
-            .map((c) => `${c.food.name} (${c.food.id})`)
+            .map((c) => `${c.food.name}${idTag(c.food.id, "food_id")}`)
             .join(", ");
         return `"${entry.name}" → ${names}`;
     });
@@ -1158,11 +1158,53 @@ export function formatGoals(
     return parts.join("\n");
 }
 
+/**
+ * The one way a tool's text names an id an agent can act on: ` [food_id: …]`,
+ * the label being the input that takes it. A host that shows a widget hands
+ * the model only the text, never `structuredContent`, so an id left out of the
+ * text is one the agent cannot pass on. `ids-in-text.db.test.ts` fails when a
+ * tool carries an id in `structuredContent` that its text omits.
+ */
+export function idTag(value: string, param = "id"): string {
+    return ` [${param}: ${value}]`;
+}
+
+/** Text with every `idTag` removed, for tests that pin the wording around ids. */
+export function stripIdTags(text: string): string {
+    return text.replace(/ \[[a-z_]*id: [^\]]+\]/g, "");
+}
+
+/**
+ * The ids a notice carries, for the end of its text line: the subject (what
+ * dismiss_notice takes as subject_id), the recipe an ingredient notice belongs
+ * to, and the related ids (dismiss_notice's related_id first, as listed).
+ */
+export function noticeIdTags(notice: WireNotice): string {
+    const dismissRelated = notice.dismiss?.related_id ?? null;
+    const seen = new Set<string>();
+    const tags: string[] = [idTag(notice.subject.id, "subject_id")];
+    seen.add(notice.subject.id);
+    if (notice.subject.recipe_id && !seen.has(notice.subject.recipe_id)) {
+        seen.add(notice.subject.recipe_id);
+        tags.push(idTag(notice.subject.recipe_id, "recipe_id"));
+    }
+    if (dismissRelated && !seen.has(dismissRelated)) {
+        seen.add(dismissRelated);
+        tags.push(idTag(dismissRelated, "related_id"));
+    }
+    for (const related of notice.related) {
+        if (seen.has(related.id)) continue;
+        seen.add(related.id);
+        tags.push(idTag(related.id, "related_id"));
+    }
+    return tags.join("");
+}
+
 export function formatWeightEntry(
     entry: WeightEntry,
     unit: WeightUnit,
 ): string {
-    return `- ${formatWeight(entry.weight_g, unit)} at ${entry.logged_at}${entry.notes ? ` (${entry.notes})` : ""} [id: ${entry.id}]`;
+    return `- ${formatWeight(entry.weight_g, unit)} at ${entry.logged_at}${entry.notes ? ` (${entry.notes})` : ""}${idTag(entry.id)}`;
 }
 
 // Shared `logged_at` description for every manual write tool. The three forms
@@ -1236,7 +1278,7 @@ export {
 
 export function formatMeal(meal: Meal, alcohol: AlcoholDisplay = null): string {
     const parts = [
-        `ID: ${meal.id}`,
+        idTag(meal.id).trimStart(),
         `Time: ${meal.logged_at}`,
         meal.meal_type ? `Type: ${meal.meal_type}` : null,
         `Description: ${meal.description}`,

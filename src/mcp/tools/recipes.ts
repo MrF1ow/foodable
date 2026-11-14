@@ -90,6 +90,7 @@ import {
     dismissedOn,
     uncapturedNote,
     withUndo,
+    idTag,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
@@ -532,6 +533,9 @@ function recipeFields(recipe: Recipe) {
 
 function ingredientLinesForRecipeText(
     rows: {
+        id: string;
+        food_id: string | null;
+        product: { food_id: string; name: string } | null;
         display_name: string;
         person_amount: number | null;
         unit: string | null;
@@ -540,11 +544,12 @@ function ingredientLinesForRecipeText(
 ): string {
     return rows
         .map((ingredient) => {
+            const ids = `${idTag(ingredient.id, "ingredient_id")}${ingredient.food_id ? idTag(ingredient.food_id, "food_id") : ""}${ingredient.product ? ` → ${ingredient.product.name}${idTag(ingredient.product.food_id, "food_id")}` : ""}`;
             // An unmeasured ingredient shows its note ("to taste"), never 0.
             if (ingredient.person_amount == null || !ingredient.unit) {
-                return `${ingredient.display_name} ${ingredient.note?.trim() || "to taste"}`;
+                return `${ingredient.display_name} ${ingredient.note?.trim() || "to taste"}${ids}`;
             }
-            return `${ingredient.display_name} ${ingredient.person_amount} ${ingredient.unit}${ingredient.note ? ` (${ingredient.note})` : ""}`;
+            return `${ingredient.display_name} ${ingredient.person_amount} ${ingredient.unit}${ingredient.note ? ` (${ingredient.note})` : ""}${ids}`;
         })
         .join("\n");
 }
@@ -685,7 +690,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         : payload.recipes
                                               .map(
                                                   (recipe) =>
-                                                      `${recipe.name} yield ${recipe.yield_portions} ${recipe.id}${recipe.verification === "unverified" ? " (unverified)" : ""}`,
+                                                      `${recipe.name} yield ${recipe.yield_portions}${recipe.verification === "unverified" ? " (unverified)" : ""}${idTag(recipe.id)}`,
                                               )
                                               .join("\n"),
                             },
@@ -793,7 +798,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         gapReasonTexts.length > 0
                             ? ` (${gapReasonTexts.join("; ")})`
                             : "";
-                    const perPortionLine = `${view.name} yield ${view.yieldPortions}, portion ${view.portionCount}\nPer portion: ${wiredMacros.incomplete && wiredMacros.calories == null ? "macros incomplete" : `${wiredMacros.calories ?? "—"} kcal${wiredMacros.incomplete ? ", incomplete" : ""}`}${perPortionReasonTail}`;
+                    const perPortionLine = `${view.name} yield ${view.yieldPortions}, portion ${view.portionCount}${idTag(view.id)}\nPer portion: ${wiredMacros.incomplete && wiredMacros.calories == null ? "macros incomplete" : `${wiredMacros.calories ?? "—"} kcal${wiredMacros.incomplete ? ", incomplete" : ""}`}${perPortionReasonTail}`;
                     const allergenBlockLines = recipeAllergen
                         .filter((n) => n.severity === "block")
                         .map((n) => `Allergen: ${noticeSentence(n)}`);
@@ -934,7 +939,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `Created ${recipe.name} yield ${recipe.yieldPortions} ${recipe.id}`,
+                                text: `Created ${recipe.name} yield ${recipe.yieldPortions}${idTag(recipe.id)}`,
                             },
                         ],
                         structuredContent: recipeFields(recipe),
@@ -1034,7 +1039,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: `Added ${ingredient.displayName} ${recipeIngredientAmountText(ingredient)}`,
+                                    text: `Added ${ingredient.displayName} ${recipeIngredientAmountText(ingredient)}${idTag(ingredient.id, "ingredient_id")}${ingredient.foodId && !args.food_id ? idTag(ingredient.foodId, "food_id") : ""}`,
                                 },
                             ],
                             structuredContent: structured,
@@ -1478,14 +1483,17 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 : ` Shortfall: ${cooked.shortfalls
                                       .map(
                                           (row) =>
-                                              `${row.displayName} ${row.amount} ${row.unit}`,
+                                              `${row.displayName} ${row.amount} ${row.unit}${row.foodId ? idTag(row.foodId, "food_id") : ""}`,
                                       )
                                       .join("; ")}.`;
                         const unmeasuredText =
                             cooked.unmeasured.length === 0
                                 ? ""
                                 : ` Not deducted (no amount): ${cooked.unmeasured
-                                      .map((row) => row.displayName)
+                                      .map(
+                                          (row) =>
+                                              `${row.displayName}${row.foodId ? idTag(row.foodId, "food_id") : ""}`,
+                                      )
                                       .join(", ")}.`;
                         return {
                             content: [
@@ -1493,7 +1501,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                     type: "text",
                                     text: `Cooked ${cooked.totalPortions} portion${cooked.totalPortions === 1 ? "" : "s"}.${shortfallText}${unmeasuredText}${
                                         mealIds.length > 0
-                                            ? ` Logged ${mealIds.length} meal${mealIds.length === 1 ? "" : "s"}.`
+                                            ? ` Logged ${mealIds.length} meal${mealIds.length === 1 ? "" : "s"}.${mealIds.map((id) => idTag(id)).join("")}`
                                             : ""
                                     }`,
                                 },
@@ -1567,7 +1575,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `Updated ${recipe.name} ${recipe.id}`,
+                                text: `Updated ${recipe.name}`,
                             },
                         ],
                         structuredContent: recipeFields(recipe),
@@ -1887,10 +1895,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text",
-                                    text: `Imported ${result.recipe.name} ${result.recipe.id} (${result.verification})\n${payload.ingredients
+                                    text: `Imported ${result.recipe.name} (${result.verification})${idTag(result.recipe.id)}\n${payload.ingredients
                                         .map(
                                             (row) =>
-                                                `${row.display_name} ${row.amount != null && row.unit ? `${row.amount} ${row.unit}` : row.note?.trim() || "to taste"}${row.missing.length ? ` missing ${row.missing.join(", ")}` : ""}`,
+                                                `${row.display_name} ${row.amount != null && row.unit ? `${row.amount} ${row.unit}` : row.note?.trim() || "to taste"}${row.missing.length ? ` missing ${row.missing.join(", ")}` : ""}${idTag(row.id, "ingredient_id")}${row.food_id ? idTag(row.food_id, "food_id") : ""}`,
                                         )
                                         .join("\n")}${
                                         places.length
@@ -2026,7 +2034,17 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         : checked.verification === "verified"
                                           ? `${recipe.name} was made by hand, so it stays verified. The check found: ${checked.problems.map((row) => row.message).join(" ")}`
                                           : `${recipe.name} is still unverified (${checked.problems.length} problem${checked.problems.length === 1 ? "" : "s"}): ${checked.problems.map((row) => row.message).join(" ")}`
-                                }${mentionWarningsText(mentionWarnings)}`,
+                                }${mentionWarningsText(mentionWarnings)}${[
+                                    ...new Set(
+                                        checked.problems.flatMap((row) =>
+                                            row.ingredientId
+                                                ? [row.ingredientId]
+                                                : [],
+                                        ),
+                                    ),
+                                ]
+                                    .map((id) => idTag(id, "ingredient_id"))
+                                    .join("")}`,
                             },
                         ],
                         structuredContent: payload,

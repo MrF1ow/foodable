@@ -39,6 +39,7 @@ import {
     setFlagsForTests,
 } from "../../flags.js";
 import { handleMcp } from "../server.js";
+import { stripIdTags } from "../shared.js";
 import { KITCHEN_ADMIN_TOOL_NAMES } from "./grocery-admin-names.js";
 
 const pgAvailable = await findPgBin();
@@ -541,7 +542,7 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
             const before = await fingerprint();
             const result = await call(arranged.tool, arranged.args);
             expect(result.isError).toBeFalsy();
-            expect(text(result)).toStartWith(arranged.text);
+            expect(stripIdTags(text(result))).toStartWith(arranged.text);
             expect(text(result)).toContain(UNDO_SENTENCE);
             await arranged.changed();
 
@@ -762,9 +763,14 @@ describeDb(pgAvailable !== null, "kitchen admin tools (db)", (getCtx) => {
                 ],
             ],
         ]);
-        expect(text(listed)).toContain(
+        expect(stripIdTags(text(listed))).toContain(
             "products: Kirkland Large Eggs (usual), Organic Eggs",
         );
+        // Each product and the usual itself carry their ids in the text.
+        expect(text(listed)).toContain(
+            `Kirkland Large Eggs (usual) [food_id: ${kirkland}], Organic Eggs [food_id: ${organic}]`,
+        );
+        expect(text(listed)).toEndWith(`[food_id: ${plain}]`);
     });
 
     test("remove_usual: a product is no usual and an archived food is unknown", async () => {

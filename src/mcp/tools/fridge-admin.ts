@@ -239,7 +239,9 @@ export function registerFridgeAdminTools(server: McpServer, ctx: ToolContext) {
                                 : `Nothing moved: everything is already in ${value.location}.`,
                             value.moved.length > 0 && value.unchanged.length > 0
                                 ? `${itemCount(value.unchanged.length)} already there.`
-                                : "",
+                                : value.unchanged.length > 0
+                                  ? "Already there."
+                                  : "",
                         ].filter(Boolean);
                         return {
                             content: [

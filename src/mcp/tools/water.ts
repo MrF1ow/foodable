@@ -16,7 +16,12 @@ import {
     resolveWriteTimestamp,
     resolveDateWindow,
 } from "../shared.js";
-import { destructiveOutcome, withUndo, type ToolContext } from "../shared.js";
+import {
+    destructiveOutcome,
+    idTag,
+    withUndo,
+    type ToolContext,
+} from "../shared.js";
 import type { WaterEntry } from "../../db/nutrition.js";
 
 export function registerWaterTools(server: McpServer, ctx: ToolContext) {
@@ -88,7 +93,7 @@ export function registerWaterTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${prefix}: ${entry.amount_ml} ml at ${entry.logged_at}${entry.notes ? ` (${entry.notes})` : ""}. ID: ${entry.id}${note}`,
+                                text: `${prefix}: ${entry.amount_ml} ml at ${entry.logged_at}${entry.notes ? ` (${entry.notes})` : ""}${idTag(entry.id)}${note}`,
                             },
                         ],
                     };
@@ -157,7 +162,7 @@ export function registerWaterTools(server: McpServer, ctx: ToolContext) {
                         };
                     }
                     const lineOf = (e: WaterEntry) =>
-                        `- ${e.amount_ml} ml at ${e.logged_at}${e.notes ? ` (${e.notes})` : ""} [id: ${e.id}]`;
+                        `- ${e.amount_ml} ml at ${e.logged_at}${e.notes ? ` (${e.notes})` : ""}${idTag(e.id)}`;
                     if (window.single) {
                         const total = sumWater(entries);
                         const lines = entries.map(lineOf);

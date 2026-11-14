@@ -32,6 +32,7 @@ import {
     MAX_ALCOHOL_G,
     MAX_CAFFEINE_MG,
     type BulkImportArgs,
+    type ImportResult,
 } from "../../domain/import.js";
 import {
     NUTRIENT_COVERAGE,
@@ -59,6 +60,7 @@ import {
     similarFoodsWire,
     SIMILAR_FOODS_ENTRY,
     WRITE_STATUS,
+    idTag,
 } from "../shared.js";
 import { SimilarFoodsError, type OnSimilar } from "../../domain/foods.js";
 import {
@@ -82,6 +84,13 @@ import {
 import { mealWriteFromItems as mealWriteFromItemsCore } from "../../meal-write.js";
 
 // ---------- bulk_import_meals ----------
+
+/** One line per row that has a meal, so an agent can update or delete it by id. */
+function importMealIdLines(result: ImportResult): string {
+    const rows = result.results.filter((r) => r.meal_id);
+    if (rows.length === 0) return "";
+    return `\n${rows.map((r) => `Line ${r.source_line}: ${r.status}${idTag(r.meal_id!)}`).join("\n")}`;
+}
 
 // Ceiling on total rows per user. Rate limiting is per HTTP request, so one
 // batched call writes up to MAX_ROWS_PER_CALL rows for a single limiter hit;
@@ -911,6 +920,7 @@ export function registerNutritionWriteTools(
                                 type: "text" as const,
                                 text:
                                     buildSummaryText(result) +
+                                    importMealIdLines(result) +
                                     alcoholHiddenNote(
                                         carriedAlcohol,
                                         alcohol,

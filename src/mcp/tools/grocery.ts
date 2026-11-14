@@ -68,6 +68,7 @@ import {
     destructiveOutcome,
     uncapturedNote,
     withUndo,
+    idTag,
 } from "../shared.js";
 import type { ToolContext } from "../shared.js";
 import { SimilarFoodsError } from "../../domain/foods.js";
@@ -246,9 +247,9 @@ function usualLine(row: UsualListRow): string {
     const settings = how.length > 0 ? how.join(", ") : "no restock schedule";
     const products =
         row.products.length > 0
-            ? `; products: ${row.products.map((p) => (p.isUsual ? `${p.name} (usual)` : p.name)).join(", ")}`
+            ? `; products: ${row.products.map((p) => `${p.isUsual ? `${p.name} (usual)` : p.name}${idTag(p.foodId, "food_id")}`).join(", ")}`
             : "";
-    return `- ${what}: ${settings}; ${status}${products}`;
+    return `- ${what}: ${settings}; ${status}${products}${row.storeId ? idTag(row.storeId, "store_id") : ""}${idTag(row.foodId, "food_id")}`;
 }
 
 export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
@@ -404,52 +405,52 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                                 .filter((section) => section.lines.length > 0),
                         })),
                     };
-                    const lines = payload.stores.flatMap((store) =>
-                        store.sections.flatMap((section) => section.lines),
+                    const lineCount = payload.stores.reduce(
+                        (n, store) =>
+                            n +
+                            store.sections.reduce(
+                                (m, section) => m + section.lines.length,
+                                0,
+                            ),
+                        0,
                     );
+                    // Every id an agent passes on is in this text: hosts that
+                    // show the widget give the model only this.
+                    const describeLine = (
+                        line: (typeof payload.stores)[number]["sections"][number]["lines"][number],
+                    ) => {
+                        const tag = line.already_have
+                            ? ` [${line.already_have}]`
+                            : "";
+                        const blockSuffix = line.notices
+                            .filter(
+                                (n) =>
+                                    n.severity === "block" ||
+                                    n.code === "grocery.restocked",
+                            )
+                            .map((n) => ` — ${n.message}`)
+                            .join("");
+                        const note = line.note?.trim();
+                        const lineText = note
+                            ? `${line.display_name} · ${note}`
+                            : `${line.display_name} ${line.amount} ${line.unit}`;
+                        const checked = line.checked ? " [checked]" : "";
+                        return `${lineText}${checked}${tag}${blockSuffix}${idTag(line.id)}`;
+                    };
+                    const text =
+                        lineCount === 0
+                            ? "Grocery list is empty."
+                            : payload.stores
+                                  .flatMap((store) => [
+                                      `## ${store.name}${idTag(store.id, "store_id")}`,
+                                      ...store.sections.flatMap((section) => [
+                                          `### ${section.name}${idTag(section.id, "section_id")}`,
+                                          ...section.lines.map(describeLine),
+                                      ]),
+                                  ])
+                                  .join("\n");
                     return {
-                        content: [
-                            {
-                                type: "text",
-                                text:
-                                    lines.length === 0
-                                        ? "Grocery list is empty."
-                                        : lines
-                                              .map((line) => {
-                                                  const tag = line.already_have
-                                                      ? ` [${line.already_have}]`
-                                                      : "";
-                                                  const blockSuffix =
-                                                      line.notices
-                                                          .filter(
-                                                              (n) =>
-                                                                  n.severity ===
-                                                                      "block" ||
-                                                                  n.code ===
-                                                                      "grocery.restocked",
-                                                          )
-                                                          .map(
-                                                              (n) =>
-                                                                  ` — ${n.message}`,
-                                                          )
-                                                          .join("");
-                                                  const note =
-                                                      line.note?.trim();
-                                                  const lineText = note
-                                                      ? `${line.display_name} · ${note}`
-                                                      : `${line.display_name} ${line.amount} ${line.unit}`;
-                                                  // The id is what check, delete
-                                                  // and put-away take; hosts that
-                                                  // show the widget give the model
-                                                  // only this text.
-                                                  const checked = line.checked
-                                                      ? " [checked]"
-                                                      : "";
-                                                  return `${lineText}${checked}${tag}${blockSuffix} [id: ${line.id}]`;
-                                              })
-                                              .join("\n"),
-                            },
-                        ],
+                        content: [{ type: "text", text }],
                         structuredContent: payload,
                     };
                 },
@@ -650,7 +651,12 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                         if (extras.alreadyHave) bits.push(extras.alreadyHave);
                         if (extras.allergenText) bits.push(extras.allergenText);
                         return {
-                            content: [{ type: "text", text: bits.join(". ") }],
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `${bits.join(". ")}${idTag(line.id)}${args.store_id ? "" : idTag(line.storeId, "store_id")}`,
+                                },
+                            ],
                             structuredContent: {
                                 status: "ok" as const,
                                 similar_foods: [],
@@ -995,7 +1001,8 @@ export function registerGroceryTools(server: McpServer, ctx: ToolContext) {
                     const payload = { put_away: putAway, failed };
                     const textParts = [
                         ...putAway.map(
-                            (row) => `Put away ${row.display_name}.`,
+                            (row) =>
+                                `Put away ${row.display_name}.${row.fridge_item_id ? idTag(row.fridge_item_id) : ""}${idTag(row.product_food_id, "food_id")}`,
                         ),
                         ...failed.map((row) => row.message),
                     ];
@@ -1377,12 +1384,15 @@ export function registerGroceryListAdminTools(
                         const said = [
                             value.moved.length > 0
                                 ? `Moved ${groceryCount(value.moved.length)}: ${[
-                                      ...new Set(
-                                          value.moved.map(
-                                              (row) =>
-                                                  `${row.store} (${row.section})`,
-                                          ),
-                                      ),
+                                      ...new Map(
+                                          value.moved.map((row) => [
+                                              row.section_id,
+                                              // The store id is the caller's own input when
+                                              // they passed it; when the lines kept their
+                                              // store it is new, so it is named too.
+                                              `${row.store} (${row.section})${idTag(row.section_id, "section_id")}${args.store_id ? "" : idTag(row.store_id, "store_id")}`,
+                                          ]),
+                                      ).values(),
                                   ].join(", ")}.`
                                 : "No lines moved.",
                             value.unchanged.length > 0
@@ -1503,7 +1513,7 @@ export function registerGroceryListAdminTools(
                             ? `No grocery line found with id ${args.id}.`
                             : !value.changed
                               ? `${line!.display_name} already has those values; nothing changed.`
-                              : `Updated ${line!.display_name}: ${line!.amount} ${line!.unit} at ${line!.store} (${line!.section})${line!.note ? `, note "${line!.note}"` : ""}.`;
+                              : `Updated ${line!.display_name}: ${line!.amount} ${line!.unit} at ${line!.store} (${line!.section})${line!.note ? `, note "${line!.note}"` : ""}.${args.store_id ? "" : idTag(line!.store_id, "store_id")}${idTag(line!.section_id, "section_id")}`;
                         return {
                             content: [
                                 {
