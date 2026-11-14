@@ -113,7 +113,10 @@ const EQUIPMENT_WORDS = new Set([
     "brush",
     "cooker",
     "cutter",
+    "cloth",
     "dish",
+    "filter",
+    "glass",
     "grater",
     "grinder",
     "keeper",
@@ -125,14 +128,17 @@ const EQUIPMENT_WORDS = new Set([
     "mold",
     "mould",
     "pan",
+    "paper",
     "peeler",
     "pot",
     "press",
     "rack",
+    "ring",
     "scale",
     "shaker",
     "slicer",
     "spoon",
+    "squeezer",
     "steamer",
     "timer",
 ]);
@@ -188,6 +194,18 @@ const INCLUSION_IN_VERBS = new Set([
     "whisk",
 ]);
 
+/** Words that turn "don't add the egg" into "not yet": the food is still used. */
+const TIMING_WORDS = new Set(["after", "before", "first", "until", "yet"]);
+
+/** Two-word timing phrases: "too early", "all at once", "right away". */
+const TIMING_PHRASES = [
+    ["too", "early"],
+    ["too", "soon"],
+    ["all", "at", "once"],
+    ["at", "once"],
+    ["right", "away"],
+];
+
 /** Small words between a cue and the food it governs ("any butter", "the cheese"). */
 const CUE_FILLERS = new Set(["a", "an", "any", "extra", "more", "some", "the"]);
 
@@ -218,6 +236,11 @@ const SUBSTITUTION_WORDS = new Set([
  */
 const HYPHEN_AFTER_MODIFIERS = new Set([
     "based",
+    "brown",
+    "color",
+    "colored",
+    "colour",
+    "coloured",
     "crusted",
     "filled",
     "flavored",
@@ -225,14 +248,59 @@ const HYPHEN_AFTER_MODIFIERS = new Set([
     "free",
     "friendly",
     "glazed",
+    "gold",
+    "golden",
+    "green",
     "infused",
     "less",
     "like",
+    "pink",
+    "red",
     "rich",
     "safe",
     "scented",
+    "shaped",
+    "size",
+    "sized",
     "stuffed",
     "style",
+    "yellow",
+]);
+
+/** A food right before one of these is a size ("walnut size pieces"), not an ingredient. */
+const SIZE_WORDS = new Set(["size", "sized"]);
+
+/** "the consistency of honey", "the size of a lemon": what follows is a yardstick. */
+const COMPARISON_NOUNS = new Set([
+    "colour",
+    "color",
+    "consistency",
+    "size",
+    "texture",
+    "thickness",
+]);
+
+/** Words before "like" that make it a comparison: "thick, like cream", "smooth like cream". */
+const LIKE_LEADS = new Set([
+    "creamy",
+    "dense",
+    "dry",
+    "firm",
+    "fluffy",
+    "glossy",
+    "gooey",
+    "light",
+    "loose",
+    "pale",
+    "runny",
+    "smooth",
+    "soft",
+    "sticky",
+    "stiff",
+    "tender",
+    "thick",
+    "thin",
+    "wet",
 ]);
 
 /** The same for a food after the hyphen: "non-dairy", "low-sugar", "two-egg". */
@@ -504,6 +572,7 @@ const stems = (list: readonly string[]): Set<string> =>
 const NOT_FOOD_STEMS = stems(MENTION_NOT_FOOD_WORDS);
 const VERB_LIKE_STEMS = stems(VERB_LIKE_FOODS);
 const OWN_FOOD_IDS = stems(MENTION_OWN_FOODS);
+const MEASURE_STEMS = stems([...MEASURE_WORDS]);
 const PART_STEMS = stems(MENTION_PART_WORDS);
 const KINDS_BY_HEAD = new Map(
     Object.entries(MENTION_KINDS).map(([head, kinds]) => [
@@ -530,6 +599,8 @@ type IndexedEntry = {
     /** Singular display and dismissal key. */
     canonical: string;
     foodId?: string;
+    /** A household food no bundled word covers: its own name, whatever it is. */
+    catalogOnly: boolean;
 };
 
 type Vocabulary = {
@@ -549,7 +620,12 @@ function buildVocabulary(catalog: readonly MentionVocabEntry[]): Vocabulary {
         const words = matchWords(word);
         if (words.length === 0) continue;
         const id = words.join(" ");
-        byId.set(id, { words, id, canonical: looseFoodKey(fold(word)) });
+        byId.set(id, {
+            words,
+            id,
+            canonical: looseFoodKey(fold(word)),
+            catalogOnly: false,
+        });
     }
     for (const entry of catalog) {
         const words = matchWords(entry.name);
@@ -560,6 +636,7 @@ function buildVocabulary(catalog: readonly MentionVocabEntry[]): Vocabulary {
             words,
             id,
             canonical: bundled?.canonical ?? looseFoodKey(fold(entry.name)),
+            catalogOnly: bundled === undefined,
             ...(entry.foodId !== undefined ? { foodId: entry.foodId } : {}),
         });
     }
@@ -817,6 +894,7 @@ function isNotUsedAsFood(
     units: readonly Unit[],
     tokens: readonly Token[],
     at: number,
+    foodTokens: ReadonlySet<number>,
 ): boolean {
     const unit = units[at]!;
     const rawOf = (u: Unit) => tokens[u.first]!.text;
@@ -835,7 +913,16 @@ function isNotUsedAsFood(
         );
     }
     if (entry.words.length !== 1) return false;
-    if (VERB_LIKE_STEMS.has(entry.id) && next) {
+    // A household food called "Cloves" is not the clove of "3 cloves garlic".
+    if (
+        MEASURE_STEMS.has(entry.id) &&
+        next &&
+        (rawOf(next) === "of" || foodTokens.has(next.first))
+    ) {
+        return true;
+    }
+    // A household food called "Rolls" or "Dip" is not the verb of "roll the dough".
+    if ((VERB_LIKE_STEMS.has(entry.id) || entry.catalogOnly) && next) {
         if (OBJECT_OPENERS.has(rawOf(next))) return true;
         const startsClause = at === 0 || tokens[unit.first]!.breakBefore;
         if (startsClause && rawOf(next) !== "and" && rawOf(next) !== "or") {
@@ -847,6 +934,82 @@ function isNotUsedAsFood(
             prev &&
             (ORANGE_LEADS.has(rawOf(prev)) ||
                 numberOf(tokens[prev.last]!.text) != null)
+        );
+    }
+    return false;
+}
+
+/** A timing word later in the clause: "until", "before", "too early", "all at once". */
+function hasTimingAfter(tokens: readonly Token[], last: number): boolean {
+    for (let i = last + 1; i < tokens.length; i++) {
+        if (tokens[i]!.breakBefore) return false;
+        if (TIMING_WORDS.has(tokens[i]!.text)) return true;
+        if (
+            TIMING_PHRASES.some((phrase) =>
+                phrase.every(
+                    (word, k) =>
+                        tokens[i + k]?.text === word &&
+                        (k === 0 || !tokens[i + k]!.breakBefore),
+                ),
+            )
+        ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * Whether "and"/"then" between tokens `lo` and `hi` starts a new action
+ * ("and add the eggs") rather than listing another food ("and the sugar").
+ */
+function startsNewAction(
+    tokens: readonly Token[],
+    foodTokens: ReadonlySet<number>,
+    lo: number,
+    hi: number,
+): boolean {
+    for (let t = lo + 1; t < hi; t++) {
+        const text = tokens[t]!.text;
+        if (text === "then") return true;
+        const next = tokens[t + 1];
+        if (text !== "and" || !next) continue;
+        const lists =
+            foodTokens.has(t + 1) ||
+            CUE_FILLERS.has(next.text) ||
+            NOTE_WORDS.has(next.text) ||
+            numberOf(next.text) != null;
+        if (!lists) return true;
+    }
+    return false;
+}
+
+/** The word of a comparison before the food: "the consistency of honey", "thick, like cream". */
+function isYardstick(
+    tokens: readonly Token[],
+    foodTokens: ReadonlySet<number>,
+    first: number,
+): boolean {
+    let j = first - 1;
+    while (
+        j >= 0 &&
+        !tokens[j + 1]!.breakBefore &&
+        CUE_FILLERS.has(tokens[j]!.text)
+    ) {
+        j--;
+    }
+    if (j >= 1 && !tokens[j]!.breakBefore && tokens[j]!.text === "of") {
+        return COMPARISON_NOUNS.has(tokens[j - 1]!.text);
+    }
+    // "like", maybe with a describing word before the food ("like whipped cream").
+    for (let n = 0; n < 3 && j >= 0; n++, j--) {
+        if (tokens[j + 1]!.breakBefore || foodTokens.has(j)) return false;
+        if (tokens[j]!.text !== "like") continue;
+        const lead = tokens[j - 1];
+        return (
+            tokens[j]!.breakBefore ||
+            (lead !== undefined &&
+                (LIKE_LEADS.has(lead.text) || /ly$/.test(lead.text)))
         );
     }
     return false;
@@ -877,6 +1040,7 @@ function isLeftOut(
     foodTokens: ReadonlySet<number>,
     from: number,
     first: number,
+    last: number,
 ): boolean {
     let j = first - 1;
     while (j >= from) {
@@ -917,7 +1081,8 @@ function isLeftOut(
     let k = verb - 1;
     while (k >= from && NEGATION_ADVERBS.has(tokens[k]!.text)) k--;
     if (k < from) return false;
-    if (isNegationAt(tokens, k, from)) return true;
+    // "don't add the egg until the pan is hot" is about when, not whether.
+    if (isNegationAt(tokens, k, from)) return !hasTimingAfter(tokens, last);
     // "avoid using garlic powder", "skip adding the cheese".
     return (
         LEAVE_OUT_CUES.has(tokens[k]!.text) &&
@@ -968,6 +1133,8 @@ function isNotAsked(
         const cut =
             next === "rack" && entry.words.some((w) => RACK_CUTS.has(w));
         if (gear && !cut) return true;
+        // "walnut size pieces": the food is a yardstick.
+        if (SIZE_WORDS.has(after.text)) return true;
         // "use onion instead" leaves it optional; "eggs instead of flax" asks for eggs.
         if (after.text === "instead" && tokens[last + 2]?.text !== "of") {
             return true;
@@ -975,10 +1142,17 @@ function isNotAsked(
     }
     let from = first;
     while (from > 0 && !tokens[from]!.breakBefore) from--;
-    if (isLeftOut(tokens, foodTokens, from, first)) return true;
+    if (isLeftOut(tokens, foodTokens, from, first, last)) return true;
+    if (isYardstick(tokens, foodTokens, first)) return true;
+    // A swap covers the foods up to the next action: "swap A for B and add C".
     for (let i = from; i < tokens.length; i++) {
         if (i > from && tokens[i]!.breakBefore) break;
-        if (SUBSTITUTION_WORDS.has(tokens[i]!.text)) return true;
+        if (!SUBSTITUTION_WORDS.has(tokens[i]!.text)) continue;
+        const swapped =
+            i < first
+                ? !startsNewAction(tokens, foodTokens, i, first)
+                : !startsNewAction(tokens, foodTokens, last, i);
+        if (swapped) return true;
     }
     return false;
 }
@@ -1042,7 +1216,7 @@ export function findMissingMentions(input: {
                 seen.has(entry.id) ||
                 isNeverFlagged(entry) ||
                 dismissed.has(entry.id) ||
-                isNotUsedAsFood(entry, units, tokens, here) ||
+                isNotUsedAsFood(entry, units, tokens, here, foodTokens) ||
                 isNotAsked(entry, units, tokens, here, foodTokens) ||
                 isCovered(pantry, vocabulary, entry)
             ) {

@@ -689,6 +689,7 @@ describe("a cue only governs the food it acts on", () => {
         ["Do not skip the cheese.", "cheese"],
         ["Make sure not to burn the garlic.", "garlic"],
         ["Do not stir the honey in.", "honey"],
+        ["Do not add the cheese until the end.", "cheese"],
     ])("a step that uses the food warns: %s", (step, food) => {
         expect(warned(step)).toEqual([food]);
     });
@@ -725,7 +726,6 @@ describe("a cue only governs the food it acts on", () => {
         "Skip the cheese and butter.",
         "Do not stir in the butter.",
         "You don't need to add the cheese.",
-        "Do not add the cheese until the end.",
         "Be careful not to add the egg.",
         "No cream, no butter.",
         "Without adding the cheese it is lighter.",
@@ -1149,6 +1149,193 @@ describe("a step that leaves a food out or swaps it is not a mention", () => {
         expect(quiet("Add 2 eggs.")).toEqual(["egg"]);
         expect(quiet("Skip the butter. Later, stir in the butter.")).toEqual([
             "butter",
+        ]);
+    });
+});
+
+describe("a negated 'add' with a timing word is an instruction about when", () => {
+    const noodles = [{ name: "200 g flat rice noodles" }];
+    const warned = (step: string) => names(warn([step], noodles));
+
+    test.each([
+        [
+            "Do not add the egg until the noodles are charred, then scramble it.",
+            "egg",
+        ],
+        ["Do not add the egg until the pan is hot.", "egg"],
+        ["Do not stir in the eggs until the mixture has cooled.", "egg"],
+        ["Don't add the cheese too early or it will burn.", "cheese"],
+        ["Make sure not to add the eggs all at once.", "egg"],
+        ["Never add the garlic before the onions are translucent.", "garlic"],
+        ["Don't add the garlic until the oil shimmers.", "garlic"],
+        ["Do not add the egg after the sauce thickens.", "egg"],
+        ["Don't add the butter too soon.", "butter"],
+        ["Do not add the egg right away.", "egg"],
+        ["Do not add the egg first.", "egg"],
+        ["Do not add the egg yet.", "egg"],
+        ["Do not add the egg at once.", "egg"],
+    ])("%s", (step, food) => {
+        expect(warned(step)).toContain(food);
+    });
+
+    test("a plain leave-out is still quiet", () => {
+        expect(warned("Do not add any butter.")).toEqual([]);
+        expect(warned("Do not add the egg.")).toEqual([]);
+        expect(warned("Skip the cheese until later.")).toEqual([]);
+    });
+});
+
+describe("a substitution reaches its own clause, not the next verb's", () => {
+    const base = [{ name: "chicken" }];
+    const warned = (step: string) => names(warn([step], base));
+
+    test("a food added after 'and' + verb still warns", () => {
+        expect(
+            warned("You can substitute the butter with oil and add the eggs."),
+        ).toEqual(["egg"]);
+        expect(
+            warned("Substitute tofu for chicken and add the shrimp."),
+        ).toEqual(["shrimp"]);
+        expect(warned("Add the eggs and substitute butter for oil.")).toEqual([
+            "egg",
+        ]);
+        expect(warned("Substitute oil for butter, then add the eggs.")).toEqual(
+            ["egg"],
+        );
+    });
+
+    test("foods inside the swap stay quiet", () => {
+        expect(
+            warned("Substitute almond milk for regular milk if vegan."),
+        ).toEqual([]);
+        expect(warned("Do not substitute honey for sugar.")).toEqual([]);
+        expect(
+            warned("Substitute honey for the sugar and the brown sugar."),
+        ).toEqual([]);
+        expect(warned("Honey can be substituted for sugar.")).toEqual([]);
+    });
+});
+
+describe("a comparison names a yardstick, not a food to add", () => {
+    const base = [{ name: "chicken" }];
+    const warned = (step: string) => names(warn([step], base));
+
+    test.each([
+        "Simmer until the sauce has the consistency of honey.",
+        "Shape into a ball the size of a lemon.",
+        "Beat until thick, like whipped cream.",
+        "Cook until it has the texture of oatmeal and the thickness of honey.",
+        "Cook until golden, the colour of honey.",
+        "Whisk until smooth like mayonnaise.",
+        "Whisk until creamy like yogurt.",
+    ])("%s", (step) => {
+        expect(warned(step)).toEqual([]);
+    });
+
+    test("'like' that is not a comparison still warns", () => {
+        expect(warned("If you like, stir in the honey.")).toEqual(["honey"]);
+        expect(warned("You would like the honey here.")).toEqual(["honey"]);
+        expect(warned("Add the honey, then the consistency is fine.")).toEqual([
+            "honey",
+        ]);
+    });
+});
+
+describe("a food as a size, shape or colour is not a mention", () => {
+    const base = [{ name: "flour" }];
+    const warned = (step: string) => names(warn([step], base));
+
+    test.each([
+        "Roll into 12 egg-sized balls.",
+        "Divide the dough into lemon-sized pieces.",
+        "Shape into pea-sized crumbs.",
+        "Roll the dough into walnut-sized pieces.",
+        "Pinch off a walnut-size piece.",
+        "Roll into egg-size balls.",
+        "Pinch off walnut size pieces of dough.",
+        "Pinch off walnut sized pieces of dough.",
+        "Cook until honey-colored.",
+        "Cook until caramel-colored.",
+        "Cook until cream-coloured.",
+        "Cook until lemon-yellow.",
+        "Pour into an egg-shaped mold.",
+    ])("%s", (step) => {
+        expect(warned(step)).toEqual([]);
+    });
+
+    test("the food itself still warns next to those words", () => {
+        expect(warned("Add the walnuts, then roll into balls.")).toEqual([
+            "walnut",
+        ]);
+        expect(warned("Cook until golden and add the honey.")).toEqual([
+            "honey",
+        ]);
+    });
+
+    test.each([
+        "Strain the curds through a coffee filter.",
+        "Line the tray with butter paper.",
+        "Strain through a cheese cloth.",
+        "Cut rounds with a wine glass.",
+        "Cook the batter in an egg ring.",
+        "Press the dough with a lemon squeezer.",
+    ])("gear is not a food: %s", (step) => {
+        expect(warned(step)).toEqual([]);
+    });
+});
+
+describe("a household food named like a measure or a verb", () => {
+    const warned = (
+        step: string,
+        catalog: string[],
+        ingredients: Ingredient[] = [{ name: "garlic" }, { name: "rice" }],
+    ) =>
+        names(
+            warn([step], ingredients, {
+                vocabulary: catalog.map((name, i) => ({
+                    name,
+                    foodId: `f${i}`,
+                })),
+            }),
+        );
+
+    test("a 'Cloves' food is not the cloves of a garlic clove count", () => {
+        expect(warned("Add 3 cloves garlic, minced.", ["Cloves"])).toEqual([]);
+        expect(warned("Mince 4 cloves of garlic.", ["Cloves"])).toEqual([]);
+        expect(
+            warned("Mince 4 cloves of garlic.", ["Cloves"], [{ name: "rice" }]),
+        ).toEqual(["garlic"]);
+    });
+
+    test("whole cloves for the rice are the spice and still warn", () => {
+        expect(warned("Add 3 whole cloves to the rice.", ["Cloves"])).toEqual([
+            "cloves",
+        ]);
+    });
+
+    test.each([
+        ["Roll the dough into a log and slice into rounds.", "Rolls"],
+        ["Season the chicken, wrap in foil and bake.", "Wraps"],
+        ["Dip the chicken in the egg, then the flour.", "Dip"],
+        ["Spread the butter over the bread.", "Spread"],
+        ["Glaze the ham with honey.", "Glaze"],
+        ["Pickle the onion in vinegar.", "Pickles"],
+        ["Fill the peppers, stuffing them tightly.", "Stuffing"],
+    ])("a verb use is not the food: %s", (step, food) => {
+        expect(warned(step, [food], [])).toEqual(
+            expect.not.arrayContaining([food.toLowerCase()]),
+        );
+    });
+
+    test("the household food is still found where the step uses it as one", () => {
+        expect(
+            warned("Serve with Stuffing on the side.", ["Stuffing"], []),
+        ).toEqual(["stuffing"]);
+        expect(warned("Add paneer in the pan.", ["Paneer"], [])).toEqual([
+            "paneer",
+        ]);
+        expect(warned("Scramble the eggs in the pan.", ["Eggs"], [])).toEqual([
+            "egg",
         ]);
     });
 });
