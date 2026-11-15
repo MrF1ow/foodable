@@ -368,7 +368,8 @@ test("no page module contains a raw <h1", () => {
         .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
         .map((name) => join(pagesDir, name));
     files.push(join(pagesDir, "../loaders.ts"));
-    expect(files.length).toBeGreaterThan(4);
+    // dev-gallery, needs-attention, share-view and loaders.ts.
+    expect(files.length).toBeGreaterThan(3);
     for (const file of files) {
         const src = readFileSync(file, "utf8");
         expect(src, file).not.toContain("<h1");

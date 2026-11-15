@@ -844,13 +844,15 @@ export type RestockStore = {
      * line id) a line whose store already has an unticked line for the same
      * food family is skipped, under the same lock a card add takes, so a card
      * landing between the run's read and its write cannot double the line.
+     * Returns the number of lines actually added (it also stores that as
+     * `lastRunAdded`), or false when the day was already claimed.
      */
     commitRestockRun(
         householdId: string,
         runOn: string,
         lines: GroceryLine[],
         families?: ReadonlyMap<string, GroceryFamily>,
-    ): Promise<boolean>;
+    ): Promise<number | false>;
 };
 
 export type MemoryRestockStoreOpts = {
@@ -887,9 +889,13 @@ export function createMemoryRestockStore(
                 }
                 opts.setPrefs({
                     ...prefs,
-                    restock: { ...prefs.restock, lastRunOn: runOn },
+                    restock: {
+                        ...prefs.restock,
+                        lastRunOn: runOn,
+                        lastRunAdded: inserted.length,
+                    },
                 });
-                return true;
+                return inserted.length;
             } catch {
                 for (const id of inserted) {
                     await opts.grocery.deleteLine(householdId, id);
@@ -1024,14 +1030,14 @@ export async function runRestockCheck(
                     plan.lines,
                     lineFamilies,
                 );
-                if (!committed) {
+                if (committed === false) {
                     log(
                         `[restock] household=${id8} date=${clock.date} already ran`,
                     );
                     return;
                 }
                 log(
-                    `[restock] household=${id8} date=${clock.date} added=${plan.lines.length} skipped_on_list=${plan.counts.skippedOnList} skipped_fresh=${plan.counts.skippedFresh} skipped_dismissed=${plan.counts.skippedDismissed}${dueUsuals ? ` due_usuals=${dueUsuals.length}` : ""}`,
+                    `[restock] household=${id8} date=${clock.date} added=${committed} planned=${plan.lines.length} skipped_on_list=${plan.counts.skippedOnList} skipped_fresh=${plan.counts.skippedFresh} skipped_dismissed=${plan.counts.skippedDismissed}${dueUsuals ? ` due_usuals=${dueUsuals.length}` : ""}`,
                 );
             });
         } catch (err) {

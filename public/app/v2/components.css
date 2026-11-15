@@ -969,3 +969,108 @@
         transition: none;
     }
 }
+
+/* ⋯ menu (src/web/components/v2/menu.ts). A <details>: the summary is the round
+ * trigger, the panel opens under it, right-aligned. While open, the trigger's
+ * ::before is a page-sized transparent backdrop, so a tap anywhere else lands
+ * on the summary and closes the menu without any script. */
+
+.fd-menu {
+    position: relative;
+    flex: none;
+}
+
+.fd-menu__trigger {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+    cursor: pointer;
+    list-style: none;
+}
+
+.fd-menu__trigger::-webkit-details-marker {
+    display: none;
+}
+
+.fd-menu__trigger:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+.fd-menu[open] > .fd-menu__trigger {
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+
+.fd-menu[open] > .fd-menu__trigger::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    cursor: default;
+}
+
+.fd-menu__panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    min-width: 220px;
+    max-width: min(320px, calc(100vw - 32px));
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    box-shadow: 0 12px 32px var(--overlay-scrim);
+}
+
+.fd-menu__form {
+    display: contents;
+}
+
+.fd-menu__item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    /* Opt out of the old app's 44px button floor for height only where the
+     * single-line item is shorter; two-line items grow past it anyway. */
+    min-height: 40px;
+    justify-content: center;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font: 400 15px/20px var(--font-body);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.fd-menu__item:hover,
+.fd-menu__item:focus-visible {
+    background: var(--surface-track);
+    outline: none;
+}
+
+.fd-menu__item--danger {
+    color: var(--status-over);
+}
+
+.fd-menu__hint {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-menu__sep {
+    height: 1px;
+    margin: 4px 6px;
+    border: 0;
+    background: var(--line);
+}

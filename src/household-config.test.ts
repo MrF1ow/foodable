@@ -9,6 +9,7 @@ import {
     isRestockWeekday,
     mergeHouseholdConfig,
     parseHouseholdConfigPatch,
+    parseHouseholdSettingsForm,
     RESTOCK_ENABLED_ERROR,
     RESTOCK_WEEKDAY_ERROR,
     parseUnverifiedRecipeExpiryDays,
@@ -284,4 +285,107 @@ test("householdTimezone resolution", () => {
             { timezone: "also-bad" },
         ),
     ).toBe("UTC");
+});
+
+test("parseHouseholdSettingsForm coerces on/off, the weekday, HH:MM, empties and expiry days", () => {
+    expect(
+        parseHouseholdSettingsForm({
+            restock_enabled: "on",
+            restock_weekday: "2",
+            restock_time: "08:30",
+            timezone: "US/Pacific",
+            unverified_recipe_expiry_days: "45",
+        }),
+    ).toEqual({
+        restock_enabled: true,
+        restock_weekday: 2,
+        restock_time: "08:30",
+        timezone: "US/Pacific",
+        preferences: { unverified_recipe_expiry_days: "45" },
+    });
+    expect(parseHouseholdSettingsForm({ restock_enabled: "off" })).toEqual({
+        restock_enabled: false,
+    });
+    // Empty fields become null; a field the form did not carry is left out.
+    expect(
+        parseHouseholdSettingsForm({
+            timezone: " ",
+            unverified_recipe_expiry_days: "",
+        }),
+    ).toEqual({
+        timezone: null,
+        preferences: { unverified_recipe_expiry_days: null },
+    });
+    expect(parseHouseholdSettingsForm({})).toEqual({});
+    // Anything that does not coerce passes through so the patch parser names it.
+    expect(
+        parseHouseholdSettingsForm({
+            restock_enabled: "maybe",
+            restock_weekday: "monday",
+        }),
+    ).toEqual({ restock_enabled: "maybe", restock_weekday: "monday" });
+});
+
+test("a coerced form goes through parseHouseholdConfigPatch and merges without touching the run marker", () => {
+    const form = parseHouseholdConfigPatch(
+        parseHouseholdSettingsForm({
+            restock_enabled: "off",
+            restock_weekday: "0",
+            timezone: "US/Pacific",
+            unverified_recipe_expiry_days: "30",
+        }),
+    );
+    expect(form.ok).toBe(true);
+    if (!form.ok) return;
+    const merged = mergeHouseholdConfig(
+        {
+            ...current,
+            preferences: {
+                ...current.preferences,
+                restock: {
+                    ...current.preferences.restock,
+                    lastRunAdded: 4,
+                },
+            },
+        },
+        form.value,
+    );
+    expect(merged.preferences.restock).toEqual({
+        enabled: false,
+        weekday: 0,
+        time: "07:00",
+        lastRunOn: "2026-11-01",
+        lastRunAdded: 4,
+    });
+    expect(merged.preferences.timezone).toBe("US/Pacific");
+    expect(merged.preferences.unverifiedRecipeExpiryDays).toBe(30);
+    expect(
+        parseHouseholdConfigPatch(
+            parseHouseholdSettingsForm({ restock_weekday: "9" }),
+        ),
+    ).toEqual({ ok: false, error: RESTOCK_WEEKDAY_ERROR });
+    expect(
+        parseHouseholdConfigPatch(
+            parseHouseholdSettingsForm({ restock_enabled: "maybe" }),
+        ),
+    ).toEqual({ ok: false, error: RESTOCK_ENABLED_ERROR });
+});
+
+test("lastRunAdded is read from storage when it is a count and absent otherwise", () => {
+    const read = (restock: unknown) =>
+        householdConfigFromRow({
+            name: "Home",
+            recipe_search_places: [],
+            household_preferences: { restock },
+        });
+    const counted = read({ lastRunOn: "2026-11-01", lastRunAdded: 3 });
+    expect(counted.ok && counted.value.preferences.restock.lastRunAdded).toBe(
+        3,
+    );
+    for (const bad of [undefined, null, -1, 1.5, "3"]) {
+        const result = read({ lastRunOn: "2026-11-01", lastRunAdded: bad });
+        expect(
+            result.ok && result.value.preferences.restock.lastRunAdded,
+        ).toBeUndefined();
+    }
 });

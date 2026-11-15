@@ -162,6 +162,28 @@ describe("renderTodayV2Page", () => {
         expect(html).toContain("fd-account-chip");
     });
 
+    test("a hidden nutrient is left out of the also-tracked line and columns", () => {
+        const shown = renderTodayV2Page(data);
+        for (const label of ["Fiber", "Sugar", "Caffeine"]) {
+            expect(shown).toContain(`>${label}</span>`);
+        }
+        expect(shown).toContain("fd-today-also-col--sugar");
+
+        const hidden = renderTodayV2Page({
+            ...data,
+            view: { ...data.view, hiddenNutrients: ["sugar", "caffeine"] },
+        });
+        // Phone line: "Sugar 31 g" is gone, Fiber stays.
+        expect(hidden).not.toMatch(/Sugar \d/);
+        expect(hidden).not.toMatch(/Caffeine \d/);
+        expect(hidden).toMatch(/Fiber \d/);
+        // Desktop columns: no sugar or caffeine column, fiber stays.
+        expect(hidden).not.toContain("fd-today-also-col--sugar");
+        expect(hidden).not.toContain("fd-today-also-col--caffeine");
+        expect(hidden).toContain("fd-today-also-col--fiber");
+        expect(hidden).toContain("fd-today-also-col--water");
+    });
+
     test("gauge's accessible name matches its hero number", () => {
         const html = renderTodayV2Page(data);
         const hero = html.match(/fd-today-gauge__hero">([^<]+)</)?.[1];

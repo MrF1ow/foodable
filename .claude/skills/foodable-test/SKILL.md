@@ -1,7 +1,7 @@
 ---
 name: foodable-test
 description: Run, start, verify, test, preview or screenshot Foodable safely - isolated local stack (Postgres plus server on its own ports), which verification tool fits which change, and what never to touch. Use before running the server, tests, check:nav, previews, the widget harness or e2e.
-updated: "7477bed79ec24f48bfcea09a9455ae5df89300bd"
+updated: "a97994691519c12d5d89bc205e67f4c4822fe115"
 watches:
     - package.json#scripts
     - docker-compose.yml
@@ -82,7 +82,7 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked.
 - **Migrations:** `bun run db:dryrun` (throwaway Postgres, never production; needs `initdb`). `bun run db:rehearse` (production copy via `railway ssh`): only when asked.
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
-- **Types, lint, format:** `bun run typecheck`, `bun run lint`, `bun run format:check` (`format` fixes). Both run `bun fmt` and need Bun ≥ 1.4.4 (default `bun` may be older): `mise exec bun@1.4.4 -- bun run format:check`.
+- **Types, lint, format:** `bun run typecheck`, `bun run lint`, `bun run format:check` (`format` fixes). Both need Bun ≥ 1.4.4 for `bun fmt`: put `$(mise where bun@1.4.4)/bin` first on PATH (`mise exec` misses the `bun` inside scripts).
 
 `e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if it points at the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 

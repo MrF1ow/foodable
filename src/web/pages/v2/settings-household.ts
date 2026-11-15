@@ -1,66 +1,57 @@
 import type { AppChromeBase } from "../../attention.js";
-import type { HouseholdMember } from "../../../household.js";
-import {
-    DEFAULT_SOCIAL_READERS,
-    type SocialReadersPreferences,
+import type {
+    HouseholdMember,
+    RestockPreferences,
+    SocialReadersPreferences,
 } from "../../../household.js";
-import type { GroceryStore } from "../../../domain/settings.js";
-import type { SocialReaderStatusRow } from "../../../domain/social-readers.js";
-import type { PossibleDuplicatePair } from "../../../domain/foods.js";
-import type { NoticeDismissal } from "../../../domain/notice-dismissals.js";
-import {
-    dismissalSubjectLabel,
-    type NoticesForResult,
-} from "../../../domain/notices-for.js";
-import { dismissalKey } from "../../../domain/notice-dismissals.js";
-import { NOTICE_COPY } from "../../../copy/notices.js";
+import type { NoticesForResult } from "../../../domain/notices-for.js";
 import { esc, join, raw, type Html } from "../../components/v2/html.js";
 import { rowList, sectionHeader } from "../../components/v2/rows.js";
-import { iconChevronRight } from "../../components/v2/icons.js";
+import { iconChevronRight, iconPlus } from "../../components/v2/icons.js";
 import { modalTrigger } from "../../components/ui.js";
 import {
     HOUSEHOLD_ADD_MEMBER_MODAL_ID,
-    HOUSEHOLD_ADD_STORE_MODAL_ID,
     HOUSEHOLD_MANAGE_ID,
     HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
-    HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
-    HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
     manageFill,
     memberActionsTemplate,
     renderHouseholdV2OwnerModals,
 } from "./settings-household-modals.js";
 import {
-    DUP_MERGE_MODAL_ID,
-    renderPossibleDuplicatesBlock,
-} from "../possible-duplicates.js";
-import {
     renderSettingsV2Page,
     settingsErrorBanner,
-    settingsField,
-    settingsPageHeader,
-    settingsPrimarySubmit,
 } from "./settings-shared.js";
-import {
-    SOCIAL_READER_OWNER_ONLY,
-    socialReaderTurnOffLabel,
-    socialReaderTurnOnLabel,
-    type SocialReaderId,
-} from "../../../copy/social-readers.js";
-import { STORES_PATH } from "./settings-stores.js";
+import { actionRow, STORES_PATH } from "./settings-stores.js";
 import {
     renderSharedLinksSection,
     type SharedLinkRow,
 } from "./settings-household-shared-links.js";
-import { sourceIcon } from "../../components/source-icon.js";
 import { lastActiveLabel } from "../../../domain/last-active.js";
 import { memberAvatar } from "../../components/v2/avatar.js";
-import { SOCIAL_READER_LABELS } from "../../../copy/social-readers.js";
+import {
+    householdEditSheet,
+    householdRow,
+    householdRowCard,
+    ROW_ICONS,
+    textInputField,
+    timeZoneSelect,
+} from "./settings-household-rows.js";
+import { RESTOCK_PATH, restockSummary } from "./settings-restock.js";
+import { READERS_PATH, readersSummary } from "./settings-readers.js";
+import { DISMISSED_PATH } from "./settings-dismissed.js";
+import { settingsField } from "./settings-shared.js";
+
+export const HOUSEHOLD_NAME_SHEET_ID = "fd-household-name";
+export const HOUSEHOLD_LOCATION_SHEET_ID = "fd-household-location";
+export const HOUSEHOLD_TIMEZONE_SHEET_ID = "fd-household-timezone";
+export const HOUSEHOLD_EXPIRY_SHEET_ID = "fd-household-expiry";
 
 export type SettingsHouseholdV2View = {
     chrome: AppChromeBase;
     householdName: string;
     members: HouseholdMember[];
-    stores: GroceryStore[];
+    /** How many stores the household has (the Stores row shows the count). */
+    storeCount: number;
     isOwner: boolean;
     canManage: boolean;
     viewerUserId: string;
@@ -68,7 +59,18 @@ export type SettingsHouseholdV2View = {
     openModalId?: string;
     issuedToken?: string;
     socialReaders?: SocialReadersPreferences;
-    socialReaderStatus?: SocialReaderStatusRow[];
+    /** Where the household shops, free text; null = not set. */
+    location: string | null;
+    /** The household's own zone; null = it follows the owner's. */
+    householdTimezone: string | null;
+    /** The zone in effect (the household's, else the owner's, else UTC). */
+    effectiveTimezone: string;
+    /** True when neither the household nor its owner has a zone, so UTC is only the fallback. */
+    effectiveTimezoneDefaulted?: boolean;
+    restock: RestockPreferences;
+    unverifiedRecipeExpiryDays: number | null;
+    /** Dismissed notices (not counting ones that are open again). */
+    dismissedCount: number;
     timezone?: string;
     /** When each member was last active, by user id; null = never. Without it the column is left out. */
     lastSeen?: ReadonlyMap<string, Date | null>;
@@ -77,15 +79,6 @@ export type SettingsHouseholdV2View = {
     /** The household's active share links; absent leaves the section out. */
     sharedLinks?: readonly SharedLinkRow[];
     noticeResult: NoticesForResult;
-    duplicatePairs: PossibleDuplicatePair[];
-    refCounts: ReadonlyMap<string, number>;
-    mergePost?: {
-        foodA: string;
-        foodB: string;
-        keepId: string;
-        picks: Partial<Record<string, string>>;
-    };
-    pluralsSameFood?: boolean;
 };
 
 function roleLabel(role: HouseholdMember["role"]): string {
@@ -98,47 +91,13 @@ function pageLevelError(view: SettingsHouseholdV2View): Html {
     if (!view.error) return raw("");
     const modalOnly =
         view.openModalId === HOUSEHOLD_ADD_MEMBER_MODAL_ID ||
-        view.openModalId === HOUSEHOLD_ADD_STORE_MODAL_ID ||
         view.openModalId === HOUSEHOLD_ROTATE_TOKEN_MODAL_ID ||
-        view.openModalId === HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID ||
-        view.openModalId === HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID ||
-        // The merge modal only renders while a pair is left to merge.
-        (view.openModalId === DUP_MERGE_MODAL_ID &&
-            view.duplicatePairs.length > 0);
+        view.openModalId === HOUSEHOLD_NAME_SHEET_ID ||
+        view.openModalId === HOUSEHOLD_LOCATION_SHEET_ID ||
+        view.openModalId === HOUSEHOLD_TIMEZONE_SHEET_ID ||
+        view.openModalId === HOUSEHOLD_EXPIRY_SHEET_ID;
     if (modalOnly) return raw("");
     return settingsErrorBanner(view.error);
-}
-
-function dismissedNoticesSection(result: NoticesForResult): Html {
-    const openKeys = new Set(
-        result.notices.map((n) => {
-            const k = dismissalKey(n);
-            return `${k.code}|${k.subjectKind}|${k.subjectId}|${k.relatedKey}`;
-        }),
-    );
-    const rows = result.dismissals
-        .filter((d) => {
-            const key = `${d.code}|${d.subjectKind}|${d.subjectId}|${d.relatedKey}`;
-            return !openKeys.has(key);
-        })
-        .map((d) => dismissedRow(d, result.subjectNames));
-    if (rows.length === 0) {
-        return raw(
-            `<p class="fd-settings-household-empty">No dismissed notices.</p>`,
-        );
-    }
-    return rowList(rows, { label: "Dismissed notices" });
-}
-
-function dismissedRow(
-    d: NoticeDismissal,
-    subjectNames: Map<string, string>,
-): Html {
-    const badge = NOTICE_COPY[d.code]?.badge ?? d.code;
-    const label = dismissalSubjectLabel(d, subjectNames);
-    return raw(
-        `<li class="fd-row fd-row--dismissed"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(`${badge} — ${label}`)}</span></span></div><form method="post" action="/needs-attention/undo" class="fd-row__actions"><input type="hidden" name="dismissal_id" value="${esc(d.id)}" /><input type="hidden" name="return_to" value="/settings/household" /><button type="submit" class="fd-settings-btn fd-settings-btn--sm">Undo</button></form></div></li>`,
-    );
 }
 
 function memberRow(
@@ -189,75 +148,187 @@ function membersHead(view: SettingsHouseholdV2View): Html {
     );
 }
 
+/** The members, then (for a viewer who can add members) the Add a member row. */
 function memberRows(view: SettingsHouseholdV2View): readonly Html[] {
-    return view.members.map((member) => memberRow(view, member));
-}
-
-function storeRows(stores: GroceryStore[]): Html {
-    if (stores.length === 0) {
-        return raw(
-            `<p class="fd-settings-household-empty">No grocery stores yet.</p>`,
-        );
-    }
-    const items = stores.map((store) =>
-        raw(
-            `<li class="fd-row fd-row--store"><a class="fd-row__body fd-row__body--link" href="${esc(`${STORES_PATH}/${encodeURIComponent(store.id)}`)}"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(store.name)}</span></span></div><span class="fd-row__chevron" aria-hidden="true">${String(iconChevronRight())}</span></a></li>`,
-        ),
-    );
-    return rowList(items, {
-        label: "Grocery stores",
-        className: "fd-list--stores",
-    });
-}
-
-const PLURALS_SAME_FOOD_LABEL = "Treat singular and plural as the same food";
-
-function pluralsSameFoodBlock(view: SettingsHouseholdV2View): Html {
-    const enabled = view.pluralsSameFood === true;
+    const rows = view.members.map((member) => memberRow(view, member));
     if (view.canManage) {
-        const checked = enabled ? " checked" : "";
-        return raw(
-            `<form method="post" action="/settings/household/plurals-same-food" class="fd-settings-form fd-settings-form--inline fd-settings-form--prefs"><span class="fd-settings-check"><input type="checkbox" name="plurals_same_food" value="true" id="plurals_same_food"${checked} /><span class="fd-settings-check__text">${esc(PLURALS_SAME_FOOD_LABEL)}</span></span>${settingsPrimarySubmit("Save")}</form>`,
+        rows.push(
+            actionRow({
+                variant: "add-member",
+                target: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
+                label: "Add a member",
+                icon: iconPlus(),
+            }),
         );
     }
-    const state = enabled ? "On" : "Off";
+    return rows;
+}
+
+const ADD_MEMBER_HINT =
+    "Members sign in with the email or username and password you give them.";
+
+/** The household name as the page title, with the member count under it. */
+function householdHead(view: SettingsHouseholdV2View): Html {
+    const count = view.members.length;
+    const sub = `${count} ${count === 1 ? "member" : "members"} · one fridge, one grocery list`;
     return raw(
-        `<li class="fd-row fd-row--prefs"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(PLURALS_SAME_FOOD_LABEL)}</span><span class="fd-row__meta">${esc(state)}</span></span></div></div></li>`,
+        `<header class="fd-settings-hh-head"><h1 class="fd-settings-title fd-settings-hh-title">${esc(view.householdName)}</h1><p class="fd-settings-hh-sub">${esc(sub)}</p></header>`,
     );
 }
 
-function socialReaderV2Rows(view: SettingsHouseholdV2View): Html {
-    const readers: SocialReaderId[] = ["tiktok", "facebook"];
-    const socialReaders = view.socialReaders ?? DEFAULT_SOCIAL_READERS;
-    const rows = readers.map((reader) => {
-        const label = SOCIAL_READER_LABELS[reader];
-        const enabled = socialReaders[reader];
-        const state = enabled ? "On" : "Off";
-        const kind = reader === "tiktok" ? "tiktok" : "facebook";
-        let action = "";
-        if (view.isOwner) {
-            const modalId =
-                reader === "tiktok"
-                    ? HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID
-                    : HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID;
-            action = enabled
-                ? `<form method="post" action="/settings/household/social-readers" class="fd-settings-inline-form"><input type="hidden" name="reader" value="${reader}" /><input type="hidden" name="enabled" value="0" /><button type="submit" class="fd-settings-btn fd-settings-btn--sm">${esc(socialReaderTurnOffLabel(reader))}</button></form>`
-                : modalTrigger({
-                      target: modalId,
-                      label: socialReaderTurnOnLabel(reader),
-                      className: "fd-settings-btn fd-settings-btn--sm",
-                  });
-        }
-        return raw(
-            `<li class="fd-row fd-row--social"><div class="fd-row__body"><span class="fd-row__lead">${sourceIcon(kind, { label, decorative: true })}</span><div class="fd-row__main"><span class="fd-row__title">${esc(label)}</span><span class="fd-row__meta">${esc(state)}</span></div>${action}</div></li>`,
+function errorFor(view: SettingsHouseholdV2View, id: string) {
+    return view.openModalId === id ? view.error : undefined;
+}
+
+function expiryLabel(days: number | null): string {
+    return days == null ? "Never" : `${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/** The nine rows of the Household group, as in the design. */
+function householdGroup(view: SettingsHouseholdV2View): Html {
+    const edit = view.canManage;
+    const rows: Html[] = [
+        householdRow({
+            icon: ROW_ICONS.edit,
+            label: "Household name",
+            value: view.householdName,
+            sheetId: edit ? HOUSEHOLD_NAME_SHEET_ID : undefined,
+        }),
+        householdRow({
+            icon: ROW_ICONS.pin,
+            label: "Location",
+            value: view.location ?? "Not set",
+            sheetId: edit ? HOUSEHOLD_LOCATION_SHEET_ID : undefined,
+        }),
+        householdRow({
+            icon: ROW_ICONS.clock,
+            label: "Time zone",
+            value:
+                view.householdTimezone ??
+                (view.effectiveTimezoneDefaulted
+                    ? `${view.effectiveTimezone} (default)`
+                    : `${view.effectiveTimezone} (owner's)`),
+            sheetId: edit ? HOUSEHOLD_TIMEZONE_SHEET_ID : undefined,
+        }),
+        householdRow({
+            icon: ROW_ICONS.cart,
+            label: "Stores",
+            value: String(view.storeCount),
+            href: STORES_PATH,
+        }),
+        householdRow({
+            icon: ROW_ICONS.calendar,
+            label: "Restock day",
+            value: restockSummary(view.restock),
+            href: RESTOCK_PATH,
+        }),
+        householdRow({
+            icon: ROW_ICONS.link,
+            label: "Recipe link readers",
+            value: readersSummary(
+                view.socialReaders ?? { tiktok: false, facebook: false },
+            ),
+            href: READERS_PATH,
+        }),
+        householdRow({
+            icon: ROW_ICONS.hourglass,
+            label: "Unverified recipes",
+            value: expiryLabel(view.unverifiedRecipeExpiryDays),
+            sheetId: edit ? HOUSEHOLD_EXPIRY_SHEET_ID : undefined,
+        }),
+        householdRow({
+            icon: ROW_ICONS.bell,
+            label: "Dismissed notices",
+            value: String(view.dismissedCount),
+            href: DISMISSED_PATH,
+        }),
+    ];
+    // Owner only: the one fix for a leaked household bot token.
+    if (view.isOwner) {
+        rows.push(
+            householdRow({
+                icon: ROW_ICONS.refresh,
+                label: "Rotate join token",
+                modalId: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
+            }),
         );
+    }
+    return householdRowCard(rows, "Household");
+}
+
+function editSheets(view: SettingsHouseholdV2View): string {
+    if (!view.canManage) return "";
+    const tz = settingsField({
+        id: "household_timezone",
+        label: "Time zone",
+        control: timeZoneSelect({
+            id: "household_timezone",
+            name: "timezone",
+            stored: view.householdTimezone,
+            emptyLabel: "Use the owner's time zone",
+        }),
     });
-    const ownerNote = view.isOwner
-        ? ""
-        : `<p class="fd-settings-muted">${esc(SOCIAL_READER_OWNER_ONLY)}</p>`;
-    return raw(
-        `${String(rowList(rows, { label: "Social readers" }))}${ownerNote}`,
-    );
+    return [
+        householdEditSheet({
+            id: HOUSEHOLD_NAME_SHEET_ID,
+            title: "Household name",
+            action: "/settings/household/name",
+            fields: textInputField({
+                id: "household_name",
+                label: "Household name",
+                name: "name",
+                value: view.householdName,
+                maxlength: 80,
+                required: true,
+            }),
+            error: errorFor(view, HOUSEHOLD_NAME_SHEET_ID),
+            open: view.openModalId === HOUSEHOLD_NAME_SHEET_ID,
+        }),
+        householdEditSheet({
+            id: HOUSEHOLD_LOCATION_SHEET_ID,
+            title: "Location",
+            subtitle:
+                "Where the household shops, such as a city or a postcode.",
+            action: "/settings/household/location",
+            fields: textInputField({
+                id: "household_location",
+                label: "Location",
+                name: "location",
+                value: view.location ?? "",
+                maxlength: 120,
+            }),
+            error: errorFor(view, HOUSEHOLD_LOCATION_SHEET_ID),
+            open: view.openModalId === HOUSEHOLD_LOCATION_SHEET_ID,
+        }),
+        householdEditSheet({
+            id: HOUSEHOLD_TIMEZONE_SHEET_ID,
+            title: "Time zone",
+            subtitle: "Days, the restock time and notices count in this zone.",
+            action: "/settings/household/timezone",
+            fields: String(tz),
+            error: errorFor(view, HOUSEHOLD_TIMEZONE_SHEET_ID),
+            open: view.openModalId === HOUSEHOLD_TIMEZONE_SHEET_ID,
+        }),
+        householdEditSheet({
+            id: HOUSEHOLD_EXPIRY_SHEET_ID,
+            title: "Unverified recipes",
+            subtitle:
+                "Imported recipes that were never verified are removed after this many days. Leave it empty to keep them.",
+            action: "/settings/household/recipe-settings",
+            fields: textInputField({
+                id: "unverified_recipe_expiry_days",
+                label: "Remove after (days)",
+                name: "unverified_recipe_expiry_days",
+                value:
+                    view.unverifiedRecipeExpiryDays == null
+                        ? ""
+                        : String(view.unverifiedRecipeExpiryDays),
+                inputmode: "numeric",
+            }),
+            error: errorFor(view, HOUSEHOLD_EXPIRY_SHEET_ID),
+            open: view.openModalId === HOUSEHOLD_EXPIRY_SHEET_ID,
+        }),
+    ].join("");
 }
 
 export function renderSettingsHouseholdV2Body(
@@ -266,87 +337,21 @@ export function renderSettingsHouseholdV2Body(
     const token = view.issuedToken
         ? `<p class="fd-settings-token">Household bot token (shown once): <code>${esc(view.issuedToken)}</code></p>`
         : "";
-    const nameField = view.canManage
-        ? `<form method="post" action="/settings/household/name" class="fd-settings-form fd-settings-form--inline">${String(
-              settingsField({
-                  id: "household_name",
-                  label: "Household name",
-                  control: `<input class="fd-settings-input" id="household_name" name="name" value="${esc(view.householdName)}" required maxlength="80" />`,
-              }),
-          )}${settingsPrimarySubmit("Save")}</form>`
-        : `<p class="fd-settings-household-name">${esc(view.householdName)}</p>`;
-
-    const addMemberTrigger = view.canManage
-        ? modalTrigger({
-              target: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
-              label: "Add member",
-              className: "fd-settings-btn fd-settings-btn--primary",
-          })
-        : "";
-
-    const addStoreTrigger = view.canManage
-        ? modalTrigger({
-              target: HOUSEHOLD_ADD_STORE_MODAL_ID,
-              label: "Add store",
-              className: "fd-settings-btn fd-settings-btn--primary",
-          })
-        : "";
-
-    // Owner only: the one fix for a leaked household bot token.
-    const rotateTokenTrigger = view.isOwner
-        ? `<div class="fd-settings-household-actions">${modalTrigger({
-              target: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
-              label: "Rotate household token",
-              className: "fd-settings-btn",
-          })}</div>`
-        : "";
-
-    const dupBlock = renderPossibleDuplicatesBlock(
-        {
-            chrome: view.chrome,
-            pairs: view.duplicatePairs,
-            refCounts: view.refCounts,
-            error: view.error,
-            openModalId: view.openModalId,
-            mergePost: view.mergePost,
-        },
-        { v2: true },
-    );
 
     const modals = renderHouseholdV2OwnerModals(view);
 
-    const pluralsBlock = view.canManage
-        ? pluralsSameFoodBlock(view)
-        : raw(
-              `${String(sectionHeader({ title: "Food names", level: 2 }))}${String(rowList([pluralsSameFoodBlock(view)], { label: PLURALS_SAME_FOOD_LABEL }))}`,
-          );
-
     const sections = join([
-        raw(`${nameField}${token}${rotateTokenTrigger}`),
-        view.canManage
-            ? raw(
-                  `${String(sectionHeader({ title: "Food names", level: 2 }))}${String(pluralsBlock)}`,
-              )
-            : pluralsBlock,
+        raw(token),
         raw(
-            `${String(sectionHeader({ title: "Members", level: 2 }))}${addMemberTrigger ? `<div class="fd-settings-household-actions">${addMemberTrigger}</div>` : ""}<div class="fd-settings-members-card">${String(membersHead(view))}${String(rowList(memberRows(view), { label: "Members" }))}</div>`,
+            `<div class="fd-settings-members-card">${String(membersHead(view))}${String(rowList(memberRows(view), { label: "Members" }))}</div>${view.canManage ? `<p class="fd-stores-hint">${esc(ADD_MEMBER_HINT)}</p>` : ""}`,
         ),
         raw(
-            `${String(sectionHeader({ title: "Grocery stores", level: 2 }))}<div class="fd-settings-household-actions">${addStoreTrigger}<a class="fd-settings-btn" href="${STORES_PATH}">Manage stores</a></div>${String(storeRows(view.stores))}`,
+            `${String(sectionHeader({ title: "Household", level: 2 }))}<div class="fd-settings-hh">${String(householdGroup(view))}</div>`,
         ),
         view.sharedLinks ? raw(renderSharedLinksSection(view.sharedLinks)) : "",
-        raw(
-            `${String(sectionHeader({ title: "Dismissed notices", level: 2 }))}${String(dismissedNoticesSection(view.noticeResult))}`,
-        ),
-        raw(
-            `${String(sectionHeader({ title: "Possible duplicates", level: 2, id: "fd-dup-section" }))}<div class="fd-settings-household-dups native">${dupBlock.listHtml}${dupBlock.modalsHtml}</div>`,
-        ),
-        raw(
-            `${String(sectionHeader({ title: "Social post readers", level: 2 }))}${String(socialReaderV2Rows(view))}`,
-        ),
     ]);
 
-    return `${String(settingsPageHeader("Household"))}${String(pageLevelError(view))}<div class="fd-settings-household">${String(sections)}</div><div class="native fd-settings-household-modals">${modals}</div>`;
+    return `${String(householdHead(view))}${String(pageLevelError(view))}<div class="fd-settings-household">${String(sections)}</div>${editSheets(view)}<div class="native fd-settings-household-modals">${modals}</div>`;
 }
 
 export function renderSettingsHouseholdV2Page(
@@ -361,4 +366,3 @@ export function renderSettingsHouseholdV2Page(
 }
 
 export const SETTINGS_HOUSEHOLD_V2_MARKER = 'data-fd-settings-page="household"';
-export const SETTINGS_HOUSEHOLD_DUP_MERGE = DUP_MERGE_MODAL_ID;

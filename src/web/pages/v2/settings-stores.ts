@@ -280,7 +280,7 @@ export function renderSettingsStoresV2Body(view: SettingsStoresV2View): string {
 export function renderSettingsStoresV2Page(view: SettingsStoresV2View): string {
     return renderSettingsV2Page({
         chrome: view.chrome,
-        page: "household",
+        page: "stores",
         title: "Stores",
         backHref: "/settings/household",
         body: renderSettingsStoresV2Body(view),

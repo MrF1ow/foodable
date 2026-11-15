@@ -18,6 +18,11 @@ export interface Profile {
     widgets_enabled: boolean;
     alcohol_tracking_enabled: boolean;
     preferred_drink_unit: DrinkUnit | null;
+    // Optional nutrients this member has switched off (Settings › Nutrients
+    // shown). Optional on the type so a Profile built without it stays valid;
+    // a missing value means none are hidden. Read through
+    // hiddenNutrientsFromProfile.
+    hidden_nutrients?: string[];
     theme: "light" | "dark" | null;
     created_at: string;
     updated_at: string;
@@ -146,6 +151,35 @@ export async function getPreferredDrinkUnit(
     return preferredDrinkUnitFromProfile(await getProfile(userId));
 }
 
+// The nutrients a member can hide. Alcohol is not one of them: it has its own
+// opt-in, alcohol_tracking_enabled. The database check allows exactly these.
+export const HIDEABLE_NUTRIENTS = ["fiber", "sugar", "caffeine"] as const;
+export type HideableNutrient = (typeof HIDEABLE_NUTRIENTS)[number];
+
+export function isHideableNutrient(value: unknown): value is HideableNutrient {
+    return (
+        typeof value === "string" &&
+        (HIDEABLE_NUTRIENTS as readonly string[]).includes(value)
+    );
+}
+
+// The nutrients this member has switched off, in canonical order. A missing
+// row, a missing column and an unrecognised stored value all read as "not
+// hidden": hiding is the opt-out, so a doubt must keep the nutrient visible.
+export function hiddenNutrientsFromProfile(
+    profile: Profile | null | undefined,
+): HideableNutrient[] {
+    const stored = profile?.hidden_nutrients;
+    if (!Array.isArray(stored)) return [];
+    return HIDEABLE_NUTRIENTS.filter((n) => stored.includes(n));
+}
+
+export async function getHiddenNutrients(
+    userId: string,
+): Promise<HideableNutrient[]> {
+    return hiddenNutrientsFromProfile(await getProfile(userId));
+}
+
 // Upsert the fields provided in `patch`, leaving other columns untouched. On
 // first insert, an omitted column falls back to its DB default where one
 // exists (widgets_enabled: true, alcohol_tracking_enabled: false); timezone,
@@ -159,6 +193,7 @@ export async function upsertProfile(
         widgets_enabled?: boolean;
         alcohol_tracking_enabled?: boolean;
         preferred_drink_unit?: DrinkUnit | null;
+        hidden_nutrients?: readonly string[];
         theme?: "light" | "dark" | null;
     },
 ): Promise<Profile> {
@@ -180,6 +215,14 @@ export async function upsertProfile(
     if (patch.theme !== undefined) payload.theme = patch.theme;
 
     return run(async (tx) => {
+        // Bound as a text[] here, inside the transaction, because the array
+        // binder lives on it. An unknown value is refused by the column's
+        // check constraint, not filtered, so a bad write fails loudly.
+        if (patch.hidden_nutrients !== undefined)
+            payload.hidden_nutrients = tx.array(
+                [...patch.hidden_nutrients],
+                "text",
+            );
         const { row, keys } = definedColumns(payload);
         const updateKeys = keys.filter((k) => k !== "user_id");
         const setClause = updateKeys
@@ -197,6 +240,52 @@ export async function upsertProfile(
             );
         } catch (err) {
             throw profileError("save profile", err);
+        }
+    });
+}
+
+// Switch one nutrient's display off (hidden) or back on, in one statement so
+// two switches flipped at once, from two forms or two devices, cannot overwrite
+// each other: the list is edited where it is stored, not read, changed and
+// written back. A member with no profile row gets one. The result is sorted
+// and has no duplicates, so repeating a request changes nothing.
+export async function setNutrientHidden(
+    userId: string,
+    nutrient: HideableNutrient,
+    hidden: boolean,
+): Promise<Profile> {
+    return run(async (tx) => {
+        try {
+            return await one<Profile>(
+                tx,
+                tx`
+                    insert into ${tx.unsafe(PROFILES)} (user_id, hidden_nutrients, updated_at)
+                    values (
+                        ${userId},
+                        case when ${hidden}::boolean
+                            then array[${nutrient}::text]
+                            else '{}'::text[]
+                        end,
+                        now()
+                    )
+                    on conflict (user_id) do update set
+                        hidden_nutrients = case when ${hidden}::boolean
+                            then array(
+                                select distinct n
+                                from unnest(
+                                    profiles.hidden_nutrients || ${nutrient}::text
+                                ) as n
+                                order by n
+                            )
+                            else array_remove(profiles.hidden_nutrients, ${nutrient}::text)
+                        end,
+                        updated_at = now()
+                    returning *
+                `,
+                "save hidden nutrients",
+            );
+        } catch (err) {
+            throw profileError("save hidden nutrients", err);
         }
     });
 }

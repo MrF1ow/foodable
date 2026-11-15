@@ -51,6 +51,19 @@ const recipe = (overrides: Partial<Recipe> = {}): Recipe => ({
 });
 
 describe("settings saved v2", () => {
+    test("links to Possible duplicates, with the count when there are pairs", () => {
+        const base = { chrome, foods: [], recipes: [], searchQuery: "" };
+        const none = renderSettingsSavedV2Page(base);
+        expect(none).toContain('href="/settings/saved/duplicates"');
+        expect(none).not.toContain(
+            'Possible duplicates</span><span class="fd-settings-menu__badge"',
+        );
+        const some = renderSettingsSavedV2Page({ ...base, duplicateCount: 2 });
+        expect(some).toMatch(
+            /Possible duplicates<\/span><span class="fd-settings-menu__badge">2</,
+        );
+    });
+
     test("lists foods, recipes, search, and merge", () => {
         const html = renderSettingsSavedV2Page({
             chrome,

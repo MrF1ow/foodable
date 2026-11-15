@@ -83,10 +83,15 @@ import {
 } from "./flags.js";
 import { evaluateViewerFlags, type ViewerFlags } from "./viewer-flags.js";
 import {
+    AGENT_ACTIONS_OFF_TEXT,
+    AGENT_DESTRUCTIVE_SETTING,
     createToolContext,
     MEAL_LOGGED_WIDGET_URI,
     widgetUri,
 } from "./mcp/shared.js";
+import { SERVER_INSTRUCTIONS } from "./mcp/server.js";
+import { AgentActionsDisabledError } from "./domain/agent-actions.js";
+import { renderSettingsAiV2Body } from "./web/pages/v2/settings-ai.js";
 import { gatedTool } from "./mcp/gated.js";
 import { toolNamesFor } from "./test-support/flag-harness.js";
 
@@ -1601,6 +1606,26 @@ describe("log_meal and update_meal round-trip caffeine_mg", () => {
             expect(text).not.toContain("caffeine_tracking");
             expect(text).not.toContain("set_caffeine_tracking");
         });
+    });
+
+    test("merge_foods names where possible duplicates live now", async () => {
+        const server = new McpServer(
+            { name: "t", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(server, { kind: "user", userId: "u1" }, true, null);
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "c", version: "0.0.0" });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        const { tools } = await client.listTools();
+        const description =
+            tools.find((t) => t.name === "merge_foods")?.description ?? "";
+        expect(description).toContain(
+            "Settings › Saved foods & recipes › Possible duplicates",
+        );
+        expect(description).not.toContain("Household › Possible duplicates");
+        await client.close();
+        await server.close();
     });
 
     // The digest is frozen (CONTRACT, and the "DO NOT ADD" comments in
@@ -4563,7 +4588,10 @@ describe("household config tools", () => {
     // Raising either constant is a deliberate, reviewed edit: trim a
     // description first, and say in the PR why the list has to grow.
     describe("tools/list size", () => {
-        const TOOLS_LIST_MAX_CHARS = 225795;
+        // +336: the optional `hidden_nutrients` list in the five card tools'
+        // output schemas (Settings › Nutrients shown), after trimming the
+        // merge_foods description to pay for its new Settings path.
+        const TOOLS_LIST_MAX_CHARS = 226131;
         const TOOLS_LIST_MAX_COUNT = 98;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
@@ -8674,7 +8702,36 @@ describe("/mcp destructive tools are guarded", () => {
     const UNDO_SENTENCE =
         "The household can undo this for 24 hours in Settings › AI connections.";
     const REFUSAL =
-        "Agents may make destructive changes is Off in Settings › AI connections.";
+        "Allow destructive changes is Off in Settings › AI connections.";
+
+    test("every place that names the switch names the one the AI page shows", () => {
+        const html = renderSettingsAiV2Body({
+            chrome: {} as never,
+            connections: [],
+            destructive: { allowed: false, canChange: true },
+            showCards: true,
+            activity: [],
+            now: new Date(),
+            timezone: "UTC",
+            mcpUrl: "https://example.test/mcp",
+        } as never);
+        expect(html).toContain("Allow destructive changes");
+        expect(AGENT_DESTRUCTIVE_SETTING).toBe("Allow destructive changes");
+        expect(AGENT_ACTIONS_OFF_TEXT).toContain(REFUSAL);
+        expect(new AgentActionsDisabledError().message).toContain(
+            "Settings › AI connections › Allow destructive changes is Off",
+        );
+        expect(SERVER_INSTRUCTIONS).toContain(
+            "(Allow destructive changes, in Settings › AI connections)",
+        );
+        for (const text of [
+            AGENT_ACTIONS_OFF_TEXT,
+            new AgentActionsDisabledError().message,
+            SERVER_INSTRUCTIONS,
+        ]) {
+            expect(text).not.toContain("Agents may make destructive changes");
+        }
+    });
 
     // unplan_recipe is only registered while the plan tools are on.
     beforeEach(() => setFlagsForTests(createMemoryFlags({})));
@@ -15370,7 +15427,9 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain('<h1 class="fd-settings-title">Household</h1>');
+        expect(html).toMatch(
+            /<h1 class="fd-settings-title fd-settings-hh-title">[^<]+<\/h1>/,
+        );
         expect(html).toContain('action="/settings/household"');
         expect(html).toContain("Alice");
         expect(html).toContain("Bob");
@@ -15429,7 +15488,9 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain('<h1 class="fd-settings-title">Household</h1>');
+        expect(html).toMatch(
+            /<h1 class="fd-settings-title fd-settings-hh-title">[^<]+<\/h1>/,
+        );
         expect(html).not.toContain('commandfor="household-add-member"');
         expect(html).not.toContain('action="/settings/household/stores"');
     });

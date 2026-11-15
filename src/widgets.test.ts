@@ -5590,3 +5590,90 @@ test("week-plan v2: a card whose window starts before the household's today has 
     await w.settle();
     expect(w.calls).toEqual([]);
 });
+
+// ---- Nutrients a member switched off (Settings › Nutrients shown) ---------
+
+// The day used below has a value for fiber, sugar and caffeine, so each earns
+// a cell in the limits row unless the member hid it.
+async function loadV1Strip(): Promise<{
+    macroPanel(
+        v: object,
+        g: object | null,
+        w?: unknown,
+        m?: unknown,
+        o?: object,
+    ): string;
+}> {
+    const parts = await Promise.all(
+        ["shared/util.js", "shared/macros.js"].map(partialAsInlined),
+    );
+    return new Function(`${parts.join("\n")}\nreturn { macroPanel };`)();
+}
+
+test("v1 strip leaves a hidden nutrient out of the limits row", async () => {
+    const v1 = await loadV1Strip();
+    const all = v1.macroPanel(V2_DAY, V2_GOAL, undefined, undefined, {
+        drinkUnit: "us",
+    });
+    expect(all).toContain("Sugar");
+    expect(all).toContain("Fiber");
+    expect(all).toContain("Caffeine");
+    // Alcohol (recorded as none), caffeine, fiber and sugar: four cells.
+    expect(all).toContain("mgrid lim n4");
+
+    const hidden = v1.macroPanel(V2_DAY, V2_GOAL, undefined, undefined, {
+        drinkUnit: "us",
+        hidden: ["sugar"],
+    });
+    expect(hidden).not.toContain("Sugar");
+    expect(hidden).toContain("Fiber");
+    expect(hidden).toContain("Caffeine");
+    // Three cells are left in the row, not four.
+    expect(hidden).toContain("mgrid lim n3");
+});
+
+test("v2 strip leaves a hidden nutrient out of the limits row", async () => {
+    const v2 = await loadV2();
+    const all = v2.macroStripV2(V2_DAY, V2_GOAL, { drinkUnit: "us" });
+    expect(all).toContain("Sugar");
+
+    const hidden = v2.macroStripV2(V2_DAY, V2_GOAL, {
+        drinkUnit: "us",
+        hidden: ["sugar"],
+    });
+    expect(hidden).not.toContain("Sugar");
+    expect(hidden).toContain("Fiber");
+    expect(hidden).toContain("Caffeine");
+    // The goal list's limits row follows the same gate.
+    const list = v2.goalListV2(V2_DAY, V2_GOAL, {
+        withLimits: true,
+        hidden: ["caffeine", "fiber"],
+    });
+    expect(list).toContain("Sugar");
+    expect(list).not.toContain("Caffeine");
+    expect(list).not.toContain("Fiber");
+});
+
+test("a hidden list that is missing or malformed hides nothing", async () => {
+    const v1 = await loadV1Strip();
+    const v2 = await loadV2();
+    for (const hidden of [undefined, null, "sugar", {}, 7]) {
+        const opts = { drinkUnit: "us", hidden };
+        expect(
+            v1.macroPanel(V2_DAY, V2_GOAL, undefined, undefined, opts),
+        ).toContain("Sugar");
+        expect(v2.macroStripV2(V2_DAY, V2_GOAL, opts)).toContain("Sugar");
+    }
+});
+
+test.each([["nutrition-summary"], ["goal-progress"], ["meal-logged"]] as const)(
+    "%s forwards hidden_nutrients to its macro strip",
+    async (key) => {
+        const html = await getWidgetHtml(key);
+        expect(html).toMatch(
+            /hidden\s*:\s*data\.hidden_nutrients\s*\|\|\s*\[\]/,
+        );
+        // It sits beside the drink unit, which every strip already forwards.
+        expect(html).toMatch(/drinkUnit\s*:\s*data\.drink_unit/);
+    },
+);

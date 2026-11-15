@@ -2,19 +2,20 @@ import { peekSiteMembership } from "../db/actor.js";
 import {
     canManageHousehold,
     dashboardAccess,
+    householdTimezone,
     type HouseholdMember,
 } from "../household.js";
 import { type AlcoholDisplay } from "../mcp/shared.js";
 import {
     alcoholTrackingEnabledFromProfile,
     getProfile,
+    hiddenNutrientsFromProfile,
     preferredDrinkUnitFromProfile,
     preferredWeightUnitFromProfile,
     widgetsEnabledFromProfile,
 } from "../db/profiles.js";
 import {
     getHouseholdConfig,
-    getPluralsSameFood,
     getHouseholdMembership,
     householdExists,
     listHouseholdMembers,
@@ -47,7 +48,6 @@ import {
 import { liveScoreSettingsStore } from "../db/score-settings.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveRecipesStore } from "../db/recipes.js";
-import { liveSocialReaderStatusStore } from "../db/social-readers.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveSettingsStore } from "../db/settings.js";
 import {
@@ -58,7 +58,12 @@ import {
     type Food,
     type MergePairPickField,
 } from "../domain/foods.js";
-import { renderPossibleDuplicatesPage } from "./pages/possible-duplicates.js";
+import {
+    findDuplicatePair,
+    renderSettingsDuplicateCompareV2Page,
+    renderSettingsDuplicatesV2Page,
+    type DuplicateMergePost,
+} from "./pages/v2/settings-duplicates.js";
 import {
     plainFoodIdForUsualPicker,
     usualProductsPickerHref,
@@ -113,6 +118,14 @@ import {
     type KitchenUsualsRowMeta,
 } from "./pages/v2/kitchen-usuals.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
+import { renderSettingsRestockV2Page } from "./pages/v2/settings-restock.js";
+import { renderSettingsReadersV2Page } from "./pages/v2/settings-readers.js";
+import {
+    dismissedNotices,
+    renderSettingsDismissedV2Page,
+} from "./pages/v2/settings-dismissed.js";
+import { recipeFetchMemory } from "../db/fetch-memory.js";
+import type { FetchMemoryStore } from "../domain/fetch-memory.js";
 import { renderSettingsStoresV2Page } from "./pages/v2/settings-stores.js";
 import { renderSettingsStoreV2Page } from "./pages/v2/settings-stores-detail.js";
 import {
@@ -183,6 +196,11 @@ import { maybeOne, run } from "../db/sql.js";
 import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "./pages/v2/settings-display.js";
+import {
+    renderSettingsUnitsV2Page,
+    type SettingsUnitsV2View,
+} from "./pages/v2/settings-units.js";
+import { renderSettingsNutrientsV2Page } from "./pages/v2/settings-nutrients.js";
 import { renderSettingsGoalsV2Page } from "./pages/v2/settings-goals.js";
 import type {
     GoalsFormDraft,
@@ -882,7 +900,7 @@ export async function groceryAllergenMembers(householdId: string) {
     );
 }
 
-async function settingsViewerEmail(userId: string): Promise<string> {
+async function settingsViewerEmail(userId: string): Promise<string | null> {
     try {
         return await run(async (tx) => {
             const row = await maybeOne<{ email: string }>(
@@ -894,10 +912,10 @@ async function settingsViewerEmail(userId: string): Promise<string> {
                 `,
                 "settings viewer email",
             );
-            return row?.email ?? "";
+            return row?.email ?? null;
         });
     } catch {
-        return "";
+        return null;
     }
 }
 
@@ -908,7 +926,7 @@ export async function renderSettingsHomeRoute(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const chrome = await viewerChromeWithAttention(profile, gate.viewer);
-    const email = await settingsViewerEmail(viewerUserId);
+    const email = (await settingsViewerEmail(viewerUserId)) ?? "";
     return {
         status: 200,
         html: renderSettingsHomeV2Page({
@@ -925,7 +943,7 @@ export async function renderSettingsHomeRoute(
 
 export async function renderSettingsAccountV2Route(
     viewerUserId: string,
-    opts: { error?: string; backHref?: string } = {},
+    opts: { error?: string; backHref?: string; openSheetId?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -937,12 +955,10 @@ export async function renderSettingsAccountV2Route(
             chrome,
             backHref: opts.backHref ?? "/",
             displayName: gate.viewer.displayName,
+            email: await settingsViewerEmail(viewerUserId),
             timezone: profile?.timezone ?? "",
-            weightUnit: preferredWeightUnitFromProfile(profile) ?? "",
-            widgetsEnabled: widgetsEnabledFromProfile(profile),
-            alcoholTrackingEnabled: alcoholTrackingEnabledFromProfile(profile),
-            drinkUnit: preferredDrinkUnitFromProfile(profile) ?? "",
             error: opts.error,
+            openSheetId: opts.openSheetId,
             photo: {
                 userId: gate.viewer.userId,
                 version:
@@ -970,6 +986,45 @@ export async function renderSettingsDisplayV2Route(
         html: renderSettingsDisplayV2Page({
             chrome,
             storedTheme: stored,
+            error: opts.error,
+        }),
+    };
+}
+
+export async function renderSettingsUnitsV2Route(
+    viewerUserId: string,
+    opts: { error?: string; openSheet?: SettingsUnitsV2View["openSheet"] } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsUnitsV2Page({
+            chrome,
+            weightUnit: preferredWeightUnitFromProfile(profile) ?? "",
+            drinkUnit: preferredDrinkUnitFromProfile(profile) ?? "",
+            error: opts.error,
+            openSheet: opts.openSheet,
+        }),
+    };
+}
+
+export async function renderSettingsNutrientsV2Route(
+    viewerUserId: string,
+    opts: { error?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsNutrientsV2Page({
+            chrome,
+            hidden: hiddenNutrientsFromProfile(profile),
+            alcoholTrackingEnabled: alcoholTrackingEnabledFromProfile(profile),
             error: opts.error,
         }),
     };
@@ -1064,6 +1119,7 @@ export async function renderSettingsSavedV2Route(
             ),
             foods: filteredFoods,
             recipes,
+            duplicateCount: noticeResult.possibleDuplicatePairs.length,
             searchQuery: q,
             error: opts.error,
             openModalId: opts.openModalId,
@@ -1116,6 +1172,7 @@ export async function renderSettingsAiV2Route(
             chrome,
             connections,
             destructive: { allowed, canChange: isOwner },
+            showCards: widgetsEnabledFromProfile(profile),
             activity: agentActivityRows(entries, {
                 viewerUserId,
                 isOwner,
@@ -1235,7 +1292,7 @@ export async function renderSettingsScoreHouseholdV2Route(
 
 export async function renderSettingsAccountPage(
     viewerUserId: string,
-    opts: { error?: string; backHref?: string } = {},
+    opts: { error?: string; backHref?: string; openSheetId?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -1417,36 +1474,43 @@ export async function renderHouseholdSettingsRoute(
         error?: string;
         issuedToken?: string;
         openModalId?: string;
-        mergePost?: {
-            foodA: string;
-            foodB: string;
-            keepId: string;
-            picks: Partial<Record<MergePairPickField, string>>;
-        };
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const store = liveFoodsStore();
-    const refCounts = await store.countFoodRefs(householdId);
-    const [config, members, stores, socialReaderStatus] = await Promise.all([
+    const [config, members, stores, location] = await Promise.all([
         getHouseholdConfig(householdId),
         listHouseholdMembers(householdId),
         liveSettingsStore().listStores(householdId),
-        liveSocialReaderStatusStore().get(householdId),
+        liveSettingsStore().getLocation(householdId),
     ]);
+    const ownerId = members.find((m) => m.role === "owner")?.userId;
+    const ownerProfile =
+        ownerId === viewerUserId
+            ? profile
+            : ownerId
+              ? await getProfile(ownerId)
+              : null;
+    const effectiveTimezone = householdTimezone(
+        config.preferences,
+        ownerProfile,
+    );
+    // UTC here is only the fallback when neither side has a valid zone.
+    const ownerZone = ownerProfile?.timezone;
+    const effectiveTimezoneDefaulted =
+        !(
+            config.preferences.timezone != null &&
+            validateTz(config.preferences.timezone)
+        ) && !(ownerZone != null && validateTz(ownerZone));
 
-    const noticeResult = await loadViewerNotices(gate.viewer, {
-        refCounts,
-    });
+    const noticeResult = await loadViewerNotices(gate.viewer);
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
         noticeResult,
     );
-    const pluralsSameFood = await getPluralsSameFood(householdId);
     // No catch: this section is the only place on the web to revoke a
     // public link, so a failed read must fail the page, not hide it. With
     // `mcp-share-links` off there are no links to list and no section.
@@ -1464,12 +1528,7 @@ export async function renderHouseholdSettingsRoute(
             householdName: config.name,
             lastSeen,
             members,
-            stores: stores.map((row) => ({
-                id: row.id,
-                householdId: row.householdId,
-                name: row.name,
-                sortOrder: row.sortOrder,
-            })),
+            storeCount: stores.length,
             isOwner: gate.viewer.role === "owner",
             canManage: canManageHousehold(gate.viewer),
             viewerUserId: gate.viewer.userId,
@@ -1477,14 +1536,114 @@ export async function renderHouseholdSettingsRoute(
             issuedToken: opts.issuedToken,
             openModalId: opts.openModalId,
             socialReaders: config.preferences.socialReaders,
-            socialReaderStatus,
+            location,
+            householdTimezone: config.preferences.timezone,
+            effectiveTimezone,
+            effectiveTimezoneDefaulted,
+            restock: config.preferences.restock,
+            unverifiedRecipeExpiryDays:
+                config.preferences.unverifiedRecipeExpiryDays,
+            dismissedCount: dismissedNotices(noticeResult).length,
             timezone: profile?.timezone ?? "UTC",
             noticeResult,
-            duplicatePairs: noticeResult.possibleDuplicatePairs,
-            refCounts,
-            mergePost: opts.mergePost,
-            pluralsSameFood,
             sharedLinks,
+        }),
+    };
+}
+
+/** Every unexpired refusal host, paged with `after` until a page comes back empty. */
+export async function listAllRefusalHosts(
+    memory: FetchMemoryStore,
+    householdId: string,
+    now = new Date(),
+): Promise<string[]> {
+    const hosts: string[] = [];
+    let after: { refusedAt: string; host: string } | undefined;
+    for (;;) {
+        const page = await memory.listRefusals(householdId, {
+            limit: 200,
+            after,
+            now,
+        });
+        if (page.length === 0) return hosts;
+        for (const row of page) hosts.push(row.host);
+        const last = page[page.length - 1]!;
+        after = { refusedAt: last.refusedAt, host: last.host };
+    }
+}
+
+export async function renderHouseholdRestockRoute(
+    viewerUserId: string,
+    opts: { error?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const config = await getHouseholdConfig(gate.viewer.householdId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsRestockV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            restock: config.preferences.restock,
+            canManage: canManageHousehold(gate.viewer),
+            error: opts.error,
+        }),
+    };
+}
+
+export async function renderHouseholdReadersRoute(
+    viewerUserId: string,
+    opts: { error?: string; openModalId?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const [config, blocked] = await Promise.all([
+        getHouseholdConfig(householdId),
+        listAllRefusalHosts(recipeFetchMemory(), householdId),
+    ]);
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsReadersV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            socialReaders: config.preferences.socialReaders,
+            blockedCount: blocked.length,
+            isOwner: gate.viewer.role === "owner",
+            canManage: canManageHousehold(gate.viewer),
+            error: opts.error,
+            openModalId: opts.openModalId,
+        }),
+    };
+}
+
+export async function renderHouseholdDismissedRoute(
+    viewerUserId: string,
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsDismissedV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            dismissals: dismissedNotices(noticeResult),
+            subjectNames: noticeResult.subjectNames,
         }),
     };
 }
@@ -2110,32 +2269,30 @@ export async function renderNeedsAttentionInventoryPage(
     };
 }
 
-export async function renderPossibleDuplicatesRoute(
+/** What the two Possible duplicates pages read: the current pairs and each food's use count. */
+async function loadDuplicatesData(viewer: HouseholdMember) {
+    const refCounts = await liveFoodsStore().countFoodRefs(viewer.householdId);
+    const noticeResult = await loadViewerNotices(viewer, { refCounts });
+    return {
+        refCounts,
+        noticeResult,
+        pairs: noticeResult.possibleDuplicatePairs,
+    };
+}
+
+export async function renderSettingsDuplicatesRoute(
     viewerUserId: string,
-    opts: {
-        error?: string;
-        openModalId?: string;
-        mergePost?: {
-            foodA: string;
-            foodB: string;
-            keepId: string;
-            picks: Partial<Record<MergePairPickField, string>>;
-        };
-    } = {},
+    opts: { error?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
-    const householdId = gate.viewer.householdId;
-    const store = liveFoodsStore();
-    const refCounts = await store.countFoodRefs(householdId);
-    const noticeResult = await loadHouseholdNotices(householdId, {
-        refCounts,
-    });
-    const pairs = noticeResult.possibleDuplicatePairs;
+    const { refCounts, noticeResult, pairs } = await loadDuplicatesData(
+        gate.viewer,
+    );
     return {
         status: 200,
-        html: renderPossibleDuplicatesPage({
+        html: renderSettingsDuplicatesV2Page({
             chrome: await viewerChromeWithAttention(
                 profile,
                 gate.viewer,
@@ -2144,7 +2301,41 @@ export async function renderPossibleDuplicatesRoute(
             pairs,
             refCounts,
             error: opts.error,
-            openModalId: opts.openModalId,
+        }),
+    };
+}
+
+/** The compare page of one pair; 404 when the two foods are not a current suggestion. */
+export async function renderSettingsDuplicateCompareRoute(
+    viewerUserId: string,
+    foodA: string,
+    foodB: string,
+    opts: { error?: string; mergePost?: DuplicateMergePost } = {},
+): Promise<{ status: 200 | 403 | 404; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const { refCounts, noticeResult, pairs } = await loadDuplicatesData(
+        gate.viewer,
+    );
+    const pair = findDuplicatePair(pairs, foodA, foodB);
+    if (!pair) {
+        return {
+            status: 404,
+            html: renderBarePage("Not found", emptyState("Pair not found.")),
+        };
+    }
+    return {
+        status: 200,
+        html: renderSettingsDuplicateCompareV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            pair,
+            refCounts,
+            error: opts.error,
             mergePost: opts.mergePost,
         }),
     };

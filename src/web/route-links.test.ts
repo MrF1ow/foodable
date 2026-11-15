@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "./loaders.js";
 import { findLegacyLinks } from "./route-map.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
-import { renderPossibleDuplicatesPage } from "./pages/possible-duplicates.js";
+import { renderSettingsDuplicatesV2Page } from "./pages/v2/settings-duplicates.js";
 import { renderNeedsAttentionPage } from "./pages/needs-attention.js";
 import {
     buildPreviewKitchenFridgeView,
@@ -82,7 +82,18 @@ describe("rendered pages have no legacy links", () => {
                 chrome,
                 householdName: "Home",
                 members: [ME],
-                stores: [],
+                storeCount: 0,
+                location: null,
+                householdTimezone: null,
+                effectiveTimezone: "UTC",
+                restock: {
+                    enabled: false,
+                    weekday: 6,
+                    time: "07:00",
+                    lastRunOn: null,
+                },
+                unverifiedRecipeExpiryDays: null,
+                dismissedCount: 0,
                 isOwner: true,
                 canManage: true,
                 viewerUserId: ME.userId,
@@ -103,17 +114,15 @@ describe("rendered pages have no legacy links", () => {
                         foodsById: new Map(),
                     },
                 },
-                duplicatePairs: [],
-                refCounts: new Map(),
             } as never),
         );
         assertNoLegacy(
             "possible duplicates",
-            renderPossibleDuplicatesPage({
+            renderSettingsDuplicatesV2Page({
                 chrome,
                 pairs: [],
-                stores: [],
-            } as never),
+                refCounts: new Map(),
+            }),
         );
         assertNoLegacy("settings help", renderSettingsHelpV2Page({ chrome }));
     });

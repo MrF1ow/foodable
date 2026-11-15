@@ -1471,7 +1471,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Merge Foods",
             description:
-                "Merge two household catalog foods. keep_id stays; drop_id is archived and its barcodes, aliases, and item references move to keep_id. Also resolves a possible-duplicate notice when the pair was listed under Household › Possible duplicates.",
+                "Merge two household catalog foods. keep_id stays; drop_id is archived and its barcodes, aliases, and item references move to keep_id. Also clears the pair from Settings › Saved foods & recipes › Possible duplicates.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: true,

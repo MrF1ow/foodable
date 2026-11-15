@@ -158,6 +158,7 @@
                 return goalListV2(data.totals || {}, data.goals, {
                     meals: data.meals,
                     drinkUnit: data.drink_unit,
+                    hidden: data.hidden_nutrients || [],
                     withLimits: true,
                     withWater: true,
                 });

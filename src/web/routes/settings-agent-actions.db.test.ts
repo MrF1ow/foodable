@@ -177,10 +177,10 @@ describeDb(
 
         test("the owner sees the switch on, and turning it Off persists and makes the guard refuse", async () => {
             const html = await (await page(ownerId)).text();
-            expect(html).toContain("Agents may make destructive changes");
+            expect(html).toContain("Allow destructive changes");
             expect(html).toContain('role="switch" aria-checked="true"');
             expect(html).toContain(`action="${SWITCH}"`);
-            expect(html).toContain("agents can still read and add");
+            expect(html).not.toContain("agents can still read and add");
 
             const res = await post(ownerId, SWITCH, { allowed: "0" });
 
@@ -221,10 +221,13 @@ describeDb(
 
         test("a member sees the value read-only, and posting the switch is a 403 that changes nothing", async () => {
             const html = await (await page(memberId)).text();
-            expect(html).toContain("Agents may make destructive changes");
-            expect(html).toContain("Only the household owner can change this.");
+            expect(html).toContain("Allow destructive changes");
+            expect(html).toContain("Owner only");
+            expect(html).not.toContain(
+                "Only the household owner can change this.",
+            );
             expect(html).not.toContain(`action="${SWITCH}"`);
-            expect(html).not.toContain('role="switch"');
+            expect(html).not.toContain('name="allowed"');
 
             const res = await post(memberId, SWITCH, { allowed: "0" });
 
@@ -257,7 +260,7 @@ describeDb(
 
             const html = await (await page(ownerId)).text();
 
-            expect(html).toContain("Agent activity");
+            expect(html).toContain("Recent agent changes");
             expect(html).toContain("Deleted grocery line Eggs");
             expect(html).toContain("Grok CLI · as Sam");
             expect(html).toContain("3 hours ago");
@@ -270,7 +273,7 @@ describeDb(
 
         test("the activity list is empty-stated when agents have done nothing", async () => {
             const html = await (await page(ownerId)).text();
-            expect(html).toContain("Agent activity");
+            expect(html).toContain("Recent agent changes");
             expect(html).toContain("Nothing yet.");
         });
 

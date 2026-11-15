@@ -6,15 +6,10 @@ import { formatWeight } from "../../../domain/units.js";
 import { toDrinks } from "../../../alcohol.js";
 import { GOAL_NAME_MAX, GOAL_NOTE_MAX } from "../../../domain/goal-label.js";
 import type { GoalDayOverride } from "../../../domain/insights.js";
-import { hasActiveTarget } from "../../../mcp/shared.js";
 import { esc } from "../../components/v2/html.js";
 import { dot } from "../../components/v2/dot.js";
 import { iconBolt, iconDrop, iconList } from "../../components/v2/icons.js";
-import {
-    confirmSheet,
-    sheet,
-    sheetTrigger,
-} from "../../components/v2/sheet.js";
+import { confirmSheet, sheetTrigger } from "../../components/v2/sheet.js";
 import {
     renderSettingsV2Page,
     settingsErrorBanner,
@@ -37,19 +32,16 @@ export type SettingsGoalsV2View = {
     alcohol: DrinkUnit | null;
     /** Per-day overrides from today on. */
     days: readonly GoalDayOverride[];
-    /** What the form holds after a refused save; the saved goals otherwise. */
-    draft?: GoalsFormDraft;
+    /** The error to show: beside the field in `invalid`, else under the header. */
     error?: string;
+    /**
+     * A field save the server refused: every field as it was submitted (the
+     * stored goals, with the typed text in the one that failed) and that field.
+     * The stored value is unchanged; the field shows the typed text with
+     * `error` beside it.
+     */
+    draft?: GoalsFormDraft;
     invalid?: readonly GoalsFormField[];
-};
-
-type GoalRow = {
-    label: string;
-    value: string;
-    /** The macro dot (FigCraft 23562 protein, carbs and fat rows). */
-    dotKey?: "protein" | "carbs" | "fat";
-    /** The row icon the frame gives calories, water and the limits. */
-    icon?: "bolt" | "drop" | "list";
 };
 
 const GOAL_ICONS = { bolt: iconBolt, drop: iconDrop, list: iconList };
@@ -60,8 +52,8 @@ const DRINK_NOUN: Record<DrinkUnit, [one: string, many: string]> = {
 };
 
 /**
- * The alcohol limit in the member's drink unit, the same figure the edit sheet
- * opens with ("2 US drinks"); a limit of 0 is "None".
+ * The alcohol limit in the member's drink unit, the same figure the field
+ * holds ("2 US drinks"); a limit of 0 is "None".
  */
 export function alcoholLimitText(grams: number, unit: DrinkUnit): string {
     const drinks = toDrinks(grams, unit);
@@ -75,164 +67,26 @@ function num(n: number): string {
     return n.toLocaleString("en-US");
 }
 
-function floorGoal(
-    value: number | null,
-    render: (n: number) => string,
-): string {
-    if (!hasActiveTarget(value, "floor")) return "Not set";
-    return render(value!);
-}
-
-function ceilingGoal(
-    value: number | null,
-    render: (n: number) => string,
-): string {
-    if (!hasActiveTarget(value, "ceiling")) return "Not set";
-    return render(value!);
-}
-
-export function settingsGoalRows(view: SettingsGoalsV2View): GoalRow[] {
-    const goals = view.goals;
-    if (!goals) return [];
-    const rows: GoalRow[] = [
-        {
-            label: "Calories",
-            value: floorGoal(goals.daily_calories, (n) => `${num(n)} kcal`),
-            icon: "bolt",
-        },
-        {
-            label: "Protein",
-            value: floorGoal(goals.daily_protein_g, (n) => `${n} g`),
-            dotKey: "protein",
-        },
-        {
-            label: "Carbs",
-            value: floorGoal(goals.daily_carbs_g, (n) => `${n} g`),
-            dotKey: "carbs",
-        },
-        {
-            label: "Fat",
-            value: floorGoal(goals.daily_fat_g, (n) => `${n} g`),
-            dotKey: "fat",
-        },
-    ];
-    rows.push(
-        {
-            label: "Water",
-            value: floorGoal(goals.daily_water_ml, formatWaterGoal),
-            icon: "drop",
-        },
-        {
-            label: "Fiber, at least",
-            value: floorGoal(goals.daily_fiber_g, (n) => `${n} g`),
-            icon: "list",
-        },
-        {
-            label: "Sugar, at most",
-            value: ceilingGoal(goals.daily_sugar_g, (n) => `${n} g`),
-            icon: "list",
-        },
-        {
-            label: "Caffeine, at most",
-            value: ceilingGoal(goals.daily_caffeine_mg, (n) => `${n} mg`),
-            icon: "bolt",
-        },
-    );
-    if (view.alcohol) {
-        rows.push({
-            label: "Alcohol, at most",
-            value: ceilingGoal(goals.daily_alcohol_g, (n) =>
-                alcoholLimitText(n, view.alcohol!),
-            ),
-            // No frame shows alcohol; the drink shares water's drop.
-            icon: "drop",
-        });
-    }
-    rows.push({
-        label: "Target weight",
-        value:
-            goals.target_weight_g != null
-                ? formatWeight(goals.target_weight_g, view.weightUnit)
-                : "Not set",
-    });
-    return rows;
-}
-
-const MACRO_GOAL_LABELS = new Set(["Calories", "Protein", "Carbs", "Fat"]);
-const OTHER_GOAL_LABELS = new Set(["Target weight"]);
-
 /** Water goals read in litres, like the Today water line (2500 → "2.5 L"). */
 function formatWaterGoal(ml: number): string {
     return `${Math.round(ml / 100) / 10} L`;
 }
 
-function goalRowMarkup(row: GoalRow): string {
-    const marker =
-        row.icon != null
-            ? `<span class="fd-settings-goals-icon">${String(GOAL_ICONS[row.icon]())}</span>`
-            : row.dotKey != null
-              ? String(dot(row.dotKey))
-              : "";
-    const dt = `<dt>${marker}${esc(row.label)}</dt>`;
-    return `<div class="fd-settings-member-dl__row">${dt}<dd>${esc(row.value)}</dd></div>`;
-}
-
-/**
- * One white card of goal rows under a section label (FigCraft 23562). The
- * macros card has no visible label in the frame, so its title is screen-reader
- * only.
- */
-function goalsCard(
-    title: string,
-    rows: GoalRow[],
-    opts: { hideTitle?: boolean } = {},
-): string {
-    if (rows.length === 0) return "";
-    const titleClass = opts.hideTitle
-        ? "fd-settings-goals-card__title fd-sr"
-        : "fd-settings-goals-card__title";
-    return `<section class="fd-settings-goals-card" aria-label="${esc(title)}"><h2 class="${titleClass}">${esc(title)}</h2><dl class="fd-settings-member-dl fd-settings-goals-dl">${rows.map((row) => goalRowMarkup(row)).join("")}</dl></section>`;
-}
-
 type FieldSpec = {
     name: GoalsFormField;
     label: string;
-    dotKey?:
-        | "calories"
-        | "protein"
-        | "carbs"
-        | "fat"
-        | "fiber"
-        | "sugar"
-        | "caffeine";
+    /** The macro dot (FigCraft 23562 protein, carbs and fat rows). */
+    dot?: "protein" | "carbs" | "fat";
+    /** The row icon the frame gives calories, water and the limits. */
+    icon?: "bolt" | "drop" | "list";
     unit?: string;
-    text?: { max: number; placeholder: string };
 };
 
-const NAME_FIELDS: FieldSpec[] = [
-    {
-        name: "goal_name",
-        label: "Name",
-        text: { max: GOAL_NAME_MAX, placeholder: "Recomp" },
-    },
-    {
-        name: "goal_note",
-        label: "Note",
-        text: { max: GOAL_NOTE_MAX, placeholder: "Optional" },
-    },
-];
-
-const TARGET_FIELDS: FieldSpec[] = [
-    {
-        name: "daily_calories",
-        label: "Calories",
-        dotKey: "calories",
-        unit: "kcal",
-    },
-    { name: "daily_protein_g", label: "Protein", dotKey: "protein", unit: "g" },
-    { name: "daily_carbs_g", label: "Carbs", dotKey: "carbs", unit: "g" },
-    { name: "daily_fat_g", label: "Fat", dotKey: "fat", unit: "g" },
-    { name: "daily_water_ml", label: "Water", unit: "ml" },
+const MACRO_FIELDS: FieldSpec[] = [
+    { name: "daily_calories", label: "Calories", icon: "bolt", unit: "kcal" },
+    { name: "daily_protein_g", label: "Protein", dot: "protein", unit: "g" },
+    { name: "daily_carbs_g", label: "Carbs", dot: "carbs", unit: "g" },
+    { name: "daily_fat_g", label: "Fat", dot: "fat", unit: "g" },
 ];
 
 const DRINK_UNIT_NAME: Record<DrinkUnit, string> = {
@@ -242,17 +96,24 @@ const DRINK_UNIT_NAME: Record<DrinkUnit, string> = {
 
 function limitFields(alcohol: DrinkUnit | null): FieldSpec[] {
     const fields: FieldSpec[] = [
+        { name: "daily_water_ml", label: "Water", icon: "drop", unit: "ml" },
         {
             name: "daily_fiber_g",
             label: "Fiber, at least",
-            dotKey: "fiber",
+            icon: "list",
             unit: "g",
         },
         {
             name: "daily_sugar_g",
             label: "Sugar, at most",
-            dotKey: "sugar",
+            icon: "list",
             unit: "g",
+        },
+        {
+            name: "daily_caffeine_mg",
+            label: "Caffeine, at most",
+            icon: "bolt",
+            unit: "mg",
         },
     ];
     if (alcohol) {
@@ -260,90 +121,116 @@ function limitFields(alcohol: DrinkUnit | null): FieldSpec[] {
         fields.push({
             name: "daily_alcohol_g",
             label: "Alcohol, at most",
+            // No frame shows alcohol; the drink shares water's drop.
+            icon: "drop",
             unit: DRINK_UNIT_NAME[alcohol],
         });
     }
-    fields.push({
-        name: "daily_caffeine_mg",
-        label: "Caffeine, at most",
-        dotKey: "caffeine",
-        unit: "mg",
-    });
     return fields;
 }
 
-function fieldRow(
-    spec: FieldSpec,
-    draft: GoalsFormDraft,
-    invalid: ReadonlySet<GoalsFormField>,
-): string {
-    const id = `goals-${spec.name.replace(/_/g, "-")}`;
-    const labelId = `${id}-label`;
-    const lead =
-        spec.dotKey != null ? String(dot(spec.dotKey, { size: "sm" })) : "";
-    const label = `${lead}${esc(spec.label)}${spec.unit ? ` <span class="fd-settings-goals-unit">(${esc(spec.unit)})</span>` : ""}`;
-    const aria = invalid.has(spec.name) ? ' aria-invalid="true"' : "";
-    const control = spec.text
-        ? `<input class="fd-settings-input" id="${id}" name="${spec.name}" type="text" value="${esc(draft[spec.name])}" maxlength="${spec.text.max}" placeholder="${esc(spec.text.placeholder)}" autocomplete="off" aria-labelledby="${labelId}"${aria} />`
-        : `<input class="fd-settings-input" id="${id}" name="${spec.name}" type="text" inputmode="decimal" value="${esc(draft[spec.name])}" placeholder="Not set" autocomplete="off" aria-labelledby="${labelId}"${aria} />`;
-    return `<div class="fd-settings-field"><span class="fd-settings-field__label" id="${labelId}">${label}</span>${control}</div>`;
+const FIELD_ACTION = "/settings/goals/field";
+
+function fieldId(name: GoalsFormField): string {
+    return `goals-${name.replace(/_/g, "-")}`;
 }
 
-function formSection(
-    title: string,
-    fields: FieldSpec[],
-    draft: GoalsFormDraft,
-    invalid: ReadonlySet<GoalsFormField>,
-): string {
-    return `<h3 class="fd-settings-goals-form__title">${esc(title)}</h3>${fields.map((f) => fieldRow(f, draft, invalid)).join("")}`;
-}
-
-/** The saved name, with when it was set and the note (FigCraft 23562). */
-function goalsHeading(view: SettingsGoalsV2View): string {
-    const name = view.goals?.goal_name?.trim();
-    if (!name) return "";
-    const since = formatGoalSince(view.goals?.goals_set_on, view.today);
-    const note = view.goals?.goal_note?.trim();
-    const sub = [since ? `Since ${since}` : null, note || null]
-        .filter((part): part is string => part != null)
-        .join(" · ");
-    return `<h2 class="fd-settings-goals-name">${esc(name)}</h2>${sub ? `<p class="fd-settings-goals-since">${esc(sub)}</p>` : ""}`;
-}
-
-export const GOALS_EDIT_SHEET_ID = "fd-goals-edit";
-const GOALS_FORM_ID = "fd-goals-form";
+type FieldCtx = {
+    draft: Record<GoalsFormField, string>;
+    error:
+        { field: GoalsFormField; value: string; message: string } | undefined;
+};
 
 /**
- * The edit sheet (FigCraft 48374): labelled filled fields, Save at the bottom.
- * A refused save re-renders it open, with what was typed and the errors.
+ * One goal as its own form: it posts `field` and `value` to the field route,
+ * and the autosave module submits it when the input is left. Without script
+ * Enter submits it. The form carries no Turbo opt-out: the 303 back to this
+ * page is morphed in place.
  */
-function editSheet(view: SettingsGoalsV2View): string {
-    const draft = view.draft ?? goalsDraftFrom(view.goals, view.alcohol);
-    const invalid = new Set(view.invalid ?? []);
-    const sections = [
-        formSection("Goal", NAME_FIELDS, draft, invalid),
-        formSection("Daily targets", TARGET_FIELDS, draft, invalid),
-        formSection(
-            "Limits and minimums",
-            limitFields(view.alcohol),
-            draft,
-            invalid,
-        ),
-    ].join("");
-    const error = view.draft ? String(settingsErrorBanner(view.error)) : "";
-    const body = `${error}<form id="${GOALS_FORM_ID}" method="POST" action="/settings/goals" class="fd-settings-goals-form" data-turbo="false">${sections}</form>`;
-    // The panel takes focus on open: a text field focused first would raise
-    // the keyboard over the form on a touch screen.
-    return sheet({
-        id: GOALS_EDIT_SHEET_ID,
-        kind: "edit",
-        title: "Edit goals",
-        subtitle: "Daily targets, limits and minimums",
-        body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${GOALS_FORM_ID}">Save</button>`,
-        openOnLoad: view.draft != null,
-        focus: "panel",
-    });
+function fieldForm(
+    name: GoalsFormField,
+    control: (opts: { id: string; value: string; attrs: string }) => string,
+    ctx: FieldCtx,
+    cls: string,
+    lead = "",
+): string {
+    const id = fieldId(name);
+    const failed = ctx.error?.field === name;
+    const value = failed ? ctx.error!.value : ctx.draft[name];
+    const attrs = failed
+        ? ` aria-invalid="true" aria-describedby="${id}-error"`
+        : "";
+    const error = failed
+        ? `<p class="fd-settings-goals-field__error" id="${id}-error" role="alert">${esc(ctx.error!.message)}</p>`
+        : "";
+    return `<form class="${cls}" method="POST" action="${FIELD_ACTION}" data-fd-autosave><input type="hidden" name="field" value="${name}" />${lead}${control({ id, value, attrs })}${error}</form>`;
+}
+
+function numberRow(spec: FieldSpec, ctx: FieldCtx): string {
+    const marker =
+        spec.icon != null
+            ? `<span class="fd-settings-goals-icon">${String(GOAL_ICONS[spec.icon]())}</span>`
+            : spec.dot != null
+              ? String(dot(spec.dot))
+              : "";
+    const unit = spec.unit
+        ? `<span class="fd-settings-goals-unit">${esc(spec.unit)}</span>`
+        : "";
+    // The whole row is the label, so a tap anywhere on it edits the number.
+    return fieldForm(
+        spec.name,
+        ({ id, value, attrs }) =>
+            `<label class="fd-settings-goals-field__row"><span class="fd-settings-goals-field__label">${marker}${esc(spec.label)}</span><span class="fd-settings-goals-field__entry"><input class="fd-settings-goals-input" id="${id}" name="value" type="text" inputmode="decimal" value="${esc(value)}" placeholder="Not set" autocomplete="off" data-fd-autosave-input${attrs} />${unit}</span></label>`,
+        ctx,
+        "fd-settings-goals-field",
+    );
+}
+
+/**
+ * One card of number fields under a section label (FigCraft 23562). The
+ * macros card has no visible label in the frame, so its title is screen-reader
+ * only.
+ */
+function fieldsCard(
+    title: string,
+    specs: FieldSpec[],
+    ctx: FieldCtx,
+    opts: { hideTitle?: boolean } = {},
+): string {
+    const titleClass = opts.hideTitle
+        ? "fd-settings-goals-card__title fd-sr"
+        : "fd-settings-goals-card__title";
+    return `<section class="fd-settings-goals-card" aria-label="${esc(title)}"><h2 class="${titleClass}">${esc(title)}</h2><div class="fd-settings-goals-fields">${specs.map((s) => numberRow(s, ctx)).join("")}</div></section>`;
+}
+
+/**
+ * The goal's name and note as plain tap-to-edit text under the page title,
+ * with the day the goals were set (FigCraft 23562).
+ */
+function goalsHeading(view: SettingsGoalsV2View, ctx: FieldCtx): string {
+    const since = formatGoalSince(view.goals?.goals_set_on, view.today);
+    const text = (
+        name: "goal_name" | "goal_note",
+        max: number,
+        placeholder: string,
+        label: string,
+        cls: string,
+    ) =>
+        fieldForm(
+            name,
+            ({ id, value, attrs }) =>
+                `<input class="${cls}" id="${id}" name="value" type="text" value="${esc(value)}" maxlength="${max}" placeholder="${esc(placeholder)}" aria-label="${esc(label)}" autocomplete="off" data-fd-autosave-input${attrs} />`,
+            ctx,
+            "fd-settings-goals-field fd-settings-goals-field--text",
+        );
+    return `${text("goal_name", GOAL_NAME_MAX, "Name this goal", "Goal name", "fd-settings-goals-name")}${text("goal_note", GOAL_NOTE_MAX, "Add a note", "Note", "fd-settings-goals-note-input")}${since ? `<p class="fd-settings-goals-since">Since ${esc(since)}</p>` : ""}`;
+}
+
+/** Target weight has no field here; it is set by the agent, shown when set. */
+function targetWeightCard(view: SettingsGoalsV2View): string {
+    const grams = view.goals?.target_weight_g;
+    if (grams == null) return "";
+    return `<section class="fd-settings-goals-card" aria-label="Other targets"><h2 class="fd-settings-goals-card__title">Other targets</h2><dl class="fd-settings-member-dl fd-settings-goals-dl"><div class="fd-settings-member-dl__row"><dt>Target weight</dt><dd>${esc(formatWeight(grams, view.weightUnit))}</dd></div></dl></section>`;
 }
 
 /** "Sat, Nov 14" for a calendar date. */
@@ -412,26 +299,23 @@ function goalDaysSection(view: SettingsGoalsV2View): string {
 }
 
 export function renderSettingsGoalsV2Body(view: SettingsGoalsV2View): string {
-    const rows = settingsGoalRows(view);
-    const macroRows = rows.filter((r) => MACRO_GOAL_LABELS.has(r.label));
-    const otherRows = rows.filter((r) => OTHER_GOAL_LABELS.has(r.label));
-    const limitRows = rows.filter(
-        (r) =>
-            !MACRO_GOAL_LABELS.has(r.label) && !OTHER_GOAL_LABELS.has(r.label),
-    );
-    const read =
-        rows.length === 0
-            ? `<p class="fd-settings-goals-empty">No nutrition goals set yet.</p>`
-            : `${goalsHeading(view)}${goalsCard("Macros", macroRows, { hideTitle: true })}${goalsCard("Limits and minimums", limitRows)}${view.goals?.target_weight_g != null ? goalsCard("Other targets", otherRows) : ""}`;
-    const edit = sheetTrigger({
-        target: GOALS_EDIT_SHEET_ID,
-        label: view.goals ? "Edit goals" : "Set goals",
-        className: "fd-settings-goals-edit",
-    });
-    // Errors from a refused save show inside the open sheet; any other sits
-    // under the header.
-    const pageError = view.draft ? "" : String(settingsErrorBanner(view.error));
-    return `${settingsPageHeader("Goals")}${pageError}${read}${edit}${goalDaysSection(view)}${editSheet(view)}`;
+    const failed = view.invalid?.[0];
+    const fieldError =
+        failed && view.draft
+            ? {
+                  field: failed,
+                  value: view.draft[failed],
+                  message: view.error ?? "",
+              }
+            : undefined;
+    const ctx: FieldCtx = {
+        draft: goalsDraftFrom(view.goals, view.alcohol),
+        error: fieldError,
+    };
+    const empty = view.goals
+        ? ""
+        : `<p class="fd-settings-goals-empty">No nutrition goals set yet. Fill in a daily target to start.</p>`;
+    return `${settingsPageHeader("Goals")}${fieldError ? "" : String(settingsErrorBanner(view.error))}${goalsHeading(view, ctx)}${empty}${fieldsCard("Macros", MACRO_FIELDS, ctx, { hideTitle: true })}${fieldsCard("Limits and minimums", limitFields(view.alcohol), ctx)}<p class="fd-settings-goals-hint">Tap a number to change it. It saves when you leave the field.</p>${targetWeightCard(view)}${goalDaysSection(view)}`;
 }
 
 export function renderSettingsGoalsV2Page(view: SettingsGoalsV2View): string {

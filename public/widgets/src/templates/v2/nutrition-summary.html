@@ -263,6 +263,7 @@
                 const strip = macroStripV2(data.averages, data.goals, {
                     meals: data.meals,
                     drinkUnit: data.drink_unit,
+                    hidden: data.hidden_nutrients || [],
                 });
                 root.innerHTML = card(head + top + strip);
             }

@@ -20,6 +20,14 @@ describe("APP_PATHS", () => {
             expect(retired).not.toContain(path);
         }
     });
+
+    test("has no key for the old Household duplicates address", () => {
+        // The page moved to /settings/saved/duplicates; the old address is the
+        // 301 route in routes/household.ts, not an APP_PATHS entry.
+        expect(Object.keys(APP_PATHS)).not.toContain(
+            "settingsHouseholdPossibleDuplicates",
+        );
+    });
 });
 
 describe("legacyRedirectTarget", () => {

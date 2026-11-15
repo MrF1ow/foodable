@@ -84,8 +84,13 @@ import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
+import { renderSettingsUnitsV2Page } from "../src/web/pages/v2/settings-units.js";
+import { renderSettingsNutrientsV2Page } from "../src/web/pages/v2/settings-nutrients.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
+import { renderSettingsRestockV2Page } from "../src/web/pages/v2/settings-restock.js";
+import { renderSettingsReadersV2Page } from "../src/web/pages/v2/settings-readers.js";
+import { renderSettingsDismissedV2Page } from "../src/web/pages/v2/settings-dismissed.js";
 import type { SharedLinkRow } from "../src/web/pages/v2/settings-household-shared-links.js";
 import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
@@ -114,17 +119,17 @@ import { pageHeader } from "../src/web/components/ui.js";
 import { renderAppShell, viewerChromeFromProfile } from "../src/web/shell.js";
 import {
     NO_USUAL_SCHEDULE,
-    possibleDuplicates,
     usualProductRows,
+    type PossibleDuplicatePair,
 } from "../src/domain/foods.js";
 import {
     possibleDuplicateNotices,
     possibleDuplicateNoticesByFoodId,
 } from "../src/domain/notices-for.js";
 import {
-    DUP_MERGE_MODAL_ID,
-    renderPossibleDuplicatesPage,
-} from "../src/web/pages/possible-duplicates.js";
+    renderSettingsDuplicateCompareV2Page,
+    renderSettingsDuplicatesV2Page,
+} from "../src/web/pages/v2/settings-duplicates.js";
 import {
     getAppCss,
     getAppJs,
@@ -1037,6 +1042,26 @@ const MACROS = {
     incomplete: true,
 };
 
+/** Milk · Whole milk and Rice · Jasmine rice, with the design's use counts. */
+function duplicatesFixture() {
+    const milk = food("f-milk", "Milk", 60, { proteinG: 3.4 });
+    const wholeMilk = food("f-whole-milk", "Whole milk", 64, { proteinG: 3.3 });
+    const rice = food("f-rice", "Rice", 130);
+    const jasmine = food("f-jasmine", "Jasmine rice", 130);
+    return {
+        pairs: [
+            { subject: milk, related: wholeMilk, rule: "contains_words" },
+            { subject: rice, related: jasmine, rule: "contains_words" },
+        ] as never as PossibleDuplicatePair[],
+        refCounts: new Map([
+            [milk.id, 6],
+            [wholeMilk.id, 2],
+            [rice.id, 4],
+            [jasmine.id, 1],
+        ]),
+    };
+}
+
 function food(
     id: string,
     name: string,
@@ -1479,12 +1504,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         submitKey: "preview",
     };
     const settingsHouseholdV2 = (sharedLinks: SharedLinkRow[]) => {
-        const dupPairs = possibleDuplicates(
-            catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
-            new Map(),
-            new Set(),
-            new Set(),
-        );
         return renderSettingsHouseholdV2Page({
             chrome,
             householdName: "The Flow household",
@@ -1497,11 +1516,23 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 [RILEY.userId, new Date("2026-10-21T15:00:00Z")],
                 [ALEX.userId, null],
             ]),
-            stores: PREVIEW_STORES,
+            storeCount: PREVIEW_STORES.length,
             isOwner: true,
             canManage: true,
             viewerUserId: ME.userId,
-            socialReaders: EMPTY_HOUSEHOLD_PREFERENCES.socialReaders,
+            socialReaders: { tiktok: true, facebook: false },
+            location: "Denver, CO",
+            householdTimezone: "America/Denver",
+            effectiveTimezone: "America/Denver",
+            restock: {
+                enabled: true,
+                weekday: 0,
+                time: "09:00",
+                lastRunOn: "2026-11-08",
+                lastRunAdded: 3,
+            },
+            unverifiedRecipeExpiryDays: 30,
+            dismissedCount: 2,
             timezone: "America/Los_Angeles",
             noticeResult: {
                 notices: previewNotices(),
@@ -1512,7 +1543,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 catalogFoods: catalog,
                 aliasMap: new Map(),
                 barcodedIds: new Set(),
-                possibleDuplicatePairs: dupPairs,
+                possibleDuplicatePairs: [],
                 recipesListPrefetch: {
                     recipes: [],
                     allIngredients: [],
@@ -1520,9 +1551,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                     foodsById: new Map(),
                 },
             },
-            duplicatePairs: dupPairs,
-            refCounts: new Map(),
-            pluralsSameFood: true,
             sharedLinks,
         } as never);
     };
@@ -2043,15 +2071,23 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             backHref: "/kitchen/fridge",
             displayName: "Ethan Flow",
+            email: "ethan@example.com",
             timezone: "America/Los_Angeles",
-            weightUnit: "kg",
-            widgetsEnabled: true,
-            alcoholTrackingEnabled: false,
-            drinkUnit: "",
         }),
         "settings-display": renderSettingsDisplayV2Page({
             chrome,
             storedTheme: null,
+        }),
+        "settings-units": renderSettingsUnitsV2Page({
+            chrome,
+            weightUnit: "lb",
+            drinkUnit: "us",
+        }),
+        // Sugar and alcohol off, the rest on.
+        "settings-nutrients": renderSettingsNutrientsV2Page({
+            chrome,
+            hidden: ["sugar"],
+            alcoholTrackingEnabled: false,
         }),
         "settings-household-v2": settingsHouseholdV2(PREVIEW_SHARED_LINKS),
         "settings-household-v2-empty": settingsHouseholdV2([]),
@@ -2069,16 +2105,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             alcohol: "us",
             days: PREVIEW_GOAL_DAYS,
         }),
-        "settings-goals-edit": renderSettingsGoalsV2Page({
-            chrome,
-            goals: PREVIEW_NAMED_GOALS,
-            today: "2026-11-10",
-            weightUnit: "kg",
-            alcohol: "us",
-            days: PREVIEW_GOAL_DAYS,
-            // A draft opens the sheet on load.
-            draft: goalsDraftFrom(PREVIEW_NAMED_GOALS, "us"),
-        }),
         "settings-goals-empty": renderSettingsGoalsV2Page({
             chrome,
             goals: null,
@@ -2087,6 +2113,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             alcohol: null,
             days: [],
         }),
+        // A refused field save: the typed text stays, with the error beside it.
         "settings-goals-error": renderSettingsGoalsV2Page({
             chrome,
             goals: PREVIEW_NAMED_GOALS,
@@ -2096,11 +2123,10 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             days: PREVIEW_GOAL_DAYS,
             draft: {
                 ...goalsDraftFrom(PREVIEW_NAMED_GOALS, "us"),
-                goal_name: "Recomp until the spring wedding photos",
                 daily_calories: "30000",
             },
-            error: "Goal name must be at most 40 characters. Calories must be at most 20000.",
-            invalid: ["goal_name", "daily_calories"],
+            error: "Calories must be at most 20000.",
+            invalid: ["daily_calories"],
         }),
         "settings-saved": renderSettingsSavedV2Page({
             chrome,
@@ -2109,6 +2135,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 aliases: [] as string[],
             })),
             recipes: [RECIPE, RECIPE_TWO],
+            duplicateCount: 2,
             searchQuery: "",
         }),
         "settings-export": renderSettingsExportV2Page({ chrome }),
@@ -2116,6 +2143,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
             destructive: { allowed: true, canChange: true },
+            showCards: true,
             activity: PREVIEW_AI_ACTIVITY,
             now: PREVIEW_AI_NOW,
             timezone: "UTC",
@@ -2126,6 +2154,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
             destructive: { allowed: false, canChange: false },
+            showCards: false,
             activity: [
                 PREVIEW_AI_ACTIVITY[0],
                 {
@@ -2144,6 +2173,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             connections: [],
             destructive: { allowed: true, canChange: true },
+            showCards: true,
             activity: [],
             now: PREVIEW_AI_NOW,
             timezone: "UTC",
@@ -2164,6 +2194,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
             destructive: { allowed: true, canChange: true },
+            showCards: true,
             activity: PREVIEW_AI_ACTIVITY,
             now: PREVIEW_AI_NOW,
             timezone: "UTC",
@@ -2214,6 +2245,53 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             weights: SCORE_PRESETS.planet,
             isSet: true,
         }),
+        "settings-restock": renderSettingsRestockV2Page({
+            chrome,
+            restock: {
+                enabled: true,
+                weekday: 0,
+                time: "09:00",
+                lastRunOn: "2026-11-08",
+                lastRunAdded: 3,
+            },
+            canManage: true,
+        }),
+        "settings-readers": renderSettingsReadersV2Page({
+            chrome,
+            socialReaders: { tiktok: true, facebook: false },
+            blockedCount: 3,
+            isOwner: true,
+            canManage: true,
+        }),
+        "settings-dismissed": renderSettingsDismissedV2Page({
+            chrome,
+            dismissals: [
+                {
+                    id: "d1",
+                    householdId: H,
+                    code: "fridge.expiring",
+                    subjectKind: "fridge_item",
+                    subjectId: "fi-1",
+                    relatedKey: "",
+                    dismissedBy: ME.userId,
+                    createdAt: "2026-11-10T12:00:00Z",
+                },
+                {
+                    id: "d2",
+                    householdId: H,
+                    code: "fridge.expiring",
+                    subjectKind: "fridge_item",
+                    subjectId: "fi-2",
+                    relatedKey: "",
+                    dismissedBy: ME.userId,
+                    createdAt: "2026-11-10T12:05:00Z",
+                },
+            ],
+            subjectNames: new Map([
+                ["fridge_item:fi-1", "Greek yogurt"],
+                ["fridge_item:fi-2", "Spinach"],
+            ]),
+        }),
         "settings-stores": renderSettingsStoresV2Page({
             chrome,
             stores: PREVIEW_STORE_SUMMARIES,
@@ -2243,51 +2321,25 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 openModalId: STORE_DELETE_SHEET_ID,
             }) as never,
         ),
-        "possible-duplicates": (() => {
-            const dupPairs = possibleDuplicates(
-                catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
-                new Map(),
-                new Set(),
-                new Set(),
+        // FigCraft 62847 / 63301 (the list, its first menu open) and 63177.
+        "settings-duplicates": (() => {
+            const { pairs, refCounts } = duplicatesFixture();
+            return renderSettingsDuplicatesV2Page({
+                chrome,
+                pairs,
+                refCounts,
+            }).replace(
+                '<details class="fd-menu',
+                '<details open class="fd-menu',
             );
-            return renderPossibleDuplicatesPage({
-                chrome: {
-                    ...chrome,
-                    householdPossibleDuplicates: dupPairs.length,
-                },
-                pairs: dupPairs,
-                refCounts: new Map([
-                    ["f-chicken-egg", 0],
-                    ["f-eggs", 1],
-                ]),
-            } as never);
         })(),
-        "possible-duplicates-merge": (() => {
-            const dupPairs = possibleDuplicates(
-                catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
-                new Map(),
-                new Set(),
-                new Set(),
-            );
-            const pair = dupPairs[0]!;
-            return renderPossibleDuplicatesPage({
-                chrome: {
-                    ...chrome,
-                    householdPossibleDuplicates: dupPairs.length,
-                },
-                pairs: dupPairs,
-                refCounts: new Map([
-                    [pair.subject.id, 0],
-                    [pair.related.id, 0],
-                ]),
-                openModalId: DUP_MERGE_MODAL_ID,
-                mergePost: {
-                    foodA: pair.subject.id,
-                    foodB: pair.related.id,
-                    keepId: pair.subject.id,
-                    picks: {},
-                },
-            } as never);
+        "settings-duplicates-compare": (() => {
+            const { pairs, refCounts } = duplicatesFixture();
+            return renderSettingsDuplicateCompareV2Page({
+                chrome,
+                pair: pairs[0]!,
+                refCounts,
+            });
         })(),
         help: renderSettingsHelpV2Page({ chrome }),
         "needs-attention": (() => {
@@ -2746,8 +2798,6 @@ for (const theme of ["light", "dark"] as const) {
         names.push(file);
     }
     modalShotPages.push(
-        `possible-duplicates-${theme}`,
-        `possible-duplicates-merge-${theme}`,
         `recipe-${theme}`,
         `recipe-cook-${theme}`,
         `grocery-put-away-${theme}`,

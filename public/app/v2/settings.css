@@ -147,6 +147,11 @@
     gap: 10px;
 }
 
+/* The flat desktop nav only shows from 1024px; phones get the grouped menu. */
+.fd-settings-menu--desktop {
+    display: none;
+}
+
 .fd-settings-menu__group-label {
     margin: 0;
     padding: 22px 0 8px 4px;
@@ -300,10 +305,6 @@
 }
 
 .fd-settings-home-pane {
-    display: none;
-}
-
-.fd-settings-menu__link--display-nav {
     display: none;
 }
 
@@ -530,23 +531,10 @@
     cursor: pointer;
 }
 
-.fd-settings-session {
-    margin: 10px 0 0;
-    font-size: 0.9375rem;
-}
-
-.fd-settings-session a {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 51px;
-    padding: 13px var(--space-section);
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
+/* Account's Log out row: the Household row card with a red label. */
+.fd-settings-account .fd-stores-pref--danger,
+.fd-settings-account .fd-stores-pref--danger .fd-row__title {
     color: var(--status-over);
-    text-decoration: none;
-    font: 400 0.9375rem/1.25 var(--font-body);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
 }
 
 .fd-settings-footnote {
@@ -638,11 +626,20 @@
     gap: var(--fd-s-12);
 }
 
-.fd-settings-household-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--fd-s-6);
-    margin-bottom: var(--fd-s-6);
+/* The household name as the page title, the count under it (FigCraft
+ * 62119 / 62121). */
+.fd-settings-hh-head {
+    margin-bottom: var(--fd-s-12);
+}
+
+.fd-settings-title.fd-settings-hh-title {
+    font: 600 22px/28px var(--font-body);
+}
+
+.fd-settings-hh-sub {
+    margin: 4px 0 0;
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
 }
 
 .fd-settings-household-name {
@@ -950,7 +947,7 @@
 /* Hide the side menu on phone subpages (home shows the full menu). */
 .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
     .fd-settings-aside
-    .fd-settings-menu {
+    .fd-settings-menu--phone {
     display: none;
 }
 
@@ -966,14 +963,37 @@
     display: none;
 }
 
-/* The goals form: the saved name above it (FigCraft 23562), then rows with a
-   dot and a label on the left and the input on the right. */
-.fd-settings-goals-name {
+/* The goals page edits in place: the name and note under the title (FigCraft
+   23562), then cards whose rows are tap-to-edit fields. Each row is its own
+   form, saved when the field is left. */
+.fd-settings-goals-field {
     margin: 0;
+}
+
+.fd-settings-goals-name,
+.fd-settings-goals-note-input {
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    outline: none;
+}
+
+.fd-settings-goals-name {
+    width: 100%;
     font: 600 22px/26px var(--font-display);
     letter-spacing: -0.35px;
-    color: var(--text-primary);
-    overflow-wrap: anywhere;
+}
+
+.fd-settings-goals-note-input {
+    width: 100%;
+    margin-top: var(--fd-s-4);
+    /* 16px keeps iOS from zooming the page on focus. */
+    font: 400 16px/22px var(--font-body);
+    color: var(--text-secondary);
 }
 
 .fd-settings-goals-since {
@@ -983,84 +1003,146 @@
     overflow-wrap: anywhere;
 }
 
-.fd-settings-goals-name:not(:has(+ .fd-settings-goals-since)) {
-    margin-bottom: var(--fd-s-12);
+.fd-settings-goals-name::placeholder,
+.fd-settings-goals-note-input::placeholder,
+.fd-settings-goals-input::placeholder {
+    color: var(--text-tertiary);
+}
+
+.fd-settings-goals-name:focus-visible,
+.fd-settings-goals-note-input:focus-visible {
+    border-color: var(--accent-text);
+}
+
+.fd-settings-goals-name[aria-invalid="true"],
+.fd-settings-goals-note-input[aria-invalid="true"] {
+    border-color: var(--status-over);
+}
+
+.fd-settings-goals-fields {
+    padding: 0 16px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-goals-fields .fd-settings-goals-field + .fd-settings-goals-field {
+    border-top: 1px solid var(--line);
+}
+
+.fd-settings-goals-field__row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--fd-s-14);
+    min-height: 52px;
+    /* 32px chip + 13px: the frame's 59px row with its hairline. */
+    padding: 13px 0;
+    cursor: text;
+}
+
+.fd-settings-goals-field__label {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-14);
+    color: var(--text-primary);
+    font-size: 15px;
+    font-weight: 400;
+}
+
+.fd-settings-goals-field__label > .fd-dot {
+    margin-left: 8px;
+}
+
+/* The value is a chip that hugs its text, the unit inside it (FigCraft 23562):
+   a 1px line, a 1.5px accent outline on the field being edited. */
+.fd-settings-goals-field__entry {
+    display: inline-flex;
+    flex: 0 1 auto;
+    align-items: center;
+    justify-content: flex-end;
+    gap: var(--fd-s-4);
+    min-width: 0;
+    max-width: 60%;
+    padding: 6px 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: var(--surface-bg);
+    font-size: 14px;
+    line-height: 18px;
+}
+
+.fd-settings-goals-field__entry:focus-within {
+    border-color: var(--accent-text);
+    box-shadow: inset 0 0 0 0.5px var(--accent-text);
+}
+
+.fd-settings-goals-field__entry:has([aria-invalid="true"]) {
+    border-color: var(--status-over);
+}
+
+.fd-settings-goals-input {
+    /* Hugs its text where field-sizing exists (below), else a fixed width. */
+    width: 7ch;
+    min-width: 2ch;
+    max-width: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-primary);
+    outline: none;
+    box-shadow: none;
+    text-align: right;
+    font: 400 14px/18px var(--font-body);
+    /* Not the 44px touch height of a bare input: the chip is the target. */
+    min-height: 0;
+}
+
+/* The chip carries the focus outline, not the input inside it. */
+.fd-settings-goals-input:focus-visible {
+    box-shadow: none;
+}
+
+@supports (field-sizing: content) {
+    .fd-settings-goals-input {
+        field-sizing: content;
+        width: auto;
+    }
 }
 
 .fd-settings-goals-unit {
-    color: var(--text-tertiary);
-}
-
-/* "Edit goals": the full-width pill under the cards (FigCraft 23562). */
-.fd-settings-goals-edit {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 52px;
-    margin: var(--space-gutter) 0 var(--fd-s-12);
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
+    flex: none;
     color: var(--text-primary);
-    font: 600 15px/1 var(--font-body);
-    cursor: pointer;
+    font-size: 14px;
+    font-weight: 400;
+    line-height: 18px;
 }
 
-.fd-settings-goals-edit:focus-visible,
+/* The line under the Limits card (FigCraft 23562). */
+.fd-settings-goals-hint {
+    margin: 10px 0 var(--fd-s-12);
+    padding-left: 4px;
+    color: var(--text-secondary);
+    font: 400 12px/16px var(--font-body);
+}
+
+.fd-settings-goals-field__error {
+    margin: 0 0 var(--fd-s-10);
+    color: var(--status-over);
+    font-size: 0.8125rem;
+    line-height: 1.35;
+    text-align: right;
+}
+
+.fd-settings-goals-field--text .fd-settings-goals-field__error {
+    margin: var(--fd-s-4) 0 0;
+    text-align: left;
+}
+
 .fd-settings-goaldays__clear:focus-visible {
     outline: 2px solid var(--accent-text);
     outline-offset: 2px;
-}
-
-/* The edit sheet (FigCraft 48374): a label above each filled field. */
-.fd-settings-goals-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-12);
-    margin: 0;
-}
-
-.fd-settings-goals-form__title {
-    margin: 8px 0 0;
-    font: 600 0.6875rem/1.1 var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-settings-goals-form__title:first-child {
-    margin-top: 0;
-}
-
-.fd-settings-goals-form .fd-settings-field__label {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-}
-
-.fd-sheet .fd-settings-goals-form .fd-settings-input {
-    min-height: 48px;
-    padding: 0 var(--fd-s-14);
-    border: 1px solid transparent;
-    border-radius: var(--radius-lg);
-    background: var(--surface-raised);
-    /* 16px keeps iOS from zooming the page on focus. */
-    font: 400 16px/1.25 var(--font-body);
-}
-
-.fd-sheet .fd-settings-goals-form .fd-settings-input::placeholder {
-    color: var(--text-tertiary);
-}
-
-.fd-sheet .fd-settings-goals-form .fd-settings-input:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 1px;
-}
-
-.fd-sheet .fd-settings-goals-form .fd-settings-input[aria-invalid="true"] {
-    border-color: var(--status-over);
 }
 
 /* Per-day overrides: one card, each day with a Clear that posts on its own. */
@@ -1494,11 +1576,6 @@
     border-radius: var(--radius-pill);
 }
 
-.fd-scoreset__form .fd-settings-submit {
-    align-self: flex-start;
-    margin-top: 16px;
-}
-
 .fd-scoreset__note {
     margin: 12px 0 0;
     font: 400 0.8125rem/1.4 var(--font-body);
@@ -1682,9 +1759,11 @@
         top: var(--fd-s-12);
     }
 
-    .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
-        .fd-settings-aside
-        .fd-settings-menu {
+    .fd-settings-aside .fd-settings-menu--phone {
+        display: none;
+    }
+
+    .fd-settings-aside .fd-settings-menu--desktop {
         display: block;
     }
 
@@ -1694,14 +1773,6 @@
     }
 
     .fd-settings-head--phone {
-        display: none;
-    }
-
-    .fd-settings-menu__link--display-nav {
-        display: flex;
-    }
-
-    .fd-settings-menu__display-row {
         display: none;
     }
 
@@ -1715,23 +1786,10 @@
         display: none;
     }
 
-    .fd-settings-menu__group-label {
-        display: none;
-    }
-
-    .fd-settings-menu__groups {
-        gap: 2px;
-    }
-
     .fd-settings-menu__list {
         border-radius: 0;
         background: transparent;
         box-shadow: none;
-    }
-
-    .fd-settings-menu__list + .fd-settings-menu__list,
-    .fd-settings-menu__group-label + .fd-settings-menu__list {
-        margin-top: 0;
     }
 
     .fd-settings-menu__link {
@@ -1751,10 +1809,6 @@
 
     .fd-settings-menu__item + .fd-settings-menu__item {
         border-top: none;
-    }
-
-    .fd-settings-menu__chev {
-        display: none;
     }
 
     .fd-settings-menu__badge {
@@ -1839,5 +1893,252 @@
 
     .fd-settings-members-card {
         padding: var(--fd-s-6) 22px;
+    }
+}
+
+/* Settings › Household › the nine-row group, and the pages behind its rows
+ * (Restock, Recipe link readers, Dismissed notices). The rows are the stores
+ * page's `fd-stores-pref`; the card is drawn here because the stores rules are
+ * scoped to `.fd-stores`. */
+.fd-settings-hh .fd-list--card {
+    padding: 0;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    box-shadow: 0 4px 14px var(--overlay-shadow);
+}
+
+.fd-settings-hh .fd-list--card > .fd-row:last-child {
+    border-bottom: 0;
+}
+
+.fd-settings-hh .fd-list--card > .fd-row > .fd-row__body {
+    padding-inline: 16px;
+}
+
+.fd-restock-form {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: var(--fd-s-12);
+    margin: 0;
+}
+
+.fd-restock-form .fd-settings-field {
+    flex: 1 1 9rem;
+}
+
+.fd-readers .fd-stores-pref .fd-switch,
+.fd-restock .fd-stores-pref .fd-switch {
+    margin-left: auto;
+}
+
+.fd-dismissed .fd-row--dismissed .fd-row__body {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-12);
+    padding-block: var(--fd-s-10);
+}
+
+.fd-dismissed .fd-row--dismissed .fd-row__main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.fd-dismissed .fd-row--dismissed .fd-row__actions {
+    flex: none;
+    margin: 0;
+}
+
+@media (min-width: 1024px) {
+    .fd-settings-hh .fd-list--card > .fd-row > .fd-row__body {
+        padding-inline: 18px;
+    }
+}
+
+/* Long values (a household name, a time zone) shrink with an ellipsis; the
+ * label keeps its full width. */
+.fd-settings-hh .fd-stores-pref__main {
+    flex: 1 0 auto;
+}
+
+.fd-settings-hh .fd-stores-pref__value {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.fd-restock-form .fd-settings-submit {
+    flex: none;
+}
+
+/* Settings › Nutrients shown: each row's switch is its own small form. */
+.fd-nutrients .fd-stores-pref .fd-switch {
+    margin-left: auto;
+}
+
+/* Settings › Saved foods & recipes › Possible duplicates, and its compare page
+ * (FigCraft 62847, 63301, 63177). The card is the Household one. */
+.fd-settings-saved-dups {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-12);
+    min-height: 48px;
+    margin-bottom: var(--fd-s-12);
+    padding: 0 16px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    color: var(--text-primary);
+    font: 400 15px/20px var(--font-body);
+    text-decoration: none;
+}
+
+.fd-settings-saved-dups__label {
+    flex: 1 1 auto;
+}
+
+.fd-settings-saved-dups .fd-settings-menu__chev {
+    flex: none;
+    color: var(--text-tertiary);
+}
+
+.fd-dups__lead {
+    margin: 0 0 var(--fd-s-12);
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-dups .fd-row--dup .fd-row__main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Row bodies are stacking contexts (z-index 1), so an open menu's row rises
+ * above the rows after it instead of showing their ⋯ through its panel. */
+.fd-dups .fd-row--dup:has(.fd-menu[open]) > .fd-row__body {
+    z-index: 3;
+}
+
+.fd-dups .fd-row--dup .fd-row__title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The whole row of the keep radio is the label, so the tap target is the row. */
+.fd-dup-choice {
+    cursor: pointer;
+}
+
+.fd-dup-radio {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    accent-color: var(--accent-fill);
+}
+
+.fd-dup-compare .fd-dup-merge-form,
+.fd-dup-compare .fd-dup-separate-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+    margin: 0;
+}
+
+.fd-dup-compare .fd-dup-separate-form {
+    margin-top: var(--fd-s-12);
+}
+
+.fd-dup-differ {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-dup-differ__title {
+    margin: 0;
+    font: 600 15px/20px var(--font-body);
+}
+
+.fd-dup-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 10px 16px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--surface-panel);
+}
+
+.fd-dup-field__legend {
+    padding: 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-dup-pick {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-10);
+    min-height: 32px;
+    font: 400 15px/20px var(--font-body);
+    cursor: pointer;
+}
+
+.fd-dup-pick input {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--accent-fill);
+}
+
+.fd-dup-btn {
+    width: 100%;
+    min-height: 52px;
+    padding: 0 20px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 15px/20px var(--font-body);
+    cursor: pointer;
+}
+
+.fd-dup-btn--primary {
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+/* The primary button names the radio's choice: both names are in the markup and
+ * the unchosen one is hidden, so it reads right with no script. */
+.fd-dup-btn__b,
+.fd-dup-merge-form:has(input[data-fd-dup-keep="b"]:checked) .fd-dup-btn__a {
+    display: none;
+}
+
+.fd-dup-merge-form:has(input[data-fd-dup-keep="b"]:checked) .fd-dup-btn__b {
+    display: inline;
+}
+
+@media (min-width: 1024px) {
+    .fd-dups {
+        max-width: 680px;
+    }
+
+    .fd-dup-choices {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .fd-dup-choices > .fd-row {
+        border-bottom: 0;
+    }
+
+    .fd-dup-choices > .fd-row + .fd-row {
+        border-left: 1px solid var(--line);
     }
 }

@@ -154,13 +154,22 @@ describe("Household member rows", () => {
             chrome: base(on, versions),
             householdName: "Home",
             members: MEMBERS,
-            stores: [],
+            storeCount: 0,
+            location: null,
+            householdTimezone: null,
+            effectiveTimezone: "UTC",
+            restock: {
+                enabled: false,
+                weekday: 6,
+                time: "07:00",
+                lastRunOn: null,
+            },
+            unverifiedRecipeExpiryDays: null,
+            dismissedCount: 0,
             isOwner: true,
             canManage: true,
             viewerUserId: ME,
             noticeResult: EMPTY_NOTICES,
-            duplicatePairs: [],
-            refCounts: new Map(),
         });
 
     test("each member with a picture shows it; others keep initials", () => {
@@ -256,11 +265,8 @@ describe("Settings > Account", () => {
             chrome: base(photo !== undefined, new Map()),
             backHref: "/",
             displayName: "Ethan Flow",
+            email: "ethan@example.com",
             timezone: "UTC",
-            weightUnit: "",
-            widgetsEnabled: true,
-            alcoholTrackingEnabled: false,
-            drinkUnit: "",
             photo,
         });
 

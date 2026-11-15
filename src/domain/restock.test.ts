@@ -748,6 +748,11 @@ test("runRestockCheck memory commits lines and lastRunOn", async () => {
     };
     await runRestockCheck(deps, sat);
     expect(prefs.restock.lastRunOn).toBe("2026-06-06");
+    // The stored count is the lines actually added.
+    expect(prefs.restock.lastRunAdded).toBe(1);
+    expect(prefs.restock.lastRunAdded).toBe(
+        (await grocery.listLines(HH)).length,
+    );
     expect((await grocery.listLines(HH)).length).toBe(1);
     expect(logs[0]).toContain("added=1");
     expect(logs[0]).not.toContain("Milk");
@@ -811,6 +816,8 @@ test("runRestockCheck skips a line a card added after the run read the list", as
     expect(lines).toHaveLength(1);
     expect(lines[0]!.source).toBe("manual");
     expect(prefs.restock.lastRunOn).toBe("2026-06-06");
+    // The run's own line was skipped (the card's was already listed): none added.
+    expect(prefs.restock.lastRunAdded).toBe(0);
 });
 
 test("runRestockCheck rolls back on insert failure", async () => {

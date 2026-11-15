@@ -65,7 +65,7 @@ export const NOTICE_ROUTES: Record<
         const foodRel = notice.related.find((r) => r.kind === "food");
         if (notice.subject.kind !== "food" || !foodRel) return null;
         const pair = normalizePairIds(notice.subject.id, foodRel.id);
-        return `/settings/household/possible-duplicates#dup-${encodeURIComponent(pair.subjectId)}-${encodeURIComponent(pair.relatedKey)}`;
+        return `/settings/saved/duplicates#dup-${encodeURIComponent(pair.subjectId)}-${encodeURIComponent(pair.relatedKey)}`;
     },
 };
 

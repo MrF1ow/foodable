@@ -55,7 +55,7 @@ function groupOpenLink(
             if (isOneTapNotice(sample)) return null;
             if (sample.code === "food.possible_duplicate") {
                 return {
-                    href: "/settings/household/possible-duplicates",
+                    href: "/settings/saved/duplicates",
                     label: "Open possible duplicates",
                 };
             }

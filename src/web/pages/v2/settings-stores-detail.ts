@@ -284,7 +284,7 @@ export function renderSettingsStoreV2Body(view: SettingsStoreV2View): string {
 export function renderSettingsStoreV2Page(view: SettingsStoreV2View): string {
     return renderSettingsV2Page({
         chrome: view.chrome,
-        page: "household",
+        page: "stores",
         title: view.store.name,
         backHref: STORES_PATH,
         backLabel: "Stores",

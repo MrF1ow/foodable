@@ -89,7 +89,7 @@ const GLOSSARY_COPY: GlossaryCopy[] = [
     {
         id: "possible-duplicates",
         title: "Possible duplicates",
-        body: "Household › Possible duplicates lists plain foods that may be the same thing: names with the same words up to plurals, or one name containing every word of the other. Scanned products and foods filed as products never appear. Merge… keeps one name, lets you choose conflicting nutrition or unit values, and combines allergens; the other name becomes another name for it. Keep separate hides the pair until a food is merged away. Undo a Keep separate from Needs attention › Show dismissed.",
+        body: "Settings › Saved foods & recipes › Possible duplicates lists plain foods that may be the same thing: names with the same words up to plurals, or one name containing every word of the other. Scanned products and foods filed as products never appear. Each pair has a ⋯ menu: Merge into either food, Not the same, or More… to compare the two first, choose which one to keep and pick conflicting nutrition or unit values. A merge combines allergens, and the other name becomes another name for the food you keep. Not the same (Keep them separate on the compare page) hides the pair until a food is merged away. Undo a Keep separate from Needs attention › Show dismissed.",
     },
 ];
 

@@ -1,6 +1,9 @@
 import type { AppChromeBase } from "../../attention.js";
 import type { AiConnection } from "../../../db/tokens.js";
-import type { AgentActionEntry } from "../../../domain/agent-actions.js";
+import {
+    AGENT_DESTRUCTIVE_SETTING,
+    type AgentActionEntry,
+} from "../../../domain/agent-actions.js";
 import { mayUndoAgentAction } from "../../../domain/notices-agent.js";
 import { dateInTz } from "../../../domain/tz.js";
 import { esc } from "../../components/v2/html.js";
@@ -22,6 +25,7 @@ export const UNKNOWN_APP_MARKER = "unknown";
 
 export const AI_DISCONNECT_PATH = "/settings/ai-connections/disconnect";
 export const AI_DESTRUCTIVE_PATH = "/settings/ai-connections/destructive";
+export const AI_WIDGETS_PATH = "/settings/ai-connections/widgets";
 export const AI_PAGE_PATH = "/settings/ai-connections";
 
 /** How many agent actions the activity list shows. */
@@ -41,9 +45,8 @@ export function parseAiUndoBack(value: string | undefined): AiUndoBack {
     return AI_UNDO_BACK_PATHS.find((path) => path === value) ?? AI_PAGE_PATH;
 }
 
-/** Said under the switch, and by the tools when it is Off. */
-export const AI_DESTRUCTIVE_HELP =
-    "Off: agents can still read and add, but anything that deletes, clears or overwrites is refused.";
+/** Said under the list of recent agent changes. */
+export const AI_UNDO_FOOTER = "Agent changes can be undone for 24 hours.";
 
 /** One line of the activity list, ready to render. */
 export type AgentActivityRow = {
@@ -68,6 +71,8 @@ export type SettingsAiV2View = {
     connections: readonly AiConnection[];
     /** The household switch; only the owner may change it. */
     destructive: { allowed: boolean; canChange: boolean };
+    /** This member's `widgets_enabled`: the cards agents show in chat. */
+    showCards: boolean;
     /** Newest first. */
     activity: readonly AgentActivityRow[];
     now: Date;
@@ -231,17 +236,43 @@ function disconnectSheet(
     });
 }
 
-function destructiveSection(view: SettingsAiV2View): string {
+/** One switch row of the Agents group; the form posts the opposite value. */
+function agentSwitchRow(opts: {
+    action: string;
+    field: string;
+    on: boolean;
+    title: string;
+    sub: string;
+    turboFalse?: boolean;
+}): string {
+    const text = `<span class="fd-settings-ai__text"><span class="fd-settings-ai__name">${esc(opts.title)}</span><span class="fd-settings-ai__meta">${esc(opts.sub)}</span></span>`;
+    const turbo = opts.turboFalse ? ' data-turbo="false"' : "";
+    return `<li class="fd-settings-ai__row"><form method="post" action="${esc(opts.action)}" class="fd-settings-ai__switch-form"${turbo}><input type="hidden" name="${esc(opts.field)}" value="${opts.on ? "0" : "1"}" />${text}<button type="submit" class="fd-switch" role="switch" aria-checked="${opts.on ? "true" : "false"}" aria-label="${esc(opts.title)}"><span class="fd-switch__knob" aria-hidden="true"></span></button></form></li>`;
+}
+
+export const AI_SHOW_CARDS_TITLE = "Show cards in chat";
+export const AI_DESTRUCTIVE_TITLE = AGENT_DESTRUCTIVE_SETTING;
+
+function agentsSection(view: SettingsAiV2View): string {
     const { allowed, canChange } = view.destructive;
-    const title = "Agents may make destructive changes";
-    const text = `<span class="fd-settings-ai__text"><span class="fd-settings-ai__name">${esc(title)}</span><span class="fd-settings-ai__meta">${allowed ? "Allowed" : "Off"}</span></span>`;
-    const row = canChange
-        ? `<li class="fd-settings-ai__row"><form method="post" action="${AI_DESTRUCTIVE_PATH}" class="fd-settings-ai__switch-form" data-turbo="false"><input type="hidden" name="allowed" value="${allowed ? "0" : "1"}" />${text}<button type="submit" class="fd-switch" role="switch" aria-checked="${allowed ? "true" : "false"}" aria-label="${esc(title)}"><span class="fd-switch__knob" aria-hidden="true"></span></button></form></li>`
-        : `<li class="fd-settings-ai__row"><span class="fd-settings-ai__text"><span class="fd-settings-ai__name">${esc(title)}</span></span><span class="fd-settings-ai__status">${allowed ? "Allowed" : "Off"}</span></li>`;
-    const readOnly = canChange
-        ? ""
-        : " Only the household owner can change this.";
-    return `<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Agent changes</h2><ul class="fd-settings-ai__list" data-fd-ai-destructive>${row}</ul><p class="fd-settings-ai__help">${esc(AI_DESTRUCTIVE_HELP + readOnly)}</p>`;
+    const cards = agentSwitchRow({
+        action: AI_WIDGETS_PATH,
+        field: "enabled",
+        on: view.showCards,
+        title: AI_SHOW_CARDS_TITLE,
+        sub: "Your goals and meals as widgets",
+    });
+    const destructive = canChange
+        ? agentSwitchRow({
+              action: AI_DESTRUCTIVE_PATH,
+              field: "allowed",
+              on: allowed,
+              title: AI_DESTRUCTIVE_TITLE,
+              sub: "Owner only · logged and undoable",
+              turboFalse: true,
+          })
+        : `<li class="fd-settings-ai__row"><span class="fd-settings-ai__text"><span class="fd-settings-ai__name">${esc(AI_DESTRUCTIVE_TITLE)}</span><span class="fd-settings-ai__meta">Owner only · logged and undoable</span></span><span class="fd-settings-ai__status">${allowed ? "Allowed" : "Off"}</span></li>`;
+    return `<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Agents</h2><ul class="fd-settings-ai__list" data-fd-ai-agents>${cards}${destructive}</ul>`;
 }
 
 function activityControl(row: AgentActivityRow, back: AiUndoBack): string {
@@ -268,8 +299,8 @@ function activitySection(view: SettingsAiV2View): string {
     const list =
         view.activity.length === 0
             ? `<p class="fd-settings-ai__empty">Nothing yet. When an agent deletes, clears or overwrites something, it shows here and you can undo it for 24 hours.</p>`
-            : `<ul class="fd-settings-ai__list" data-fd-ai-activity>${view.activity.map(activityRow).join("")}</ul>`;
-    return `<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Agent activity</h2>${list}`;
+            : `<ul class="fd-settings-ai__list" data-fd-ai-activity>${view.activity.map(activityRow).join("")}</ul><p class="fd-settings-ai__help" data-fd-ai-undo-footer>${esc(AI_UNDO_FOOTER)}</p>`;
+    return `<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Recent agent changes</h2>${list}`;
 }
 
 export function renderSettingsAiV2Body(view: SettingsAiV2View): string {
@@ -280,7 +311,7 @@ export function renderSettingsAiV2Body(view: SettingsAiV2View): string {
     const sheets = view.connections
         .map((c, i) => disconnectSheet(c, i, view))
         .join("");
-    return `${settingsPageHeader("AI connections")}${String(settingsErrorBanner(view.error))}<p class="fd-settings-ai__lead">Agents you connect can log meals, read your fridge and plan groceries for this household.</p>${list}<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Connect a new agent</h2><div class="fd-settings-ai__address" data-fd-copy-address><code id="fd-ai-mcp-url" data-fd-copy-source>${esc(view.mcpUrl)}</code><button type="button" class="fd-settings-ai__copy" data-fd-copy-trigger aria-label="Copy address">${String(iconCopy())}</button></div><p class="fd-visually-hidden" role="status" aria-live="polite" data-fd-copy-status></p><p class="fd-settings-ai__help">Add this address as a remote MCP server in your agent, then sign in when it asks.</p>${destructiveSection(view)}${activitySection(view)}${sheets}`;
+    return `${settingsPageHeader("AI connections")}${String(settingsErrorBanner(view.error))}<p class="fd-settings-ai__lead">Agents you connect can log meals, read your fridge and plan groceries for this household.</p>${list}<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Connect a new agent</h2><div class="fd-settings-ai__address" data-fd-copy-address><code id="fd-ai-mcp-url" data-fd-copy-source>${esc(view.mcpUrl)}</code><button type="button" class="fd-settings-ai__copy" data-fd-copy-trigger aria-label="Copy address">${String(iconCopy())}</button></div><p class="fd-visually-hidden" role="status" aria-live="polite" data-fd-copy-status></p><p class="fd-settings-ai__help">Add this address as a remote MCP server in your agent, then sign in when it asks.</p>${agentsSection(view)}${activitySection(view)}${sheets}`;
 }
 
 export function renderSettingsAiV2Page(view: SettingsAiV2View): string {

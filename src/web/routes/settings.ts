@@ -1,7 +1,10 @@
 import { Hono, type Context } from "hono";
 import { parseAppearanceInput } from "../shell.js";
 
-import { parseNutritionPrefsInput } from "../pages/v2/settings-account.js";
+import {
+    ACCOUNT_TIMEZONE_SHEET_ID,
+    parseNutritionPrefsInput,
+} from "../pages/v2/settings-account.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
@@ -10,6 +13,8 @@ import {
     renderSettingsAccountV2Route,
     renderSettingsDisplayV2Route,
     renderSettingsExportV2Route,
+    renderSettingsNutrientsV2Route,
+    renderSettingsUnitsV2Route,
     alcoholOf,
     renderSettingsGoalsV2Route,
     renderSettingsHelpRoute,
@@ -36,6 +41,7 @@ import {
     AI_DESTRUCTIVE_PATH,
     AI_DISCONNECT_PATH,
     AI_PAGE_PATH,
+    AI_WIDGETS_PATH,
     parseAiUndoBack,
     UNKNOWN_APP_MARKER,
 } from "../pages/v2/settings-ai.js";
@@ -71,18 +77,33 @@ import {
 } from "../../domain/signup.js";
 import {
     getProfile,
+    isHideableNutrient,
+    setNutrientHidden,
     timezoneFromProfile,
     upsertProfile,
 } from "../../db/profiles.js";
 import {
+    isSwitchableNutrient,
+    NUTRIENTS_PATH,
+} from "../pages/v2/settings-nutrients.js";
+import {
+    UNITS_DRINKS_SHEET_ID,
+    UNITS_PATH,
+    UNITS_WEIGHT_SHEET_ID,
+} from "../pages/v2/settings-units.js";
+import { isDrinkUnit } from "../../alcohol.js";
+import { isWeightUnit } from "../../domain/units.js";
+import {
     clearGoalDays,
     getNutritionGoals,
     upsertNutritionGoals,
+    type NutritionGoalsInput,
 } from "../../db/nutrition.js";
 import { isCalendarDate } from "../../domain/insights.js";
 import { todayInTz, validateTz } from "../../domain/tz.js";
 import {
     GOALS_FORM_FIELDS,
+    goalsDraftFrom,
     parseGoalsForm,
     type GoalsFormDraft,
 } from "../pages/v2/settings-goals-form.js";
@@ -116,6 +137,16 @@ settingsRoutes.get("/settings/account", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
+settingsRoutes.get("/settings/units", requireSiteUser, async (c) => {
+    const page = await renderSettingsUnitsV2Route(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
+settingsRoutes.get("/settings/nutrients", requireSiteUser, async (c) => {
+    const page = await renderSettingsNutrientsV2Route(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
 settingsRoutes.get("/settings/display", requireSiteUser, async (c) => {
     const page = await renderSettingsDisplayV2Route(c.get("userId"));
     return c.html(page.html, page.status);
@@ -126,35 +157,72 @@ settingsRoutes.get("/settings/goals", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
-settingsRoutes.post("/settings/goals", requireMember, async (c) => {
+// One goal at a time: the page edits in place and each field posts alone when
+// it is left. The new value is validated against the stored goals (so the
+// "at least one daily target" rule still holds), and only that column is
+// written, so two quick edits to different fields cannot overwrite each other.
+settingsRoutes.post("/settings/goals/field", requireMember, async (c) => {
     const userId = c.get("userId");
     const body = await c.req.parseBody();
-    const values = Object.fromEntries(
-        GOALS_FORM_FIELDS.map((f) => [f, formText(body, f)]),
-    ) as GoalsFormDraft;
+    const field = formText(body, "field");
+    const known = GOALS_FORM_FIELDS.find((f) => f === field);
     const profile = await getProfile(userId);
+    const alcohol = alcoholOf(profile);
+    // The alcohol field is not on the page with tracking off.
+    if (!known || (known === "daily_alcohol_g" && alcohol == null)) {
+        return c.text("Unknown goals field.", 400);
+    }
+    const value = formText(body, "value");
     const stored = await getNutritionGoals(userId);
-    const parsed = parseGoalsForm(values, {
-        alcohol: alcoholOf(profile),
-        stored,
-    });
+    const values = {
+        ...goalsDraftFrom(stored, alcohol),
+        [known]: value,
+    } as GoalsFormDraft;
+    let parsed = parseGoalsForm(values, { alcohol, stored });
+    let judgedAlone = false;
+    // A stored value the form's bounds no longer accept (one set through MCP,
+    // or rounded into a drink unit) must not block saving another field: judge
+    // the posted field alone, with the refused stored ones left out.
+    if (!parsed.ok && parsed.invalid && !parsed.invalid.includes(known)) {
+        const others = Object.fromEntries(
+            parsed.invalid.map((f) => [f, ""]),
+        ) as Partial<GoalsFormDraft>;
+        const retry = parseGoalsForm(
+            { ...values, ...others },
+            {
+                alcohol,
+                stored,
+            },
+        );
+        if (retry.ok) {
+            parsed = retry;
+            judgedAlone = true;
+        }
+    }
     if (!parsed.ok) {
         const page = await renderSettingsGoalsV2Route(userId, {
             error: parsed.errors.join(" "),
             draft: values,
-            invalid: parsed.invalid,
+            invalid:
+                parsed.invalid && parsed.invalid.length > 0
+                    ? parsed.invalid
+                    : [known],
         });
         // A non-member gets the membership page with its own status.
-        return c.html(page.html, page.status === 200 ? 400 : page.status);
+        return c.html(page.html, page.status === 200 ? 422 : page.status);
     }
     // A save that changes a target is the day those goals were set; a
     // rename alone is not, the same rule set_nutrition_goals follows.
-    const input = parsed.changesTargets
-        ? {
-              ...parsed.input,
-              goals_set_on: todayInTz(timezoneFromProfile(profile) ?? "UTC"),
-          }
-        : parsed.input;
+    const input: NutritionGoalsInput = { [known]: parsed.input[known] };
+    // Judged alone, the left-out fields read as changed: only this one counts.
+    const changesTargets = judgedAlone
+        ? known !== "goal_name" &&
+          known !== "goal_note" &&
+          parsed.input[known] !== (stored?.[known] ?? null)
+        : parsed.changesTargets;
+    if (changesTargets) {
+        input.goals_set_on = todayInTz(timezoneFromProfile(profile) ?? "UTC");
+    }
     await upsertNutritionGoals(userId, input);
     return redirectWithToast(c, "/settings/goals", "settings.goals.saved");
 });
@@ -271,7 +339,7 @@ settingsRoutes.post(
             await updateHouseholdScoreDefault(store, member.householdId, null);
             return redirectWithToast(
                 c,
-                SCORE_PATH,
+                SCORE_HOUSEHOLD_PATH,
                 "settings.score.household-cleared",
             );
         }
@@ -294,9 +362,10 @@ settingsRoutes.post(
             member.householdId,
             parsed.choice,
         );
+        // Back to the editor: the default saves as it changes.
         return redirectWithToast(
             c,
-            SCORE_PATH,
+            SCORE_HOUSEHOLD_PATH,
             "settings.score.household-saved",
         );
     },
@@ -370,6 +439,23 @@ settingsRoutes.post(AI_DESTRUCTIVE_PATH, requireOwner, async (c) => {
             ? "settings.ai.destructive-allowed"
             : "settings.ai.destructive-off",
     );
+});
+
+// "Show cards in chat": the member's own switch (profiles.widgets_enabled).
+settingsRoutes.post(AI_WIDGETS_PATH, requireMember, async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.parseBody();
+    const value = formText(body, "enabled").trim();
+    if (value !== "0" && value !== "1") {
+        const page = await renderSettingsAiV2Route(userId, {
+            mcpUrl: `${getBaseUrl(c)}/mcp`,
+            error: "Choose On or Off.",
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    await upsertProfile(userId, { widgets_enabled: value === "1" });
+    // toast: none the switch shows the new state
+    return c.redirect(AI_PAGE_PATH, 303);
 });
 
 const UNDO_REFUSED_STATUS: Record<
@@ -460,6 +546,70 @@ settingsRoutes.post("/settings/export", requireSiteUser, async (c) => {
     return c.redirect(result.downloadPath, 303);
 });
 
+// Weight and drink units (Settings › Units). Each field is written only when
+// the form carries it, and an empty value clears the choice.
+settingsRoutes.post(UNITS_PATH, requireMember, async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.parseBody();
+    const weight = formText(body, "preferred_weight_unit").trim();
+    const drink = formText(body, "preferred_drink_unit").trim();
+    const hasWeight = "preferred_weight_unit" in body;
+    const hasDrink = "preferred_drink_unit" in body;
+    if (hasWeight && weight !== "" && !isWeightUnit(weight)) {
+        const page = await renderSettingsUnitsV2Route(userId, {
+            error: "Choose kg or lb.",
+            openSheet: UNITS_WEIGHT_SHEET_ID,
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    if (hasDrink && drink !== "" && !isDrinkUnit(drink)) {
+        const page = await renderSettingsUnitsV2Route(userId, {
+            error: "Choose US drinks or UK units.",
+            openSheet: UNITS_DRINKS_SHEET_ID,
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    const prefs = parseNutritionPrefsInput({
+        preferred_weight_unit: hasWeight ? weight : undefined,
+        preferred_drink_unit: hasDrink ? drink : undefined,
+    });
+    if (
+        prefs.preferred_weight_unit !== undefined ||
+        prefs.preferred_drink_unit !== undefined
+    ) {
+        await upsertProfile(userId, {
+            preferred_weight_unit: prefs.preferred_weight_unit,
+            preferred_drink_unit: prefs.preferred_drink_unit,
+        });
+    }
+    // toast: none the row shows the new value
+    return c.redirect(UNITS_PATH, 303);
+});
+
+// One Nutrients shown switch. Alcohol is its own opt-in; fiber, sugar and
+// caffeine are kept in the member's hidden list, edited in place.
+settingsRoutes.post(NUTRIENTS_PATH, requireMember, async (c) => {
+    const userId = c.get("userId");
+    const body = await c.req.parseBody();
+    const nutrient = formText(body, "nutrient").trim();
+    const shown = formText(body, "shown").trim();
+    if (!isSwitchableNutrient(nutrient) || (shown !== "0" && shown !== "1")) {
+        const page = await renderSettingsNutrientsV2Route(userId, {
+            error: "Choose a nutrient and On or Off.",
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    if (nutrient === "alcohol") {
+        await upsertProfile(userId, {
+            alcohol_tracking_enabled: shown === "1",
+        });
+    } else if (isHideableNutrient(nutrient)) {
+        await setNutrientHidden(userId, nutrient, shown === "0");
+    }
+    // toast: none the switch shows the new state
+    return c.redirect(NUTRIENTS_PATH, 303);
+});
+
 settingsRoutes.post("/settings/display", requireMember, async (c) => {
     const userId = c.get("userId");
     const body = await c.req.parseBody();
@@ -496,6 +646,18 @@ settingsRoutes.get("/settings/household-settings", async (c) => {
     return c.redirect(APP_PATHS.settingsHousehold, 301);
 });
 
+// A checkbox posts nothing when it is off, so "absent" cannot tell Off from
+// "this form has no such field". A form that has the checkbox says so with a
+// hidden `has_<name>` marker; without the marker or the value the field is
+// left out of the patch, and the stored choice survives a partial save.
+function carriedCheckbox(
+    body: Parameters<typeof formText>[0],
+    name: string,
+): boolean | undefined {
+    if (!(name in body) && !(`has_${name}` in body)) return undefined;
+    return formText(body, name) === "true";
+}
+
 settingsRoutes.post("/settings", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
@@ -512,16 +674,19 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
         const prefs = parseNutritionPrefsInput({
             timezone: body.timezone,
             preferred_weight_unit: body.preferred_weight_unit,
-            widgets_enabled: formText(body, "widgets_enabled") === "true",
-            alcohol_tracking_enabled:
-                formText(body, "alcohol_tracking_enabled") === "true",
+            widgets_enabled: carriedCheckbox(body, "widgets_enabled"),
+            alcohol_tracking_enabled: carriedCheckbox(
+                body,
+                "alcohol_tracking_enabled",
+            ),
             preferred_drink_unit: body.preferred_drink_unit,
         });
         if (prefs.timezone) {
             if (!validateTz(prefs.timezone)) {
                 const page = await renderSettingsAccountPage(userId, {
                     backHref,
-                    error: "Enter a valid IANA timezone.",
+                    error: "Choose a time zone from the list.",
+                    openSheetId: ACCOUNT_TIMEZONE_SHEET_ID,
                 });
                 return c.html(page.html, 400);
             }
@@ -529,6 +694,10 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
             delete prefs.timezone;
         }
         await upsertProfile(userId, prefs);
+        // The Account time zone sheet posts only the zone.
+        if (typeof body.timezone === "string") {
+            return redirectWithToast(c, redirectTo, "settings.timezone.saved");
+        }
         return redirectWithToast(c, redirectTo, "settings.nutrition.saved");
     }
     if ("theme" in body) {

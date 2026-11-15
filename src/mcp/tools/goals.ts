@@ -45,6 +45,7 @@ import {
     GOALS_ITEM,
     TOTALS_ITEM,
     DRINK_UNIT_FIELD,
+    HIDDEN_NUTRIENTS_FIELD,
     goalsPayloadOf,
     totalsPayloadOf,
     formatProgress,
@@ -192,6 +193,7 @@ function hasGoalDayScope(args: {
 export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
     const {
         alcohol,
+        hiddenNutrients,
         personSchema,
         nutritionWriteSchema,
         actorUserId,
@@ -700,6 +702,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                 meal_count: z.number(),
                 water_entries: z.number(),
                 drink_unit: DRINK_UNIT_FIELD,
+                hidden_nutrients: HIDDEN_NUTRIENTS_FIELD,
                 goals: GOALS_ITEM.nullable(),
                 totals: TOTALS_ITEM,
                 weight: z
@@ -806,6 +809,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         structuredContent: {
                             date: targetDate,
                             drink_unit: alcohol,
+                            hidden_nutrients: [...hiddenNutrients],
                             meal_count: meals.length,
                             water_entries: water.length,
                             goals: goalsPayload,

@@ -247,6 +247,78 @@ describe("the member page", () => {
     });
 });
 
+describe("autosave", () => {
+    const forms = (html: string) =>
+        [...html.matchAll(/<form\b[^>]*>/g)].map((m) => m[0]);
+
+    test("the score page has no Save weights button and no Turbo opt-out on its forms", () => {
+        const html = renderSettingsScoreV2Page(
+            view({ canEditHousehold: true }),
+        );
+        expect(html).not.toContain("Save weights");
+        expect(html).not.toContain("Save household default");
+        for (const form of forms(html)) {
+            expect(form).not.toContain('data-turbo="false"');
+        }
+        // The choice form, both switch forms and the reset button save themselves.
+        const marked = forms(html).filter((f) =>
+            f.includes('data-fd-autosave="form"'),
+        );
+        expect(marked).toHaveLength(4);
+        expect(html).toContain(
+            'class="fd-visually-hidden">Save</button></form>',
+        );
+    });
+
+    test("the reset buttons are autosave forms too, so they queue behind a save in flight", () => {
+        const own = renderSettingsScoreV2Page(view());
+        const reset = forms(own).find((f) => f.includes("fd-scoreset__reset"));
+        expect(reset).toContain('data-fd-autosave="form"');
+        const household = renderSettingsScoreHouseholdV2Page({
+            chrome,
+            preset: "planet" as const,
+            weights: SCORE_PRESETS.planet,
+            isSet: true,
+        });
+        expect(
+            forms(household).find((f) => f.includes("fd-scoreset__reset")),
+        ).toContain('data-fd-autosave="form"');
+    });
+
+    test("the household default page saves itself too, and a refused draft is marked", () => {
+        const base = {
+            chrome,
+            preset: "planet" as const,
+            weights: SCORE_PRESETS.planet,
+            isSet: true,
+        };
+        const html = renderSettingsScoreHouseholdV2Page(base);
+        expect(html).not.toContain("Save household default");
+        for (const form of forms(html)) {
+            expect(form).not.toContain('data-turbo="false"');
+        }
+        const choice = forms(html).find((f) => f.includes("fd-scoreset__form"));
+        expect(choice).toContain('data-fd-autosave="form"');
+        expect(choice).not.toContain("data-fd-invalid");
+        const refused = renderSettingsScoreHouseholdV2Page({
+            ...base,
+            error: "No.",
+            draft: {
+                preset: "custom",
+                weights: {
+                    nutrition: "0",
+                    processing: "0",
+                    additives: "0",
+                    environment: "0",
+                },
+            },
+        });
+        expect(
+            forms(refused).find((f) => f.includes("fd-scoreset__form")),
+        ).toContain("data-fd-invalid");
+    });
+});
+
 describe("the household default page", () => {
     test("offers Clear only when a default is set", () => {
         const base = {

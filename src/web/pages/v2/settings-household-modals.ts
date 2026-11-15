@@ -25,7 +25,7 @@ export type HouseholdOwnerModalsView = {
     members: HouseholdMember[];
     /** Owner only: roles, removal, transfer. */
     isOwner: boolean;
-    /** Owner or admin: add a member, add a store. */
+    /** Owner or admin: add a member. */
     canManage: boolean;
     error?: string;
     openModalId?: string;
@@ -305,23 +305,12 @@ ${memberActionsSlot(manageMember)}`,
     );
 }
 
-/** Owner/admin dialogs for the household settings page (add member, stores, token, roles). */
+/** Owner/admin dialogs for the household settings page (add member, token, roles). */
 export function renderHouseholdV2OwnerModals(
     view: HouseholdOwnerModalsView,
 ): string {
     return [
         view.canManage ? addMemberModal(view) : "",
-        view.canManage
-            ? modal({
-                  id: HOUSEHOLD_ADD_STORE_MODAL_ID,
-                  title: "Add store",
-                  openOnLoad: modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID),
-                  body: `${view.error && modalOpen(view, HOUSEHOLD_ADD_STORE_MODAL_ID) ? errorBanner(view.error) : ""}<form method="post" action="/settings/household/stores" class="add-store">
-${field({ id: "store_name", label: "Grocery store", control: `<input id="store_name" name="name" required maxlength="80" autocomplete="off" />` })}
-<button type="submit" class="btn-primary">Add store</button>
-</form>`,
-              })
-            : "",
         view.isOwner
             ? confirmModal({
                   id: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
@@ -337,15 +326,24 @@ ${field({ id: "store_name", label: "Grocery store", control: `<input id="store_n
               })
             : "",
         sharedMemberDialogs(view),
+    ].join("");
+}
+
+/** The two terms-confirm dialogs for turning a recipe link reader on (owner only). */
+export function renderSocialReaderModals(
+    view: Pick<HouseholdOwnerModalsView, "error" | "openModalId">,
+): string {
+    const modalView = { ...view, members: [], isOwner: true, canManage: true };
+    return [
         socialReaderEnableModal(
             "tiktok",
             HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
-            view,
+            modalView,
         ),
         socialReaderEnableModal(
             "facebook",
             HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
-            view,
+            modalView,
         ),
     ].join("");
 }

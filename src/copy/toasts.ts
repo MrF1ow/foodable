@@ -229,6 +229,18 @@ export const TOASTS = {
         kind: "success",
         text: "Recipe settings saved",
     },
+    "household.restock.saved": {
+        kind: "success",
+        text: "Restock saved",
+    },
+    "household.timezone.saved": {
+        kind: "success",
+        text: "Time zone saved",
+    },
+    "household.fetch-refusals.cleared-all": {
+        kind: "success",
+        text: "Blocked links cleared",
+    },
     "household.plurals-same-food.saved": {
         kind: "success",
         text: "Food name matching updated",
@@ -250,6 +262,7 @@ export const TOASTS = {
         kind: "success",
         text: "Nutrition preferences saved",
     },
+    "settings.timezone.saved": { kind: "success", text: "Time zone saved" },
     "settings.goals.saved": { kind: "success", text: "Goals saved" },
     "settings.goals.day-cleared": {
         kind: "success",
@@ -276,11 +289,11 @@ export const TOASTS = {
     "settings.ai.undone": { kind: "success", text: "Change undone" },
     "settings.ai.destructive-allowed": {
         kind: "success",
-        text: "Agents may make destructive changes",
+        text: "Allow destructive changes is on",
     },
     "settings.ai.destructive-off": {
         kind: "success",
-        text: "Agents can no longer make destructive changes",
+        text: "Allow destructive changes is off",
     },
     "settings.profile.saved": { kind: "success", text: "Profile updated" },
     "settings.household.created": {

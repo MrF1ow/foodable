@@ -13,7 +13,7 @@ import {
     type WaterEntry,
     type WeightEntry,
 } from "../db/nutrition.js";
-import { getProfile } from "../db/profiles.js";
+import { getProfile, hiddenNutrientsFromProfile } from "../db/profiles.js";
 import { liveFridgeStore } from "../db/fridge.js";
 import { householdClock } from "../db/restock.js";
 import {
@@ -88,6 +88,8 @@ export type TodayView = {
     fridgeLocationNames: ReadonlyMap<string, string>;
     preferredWeightUnit: WeightUnit;
     alcoholTrackingEnabled: boolean;
+    /** Optional nutrients the member switched off (Settings › Nutrients shown). */
+    hiddenNutrients?: readonly string[];
     totals: TodayDayTotals;
     goals: NutritionGoals | null;
     /** Full meal rows for the selected day (edit sheets). */
@@ -437,6 +439,7 @@ export async function loadToday(
         fridgeLocationNames,
         preferredWeightUnit,
         alcoholTrackingEnabled: profile?.alcohol_tracking_enabled === true,
+        hiddenNutrients: hiddenNutrientsFromProfile(profile),
         totals,
         goals,
         editMeals,
