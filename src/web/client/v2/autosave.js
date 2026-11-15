@@ -37,7 +37,7 @@
 //    picking an earlier value again (after "Use household default") saves.
 //    A reset button is such a form too: queued behind a save in flight, and
 //    behind any edit made after it.
-//  - Leaving the page (a Turbo visit elsewhere) while a save is in flight or
+//  - Leaving the page (a Turbo visit elsewhere, or a full load via `pagehide`) while a save is in flight or
 //    queued posts those fields with `fetch(keepalive)` instead of
 //    `requestSubmit()`, which would stop the visit and bring the user back.
 
@@ -360,18 +360,10 @@ document.addEventListener("turbo:before-render", (event) => {
 
 // Leaving for another page: post what is in flight or queued without Turbo
 // (a `requestSubmit()` now would stop the visit), then forget it.
-document.addEventListener("turbo:before-visit", (event) => {
+// Post what is in flight or queued with `fetch(keepalive)` and forget it:
+// the page is going away (a Turbo visit elsewhere, or a full page load).
+function leaveNow() {
     if (!active && waiting.size === 0) return;
-    const url = event.detail && event.detail.url;
-    if (typeof location !== "undefined" && url) {
-        try {
-            if (new URL(url, location.href).pathname === location.pathname) {
-                return; // our own 303 back to this page
-            }
-        } catch (_) {
-            return;
-        }
-    }
     const forms = [];
     if (active && !ended && !rendered) forms.push(active);
     for (const name of waiting) {
@@ -400,7 +392,28 @@ document.addEventListener("turbo:before-visit", (event) => {
     active = null;
     rendered = false;
     ended = false;
+}
+
+document.addEventListener("turbo:before-visit", (event) => {
+    if (!active && waiting.size === 0) return;
+    const url = event.detail && event.detail.url;
+    if (typeof location !== "undefined" && url) {
+        try {
+            if (new URL(url, location.href).pathname === location.pathname) {
+                return; // our own 303 back to this page
+            }
+        } catch (_) {
+            return;
+        }
+    }
+    leaveNow();
 });
+
+// A full page load (a `data-turbo="false"` link such as the Settings back
+// link) skips `turbo:before-visit`: the same flush runs as the page hides.
+if (typeof window !== "undefined" && window.addEventListener) {
+    window.addEventListener("pagehide", leaveNow);
+}
 
 function maybeSubmit(event) {
     const target = event.target;

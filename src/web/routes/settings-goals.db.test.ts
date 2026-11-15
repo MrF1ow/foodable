@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { getNutritionGoals, upsertNutritionGoals } from "../../db/nutrition.js";
+import { upsertProfile } from "../../db/profiles.js";
 import { setSqlForTests } from "../../db/sql.js";
 import { describeDb } from "../../db/testing/pg.js";
 import { seedHousehold } from "../../db/testing/fixtures.js";
@@ -73,6 +74,28 @@ describeDb(pgAvailable !== null, "settings goals fields", (getCtx) => {
             daily_fat_g: 70,
             daily_water_ml: 2500,
         });
+    });
+
+    test("a stored limit the form's bounds refuse does not block saving another field", async () => {
+        // 9999.99 g is the MCP maximum; in US drinks it shows as 714.29, one
+        // over the form's own bound.
+        await upsertProfile(userId, {
+            alcohol_tracking_enabled: true,
+            preferred_drink_unit: "us",
+        });
+        await upsertNutritionGoals(userId, { daily_alcohol_g: 9999.99 });
+        const res = await postField(userId, "daily_protein_g", "180");
+        expect(res.status).toBe(303);
+        const goals = await getNutritionGoals(userId);
+        expect(goals).toMatchObject({
+            daily_protein_g: 180,
+            daily_alcohol_g: 9999.99,
+            // A protein change is a target change; the left-out alcohol is not.
+        });
+        // A rename alone still does not stamp the day.
+        const before = (await getNutritionGoals(userId))?.goals_set_on;
+        expect((await postField(userId, "goal_name", "Cut")).status).toBe(303);
+        expect((await getNutritionGoals(userId))?.goals_set_on).toBe(before);
     });
 
     test("two sequential field posts both survive", async () => {

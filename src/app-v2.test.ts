@@ -749,6 +749,44 @@ describe("autosave.js", () => {
         }
     });
 
+    test("a full page load (pagehide) mid-save posts in-flight and queued fields with keepalive", async () => {
+        const g = globalThis as unknown as {
+            fetch: unknown;
+            FormData: unknown;
+            window?: unknown;
+        };
+        const realFetch = g.fetch;
+        const realFormData = g.FormData;
+        const hadWindow = g.window;
+        const posts: unknown[] = [];
+        const onWindow: Record<string, () => void> = {};
+        g.fetch = (_url: unknown, init: { keepalive?: unknown }) => {
+            posts.push(init.keepalive);
+            return Promise.resolve();
+        };
+        g.FormData = function FakeFormData() {};
+        g.window = {
+            addEventListener: (type: string, fn: () => void) => {
+                onWindow[type] = fn;
+            },
+        };
+        try {
+            const t = await autosaveSetup();
+            t.leave(t.a, "250");
+            t.leave(t.b, "2500");
+            onWindow.pagehide!();
+            expect(posts).toEqual([true, true]);
+            // Nothing is left to drain into a page that is gone.
+            t.fire("turbo:submit-end", { target: t.a, detail: {} });
+            t.flush();
+            expect(t.reached()).toBe(1);
+        } finally {
+            g.fetch = realFetch;
+            g.FormData = realFormData;
+            g.window = hadWindow;
+        }
+    });
+
     test("binding is page-wide: no per-form listeners to double up", async () => {
         const t = await autosaveSetup();
         const before = t.a.input;

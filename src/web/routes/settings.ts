@@ -178,12 +178,35 @@ settingsRoutes.post("/settings/goals/field", requireMember, async (c) => {
         ...goalsDraftFrom(stored, alcohol),
         [known]: value,
     } as GoalsFormDraft;
-    const parsed = parseGoalsForm(values, { alcohol, stored });
+    let parsed = parseGoalsForm(values, { alcohol, stored });
+    let judgedAlone = false;
+    // A stored value the form's bounds no longer accept (one set through MCP,
+    // or rounded into a drink unit) must not block saving another field: judge
+    // the posted field alone, with the refused stored ones left out.
+    if (!parsed.ok && parsed.invalid && !parsed.invalid.includes(known)) {
+        const others = Object.fromEntries(
+            parsed.invalid.map((f) => [f, ""]),
+        ) as Partial<GoalsFormDraft>;
+        const retry = parseGoalsForm(
+            { ...values, ...others },
+            {
+                alcohol,
+                stored,
+            },
+        );
+        if (retry.ok) {
+            parsed = retry;
+            judgedAlone = true;
+        }
+    }
     if (!parsed.ok) {
         const page = await renderSettingsGoalsV2Route(userId, {
             error: parsed.errors.join(" "),
             draft: values,
-            invalid: [known],
+            invalid:
+                parsed.invalid && parsed.invalid.length > 0
+                    ? parsed.invalid
+                    : [known],
         });
         // A non-member gets the membership page with its own status.
         return c.html(page.html, page.status === 200 ? 422 : page.status);
@@ -191,7 +214,13 @@ settingsRoutes.post("/settings/goals/field", requireMember, async (c) => {
     // A save that changes a target is the day those goals were set; a
     // rename alone is not, the same rule set_nutrition_goals follows.
     const input: NutritionGoalsInput = { [known]: parsed.input[known] };
-    if (parsed.changesTargets) {
+    // Judged alone, the left-out fields read as changed: only this one counts.
+    const changesTargets = judgedAlone
+        ? known !== "goal_name" &&
+          known !== "goal_note" &&
+          parsed.input[known] !== (stored?.[known] ?? null)
+        : parsed.changesTargets;
+    if (changesTargets) {
         input.goals_set_on = todayInTz(timezoneFromProfile(profile) ?? "UTC");
     }
     await upsertNutritionGoals(userId, input);
