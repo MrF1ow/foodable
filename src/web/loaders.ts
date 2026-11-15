@@ -58,7 +58,12 @@ import {
     type Food,
     type MergePairPickField,
 } from "../domain/foods.js";
-import { renderPossibleDuplicatesPage } from "./pages/possible-duplicates.js";
+import {
+    findDuplicatePair,
+    renderSettingsDuplicateCompareV2Page,
+    renderSettingsDuplicatesV2Page,
+    type DuplicateMergePost,
+} from "./pages/v2/settings-duplicates.js";
 import {
     plainFoodIdForUsualPicker,
     usualProductsPickerHref,
@@ -1114,6 +1119,7 @@ export async function renderSettingsSavedV2Route(
             ),
             foods: filteredFoods,
             recipes,
+            duplicateCount: noticeResult.possibleDuplicatePairs.length,
             searchQuery: q,
             error: opts.error,
             openModalId: opts.openModalId,
@@ -1468,20 +1474,12 @@ export async function renderHouseholdSettingsRoute(
         error?: string;
         issuedToken?: string;
         openModalId?: string;
-        mergePost?: {
-            foodA: string;
-            foodB: string;
-            keepId: string;
-            picks: Partial<Record<MergePairPickField, string>>;
-        };
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const store = liveFoodsStore();
-    const refCounts = await store.countFoodRefs(householdId);
     const [config, members, stores, location] = await Promise.all([
         getHouseholdConfig(householdId),
         listHouseholdMembers(householdId),
@@ -1507,9 +1505,7 @@ export async function renderHouseholdSettingsRoute(
             validateTz(config.preferences.timezone)
         ) && !(ownerZone != null && validateTz(ownerZone));
 
-    const noticeResult = await loadViewerNotices(gate.viewer, {
-        refCounts,
-    });
+    const noticeResult = await loadViewerNotices(gate.viewer);
     const chrome = await viewerChromeWithAttention(
         profile,
         gate.viewer,
@@ -1550,9 +1546,6 @@ export async function renderHouseholdSettingsRoute(
             dismissedCount: dismissedNotices(noticeResult).length,
             timezone: profile?.timezone ?? "UTC",
             noticeResult,
-            duplicatePairs: noticeResult.possibleDuplicatePairs,
-            refCounts,
-            mergePost: opts.mergePost,
             sharedLinks,
         }),
     };
@@ -2276,32 +2269,30 @@ export async function renderNeedsAttentionInventoryPage(
     };
 }
 
-export async function renderPossibleDuplicatesRoute(
+/** What the two Possible duplicates pages read: the current pairs and each food's use count. */
+async function loadDuplicatesData(viewer: HouseholdMember) {
+    const refCounts = await liveFoodsStore().countFoodRefs(viewer.householdId);
+    const noticeResult = await loadViewerNotices(viewer, { refCounts });
+    return {
+        refCounts,
+        noticeResult,
+        pairs: noticeResult.possibleDuplicatePairs,
+    };
+}
+
+export async function renderSettingsDuplicatesRoute(
     viewerUserId: string,
-    opts: {
-        error?: string;
-        openModalId?: string;
-        mergePost?: {
-            foodA: string;
-            foodB: string;
-            keepId: string;
-            picks: Partial<Record<MergePairPickField, string>>;
-        };
-    } = {},
+    opts: { error?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
-    const householdId = gate.viewer.householdId;
-    const store = liveFoodsStore();
-    const refCounts = await store.countFoodRefs(householdId);
-    const noticeResult = await loadHouseholdNotices(householdId, {
-        refCounts,
-    });
-    const pairs = noticeResult.possibleDuplicatePairs;
+    const { refCounts, noticeResult, pairs } = await loadDuplicatesData(
+        gate.viewer,
+    );
     return {
         status: 200,
-        html: renderPossibleDuplicatesPage({
+        html: renderSettingsDuplicatesV2Page({
             chrome: await viewerChromeWithAttention(
                 profile,
                 gate.viewer,
@@ -2310,7 +2301,41 @@ export async function renderPossibleDuplicatesRoute(
             pairs,
             refCounts,
             error: opts.error,
-            openModalId: opts.openModalId,
+        }),
+    };
+}
+
+/** The compare page of one pair; 404 when the two foods are not a current suggestion. */
+export async function renderSettingsDuplicateCompareRoute(
+    viewerUserId: string,
+    foodA: string,
+    foodB: string,
+    opts: { error?: string; mergePost?: DuplicateMergePost } = {},
+): Promise<{ status: 200 | 403 | 404; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const { refCounts, noticeResult, pairs } = await loadDuplicatesData(
+        gate.viewer,
+    );
+    const pair = findDuplicatePair(pairs, foodA, foodB);
+    if (!pair) {
+        return {
+            status: 404,
+            html: renderBarePage("Not found", emptyState("Pair not found.")),
+        };
+    }
+    return {
+        status: 200,
+        html: renderSettingsDuplicateCompareV2Page({
+            chrome: await viewerChromeWithAttention(
+                profile,
+                gate.viewer,
+                noticeResult,
+            ),
+            pair,
+            refCounts,
+            error: opts.error,
             mergePost: opts.mergePost,
         }),
     };

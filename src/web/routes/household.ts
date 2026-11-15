@@ -93,7 +93,8 @@ import {
 import { fridgeBarcodeLookup } from "./fridge.js";
 import {
     renderUsualProductsListPage,
-    renderPossibleDuplicatesRoute,
+    renderSettingsDuplicateCompareRoute,
+    renderSettingsDuplicatesRoute,
     renderSettingsSavedV2Route,
 } from "../loaders.js";
 import { viewerFlagsFor } from "../attention.js";
@@ -125,7 +126,12 @@ import {
     FOODS_MERGE_MODAL_ID,
     savedFoodDeleteSheetId,
 } from "../pages/v2/settings-saved.js";
-import { DUP_MERGE_MODAL_ID } from "../pages/possible-duplicates.js";
+import {
+    DUPLICATES_PATH,
+    DUPLICATES_VIEW_COMPARE,
+    duplicatesBackFrom,
+    type DuplicateMergePost,
+} from "../pages/v2/settings-duplicates.js";
 import { householdPersonRuleRemovedKey } from "../components/toast-flash.js";
 import { redirectWithToast } from "../components/toast.js";
 import {
@@ -1304,14 +1310,71 @@ function noticeDeps(): NoticesForDeps {
     };
 }
 
+// Settings › Saved foods & recipes › Possible duplicates and one pair's compare
+// page. Merge and keep-separate post to the routes further down.
+householdRoutes.get(DUPLICATES_PATH, requireSiteUser, async (c) => {
+    const page = await renderSettingsDuplicatesRoute(c.get("userId"));
+    return c.html(page.html, page.status);
+});
+
+householdRoutes.get(`${DUPLICATES_PATH}/:a/:b`, requireSiteUser, async (c) => {
+    const page = await renderSettingsDuplicateCompareRoute(
+        c.get("userId"),
+        c.req.param("a"),
+        c.req.param("b"),
+    );
+    return c.html(page.html, page.status);
+});
+
+// The list's old address. An exact route, not a LEGACY_PATH_MOVES entry: those
+// prefix-match every method, so the merge and keep-separate posts below would
+// answer 308 instead of acting.
 householdRoutes.get(
     "/settings/household/possible-duplicates",
     requireSiteUser,
-    async (c) => {
-        const page = await renderPossibleDuplicatesRoute(c.get("userId"));
-        return c.html(page.html, page.status);
-    },
+    (c) => c.redirect(`${DUPLICATES_PATH}${new URL(c.req.url).search}`, 301),
 );
+
+/**
+ * A refused merge or keep-separate: the compare page it came from (404 when
+ * the pair is no longer a suggestion falls back to the list) or the list.
+ */
+async function duplicatesRefusal(
+    userId: string,
+    input: {
+        foodA: string;
+        foodB: string;
+        back: string;
+        view: string;
+        message: string;
+        mergePost?: DuplicateMergePost;
+    },
+) {
+    const fromCompare =
+        input.back !== DUPLICATES_PATH ||
+        input.view === DUPLICATES_VIEW_COMPARE;
+    if (fromCompare) {
+        const page = await renderSettingsDuplicateCompareRoute(
+            userId,
+            input.foodA,
+            input.foodB,
+            { error: input.message, mergePost: input.mergePost },
+        );
+        if (page.status !== 404) {
+            return {
+                status: page.status === 200 ? (400 as const) : page.status,
+                html: page.html,
+            };
+        }
+    }
+    const page = await renderSettingsDuplicatesRoute(userId, {
+        error: input.message,
+    });
+    return {
+        status: page.status === 200 ? (400 as const) : page.status,
+        html: page.html,
+    };
+}
 
 householdRoutes.post(
     "/settings/household/possible-duplicates/keep-separate",
@@ -1320,6 +1383,9 @@ householdRoutes.post(
         const userId = c.get("userId");
         const member = siteMember(c);
         const body = await c.req.parseBody();
+        const subjectId = formText(body, "subject_id");
+        const relatedId = formText(body, "related_id");
+        const back = duplicatesBackFrom(formText(body, "back"));
         try {
             const today = await householdToday(member.householdId);
             await dismissNotice(
@@ -1329,8 +1395,8 @@ householdRoutes.post(
                 {
                     code: "food.possible_duplicate",
                     subjectKind: "food",
-                    subjectId: formText(body, "subject_id"),
-                    relatedId: formText(body, "related_id"),
+                    subjectId,
+                    relatedId,
                 },
                 { today },
             );
@@ -1341,13 +1407,19 @@ householdRoutes.post(
                     : err instanceof Error
                       ? err.message
                       : "Could not keep foods separate.";
-            const page = await renderHouseholdSettingsRoute(userId, {
-                error: message,
+            const page = await duplicatesRefusal(userId, {
+                foodA: subjectId,
+                foodB: relatedId,
+                back,
+                view: formText(body, "view"),
+                message,
             });
-            return c.html(page.html, page.status === 200 ? 400 : page.status);
+            return c.html(page.html, page.status);
         }
+        // Success goes to the list even from a compare `back`: the pair is gone,
+        // so its compare page would 404. A refusal keeps `back` (above).
         // toast: none
-        return c.redirect("/settings/household", 303);
+        return c.redirect(DUPLICATES_PATH, 303);
     },
 );
 
@@ -1375,6 +1447,7 @@ householdRoutes.post(
         const foodA = formText(asText, "food_a");
         const foodB = formText(asText, "food_b");
         const keepId = formText(asText, "keep_id");
+        const back = duplicatesBackFrom(formText(asText, "back"));
         const mergePost = {
             foodA,
             foodB,
@@ -1400,15 +1473,20 @@ householdRoutes.post(
                     : err instanceof Error
                       ? err.message
                       : "Could not merge foods.";
-            const page = await renderHouseholdSettingsRoute(userId, {
-                error: message,
-                openModalId: DUP_MERGE_MODAL_ID,
+            const page = await duplicatesRefusal(userId, {
+                foodA,
+                foodB,
+                back,
+                view: formText(asText, "view"),
+                message,
                 mergePost,
             });
-            return c.html(page.html, page.status === 200 ? 400 : page.status);
+            return c.html(page.html, page.status);
         }
+        // Success goes to the list even from a compare `back`: the pair is gone,
+        // so its compare page would 404. A refusal keeps `back` (above).
         // toast: none
-        return c.redirect("/settings/household", 303);
+        return c.redirect(DUPLICATES_PATH, 303);
     },
 );
 

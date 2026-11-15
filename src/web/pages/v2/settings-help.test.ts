@@ -24,6 +24,14 @@ describe("settings help v2", () => {
         }
     });
 
+    test("Possible duplicates help names its new home", () => {
+        const entry = GLOSSARY.find((g) => g.id === "possible-duplicates")!;
+        expect(entry.answer).toContain(
+            "Saved foods &amp; recipes › Possible duplicates",
+        );
+        expect(entry.answer).not.toContain("Household › Possible duplicates");
+    });
+
     test("one card of rows, each a native details with a plain title and its answer", () => {
         const html = renderSettingsHelpV2Page({ chrome });
         const rows = [

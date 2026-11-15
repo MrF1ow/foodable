@@ -16,8 +16,6 @@ export const APP_PATHS = {
     settingsUnits: "/settings/units",
     settingsNutrients: "/settings/nutrients",
     settingsHouseholdItems: "/settings/household/items",
-    settingsHouseholdPossibleDuplicates:
-        "/settings/household/possible-duplicates",
     product: "/foods",
 } as const;
 

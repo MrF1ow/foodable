@@ -170,8 +170,6 @@ describe("Household member rows", () => {
             canManage: true,
             viewerUserId: ME,
             noticeResult: EMPTY_NOTICES,
-            duplicatePairs: [],
-            refCounts: new Map(),
         });
 
     test("each member with a picture shows it; others keep initials", () => {

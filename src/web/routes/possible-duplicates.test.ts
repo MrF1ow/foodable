@@ -43,8 +43,8 @@ import {
     createMemoryStockStore,
     ledgerMatchesStock,
 } from "../../domain/stock.js";
-import { DUP_MERGE_MODAL_ID } from "../pages/possible-duplicates.js";
 import { noticesFor } from "../../domain/notices-for.js";
+import { noticeHref } from "../components/notices.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
@@ -281,7 +281,7 @@ describe("possible-duplicates routes", () => {
     test("Keep separate removes pair and badge", async () => {
         const { egg, eggs } = await seedDuplicatePair();
         const before = await app().request(
-            "http://x/settings/household/possible-duplicates",
+            "http://x/settings/saved/duplicates",
             {
                 headers: { Cookie: cookieFor(ALICE) },
             },
@@ -302,7 +302,7 @@ describe("possible-duplicates routes", () => {
         );
         expect(keep.status).toBe(303);
         const after = await app().request(
-            "http://x/settings/household/possible-duplicates",
+            "http://x/settings/saved/duplicates",
             {
                 headers: { Cookie: cookieFor(ALICE) },
             },
@@ -366,14 +366,14 @@ describe("possible-duplicates routes", () => {
             locationId: loc.id,
         });
         const page = await app().request(
-            "http://x/settings/household/possible-duplicates",
+            `http://x/settings/saved/duplicates/${egg.id}/${eggs.id}`,
             { headers: { Cookie: cookieFor(ALICE) } },
         );
         const html = await page.text();
         const keepRadio = (id: string) =>
-            new RegExp(`name="keep_id" value="${id}"( checked)? />`).exec(
-                html,
-            )?.[1];
+            new RegExp(
+                `name="keep_id" value="${id}" data-fd-dup-keep="[ab]"( checked)?>`,
+            ).exec(html)?.[1];
         expect(keepRadio(eggs.id)).toBe(" checked");
         expect(keepRadio(egg.id)).toBeUndefined();
 
@@ -465,7 +465,7 @@ describe("possible-duplicates routes", () => {
         expect(movements.every((m) => m.foodId !== eggs.id)).toBe(true);
     });
 
-    test("merge validation error reopens modal without writes", async () => {
+    test("a refused merge re-renders the duplicates page with the error, without writes", async () => {
         const { egg, eggs } = await seedDuplicatePair();
         const foodsBefore = await db.foodsStore.listFoods(HH);
         const res = await app().request(
@@ -486,19 +486,81 @@ describe("possible-duplicates routes", () => {
         );
         expect(res.status).toBe(400);
         const html = await res.text();
-        expect(html).toContain(`id="${DUP_MERGE_MODAL_ID}"`);
-        expect(html).toContain("data-modal-open-on-load");
-        expect(html).toContain("data-filled-template=");
-        expect(html).toContain('name="pick_calories"');
-        expect(html).toMatch(
-            new RegExp(
-                `name="pick_protein_g"[\\s\\S]*value="${egg.id}"[\\s\\S]*checked`,
-            ),
-        );
+        expect(html).toContain("data-fd-duplicates");
+        expect(html).toContain("Invalid field pick.");
+        expect(html).not.toContain("data-modal-open-on-load");
         const foodsAfter = await db.foodsStore.listFoods(HH);
         expect(foodsAfter.map((f) => f.id).sort()).toEqual(
             foodsBefore.map((f) => f.id).sort(),
         );
+    });
+
+    test("a refused merge from the compare page re-renders it with the chosen picks", async () => {
+        const { egg, eggs } = await seedDuplicatePair();
+        const res = await app().request(
+            "http://x/settings/household/possible-duplicates/merge",
+            {
+                method: "POST",
+                headers: {
+                    Cookie: cookieFor(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    food_a: egg.id,
+                    food_b: eggs.id,
+                    keep_id: egg.id,
+                    pick_calories: crypto.randomUUID(),
+                    pick_protein_g: eggs.id,
+                    back: "/settings/saved/duplicates",
+                    view: "compare",
+                }).toString(),
+            },
+        );
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain("data-fd-duplicate-compare");
+        expect(html).toContain("Invalid field pick.");
+        expect(html).toMatch(
+            new RegExp(`name="pick_protein_g" value="${eggs.id}" checked`),
+        );
+        expect(html).toMatch(
+            new RegExp(
+                `name="keep_id" value="${egg.id}" data-fd-dup-keep="[ab]" checked`,
+            ),
+        );
+    });
+
+    test("merging with the second food kept and no picks keeps that food's own values", async () => {
+        const { egg, eggs } = await seedDuplicatePair();
+        const page = await app().request(
+            `http://x/settings/saved/duplicates/${egg.id}/${eggs.id}`,
+            { headers: { Cookie: cookieFor(ALICE) } },
+        );
+        // The rendered form pre-checks no pick radio, so a browser posts none.
+        expect(await page.text()).not.toMatch(
+            /name="pick_[a-z_]+" value="[^"]+" checked/,
+        );
+        const merged = await app().request(
+            "http://x/settings/household/possible-duplicates/merge",
+            {
+                method: "POST",
+                headers: {
+                    Cookie: cookieFor(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    food_a: egg.id,
+                    food_b: eggs.id,
+                    keep_id: eggs.id,
+                    back: "/settings/saved/duplicates",
+                    view: "compare",
+                }).toString(),
+            },
+        );
+        expect(merged.status).toBe(303);
+        const kept = await db.foodsStore.getFood(HH, eggs.id);
+        expect(kept!.calories).toBe(140);
+        expect(kept!.proteinG).toBe(12);
     });
 
     test("merge rejects keep_id outside the pair", async () => {
@@ -525,16 +587,15 @@ describe("possible-duplicates routes", () => {
         expect(await res.text()).toContain("Keep must be one of the two");
     });
 
-    test("sub-nav shows Possible duplicates only when list is non-empty", async () => {
-        const empty = await app().request("http://x/settings/household/items", {
-            headers: { Cookie: cookieFor(ALICE) },
-        });
-        expect(await empty.text()).not.toContain("Possible duplicates");
+    test("Household no longer shows Possible duplicates or its merge modal", async () => {
         await seedDuplicatePair();
-        const members = await app().request("http://x/settings/household", {
+        const household = await app().request("http://x/settings/household", {
             headers: { Cookie: cookieFor(ALICE) },
         });
-        expect(await members.text()).toContain("Possible duplicates");
+        expect(household.status).toBe(200);
+        const householdHtml = await household.text();
+        expect(householdHtml).not.toContain("Possible duplicates");
+        expect(householdHtml).not.toContain("dup-merge");
     });
 
     test("noticesFor still exposes pair count for chrome", async () => {
@@ -557,52 +618,218 @@ describe("possible-duplicates routes", () => {
     });
 });
 
-describe("possible-duplicates routes on the household page", () => {
+describe("Settings › Saved foods & recipes › Possible duplicates", () => {
     afterAll(() => {
         resetFlagsForTests();
     });
 
-    test("keep-separate success redirects to household settings", async () => {
-        const { egg, eggs } = await seedDuplicatePair();
-        const keep = await app().request(
-            "http://x/settings/household/possible-duplicates/keep-separate",
-            {
-                method: "POST",
-                headers: {
-                    Cookie: cookieFor(ALICE),
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: `subject_id=${encodeURIComponent(egg.id)}&related_id=${encodeURIComponent(eggs.id)}`,
+    const get = (path: string) =>
+        app().request(`http://x${path}`, {
+            headers: { Cookie: cookieFor(ALICE) },
+        });
+    const post = (path: string, fields: Record<string, string>) =>
+        app().request(`http://x${path}`, {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
             },
+            body: new URLSearchParams(fields).toString(),
+        });
+    const MERGE = "/settings/household/possible-duplicates/merge";
+    const KEEP = "/settings/household/possible-duplicates/keep-separate";
+
+    test("GET /settings/saved/duplicates lists pairs with a menu: Merge into A, Merge into B, Not the same, More…", async () => {
+        const { egg, eggs } = await seedDuplicatePair();
+        const res = await get("/settings/saved/duplicates");
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        // The pair is ordered by id: the lower one is the subject.
+        const [lo, hi] = [egg.id, eggs.id].sort() as [string, string];
+        expect(html).toContain(`id="dup-${lo}-${hi}"`);
+        expect(html).toContain("<details");
+        expect(html).toContain("Merge into chicken egg");
+        expect(html).toContain("Merge into Eggs");
+        expect(html).toContain("Not the same");
+        expect(html).toContain("More…");
+        expect(html).toContain(`href="/settings/saved/duplicates/${lo}/${hi}"`);
+        // A menu action posts to the existing routes and returns to the list.
+        expect(html).toContain(`action="${MERGE}"`);
+        expect(html).toContain(`action="${KEEP}"`);
+        expect(html).toContain(
+            '<input type="hidden" name="back" value="/settings/saved/duplicates">',
         );
-        expect(keep.status).toBe(303);
-        expect(keep.headers.get("location")).toBe("/settings/household");
     });
 
-    test("merge validation re-renders household settings", async () => {
+    test("the compare page answers 200 for a current pair and 404 otherwise", async () => {
         const { egg, eggs } = await seedDuplicatePair();
+        const ok = await get(`/settings/saved/duplicates/${egg.id}/${eggs.id}`);
+        expect(ok.status).toBe(200);
+        const html = await ok.text();
+        expect(html).toContain("data-fd-duplicate-compare");
+        expect(html).toContain("Keep them separate");
+        expect(html).toContain('name="keep_id"');
+        // Either order names the pair.
+        expect(
+            (await get(`/settings/saved/duplicates/${eggs.id}/${egg.id}`))
+                .status,
+        ).toBe(200);
         const solo = await db.foodsStore.insertFood(
             newFood({ householdId: HH, kind: "food", name: "solo" }),
         );
-        const res = await app().request(
-            "http://x/settings/household/possible-duplicates/merge",
-            {
-                method: "POST",
-                headers: {
-                    Cookie: cookieFor(ALICE),
-                    "Content-Type": "application/x-www-form-urlencoded",
-                },
-                body: new URLSearchParams({
-                    food_a: egg.id,
-                    food_b: eggs.id,
-                    keep_id: solo.id,
-                }).toString(),
-            },
+        expect(
+            (await get(`/settings/saved/duplicates/${egg.id}/${solo.id}`))
+                .status,
+        ).toBe(404);
+        expect(
+            (
+                await get(
+                    `/settings/saved/duplicates/${egg.id}/${crypto.randomUUID()}`,
+                )
+            ).status,
+        ).toBe(404);
+    });
+
+    test("merge with back=<compare path> answers 303 to the list: the pair is gone", async () => {
+        const { egg, eggs } = await seedDuplicatePair();
+        const back = `/settings/saved/duplicates/${egg.id}/${eggs.id}`;
+        const res = await post(MERGE, {
+            food_a: egg.id,
+            food_b: eggs.id,
+            keep_id: egg.id,
+            back,
+        });
+        expect(res.status).toBe(303);
+        // The compare path of a merged pair would 404.
+        expect(res.headers.get("location")).toBe("/settings/saved/duplicates");
+    });
+
+    test("merge with the list as back, or no back, answers 303 to the list", async () => {
+        const { egg, eggs } = await seedDuplicatePair();
+        const res = await post(MERGE, {
+            food_a: egg.id,
+            food_b: eggs.id,
+            keep_id: egg.id,
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/settings/saved/duplicates");
+    });
+
+    test("an off-list back falls back to the list", async () => {
+        for (const back of [
+            "https://evil.example",
+            "//evil.example",
+            "/settings/account",
+            "/settings/saved/duplicates/not-a-uuid/also-not",
+            `/settings/saved/duplicates/${crypto.randomUUID()}/${crypto.randomUUID()}/x`,
+        ]) {
+            db.foodsStore = createMemoryFoodsStore();
+            db.foodsStore.linkDismissals(db.dismissalsStore);
+            const { egg, eggs } = await seedDuplicatePair();
+            const merged = await post(MERGE, {
+                food_a: egg.id,
+                food_b: eggs.id,
+                keep_id: egg.id,
+                back,
+            });
+            expect(merged.status, back).toBe(303);
+            expect(merged.headers.get("location"), back).toBe(
+                "/settings/saved/duplicates",
+            );
+            db.foodsStore = createMemoryFoodsStore();
+            db.foodsStore.linkDismissals(db.dismissalsStore);
+            const pair = await seedDuplicatePair();
+            const kept = await post(KEEP, {
+                subject_id: pair.egg.id,
+                related_id: pair.eggs.id,
+                back,
+            });
+            expect(kept.status, back).toBe(303);
+            expect(kept.headers.get("location"), back).toBe(
+                "/settings/saved/duplicates",
+            );
+        }
+    });
+
+    test("keep-separate with a compare back answers 303 to the list, as with no back", async () => {
+        const { egg, eggs } = await seedDuplicatePair();
+        const back = `/settings/saved/duplicates/${egg.id}/${eggs.id}`;
+        const keep = await post(KEEP, {
+            subject_id: egg.id,
+            related_id: eggs.id,
+            back,
+        });
+        expect(keep.status).toBe(303);
+        // The pair no longer exists, so its compare path would 404.
+        expect(keep.headers.get("location")).toBe("/settings/saved/duplicates");
+        const plain = await post(KEEP, {
+            subject_id: egg.id,
+            related_id: eggs.id,
+        });
+        expect(plain.status).toBe(303);
+        expect(plain.headers.get("location")).toBe(
+            "/settings/saved/duplicates",
         );
+    });
+
+    test("POST /settings/household/possible-duplicates/merge answers 303, not 308", async () => {
+        const { egg, eggs } = await seedDuplicatePair();
+        const res = await post(MERGE, {
+            food_a: egg.id,
+            food_b: eggs.id,
+            keep_id: eggs.id,
+        });
+        expect(res.status).toBe(303);
+        expect(res.status).not.toBe(308);
+    });
+
+    test("GET /settings/household/possible-duplicates answers 301 to the new page, query kept", async () => {
+        const res = await get("/settings/household/possible-duplicates");
+        expect(res.status).toBe(301);
+        expect(res.headers.get("location")).toBe("/settings/saved/duplicates");
+        const withQuery = await get(
+            "/settings/household/possible-duplicates?x=1",
+        );
+        expect(withQuery.status).toBe(301);
+        expect(withQuery.headers.get("location")).toBe(
+            "/settings/saved/duplicates?x=1",
+        );
+    });
+
+    test("a refused keep-separate re-renders the duplicates page with the error", async () => {
+        const { egg } = await seedDuplicatePair();
+        const res = await post(KEEP, {
+            subject_id: egg.id,
+            related_id: egg.id,
+        });
         expect(res.status).toBe(400);
+        expect(await res.text()).toContain("data-fd-duplicates");
+    });
+
+    test("a notice's link opens the list at the pair's row, and that row exists", async () => {
+        const { egg, eggs } = await seedDuplicatePair();
+        const noticeResult = await noticesFor(
+            {
+                foods: db.foodsStore,
+                fridge: db.fridgeStore,
+                recipes: db.recipesStore,
+                dismissals: db.dismissalsStore,
+                grocery: db.groceryStore,
+            },
+            HH,
+            { today: "2026-01-15" },
+        );
+        const notice = noticeResult.notices.find(
+            (n) => n.code === "food.possible_duplicate",
+        )!;
+        const href = noticeHref(notice, {} as never)!;
+        expect(href).toStartWith("/settings/saved/duplicates#dup-");
+        const [path, anchor] = href.split("#");
+        const res = await get(path!);
+        expect(res.status).toBe(200);
         const html = await res.text();
-        expect(html).toContain('data-fd-settings-page="household"');
-        expect(html).toContain(`id="${DUP_MERGE_MODAL_ID}"`);
-        expect(html).toContain("data-modal-open-on-load");
+        expect(html).toContain(`id="${anchor}"`);
+        const [lo, hi] = [egg.id, eggs.id].sort() as [string, string];
+        expect(anchor).toBe(`dup-${lo}-${hi}`);
     });
 });

@@ -4,7 +4,6 @@ import type {
     RestockPreferences,
     SocialReadersPreferences,
 } from "../../../household.js";
-import type { PossibleDuplicatePair } from "../../../domain/foods.js";
 import type { NoticesForResult } from "../../../domain/notices-for.js";
 import { esc, join, raw, type Html } from "../../components/v2/html.js";
 import { rowList, sectionHeader } from "../../components/v2/rows.js";
@@ -18,10 +17,6 @@ import {
     memberActionsTemplate,
     renderHouseholdV2OwnerModals,
 } from "./settings-household-modals.js";
-import {
-    DUP_MERGE_MODAL_ID,
-    renderPossibleDuplicatesBlock,
-} from "../possible-duplicates.js";
 import {
     renderSettingsV2Page,
     settingsErrorBanner,
@@ -84,14 +79,6 @@ export type SettingsHouseholdV2View = {
     /** The household's active share links; absent leaves the section out. */
     sharedLinks?: readonly SharedLinkRow[];
     noticeResult: NoticesForResult;
-    duplicatePairs: PossibleDuplicatePair[];
-    refCounts: ReadonlyMap<string, number>;
-    mergePost?: {
-        foodA: string;
-        foodB: string;
-        keepId: string;
-        picks: Partial<Record<string, string>>;
-    };
 };
 
 function roleLabel(role: HouseholdMember["role"]): string {
@@ -108,10 +95,7 @@ function pageLevelError(view: SettingsHouseholdV2View): Html {
         view.openModalId === HOUSEHOLD_NAME_SHEET_ID ||
         view.openModalId === HOUSEHOLD_LOCATION_SHEET_ID ||
         view.openModalId === HOUSEHOLD_TIMEZONE_SHEET_ID ||
-        view.openModalId === HOUSEHOLD_EXPIRY_SHEET_ID ||
-        // The merge modal only renders while a pair is left to merge.
-        (view.openModalId === DUP_MERGE_MODAL_ID &&
-            view.duplicatePairs.length > 0);
+        view.openModalId === HOUSEHOLD_EXPIRY_SHEET_ID;
     if (modalOnly) return raw("");
     return settingsErrorBanner(view.error);
 }
@@ -354,18 +338,6 @@ export function renderSettingsHouseholdV2Body(
         ? `<p class="fd-settings-token">Household bot token (shown once): <code>${esc(view.issuedToken)}</code></p>`
         : "";
 
-    const dupBlock = renderPossibleDuplicatesBlock(
-        {
-            chrome: view.chrome,
-            pairs: view.duplicatePairs,
-            refCounts: view.refCounts,
-            error: view.error,
-            openModalId: view.openModalId,
-            mergePost: view.mergePost,
-        },
-        { v2: true },
-    );
-
     const modals = renderHouseholdV2OwnerModals(view);
 
     const sections = join([
@@ -377,9 +349,6 @@ export function renderSettingsHouseholdV2Body(
             `${String(sectionHeader({ title: "Household", level: 2 }))}<div class="fd-settings-hh">${String(householdGroup(view))}</div>`,
         ),
         view.sharedLinks ? raw(renderSharedLinksSection(view.sharedLinks)) : "",
-        raw(
-            `${String(sectionHeader({ title: "Possible duplicates", level: 2, id: "fd-dup-section" }))}<div class="fd-settings-household-dups native">${dupBlock.listHtml}${dupBlock.modalsHtml}</div>`,
-        ),
     ]);
 
     return `${String(householdHead(view))}${String(pageLevelError(view))}<div class="fd-settings-household">${String(sections)}</div>${editSheets(view)}<div class="native fd-settings-household-modals">${modals}</div>`;
@@ -397,4 +366,3 @@ export function renderSettingsHouseholdV2Page(
 }
 
 export const SETTINGS_HOUSEHOLD_V2_MARKER = 'data-fd-settings-page="household"';
-export const SETTINGS_HOUSEHOLD_DUP_MERGE = DUP_MERGE_MODAL_ID;

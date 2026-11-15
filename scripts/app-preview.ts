@@ -119,17 +119,17 @@ import { pageHeader } from "../src/web/components/ui.js";
 import { renderAppShell, viewerChromeFromProfile } from "../src/web/shell.js";
 import {
     NO_USUAL_SCHEDULE,
-    possibleDuplicates,
     usualProductRows,
+    type PossibleDuplicatePair,
 } from "../src/domain/foods.js";
 import {
     possibleDuplicateNotices,
     possibleDuplicateNoticesByFoodId,
 } from "../src/domain/notices-for.js";
 import {
-    DUP_MERGE_MODAL_ID,
-    renderPossibleDuplicatesPage,
-} from "../src/web/pages/possible-duplicates.js";
+    renderSettingsDuplicateCompareV2Page,
+    renderSettingsDuplicatesV2Page,
+} from "../src/web/pages/v2/settings-duplicates.js";
 import {
     getAppCss,
     getAppJs,
@@ -1042,6 +1042,26 @@ const MACROS = {
     incomplete: true,
 };
 
+/** Milk · Whole milk and Rice · Jasmine rice, with the design's use counts. */
+function duplicatesFixture() {
+    const milk = food("f-milk", "Milk", 60, { proteinG: 3.4 });
+    const wholeMilk = food("f-whole-milk", "Whole milk", 64, { proteinG: 3.3 });
+    const rice = food("f-rice", "Rice", 130);
+    const jasmine = food("f-jasmine", "Jasmine rice", 130);
+    return {
+        pairs: [
+            { subject: milk, related: wholeMilk, rule: "contains_words" },
+            { subject: rice, related: jasmine, rule: "contains_words" },
+        ] as never as PossibleDuplicatePair[],
+        refCounts: new Map([
+            [milk.id, 6],
+            [wholeMilk.id, 2],
+            [rice.id, 4],
+            [jasmine.id, 1],
+        ]),
+    };
+}
+
 function food(
     id: string,
     name: string,
@@ -1484,12 +1504,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         submitKey: "preview",
     };
     const settingsHouseholdV2 = (sharedLinks: SharedLinkRow[]) => {
-        const dupPairs = possibleDuplicates(
-            catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
-            new Map(),
-            new Set(),
-            new Set(),
-        );
         return renderSettingsHouseholdV2Page({
             chrome,
             householdName: "The Flow household",
@@ -1529,7 +1543,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 catalogFoods: catalog,
                 aliasMap: new Map(),
                 barcodedIds: new Set(),
-                possibleDuplicatePairs: dupPairs,
+                possibleDuplicatePairs: [],
                 recipesListPrefetch: {
                     recipes: [],
                     allIngredients: [],
@@ -1537,8 +1551,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                     foodsById: new Map(),
                 },
             },
-            duplicatePairs: dupPairs,
-            refCounts: new Map(),
             sharedLinks,
         } as never);
     };
@@ -2123,6 +2135,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 aliases: [] as string[],
             })),
             recipes: [RECIPE, RECIPE_TWO],
+            duplicateCount: 2,
             searchQuery: "",
         }),
         "settings-export": renderSettingsExportV2Page({ chrome }),
@@ -2308,51 +2321,25 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 openModalId: STORE_DELETE_SHEET_ID,
             }) as never,
         ),
-        "possible-duplicates": (() => {
-            const dupPairs = possibleDuplicates(
-                catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
-                new Map(),
-                new Set(),
-                new Set(),
+        // FigCraft 62847 / 63301 (the list, its first menu open) and 63177.
+        "settings-duplicates": (() => {
+            const { pairs, refCounts } = duplicatesFixture();
+            return renderSettingsDuplicatesV2Page({
+                chrome,
+                pairs,
+                refCounts,
+            }).replace(
+                '<details class="fd-menu',
+                '<details open class="fd-menu',
             );
-            return renderPossibleDuplicatesPage({
-                chrome: {
-                    ...chrome,
-                    householdPossibleDuplicates: dupPairs.length,
-                },
-                pairs: dupPairs,
-                refCounts: new Map([
-                    ["f-chicken-egg", 0],
-                    ["f-eggs", 1],
-                ]),
-            } as never);
         })(),
-        "possible-duplicates-merge": (() => {
-            const dupPairs = possibleDuplicates(
-                catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
-                new Map(),
-                new Set(),
-                new Set(),
-            );
-            const pair = dupPairs[0]!;
-            return renderPossibleDuplicatesPage({
-                chrome: {
-                    ...chrome,
-                    householdPossibleDuplicates: dupPairs.length,
-                },
-                pairs: dupPairs,
-                refCounts: new Map([
-                    [pair.subject.id, 0],
-                    [pair.related.id, 0],
-                ]),
-                openModalId: DUP_MERGE_MODAL_ID,
-                mergePost: {
-                    foodA: pair.subject.id,
-                    foodB: pair.related.id,
-                    keepId: pair.subject.id,
-                    picks: {},
-                },
-            } as never);
+        "settings-duplicates-compare": (() => {
+            const { pairs, refCounts } = duplicatesFixture();
+            return renderSettingsDuplicateCompareV2Page({
+                chrome,
+                pair: pairs[0]!,
+                refCounts,
+            });
         })(),
         help: renderSettingsHelpV2Page({ chrome }),
         "needs-attention": (() => {
@@ -2811,8 +2798,6 @@ for (const theme of ["light", "dark"] as const) {
         names.push(file);
     }
     modalShotPages.push(
-        `possible-duplicates-${theme}`,
-        `possible-duplicates-merge-${theme}`,
         `recipe-${theme}`,
         `recipe-cook-${theme}`,
         `grocery-put-away-${theme}`,

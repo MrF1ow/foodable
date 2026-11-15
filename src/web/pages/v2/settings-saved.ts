@@ -19,6 +19,7 @@ import {
     settingsPageHeader,
 } from "./settings-shared.js";
 import { selectMode } from "./select-mode.js";
+import { duplicatesLink } from "./settings-duplicates.js";
 
 export const FOODS_MERGE_MODAL_ID = "foods-merge";
 export const SETTINGS_SAVED_MERGE_SHEET_ID = FOODS_MERGE_MODAL_ID;
@@ -37,6 +38,8 @@ export type SettingsSavedV2View = {
     chrome: AppChromeBase;
     foods: SavedFoodRow[];
     recipes: Recipe[];
+    /** Pairs on Possible duplicates; 0 leaves the badge off. */
+    duplicateCount?: number;
     searchQuery: string;
     error?: string;
     openModalId?: string;
@@ -222,7 +225,7 @@ export function renderSettingsSavedV2Body(view: SettingsSavedV2View): string {
     const selectable =
         view.foods.some((f) => !f.archivedAt) || view.recipes.length > 0;
     const headerActions = mergeTrigger ? String(mergeTrigger) : undefined;
-    return `${String(settingsPageHeader("Saved foods & recipes", headerActions))}<div${select.rootAttrs}>${String(settingsErrorBanner(view.error))}${search}${selectable ? select.tools + select.bar : ""}${String(sectionHeader({ title: "Foods", level: 2 }))}${String(foodsSection)}${String(sectionHeader({ title: "Recipes", level: 2 }))}${String(recipesSection)}${mergeSheet(view)}${deleteFoodSheets(view)}${deleteRecipeSheets(view)}${selectable ? select.sheets : ""}</div>`;
+    return `${String(settingsPageHeader("Saved foods & recipes", headerActions))}<div${select.rootAttrs}>${String(settingsErrorBanner(view.error))}${String(duplicatesLink(view.duplicateCount ?? 0))}${search}${selectable ? select.tools + select.bar : ""}${String(sectionHeader({ title: "Foods", level: 2 }))}${String(foodsSection)}${String(sectionHeader({ title: "Recipes", level: 2 }))}${String(recipesSection)}${mergeSheet(view)}${deleteFoodSheets(view)}${deleteRecipeSheets(view)}${selectable ? select.sheets : ""}</div>`;
 }
 
 export function renderSettingsSavedV2Page(view: SettingsSavedV2View): string {

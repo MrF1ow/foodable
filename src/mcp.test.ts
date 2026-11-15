@@ -1608,6 +1608,26 @@ describe("log_meal and update_meal round-trip caffeine_mg", () => {
         });
     });
 
+    test("merge_foods names where possible duplicates live now", async () => {
+        const server = new McpServer(
+            { name: "t", version: "0.0.0" },
+            { capabilities: { tools: {}, resources: {} } },
+        );
+        registerTools(server, { kind: "user", userId: "u1" }, true, null);
+        const [ct, st] = InMemoryTransport.createLinkedPair();
+        const client = new Client({ name: "c", version: "0.0.0" });
+        await Promise.all([server.connect(st), client.connect(ct)]);
+        const { tools } = await client.listTools();
+        const description =
+            tools.find((t) => t.name === "merge_foods")?.description ?? "";
+        expect(description).toContain(
+            "Settings › Saved foods & recipes › Possible duplicates",
+        );
+        expect(description).not.toContain("Household › Possible duplicates");
+        await client.close();
+        await server.close();
+    });
+
     // The digest is frozen (CONTRACT, and the "DO NOT ADD" comments in
     // src/db/nutrition.ts and src/domain/import.ts). Adding caffeine_mg to it would orphan
     // every `auto:` key already stored, so the same meal logged with and
@@ -4568,7 +4588,10 @@ describe("household config tools", () => {
     // Raising either constant is a deliberate, reviewed edit: trim a
     // description first, and say in the PR why the list has to grow.
     describe("tools/list size", () => {
-        const TOOLS_LIST_MAX_CHARS = 225795;
+        // +336: the optional `hidden_nutrients` list in the five card tools'
+        // output schemas (Settings › Nutrients shown), after trimming the
+        // merge_foods description to pay for its new Settings path.
+        const TOOLS_LIST_MAX_CHARS = 226131;
         const TOOLS_LIST_MAX_COUNT = 98;
 
         test("all-flags-on tools/list stays within the size budget", async () => {

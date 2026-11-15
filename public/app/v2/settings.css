@@ -1977,3 +1977,168 @@
 .fd-nutrients .fd-stores-pref .fd-switch {
     margin-left: auto;
 }
+
+/* Settings › Saved foods & recipes › Possible duplicates, and its compare page
+ * (FigCraft 62847, 63301, 63177). The card is the Household one. */
+.fd-settings-saved-dups {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-12);
+    min-height: 48px;
+    margin-bottom: var(--fd-s-12);
+    padding: 0 16px;
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    color: var(--text-primary);
+    font: 400 15px/20px var(--font-body);
+    text-decoration: none;
+}
+
+.fd-settings-saved-dups__label {
+    flex: 1 1 auto;
+}
+
+.fd-settings-saved-dups .fd-settings-menu__chev {
+    flex: none;
+    color: var(--text-tertiary);
+}
+
+.fd-dups__lead {
+    margin: 0 0 var(--fd-s-12);
+    font: 400 13px/18px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-dups .fd-row--dup .fd-row__main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* Row bodies are stacking contexts (z-index 1), so an open menu's row rises
+ * above the rows after it instead of showing their ⋯ through its panel. */
+.fd-dups .fd-row--dup:has(.fd-menu[open]) > .fd-row__body {
+    z-index: 3;
+}
+
+.fd-dups .fd-row--dup .fd-row__title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The whole row of the keep radio is the label, so the tap target is the row. */
+.fd-dup-choice {
+    cursor: pointer;
+}
+
+.fd-dup-radio {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    margin: 0;
+    accent-color: var(--accent-fill);
+}
+
+.fd-dup-compare .fd-dup-merge-form,
+.fd-dup-compare .fd-dup-separate-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-12);
+    margin: 0;
+}
+
+.fd-dup-compare .fd-dup-separate-form {
+    margin-top: var(--fd-s-12);
+}
+
+.fd-dup-differ {
+    display: flex;
+    flex-direction: column;
+    gap: var(--fd-s-10);
+}
+
+.fd-dup-differ__title {
+    margin: 0;
+    font: 600 15px/20px var(--font-body);
+}
+
+.fd-dup-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 10px 16px;
+    border: 0;
+    border-radius: var(--radius-md);
+    background: var(--surface-panel);
+}
+
+.fd-dup-field__legend {
+    padding: 0;
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-dup-pick {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-s-10);
+    min-height: 32px;
+    font: 400 15px/20px var(--font-body);
+    cursor: pointer;
+}
+
+.fd-dup-pick input {
+    flex: none;
+    width: 20px;
+    height: 20px;
+    margin: 0;
+    accent-color: var(--accent-fill);
+}
+
+.fd-dup-btn {
+    width: 100%;
+    min-height: 52px;
+    padding: 0 20px;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: 600 15px/20px var(--font-body);
+    cursor: pointer;
+}
+
+.fd-dup-btn--primary {
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+/* The primary button names the radio's choice: both names are in the markup and
+ * the unchosen one is hidden, so it reads right with no script. */
+.fd-dup-btn__b,
+.fd-dup-merge-form:has(input[data-fd-dup-keep="b"]:checked) .fd-dup-btn__a {
+    display: none;
+}
+
+.fd-dup-merge-form:has(input[data-fd-dup-keep="b"]:checked) .fd-dup-btn__b {
+    display: inline;
+}
+
+@media (min-width: 1024px) {
+    .fd-dups {
+        max-width: 680px;
+    }
+
+    .fd-dup-choices {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .fd-dup-choices > .fd-row {
+        border-bottom: 0;
+    }
+
+    .fd-dup-choices > .fd-row + .fd-row {
+        border-left: 1px solid var(--line);
+    }
+}

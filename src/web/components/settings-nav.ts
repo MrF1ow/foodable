@@ -41,7 +41,7 @@ export function renderHouseholdNav(
             count > 0 ? ` <span class="pill pill-dim">${count}</span>` : "";
         sections.push({
             id: "possible-duplicates",
-            href: "/settings/household/possible-duplicates",
+            href: "/settings/saved/duplicates",
             label: `Possible duplicates${badge}`,
         });
     }

@@ -71,8 +71,6 @@ function baseView(
         canManage: true,
         viewerUserId: alice.userId,
         noticeResult: EMPTY_NOTICES,
-        duplicatePairs: [],
-        refCounts: new Map<string, number>(),
         ...overrides,
     };
 }
@@ -165,7 +163,7 @@ describe("settings household v2", () => {
         expect(html).toContain('commandfor="household-add-member"');
         expect(html).toContain('commandfor="fd-household-name"');
         expect(html).toContain(`/settings/household/members/${bob.userId}`);
-        expect(html).toContain('id="fd-dup-section"');
+        expect(html).not.toContain("Possible duplicates");
     });
 
     test("the members list shows each member's last active day in the household's timezone", () => {
@@ -231,19 +229,6 @@ describe("settings household v2", () => {
         );
         expect(html).toContain('class="error-banner"');
         expect(html).not.toContain('class="fd-settings-error"');
-    });
-
-    test("merge error with no pair left shows on the page", () => {
-        const html = renderSettingsHouseholdV2Page(
-            baseView({
-                error: "Keep must be one of the two foods in this pair.",
-                openModalId: "dup-merge",
-                duplicatePairs: [],
-            }) as never,
-        );
-        expect(html).toContain(
-            "Keep must be one of the two foods in this pair.",
-        );
     });
 
     test("a member row without Manage has its chevron inside the link", () => {
@@ -321,8 +306,9 @@ describe("settings household v2", () => {
         expect(html).not.toContain(">Social post readers</");
         expect(html).not.toContain("/settings/household/social-readers");
         expect(html).not.toContain(">Dismissed notices</h2>");
-        // Possible duplicates stays on this page for now.
-        expect(html).toContain('id="fd-dup-section"');
+        // Possible duplicates moved to Saved foods & recipes.
+        expect(html).not.toContain('id="fd-dup-section"');
+        expect(html).not.toContain("dup-merge");
     });
 
     test("Shared links sits below the Household group, only when the page has links", () => {
@@ -332,7 +318,6 @@ describe("settings household v2", () => {
         const groupIdx = withLinks.indexOf('aria-label="Household"><li');
         const linksIdx = withLinks.indexOf("Shared links");
         expect(linksIdx).toBeGreaterThan(groupIdx);
-        expect(linksIdx).toBeLessThan(withLinks.indexOf('id="fd-dup-section"'));
         expect(renderSettingsHouseholdV2Page(baseView())).not.toContain(
             "Shared links",
         );
