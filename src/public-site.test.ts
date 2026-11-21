@@ -452,7 +452,7 @@ describe("cannot republish the marketing site", () => {
         expect(genLogin).toContain("public/llms.txt");
     });
 
-    test("the English login template is present (CI/dev run gen:all before tests)", async () => {
+    test("the English login template is present (gen:all, or the test preload when missing)", async () => {
         expect(await Bun.file("./public/login.html").exists()).toBe(true);
         expect(await Bun.file("./public/de/login.html").exists()).toBe(false);
     });
