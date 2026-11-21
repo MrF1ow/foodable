@@ -1,5 +1,5 @@
 [test]
-preload = ["./src/db/testing/test-teardown.ts"]
+preload = ["./scripts/test-preload.ts", "./src/db/testing/test-teardown.ts"]
 
 # `bun fmt`: Prettier's defaults except the 4-space indent. Every other option
 # stays off on purpose (sortImports, sortTailwindcss, sortPackageJson, jsdoc
