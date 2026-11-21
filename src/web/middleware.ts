@@ -3,9 +3,11 @@ import { createMiddleware } from "hono/factory";
 import { beginSiteLogin } from "../oauth.js";
 import {
     requireManager as managerCheck,
+    requireMemberOfHousehold,
     requireOwner as ownerCheck,
     type HouseholdMember,
 } from "../household.js";
+import { can, type Action } from "../domain/permissions.js";
 import {
     actorFromAuthContext,
     runAsSystem,
@@ -107,6 +109,28 @@ export const requireOwner = createMiddleware(async (c, next) => {
         withSiteMembershipPeek(check.member, () => next()),
     );
 });
+
+/** Whoever `can()` grants `action`: the gate for a route whose page asks that
+ * same action, so the page and its POST cannot disagree. Same lookup and 403
+ * as `requireOwner`; `requireOwner` stays for the generic owner decision. */
+export function requireAction(action: Action) {
+    return createMiddleware(async (c, next) => {
+        const userId = siteUserId(c.req.header("cookie"));
+        if (!userId) return beginSiteLogin(c, c.req.query("locale"));
+        const member = await ensureSiteMembershipResolved(c, userId);
+        const check = requireMemberOfHousehold(member, null);
+        if (!check.ok || !can(check.member, action).ok) {
+            return c.html(forbiddenDashboardHtml(), 403);
+        }
+        c.set("userId", userId);
+        c.set("member", check.member);
+        const auth = { kind: "user" as const, userId };
+        return withActor(
+            actorFromAuthContext(auth, check.member.householdId),
+            () => withSiteMembershipPeek(check.member, () => next()),
+        );
+    });
+}
 
 /** Owner or admin. */
 export const requireManager = createMiddleware(async (c, next) => {

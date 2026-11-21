@@ -3365,6 +3365,50 @@ describe("household settings sub-pages", () => {
         });
     });
 
+    describe("invites", () => {
+        test("the invites page and its forms are the owner's: 403 for a member and an admin", async () => {
+            // The owner gets past the gate (the page itself reads invites from
+            // the database, which this file does not stub).
+            expect(
+                (await get("/settings/household/invites", ALICE)).status,
+            ).not.toBe(403);
+            for (const who of [BOB, ADMIN]) {
+                expect(
+                    (await get("/settings/household/invites", who)).status,
+                ).toBe(403);
+                expect(
+                    (await post("/settings/household/invites", who)).status,
+                ).toBe(403);
+                expect(
+                    (
+                        await post(
+                            "/settings/household/invites/revoke",
+                            who,
+                            "id=00000000-0000-4000-8000-000000000000",
+                        )
+                    ).status,
+                ).toBe(403);
+            }
+        });
+
+        test("signed out, an invites form answers like the other owner-only forms", async () => {
+            const signedOut = (path: string) =>
+                app().request(`http://x${path}`, {
+                    method: "POST",
+                    headers: { "content-type": form },
+                    body: "",
+                });
+            const invites = await signedOut("/settings/household/invites");
+            const makeOwner = await signedOut(
+                `/settings/household/members/${BOB}/make-owner`,
+            );
+            expect(invites.status).toBe(makeOwner.status);
+            expect(invites.headers.get("location")).toBe(
+                makeOwner.headers.get("location"),
+            );
+        });
+    });
+
     describe("recipe link readers", () => {
         test("social-readers answers 303 to the readers page for the owner and 403 for a member and an admin", async () => {
             const owner = await post(

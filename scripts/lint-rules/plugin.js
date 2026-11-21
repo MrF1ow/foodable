@@ -12,6 +12,7 @@
 import gatedTool from "./rules/gated-tool.js";
 import mcpSchemaObject from "./rules/mcp-schema-object.js";
 import noDbMockOutsideWindows from "./rules/no-db-mock-outside-windows.js";
+import noRawRoleCheck from "./rules/no-raw-role-check.js";
 import noPerTestTimeout from "./rules/no-per-test-timeout.js";
 import noRestoreFromLiveImport from "./rules/no-restore-from-live-import.js";
 import noStringReplacementPatterns from "./rules/no-string-replacement-patterns.js";
@@ -25,6 +26,7 @@ export default {
         "mcp-schema-object": mcpSchemaObject,
         "no-db-mock-outside-windows": noDbMockOutsideWindows,
         "no-per-test-timeout": noPerTestTimeout,
+        "no-raw-role-check": noRawRoleCheck,
         "no-restore-from-live-import": noRestoreFromLiveImport,
         "no-string-replacement-patterns": noStringReplacementPatterns,
         "no-wall-clock-waits": noWallClockWaits,

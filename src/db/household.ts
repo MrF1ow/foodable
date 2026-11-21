@@ -199,6 +199,7 @@ export async function getHouseholdOwnerProfile(
     householdId: string,
 ): Promise<Profile | null> {
     const members = await listHouseholdMembers(householdId);
+    // oxlint-disable-next-line foodable/no-raw-role-check -- finds the owner's row; a data lookup, not a permission decision
     const owner = members.find((member) => member.role === "owner");
     if (!owner) return null;
     return getProfile(owner.userId);
@@ -690,6 +691,7 @@ export async function removeHouseholdMemberAccount(
                 `,
                 "load household member",
             );
+            // oxlint-disable-next-line foodable/no-raw-role-check -- data-integrity guard under the row lock: the owner row is never deleted
             if (!member || member.role === "owner") {
                 throw new Error(
                     "Only a member other than the owner can be removed.",

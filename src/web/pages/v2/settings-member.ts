@@ -16,7 +16,9 @@ export type SettingsMemberV2View = {
 };
 
 function roleLabel(role: HouseholdMember["role"]): string {
+    // oxlint-disable-next-line foodable/no-raw-role-check -- a display label, not a permission decision
     if (role === "owner") return "Owner";
+    // oxlint-disable-next-line foodable/no-raw-role-check -- a display label, not a permission decision
     if (role === "admin") return "Admin";
     return "Member";
 }

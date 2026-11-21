@@ -58,7 +58,7 @@ import { formText } from "../form.js";
 import {
     requireManager,
     requireMember,
-    requireOwner,
+    requireAction,
     requireSiteUser,
     siteMember,
 } from "../middleware.js";
@@ -416,30 +416,34 @@ settingsRoutes.post(AI_DISCONNECT_PATH, requireMember, async (c) => {
 
 // The household switch: only the owner flips it (403 for anyone else). The
 // form posts the value the switch should take.
-settingsRoutes.post(AI_DESTRUCTIVE_PATH, requireOwner, async (c) => {
-    const member = siteMember(c);
-    const body = await c.req.parseBody();
-    const value = formText(body, "allowed").trim();
-    if (value !== "0" && value !== "1") {
-        const page = await renderSettingsAiV2Route(c.get("userId"), {
-            mcpUrl: `${getBaseUrl(c)}/mcp`,
-            error: "Choose Allowed or Off.",
-        });
-        return c.html(page.html, page.status === 200 ? 400 : page.status);
-    }
-    const allowed = value === "1";
-    await liveSettingsStore().setAgentDestructiveAllowed(
-        member.householdId,
-        allowed,
-    );
-    return redirectWithToast(
-        c,
-        AI_PAGE_PATH,
-        allowed
-            ? "settings.ai.destructive-allowed"
-            : "settings.ai.destructive-off",
-    );
-});
+settingsRoutes.post(
+    AI_DESTRUCTIVE_PATH,
+    requireAction("agents.household_switch"),
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const value = formText(body, "allowed").trim();
+        if (value !== "0" && value !== "1") {
+            const page = await renderSettingsAiV2Route(c.get("userId"), {
+                mcpUrl: `${getBaseUrl(c)}/mcp`,
+                error: "Choose Allowed or Off.",
+            });
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
+        }
+        const allowed = value === "1";
+        await liveSettingsStore().setAgentDestructiveAllowed(
+            member.householdId,
+            allowed,
+        );
+        return redirectWithToast(
+            c,
+            AI_PAGE_PATH,
+            allowed
+                ? "settings.ai.destructive-allowed"
+                : "settings.ai.destructive-off",
+        );
+    },
+);
 
 // "Show cards in chat": the member's own switch (profiles.widgets_enabled).
 settingsRoutes.post(AI_WIDGETS_PATH, requireMember, async (c) => {

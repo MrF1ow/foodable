@@ -37,6 +37,7 @@ const GRANTS: Record<Action, readonly PermissionRole[]> = {
     "member.change_role": OWNER,
     "member.remove": OWNER,
     "agents.household_switch": OWNER,
+    "agents.undo_any": OWNER,
     "flags.view_owner_only": OWNER,
     "rules.edit_person": EVERYONE,
     "notification.act": EVERYONE,

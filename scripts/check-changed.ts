@@ -188,6 +188,12 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             tests: /^src\/db\/actor-allowlist\.test\.ts$/,
             incidental: true,
         },
+        // no-raw-role-check.test.ts scans src/**/*.ts from disk for raw role comparisons.
+        {
+            when: /^src\/.+\.ts$/,
+            tests: /^src\/domain\/no-raw-role-check\.test\.ts$/,
+            incidental: true,
+        },
         // notices.test.ts globs src/**/*.ts for hand-built allergen and expiry markup.
         {
             when: /^src\/.+\.ts$/,

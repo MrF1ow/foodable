@@ -186,6 +186,7 @@ export function householdInitial(name: string): string {
 }
 
 function roleLabel(role: HouseholdMember["role"]): string {
+    // oxlint-disable-next-line foodable/no-raw-role-check -- a display label, not a permission decision
     return role === "owner" ? "Owner" : role === "admin" ? "Admin" : "Member";
 }
 

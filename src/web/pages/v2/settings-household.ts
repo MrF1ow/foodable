@@ -82,7 +82,9 @@ export type SettingsHouseholdV2View = {
 };
 
 function roleLabel(role: HouseholdMember["role"]): string {
+    // oxlint-disable-next-line foodable/no-raw-role-check -- a display label, not a permission decision
     if (role === "owner") return "Owner";
+    // oxlint-disable-next-line foodable/no-raw-role-check -- a display label, not a permission decision
     if (role === "admin") return "Admin";
     return "Member";
 }
@@ -100,24 +102,31 @@ function pageLevelError(view: SettingsHouseholdV2View): Html {
     return settingsErrorBanner(view.error);
 }
 
+/** Whether this row offers Manage. Mirrors `checkManagedMember`: only the
+ * owner manages anyone, and never their own row. */
+function canManageRow(
+    view: SettingsHouseholdV2View,
+    member: HouseholdMember,
+): boolean {
+    return view.isOwner && member.userId !== view.viewerUserId;
+}
+
 function memberRow(
     view: SettingsHouseholdV2View,
     member: HouseholdMember,
 ): Html {
     const href = `/settings/household/members/${encodeURIComponent(member.userId)}`;
-    const manage =
-        view.isOwner && member.role !== "owner"
-            ? modalTrigger({
-                  target: HOUSEHOLD_MANAGE_ID,
-                  label: "Manage",
-                  className: "fd-settings-btn fd-settings-btn--sm",
-                  fill: manageFill(member),
-              })
-            : "";
-    const template =
-        view.isOwner && member.role !== "owner"
-            ? memberActionsTemplate(member)
-            : "";
+    const manage = canManageRow(view, member)
+        ? modalTrigger({
+              target: HOUSEHOLD_MANAGE_ID,
+              label: "Manage",
+              className: "fd-settings-btn fd-settings-btn--sm",
+              fill: manageFill(member),
+          })
+        : "";
+    const template = canManageRow(view, member)
+        ? memberActionsTemplate(member)
+        : "";
     // Without Manage the chevron sits inside the link, so it navigates too.
     const chevron = manage
         ? ""

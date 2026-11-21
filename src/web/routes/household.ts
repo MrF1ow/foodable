@@ -17,6 +17,7 @@ import {
     USUAL_WHEN_LOW_MARKER,
 } from "../pages/v2/kitchen-usuals.js";
 import {
+    requireAction,
     requireManager,
     requireMember,
     requireOwner,
@@ -32,6 +33,7 @@ import {
     parseHouseholdConfigPatch,
     parseHouseholdSettingsForm,
 } from "../../household.js";
+import { can } from "../../domain/permissions.js";
 import {
     generateHouseholdToken,
     hashHouseholdToken,
@@ -642,7 +644,7 @@ householdRoutes.post("/settings/household/name", requireManager, async (c) => {
 
 householdRoutes.post(
     "/settings/household/social-readers",
-    requireOwner,
+    requireAction("household.recipe_link_readers"),
     async (c) => {
         const userId = c.get("userId");
         const owner = siteMember(c);
@@ -1072,6 +1074,7 @@ householdRoutes.post(
             owner.householdId,
         );
         const check = checkManagedMember(owner, target, "role");
+        // oxlint-disable-next-line foodable/no-raw-role-check -- validates the submitted form value, not the actor's role
         if (!check.ok || (role !== "admin" && role !== "member")) {
             const page = await householdFormError(
                 userId,
@@ -1507,7 +1510,7 @@ async function renderInvitesRoute(
     if (!member) {
         return { status: 403 as const, html: forbiddenDashboardHtml() };
     }
-    if (member.role !== "owner") {
+    if (!can(member, "member.manage").ok) {
         return { status: 403 as const, html: forbiddenDashboardHtml() };
     }
     const profile = await getProfile(userId);
@@ -1530,40 +1533,48 @@ async function renderInvitesRoute(
     };
 }
 
-householdRoutes.get("/settings/household/invites", requireOwner, async (c) => {
-    const page = await renderInvitesRoute(
-        c.get("userId"),
-        invitesBackHref(c, c.req.query("from")),
-    );
-    return c.html(page.html, page.status);
-});
-
-householdRoutes.post("/settings/household/invites", requireOwner, async (c) => {
-    const member = siteMember(c);
-    const body = await c.req.parseBody();
-    const backHref = invitesBackHref(c, formText(body, "from"));
-    try {
-        const { code } = await createHouseholdInvite(
-            member.householdId,
-            member.userId,
+householdRoutes.get(
+    "/settings/household/invites",
+    requireAction("member.manage"),
+    async (c) => {
+        const page = await renderInvitesRoute(
+            c.get("userId"),
+            invitesBackHref(c, c.req.query("from")),
         );
-        const page = await renderInvitesRoute(member.userId, backHref, {
-            createdCode: code,
-        });
         return c.html(page.html, page.status);
-    } catch (err) {
-        const message =
-            err instanceof Error ? err.message : "Could not create invite.";
-        const page = await renderInvitesRoute(member.userId, backHref, {
-            error: message,
-        });
-        return c.html(page.html, 400);
-    }
-});
+    },
+);
+
+householdRoutes.post(
+    "/settings/household/invites",
+    requireAction("member.manage"),
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const backHref = invitesBackHref(c, formText(body, "from"));
+        try {
+            const { code } = await createHouseholdInvite(
+                member.householdId,
+                member.userId,
+            );
+            const page = await renderInvitesRoute(member.userId, backHref, {
+                createdCode: code,
+            });
+            return c.html(page.html, page.status);
+        } catch (err) {
+            const message =
+                err instanceof Error ? err.message : "Could not create invite.";
+            const page = await renderInvitesRoute(member.userId, backHref, {
+                error: message,
+            });
+            return c.html(page.html, 400);
+        }
+    },
+);
 
 householdRoutes.post(
     "/settings/household/invites/revoke",
-    requireOwner,
+    requireAction("member.manage"),
     async (c) => {
         const member = siteMember(c);
         const body = await c.req.parseBody();
