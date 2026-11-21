@@ -22,12 +22,12 @@ watches:
 
 - Bun loads `.env` on its own, and a real `.env` can hold production secrets. Pass every variable the process needs on the command line (a process env var beats `.env`), and start the server with `bun --no-env-file` so nothing else leaks in. `bun --no-env-file run <script>` does **not** reach the inner `bun`: use it only on `bun <file>` or `bun test`.
 - Never print, copy or commit `.env` values; use throwaway secrets.
-- `bun run db:dev` defaults to the user's own dev database (data dir ~/.local/share/foodable/pg, port 54330, run by `foodable-db.service`). `db:dev stop` would stop it and `init` would migrate it. There is no force or drop flag. So **always** set `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` first, as below. If you cannot, run only `status` or `url`. `db:dev` reads only those two (plus `PG_BIN`) and never `DATABASE_URL`, so it is safe under `bun run` even though the inner `bun` loads `.env`.
+- `bun run db:dev` defaults to the user's own dev database (data dir ~/.local/share/foodable/pg, port 54330, run by `foodable-db.service`). `db:dev stop` would stop it and `init` would migrate it, with no force flag to guard either. **Always** set `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` first (below), or run only `status` or `url`. `db:dev` reads only those two (plus `PG_BIN`) and never `DATABASE_URL`, so it is safe under `bun run` even though the inner `bun` loads `.env`.
 - Never use port 8080 or 54330: the user's dev server and database live there.
 
 ## Isolated stack (one-off verification)
 
-Shell variables do not survive separate tool calls: begin **every** command block with `STACK=<path printed by the first block>; . "$STACK/env"`. `init` creates the cluster, starts it, creates the database and migrates.
+Shell variables do not survive between tool calls: begin **every** command block with `STACK=<path printed by the first block>; . "$STACK/env"`. `init` creates the cluster, starts it, creates the database and migrates.
 
 ```bash
 free_port() { bun -e 'const s=Bun.listen({hostname:"127.0.0.1",port:0,socket:{open(){},data(){}}});console.log(s.port);s.stop(true)'; }
@@ -39,7 +39,7 @@ STACK=$(mktemp -d); echo "STACK=$STACK"
 bun run db:dev init        # needs initdb on PATH, or PG_BIN=<postgres bin dir>
 ```
 
-Start the server (repo root). `src/index.ts` needs `DATABASE_URL`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` and `OFF_USER_AGENT`; `SESSION_SECRET` (32+ chars) is optional (it falls back to `OAUTH_CLIENT_SECRET` with a warning) but pass it. The values below are throwaway. `db:dev url` echoes a `$ bun run …` line first, hence `| tail -1`:
+Start the server (repo root). It needs `DATABASE_URL`, `OAUTH_CLIENT_ID`, `OAUTH_CLIENT_SECRET` and `OFF_USER_AGENT`; `SESSION_SECRET` (32+ chars) falls back to `OAUTH_CLIENT_SECRET` with a warning, but pass it. The values below are throwaway. `db:dev url` echoes a `$ bun run …` line first (`| tail -1`):
 
 ```bash
 . "$STACK/env"
@@ -53,11 +53,11 @@ for i in $(seq 40); do curl -sf "http://127.0.0.1:$APP_PORT/health" >/dev/null &
 curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:$APP_PORT/"   # 200 = login page
 ```
 
-For row level security, set a throwaway `foodable_app` password (`psql`) and add `DATABASE_APP_URL` (as `foodable_app:<pw>`).
+For row level security, set a throwaway `foodable_app` password (`psql`) and add `DATABASE_APP_URL` (user `foodable_app`).
 
-It binds `0.0.0.0` (LAN): keep runs short. No answer: `$STACK/server.log`. App: `http://127.0.0.1:$APP_PORT`; the first sign-up on an empty database becomes the owner (`docs/self-hosting.md`, "First-user flow").
+It binds `0.0.0.0` (LAN): keep runs short. No answer: `$STACK/server.log`. App: `http://127.0.0.1:$APP_PORT`; the first sign-up on an empty database is the owner (`docs/self-hosting.md`, "First-user flow").
 
-Not `bun run dev`/`start`: `dev` runs `gen:all` (rewrites tracked files) and `--watch`, and the inner `bun` loads `.env`. Run `gen:all` only in a fresh worktree or after login copy/token changes.
+Not `bun run dev`/`start`: `dev` runs `gen:all` (rewrites tracked files) and `--watch`, and the inner `bun` loads `.env`. Run `gen:all` only in a fresh worktree or after login copy or token changes.
 
 Stop everything:
 
@@ -70,30 +70,31 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 ## Which tool fits which change
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
-- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app` (`src/db/testing/pg.ts`). Needs `initdb` (PATH or `PG_BIN`), else skipped.
-- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed": another run holds them; wait for `ss -ltn` to show both free). No database.
+- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped.
+- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" means another run holds them; wait until `ss -ltn` shows both free). No database.
 - **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow: long `timeout`). Clear tmp/app-preview first. Without `--shots`: serves :4787 (`PREVIEW_PORT`). Fixture data, `-390.png` and `-1440.png` per page.
-- **WebKit (Safari-class checks):** Playwright's WPE `MiniBrowser` only starts through a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH` (its `bin`, `lib`, `share`), `WEBKIT_FORCE_COMPLEX_TEXT=1` and an `LD_LIBRARY_PATH` with its `lib`, `sys/lib` and an ICU 74 libs dir.
-- **Barcode scans against a running server** hit live Open Food Facts so they need network; unit tests stub it.
+- **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`) diffs the non-gallery shots of base and branch; exit 1 on a difference. Renders must not overlap: one per tree, reuse the base.
+- **WebKit (Safari-class):** Playwright's WPE `MiniBrowser` starts only through a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH` (`bin`, `lib`, `share`), `WEBKIT_FORCE_COMPLEX_TEXT=1` and an `LD_LIBRARY_PATH` with its `lib`, `sys/lib` and an ICU 74 libs dir.
+- **Barcode scans against a running server** hit live Open Food Facts (network needed); unit tests stub it.
 - **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
-- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. `src/widgets.test.ts` guards assembly. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
+- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
 - **App-wide middleware (body limit, CORS):** import `app` from `src/index.ts`, as `src/index.test.ts` does.
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked.
-- **Migrations:** `bun run db:dryrun` (throwaway Postgres, never production; needs `initdb`). `bun run db:rehearse` (production copy via `railway ssh`): only when asked.
+- **Migrations:** `bun run db:dryrun` (throwaway Postgres; needs `initdb`). `bun run db:rehearse` (production copy via `railway ssh`): only when asked.
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
-- **Types, lint, format:** `bun run typecheck`, `bun run lint`, `bun run format:check` (`format` fixes). Both need Bun ≥ 1.4.4 for `bun fmt`: put `$(mise where bun@1.4.4)/bin` first on PATH (`mise exec` misses the `bun` inside scripts).
+- **Types, lint, format:** `bun run typecheck`, `lint`, `format:check` (`format` fixes). Both need Bun ≥ 1.4.4 for `bun fmt`: put `$(mise where bun@1.4.4)/bin` first on PATH (`mise exec` misses the `bun` inside scripts).
 
-`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if it points at the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
+`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if that is the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 
 ## Never touch
 
-- Production data: Railway Postgres is internal-only; `bun run db:rehearse` only when asked, no own `railway ssh` queries.
-- `.env`, and any value in it (never print, copy or commit). `docker-compose.yml` loads `.env`, so do not use it for verification.
-- The design file `Foodable Design.figcraft` in the user's designs folder: read-only, read it with the FigCraft tools, never edit or save it.
+- Production data: Railway Postgres is internal-only; `bun run db:rehearse` only when asked, no `railway ssh` queries of your own.
+- `.env`, and any value in it (never print, copy or commit). Not `docker-compose.yml` (loads `.env`).
+- The design file `Foodable Design.figcraft`: read-only, read it with the FigCraft tools, never edit or save it.
 - The user's dev server, `foodable*.service` units, `foodable-db.service`, and anything on :8080 or :54330: never kill, restart or reuse.
 - `main` and the rulesets.
 
 ## When this skill is out of date
 
-The `watches:` list in the frontmatter names the files this skill describes. If your change touches one, update this skill in the same PR: the **skill-drift** policy check fails otherwise (`bun scripts/conventions/skill-drift.ts` runs it locally). Skills and CLAUDE.md also have a size budget (`.github/agent-context-budget.json`); growing past it needs the `agent-context-increase` label (`bun scripts/conventions/context-budget.ts` checks it).
+The `watches:` list in the frontmatter names the files this skill describes. If your change touches one, update this skill in the same PR, or the **skill-drift** check fails (`bun scripts/conventions/skill-drift.ts`). Skills and CLAUDE.md also have a size budget (`.github/agent-context-budget.json`); growing past it needs the `agent-context-increase` label (`bun scripts/conventions/context-budget.ts`).

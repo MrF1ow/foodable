@@ -2868,8 +2868,9 @@ if (process.argv.includes("--shots")) {
         // top bar at the design's 1440. Long pages (the dev gallery, Today,
         // Settings) get a tall window so --shots capture every block.
         const shotBase = name.replace(/-(?:light|dark)$/, "");
+        const growsWithPage = shotBase.startsWith("dev-gallery-v2");
         const galleryFullPage =
-            shotBase.startsWith("dev-gallery-v2") ||
+            growsWithPage ||
             shotBase.startsWith("trends-v2") ||
             shotBase === "nutrition" ||
             shotBase === "nutrition-agent-notice" ||
@@ -2886,8 +2887,38 @@ if (process.argv.includes("--shots")) {
             shotBase === "help" ||
             shotBase === "recipes" ||
             shotBase === "recipe";
-        const phone = galleryFullPage ? "390,5400" : "390,844";
-        const desktop = galleryFullPage ? "1440,5400" : "1440,960";
+        // The dev gallery grows with every component it shows, so it is
+        // measured first and shot at its own height. The page is measured in
+        // an iframe of the shot's own width, since headless Chromium lays a
+        // phone-sized window out wider than --window-size says, and only once
+        // its fonts have loaded (timers, since no animation frame fires under
+        // virtual time; the colour scheme does not change the layout, and
+        // forcing it crashes the renderer once a page holds an iframe). Other
+        // long pages keep the fixed window: their shot size is part of the
+        // no-change diff.
+        const fullHeight = async (width: number): Promise<number> => {
+            const probe = `${OUT}/${name}.measure.html`;
+            await Bun.write(
+                probe,
+                `<!doctype html><iframe id="f" src="/${name}.html" style="width:${width}px;height:900px;border:0"></iframe><script>const wait=(ms)=>new Promise((r)=>setTimeout(r,ms));f.onload=async()=>{const d=f.contentDocument;await Promise.race([d.fonts.ready,wait(1500)]);await wait(200);document.documentElement.setAttribute("data-fd-height",String(Math.max(d.documentElement.scrollHeight,d.body.scrollHeight)))}</script>`,
+            );
+            const dom =
+                await Bun.$`timeout 60 ${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --user-data-dir=${dataDir} --window-size=${Math.max(width, 500)},900 --virtual-time-budget=3000 --dump-dom http://localhost:${PORT}/${name}.measure.html`.text();
+            await Bun.$`rm -f ${probe}`.quiet();
+            const found = /data-fd-height="(\d+)"/.exec(dom);
+            if (!found) throw new Error(`${name}: could not measure the page`);
+            return Number(found[1]);
+        };
+        const phone = growsWithPage
+            ? `390,${await fullHeight(390)}`
+            : galleryFullPage
+              ? "390,5400"
+              : "390,844";
+        const desktop = growsWithPage
+            ? `1440,${await fullHeight(1440)}`
+            : galleryFullPage
+              ? "1440,5400"
+              : "1440,960";
         await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${phone} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-390.png http://localhost:${PORT}/${name}.html`.quiet();
         console.log(`${OUT}/${name}-390.png`);
         await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${desktop} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-1440.png http://localhost:${PORT}/${name}.html`.quiet();

@@ -1,8 +1,10 @@
 import type { AppChromeBase } from "../attention.js";
 import { pageHeader } from "../components/ui.js";
 import { renderAppShell } from "../shell.js";
+import { button, filterButton } from "../components/v2/button.js";
 import { choiceGroup, chipLink, chipNav } from "../components/v2/chips.js";
 import { DOT_COLORS, dot } from "../components/v2/dot.js";
+import { ICON_NAMES, icon } from "../components/v2/icon.js";
 import { iconRepeat } from "../components/v2/icons.js";
 import {
     foodRow,
@@ -531,11 +533,105 @@ function sheetsSection(): string {
     );
 }
 
+function buttonSection(): string {
+    const row = (...items: string[]) =>
+        `<div class="fd-gallery-row">${items.join("")}</div>`;
+    const kinds = [
+        ["secondary", "Cancel"],
+        ["primary", "Save"],
+        ["danger", "Delete"],
+        ["link", "Save"],
+    ] as const;
+    const large = kinds.map(([variant, label]) => button({ label, variant }));
+    const largeIcon = kinds.map(([variant, label]) =>
+        button({ label, variant, icon: "plus" }),
+    );
+    const small = kinds.map(([variant, label]) =>
+        button({ label, variant, size: "md" }),
+    );
+    const smallIcon = kinds.map(([variant, label]) =>
+        button({ label, variant, size: "md", icon: "plus" }),
+    );
+    const disabled = kinds.map(([variant, label]) =>
+        button({ label, variant, disabled: true }),
+    );
+    return block(
+        "Button",
+        "Button 171966 (Kind × Size), Icon button 171939, Go button 69115, Filter button 69111. Large 48, Small 40, Go 32.",
+        `<p class="fd-gallery-note">Large</p>${row(...large)}${row(...largeIcon)}` +
+            `<p class="fd-gallery-note">Small</p>${row(...small)}${row(...smallIcon)}` +
+            `<p class="fd-gallery-note">Icon button (40), primary and danger rounds</p>${row(
+                button({
+                    label: "Back",
+                    icon: "chevron-left",
+                    round: true,
+                    size: "md",
+                }),
+                button({
+                    label: "More",
+                    icon: "more",
+                    round: true,
+                    size: "md",
+                }),
+                button({
+                    label: "Add",
+                    icon: "plus",
+                    round: true,
+                    variant: "primary",
+                    size: "md",
+                }),
+                button({
+                    label: "Delete",
+                    icon: "trash",
+                    round: true,
+                    variant: "danger",
+                    size: "md",
+                }),
+            )}` +
+            `<p class="fd-gallery-note">Go button (32), Filter button (24) without and with a count</p>${row(
+                button({ label: "Search", variant: "go" }),
+                filterButton({ label: "Filter" }),
+                `<span style="display:inline-flex;width:24px;height:24px"></span>`,
+                filterButton({ label: "Filter, 2 on", count: 2 }),
+            )}` +
+            `<p class="fd-gallery-note">Links and submit buttons render the same markup</p>${row(
+                button({ label: "Open", variant: "primary", href: "#" }),
+                button({ label: "Open", href: "#", size: "md" }),
+                button({ label: "Save", variant: "primary", type: "submit" }),
+            )}` +
+            `<p class="fd-gallery-note">Disabled</p>${row(...disabled)}` +
+            row(
+                button({
+                    label: "More",
+                    icon: "more",
+                    round: true,
+                    disabled: true,
+                }),
+                button({ label: "Search", variant: "go", disabled: true }),
+                button({ label: "Open", href: "#", disabled: true }),
+            ),
+    );
+}
+
+function iconsSection(): string {
+    const cells = ICON_NAMES.map(
+        (name) =>
+            `<div style="display:flex;flex-direction:column;align-items:center;gap:6px;width:84px;color:var(--text-primary)">${icon(name)}<span class="fd-gallery-note" style="margin:0">${name}</span></div>`,
+    ).join("");
+    return block(
+        "Icons",
+        "The 40 design Icon/* components at their 24 frame",
+        `<div class="fd-gallery-row" style="gap:12px 0">${cells}</div>`,
+    );
+}
+
 function devGalleryBody(): string {
     const sections = [
         ...SECTIONS.map((s) => s.render()),
         dotsSection(),
         sheetsSection(),
+        buttonSection(),
+        iconsSection(),
     ].join("\n");
     return `<div class="fd-gallery">${pageHeader({ title: "v2 components" })}${sections}</div>`;
 }
