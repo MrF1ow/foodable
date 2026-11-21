@@ -9,8 +9,13 @@
 //
 // Output order is stable: collections and variables in the design's id order,
 // modes in the collection's order. Colours are `hex` (#rrggbb) plus `alpha`
-// as stored by FigCraft; the export fails if an alpha is not a whole byte,
-// because the CSS writes colours as 8-digit hex.
+// as stored by FigCraft; the export fails if a plain colour's alpha is not a
+// whole byte, because the CSS writes colours as 8-digit hex. An alias to
+// another variable (space/gutter -> space/xl) is written as the value it
+// resolves to, in the same mode (by position when the target's collection has
+// its own modes). A colour that is another colour at some opacity
+// (accent/glow) is written as that colour's hex with the opacity as `alpha`;
+// its alpha need not be a whole byte, and nothing in the CSS reads it.
 import { homedir } from "node:os";
 
 const DEFAULT_PATH = `${homedir()}/Projects/designs/Foodable/Foodable Design.figcraft`;
@@ -21,7 +26,12 @@ type RawValue =
     | { type: "color"; value: Rgba }
     | { type: "number"; value: number }
     | { type: "string"; value: string }
-    | { type: "boolean"; value: boolean };
+    | { type: "boolean"; value: boolean }
+    | { type: "alias"; value: string }
+    | {
+          type: "colorAlpha";
+          value: { variable: string; opacity: number };
+      };
 type RawVariables = {
     collections: {
         id: string;
@@ -44,7 +54,35 @@ const hex = (c: Rgba) =>
     "#" +
     [c.r, c.g, c.b].map((v) => byte(v).toString(16).padStart(2, "0")).join("");
 
-function value(name: string, raw: RawValue) {
+type Exported = number | string | boolean | { hex: string; alpha: number };
+
+function value(
+    name: string,
+    raw: RawValue,
+    modeIndex: number,
+    depth = 0,
+): Exported {
+    if (depth > 8) throw new Error(`${name}: alias chain too deep`);
+    if (raw.type === "alias" || raw.type === "colorAlpha") {
+        const targetId = raw.type === "alias" ? raw.value : raw.value.variable;
+        const target = byId.get(targetId);
+        if (!target) throw new Error(`${name}: no variable ${targetId}`);
+        const targetModes = modesOf.get(target.collection)!;
+        const mode = targetModes[Math.min(modeIndex, targetModes.length - 1)]!;
+        const resolved = target.values[mode.id];
+        if (!resolved) throw new Error(`${name}: ${target.name} has no value`);
+        const v = value(
+            `${name} -> ${target.name}`,
+            resolved,
+            modeIndex,
+            depth + 1,
+        );
+        if (raw.type === "alias") return v;
+        if (typeof v !== "object") {
+            throw new Error(`${name}: colorAlpha of a non-colour`);
+        }
+        return { hex: v.hex, alpha: v.alpha * raw.value.opacity };
+    }
     if (raw.type !== "color") return raw.value;
     const a = raw.value.a;
     if (Math.abs(a * 255 - byte(a)) > 1e-3) {
@@ -58,6 +96,8 @@ const doc = JSON.parse(
     await Bun.$`unzip -p ${path} document.json`.quiet().text(),
 ) as { variables: RawVariables };
 const raw = doc.variables;
+const byId = new Map(raw.variables.map((v) => [v.id, v]));
+const modesOf = new Map(raw.collections.map((c) => [c.id, c.modes]));
 
 const collections = [...raw.collections]
     .sort((a, b) => idNum(a.id) - idNum(b.id))
@@ -67,10 +107,10 @@ const collections = [...raw.collections]
             .filter((v) => v.collection === c.id)
             .sort((a, b) => idNum(a.id) - idNum(b.id))) {
             const values: Record<string, unknown> = {};
-            for (const m of c.modes) {
+            for (const [i, m] of c.modes.entries()) {
                 const r = v.values[m.id];
                 if (!r) throw new Error(`${v.name}: no value for ${m.name}`);
-                values[m.name] = value(`${v.name} (${m.name})`, r);
+                values[m.name] = value(`${v.name} (${m.name})`, r, i);
             }
             variables[v.name] = {
                 type: v.resolvedType,
