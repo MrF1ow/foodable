@@ -27,6 +27,8 @@ export type HouseholdOwnerModalsView = {
     isOwner: boolean;
     /** Owner or admin: add a member. */
     canManage: boolean;
+    /** The person looking: their own row is never managed. */
+    viewerUserId?: string;
     error?: string;
     openModalId?: string;
 };
@@ -87,7 +89,8 @@ function modalOpen(view: HouseholdOwnerModalsView, id: string): boolean {
 
 function managedMembers(view: HouseholdOwnerModalsView): HouseholdMember[] {
     if (!view.isOwner) return [];
-    return view.members.filter((member) => member.role !== "owner");
+    // Mirrors `checkManagedMember`: the owner manages everyone but themselves.
+    return view.members.filter((member) => member.userId !== view.viewerUserId);
 }
 
 function findManagedMember(
@@ -131,20 +134,24 @@ ${modalError}${addMemberFormBody()}
 
 function roleBlurb(member: HouseholdMember): string {
     const name = member.displayName;
+    // oxlint-disable-next-line foodable/no-raw-role-check -- wording follows the member's current role; not a permission decision
     return member.role === "admin"
         ? `${name} is an admin: they can change household settings, stores and everyone's rules, and add people. You stay the owner.`
         : `Make ${name} an admin to let them change household settings, stores and everyone's rules, and add people. You stay the owner.`;
 }
 
 function roleValue(member: HouseholdMember): string {
+    // oxlint-disable-next-line foodable/no-raw-role-check -- button text follows the member's current role; not a permission decision
     return member.role === "admin" ? "member" : "admin";
 }
 
 function roleSubmitLabel(member: HouseholdMember): string {
+    // oxlint-disable-next-line foodable/no-raw-role-check -- button text follows the member's current role; not a permission decision
     return member.role === "admin" ? "Make member" : "Make admin";
 }
 
 function roleSubmitClass(member: HouseholdMember): string {
+    // oxlint-disable-next-line foodable/no-raw-role-check -- button text follows the member's current role; not a permission decision
     return member.role === "admin" ? "" : "btn-primary";
 }
 

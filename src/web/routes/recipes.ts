@@ -15,6 +15,7 @@ import {
     RecipeUnverifiedError,
 } from "../../domain/recipes.js";
 import { getHouseholdConfig } from "../../db/household.js";
+import { can } from "../../domain/permissions.js";
 import { liveSocialReaderStatusStore } from "../../db/social-readers.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
@@ -1010,7 +1011,7 @@ recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {
     try {
         await deleteRecipe(liveRecipesStore(), member.householdId, recipeId, {
             userId,
-            isOwner: member.role === "owner",
+            isOwner: can(member, "recipe.delete_any").ok,
         });
     } catch (err) {
         const page = await recipeFormError(userId, recipeId, err, {

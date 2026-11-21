@@ -186,7 +186,6 @@ export function buildFlagContext(
         ctx.household_id = household_id;
         ctx.household_cohort = bucket(household_id);
     }
-    // oxlint-disable-next-line foodable/no-raw-role-check -- presence check, not a role decision
     if (input.member?.role !== undefined) {
         ctx.role = input.member.role;
     }
@@ -224,7 +223,6 @@ export function sdkContext(
     if (ctx.household_cohort !== undefined) {
         out.household_cohort = ctx.household_cohort;
     }
-    // oxlint-disable-next-line foodable/no-raw-role-check -- presence check, not a role decision
     if (ctx.role !== undefined) out.role = ctx.role;
     return out;
 }

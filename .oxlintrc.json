@@ -178,6 +178,22 @@
             }
         },
         {
+            "files": ["src/**/*.ts"],
+            "rules": {
+                "foodable/no-raw-role-check": "error"
+            }
+        },
+        {
+            "files": [
+                "**/*.test.ts",
+                "src/domain/permissions.ts",
+                "src/household.ts"
+            ],
+            "rules": {
+                "foodable/no-raw-role-check": "off"
+            }
+        },
+        {
             "files": ["src/mcp/**/*.ts"],
             "rules": {
                 "foodable/mcp-schema-object": "error",

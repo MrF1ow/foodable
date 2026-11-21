@@ -17,6 +17,7 @@ import {
     type BulkResult,
 } from "../../domain/bulk.js";
 import { FoodsInputError } from "../../domain/foods.js";
+import { can } from "../../domain/permissions.js";
 import { RecipeForbiddenError } from "../../domain/recipes.js";
 import { StockInputError } from "../../domain/stock.js";
 import {
@@ -187,7 +188,7 @@ bulkRoutes.post("/settings/saved/bulk/delete", requireMember, (c) => {
                 recipeIds: recipeIds == null ? [] : parseBulkIds(recipeIds),
                 actor: {
                     userId: c.get("userId"),
-                    isOwner: member.role === "owner",
+                    isOwner: can(member, "recipe.delete_any").ok,
                 },
             });
         },

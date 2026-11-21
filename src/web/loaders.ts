@@ -5,6 +5,7 @@ import {
     householdTimezone,
     type HouseholdMember,
 } from "../household.js";
+import { can } from "../domain/permissions.js";
 import { type AlcoholDisplay } from "../mcp/shared.js";
 import {
     alcoholTrackingEnabledFromProfile,
@@ -1151,7 +1152,7 @@ export async function renderSettingsAiV2Route(
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const householdId = gate.viewer.householdId;
-    const isOwner = gate.viewer.role === "owner";
+    const isOwner = can(gate.viewer, "agents.household_switch").ok;
     const profile = await getProfile(viewerUserId);
     const timezone = profile?.timezone?.trim() || "UTC";
     const now = new Date();
@@ -1175,7 +1176,7 @@ export async function renderSettingsAiV2Route(
             showCards: widgetsEnabledFromProfile(profile),
             activity: agentActivityRows(entries, {
                 viewerUserId,
-                isOwner,
+                isOwner: can(gate.viewer, "agents.undo_any").ok,
                 names: new Map(members.map((m) => [m.userId, m.displayName])),
                 now,
                 timezone,
@@ -1206,7 +1207,7 @@ export async function loadAgentActionNotices(
         return agentActionNotices(entries, {
             now,
             viewerUserId: viewer.userId,
-            isOwner: viewer.role === "owner",
+            isOwner: can(viewer, "agents.undo_any").ok,
         });
     } catch (err) {
         console.error("Failed to load agent change notices:", err);
@@ -1486,6 +1487,7 @@ export async function renderHouseholdSettingsRoute(
         liveSettingsStore().listStores(householdId),
         liveSettingsStore().getLocation(householdId),
     ]);
+    // oxlint-disable-next-line foodable/no-raw-role-check -- finds the owner's row; a data lookup, not a permission decision
     const ownerId = members.find((m) => m.role === "owner")?.userId;
     const ownerProfile =
         ownerId === viewerUserId
@@ -1529,7 +1531,7 @@ export async function renderHouseholdSettingsRoute(
             lastSeen,
             members,
             storeCount: stores.length,
-            isOwner: gate.viewer.role === "owner",
+            isOwner: can(gate.viewer, "household.owner_only").ok,
             canManage: canManageHousehold(gate.viewer),
             viewerUserId: gate.viewer.userId,
             error: opts.error,
@@ -1619,7 +1621,7 @@ export async function renderHouseholdReadersRoute(
             ),
             socialReaders: config.preferences.socialReaders,
             blockedCount: blocked.length,
-            isOwner: gate.viewer.role === "owner",
+            isOwner: can(gate.viewer, "household.recipe_link_readers").ok,
             canManage: canManageHousehold(gate.viewer),
             error: opts.error,
             openModalId: opts.openModalId,

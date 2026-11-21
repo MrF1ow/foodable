@@ -26,6 +26,7 @@ export type Action =
     | "member.remove"
     // Agents and flags
     | "agents.household_switch"
+    | "agents.undo_any" // undo an agent change someone else's agent made
     | "flags.view_owner_only"
     // Rules and notifications
     | "rules.edit_person" // someone's allergens, dislikes and rules
@@ -75,6 +76,7 @@ const OWNER_ONLY: readonly Action[] = [
     "member.change_role",
     "member.remove",
     "agents.household_switch",
+    "agents.undo_any",
     "flags.view_owner_only",
     "recipe.delete_any",
 ];
