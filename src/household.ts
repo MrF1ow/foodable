@@ -1,5 +1,6 @@
 import type { AuthContext } from "./auth-context.js";
 import { MIN_PASSWORD_LENGTH } from "./domain/auth.js";
+import { can, type Action } from "./domain/permissions.js";
 import { dateInTz, validateTz } from "./domain/tz.js";
 
 /** `admin` is an elevated member: they manage the household (settings,
@@ -314,10 +315,15 @@ export function createMemoryHouseholdStore(): HouseholdStore {
             if (members.some((existing) => existing.userId === member.userId)) {
                 throw new DuplicateMembershipError();
             }
-            if (
-                member.role === "owner" &&
-                members.some((existing) => existing.role === "owner")
-            ) {
+            // One owner per household is a data-integrity rule on the store,
+            // not a permission decision.
+            // oxlint-disable-next-line foodable/no-raw-role-check -- data-integrity rule
+            const addsOwner = member.role === "owner";
+            const hasOwner = members.some(
+                // oxlint-disable-next-line foodable/no-raw-role-check -- data-integrity rule
+                (existing) => existing.role === "owner",
+            );
+            if (addsOwner && hasOwner) {
                 throw new DuplicateOwnerError();
             }
             members.push({ ...member });
@@ -374,14 +380,14 @@ export function requireOwner(
 ): RequireOwnerResult {
     const check = requireMemberOfHousehold(member, householdId);
     if (!check.ok) return check;
-    if (check.member.role !== "owner") {
+    if (!can(check.member, "household.owner_only").ok) {
         return { ok: false, error: "not_owner" };
     }
     return { ok: true, member: check.member };
 }
 
 export function canManageHousehold(member: HouseholdMember): boolean {
-    return member.role === "owner" || member.role === "admin";
+    return can(member, "household.manage").ok;
 }
 
 /** Owner or admin. */
@@ -403,10 +409,16 @@ export function canEditPersonRules(
     actor: HouseholdMember,
     targetUserId: string,
 ): boolean {
-    return actor.userId === targetUserId || canManageHousehold(actor);
+    return can(actor, "rules.edit_person", { userId: targetUserId }).ok;
 }
 
 export type ManagedMemberAction = "transfer" | "remove" | "role";
+
+const MANAGED_MEMBER_ACTIONS = {
+    transfer: "member.transfer_ownership",
+    remove: "member.remove",
+    role: "member.change_role",
+} as const satisfies Record<ManagedMemberAction, Action>;
 
 export type ManagedMemberResult =
     { ok: true; target: HouseholdMember } | { ok: false; error: string };
@@ -420,23 +432,17 @@ export function checkManagedMember(
     target: HouseholdMember | null | undefined,
     action: ManagedMemberAction,
 ): ManagedMemberResult {
-    if (owner.role !== "owner") {
-        return { ok: false, error: "Only the household owner can do that." };
-    }
+    const permission = MANAGED_MEMBER_ACTIONS[action];
+    const allowed = can(owner, permission);
+    if (!allowed.ok) return { ok: false, error: allowed.reason };
     if (target == null || target.householdId !== owner.householdId) {
         return { ok: false, error: "That person is not in this household." };
     }
-    if (target.userId === owner.userId) {
-        return {
-            ok: false,
-            error:
-                action === "transfer"
-                    ? "You are already the owner."
-                    : action === "role"
-                      ? "You are the owner. Transfer ownership to change your role."
-                      : "You can't remove yourself. Make someone else the owner first.",
-        };
-    }
+    const aimed = can(owner, permission, {
+        userId: target.userId,
+        role: target.role,
+    });
+    if (!aimed.ok) return { ok: false, error: aimed.reason };
     return { ok: true, target };
 }
 

@@ -72,6 +72,7 @@ import {
     type AgentUndoDeps,
     type SnapshotRecorder,
 } from "../domain/agent-actions.js";
+import { can } from "../domain/permissions.js";
 import { alreadyHaveTag } from "../domain/linking.js";
 import { listFridge } from "../domain/fridge.js";
 import {
@@ -1854,6 +1855,7 @@ export function createToolContext(
     }> {
         if (auth.kind === "household") {
             const members = await listHouseholdMembers(auth.householdId);
+            // oxlint-disable-next-line foodable/no-raw-role-check -- finds the owner's row; a data lookup, not a permission decision
             const owner = members.find((row) => row.role === "owner");
             if (!owner) {
                 throw new Error("not a household member");
@@ -1871,7 +1873,7 @@ export function createToolContext(
         }
         return {
             userId: check.member.userId,
-            isOwner: check.member.role === "owner",
+            isOwner: can(check.member, "household.owner_only").ok,
             householdId: check.member.householdId,
         };
     }
