@@ -1,0 +1,156 @@
+/* The one button (src/web/components/v2/button.ts): Secondary, Primary,
+ * Danger and Link, in a Large and a Small size, plus the round Icon button,
+ * the Go button and the Filter button.
+ *
+ * Every rule matches `[data-fd-btn]`, which only `button()` and
+ * `filterButton()` emit, at the specificity of one type selector (the
+ * `:is(a, button)`; the class and attribute sit in `:where`). `.fd-btn` markup
+ * that a page writes by hand therefore keeps the look its own stylesheet gives
+ * it, and any page rule with a class beats this one. The type selector is there
+ * so a link button is not recoloured by the app's own `a` rule.
+ *
+ * Sizes, padding, gap, radius and type size come from the control tiers of
+ * tokens.css (Large = lg, Small = md, Go = sm); colours from the theme tokens.
+ * Order matters: the variants sit after the base and the round modifier, and
+ * resolve by order because none of them has any specificity.
+ */
+
+:is(a, button):where(.fd-btn[data-fd-btn]) {
+    --fd-btn-icon: var(--control-lg-icon);
+    box-sizing: border-box;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    gap: var(--control-lg-gap);
+    height: var(--control-lg-height);
+    min-height: 0;
+    margin: 0;
+    padding: 0 var(--control-lg-padding);
+    border: 0;
+    border-radius: var(--control-lg-radius);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: var(--control-lg-text);
+    font-weight: 600;
+    line-height: 1;
+    text-decoration: none;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+:where(.fd-btn[data-fd-btn]) :where(.fd-icon) {
+    flex: none;
+    width: var(--fd-btn-icon);
+    height: var(--fd-btn-icon);
+}
+
+/* Small: the md control tier. */
+:is(a, button):where(.fd-btn--sm[data-fd-btn]) {
+    --fd-btn-icon: var(--control-md-icon);
+    gap: var(--control-md-gap);
+    height: var(--control-md-height);
+    padding: 0 var(--control-md-padding);
+    border-radius: var(--control-md-radius);
+    font-size: var(--control-md-text);
+}
+
+/* Icon button: a circle as wide as the tier is tall, secondary text colour. */
+:is(a, button):where(.fd-btn--icon[data-fd-btn]) {
+    width: var(--control-lg-height);
+    padding: 0;
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+}
+
+:is(a, button):where(.fd-btn--icon.fd-btn--sm[data-fd-btn]) {
+    width: var(--control-md-height);
+}
+
+:is(a, button):where(.fd-btn--primary[data-fd-btn]) {
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+:is(a, button):where(.fd-btn--danger[data-fd-btn]) {
+    color: var(--status-over);
+}
+
+:is(a, button):where(.fd-btn--link[data-fd-btn]) {
+    background: transparent;
+    color: var(--accent-text);
+}
+
+/* Go: the sm tier as a circle, the arrow drawn on its 32 box. */
+:is(a, button):where(.fd-btn--go[data-fd-btn]) {
+    width: var(--control-sm-height);
+    height: var(--control-sm-height);
+    padding: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
+:where(.fd-btn--go[data-fd-btn]) :where(.fd-btn__arrow) {
+    width: 100%;
+    height: 100%;
+}
+
+/* Filter: the bars glyph on a 24 box, with a count badge on its top corner. */
+:is(a, button):where(.fd-btn--filter[data-fd-btn]) {
+    position: relative;
+    width: var(--space-2xl);
+    height: var(--space-2xl);
+    padding: 0;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--text-primary);
+}
+
+:where(.fd-btn--filter[data-fd-btn]) :where(.fd-btn__glyph) {
+    width: 100%;
+    height: 100%;
+}
+
+:where(.fd-btn__badge) {
+    position: absolute;
+    top: calc(-1 * var(--space-xs));
+    left: calc(var(--space-md) + var(--space-2xs));
+    box-sizing: border-box;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: var(--text-micro-line);
+    height: var(--text-micro-line);
+    padding: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent-fill);
+    color: var(--accent-on);
+    font-size: var(--text-micro-size);
+    font-weight: 600;
+    line-height: 1;
+}
+
+/* Disabled and focus are the two states the app's own `.native` form rules
+ * also style, at one pseudo-class of specificity: `:where(.native button)
+ * :disabled` (cursor, opacity) and `:where(.native :is(…, button))
+ * :focus-visible` (outline none, accent box-shadow). So these two keep their
+ * state pseudo-class outside `:where`: `:is(a, button)` plus the pseudo-class
+ * is one type and one pseudo-class, which beats those and gives a `<button>`
+ * and an `<a>` the same ring and cursor on every app page. That is still below
+ * any rule that names a class of its own (`.fd-sheet .fd-btn:disabled`, ...),
+ * so a context keeps winning here too. */
+:is(a, button):where(.fd-btn[data-fd-btn]):disabled,
+:is(a, button):where(.fd-btn[data-fd-btn])[aria-disabled="true"] {
+    opacity: 0.5;
+    cursor: default;
+    pointer-events: none;
+}
+
+:is(a, button):where(.fd-btn[data-fd-btn]):focus-visible {
+    border-color: transparent;
+    box-shadow: none;
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}
