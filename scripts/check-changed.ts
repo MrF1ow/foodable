@@ -167,6 +167,13 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             tests: /^src\/copy\/notices-inline-guard\.test\.ts$/,
             incidental: true,
         },
+        // permissions.test.ts scans src/mcp/tools for every runDestructive
+        // call, so TOOL_ACTIONS stays in step with the guarded tools.
+        {
+            when: /^src\/mcp\/tools\/.+\.ts$/,
+            tests: /^src\/domain\/permissions\.test\.ts$/,
+            incidental: true,
+        },
         // field.test.ts globs src/web/**/*.ts for hand-written labels;
         // turbo-forms.test.ts reads pages/v2/settings-household-modals.ts,
         // components/ui.ts and shell.ts.

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { flags as railwayFlags } from "railway";
 import type { AuthContext } from "./auth-context.js";
 import { rateLimitKey } from "./auth-context.js";
+import { can } from "./domain/permissions.js";
 import type { HouseholdMember } from "./household.js";
 import { VERSION } from "./version.js";
 
@@ -185,6 +186,7 @@ export function buildFlagContext(
         ctx.household_id = household_id;
         ctx.household_cohort = bucket(household_id);
     }
+    // oxlint-disable-next-line foodable/no-raw-role-check -- presence check, not a role decision
     if (input.member?.role !== undefined) {
         ctx.role = input.member.role;
     }
@@ -222,6 +224,7 @@ export function sdkContext(
     if (ctx.household_cohort !== undefined) {
         out.household_cohort = ctx.household_cohort;
     }
+    // oxlint-disable-next-line foodable/no-raw-role-check -- presence check, not a role decision
     if (ctx.role !== undefined) out.role = ctx.role;
     return out;
 }
@@ -289,7 +292,10 @@ function evaluateInternal(
     ctx: FlagContext,
 ): { value: boolean; reason: string } {
     if (def.unit === "user") {
-        const on = ctx.role === "owner";
+        const on =
+            ctx.role !== undefined &&
+            can({ userId: ctx.key, role: ctx.role }, "flags.view_owner_only")
+                .ok;
         return { value: on, reason: "ENV_INTERNAL" };
     }
     const on = ctx.household_id !== undefined;
