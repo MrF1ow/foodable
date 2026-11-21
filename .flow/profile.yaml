@@ -18,6 +18,7 @@ risk:
     command: "bun run scripts/conventions/blast.ts --base origin/main"
 check_changed: "bun run check:changed"
 testing_skill: .claude/skills/foodable-test/SKILL.md
+design: "~/Projects/designs/Foodable/Foodable Design.figcraft" # read-only FigCraft file the UI checks compare against
 checks:
     - "bun run typecheck"
     - "bun run format:check"
@@ -32,3 +33,4 @@ history:
     - "2026-11-08: inferred standard (default branch requires review, so the user merges)"
     - "2026-11-08: delivery stack (multi-phase work ships as one gh stack, from postgres-phase-workflow); rules migrated from Claude memories (composer-gate-reports, pr-blocked-unresolved-threads, gate-label-stripped-on-update, dependabot-roundup, prod-db-via-railway-ssh, kaneo-roadmap)"
     - "2026-11-09: one-PR flow (plans/foodable/flow-alignment.md): delivery pr, merge auto (no review or label is required; the user steps in only on full stop), risk/check_changed/testing_skill added; dropped rules now enforced by tooling (unmapped files: conventions test; PR body sections: pr:check and the policy check) or obsolete (the approval label is gone, and pr:check no longer checks the Planner section)"
+    - "2026-11-21: design path for flow's UI checks (flow setup)"

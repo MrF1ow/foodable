@@ -343,6 +343,48 @@
                             "alpha": 0.05882353
                         }
                     }
+                },
+                "accent/glow": {
+                    "type": "color",
+                    "description": "Hero glow behind the gauge (blurred 110)",
+                    "values": {
+                        "Dark": {
+                            "hex": "#28cf8b",
+                            "alpha": 0.18
+                        },
+                        "Light": {
+                            "hex": "#28cf8b",
+                            "alpha": 0.18
+                        }
+                    }
+                },
+                "accent/line": {
+                    "type": "color",
+                    "description": "Border of the active chat suggestion",
+                    "values": {
+                        "Dark": {
+                            "hex": "#28cf8b",
+                            "alpha": 0.55
+                        },
+                        "Light": {
+                            "hex": "#28cf8b",
+                            "alpha": 0.55
+                        }
+                    }
+                },
+                "device/body": {
+                    "type": "color",
+                    "description": "Phone frame around app screenshots",
+                    "values": {
+                        "Dark": {
+                            "hex": "#050606",
+                            "alpha": 1
+                        },
+                        "Light": {
+                            "hex": "#1a1d1c",
+                            "alpha": 1
+                        }
+                    }
                 }
             }
         },
@@ -405,7 +447,7 @@
                     "type": "number",
                     "description": "Row vertical padding",
                     "values": {
-                        "Default": 11
+                        "Default": 12
                     }
                 },
                 "space/gap": {
@@ -427,6 +469,525 @@
                     "description": "",
                     "values": {
                         "Default": "Geist"
+                    }
+                },
+                "space/2xs": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 2
+                    }
+                },
+                "space/xs": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 4
+                    }
+                },
+                "space/sm": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 8
+                    }
+                },
+                "space/md": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 12
+                    }
+                },
+                "space/lg": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 16
+                    }
+                },
+                "space/xl": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 20
+                    }
+                },
+                "space/2xl": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 24
+                    }
+                },
+                "space/3xl": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 32
+                    }
+                },
+                "space/4xl": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 40
+                    }
+                },
+                "radius/xs": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 10
+                    }
+                },
+                "text/figure/size": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 44
+                    }
+                },
+                "text/figure/line": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 48
+                    }
+                },
+                "text/title-page/size": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 28
+                    }
+                },
+                "text/title-page/line": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 34
+                    }
+                },
+                "text/title-sheet/size": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 22
+                    }
+                },
+                "text/title-sheet/line": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 28
+                    }
+                },
+                "text/title-section/size": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 17
+                    }
+                },
+                "text/title-section/line": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 22
+                    }
+                },
+                "text/body/size": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 15
+                    }
+                },
+                "text/body/line": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 22
+                    }
+                },
+                "text/label/size": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 13
+                    }
+                },
+                "text/label/line": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 18
+                    }
+                },
+                "text/caption/size": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 12
+                    }
+                },
+                "text/caption/line": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 16
+                    }
+                },
+                "text/micro/size": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 11
+                    }
+                },
+                "text/micro/line": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 14
+                    }
+                },
+                "control/sm/height": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 32
+                    }
+                },
+                "control/sm/padding": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 12
+                    }
+                },
+                "control/sm/gap": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 6
+                    }
+                },
+                "control/sm/text": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 13
+                    }
+                },
+                "control/sm/icon": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 16
+                    }
+                },
+                "control/sm/radius": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 10
+                    }
+                },
+                "control/md/height": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 40
+                    }
+                },
+                "control/md/padding": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 16
+                    }
+                },
+                "control/md/gap": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 6
+                    }
+                },
+                "control/md/text": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 14
+                    }
+                },
+                "control/md/icon": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 18
+                    }
+                },
+                "control/md/radius": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 12
+                    }
+                },
+                "control/lg/height": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 48
+                    }
+                },
+                "control/lg/padding": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 20
+                    }
+                },
+                "control/lg/gap": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 8
+                    }
+                },
+                "control/lg/text": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 15
+                    }
+                },
+                "control/lg/icon": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 20
+                    }
+                },
+                "control/lg/radius": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 16
+                    }
+                },
+                "control/xl/height": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 56
+                    }
+                },
+                "control/xl/padding": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 24
+                    }
+                },
+                "control/xl/gap": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 8
+                    }
+                },
+                "control/xl/text": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 17
+                    }
+                },
+                "control/xl/icon": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 24
+                    }
+                },
+                "control/xl/radius": {
+                    "type": "number",
+                    "description": "",
+                    "values": {
+                        "Default": 20
+                    }
+                }
+            }
+        },
+        {
+            "name": "Site",
+            "modes": [
+                "Desktop",
+                "Mobile"
+            ],
+            "variables": {
+                "type/hero": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 66,
+                        "Mobile": 40
+                    }
+                },
+                "type/cta": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 64,
+                        "Mobile": 40
+                    }
+                },
+                "type/h2": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 52,
+                        "Mobile": 34
+                    }
+                },
+                "type/h2-sm": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 40,
+                        "Mobile": 32
+                    }
+                },
+                "type/h3": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 34,
+                        "Mobile": 28
+                    }
+                },
+                "type/fact": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 44,
+                        "Mobile": 40
+                    }
+                },
+                "type/h4": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 22,
+                        "Mobile": 22
+                    }
+                },
+                "type/story": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 22,
+                        "Mobile": 18
+                    }
+                },
+                "type/card": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 20,
+                        "Mobile": 20
+                    }
+                },
+                "type/lede": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 19,
+                        "Mobile": 16
+                    }
+                },
+                "type/lead": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 18,
+                        "Mobile": 16
+                    }
+                },
+                "type/body": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 15,
+                        "Mobile": 15
+                    }
+                },
+                "type/small": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 14,
+                        "Mobile": 14
+                    }
+                },
+                "type/caption": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 13,
+                        "Mobile": 13
+                    }
+                },
+                "type/micro": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 12,
+                        "Mobile": 12
+                    }
+                },
+                "type/eyebrow": {
+                    "type": "number",
+                    "description": "Marketing site type scale",
+                    "values": {
+                        "Desktop": 11,
+                        "Mobile": 11
+                    }
+                },
+                "space/page-x": {
+                    "type": "number",
+                    "description": "Side padding of a section (1120 content column at 1280)",
+                    "values": {
+                        "Desktop": 80,
+                        "Mobile": 16
+                    }
+                },
+                "space/section-y": {
+                    "type": "number",
+                    "description": "Top and bottom padding of a section",
+                    "values": {
+                        "Desktop": 96,
+                        "Mobile": 64
+                    }
+                },
+                "space/stack": {
+                    "type": "number",
+                    "description": "Gap between the two columns of a split section",
+                    "values": {
+                        "Desktop": 48,
+                        "Mobile": 28
+                    }
+                },
+                "size/content": {
+                    "type": "number",
+                    "description": "Content column width",
+                    "values": {
+                        "Desktop": 1120,
+                        "Mobile": 358
                     }
                 }
             }

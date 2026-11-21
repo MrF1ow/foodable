@@ -494,6 +494,62 @@ export const V2_SPACE = {
     gap: 8,
 } as const;
 
+/**
+ * FigCraft Tokens collection: the space/* scale (px literals in CSS). The
+ * legacy names above stay as they are; this scale is read only by the app
+ * stylesheet, never by the widgets.
+ */
+export const V2_SCALE_SPACE = {
+    "2xs": 2,
+    xs: 4,
+    sm: 8,
+    md: 12,
+    lg: 16,
+    xl: 20,
+    "2xl": 24,
+    "3xl": 32,
+    "4xl": 40,
+} as const;
+
+/** FigCraft Tokens collection: the radius/* scale, `xs` being the new step. */
+export const V2_SCALE_RADIUS = {
+    xs: 10,
+    ...V2_RADIUS,
+} as const;
+
+/** FigCraft Tokens collection: text/<role>/size and /line (px literals). */
+export const V2_TEXT = {
+    figure: { size: 44, line: 48 },
+    "title-page": { size: 28, line: 34 },
+    "title-sheet": { size: 22, line: 28 },
+    "title-section": { size: 17, line: 22 },
+    body: { size: 15, line: 22 },
+    label: { size: 13, line: 18 },
+    caption: { size: 12, line: 16 },
+    micro: { size: 11, line: 14 },
+} as const;
+
+/**
+ * FigCraft Tokens collection: control/<tier>/*. `radius` names a step of
+ * V2_SCALE_RADIUS (the design aliases it), the rest are px.
+ */
+export const V2_CONTROL = {
+    sm: { height: 32, padding: 12, gap: 6, text: 13, icon: 16, radius: "xs" },
+    md: { height: 40, padding: 16, gap: 6, text: 14, icon: 18, radius: "sm" },
+    lg: { height: 48, padding: 20, gap: 8, text: 15, icon: 20, radius: "md" },
+    xl: { height: 56, padding: 24, gap: 8, text: 17, icon: 24, radius: "lg" },
+} as const satisfies Record<
+    string,
+    {
+        height: number;
+        padding: number;
+        gap: number;
+        text: number;
+        icon: number;
+        radius: keyof typeof V2_SCALE_RADIUS;
+    }
+>;
+
 /** FigCraft Tokens collection: font/*. */
 export const V2_FONT = {
     display: "Bricolage Grotesque",
@@ -524,9 +580,32 @@ function v2StaticDecls(indent: string): string {
         `space-${k}`,
         `${v}px`,
     ]);
+    const scaleSpace: [string, string][] = Object.entries(V2_SCALE_SPACE).map(
+        ([k, v]) => [`space-${k}`, `${v}px`],
+    );
+    const text: [string, string][] = Object.entries(V2_TEXT).flatMap(
+        ([role, { size, line }]) => [
+            [`text-${role}-size`, `${size}px`],
+            [`text-${role}-line`, `${line}px`],
+        ],
+    );
+    const control: [string, string][] = Object.entries(V2_CONTROL).flatMap(
+        ([tier, c]) => [
+            [`control-${tier}-height`, `${c.height}px`],
+            [`control-${tier}-padding`, `${c.padding}px`],
+            [`control-${tier}-gap`, `${c.gap}px`],
+            [`control-${tier}-text`, `${c.text}px`],
+            [`control-${tier}-icon`, `${c.icon}px`],
+            [`control-${tier}-radius`, `${V2_SCALE_RADIUS[c.radius]}px`],
+        ],
+    );
     return [
         decl(indent, radius),
+        decl(indent, [["radius-xs", `${V2_SCALE_RADIUS.xs}px`]]),
         decl(indent, space),
+        decl(indent, scaleSpace),
+        decl(indent, text),
+        decl(indent, control),
         line(indent, "font-body", `"${V2_FONT.body}", ${FONT_FALLBACK}`),
         line(indent, "font-display", `"${V2_FONT.display}", var(--font-body)`),
     ].join("\n");
