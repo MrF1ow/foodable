@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { checkedPart, scaleViolations } from "./scale-guard";
 
 const css = readFileSync(
     join(import.meta.dir, "../../../../public/app/v2/components.css"),
@@ -147,4 +148,214 @@ test("a social reader's label stays inside its column and the button keeps one l
     expect(settingsRules).toMatch(
         /\.fd-row--social \.fd-settings-btn\s*\{[^}]*white-space:\s*nowrap/,
     );
+});
+
+const planted = (decl: string) => scaleViolations(`.fd-x { ${decl} }`);
+
+test("a literal size, space, radius or font size is a violation naming selector, property and value", () => {
+    expect(planted("padding: 13px")).toEqual([
+        { selector: ".fd-x", property: "padding", value: "13px" },
+    ]);
+    expect(planted("font-size: 13px")).toEqual([
+        { selector: ".fd-x", property: "font-size", value: "13px" },
+    ]);
+    expect(planted("border-radius: 10px")).toEqual([
+        { selector: ".fd-x", property: "border-radius", value: "10px" },
+    ]);
+    expect(planted("gap: 6px")).toHaveLength(1);
+    expect(planted("min-height: 44px")).toHaveLength(1);
+    expect(planted("margin-top: 0.5rem")).toHaveLength(1);
+    expect(planted("border-top-left-radius: 8px")).toHaveLength(1);
+    expect(planted("padding: 0 var(--space-md) 13px")).toHaveLength(1);
+    expect(planted("font: 600 13px/18px Geist, sans-serif")).toHaveLength(1);
+});
+
+test("a scale variable, a --fd- local, zero, a hairline, a percentage and a keyword pass", () => {
+    expect(planted("padding: var(--space-md)")).toEqual([]);
+    expect(planted("padding: var(--space-sm) var(--space-lg)")).toEqual([]);
+    expect(planted("border-radius: var(--radius-pill)")).toEqual([]);
+    expect(planted("font-size: var(--text-body-size)")).toEqual([]);
+    expect(planted("height: var(--control-md-height)")).toEqual([]);
+    expect(planted("width: var(--fd-dialog-width)")).toEqual([]);
+    expect(planted("margin: 0")).toEqual([]);
+    expect(planted("margin: 0 auto")).toEqual([]);
+    expect(planted("border-width: 1px")).toEqual([]);
+    expect(planted("margin-top: -1px")).toEqual([]);
+    expect(planted("border-radius: 50%")).toEqual([]);
+    expect(planted("max-width: 100%")).toEqual([]);
+    expect(planted("min-height: 100dvh")).toEqual([]);
+    expect(planted("width: fit-content")).toEqual([]);
+    expect(planted("max-width: none")).toEqual([]);
+    expect(planted("font-size: inherit")).toEqual([]);
+    expect(planted("font: inherit")).toEqual([]);
+    expect(planted("padding: var(--space-md) !important")).toEqual([]);
+});
+
+test("calc() is fine when every length in it is allowed", () => {
+    expect(planted("padding: calc(var(--space-md) + 1px)")).toEqual([]);
+    expect(
+        planted(
+            "padding-bottom: calc(env(safe-area-inset-bottom) + var(--space-lg))",
+        ),
+    ).toEqual([]);
+    expect(planted("width: calc(100% - var(--space-2xl) * 2)")).toEqual([]);
+    expect(planted("width: calc(100% - 13px)")).toHaveLength(1);
+    expect(planted("padding: calc(var(--space-md) + 3px)")).toHaveLength(1);
+    expect(planted("width: min(100%, 480px)")).toHaveLength(1);
+});
+
+test("a variable outside the scale is a violation, a fallback literal too", () => {
+    expect(planted("padding: var(--gutter)")).toHaveLength(1);
+    expect(planted("padding: var(--space-md, 13px)")).toHaveLength(1);
+    expect(planted("padding: var(--space-md, var(--space-sm))")).toEqual([]);
+});
+
+test("a --fd- local may hold a literal; properties outside the scale are not checked", () => {
+    expect(
+        scaleViolations(
+            ".fd-dialog { --fd-dialog-width: 480px; width: var(--fd-dialog-width); }",
+        ),
+    ).toEqual([]);
+    expect(planted("border: 3px solid red")).toEqual([]);
+    expect(planted("top: 13px")).toEqual([]);
+    expect(planted("line-height: 1.4")).toEqual([]);
+});
+
+test("comments are ignored", () => {
+    expect(
+        scaleViolations(
+            "/* padding: 13px */ .fd-x { /* gap: 7px; */ padding: var(--space-md); }",
+        ),
+    ).toEqual([]);
+});
+
+test("rules inside @media and a last declaration without a semicolon are read", () => {
+    const found = scaleViolations(
+        "@media (min-width: 900px) { .fd-a { gap: var(--space-sm); padding: 13px } } .fd-b, .fd-c { width: 7px }",
+    );
+    expect(found).toEqual([
+        { selector: ".fd-a", property: "padding", value: "13px" },
+        { selector: ".fd-b, .fd-c", property: "width", value: "7px" },
+    ]);
+});
+
+test("the old off-scale names are violations: --fd-s-<n> and the V2_SPACE aliases", () => {
+    expect(planted("padding: var(--fd-s-13); gap: var(--space-row)")).toEqual([
+        { selector: ".fd-x", property: "padding", value: "var(--fd-s-13)" },
+        { selector: ".fd-x", property: "gap", value: "var(--space-row)" },
+    ]);
+    for (const name of ["gutter", "section", "row", "gap"]) {
+        expect(planted(`margin: var(--space-${name})`)).toHaveLength(1);
+    }
+    expect(planted("padding: var(--space-nope)")).toHaveLength(1);
+    expect(planted("height: var(--control-md-nope)")).toHaveLength(1);
+    expect(planted("height: var(--control-xx-height)")).toHaveLength(1);
+    expect(planted("font-size: var(--text-body-lines)")).toHaveLength(1);
+});
+
+test("every scale step is allowed, a component-local --fd- name too", () => {
+    for (const name of [
+        "--space-2xs",
+        "--space-4xl",
+        "--radius-xs",
+        "--radius-pill",
+        "--text-title-page-size",
+        "--text-micro-line",
+        "--control-xl-radius",
+        "--control-sm-icon",
+        "--fd-sheet-height",
+        "--fd-s",
+    ]) {
+        expect(planted(`padding: var(${name})`)).toEqual([]);
+    }
+});
+
+test("in the font shorthand only a --font- family or a scale variable may be a var", () => {
+    expect(
+        planted(
+            "font: 500 var(--text-body-size)/var(--text-body-line) var(--font-body)",
+        ),
+    ).toEqual([]);
+    expect(planted("font: 600 var(--font-display), sans-serif")).toEqual([]);
+    expect(
+        planted("font: 600 var(--text-label-size)/1.2 var(--font-body)"),
+    ).toEqual([]);
+    expect(planted("font: 600 var(--fs-body)/1.2 var(--font-body)")).toEqual([
+        {
+            selector: ".fd-x",
+            property: "font",
+            value: "600 var(--fs-body)/1.2 var(--font-body)",
+        },
+    ]);
+    expect(planted("font: 600 var(--space-row) var(--font-body)")).toHaveLength(
+        1,
+    );
+    expect(planted("font-size: var(--font-body)")).toHaveLength(1);
+});
+
+test("checkedPart returns what follows the marker, nothing without one", () => {
+    expect(checkedPart(".a { gap: 7px }")).toBe("");
+    expect(
+        checkedPart(
+            ".a { gap: 7px }\n/* scale-guard: checked */\n.b { gap: 9px }",
+        ),
+    ).toBe("\n.b { gap: 9px }");
+    expect(checkedPart("/*scale-guard:checked*/ .b { gap: 9px }")).toBe(
+        " .b { gap: 9px }",
+    );
+});
+
+test("in a legacy partial a literal before the marker passes and one after it fails", () => {
+    const before =
+        ".old { padding: 13px }\n/* scale-guard: checked */\n.fd-new { padding: var(--space-md) }";
+    expect(scaleViolations(checkedPart(before))).toEqual([]);
+    const after =
+        ".old { padding: 13px }\n/* scale-guard: checked */\n.fd-new { padding: 13px }";
+    expect(scaleViolations(checkedPart(after))).toEqual([
+        { selector: ".fd-new", property: "padding", value: "13px" },
+    ]);
+});
+
+// Partials that predate the scale. A partial leaves this list when it moves
+// onto the scale; every partial added since is checked. A legacy partial that
+// gains a scaled section puts `/* scale-guard: checked */` before it: every
+// declaration after the marker is checked, those before it stay exempt.
+const LEGACY_PARTIALS = [
+    "app-v2.css",
+    "components.css",
+    "gallery.css",
+    "kitchen.css",
+    "log-sheet.css",
+    "product.css",
+    "recipes.css",
+    "scanner.css",
+    "select.css",
+    "settings.css",
+    "share-links.css",
+    "share.css",
+    "sheet.css",
+    "shell.css",
+    "stores.css",
+    "today.css",
+    "tokens.css",
+    "trends.css",
+];
+
+const partialsDir = join(import.meta.dir, "../../../../public/app/v2");
+const partials = readdirSync(partialsDir).filter((f) => f.endsWith(".css"));
+
+test("every legacy partial still exists, so a rename cannot hide one from the guard", () => {
+    expect(LEGACY_PARTIALS.filter((f) => !partials.includes(f))).toEqual([]);
+});
+
+test("a partial outside the legacy list, and the marked part of a legacy one, have no literal size, space, radius or font size", () => {
+    const found: Record<string, ReturnType<typeof scaleViolations>> = {};
+    for (const file of partials) {
+        const text = readFileSync(join(partialsDir, file), "utf8");
+        const violations = scaleViolations(
+            LEGACY_PARTIALS.includes(file) ? checkedPart(text) : text,
+        );
+        if (violations.length > 0) found[file] = violations;
+    }
+    expect(found).toEqual({});
 });
