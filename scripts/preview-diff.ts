@@ -16,6 +16,10 @@
  *                   run left in --work (after a change that does not move
  *                   pixels, or to re-run the comparison)
  *   --keep          leave the base worktree in place
+ *   -h, --help      print this usage and exit 0
+ *
+ * Any other argument prints the usage on stderr and exits 2, before any git,
+ * worktree or render.
  *
  * The base is rendered in a temporary `git worktree` (it needs `bun install`
  * there) and then rendered a second time: a shot that differs between those two
@@ -26,7 +30,8 @@
  * when base-1, base-2 and head are not all non-empty or base-1 and base-2 do
  * not hold the same shots (an interrupted render); 0 otherwise.
  *
- * Needs Chromium (see scripts/app-preview.ts) and ImageMagick's `compare`.
+ * Needs Chromium (see scripts/app-preview.ts) and ImageMagick's `magick`
+ * (`magick a b -compose difference -composite`, not `compare`).
  * Rendering is slow, so use a long timeout.
  */
 import {
@@ -42,24 +47,79 @@ import { join, resolve } from "node:path";
 const ROOT = resolve(import.meta.dir, "..");
 const COMPARE_CONCURRENCY = 8;
 
-function arg(name: string): string | undefined {
-    const i = process.argv.indexOf(name);
-    return i >= 0 ? process.argv[i + 1] : undefined;
-}
-const flag = (name: string) => process.argv.includes(name);
+/** The usage text: printed by --help and after a refused argument. */
+export const USAGE = `usage: bun scripts/preview-diff.ts [--base <ref>] [--work <dir>]
+                                  [--reuse-base] [--reuse-head] [--keep]
 
-const baseRef = arg("--base") ?? "origin/main";
-const work = resolve(ROOT, arg("--work") ?? "tmp/preview-diff");
-const reuseBase = flag("--reuse-base");
-const reuseHead = flag("--reuse-head");
-const keep = flag("--keep");
+  --base <ref>    the ref to compare against (default origin/main)
+  --work <dir>    where the renders live (default tmp/preview-diff)
+  --reuse-base    skip rendering the base: use the base-1/ and base-2/ a
+                  previous run left in --work
+  --reuse-head    skip rendering this checkout: use the head/ a previous run
+                  left in --work
+  --keep          leave the base worktree in place
+  -h, --help      print this usage and exit 0
+`;
 
-const wt = join(work, "wt");
-const dirs = {
-    base1: join(work, "base-1"),
-    base2: join(work, "base-2"),
-    head: join(work, "head"),
+export type Options = {
+    base: string;
+    work: string;
+    reuseBase: boolean;
+    reuseHead: boolean;
+    keep: boolean;
 };
+
+export type ParsedArgs =
+    | { kind: "run"; options: Options }
+    | { kind: "help" }
+    | { kind: "error"; message: string };
+
+/** Reads the command line without touching git, the disk or a render. */
+export function parseArgs(argv: string[]): ParsedArgs {
+    const options: Options = {
+        base: "origin/main",
+        work: "tmp/preview-diff",
+        reuseBase: false,
+        reuseHead: false,
+        keep: false,
+    };
+    for (let i = 0; i < argv.length; i++) {
+        const a = argv[i]!;
+        switch (a) {
+            case "-h":
+            case "--help":
+                return { kind: "help" };
+            case "--reuse-base":
+                options.reuseBase = true;
+                break;
+            case "--reuse-head":
+                options.reuseHead = true;
+                break;
+            case "--keep":
+                options.keep = true;
+                break;
+            case "--base":
+            case "--work": {
+                const value = argv[i + 1];
+                if (value === undefined || value.startsWith("--")) {
+                    return { kind: "error", message: `${a} needs a value` };
+                }
+                if (a === "--base") options.base = value;
+                else options.work = value;
+                i++;
+                break;
+            }
+            default:
+                return {
+                    kind: "error",
+                    message: a.startsWith("-")
+                        ? `unknown flag ${a}`
+                        : `unexpected argument ${a}`,
+                };
+        }
+    }
+    return { kind: "run", options };
+}
 
 const isGallery = (file: string) => file.startsWith("dev-gallery");
 
@@ -275,7 +335,16 @@ export function classifyShots(c: ShotComparison) {
     };
 }
 
-async function main() {
+async function main(options: Options) {
+    const baseRef = options.base;
+    const work = resolve(ROOT, options.work);
+    const { reuseBase, reuseHead, keep } = options;
+    const wt = join(work, "wt");
+    const dirs = {
+        base1: join(work, "base-1"),
+        base2: join(work, "base-2"),
+        head: join(work, "head"),
+    };
     mkdirSync(work, { recursive: true });
 
     let baseSha = baseRef;
@@ -351,4 +420,15 @@ async function main() {
     process.exit(r.ok ? 0 : 1);
 }
 
-if (import.meta.main) await main();
+if (import.meta.main) {
+    const parsed = parseArgs(process.argv.slice(2));
+    if (parsed.kind === "help") {
+        process.stdout.write(USAGE);
+        process.exit(0);
+    }
+    if (parsed.kind === "error") {
+        process.stderr.write(`preview-diff: ${parsed.message}\n${USAGE}`);
+        process.exit(2);
+    }
+    await main(parsed.options);
+}
