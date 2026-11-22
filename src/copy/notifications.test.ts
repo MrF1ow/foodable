@@ -93,6 +93,46 @@ describe("eventSentence", () => {
         );
     });
 
+    test("a repeat says how it repeats, and a series removal says every later day went too", () => {
+        const base = {
+            recipeName: "Lasagna",
+            date: "2026-12-01",
+            slot: "dinner",
+        };
+        const sentence = (payload: Record<string, unknown>) =>
+            eventSentence(
+                row("week_plan_changes", { ...base, ...payload }),
+                "Sarah",
+            );
+        expect(sentence({ change: "planned", repeat: "daily" })).toBe(
+            "Sarah planned Lasagna for dinner on Tue, Dec 1, repeating every day.",
+        );
+        expect(sentence({ change: "planned", repeat: "weekly" })).toBe(
+            "Sarah planned Lasagna for dinner on Tue, Dec 1, repeating every week on Tuesday.",
+        );
+        expect(sentence({ change: "planned", repeat: "weekdays" })).toBe(
+            "Sarah planned Lasagna for dinner on Tue, Dec 1, repeating on weekdays.",
+        );
+        expect(
+            sentence({ change: "planned", repeat: "days", days: [6, 1, 3] }),
+        ).toBe(
+            "Sarah planned Lasagna for dinner on Tue, Dec 1, repeating on Mon, Wed and Sat.",
+        );
+        expect(sentence({ change: "planned", repeat: "days", days: [2] })).toBe(
+            "Sarah planned Lasagna for dinner on Tue, Dec 1, repeating on Tue.",
+        );
+        // A repeat the sentence has no word for reads as a plain plan.
+        expect(sentence({ change: "planned", repeat: "monthly" })).toBe(
+            "Sarah planned Lasagna for dinner on Tue, Dec 1.",
+        );
+        expect(sentence({ change: "unplanned", scope: "series" })).toBe(
+            "Sarah took Lasagna off dinner on Tue, Dec 1 and every one after.",
+        );
+        expect(sentence({ change: "unplanned", scope: "day" })).toBe(
+            "Sarah took Lasagna off dinner on Tue, Dec 1.",
+        );
+    });
+
     test("a plan event whose recipe is gone from the payload still reads", () => {
         expect(
             eventSentence(

@@ -4756,7 +4756,13 @@ describe("household config tools", () => {
         // +234: the optional `filters` and `query` inputs on list_recipes (the
         // Recipes page's filter registry), explained in the tool description
         // rather than per field, in as few words as fit.
-        const TOOLS_LIST_MAX_CHARS = 229329;
+        // +547: `repeat` and `days` on plan_recipe, `scope` on unplan_recipe
+        // and the optional `repeats` flag on a plan in their outputs, with
+        // one sentence of each description.
+        // +94: plan_recipe says an entry already on that day and slot comes
+        // back unchanged whatever the servings, and that repeats of one
+        // recipe and slot may not overlap, in place of its one old sentence.
+        const TOOLS_LIST_MAX_CHARS = 229970;
         const TOOLS_LIST_MAX_COUNT = 102;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
@@ -13681,6 +13687,109 @@ describe("plan tools over HTTP", () => {
                 );
                 expect(after.planned_count).toBe(0);
                 expect(after.missing).toEqual([]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "plan_recipe repeat puts a recipe on every day it names, unplan_recipe removes one day or the series (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({}));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId } = await seedBread(call);
+                const today = utcTodayFromDate();
+                const datesOnPlan = async () =>
+                    WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                        (await call("get_week_plan")).structuredContent,
+                    ).days.flatMap((d) => d.plans.map(() => d.date));
+
+                const planned = await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: today,
+                    slot: "dinner",
+                    repeat: "daily",
+                });
+                expect(planned.isError).toBeFalsy();
+                const created = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    planned.structuredContent,
+                );
+                expect(created.plan.repeats).toBe(true);
+                expect(created.plan.plan_id).toBe(
+                    `rule:${created.plan.plan_id.split(":")[1]}:${today}`,
+                );
+                expect(await datesOnPlan()).toEqual(
+                    [0, 1, 2, 3, 4, 5, 6].map((n) => addUtcDays(today, n)),
+                );
+                // The same repeat again is the same repeat.
+                const again = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("plan_recipe", {
+                            recipe_id: recipeId,
+                            date: today,
+                            slot: "dinner",
+                            repeat: "daily",
+                        })
+                    ).structuredContent,
+                );
+                expect(again).toMatchObject({ already_planned: true });
+                expect(await datesOnPlan()).toHaveLength(7);
+
+                // One day: the default scope.
+                const dayId = `rule:${created.plan.plan_id.split(":")[1]}:${addUtcDays(today, 2)}`;
+                const dayRemoved = await call("unplan_recipe", {
+                    plan_id: dayId,
+                });
+                expect(dayRemoved.isError).toBeFalsy();
+                expect(await datesOnPlan()).toEqual(
+                    [0, 1, 3, 4, 5, 6].map((n) => addUtcDays(today, n)),
+                );
+                // The whole series from a day on; earlier days stay.
+                const seriesRemoved = await call("unplan_recipe", {
+                    plan_id: `rule:${created.plan.plan_id.split(":")[1]}:${addUtcDays(today, 4)}`,
+                    scope: "series",
+                });
+                expect(seriesRemoved.isError).toBeFalsy();
+                expect(await datesOnPlan()).toEqual(
+                    [0, 1, 3].map((n) => addUtcDays(today, n)),
+                );
+
+                // Pick days, weekdays or a bad choice.
+                const picked = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("plan_recipe", {
+                            recipe_id: recipeId,
+                            date: today,
+                            slot: "lunch",
+                            repeat: "days",
+                            days: [0, 1, 2, 3, 4, 5, 6],
+                        })
+                    ).structuredContent,
+                );
+                expect(picked.plan.repeats).toBe(true);
+                const bad = await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: today,
+                    slot: "lunch",
+                    repeat: "days",
+                });
+                expect(bad.isError).toBe(true);
+                // `series` on a plan that does not repeat is refused.
+                const oneOff = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("plan_recipe", {
+                            recipe_id: recipeId,
+                            date: today,
+                            slot: "snack",
+                        })
+                    ).structuredContent,
+                );
+                expect(oneOff.plan.repeats).toBeUndefined();
+                const refused = await call("unplan_recipe", {
+                    plan_id: oneOff.plan.plan_id,
+                    scope: "series",
+                });
+                expect(refused.isError).toBe(true);
             });
         },
     );

@@ -1,6 +1,7 @@
 import { NOTICE_SEVERITY, type Notice } from "../domain/notices.js";
 import type { NotificationKind } from "../domain/notification-kinds.js";
 import type { NotificationRow } from "../domain/notifications.js";
+import { isPlanDate, repeatPatternWords } from "../domain/plan.js";
 import { noticeSentence } from "./notices.js";
 
 /** What each kind is called where a person sees it: the settings list and the
@@ -38,6 +39,38 @@ function placeText(slot: unknown, date: unknown): string | null {
     return where ? `${where} on ${dayText(day)}` : dayText(day);
 }
 
+/** "every week on Tuesday", "on Mon, Wed and Sat": how a repeating plan repeats, worded as the week plan words it, or null when the payload names no repeat. */
+function repeatText(
+    repeat: unknown,
+    days: unknown,
+    date: unknown,
+): string | null {
+    const picked = Array.isArray(days)
+        ? days.filter(
+              (d): d is number => Number.isInteger(d) && d >= 0 && d <= 6,
+          )
+        : [];
+    switch (repeat) {
+        case "daily":
+        case "weekdays":
+            return repeatPatternWords({ repeat, days: [], startsOn: "" });
+        case "weekly":
+            return typeof date === "string" && isPlanDate(date)
+                ? repeatPatternWords({ repeat, days: [], startsOn: date })
+                : "every week";
+        case "days":
+            return picked.length > 0
+                ? repeatPatternWords({
+                      repeat,
+                      days: [...new Set(picked)],
+                      startsOn: "",
+                  })
+                : null;
+        default:
+            return null;
+    }
+}
+
 /**
  * The sentence of an event notification. Its names are frozen in the payload
  * when the event is written ("Sarah removed Beef chili" stays true after the
@@ -57,13 +90,15 @@ export function eventSentence(
             const place = placeText(p.slot, p.date);
             switch (p.change) {
                 case "unplanned":
-                    return `${actorName} took ${recipe} off ${place ?? "the plan"}.`;
+                    return `${actorName} took ${recipe} off ${place ?? "the plan"}${p.scope === "series" ? " and every one after" : ""}.`;
                 case "moved": {
                     const from = placeText(p.fromSlot, p.fromDate);
                     return `${actorName} moved ${recipe}${from ? ` from ${from}` : ""} to ${place ?? "another day"}.`;
                 }
-                default:
-                    return `${actorName} planned ${recipe}${place ? ` for ${place}` : ""}.`;
+                default: {
+                    const repeats = repeatText(p.repeat, p.days, p.date);
+                    return `${actorName} planned ${recipe}${place ? ` for ${place}` : ""}${repeats ? `, repeating ${repeats}` : ""}.`;
+                }
             }
         }
         case "new_usuals": {

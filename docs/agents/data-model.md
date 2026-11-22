@@ -1,6 +1,6 @@
 # The household data model in detail
 
-Read this before touching foods, fridge stock, meals with items, usuals or recipe step mentions (`src/domain/foods.ts`, `stock.ts`, `meals.ts`, `food-quantity.ts`, `unit-conversion.ts`, `usual-add.ts`, `linking.ts`, and their db adapters). The invariants in brief are in `CLAUDE.md` ("Household data model").
+Read this before touching foods, fridge stock, meals with items, usuals, recipe step mentions or week plan repeats (`src/domain/foods.ts`, `stock.ts`, `meals.ts`, `food-quantity.ts`, `unit-conversion.ts`, `usual-add.ts`, `linking.ts`, and their db adapters). The invariants in brief are in `CLAUDE.md` ("Household data model"); week plan repeats are described only here.
 
 ## Foods
 
@@ -62,3 +62,14 @@ Imported recipes only. `findMissingMentions` is pure: reviewed bundled words plu
 - Dismissals live in `recipe_imports.dismissed_mentions`, appended in place (`addDismissedMention`), so re-checks and import-row rewrites keep them.
 - Add uses the step's amount, else one pack serving, else 1 each, with the step's descriptive words as the note.
 - MCP returns `mention_warnings` (there is no dismiss tool).
+
+## Week plan repeats
+
+A repeating plan is one `plan_rules` row (`src/domain/plan.ts`, `src/db/plans.ts`): a recipe, meal and servings from `starts_on`, as once, every week, every day, weekdays or picked days (`days`, 0 = Sunday). One-off plans stay `recipe_plans` rows.
+
+- `PlansStore.listPlans` expands the repeats into dated entries with ids `rule:<rule id>:<yyyy-mm-dd>`, so every plan reader (the week view, Today, groceries' missing-for-plan, the plan notices) sees them. Nothing else reads the two tables.
+- Days are whole calendar days, so a daylight saving change cannot drop or double one.
+- One entry per recipe, day and meal, never merged. Planning a recipe on a day and meal it already holds (a one-off or a day of a repeat) is already planned: nothing is written, whatever the servings, and the person changes the servings on the entry that is there. A different recipe, or the same recipe at another meal, is a plan of its own. A move onto a slot that already holds the same recipe and meal is the same answer (`PlanMove.alreadyPlanned`) and changes nothing.
+- A repeat that would show on a day another repeat of the same recipe and meal shows on is refused (`PlanRepeatOverlapError`, which names the weekdays and how the other repeat repeats); asking again for a repeat that already runs is already planned. A repeat created over one-offs skips those days and leaves the one-offs and their servings alone. Nothing sums servings, on write or on read: `planEntries` is the one-offs and the expanded days in day, meal and planning order, so a plan entry names at most one repeat (stored data that somehow held a day twice would list both).
+- Removing one day adds it to `skipped_on`, in that repeat only. Removing the whole series sets `ends_on` to the day before. Moving a day onto a free slot, or changing its servings, skips it and writes a one-off, in one transaction; saving a day with nothing changed writes nothing.
+- Every write runs under the household plan lock. `plan_rules` is in `AGENT_TABLES`, so an agent's series removal is undoable.

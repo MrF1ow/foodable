@@ -14,6 +14,7 @@ const KEEP_LIST = [
     "recipes.cooked.changed",
     "recipes.mention.error",
     "plan.notice",
+    "plan.already",
     "plan.missing.added.unknown",
     "plan.missing.none",
     "notice.added.check",
