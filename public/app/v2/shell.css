@@ -48,14 +48,28 @@ html:has(body.fd-body) {
     padding-bottom: calc(130px + env(safe-area-inset-bottom, 0px));
 }
 
-/* Account chip, top right over the title row (design: Header > Account chip,
-   38 x 29 at y = 8 in the header). */
-.fd-account-chip {
-    box-sizing: border-box;
+/* The top-right cluster over the title row (design: Header, the Bell beside the
+   Account chip): the bell is 32 square and the chip 38 x 29, both centred on
+   one line. Hidden from 1024 px, where the top bar and the sidebar replace it. */
+.fd-cluster {
     position: absolute;
     z-index: 2;
-    top: calc(14px + env(safe-area-inset-top, 0px));
+    top: calc(12.5px + env(safe-area-inset-top, 0px));
     right: max(var(--space-gutter), env(safe-area-inset-right, 0px));
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+/* The product and recipe pages draw their own top bar over this corner (the
+   chip is hidden there in product.css and recipes.css), so the bell goes too. */
+.fd-main:has(.fd-product-top) .fd-cluster,
+.fd-main:has(.fd-recipe-detail) .fd-cluster {
+    display: none;
+}
+/* Account chip (design: Header > Account chip, 38 x 29 at y = 8 in the
+   header). */
+.fd-account-chip {
+    box-sizing: border-box;
     display: inline-flex;
     align-items: center;
     height: 29px;
@@ -86,12 +100,12 @@ html:has(body.fd-body) {
     color: var(--text-primary);
     font: 600 11px/13px var(--font-body);
 }
-/* Keep the title, and any actions beside it, clear of the chip: 38px chip +
-   10px gap. */
+/* Keep the title, and any actions beside it, clear of the cluster: 32px bell
+   + gap + 38px chip + 10px gap. */
 .fd-main > h1,
 .fd-main > .dash-head > h1,
 .fd-main > .dash-head > .dash-head-title-row {
-    padding-right: 48px;
+    padding-right: calc(80px + var(--space-md));
 }
 
 /* The old app's dialog (components/ui.ts modal) shows up on v2 pages too, on
@@ -280,7 +294,7 @@ body.fd-body .toast-region {
 /* ---- Desktop: 1024px and up -------------------------------------------- */
 @media (min-width: 1024px) {
     .fd-tabs,
-    .fd-account-chip,
+    .fd-cluster,
     .fd-kitchen-tabs {
         display: none;
     }

@@ -1589,6 +1589,258 @@ try {
         );
     }
 
+    // The bell and the Notifications inbox: the dot on phone and desktop,
+    // opening the inbox clears it (over a Turbo visit, with no full reload),
+    // and the ⋯ menu's actions.
+    const bellState = () =>
+        ev<{
+            visible: number;
+            unread: number;
+            dotWidth: number;
+            inCluster: boolean;
+            inTopBar: boolean;
+            leftOfLogFood: boolean;
+            href: string | null;
+            label: string | null;
+        }>(`(() => {
+            const shown = (el) => !!el && el.offsetParent !== null;
+            const bells = [...document.querySelectorAll(".fd-bell")].filter(shown);
+            const bell = bells[0];
+            const dot = bell?.querySelector(".fd-bell__dot");
+            const logFood = document.querySelector(".fd-logfood");
+            return {
+                visible: bells.length,
+                unread: bells.filter((b) => b.classList.contains("fd-bell--unread")).length,
+                dotWidth: dot ? Math.round(dot.getBoundingClientRect().width) : 0,
+                inCluster: !!bell?.closest(".fd-cluster"),
+                inTopBar: !!bell?.closest(".fd-topbar"),
+                leftOfLogFood: !!bell && shown(logFood)
+                    ? bell.getBoundingClientRect().right <= logFood.getBoundingClientRect().left
+                    : false,
+                href: bell?.getAttribute("href") ?? null,
+                label: bell?.getAttribute("aria-label") ?? null,
+            };
+        })()`);
+
+    await control("session=app&theme=dark&reset=posts&post=ok&unread=1");
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 430,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    await goto("/");
+    const phoneBell = await bellState();
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 900,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await goto("/");
+    const desktopBell = await bellState();
+    record(
+        "bell: a green dot on the phone (top-right cluster) and on the desktop (top bar, left of Log food), one bell each, linking to /notifications",
+        phoneBell.visible === 1 &&
+            phoneBell.unread === 1 &&
+            phoneBell.dotWidth === 8 &&
+            phoneBell.inCluster &&
+            phoneBell.href === "/notifications" &&
+            phoneBell.label === "Notifications, new" &&
+            desktopBell.visible === 1 &&
+            desktopBell.unread === 1 &&
+            desktopBell.dotWidth === 8 &&
+            desktopBell.inTopBar &&
+            desktopBell.leftOfLogFood &&
+            desktopBell.href === "/notifications",
+        { phoneBell, desktopBell, ex: drain() },
+    );
+
+    // A pointer resting on the bell must not open the inbox for it: Turbo
+    // prefetches a hovered link after 100 ms, and the inbox marks what it
+    // shows as read, so the dot would be gone without a visit. (The page is
+    // still the desktop one from above.)
+    const bellPt = await ev<{ x: number; y: number }>(`(() => {
+        const r = document.querySelector(".fd-topbar .fd-bell").getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    })()`);
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 });
+    await send("Input.dispatchMouseEvent", {
+        type: "mouseMoved",
+        x: bellPt.x,
+        y: bellPt.y,
+    });
+    await sleep(900);
+    const afterHover = (await control("")) as { inboxUnread: boolean };
+    const hoverBell = await bellState();
+    await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 });
+    record(
+        "bell: hovering the bell does not prefetch the inbox, so the dot stays until it is opened",
+        afterHover.inboxUnread === true && hoverBell.unread === 1,
+        { afterHover, hoverBell, ex: drain() },
+    );
+
+    // Opening the inbox from the bell is a Turbo visit; the dot is gone on the
+    // inbox and on the pages after it, on a visit and on a full load.
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 430,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    await control("unread=1");
+    await goto("/");
+    await setMarker();
+    await clickSel(".fd-cluster .fd-bell");
+    await sleep(700);
+    const inbox = await snap();
+    // The inbox has no phone cluster, so its bell is the top bar's (hidden at
+    // this width): none of the bells in the page carry the dot.
+    const inboxBell = await ev<{ bells: number; dots: number }>(`({
+        bells: document.querySelectorAll(".fd-bell").length,
+        dots: document.querySelectorAll(".fd-bell--unread").length,
+    })`);
+    await clickSel('.fd-tabs a[href="/recipes"]');
+    await sleep(700);
+    const afterVisit = await snap();
+    const afterBell = await bellState();
+    await goto("/kitchen/fridge");
+    const afterLoad = await bellState();
+    const noNoticeDots = await ev<number>(
+        `document.querySelectorAll(".fd-bell--unread").length`,
+    );
+    record(
+        "bell: opening the inbox is a Turbo visit (no full reload) and clears the dot, on that page, the next visit and a fresh load",
+        inbox.href.endsWith("/notifications") &&
+            inbox.h1 === "Notifications" &&
+            inbox.marker === "stay" &&
+            inbox.active === null &&
+            inboxBell.bells === 1 &&
+            inboxBell.dots === 0 &&
+            afterVisit.href.endsWith("/recipes") &&
+            afterVisit.marker === "stay" &&
+            afterBell.unread === 0 &&
+            afterLoad.unread === 0 &&
+            noNoticeDots === 0,
+        {
+            inbox,
+            inboxBell,
+            afterVisit,
+            afterBell,
+            afterLoad,
+            noNoticeDots,
+            ex: drain(),
+        },
+    );
+
+    // The inbox has no phone cluster over its Detail bar; the desktop keeps
+    // the bell in the top bar.
+    const inboxChrome = async (width: number, mobile: boolean) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: 900,
+            deviceScaleFactor: 1,
+            mobile,
+        });
+        await goto("/notifications");
+        return ev<{
+            cluster: boolean;
+            sections: string[];
+            rows: number;
+            filter: string[];
+            bellVisible: number;
+        }>(`(() => {
+            const shown = (el) => !!el && el.offsetParent !== null;
+            return {
+                cluster: shown(document.querySelector(".fd-cluster")),
+                sections: [...document.querySelectorAll(".fd-notifications .fd-section-header__label")].map((e) => e.textContent.trim()),
+                rows: document.querySelectorAll(".fd-notifications .fd-item-row").length,
+                filter: [...document.querySelectorAll(".fd-notifications__filter a")].map((a) => a.textContent.trim() + (a.getAttribute("aria-current") ? "*" : "")),
+                bellVisible: [...document.querySelectorAll(".fd-bell")].filter(shown).length,
+            };
+        })()`);
+    };
+    const phoneInbox = await inboxChrome(430, true);
+    const desktopInbox = await inboxChrome(1440, false);
+    record(
+        "inbox: Today and Snoozed sections, four rows, All / Just me / Household; no phone cluster, the top-bar bell on desktop",
+        [phoneInbox, desktopInbox].every(
+            (i) =>
+                i.sections.join("|") === "Today|Snoozed" &&
+                i.rows === 4 &&
+                i.filter.join("|") === "All*|Just me|Household",
+        ) &&
+            !phoneInbox.cluster &&
+            phoneInbox.bellVisible === 0 &&
+            desktopInbox.bellVisible === 1,
+        { phoneInbox, desktopInbox, ex: drain() },
+    );
+
+    // The ⋯ menu: an owner's household row offers Open, both Snoozes, Dismiss
+    // for me / for everyone; an Allergens row offers only Open.
+    // Choosing an action posts its form (the server answers 303 back here).
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 430,
+        height: 900,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    await control("reset=posts");
+    await goto("/notifications");
+    await setMarker();
+    const menuLabels = (row: string) =>
+        ev<string[]>(
+            `[...document.querySelectorAll(${JSON.stringify(`#notification-${row} .fd-menu__item`)})].map((e) => e.textContent.trim())`,
+        );
+    const yogurtItems = await menuLabels("n-yogurt");
+    const weighItems = await menuLabels("n-weigh");
+    const allergenItems = await menuLabels("n-allergen");
+    const yogurtTrigger = "#notification-n-yogurt [data-fd-menu-trigger]";
+    await mouseClick(yogurtTrigger);
+    await sleep(150);
+    const menuOpened = await ev<boolean>(
+        `!document.querySelector("#notification-n-yogurt .fd-menu__panel").hidden`,
+    );
+    await mouseClick(
+        '#notification-n-yogurt form[action$="/snooze"]:has(input[value="week"]) button',
+    );
+    await sleep(700);
+    const afterSnooze = await snap();
+    await mouseClick(yogurtTrigger);
+    await sleep(150);
+    await mouseClick(
+        '#notification-n-yogurt form[action$="/dismiss"]:has(input[value="everyone"]) button',
+    );
+    await sleep(700);
+    const menuPosts = (await stats()).posts.map((p) => [
+        p.path,
+        Object.fromEntries(p.entries),
+    ]);
+    record(
+        "inbox ⋯ menu: owner and allergens menus, and Snooze 1 week and Dismiss for everyone post their forms over Turbo",
+        yogurtItems.join("|") ===
+            "Open|Snooze until tomorrow|Snooze 1 week|Dismiss for me|Dismiss for everyone" &&
+            weighItems.join("|") ===
+                "Open|Snooze until tomorrow|Snooze 1 week|Dismiss" &&
+            allergenItems.join("|") === "Open" &&
+            menuOpened &&
+            afterSnooze.marker === "stay" &&
+            JSON.stringify(menuPosts) ===
+                JSON.stringify([
+                    ["/notifications/n-yogurt/snooze", { until: "week" }],
+                    ["/notifications/n-yogurt/dismiss", { scope: "everyone" }],
+                ]),
+        {
+            yogurtItems,
+            weighItems,
+            allergenItems,
+            menuOpened,
+            afterSnooze,
+            menuPosts,
+            ex: drain(),
+        },
+    );
+
     await send("Emulation.setDeviceMetricsOverride", {
         width: 430,
         height: 800,

@@ -270,3 +270,48 @@
     flex: 1 1 var(--fd-page-layout-settings-w);
     max-width: var(--fd-page-layout-settings-w);
 }
+
+/* ---- Notifications inbox (src/web/pages/v2/notifications.ts) ----
+ * Phone: the Detail bar, the filter, and each section's header and list are
+ * stacked with one 12 px gap (FigCraft Screens › Notifications, Content gap
+ * 12). Desktop (Desktop › Notifications): the filter sits 32 px above the
+ * first section and the sections 24 px apart, 12 px between a header and its
+ * list. A section header brings its own 20 px of space above. */
+
+.fd-notifications .fd-page-layout__box,
+.fd-notifications .fd-page-layout__content,
+.fd-notifications__section {
+    gap: var(--space-md);
+}
+.fd-notifications__section {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+@media (min-width: 1024px) {
+    .fd-notifications .fd-page-layout__content {
+        gap: var(--space-2xl);
+    }
+    /* 24 px of content gap plus 8 px: the design's 32 px under the filter. */
+    .fd-notifications__filter {
+        margin-bottom: var(--space-sm);
+    }
+}
+/* The filter is three links drawn with the Segmented's own faces. */
+.fd-notifications__filter .fd-segmented__segment {
+    text-decoration: none;
+}
+/* A row's ⋯ is the bare glyph the design draws, not a raised circle. */
+.fd-notifications .fd-item-row .fd-menu > .fd-btn {
+    background: transparent;
+    color: var(--text-secondary);
+}
+.fd-notifications__error {
+    margin: 0;
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font-size: var(--text-label-size);
+    line-height: var(--text-label-line);
+}

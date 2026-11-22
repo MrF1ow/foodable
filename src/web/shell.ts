@@ -71,6 +71,12 @@ export type AppChrome = ViewerChrome & {
     v2KitchenGroceriesCount?: number;
     /** Profile timezone for the log sheet defaults. */
     v2Timezone?: string;
+    /** The bell's dot: the viewer has a notification they have not seen. Set
+     *  by `viewerChromeWithAttention`; absent means no dot. */
+    notificationsUnread?: boolean;
+    /** The page draws its own Detail bar (a back button and a title), so the
+     *  phone's account chip and bell stay off it. */
+    v2Detail?: boolean;
     /** Log sheet open state after validation errors. */
     v2LogSheet?: Omit<
         import("./pages/v2/log-sheet.js").RenderLogSheetsOpts,
