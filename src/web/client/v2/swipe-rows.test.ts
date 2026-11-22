@@ -112,6 +112,14 @@ class FakeEl {
                 if (el.classes.includes("fd-row__body--link")) return el;
             } else if (sel === ".fd-row__body") {
                 if (el.classes.includes("fd-row__body")) return el;
+            } else if (sel === ".fd-item-row__bed--again") {
+                if (el.classes.includes("fd-item-row__bed--again")) return el;
+            } else if (sel === ".fd-item-row__bed--delete") {
+                if (el.classes.includes("fd-item-row__bed--delete")) return el;
+            } else if (sel === ".fd-item-row__face--link") {
+                if (el.classes.includes("fd-item-row__face--link")) return el;
+            } else if (sel === ".fd-item-row__face") {
+                if (el.classes.includes("fd-item-row__face")) return el;
             } else if (sel === "form.fd-inline-form, form" || sel === "form") {
                 if (el.tag === "form") return el;
             } else if (sel === 'button[type="submit"]') {
@@ -178,6 +186,39 @@ function swipeRow(opts: { hrefBody?: boolean } = {}) {
     return { row, body, leadForm, trailForm, leadBtn };
 }
 
+/** The Item row: beds first and last, the face between, as itemRow() emits. */
+function itemSwipeRow(opts: { link?: boolean } = {}) {
+    const row = new FakeEl("li", ["fd-item-row", "fd-item-row--swipe"]);
+    const againBed = new FakeEl(
+        "div",
+        ["fd-item-row__bed", "fd-item-row__bed--again"],
+        row,
+    );
+    const againForm = new FakeForm("form", [], againBed);
+    const againBtn = new FakeEl("button", [], againForm);
+    const face = new FakeEl(
+        opts.link ? "a" : "div",
+        opts.link
+            ? ["fd-item-row__face", "fd-item-row__face--link"]
+            : ["fd-item-row__face"],
+        row,
+    );
+    face.style.setProperty = (k: string, v: string) => {
+        face.style[k] = v;
+    };
+    face.style.removeProperty = (k: string) => {
+        delete face.style[k];
+    };
+    const deleteBed = new FakeEl(
+        "div",
+        ["fd-item-row__bed", "fd-item-row__bed--delete"],
+        row,
+    );
+    const deleteForm = new FakeForm("form", [], deleteBed);
+    const deleteBtn = new FakeEl("button", [], deleteForm);
+    return { row, face, againForm, againBtn, deleteForm, deleteBtn };
+}
+
 type SwipeDecision = (opts: {
     dx: number;
     dy: number;
@@ -195,7 +236,14 @@ class FakeDoc extends FakeEl {
         super("document");
     }
     querySelectorAll(sel: string) {
-        if (sel === ".fd-row--swipe") return this.rows;
+        if (sel === ".fd-row--swipe") {
+            return this.rows.filter((r) => r.classes.includes("fd-row--swipe"));
+        }
+        if (sel === ".fd-item-row--swipe") {
+            return this.rows.filter((r) =>
+                r.classes.includes("fd-item-row--swipe"),
+            );
+        }
         return [];
     }
 }
@@ -435,4 +483,88 @@ test("re-running onLoad is idempotent", () => {
     const before = body.count("pointerdown");
     for (const hook of ctx.hooks) hook(ctx.doc);
     expect(body.count("pointerdown")).toBe(before);
+});
+
+function drag(
+    ctx: Setup,
+    face: FakeEl,
+    pointerId: number,
+    from: number,
+    to: number,
+    extra: Record<string, unknown> = {},
+) {
+    face.fire("pointerdown", {
+        pointerId,
+        button: 0,
+        clientX: from,
+        clientY: 50,
+        ...extra,
+    });
+    ctx.doc.fire("pointermove", { pointerId, clientX: to, clientY: 52 });
+    ctx.doc.fire("pointerup", { pointerId, clientX: to, clientY: 52 });
+}
+
+test("an Item row past the threshold fires the bed on that side", () => {
+    const ctx = setup();
+    const { row, face, againForm, againBtn, deleteForm, deleteBtn } =
+        itemSwipeRow();
+    ctx.doc.rows.push(row);
+    load(ctx);
+    expect(face.count("pointerdown")).toBe(1);
+    drag(ctx, face, 1, 100, 210);
+    expect(againForm.requestSubmits).toEqual([againBtn]);
+    expect(deleteForm.requestSubmits).toEqual([]);
+    drag(ctx, face, 2, 200, 80);
+    expect(deleteForm.requestSubmits).toEqual([deleteBtn]);
+    expect(againForm.requestSubmits).toEqual([againBtn]);
+});
+
+test("an Item row in a list in select mode fires nothing", () => {
+    const ctx = setup();
+    const { row, face, againForm, deleteForm } = itemSwipeRow();
+    const list = new FakeEl("div");
+    list.setAttribute("data-fd-selecting", "");
+    row.parent = list;
+    list.children.push(row);
+    ctx.doc.rows.push(row);
+    load(ctx);
+    drag(ctx, face, 1, 100, 230);
+    drag(ctx, face, 2, 230, 90);
+    expect(againForm.requestSubmits).toEqual([]);
+    expect(deleteForm.requestSubmits).toEqual([]);
+});
+
+test("an Item row with a link face still swipes; a drag suppresses the following click", () => {
+    const ctx = setup();
+    const { row, face, againForm, againBtn } = itemSwipeRow({ link: true });
+    ctx.doc.rows.push(row);
+    load(ctx);
+    drag(ctx, face, 1, 100, 210, { target: face });
+    expect(againForm.requestSubmits).toEqual([againBtn]);
+    const click = face.fire("click", { target: face });
+    expect(click.prevented).toBe(true);
+    // Only that one click: the next tap follows the link.
+    const next = face.fire("click", { target: face });
+    expect(next.prevented).toBe(false);
+});
+
+test("an Item row snapping back clears data-swipe-open", () => {
+    const ctx = setup();
+    const { row, face, deleteForm } = itemSwipeRow();
+    row.setAttribute("data-swipe-open", "left");
+    ctx.doc.rows.push(row);
+    load(ctx);
+    face.fire("pointerdown", {
+        pointerId: 1,
+        button: 0,
+        clientX: 180,
+        clientY: 50,
+    });
+    ctx.doc.fire("pointermove", { pointerId: 1, clientX: 40, clientY: 50 });
+    expect(row.getAttribute("data-swipe-dragging")).toBe("");
+    ctx.doc.fire("pointercancel", { pointerId: 1, clientX: 0, clientY: 0 });
+    expect(row.getAttribute("data-swipe-open")).toBeNull();
+    expect(row.getAttribute("data-swipe-dragging")).toBeNull();
+    expect(face.style.transform).toBe("");
+    expect(deleteForm.requestSubmits).toEqual([]);
 });

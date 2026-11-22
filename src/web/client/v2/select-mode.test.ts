@@ -155,14 +155,14 @@ async function setup() {
     bar.add(plainForm);
     const otherForm = new El("form");
 
-    function row(id: string) {
+    function row(id: string, family = "fd-row") {
         const box = new El(
             "input",
             { "data-fd-select-item": "" },
             { name: "ids[]", value: id },
         );
-        const label = new El("label", { class: "fd-row__select" }).add(box);
-        const title = new El("span", { class: "fd-row__title" });
+        const label = new El("label", { class: `${family}__select` }).add(box);
+        const title = new El("span", { class: `${family}__title` });
         const li = new El("li", {
             "data-fd-select-row": "",
             tabindex: "0",
@@ -172,7 +172,8 @@ async function setup() {
     const a = row("a");
     const b = row("b");
     const c = row("c");
-    const list = new El("ul").add(a.li, b.li, c.li);
+    const item = row("item", "fd-item-row");
+    const list = new El("ul").add(a.li, b.li, c.li, item.li);
     root.add(bar, list, dialog);
     document.add(new El("div").add(toggle), root, otherForm);
 
@@ -231,6 +232,7 @@ async function setup() {
         a,
         b,
         c,
+        item,
         confirmForm,
         plainForm,
         otherForm,
@@ -257,6 +259,14 @@ describe("select mode", () => {
         expect(t.action.disabled).toBe(true);
         // Focus lands on the first row's box so the keyboard can carry on.
         expect(t.a.box.focused).toBe(true);
+    });
+
+    test("Select focuses the first box that is not disabled", async () => {
+        const t = await setup();
+        t.a.box.disabled = true;
+        t.click(t.toggle);
+        expect(t.a.box.focused).toBe(false);
+        expect(t.b.box.focused).toBe(true);
     });
 
     test("ticking rows counts them, enables the actions and words the confirm", async () => {
@@ -294,6 +304,19 @@ describe("select mode", () => {
         expect(tap.prevented).toBe(false);
         expect(tap.stopped).toBe(true);
         expect(t.a.box.checked).toBe(false);
+    });
+
+    test("the Item row's own box is left to the checkbox too, and the rest of that row picks it", async () => {
+        const t = await setup();
+        t.click(t.toggle);
+        const onBox = t.click(t.item.label);
+        expect(onBox.prevented).toBe(false);
+        expect(onBox.stopped).toBe(true);
+        expect(t.item.box.checked).toBe(false);
+        const onRow = t.click(t.item.title);
+        expect(onRow.prevented).toBe(true);
+        expect(onRow.stopped).toBe(true);
+        expect(t.item.box.checked).toBe(true);
     });
 
     test("outside select mode a row is left alone", async () => {

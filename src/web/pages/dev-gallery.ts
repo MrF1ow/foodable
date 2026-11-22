@@ -6,6 +6,8 @@ import { choiceGroup, chipLink, chipNav } from "../components/v2/chips.js";
 import { DOT_COLORS, dot } from "../components/v2/dot.js";
 import { ICON_NAMES, icon } from "../components/v2/icon.js";
 import { iconRepeat } from "../components/v2/icons.js";
+import { itemRow, type ItemRowOptions } from "../components/v2/item-row.js";
+import { listGroup } from "../components/v2/list-group.js";
 import {
     foodRow,
     fridgeRow,
@@ -21,6 +23,7 @@ import {
     scoreBig,
     scoreVerdict,
 } from "../components/v2/score-badge.js";
+import { sectionHeader as sectionHeaderV2 } from "../components/v2/section-header.js";
 import { sheet, sheetTrigger } from "../components/v2/sheet.js";
 import { stepper } from "../components/v2/stepper.js";
 import {
@@ -625,12 +628,339 @@ function iconsSection(): string {
     );
 }
 
+/** The design's nine `Item row` examples, with its example data. */
+const ITEM_ROW_EXAMPLES: {
+    name: string;
+    id: number;
+    today: string;
+    row: ItemRowOptions;
+}[] = [
+    {
+        name: "Fridge",
+        id: 171600,
+        today: "fridgeRow: title, qty, date, menu",
+        row: {
+            title: "Eggs",
+            meta: "9",
+            score: 74,
+            value: "Nov 19",
+            trailing: { kind: "more", label: "More for Eggs" },
+        },
+    },
+    {
+        name: "Grocery",
+        id: 171634,
+        today: "groceryRow: check circle, title, subtitle with the usual tag, amount",
+        row: {
+            title: "Kirkland 2% milk",
+            subtitle: "Milk · usual",
+            value: "1 gal",
+            lead: { kind: "checkbox", label: "Kirkland 2% milk" },
+        },
+    },
+    {
+        name: "Usual",
+        id: 171668,
+        today: "usualRow: title, meta, the parts joined by dots, chevron",
+        row: {
+            title: "Milk",
+            meta: "Kirkland 2% milk",
+            subtitle: "Costco · 1 gal · Every week",
+            trailing: { kind: "chevron" },
+        },
+    },
+    {
+        name: "Ingredient",
+        id: 171702,
+        today: "partRow: status dot, label, value",
+        row: {
+            title: "Salmon fillet",
+            subtitle: "Fridge · expires tomorrow",
+            value: "1 lb",
+            lead: { kind: "dot" },
+            trailing: { kind: "more", label: "More for Salmon fillet" },
+        },
+    },
+    {
+        name: "Log result",
+        id: 171736,
+        today: "searchResultRow: title, score, subtitle, macros, add",
+        row: {
+            title: "Chicken thighs",
+            subtitle: "In your fridge · 209 / 100 g kcal",
+            macros: MACRO(26, 0, 11),
+            trailing: { kind: "add", label: "Add Chicken thighs" },
+        },
+    },
+    {
+        name: "Recipe",
+        id: 171770,
+        today: "no row yet: recipe cards are their own markup",
+        row: {
+            title: "Chicken rice bowl",
+            subtitle: "4 servings · 35 min",
+            macros: MACRO(26, 0, 11),
+            trailing: { kind: "more", label: "More for Chicken rice bowl" },
+        },
+    },
+    {
+        name: "Member",
+        id: 171804,
+        today: "manageRow with a member avatar, chevron",
+        row: {
+            title: "Sam",
+            meta: "Member",
+            lead: { kind: "avatar", initials: "S" },
+            trailing: { kind: "chevron" },
+        },
+    },
+    {
+        name: "Notification",
+        id: 171838,
+        today: "attention rows: title, subtitle, menu",
+        row: {
+            title: "Greek yogurt expires tomorrow",
+            subtitle: "Fridge · Household",
+            trailing: { kind: "more", label: "More for Greek yogurt" },
+        },
+    },
+    {
+        name: "Setting",
+        id: 171872,
+        today: "settings rows: icon, title, subtitle, switch (a Segmented in the control slot is a later component)",
+        row: {
+            title: "Show cards in chat",
+            subtitle: "Goals and meals as widgets",
+            lead: { kind: "icon", name: "cart" },
+            trailing: {
+                kind: "toggle",
+                on: true,
+                label: "Show cards in chat",
+            },
+        },
+    },
+];
+
+function caption(text: string): string {
+    return `<p class="fd-gallery-note" style="margin:var(--space-md) 0 0">${text}</p>`;
+}
+
+function itemRowExamplesSection(): string {
+    return block(
+        "Item row · the nine examples",
+        "Item row 171566 with the design's example data (171600 … 171872). Each caption names today's builder for the same slots.",
+        ITEM_ROW_EXAMPLES.map(
+            (ex) =>
+                `${caption(`${ex.name} ${ex.id} · today: ${ex.today}`)}${listGroup({ rows: [itemRow(ex.row)] })}`,
+        ).join(""),
+    );
+}
+
+function itemRowOptionsSection(): string {
+    const group = (note: string, rows: ItemRowOptions[]) =>
+        `${caption(note)}${listGroup({ rows: rows.map(itemRow) })}`;
+    // The same rows twice: the box is in the markup, shown once the list root
+    // carries `data-fd-selecting` (select-mode.js sets it on Select).
+    const selectRows: ItemRowOptions[] = [
+        {
+            title: "Eggs",
+            value: "9",
+            select: { name: "ids[]", value: "1" },
+        },
+        {
+            title: "Milk",
+            value: "1 gal",
+            href: "/gallery",
+            trailing: { kind: "chevron" },
+            select: { name: "ids[]", value: "2" },
+        },
+        {
+            title: "Butter",
+            value: "1 stick",
+            select: { name: "ids[]", value: "3" },
+            swipe: {
+                left: { form: { action: "/gallery/delete" } },
+                right: { form: { action: "/gallery/again" } },
+            },
+        },
+        {
+            title: "Cheese",
+            subtitle: "Not available",
+            state: "disabled",
+            select: { name: "ids[]", value: "4" },
+        },
+    ];
+    const selectLists = () => [
+        group("Select mode, idle: no box yet", selectRows),
+        `${caption("Select mode, selecting: [data-fd-selecting] on the list")}<div data-fd-selecting>${listGroup({ rows: selectRows.map((r, i) => itemRow(i === 0 && typeof r.select === "object" ? { ...r, select: { ...r.select, checked: true } } : r)) })}</div>`,
+    ];
+    return block(
+        "Item row · options",
+        "Leads, extras, trailing, states and select mode.",
+        [
+            group("Leads: checkbox off and on, avatar, icon, dot", [
+                {
+                    title: "Checkbox off",
+                    lead: { kind: "checkbox", label: "Checkbox off" },
+                },
+                {
+                    title: "Checkbox on",
+                    lead: {
+                        kind: "checkbox",
+                        label: "Checkbox on",
+                        checked: true,
+                    },
+                },
+                {
+                    title: "Avatar",
+                    lead: { kind: "avatar", initials: "EF" },
+                },
+                { title: "Icon", lead: { kind: "icon", name: "cart" } },
+                { title: "Dot", lead: { kind: "dot" } },
+                { title: "Dot warn", lead: { kind: "dot", color: "warn" } },
+            ]),
+            group(
+                "Extras: score and macros, with a long title that ends in …",
+                [
+                    {
+                        title: "Chicken thighs, bone-in, skin-on, family pack",
+                        meta: "0.5 lb",
+                        score: 74,
+                        subtitle: "In your fridge · 209 / 100 g kcal",
+                        macros: MACRO(26, 0, 11),
+                        value: "209",
+                    },
+                    { title: "Poor score", score: 23, macros: MACRO(5, 12, 2) },
+                ],
+            ),
+            group(
+                "Trailing: value, chevron, more, add, toggle on and off, control slot",
+                [
+                    { title: "Value", value: "Nov 10" },
+                    { title: "Chevron", trailing: { kind: "chevron" } },
+                    {
+                        title: "More",
+                        trailing: { kind: "more", label: "More for More" },
+                    },
+                    {
+                        title: "Add",
+                        trailing: { kind: "add", label: "Add" },
+                    },
+                    {
+                        title: "Toggle on",
+                        trailing: { kind: "toggle", on: true, label: "On" },
+                    },
+                    {
+                        title: "Toggle off",
+                        trailing: { kind: "toggle", on: false, label: "Off" },
+                    },
+                    {
+                        title: "Control",
+                        trailing: {
+                            kind: "control",
+                            html: stepper({
+                                name: "gallery-qty",
+                                label: "Quantity",
+                                value: 2,
+                            }),
+                        },
+                    },
+                ],
+            ),
+            group(
+                "States: disabled (greyed, still there) and warning (in words)",
+                [
+                    {
+                        title: "Disabled",
+                        subtitle: "Not available on this plan",
+                        state: "disabled",
+                        lead: { kind: "checkbox", label: "Disabled" },
+                        trailing: {
+                            kind: "toggle",
+                            on: false,
+                            label: "Disabled",
+                        },
+                    },
+                    {
+                        title: "Eggs",
+                        subtitle: "low now",
+                        state: "warning",
+                        value: "2 left",
+                    },
+                ],
+            ),
+            ...selectLists(),
+        ].join(""),
+    );
+}
+
+function itemRowSwipeSection(): string {
+    const swipe = (open?: "left" | "right"): ItemRowOptions => ({
+        title: "Scrambled eggs",
+        meta: "3 large",
+        macros: MACRO(19, 2, 15),
+        value: "216",
+        swipe: {
+            left: { form: { action: "/meals/1/delete" } },
+            right: { form: { action: "/meals/1/again" } },
+            open,
+        },
+    });
+    return block(
+        "Item row · swipe",
+        "Swipe row 383521. Phone only: left deletes (red bed, trash), right repeats (green bed, repeat). Closed, swiped right, swiped left.",
+        [undefined, "right" as const, "left" as const]
+            .map((open) => listGroup({ rows: [itemRow(swipe(open))] }))
+            .join(""),
+    );
+}
+
+function listGroupSection(): string {
+    const rows = [
+        itemRow({ title: "Chicken thighs", value: "0.5 lb" }),
+        itemRow({ title: "Cheddar", value: "200 g" }),
+        itemRow({ title: "Milk 2%", value: "½ gal" }),
+    ];
+    return block(
+        "List group",
+        "List group 227951: Flat (the default, on the page) and Card (one standout list on a panel).",
+        `${caption("Flat")}${listGroup({ rows })}${caption("Card")}${listGroup({ style: "card", rows })}`,
+    );
+}
+
+function sectionHeaderSection(): string {
+    return block(
+        "Section header",
+        "Section header 177885: label in caps, count, trailing action, Rule On and Off.",
+        [
+            sectionHeaderV2({ label: "Fridge", count: 5 }),
+            sectionHeaderV2({
+                label: "Fridge",
+                count: 5,
+                action: { label: "See all", href: "#" },
+            }),
+            sectionHeaderV2({ label: "Fridge", count: 5, rule: false }),
+            sectionHeaderV2({
+                label: "Fridge",
+                rule: false,
+                action: { label: "See all", href: "#" },
+            }),
+            sectionHeaderV2({ label: "Fridge" }),
+        ].join(""),
+    );
+}
+
 function devGalleryBody(): string {
     const sections = [
         ...SECTIONS.map((s) => s.render()),
         dotsSection(),
         sheetsSection(),
         buttonSection(),
+        itemRowExamplesSection(),
+        itemRowOptionsSection(),
+        itemRowSwipeSection(),
+        listGroupSection(),
+        sectionHeaderSection(),
         iconsSection(),
     ].join("\n");
     return `<div class="fd-gallery">${pageHeader({ title: "v2 components" })}${sections}</div>`;

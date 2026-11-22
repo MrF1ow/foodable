@@ -1,0 +1,470 @@
+/* The Item row, List group and Section header (src/web/components/v2/
+ * item-row.ts, list-group.ts, section-header.ts), built to the design's
+ * `Item row`, `List group` and `Section header` components and its Swipe row.
+ *
+ * Sizes, spacing, radius and type come from the scale in tokens.css; the few
+ * fixed shapes the design draws (the 22 px ring, the 36 px add circle, the
+ * 44 x 26 switch, the 96 px swipe bed) are the --fd-item-row-* locals below.
+ * Line heights are the ratios the design's auto line height gives (15 / 20,
+ * 13 / 17, 12 / 16), so a row measures 64 px with a title and a subtitle.
+ * Colours are theme tokens. Every class starts with `fd-item-row`,
+ * `fd-list-group` or `fd-section-header`; none of them is shared with the
+ * older `fd-row` family in components.css.
+ */
+
+.fd-item-row {
+    --fd-item-row-ring: 22px;
+    --fd-item-row-dot: 8px;
+    --fd-item-row-avatar: 32px;
+    --fd-item-row-add: 36px;
+    --fd-item-row-switch-w: 44px;
+    --fd-item-row-switch-h: 26px;
+    --fd-item-row-knob: 22px;
+    --fd-item-row-bed: 96px;
+    --fd-item-row-line-gap: 6px;
+    --fd-item-row-score-pad: 6px;
+    position: relative;
+    box-sizing: border-box;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    border-bottom: 1px solid var(--line);
+}
+
+.fd-item-row__face {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    /* The row is 56 with its hairline (the design's min height, control xl). */
+    min-height: calc(var(--control-xl-height) - 1px);
+    padding: var(--space-md) 0;
+    color: inherit;
+    text-decoration: none;
+}
+a.fd-item-row__face:focus-visible,
+.fd-item-row__anchor:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+/* A link row that also picks: the pick box sits beside the link, not in it. */
+.fd-item-row__anchor {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: var(--space-md);
+    min-width: 0;
+    color: inherit;
+    text-decoration: none;
+}
+
+/* ---- leads ---- */
+
+.fd-item-row__lead {
+    flex: none;
+}
+.fd-item-row__check {
+    position: relative;
+    display: grid;
+    place-items: center;
+    width: var(--fd-item-row-ring);
+    height: var(--fd-item-row-ring);
+    cursor: pointer;
+}
+/* The real checkbox covers a larger hit area, unseen; the ring is drawn under it. */
+.fd-item-row__check-input,
+.fd-item-row__select-input {
+    position: absolute;
+    inset: calc(var(--space-sm) * -1);
+    width: calc(100% + var(--space-lg));
+    height: calc(100% + var(--space-lg));
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+.fd-item-row__check-box {
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    width: var(--fd-item-row-ring);
+    height: var(--fd-item-row-ring);
+    border: 1.5px solid var(--text-secondary);
+    border-radius: var(--radius-pill);
+    color: var(--accent-on);
+    pointer-events: none;
+}
+.fd-item-row__check-box .fd-icon,
+.fd-item-row__select-box .fd-icon {
+    width: var(--control-md-icon);
+    height: var(--control-md-icon);
+    opacity: 0;
+}
+.fd-item-row__check-input:checked + .fd-item-row__check-box {
+    border-color: var(--accent-fill);
+    background: var(--accent-fill);
+}
+.fd-item-row__check-input:checked + .fd-item-row__check-box .fd-icon,
+.fd-item-row__select-input:checked + .fd-item-row__select-box .fd-icon {
+    opacity: 1;
+}
+.fd-item-row__check-input:focus-visible + .fd-item-row__check-box,
+.fd-item-row__select-input:focus-visible + .fd-item-row__select-box {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+.fd-item-row__avatar {
+    display: grid;
+    place-items: center;
+    width: var(--fd-item-row-avatar);
+    height: var(--fd-item-row-avatar);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: 1.3334;
+}
+.fd-item-row__icon {
+    display: inline-flex;
+    color: var(--text-secondary);
+}
+.fd-item-row__dot {
+    width: var(--fd-item-row-dot);
+    height: var(--fd-item-row-dot);
+    border-radius: var(--radius-pill);
+}
+
+/* ---- text block ---- */
+
+.fd-item-row__main {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+.fd-item-row__line {
+    display: flex;
+    align-items: center;
+    gap: var(--fd-item-row-line-gap);
+    min-width: 0;
+}
+.fd-item-row__title {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--text-primary);
+    font-size: var(--text-body-size);
+    font-weight: 400;
+    line-height: 1.3334;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fd-item-row__meta,
+.fd-item-row__value {
+    flex: none;
+    color: var(--text-secondary);
+    font-size: var(--text-label-size);
+    line-height: 1.3077;
+    white-space: nowrap;
+}
+/* The design's Score badge on a row: 20 high, 4 gap, 6 left, 8 right, medium. */
+.fd-item-row .fd-score {
+    gap: var(--space-xs);
+    padding: var(--space-2xs) var(--space-sm) var(--space-2xs)
+        var(--fd-item-row-score-pad);
+}
+.fd-item-row .fd-score__num {
+    font-weight: 500;
+}
+.fd-item-row__subtitle {
+    color: var(--text-secondary);
+    font-size: var(--text-label-size);
+    line-height: 1.3077;
+}
+.fd-item-row .fd-macros {
+    gap: var(--space-sm);
+}
+
+/* ---- trailing ---- */
+
+.fd-item-row__trail {
+    flex: none;
+}
+.fd-item-row__chevron,
+.fd-item-row__more {
+    display: inline-flex;
+    color: var(--text-secondary);
+}
+.fd-item-row__control {
+    display: inline-flex;
+    align-items: center;
+}
+.fd-item-row__more,
+.fd-item-row__add,
+.fd-item-row__toggle,
+.fd-item-row__bed-btn {
+    appearance: none;
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    font: inherit;
+    cursor: pointer;
+}
+.fd-item-row__more {
+    background: transparent;
+}
+.fd-item-row__add {
+    display: grid;
+    place-items: center;
+    width: var(--fd-item-row-add);
+    height: var(--fd-item-row-add);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+}
+.fd-item-row__toggle {
+    position: relative;
+    width: var(--fd-item-row-switch-w);
+    height: var(--fd-item-row-switch-h);
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+    transition: background 0.15s ease;
+}
+.fd-item-row__toggle[aria-checked="true"] {
+    background: var(--accent-fill);
+}
+.fd-item-row__knob {
+    position: absolute;
+    top: var(--space-2xs);
+    left: var(--space-2xs);
+    width: var(--fd-item-row-knob);
+    height: var(--fd-item-row-knob);
+    border-radius: var(--radius-pill);
+    background: var(--text-secondary);
+    transition: transform 0.15s ease;
+}
+.fd-item-row__toggle[aria-checked="true"] .fd-item-row__knob {
+    background: var(--accent-on);
+    transform: translateX(
+        calc(
+            var(--fd-item-row-switch-w) - var(--fd-item-row-knob) -
+                var(--space-xs)
+        )
+    );
+}
+.fd-item-row__more:focus-visible,
+.fd-item-row__add:focus-visible,
+.fd-item-row__toggle:focus-visible,
+.fd-item-row__bed-btn:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+/* ---- states ---- */
+
+.fd-item-row--disabled {
+    opacity: 0.5;
+}
+.fd-item-row--disabled .fd-item-row__face {
+    pointer-events: none;
+}
+.fd-item-row--warning .fd-item-row__subtitle,
+.fd-item-row--warning .fd-item-row__value {
+    color: var(--status-warn);
+}
+
+/* ---- select mode ---- */
+
+/* The box is in every selectable row's markup and out of sight until the list
+ * root carries [data-fd-selecting] (select-mode.js), as .fd-row__select is. */
+.fd-item-row__select {
+    display: none;
+}
+[data-fd-selecting] .fd-item-row__select {
+    position: relative;
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: var(--fd-item-row-ring);
+    height: var(--fd-item-row-ring);
+    cursor: pointer;
+}
+.fd-item-row__select-box {
+    box-sizing: border-box;
+    display: grid;
+    place-items: center;
+    width: var(--fd-item-row-ring);
+    height: var(--fd-item-row-ring);
+    border: 1.5px solid var(--text-secondary);
+    border-radius: var(--radius-pill);
+    color: var(--accent-on);
+    pointer-events: none;
+}
+.fd-item-row__select-input:checked + .fd-item-row__select-box {
+    border-color: var(--accent-fill);
+    background: var(--accent-fill);
+}
+
+/* In select mode a row only picks: the trailing control, the value and the
+ * swipe beds step aside (and leave the tab order) and a tap on the face picks.
+ * The pick is the design's Checkbox ring, filled when picked; the row itself
+ * is not tinted. */
+[data-fd-selecting] .fd-item-row--select .fd-item-row__trail,
+[data-fd-selecting] .fd-item-row--select .fd-item-row__value,
+[data-fd-selecting] .fd-item-row--select .fd-item-row__bed {
+    display: none;
+}
+[data-fd-selecting] .fd-item-row--select.fd-item-row--swipe {
+    --fd-swipe-x: 0;
+}
+[data-fd-selecting] .fd-item-row--select .fd-item-row__face {
+    cursor: pointer;
+}
+/* ---- swipe (phone) ---- */
+
+.fd-item-row--swipe {
+    overflow: hidden;
+}
+.fd-item-row--swipe .fd-item-row__face {
+    position: relative;
+    z-index: 1;
+    /* Inherited from a card list group; the page colour otherwise. */
+    background: var(--fd-item-row-face, var(--surface-bg));
+    touch-action: pan-y;
+    transform: translateX(var(--fd-swipe-x, 0));
+    transition: transform 0.2s ease;
+}
+.fd-item-row--swipe[data-swipe-open="right"] {
+    --fd-swipe-x: var(--fd-item-row-bed);
+}
+.fd-item-row--swipe[data-swipe-open="left"] {
+    --fd-swipe-x: calc(var(--fd-item-row-bed) * -1);
+}
+.fd-item-row--swipe:has(.fd-item-row__bed--again :focus-visible) {
+    --fd-swipe-x: var(--fd-item-row-bed);
+}
+.fd-item-row--swipe:has(.fd-item-row__bed--delete :focus-visible) {
+    --fd-swipe-x: calc(var(--fd-item-row-bed) * -1);
+}
+.fd-item-row__bed {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    z-index: 0;
+    display: grid;
+    place-items: center;
+    width: var(--fd-item-row-bed);
+    color: var(--accent-on);
+}
+.fd-item-row__bed--again {
+    left: 0;
+    background: var(--accent-fill);
+}
+.fd-item-row__bed--delete {
+    right: 0;
+    background: var(--status-over);
+}
+.fd-item-row__bed-btn {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    background: transparent;
+    color: inherit;
+}
+
+/* A mouse has no swipe: the row stays put and the beds are gone. The menu on
+ * the row is the way to Delete and Again there. A row the gallery draws
+ * swiped open keeps its bed. */
+@media (hover: hover) and (pointer: fine) {
+    .fd-item-row--swipe:not([data-swipe-open]) {
+        overflow: visible;
+    }
+    .fd-item-row--swipe:not([data-swipe-open]) .fd-item-row__bed {
+        display: none;
+    }
+    .fd-item-row--swipe:not([data-swipe-open]) .fd-item-row__face {
+        transform: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .fd-item-row--swipe .fd-item-row__face,
+    .fd-item-row__toggle,
+    .fd-item-row__knob {
+        transition: none;
+    }
+}
+
+/* ---- list group ---- */
+
+.fd-list-group {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.fd-list-group--card {
+    --fd-item-row-face: var(--surface-panel);
+    padding: 0 var(--space-lg);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+}
+
+/* The card's last hairline would sit on its rounded edge; the design draws none. */
+.fd-list-group--card > .fd-item-row:last-child {
+    border-bottom-color: transparent;
+}
+
+/* ---- section header ---- */
+
+.fd-section-header {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-xl) 0 var(--space-sm);
+}
+.fd-section-header--rule {
+    padding-top: var(--space-md);
+    border-bottom: 1px solid var(--line);
+}
+.fd-section-header__label {
+    flex: 1;
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--text-micro-size);
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    line-height: 1.2727;
+    text-transform: uppercase;
+}
+.fd-section-header__count {
+    flex: none;
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: 1.3334;
+}
+.fd-section-header__action {
+    appearance: none;
+    flex: none;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--accent-text);
+    font: inherit;
+    font-size: var(--text-caption-size);
+    font-weight: 500;
+    line-height: 1.3334;
+    text-decoration: none;
+    cursor: pointer;
+}
+.fd-section-header__action:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
