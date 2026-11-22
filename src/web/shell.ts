@@ -3,7 +3,6 @@ import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
 import { appScriptHref, appStylesheetHref } from "../widgets.js";
 import type { MemberRole } from "../household.js";
 import type { ViewerFlags } from "../viewer-flags.js";
-import type { AttentionChrome } from "./attention.js";
 import { iconLogOut } from "./components/icons.js";
 import { renderAppShellV2 } from "./shell-v2.js";
 
@@ -56,7 +55,6 @@ export type AppChrome = ViewerChrome & {
     title: string;
     active: AppTabId | "none";
     body: string;
-    attention: AttentionChrome;
     flags: ViewerFlags;
     /** Set by `viewerChromeWithAttention`. */
     identity?: ShellIdentity;

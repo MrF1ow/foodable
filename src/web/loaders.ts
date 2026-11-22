@@ -94,6 +94,7 @@ import {
     parseFilterParam,
 } from "../domain/recipe-filters.js";
 import {
+    lowStockLevels,
     renderKitchenFridgeV2Page,
     type KitchenFridgeFoodMeta,
 } from "./pages/v2/kitchen-fridge.js";
@@ -181,11 +182,6 @@ import {
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
 import { dismissedKeySet, isDismissedIn } from "../domain/notice-dismissals.js";
 import { groceryRestockNotices } from "../domain/restock.js";
-import { dismissNotice, type NoticesForDeps } from "../domain/notices-for.js";
-import { NoticeDismissError } from "../domain/notice-dismissals.js";
-import type { NoticeCode } from "../domain/notices.js";
-import type { NoticeSubjectKind } from "../domain/notice-dismissals.js";
-import { renderNeedsAttentionPage } from "./pages/needs-attention.js";
 import { maybeOne, run } from "../db/sql.js";
 import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
@@ -209,11 +205,6 @@ import {
 } from "./pages/v2/settings-ai.js";
 import { listAgentActions } from "../domain/agent-actions.js";
 import { liveAgentActionDeps } from "../db/agent-actions.js";
-import {
-    AGENT_NOTICE_SCAN,
-    agentActionNotices,
-    type AgentActionNotice,
-} from "../domain/notices-agent.js";
 import { listConnections } from "../db/tokens.js";
 import { getAllGoalDays, getNutritionGoals } from "../db/nutrition.js";
 import { renderSettingsHelpV2Page } from "./pages/v2/settings-help.js";
@@ -373,7 +364,7 @@ export async function renderDashboardPage(
     const chrome = await viewerChromeWithAttention(
         viewerProfile,
         access.viewer,
-        todayView.attention,
+        todayView,
     );
 
     const weighInPrefill = await weighInPrefillForUser(access.viewer.userId);
@@ -396,10 +387,6 @@ export async function renderDashboardPage(
               access.viewer.householdId,
               todayView.householdDate,
           );
-    // A peer's read-only day shows none: the changes are the viewer's.
-    const agentNotices = subjectLabel
-        ? []
-        : await loadAgentActionNotices(access.viewer);
     const plan =
         week && v2Today?.planEdit
             ? (withPlanEditDraft(week, v2Today.planEdit) ?? week)
@@ -410,7 +397,6 @@ export async function renderDashboardPage(
             chrome: { ...chrome, subjectLabel },
             view: todayView,
             plan,
-            agentNotices,
             today: calendarToday,
             memberQuery: viewMemberId,
             logSheet: mergedLogSheet,
@@ -508,7 +494,7 @@ export async function renderFridgeInventoryPage(
                 listExpiring(snapshot.items, today, 7),
             ).uses,
             freezeDefaultExpiry: defaultFreezeExpiry(today),
-            notices: noticeResult.notices,
+            lowStock: lowStockLevels(noticeResult.notices, allFoods),
             groceryLines,
             groceryOverview: buildKitchenFridgeGroceryOverview(grocerySnapshot),
         }),
@@ -1197,32 +1183,6 @@ export async function renderSettingsAiV2Route(
     };
 }
 
-/**
- * What an agent changed in the last 24 hours that this viewer can still undo,
- * for the strip on Today. One indexed read of the household's newest actions.
- * The strip is an extra: when the read fails Today still renders, without it.
- */
-export async function loadAgentActionNotices(
-    viewer: HouseholdMember,
-    now: Date = new Date(),
-): Promise<AgentActionNotice[]> {
-    try {
-        const entries = await listAgentActions(
-            liveAgentActionDeps(),
-            viewer.householdId,
-            { limit: AGENT_NOTICE_SCAN, now },
-        );
-        return agentActionNotices(entries, {
-            now,
-            viewerUserId: viewer.userId,
-            isOwner: can(viewer, "agents.undo_any").ok,
-        });
-    } catch (err) {
-        console.error("Failed to load agent change notices:", err);
-        return [];
-    }
-}
-
 export async function renderSettingsScoreV2Route(
     viewerUserId: string,
     opts: { error?: string; draft?: ScoreFormDraft } = {},
@@ -1456,7 +1416,6 @@ export async function renderUsualProductsListPage(
                 : null,
             add,
             openGroceriesCount: groceryOpenLineCount(groceryLines),
-            notices: noticeResult.notices,
         }),
     };
 }
@@ -2179,87 +2138,6 @@ export async function renderRecipeDetailRoute(
             ),
             error: opts.error,
         }),
-    };
-}
-
-function noticeDeps(): NoticesForDeps {
-    return {
-        foods: liveFoodsStore(),
-        fridge: liveFridgeStore(),
-        recipes: liveRecipesStore(),
-        dismissals: liveNoticeDismissalsStore(),
-        grocery: liveGroceryStore(),
-    };
-}
-
-export async function renderNeedsAttentionInventoryPage(
-    viewerUserId: string,
-    error?: string,
-    post?: {
-        code?: string;
-        subjectKind?: string;
-        subjectId?: string;
-        relatedId?: string;
-        member?: HouseholdMember;
-    },
-): Promise<{ status: 200 | 303 | 400 | 403; html: string }> {
-    const gate = await memberGate(viewerUserId);
-    if ("html" in gate) return { status: gate.status, html: gate.html };
-    const profile = await getProfile(viewerUserId);
-    const householdId = gate.viewer.householdId;
-    let pageError = error;
-    let redirect = false;
-    let today: string | undefined;
-
-    if (post?.member) {
-        const deps = noticeDeps();
-        try {
-            if (post.code && post.subjectKind && post.subjectId) {
-                today = await householdToday(householdId);
-                await dismissNotice(
-                    deps,
-                    householdId,
-                    post.member.userId,
-                    {
-                        code: post.code as NoticeCode,
-                        subjectKind: post.subjectKind as NoticeSubjectKind,
-                        subjectId: post.subjectId,
-                        relatedId: post.relatedId,
-                    },
-                    { today },
-                );
-                redirect = true;
-            }
-        } catch (err) {
-            pageError =
-                err instanceof NoticeDismissError
-                    ? err.message
-                    : err instanceof Error
-                      ? err.message
-                      : "Could not update notices.";
-        }
-    }
-
-    // The same notices the Today card counts: the one-tap ones are listed for
-    // a viewer on the new app and left out for everyone else.
-    const result = await loadViewerNotices(gate.viewer, { today });
-    const chrome = await viewerChromeWithAttention(
-        profile,
-        gate.viewer,
-        result,
-    );
-    const html = renderNeedsAttentionPage({
-        chrome,
-        viewerUserId: gate.viewer.userId,
-        result,
-        error: pageError,
-    });
-    if (redirect && !pageError) {
-        return { status: 303, html };
-    }
-    return {
-        status: pageError ? 400 : 200,
-        html,
     };
 }
 

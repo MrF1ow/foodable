@@ -560,36 +560,37 @@ describeDb(
             });
         }
 
-        test("Today shows the owner a notice with Undo for a recent change, and it goes once undone", async () => {
+        test("Today shows no agent change; Undo stays in Settings › AI connections until it is undone", async () => {
             const { actionId } = await agentClears({ name: "Milk" });
 
             const html = await (await today(ownerId)).text();
+            expect(html).not.toContain('data-notice="agent.action"');
+            expect(html).not.toContain("Deleted grocery line Milk");
+            expect(html).not.toContain(`action="${undoPath(actionId)}"`);
 
-            expect(html).toContain('data-notice="agent.action"');
-            expect(html).toContain("Deleted grocery line Milk (by Claude)");
-            expect(html).toContain(`action="${undoPath(actionId)}"`);
-            expect(html).toContain('href="/settings/ai-connections"');
+            const settings = await (await page(ownerId)).text();
+            expect(settings).toContain("Deleted grocery line Milk");
+            expect(settings).toContain(`action="${undoPath(actionId)}"`);
 
             expect(
-                (await post(ownerId, undoPath(actionId), { back: "/" })).status,
+                (
+                    await post(ownerId, undoPath(actionId), {
+                        back: "/settings/ai-connections",
+                    })
+                ).status,
             ).toBe(303);
-            expect(await (await today(ownerId)).text()).not.toContain(
-                'data-notice="agent.action"',
-            );
+            expect(await lineCount()).toBe(1);
         });
 
-        test("Today shows no agent notice for an expired change, or to a member it is not theirs to undo", async () => {
+        test("no one's Today shows an agent change, whoever it is theirs to undo", async () => {
             await agentClears({ name: "Old", ago: AGENT_UNDO_TTL_MS + 60_000 });
             await agentClears({ name: "Sams", as: memberId });
 
-            expect(await (await today(ownerId)).text()).not.toContain(
-                "Deleted grocery line Old",
-            );
-            expect(await (await today(otherId)).text()).not.toContain(
-                'data-notice="agent.action"',
-            );
-            const samsOwn = await (await today(memberId)).text();
-            expect(samsOwn).toContain("Deleted grocery line Sams (by Claude)");
+            for (const userId of [ownerId, otherId, memberId]) {
+                const html = await (await today(userId)).text();
+                expect(html).not.toContain('data-notice="agent.action"');
+                expect(html).not.toContain("(by Claude)");
+            }
         });
     },
 );

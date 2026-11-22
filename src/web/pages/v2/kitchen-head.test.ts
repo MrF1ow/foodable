@@ -51,7 +51,6 @@ test("the phone title is the first element, so the tabs land right under it", ()
 describe("the add button", () => {
     const chrome = {
         theme: "light" as const,
-        attention: { count: 0, tabs: {} },
         flags: FIXTURE_APP_CHROME_FLAGS,
         identity: {
             viewerName: "Alex",

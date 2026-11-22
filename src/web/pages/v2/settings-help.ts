@@ -68,8 +68,8 @@ const GLOSSARY_COPY: GlossaryCopy[] = [
     },
     {
         id: "needs-attention",
-        title: "Needs attention",
-        body: "A dot on a tab, or on Settings, means there is an open warning or suggestion under it (not allergen blocks). Today lists them in its Needs attention card, and View all opens the full list. Dismiss hides a suggestion for good, until that thing is removed or merged away. Undo dismissed notices under Show dismissed on the Needs attention page.",
+        title: "Notifications",
+        body: "The bell at the top of the page shows a green dot when there is something new, and opens your Notifications. They are what needs a look: allergen warnings, food about to expire, a usual running low, a weigh-in that is due, and what others in the household changed with recipes, the week plan or usuals. A planned recipe's missing ingredients show on the Recipes page and the This week card instead. Open goes to the thing, Snooze brings it back tomorrow or in a week, and Dismiss clears it; an admin can also dismiss one for everyone. Allergen warnings can only be opened. A dismissal cannot be undone, and the notification stays gone while the problem lasts; it comes back only if the problem clears and then happens again. Choose which kinds you get under Settings › Notifications.",
     },
     {
         id: "restock",
@@ -89,7 +89,7 @@ const GLOSSARY_COPY: GlossaryCopy[] = [
     {
         id: "possible-duplicates",
         title: "Possible duplicates",
-        body: "Settings › Saved foods & recipes › Possible duplicates lists plain foods that may be the same thing: names with the same words up to plurals, or one name containing every word of the other. Scanned products and foods filed as products never appear. Each pair has a ⋯ menu: Merge into either food, Not the same, or More… to compare the two first, choose which one to keep and pick conflicting nutrition or unit values. A merge combines allergens, and the other name becomes another name for the food you keep. Not the same (Keep them separate on the compare page) hides the pair until a food is merged away. Undo a Keep separate from Needs attention › Show dismissed.",
+        body: "Settings › Saved foods & recipes › Possible duplicates lists plain foods that may be the same thing: names with the same words up to plurals, or one name containing every word of the other. Scanned products and foods filed as products never appear. Each pair has a ⋯ menu: Merge into either food, Not the same, or More… to compare the two first, choose which one to keep and pick conflicting nutrition or unit values. A merge combines allergens, and the other name becomes another name for the food you keep. Not the same (Keep them separate on the compare page) hides the pair until a food is merged away.",
     },
 ];
 

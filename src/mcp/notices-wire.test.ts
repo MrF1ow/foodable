@@ -4,7 +4,7 @@ import { NOTICE_CODES, type NoticeCode } from "../domain/notices.js";
 import { noticeSentence } from "../copy/notices.js";
 import { eventSentence } from "../copy/notifications.js";
 import { noticeToWire, NOTICE_SCHEMA } from "./shared.js";
-import { runningLowStrip } from "../web/pages/v2/kitchen-usuals.js";
+import { kitchenUsualRowParts } from "../web/pages/v2/kitchen-usuals.js";
 import { APP_PATHS } from "../web/route-map.js";
 import { NOTIFICATION_SCHEMA, notificationToWire } from "./tools/notices.js";
 import {
@@ -800,7 +800,7 @@ test("an Allergens row names its item and opens that item's page, whichever kind
     expect(food.open).toBe("/foods/f-9");
 });
 
-test("a Running low row opens the page whose strip shows it", () => {
+test("a Running low row opens the page whose usual says low now", () => {
     const notice: Notice = {
         code: "grocery.running_low",
         severity: "warn",
@@ -813,12 +813,17 @@ test("a Running low row opens the page whose strip shows it", () => {
             dismissScope: "",
         },
     };
-    // The page the row opens renders the notice with its actions...
-    const strip = String(runningLowStrip([notice]));
-    expect(strip).toContain("Running low");
-    expect(strip).toContain("Milk");
-    // ...and its Dismiss and Add to list come back to that same page.
-    expect(strip).toContain(APP_PATHS.kitchenUsuals);
+    // The page the row opens shows the usual in the warning colour, in place.
+    expect(
+        kitchenUsualRowParts({
+            productLabel: "",
+            storeId: null,
+            storeName: null,
+            amountLabel: null,
+            onList: false,
+            lowNow: true,
+        }),
+    ).toContainEqual({ text: "low now", tone: "warn" });
     const [row] = syncConditions({
         householdId: HH,
         notices: [notice],

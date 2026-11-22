@@ -132,7 +132,6 @@ function setup(opts: { failGet?: boolean; failNames?: boolean } = {}) {
             // live shell.
             chrome: async (viewer) => ({
                 theme: "light",
-                attention: { count: 0, tabs: {} },
                 flags: FIXTURE_APP_CHROME_FLAGS,
                 identity: {
                     viewerName: viewer.displayName,

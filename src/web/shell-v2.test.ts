@@ -38,7 +38,6 @@ function v2Chrome(over: Partial<AppChrome> = {}): AppChrome {
         active: "nutrition",
         theme: "system",
         body: "<h1>Body</h1>",
-        attention: { count: 0, tabs: {} },
         flags: FIXTURE_APP_CHROME_FLAGS,
         identity: IDENTITY,
         ...over,
@@ -567,18 +566,18 @@ describe("the shell", () => {
         );
     });
 
-    test("attention dots: warn dot on the tab, no badge", () => {
+    test("no tab or sidebar link carries a notice dot: the bell does", () => {
         const html = v2Html({
             active: "nutrition",
-            attention: { count: 3, tabs: { fridge: true, household: true } },
+            notificationsUnread: true,
         });
-        const tabs = tabsNav(html);
-        expect(tabs).toContain('aria-label="Kitchen, has notices"');
-        expect(tabs).toContain('class="fd-tab-dot fd-tab-dot-attention"');
-        expect(tabs.match(/fd-tab-dot-attention/g)?.length).toBe(1);
-        expect(sideNav(html)).toContain('aria-label="Settings, has notices"');
-        expect(html).not.toContain("app-bar-attention");
+        expect(html).not.toContain("has notices");
+        expect(html).not.toContain("-attention");
         expect(html).not.toContain("needs-attention");
+        expect(tabsNav(html)).not.toContain("fd-tab-dot-");
+        expect(sideNav(html)).not.toContain("fd-side-dot-");
+        // The bell is the one place a new notification shows.
+        expect(html).toContain("fd-bell");
     });
 
     test("untrusted names are escaped", () => {

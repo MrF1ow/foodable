@@ -406,6 +406,9 @@ export function groceryRow(
 /**
  * Fridge row, FigCraft `#21411`: title with an inline quantity and a trailing
  * date in tertiary text. `dateTime` (ISO) turns the date into a `<time>`.
+ * `subtitle` is a second line under the title (FigCraft `#396429`: "Tomorrow ·
+ * low, below 6"); with `subtitleTone: "warn"` it takes the warning colour.
+ * A row with a subtitle carries its date there, so `date` is not drawn beside it.
  */
 export function fridgeRow(
     opts: RowBase & {
@@ -415,20 +418,29 @@ export function fridgeRow(
         dateTime?: string;
         /** Extra class on the date cell (expiry tone). */
         dateClass?: string;
+        subtitle?: Text;
+        subtitleTone?: "warn";
         href?: string;
     },
 ): Html {
     const dateExtra = opts.dateClass ? ` ${opts.dateClass}` : "";
+    const hasSubtitle = opts.subtitle != null && opts.subtitle !== "";
     const date =
-        opts.date == null || opts.date === ""
+        hasSubtitle || opts.date == null || opts.date === ""
             ? ""
             : opts.dateTime
               ? `<time class="fd-row__date${dateExtra}" datetime="${esc(opts.dateTime)}">${esc(opts.date)}</time>`
               : `<span class="fd-row__date${dateExtra}">${esc(opts.date)}</span>`;
+    const tone = opts.subtitleTone
+        ? ` fd-tone fd-tone--${opts.subtitleTone}`
+        : "";
+    const subtitle = hasSubtitle
+        ? `<span class="fd-row__sub${tone}">${esc(opts.subtitle!)}</span>`
+        : "";
     return rowShell({
         ...opts,
         variant: "fridge",
-        main: titleLine(opts.title, metaSpan(opts.qty)),
+        main: join([titleLine(opts.title, metaSpan(opts.qty)), subtitle]),
         trailing: raw(date),
     });
 }

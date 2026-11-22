@@ -34,9 +34,7 @@ import {
 export { USUAL_ADD_SHEET_ID };
 import { selectMode } from "./select-mode.js";
 import { stepper } from "../../components/v2/stepper.js";
-import type { Notice } from "../../../domain/notices.js";
 import { renderAppShell } from "../../shell.js";
-import { noticeStrip, stripNotices } from "./notice-strip.js";
 import { kitchenTopTools, renderKitchenHead } from "./kitchen-head.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 
@@ -231,8 +229,6 @@ export type KitchenUsualsV2View = {
     /** The Add a usual sheet's state; absent leaves it closed on Scan. */
     add?: UsualAddView;
     openGroceriesCount?: number;
-    /** The household's open notices; the usuals running low show in place. */
-    notices?: readonly Notice[];
 };
 
 function sortStoresByName<T extends { name: string }>(stores: T[]): T[] {
@@ -753,14 +749,6 @@ function renderUsualsHead(view: KitchenUsualsV2View): string {
     });
 }
 
-/** The usuals running low, with Add to list and Dismiss; empty when none is. */
-export function runningLowStrip(notices: readonly Notice[] | undefined) {
-    return noticeStrip(
-        stripNotices(notices ?? [], ["grocery.running_low"], undefined),
-        { back: "/kitchen/usuals", label: "Running low" },
-    );
-}
-
 export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
     const resolvedOpen = kitchenUsualsResolvedOpenFoodId(view);
     const rows = filteredRows(view);
@@ -819,7 +807,6 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
 ${kitchenTopTools(addUsualButton().phone)}
 ${pageError}
 <p class="fd-kitchen-usual-intro">${esc(USUALS_INTRO)}</p>
-${String(runningLowStrip(view.notices))}
 ${view.stores.length > 0 ? storeFilterChips(view) : ""}
 ${selectable ? select.tools + select.bar : ""}
 ${rows.length > 0 ? String(sectionHeader({ title: "Usuals", count: rows.length })) : ""}

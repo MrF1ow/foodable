@@ -19,7 +19,6 @@ const NOW = new Date("2026-11-22T12:00:00.000Z");
 
 const CHROME: AppChromeBase = {
     theme: "light",
-    attention: { count: 0, tabs: {} },
     flags: FIXTURE_APP_CHROME_FLAGS,
     identity: {
         viewerName: "Ethan Flow",

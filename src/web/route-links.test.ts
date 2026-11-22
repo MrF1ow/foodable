@@ -3,7 +3,6 @@ import { createHouseholdFormHtml, forbiddenDashboardHtml } from "./loaders.js";
 import { findLegacyLinks } from "./route-map.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import { renderSettingsDuplicatesV2Page } from "./pages/v2/settings-duplicates.js";
-import { renderNeedsAttentionPage } from "./pages/needs-attention.js";
 import {
     buildPreviewKitchenFridgeView,
     renderKitchenFridgeV2Page,
@@ -23,7 +22,6 @@ import {
 const HH = "hh-fix";
 const chrome = {
     theme: "light" as const,
-    attention: { count: 0, tabs: {} },
     flags: FIXTURE_APP_CHROME_FLAGS,
     identity: {
         viewerName: "Ethan",
@@ -126,20 +124,7 @@ describe("rendered pages have no legacy links", () => {
         assertNoLegacy("settings help", renderSettingsHelpV2Page({ chrome }));
     });
 
-    test("attention and gate pages", () => {
-        assertNoLegacy(
-            "needs attention",
-            renderNeedsAttentionPage({
-                chrome,
-                result: {
-                    notices: [],
-                    dismissals: [],
-                    subjectNames: new Map(),
-                    subjectTimes: new Map(),
-                    noticeFoods: new Map(),
-                },
-            } as never),
-        );
+    test("gate pages", () => {
         assertNoLegacy(
             "create household",
             createHouseholdFormHtml(undefined, "light"),

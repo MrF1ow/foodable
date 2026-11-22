@@ -8,7 +8,6 @@ import {
 
 const chrome = {
     theme: "light" as const,
-    attention: { count: 0, tabs: {} },
     flags: FIXTURE_APP_CHROME_FLAGS,
 };
 
@@ -61,9 +60,32 @@ describe("settings help v2", () => {
         expect(text("locations")).not.toContain("Add location");
         expect(text("restock")).toContain("update_household_config");
         expect(text("restock")).not.toContain("Settings › Household");
-        // The attention indicator is a dot, not a number beside Settings.
-        expect(text("needs-attention")).toContain("A dot on a tab");
-        expect(text("needs-attention")).not.toContain("The number beside");
+        // The bell shows a green dot, never a number, and nothing is on a tab.
+        expect(text("needs-attention")).toContain("green dot");
+        expect(text("needs-attention")).toContain("Settings › Notifications");
+        // Only kinds that reach the inbox are listed; plan gaps do not.
+        expect(text("needs-attention")).not.toContain(
+            "what a planned recipe is missing",
+        );
+        expect(text("needs-attention")).toContain(
+            "missing ingredients show on the Recipes page",
+        );
+        // A dismissal holds while the condition lasts.
+        expect(text("needs-attention")).not.toContain(
+            "comes back if the thing it is about changes",
+        );
+        expect(text("needs-attention")).toContain(
+            "comes back only if the problem clears and then happens again",
+        );
+        for (const gone of [
+            "dot on a tab",
+            "Needs attention",
+            "Show dismissed",
+            "The number beside",
+        ]) {
+            expect(text("needs-attention")).not.toContain(gone);
+            expect(text("possible-duplicates")).not.toContain(gone);
+        }
         // The old fridge and recipe controls are gone with the old pages.
         for (const entry of GLOSSARY) {
             for (const gone of [

@@ -57,7 +57,6 @@ function identity(on: boolean, versions = VERSIONS): ShellIdentity {
 function base(on: boolean, versions = VERSIONS): AppChromeBase {
     return {
         theme: "light",
-        attention: { count: 0, tabs: {} },
         flags: FIXTURE_APP_CHROME_FLAGS,
         identity: identity(on, versions),
     };

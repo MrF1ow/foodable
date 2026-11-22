@@ -6,7 +6,6 @@ export const APP_PATHS = {
     settings: "/settings",
     settingsHelp: "/settings/help",
     settingsNotifications: "/settings/notifications",
-    needsAttention: "/needs-attention",
     notifications: "/notifications",
     createHousehold: "/create-household",
     share: "/share",
@@ -22,9 +21,19 @@ export const APP_PATHS = {
 } as const;
 
 /** Longest match first — segment-boundary prefixes only. */
-export const LEGACY_PATH_MOVES: readonly { from: string; to: string }[] = [
+export type LegacyPathMove = {
+    from: string;
+    to: string;
+    /** Match `from` alone: its sub-paths are not moved with it. */
+    exact?: true;
+};
+
+export const LEGACY_PATH_MOVES: readonly LegacyPathMove[] = [
     // The Dismissed notices list is gone: dismissing a notice has nothing to show.
     { from: "/settings/household/dismissed", to: APP_PATHS.settingsHousehold },
+    // The Needs attention page is the inbox now. Its own POST (/dismiss) went
+    // with it and answers 404 rather than moving, so only this path matches.
+    { from: "/needs-attention", to: APP_PATHS.notifications, exact: true },
     { from: "/household/usual-products", to: APP_PATHS.kitchenUsuals },
     { from: "/settings/foods", to: APP_PATHS.settingsHouseholdItems },
     { from: "/fridge", to: APP_PATHS.kitchenFridge },
@@ -32,11 +41,14 @@ export const LEGACY_PATH_MOVES: readonly { from: string; to: string }[] = [
     { from: "/household", to: APP_PATHS.settingsHousehold },
 ];
 
-function legacyPrefixMatch(
-    pathname: string,
-): { from: string; to: string } | null {
+function legacyPrefixMatch(pathname: string): LegacyPathMove | null {
     for (const move of LEGACY_PATH_MOVES) {
         if (pathname === move.from) return move;
+        if (move.exact) {
+            // `/needs-attention/` is the same page; `/needs-attention/dismiss` is not.
+            if (pathname.replace(/\/+$/, "") === move.from) return move;
+            continue;
+        }
         if (pathname.startsWith(`${move.from}/`)) return move;
     }
     return null;

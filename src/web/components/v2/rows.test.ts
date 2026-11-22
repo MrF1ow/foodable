@@ -133,6 +133,31 @@ test("fridgeRow: inline qty, tertiary date; dateTime makes a <time>", () => {
     );
 });
 
+test("fridgeRow: a subtitle is a second line in the warning tone and takes the date's place", () => {
+    const html = String(
+        fridgeRow({
+            title: "Eggs",
+            qty: 2,
+            date: "Nov 19",
+            dateTime: "2026-11-19",
+            subtitle: "Nov 19 · low, below 6",
+            subtitleTone: "warn",
+        }),
+    );
+    expect(html).toContain(
+        `<span class="fd-row__sub fd-tone fd-tone--warn">Nov 19 · low, below 6</span>`,
+    );
+    expect(html).not.toContain("fd-row__date");
+    expect(html).not.toContain("<time");
+    const plain = String(fridgeRow({ title: "Eggs", subtitle: "Expired" }));
+    expect(plain).toContain(`<span class="fd-row__sub">Expired</span>`);
+    expect(plain).not.toContain("fd-tone");
+    // No subtitle: unchanged, no second line.
+    expect(String(fridgeRow({ title: "Eggs", date: "Nov 19" }))).not.toContain(
+        "fd-row__sub",
+    );
+});
+
 test("usualRow: the whole row is a link with parts joined by hidden dots and a chevron", () => {
     const html = usualRow({
         title: "Eggs",

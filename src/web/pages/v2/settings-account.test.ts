@@ -4,7 +4,6 @@ import { renderSettingsAccountV2Page } from "./settings-account.js";
 
 const chrome = {
     theme: "light" as const,
-    attention: { count: 0, tabs: {} },
     flags: FIXTURE_APP_CHROME_FLAGS,
 };
 

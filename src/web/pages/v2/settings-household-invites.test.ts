@@ -15,7 +15,6 @@ function view(
     return {
         chrome: {
             theme: "dark",
-            attention: { count: 0, tabs: {} },
             flags: FIXTURE_APP_CHROME_FLAGS,
         },
         flags: FIXTURE_APP_CHROME_FLAGS,

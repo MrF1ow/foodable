@@ -1,14 +1,8 @@
 /**
- * The one-tap notices (a usual running low, what a planned recipe is missing,
- * a weigh-in that is due) as the new app shows them in place: a short list of
- * rows, each a sentence from the notice registry with its action and a
- * dismiss. The desktop Today "Needs attention" card renders the same notices
- * as its own rail rows and uses `noticeActionControl` for the action.
- *
- * FigCraft Desktop › Today (dark 41837, light 50720) has the card with the
- * three actions as plain accent text at the end of the row ("Add to list",
- * "Add", "Weigh in"). The design has no in-place strip on Kitchen, Recipes or
- * the phone Today; these reuse the card's row (dot, sentence, accent action).
+ * The one-tap notices (a usual running low, what a planned recipe is missing)
+ * as Recipes shows them in place: a short list of rows, each a sentence from
+ * the notice registry with its action and a dismiss. Every other notification
+ * lives in the inbox behind the bell.
  */
 import { noticeActionFor, noticeSentence } from "../../../copy/notices.js";
 import { dismissalKey } from "../../../domain/notice-dismissals.js";
@@ -24,9 +18,7 @@ import {
     type NoticeRouteContext,
 } from "../../components/notices.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
-import type { AgentActionNotice } from "../../../domain/notices-agent.js";
 import { FD_LOG_WEIGH_IN_SHEET_ID } from "./log-sheet.js";
-import { AI_PAGE_PATH, aiUndoPath } from "./settings-ai.js";
 
 /** The pages an action or a dismissal may send the person back to. */
 export const NOTICE_BACK_PATHS = [
@@ -34,7 +26,6 @@ export const NOTICE_BACK_PATHS = [
     "/kitchen/usuals",
     "/kitchen/fridge",
     "/recipes",
-    "/needs-attention",
 ] as const;
 export type NoticeBack =
     (typeof NOTICE_BACK_PATHS)[number] | `/?date=${string}`;
@@ -60,25 +51,6 @@ function isCalendarDate(value: string): boolean {
 }
 
 export { noticeActPath, NOTICE_DISMISS_PATH };
-
-/** The notices this app acts on and dismisses in place. */
-export const ONE_TAP_NOTICE_CODES = [
-    "grocery.running_low",
-    "plan.missing_ingredient",
-    "nutrition.weigh_in_due",
-] as const satisfies readonly NoticeCode[];
-
-export function isOneTapNotice(notice: Notice): boolean {
-    return (ONE_TAP_NOTICE_CODES as readonly string[]).includes(notice.code);
-}
-
-/** Where Today sends an action back to: the day it is showing, or plain Today. */
-export function todayNoticeBack(view: {
-    date: string;
-    householdDate: string;
-}): NoticeBack {
-    return view.date === view.householdDate ? "/" : `/?date=${view.date}`;
-}
 
 /**
  * The notices of `codes` a viewer can act on here. A weigh-in reminder is kept
@@ -168,29 +140,6 @@ export function noticeStrip(
             });
             return `<li class="fd-notice-strip__row" data-notice="${esc(notice.code)}"><span class="${dotClass(notice)}" aria-hidden="true"></span><span class="fd-notice-strip__text">${esc(noticeShortSentence(notice, { viewerUserId: opts.viewerUserId }) ?? noticeSentence(notice))}</span>${action}${noticeDismissControl(notice, opts.back)}</li>`;
         })
-        .join("");
-    const extra = opts.className ? ` ${esc(opts.className)}` : "";
-    return raw(
-        `<section class="fd-notice-strip${extra}" aria-label="${esc(opts.label)}"><ul class="fd-notice-strip__list">${rows}</ul></section>`,
-    );
-}
-
-/**
- * What an agent changed in the last 24 hours and can still be undone: one row
- * per change with its Undo, and a way to Settings › AI connections where the
- * whole activity is. Not a registry notice, so it has no dismiss: it goes away
- * when the change is undone or its 24 hours pass.
- */
-export function agentActionStrip(
-    notices: readonly AgentActionNotice[],
-    opts: { label: string; className?: string },
-): Html {
-    if (notices.length === 0) return raw("");
-    const rows = notices
-        .map(
-            (notice) =>
-                `<li class="fd-notice-strip__row" data-notice="agent.action" data-agent-action="${esc(notice.actionId)}"><span class="fd-notice-strip__dot fd-notice-strip__dot--warn" aria-hidden="true"></span><span class="fd-notice-strip__text">${esc(notice.sentence)}</span><form class="fd-notice-strip__action-form" method="post" action="${esc(aiUndoPath(notice.actionId))}" data-turbo="false">${hidden("back", "/")}<button type="submit" class="fd-notice-strip__action" aria-label="Undo: ${esc(notice.sentence)}">Undo</button></form><a class="fd-notice-strip__action" href="${AI_PAGE_PATH}" data-turbo="false">Review</a></li>`,
-        )
         .join("");
     const extra = opts.className ? ` ${esc(opts.className)}` : "";
     return raw(

@@ -10,20 +10,13 @@ import {
     renderKitchenUsualsBody,
 } from "./kitchen-usuals.js";
 import { noticeSentence } from "../../../copy/notices.js";
-import {
-    agentActionStrip,
-    noticeStrip,
-    parseNoticeBack,
-    stripNotices,
-} from "./notice-strip.js";
+import { noticeStrip, parseNoticeBack, stripNotices } from "./notice-strip.js";
 import { renderRecipesListBody } from "./recipes-list.js";
 import { buildPreviewTodayPageData, renderTodayV2Page } from "./today.js";
-import { renderTodayRail } from "./today-rail.js";
 
 const chrome = {
     theme: "light" as const,
     flags: FIXTURE_APP_CHROME_FLAGS,
-    attention: { count: 0, tabs: {} },
 };
 
 const ME = "user-me";
@@ -200,8 +193,8 @@ describe("noticeStrip", () => {
         ).toEqual([]);
     });
 
-    test("parseNoticeBack keeps a real Today date and the Needs attention page", () => {
-        expect(parseNoticeBack("/needs-attention")).toBe("/needs-attention");
+    test("parseNoticeBack keeps a real Today date; the retired Needs attention page falls back to Today", () => {
+        expect(parseNoticeBack("/needs-attention")).toBe("/");
         expect(parseNoticeBack("/?date=2026-11-03")).toBe("/?date=2026-11-03");
         for (const bad of [
             "/?date=2026-02-31",
@@ -230,41 +223,25 @@ describe("noticeStrip", () => {
 });
 
 describe("where the one-tap notices show", () => {
-    test("Kitchen › Usuals shows the usuals running low, not the other two", () => {
+    test("Kitchen › Usuals draws no strip: the usual's own row says low now", () => {
         const html = renderKitchenUsualsBody(
             buildPreviewKitchenUsualsView({
                 chrome,
                 rows: [],
                 stores: [],
                 rowMeta: new Map(),
-                notices: [low, missing, weighIn(ME, "Alex")],
             }),
         );
-        expect(html).toContain("Running low: Eggs");
-        expect(html).toContain('aria-label="Running low"');
-        expect(html).not.toContain("missing for Pancakes");
-        expect(html).not.toContain("weighed in");
-        expect(
-            renderKitchenUsualsBody(
-                buildPreviewKitchenUsualsView({
-                    chrome,
-                    rows: [],
-                    stores: [],
-                    rowMeta: new Map(),
-                }),
-            ),
-        ).not.toContain("fd-notice-strip");
+        expect(html).not.toContain("fd-notice-strip");
+        expect(html).not.toContain('aria-label="Running low"');
     });
 
-    test("Kitchen › Fridge shows them too, and takes the person back to the fridge", () => {
+    test("Kitchen › Fridge draws no strip: the row says it in the warning colour", () => {
         const html = renderKitchenFridgeBody(
-            buildPreviewKitchenFridgeView(chrome, "2026-11-12", {
-                notices: [low, missing],
-            }),
+            buildPreviewKitchenFridgeView(chrome, "2026-11-12"),
         );
-        expect(html).toContain("Running low: Eggs");
-        expect(html).toContain('name="back" value="/kitchen/fridge"');
-        expect(html).not.toContain("missing for Pancakes");
+        expect(html).not.toContain("fd-notice-strip");
+        expect(html).not.toContain('aria-label="Running low"');
     });
 
     test("Recipes shows what the plan is missing under This week", () => {
@@ -291,201 +268,31 @@ describe("where the one-tap notices show", () => {
         );
     });
 
-    test("the desktop Today card lists all three with their actions", () => {
+    test("Today draws no notice card, strip or action, on the desktop or the phone", () => {
         const data = buildPreviewTodayPageData(chrome, "2026-11-12");
-        data.view.attention = {
-            viewerUserId: ME,
-            count: 4,
-            notices: [low, missing, weighIn(ME, "Alex"), weighIn(SAM, "Sam")],
-            noticeFoods: new Map(),
-        };
-        const rail = String(renderTodayRail(data));
-        expect(rail).toContain("Running low: Eggs");
-        expect(rail).toContain('action="/notices/grocery.running_low/act"');
-        expect(rail).toContain('action="/notices/plan.missing_ingredient/act"');
-        expect(rail).toContain('data-fd-open-sheet="fd-log-weigh-in"');
-        // Sam's reminder is a sentence only: the sheet logs the viewer's weight.
-        expect(rail).toContain("Sam hasn't weighed in");
-        expect(
-            rail.match(/data-fd-open-sheet="fd-log-weigh-in"/g),
-        ).toHaveLength(
-            // Alex's row, and the Weight card's own Weigh in link.
-            2,
-        );
-    });
-
-    test("the card's one-tap rows each carry the dismiss, so the desktop can dismiss without the phone strip", () => {
-        const data = buildPreviewTodayPageData(chrome, "2026-11-12");
-        const expiring: Notice = {
-            code: "fridge.expiring",
-            severity: "info",
-            subject: { kind: "fridge_item", id: "fi-1" },
-            related: [],
-            params: {
-                name: "Milk",
-                amount: 1,
-                unit: "l",
-                expiresOn: "2026-11-13",
-                daysLeft: 1,
-                onGroceryList: "no",
-            },
-        };
-        data.view.attention = {
-            viewerUserId: ME,
-            count: 5,
-            notices: [
-                low,
-                missing,
-                weighIn(ME, "Alex"),
-                weighIn(SAM, "Sam"),
-                expiring,
-            ],
-            noticeFoods: new Map(),
-        };
-        const rail = String(renderTodayRail(data));
-        const forms =
-            rail.match(
-                /<form[^>]*action="\/notices\/dismiss"[\s\S]*?<\/form>/g,
-            ) ?? [];
-        // Four one-tap notices (Sam's too: dismissals are the household's); the expiring one has none.
-        expect(forms).toHaveLength(4);
-        expect(forms.join("")).toContain(
-            'name="code" value="grocery.running_low"',
-        );
-        expect(forms.join("")).toContain(
-            'name="code" value="plan.missing_ingredient"',
-        );
-        expect(forms.join("")).toContain(
-            'name="subject_id" value="' + ME + '"',
-        );
-        expect(forms.join("")).toContain(
-            'name="subject_id" value="' + SAM + '"',
-        );
-        expect(forms.join("")).toContain(
-            'name="related_id" value="2026-11-03"',
-        );
-        expect(forms.join("")).toContain('name="back" value="/"');
-        const row = rail.slice(rail.indexOf("Milk"));
-        expect(row).not.toContain("notices/dismiss");
-    });
-
-    test("acting or dismissing from another day of Today returns to that day", () => {
-        const data = buildPreviewTodayPageData(chrome, "2026-11-12");
-        data.view.date = "2026-11-10";
-        data.view.householdDate = "2026-11-12";
-        data.view.attention = {
-            viewerUserId: ME,
-            count: 2,
-            notices: [low, weighIn(ME, "Alex")],
-            noticeFoods: new Map(),
-        };
-        const html = renderTodayV2Page(data);
-        expect(html).toContain('name="back" value="/?date=2026-11-10"');
-        expect(html).not.toContain('name="back" value="/"');
-        data.view.date = data.view.householdDate;
-        expect(renderTodayV2Page(data)).toContain('name="back" value="/"');
-    });
-
-    test("the phone Today shows the weigh-in and what the plan is missing in place", () => {
-        const data = buildPreviewTodayPageData(chrome, "2026-11-12");
-        data.view.attention = {
-            viewerUserId: ME,
-            count: 3,
-            notices: [low, missing, weighIn(ME, "Alex"), weighIn(SAM, "Sam")],
-            noticeFoods: new Map(),
-        };
-        const html = renderTodayV2Page(data);
-        expect(html).toContain("fd-today-notices");
-        expect(html).toContain('aria-label="Weigh-in"');
-        expect(html).toContain('aria-label="Missing for the plan"');
-        // Running low belongs to Kitchen; Sam's reminder is not Alex's to act on.
-        const phone = html.slice(html.indexOf('class="fd-today-main"'));
-        const phoneOnly = phone.slice(
-            0,
-            phone.indexOf('class="fd-today-rail"'),
-        );
-        expect(phoneOnly).not.toContain("Running low: Eggs");
-        expect(phoneOnly).not.toContain("Sam hasn't");
-        // The phone rows read short, as in the design.
-        expect(rowTexts(phoneOnly)).toEqual([
-            "Weigh in · 9 days ago",
-            "Flour missing for tomorrow",
-        ]);
-    });
-
-    test("a peer's read-only day shows no one-tap notices", () => {
-        const data = buildPreviewTodayPageData(
-            { ...chrome, subjectLabel: "Sam" } as never,
-            "2026-11-12",
-        );
-        data.view.attention = {
-            viewerUserId: ME,
-            count: 2,
-            notices: [missing, weighIn(ME, "Alex")],
-            noticeFoods: new Map(),
-        };
+        data.view.notices = [
+            low,
+            missing,
+            weighIn(ME, "Alex"),
+            weighIn(SAM, "Sam"),
+        ];
         const html = renderTodayV2Page(data);
         expect(html).not.toContain("fd-notice-strip");
+        expect(html).not.toContain("fd-today-notices");
+        expect(html).not.toContain("Needs attention");
+        expect(html).not.toContain("/needs-attention");
         expect(html).not.toContain("/notices/");
-    });
-});
-
-describe("agentActionStrip", () => {
-    const notice = {
-        actionId: "a1000000-0000-4000-8000-000000000001",
-        sentence: "Cleared 20 grocery lines (by Claude)",
-    };
-
-    test("is empty with nothing to say", () => {
-        expect(String(agentActionStrip([], { label: "Agent changes" }))).toBe(
-            "",
-        );
+        expect(html).not.toContain('aria-label="Weigh-in"');
+        expect(html).not.toContain('aria-label="Missing for the plan"');
+        expect(html).not.toContain("Running low");
+        expect(html).not.toContain("Sam hasn't");
     });
 
-    test("a row with its Undo form, a link to Settings, and no dismiss", () => {
-        const html = String(
-            agentActionStrip([notice], {
-                label: "Agent changes",
-                className: "fd-today-agent",
-            }),
-        );
-        expect(html).toContain('data-notice="agent.action"');
-        expect(html).toContain("Cleared 20 grocery lines (by Claude)");
-        expect(html).toContain(
-            `action="/settings/ai-connections/actions/${notice.actionId}/undo"`,
-        );
-        expect(html).toContain('<input type="hidden" name="back" value="/" />');
-        expect(html).toContain('href="/settings/ai-connections"');
-        expect(html).toContain("fd-today-agent");
-        expect(html).not.toContain("fd-notice-strip__dismiss");
-    });
-
-    test("a sentence made of markup stays inert", () => {
-        const html = String(
-            agentActionStrip(
-                [{ ...notice, sentence: "<img src=x onerror=alert(1)>" }],
-                { label: "Agent changes" },
-            ),
-        );
-        expect(html).not.toContain("<img src=x");
-    });
-
-    test("Today carries it under the title, and not on a peer's read-only day", () => {
+    test("Today draws no agent change strip: Undo lives in Settings › AI connections", () => {
         const data = buildPreviewTodayPageData(chrome as never, "2026-11-10");
-        const withStrip = renderTodayV2Page({
-            ...data,
-            agentNotices: [notice],
-        });
-        expect(withStrip).toContain('data-notice="agent.action"');
-        expect(withStrip.indexOf("fd-today-agent")).toBeLessThan(
-            withStrip.indexOf("fd-today-summary"),
-        );
-        expect(renderTodayV2Page(data)).not.toContain("agent.action");
-        const peer = renderTodayV2Page({
-            ...data,
-            agentNotices: [notice],
-            chrome: { ...data.chrome, subjectLabel: "Sam" } as never,
-        });
-        expect(peer).not.toContain("agent.action");
+        const html = renderTodayV2Page(data);
+        expect(html).not.toContain("agent.action");
+        expect(html).not.toContain("fd-today-agent");
+        expect(html).not.toContain("Agent changes");
     });
 });

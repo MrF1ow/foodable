@@ -28,7 +28,6 @@ function shellPage(
         active,
         theme,
         body: `<h1>${title}</h1>`,
-        attention: { count: 0, tabs: {} },
         flags: FIXTURE_APP_CHROME_FLAGS,
     });
 }
@@ -368,8 +367,8 @@ test("no page module contains a raw <h1", () => {
         .filter((name) => name.endsWith(".ts") && !name.endsWith(".test.ts"))
         .map((name) => join(pagesDir, name));
     files.push(join(pagesDir, "../loaders.ts"));
-    // dev-gallery, needs-attention, share-view and loaders.ts.
-    expect(files.length).toBeGreaterThan(3);
+    // dev-gallery, share-view and loaders.ts.
+    expect(files.length).toBeGreaterThan(2);
     for (const file of files) {
         const src = readFileSync(file, "utf8");
         expect(src, file).not.toContain("<h1");

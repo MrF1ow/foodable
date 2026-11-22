@@ -355,8 +355,6 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/v2/notice-strip.test.ts": "web",
     "src/mcp/tools/notices.ts": "web",
     "src/web/attention.ts": "web",
-    "src/web/pages/needs-attention.ts": "web",
-    "src/web/routes/needs-attention.ts": "web",
     "src/web/routes/notifications.ts": "web",
     "src/web/routes/notifications.test.ts": "web",
     "src/web/pages/v2/notifications.ts": "web",

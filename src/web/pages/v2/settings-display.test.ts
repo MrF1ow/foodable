@@ -7,7 +7,6 @@ import {
 
 const chrome = {
     theme: "dark" as const,
-    attention: { count: 0, tabs: {} },
     flags: FIXTURE_APP_CHROME_FLAGS,
 };
 

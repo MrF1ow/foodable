@@ -78,6 +78,18 @@ describe("legacyRedirectTarget", () => {
             want: `${APP_PATHS.settingsHousehold}?x=1`,
         },
         { in: "/settings/household/dismissedx", want: null },
+        // Exact: the Needs attention page itself is the inbox now, and what
+        // used to hang under it (its dismiss POST) is gone, not moved.
+        { in: "/needs-attention", want: APP_PATHS.notifications },
+        { in: "/needs-attention/", want: APP_PATHS.notifications },
+        {
+            in: "/needs-attention?show=dismissed",
+            want: `${APP_PATHS.notifications}?show=dismissed`,
+        },
+        { in: "/needs-attention/dismiss", want: null },
+        { in: "/needs-attention/undo", want: null },
+        { in: "/needs-attentionx", want: null },
+        { in: APP_PATHS.notifications, want: null },
         { in: APP_PATHS.kitchenFridge, want: null },
         { in: "/recipes", want: null },
     ];
@@ -88,9 +100,28 @@ describe("legacyRedirectTarget", () => {
         });
     }
 
+    test("an exact entry moves its own path only: /needs-attention/dismiss gets no redirect", () => {
+        const exact = LEGACY_PATH_MOVES.find(
+            (m) => m.from === "/needs-attention",
+        );
+        expect(exact?.exact).toBe(true);
+        expect(legacyRedirectTarget("/needs-attention/dismiss")).toBeNull();
+        expect(canonicalAppPath("/needs-attention/dismiss")).toBe(
+            "/needs-attention/dismiss",
+        );
+        // Links to the exact path are found; links under it are not legacy.
+        expect(
+            findLegacyLinks(
+                `<a href="/needs-attention">x</a><form action="/needs-attention/dismiss"></form>`,
+            ),
+        ).toEqual(["/needs-attention"]);
+    });
+
     test("every mapped target is not legacy", () => {
         for (const row of LEGACY_PATH_MOVES) {
-            const target = legacyRedirectTarget(`${row.from}/x`);
+            const target = legacyRedirectTarget(
+                row.exact ? row.from : `${row.from}/x`,
+            );
             expect(target).not.toBeNull();
             expect(legacyRedirectTarget(target!)).toBeNull();
         }
@@ -127,7 +158,13 @@ describe("findLegacyLinks", () => {
 });
 
 describe("legacy path literals in source", () => {
-    const OLD = ["/fridge", "/grocery", "/household", "/settings/foods"];
+    const OLD = [
+        "/fridge",
+        "/grocery",
+        "/household",
+        "/settings/foods",
+        "/needs-attention",
+    ];
     const NEEDLES = OLD.flatMap((path) => [
         `"${path}`,
         `'${path}`,

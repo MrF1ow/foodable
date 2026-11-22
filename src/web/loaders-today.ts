@@ -37,7 +37,6 @@ import {
     type MacrosLeft,
     type SlotSuggestion,
 } from "../domain/suggestions.js";
-import { needsAttentionCount } from "../domain/notices.js";
 import {
     adjacentWeekStarts,
     annotateWeekDays,
@@ -72,14 +71,6 @@ export type TodayWeightPoint = {
     weight_g: number;
 };
 
-export type TodayAttention = {
-    /** The member the page is for; a weigh-in reminder has an action only for them. */
-    viewerUserId?: string;
-    count: number;
-    notices: Notice[];
-    noticeFoods: ReadonlyMap<string, Pick<Food, "genericFoodId">>;
-};
-
 export type TodayView = {
     date: string;
     /** Household calendar date when the view was built (expiring-soon list). */
@@ -98,7 +89,8 @@ export type TodayView = {
     week: WeekStripLayout & { dots: WeekDot[] };
     streak: number;
     expiringFridge: FridgeItem[];
-    attention: TodayAttention;
+    /** The household's open notices: the shell's chrome reuses them instead of reading them again. */
+    notices: Notice[];
     weight: {
         latest: WeightEntry | null;
         series30d: TodayWeightPoint[];
@@ -447,12 +439,7 @@ export async function loadToday(
         week,
         streak,
         expiringFridge,
-        attention: {
-            viewerUserId: userId,
-            count: needsAttentionCount(noticeResult.notices),
-            notices: [...noticeResult.notices],
-            noticeFoods: noticeResult.noticeFoods,
-        },
+        notices: [...noticeResult.notices],
         weight: {
             latest: latestWeight,
             series30d: weightSeries30d(weightRange, tz),

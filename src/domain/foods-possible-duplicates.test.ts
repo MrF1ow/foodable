@@ -32,11 +32,9 @@ import {
     noticeDismissLabel,
     noticeDismissPair,
 } from "../copy/notices.js";
-import { attentionFromNotices } from "../web/attention.js";
 import { utcTodayFromDate } from "./stock.js";
 
 const NOTICE_TODAY = utcTodayFromDate();
-import { needsAttentionCount, tabDotsFromNotices } from "./notices.js";
 import { HELP_GLOSSARY_IDS } from "../web/pages/v2/settings-help.js";
 
 function pairListed(
@@ -798,11 +796,8 @@ describe("possibleDuplicateNotices and noticesFor", () => {
         ).toBe(true);
         expect(listCalls).toBeGreaterThanOrEqual(2);
         expect(open.subjectNames.get(`food:${a.id}`)).toBe("chicken egg");
-        const openAttention = attentionFromNotices(open);
-        const openCount = needsAttentionCount(open.notices);
+        const openCount = open.notices.length;
         expect(openCount).toBeGreaterThan(0);
-        expect(tabDotsFromNotices(open.notices).household).toBe(true);
-        expect(openAttention.tabs.household).toBe(true);
         await dismissNotice(
             deps,
             HH,
@@ -819,7 +814,7 @@ describe("possibleDuplicateNotices and noticesFor", () => {
         expect(
             after.notices.some((n) => n.code === "food.possible_duplicate"),
         ).toBe(false);
-        expect(needsAttentionCount(after.notices)).toBe(openCount - 1);
+        expect(after.notices.length).toBe(openCount - 1);
         const withDismissed = await noticesFor(deps, HH, {
             today: NOTICE_TODAY,
             includeDismissed: true,
@@ -884,6 +879,5 @@ describe("pairs that read alike", () => {
         ]);
         const html = noticeList(notices);
         expect(html.match(/class="notice-row"/g)?.length).toBe(2);
-        expect(needsAttentionCount(notices)).toBe(2);
     });
 });

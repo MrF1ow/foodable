@@ -36,12 +36,7 @@ import {
 } from "./preview-clock.js";
 import { fridgeNotices, utcTodayFromDate } from "../src/domain/stock.js";
 import { groceryRestockNotices } from "../src/domain/restock.js";
-import {
-    needsAttentionCount,
-    sortNotices,
-    tabDotsFromNotices,
-    type Notice,
-} from "../src/domain/notices.js";
+import { sortNotices, type Notice } from "../src/domain/notices.js";
 import { renderShareViewPage } from "../src/web/pages/share-view.js";
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import {
@@ -56,7 +51,6 @@ import {
     renderRecipeDetailV2Page,
 } from "../src/web/pages/v2/recipes-page.js";
 import type { CookSheetView } from "../src/web/pages/v2/recipes-page-cook.js";
-import { renderNeedsAttentionPage } from "../src/web/pages/needs-attention.js";
 import {
     renderNotificationsPage,
     type NotificationsPageView,
@@ -1358,7 +1352,6 @@ const PREVIEW_IDENTITY = {
 function previewChrome(theme: "light" | "dark") {
     return {
         ...viewerChromeFromProfile({ theme }),
-        attention: previewAttention(),
         // The preview shows the Share buttons and sheets although
         // mcp-share-links is off on this deploy.
         flags: { ...PREVIEW_FLAGS, mcpShareLinks: true },
@@ -1556,14 +1549,6 @@ function withFirstMenuOpen(html: string): string {
             /(<div class="fd-menu__panel" role="menu"[^>]*?) hidden>/,
             "$1>",
         );
-}
-
-function previewAttention() {
-    const notices = previewNotices();
-    return {
-        count: needsAttentionCount(notices),
-        tabs: tabDotsFromNotices(notices),
-    };
 }
 
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
@@ -2131,33 +2116,20 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "kitchen-usuals": renderKitchenUsualsV2Page(
             previewKitchenUsualsView(chrome as never),
         ),
-        "kitchen-usuals-low": renderKitchenUsualsV2Page(
-            previewKitchenUsualsView(chrome as never, {
-                notices: previewOneTapNotices(),
-            }),
-        ),
+        // Eggs run low (frame 396429): the row says so under its name.
         "kitchen-fridge-low": fridgePage({
-            notices: previewOneTapNotices(),
+            // Two eggs left, below the level of 6, as in the frame.
+            items: fridgeView(chrome).items.map((row) =>
+                row.id === "i3"
+                    ? { ...row, quantity: { amount: 2, unit: "each" } }
+                    : row,
+            ) as import("../src/domain/fridge.js").FridgeItem[],
+            lowStock: new Map([["f-i3", "6"]]),
         }),
         "recipes-plan-notices": recipesListV2({
             week: previewWeekPlan(),
             notices: previewOneTapNotices(),
         }),
-        "nutrition-notices": (() => {
-            const view = buildPreviewTodayViewWithRail("2026-11-10");
-            const notices = previewOneTapNotices();
-            view.attention = {
-                viewerUserId: PREVIEW_VIEWER_ID,
-                count: notices.length,
-                notices,
-                noticeFoods: new Map(),
-            };
-            return renderTodayV2Page({
-                ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
-                view,
-                plan: previewWeekPlan(),
-            });
-        })(),
         "kitchen-usual-edit": renderKitchenUsualsV2Page(
             previewKitchenUsualsView(chrome as never, {
                 openFoodId: "u-milk",
@@ -2392,17 +2364,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             timezone: "UTC",
             mcpUrl: "https://food.flow.home/mcp",
         }),
-        "nutrition-agent-notice": renderTodayV2Page({
-            ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
-            view: buildPreviewTodayViewWithRail("2026-11-10"),
-            plan: previewWeekPlan(),
-            agentNotices: [
-                {
-                    actionId: PREVIEW_AI_ACTIVITY[0].id,
-                    sentence: "Cleared 20 grocery lines (by Claude)",
-                },
-            ],
-        }),
         "settings-ai-confirm": renderSettingsAiV2Page({
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
@@ -2526,46 +2487,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             });
         })(),
         help: renderSettingsHelpV2Page({ chrome }),
-        "needs-attention": (() => {
-            const fridgeItems = fridgeView(null).items;
-            return renderNeedsAttentionPage({
-                chrome,
-                result: {
-                    notices: previewNotices(),
-                    dismissals: [],
-                    subjectNames: new Map([
-                        ...fridgeItems.map(
-                            (row) =>
-                                [`fridge_item:${row.id}`, row.displayName] as [
-                                    string,
-                                    string,
-                                ],
-                        ),
-                        [`recipe:${RECIPE.id}`, RECIPE.name],
-                    ]),
-                    subjectTimes: new Map([
-                        ...fridgeItems.map(
-                            (row, i) =>
-                                [
-                                    `fridge_item:${row.id}`,
-                                    Date.parse("2026-01-01T00:00:00.000Z") +
-                                        i * 60_000,
-                                ] as [string, number],
-                        ),
-                        [
-                            `recipe:${RECIPE.id}`,
-                            Date.parse("2026-02-01T00:00:00.000Z"),
-                        ],
-                    ]),
-                    noticeFoods: new Map(
-                        catalog.map((f) => [
-                            f.id,
-                            { genericFoodId: f.genericFoodId },
-                        ]),
-                    ),
-                },
-            } as never);
-        })(),
         // FigCraft Screens › Settings › Notifications (413107, desktop 601988):
         // the extras in their default (off) state, and a mix of choices.
         "settings-notifications": renderSettingsNotificationsV2Page({
@@ -2636,21 +2557,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 inbox: { unread: 0, today: [], earlier: [], snoozed: [] },
             }),
         ),
-        // The one-tap notices on the page behind "View all".
-        "needs-attention-notices": (() => {
-            const notices = previewOneTapNotices();
-            return renderNeedsAttentionPage({
-                chrome,
-                viewerUserId: PREVIEW_VIEWER_ID,
-                result: {
-                    notices,
-                    dismissals: [],
-                    subjectNames: new Map(),
-                    subjectTimes: new Map(),
-                    noticeFoods: new Map(),
-                },
-            } as never);
-        })(),
         "settings-household-invites": renderHouseholdInvitesPage({
             chrome,
             flags: PREVIEW_FLAGS,

@@ -223,7 +223,6 @@ describe("buildGroceryV2StoreGroups", () => {
 describe("renderKitchenGroceriesV2Page", () => {
     const chrome = {
         theme: "light" as const,
-        attention: { count: 0, tabs: {} },
         flags: FIXTURE_APP_CHROME_FLAGS,
         identity: {
             viewerName: "Alex",

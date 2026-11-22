@@ -1,7 +1,5 @@
 import type { WeightEntry } from "../../../db/nutrition.js";
 import type { FridgeItem } from "../../../domain/fridge.js";
-import { noticeShortSentence, type Notice } from "../../../domain/notices.js";
-import { panelGroupKey } from "../../../domain/notices-for.js";
 import {
     daysUntilExpiry,
     expiryLevel,
@@ -13,27 +11,11 @@ import {
     type WeightUnit,
 } from "../../../domain/units.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
-import {
-    noticeHref,
-    type NoticeRouteContext,
-} from "../../components/notices.js";
-import {
-    noticeActionFor,
-    noticeDismissPair,
-    noticeSentence,
-} from "../../../copy/notices.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
 import { sparklineSvg } from "../../components/v2/sparkline.js";
 import type { TodayView, TodayWeightPoint } from "../../loaders-today.js";
 import { FD_LOG_HREF } from "../../shell-v2.js";
 import { FD_LOG_WEIGH_IN_SHEET_ID } from "./log-sheet.js";
-import {
-    isOneTapNotice,
-    noticeActionControl,
-    noticeDismissControl,
-    todayNoticeBack,
-    type NoticeBack,
-} from "./notice-strip.js";
 import { renderWeekMissingLine, renderWeekRows } from "./recipes-plan.js";
 import type { TodayPageData } from "./today.js";
 
@@ -60,24 +42,6 @@ function railCard(title: string, body: string, headExtra?: string): string {
     return `<section class="fd-today-card" aria-label="${esc(title)}">${head}<div class="fd-today-card__body">${body}</div></section>`;
 }
 
-export function railNoticesListed(notices: readonly Notice[]): Notice[] {
-    const seen = new Set<string>();
-    const out: Notice[] = [];
-    for (const notice of notices) {
-        const sentence = noticeSentence(notice);
-        const dedupeKey = noticeDismissPair(notice.code)
-            ? `${notice.code}|${notice.subject.id}|${notice.related.map((r) => r.id).join(",")}`
-            : sentence;
-        // Same scope as the Needs attention page: identical sentences fold
-        // only within one panel group, never across groups.
-        const scopedKey = `${panelGroupKey(notice)}|${dedupeKey}`;
-        if (seen.has(scopedKey)) continue;
-        seen.add(scopedKey);
-        out.push(notice);
-    }
-    return out;
-}
-
 export function expiryToneClass(level: ExpiryLevel): string {
     if (level === "expired" || level === "high")
         return "fd-today-rail-row__when--high";
@@ -99,41 +63,6 @@ export function formatExpiryWhen(today: string, expiresOn: string): string {
     if (days === 0) return "Today";
     if (days <= 7) return `${days} days`;
     return expiresOn;
-}
-
-function noticeDotClass(notice: Notice): string {
-    if (notice.severity === "block") {
-        return "fd-today-rail-dot--high";
-    }
-    if (notice.severity === "warn") return "fd-today-rail-dot--medium";
-    return "fd-today-rail-dot--low";
-}
-
-function noticeActionLink(
-    notice: Notice,
-    attention: TodayView["attention"],
-    back: NoticeBack,
-): string {
-    const ctx: NoticeRouteContext = {
-        from: back,
-        foods: attention.noticeFoods,
-        v2: { viewerUserId: attention.viewerUserId },
-    };
-    const action = noticeActionFor(notice);
-    if (!action) return "";
-    const href = noticeHref(notice, ctx);
-    if (href == null) return "";
-    // The one-tap and weigh-in notices share the strip's control.
-    if (action.to === "actOnNotice" || action.to === "weighInSheet") {
-        return noticeActionControl(notice, ctx, back, {
-            button: "fd-today-rail-row__action",
-            form: "fd-today-rail-row__action-form",
-        });
-    }
-    if (action.method === "post") {
-        return `<form class="fd-today-rail-row__action-form" method="post" action="${esc(href)}"><input type="hidden" name="from" value="/" /><button type="submit" class="fd-today-rail-row__action">${esc(action.label)}</button></form>`;
-    }
-    return `<a class="fd-today-rail-row__action" href="${esc(href)}">${esc(action.label)}</a>`;
 }
 
 function railRow(opts: {
@@ -241,45 +170,6 @@ function useSoonMarkup(view: TodayView, canPlan: boolean): string {
     return `<section class="fd-today-card" aria-label="Use soon">${head}<ul class="fd-today-rail-list">${rows}</ul>${useSoonHighlightMarkup(view, canPlan)}</section>`;
 }
 
-function attentionMarkup(view: TodayView): string {
-    const { count, notices } = view.attention;
-    const listed = railNoticesListed(notices);
-    const back = todayNoticeBack(view);
-    if (listed.length === 0) {
-        return railCard(
-            "Needs attention",
-            `<p class="fd-today-card__empty">Nothing needs attention</p>`,
-        );
-    }
-    const rows = listed
-        .map((notice) => {
-            const action = noticeActionLink(notice, view.attention, back);
-            // The phone's in-place strips are hidden on the desktop, so the
-            // card's one-tap rows carry the dismiss themselves.
-            const dismiss = isOneTapNotice(notice)
-                ? noticeDismissControl(
-                      notice,
-                      back,
-                      "fd-today-rail-row__dismiss",
-                  )
-                : "";
-            return railRow({
-                dotClass: noticeDotClass(notice),
-                title:
-                    noticeShortSentence(notice, {
-                        viewerUserId: view.attention.viewerUserId,
-                    }) ?? noticeSentence(notice),
-                trail: `${action}${dismiss}`,
-            });
-        })
-        .join("");
-    const head = cardHeader("Needs attention", {
-        count,
-        action: { href: "/needs-attention", label: "View all" },
-    });
-    return `<section class="fd-today-card" aria-label="Needs attention">${head}<ul class="fd-today-rail-list">${rows}</ul></section>`;
-}
-
 function thisWeekMarkup(data: TodayPageData): string {
     const head = cardHeader("This week", {
         action: { href: "/recipes", label: "Recipes" },
@@ -368,7 +258,7 @@ export function renderTodayRail(data: TodayPageData): Html {
         );
     }
     return raw(
-        `<aside class="fd-today-rail" aria-label="Day sidebar">${useSoonMarkup(view, data.plan != null)}${attentionMarkup(view)}${thisWeekMarkup(data)}${weightMarkup(view, false)}</aside>`,
+        `<aside class="fd-today-rail" aria-label="Day sidebar">${useSoonMarkup(view, data.plan != null)}${thisWeekMarkup(data)}${weightMarkup(view, false)}</aside>`,
     );
 }
 
