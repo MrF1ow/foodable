@@ -57,6 +57,11 @@ import {
 } from "../src/web/pages/v2/recipes-page.js";
 import type { CookSheetView } from "../src/web/pages/v2/recipes-page-cook.js";
 import { renderNeedsAttentionPage } from "../src/web/pages/needs-attention.js";
+import {
+    renderNotificationsPage,
+    type NotificationsPageView,
+} from "../src/web/pages/v2/notifications.js";
+import type { NotificationRow } from "../src/domain/notifications.js";
 import { renderHouseholdInvitesPage } from "../src/web/pages/v2/settings-household-invites.js";
 import { EMPTY_HOUSEHOLD_PREFERENCES } from "../src/household.js";
 import {
@@ -844,6 +849,7 @@ function previewMoveError() {
 }
 
 const PREVIEW_VIEWER_ID = "preview-viewer";
+const PREVIEW_SARAH_ID = "preview-sarah";
 
 /** The three one-tap notices as the preview household has them. */
 function previewOneTapNotices(): import("../src/domain/notices.js").Notice[] {
@@ -1357,7 +1363,199 @@ function previewChrome(theme: "light" | "dark") {
         // mcp-share-links is off on this deploy.
         flags: { ...PREVIEW_FLAGS, mcpShareLinks: true },
         identity: PREVIEW_IDENTITY,
+        // The bell shows its dot, as in the design's frames.
+        notificationsUnread: true,
     };
+}
+
+function previewNotificationRow(
+    over: Partial<NotificationRow> & Pick<NotificationRow, "id">,
+): NotificationRow {
+    return {
+        householdId: H,
+        recipientUserId: ME.userId,
+        kind: "food_expiring",
+        bucket: "household",
+        source: "condition",
+        noticeKey: over.id,
+        subjectKind: "fridge_item",
+        subjectId: "fi-1",
+        actorUserId: null,
+        payload: {},
+        createdAt: "2026-11-10T08:00:00.000Z",
+        readAt: null,
+        snoozedUntil: null,
+        snoozedBy: null,
+        dismissedAt: null,
+        dismissedBy: null,
+        resolvedAt: null,
+        ...over,
+    };
+}
+
+/** FigCraft Screens › Notifications: four open rows today and one snoozed. */
+function previewNotificationsView(
+    chrome: ReturnType<typeof previewChrome>,
+    over: Partial<NotificationsPageView> = {},
+): NotificationsPageView {
+    const today = [
+        previewNotificationRow({
+            id: "n-yogurt",
+            payload: {
+                code: "fridge.expiring",
+                params: {
+                    name: "Greek yogurt",
+                    amount: 1,
+                    unit: "each",
+                    expiresOn: "2026-11-11",
+                    daysLeft: 1,
+                    onGroceryList: "no",
+                },
+                related: [],
+            },
+        }),
+        previewNotificationRow({
+            id: "n-weigh",
+            kind: "weigh_in_due",
+            bucket: "personal",
+            subjectKind: "member",
+            subjectId: ME.userId,
+            payload: {
+                code: "nutrition.weigh_in_due",
+                params: { name: "Ethan", days: 8 },
+                related: [],
+            },
+        }),
+        previewNotificationRow({
+            id: "n-milk",
+            kind: "running_low",
+            subjectKind: "food",
+            subjectId: "f-milk",
+            payload: {
+                code: "grocery.running_low",
+                params: { name: "Milk", reason: "usually bought weekly" },
+                related: [],
+            },
+        }),
+        previewNotificationRow({
+            id: "n-chili",
+            kind: "recipe_changes",
+            source: "event",
+            subjectKind: "recipe",
+            subjectId: "r-chili",
+            actorUserId: PREVIEW_SARAH_ID,
+            createdAt: "2026-11-10T10:00:00.000Z",
+            payload: { recipeName: "Beef chili" },
+        }),
+    ];
+    const snoozed = [
+        previewNotificationRow({
+            id: "n-spinach",
+            snoozedUntil: "2026-11-11T09:00:00.000Z",
+            payload: {
+                code: "fridge.expiring",
+                params: {
+                    name: "Spinach",
+                    amount: 1,
+                    unit: "bag",
+                    expiresOn: "2026-11-12",
+                    daysLeft: 2,
+                    onGroceryList: "no",
+                },
+                related: [],
+            },
+        }),
+    ];
+    return {
+        chrome: chrome as never,
+        inbox: { unread: today.length, today, earlier: [], snoozed },
+        bucket: "all",
+        canDismissEveryone: false,
+        timezone: "UTC",
+        now: new Date("2026-11-10T12:00:00.000Z"),
+        memberNames: new Map([[PREVIEW_SARAH_ID, "Sarah"]]),
+        ...over,
+    };
+}
+
+/** One of each event the household writes, for the inbox's event wording. */
+function previewEventRows(): NotificationRow[] {
+    const base = {
+        source: "event" as const,
+        actorUserId: PREVIEW_SARAH_ID,
+        subjectKind: "recipe",
+        subjectId: "r-chili",
+    };
+    return [
+        previewNotificationRow({
+            ...base,
+            id: "n-planned",
+            kind: "week_plan_changes",
+            createdAt: "2026-11-10T11:40:00.000Z",
+            payload: {
+                recipeName: "Beef chili",
+                date: "2026-11-11",
+                slot: "dinner",
+                change: "planned",
+            },
+        }),
+        previewNotificationRow({
+            ...base,
+            id: "n-moved",
+            kind: "week_plan_changes",
+            createdAt: "2026-11-10T10:00:00.000Z",
+            payload: {
+                recipeName: "Beef chili",
+                date: "2026-11-13",
+                slot: "dinner",
+                change: "moved",
+                fromDate: "2026-11-11",
+                fromSlot: "dinner",
+            },
+        }),
+        previewNotificationRow({
+            ...base,
+            id: "n-unplanned",
+            kind: "week_plan_changes",
+            createdAt: "2026-11-09T18:00:00.000Z",
+            payload: {
+                recipeName: "Beef chili",
+                date: "2026-11-12",
+                slot: "dinner",
+                change: "unplanned",
+            },
+        }),
+        previewNotificationRow({
+            ...base,
+            id: "n-usual",
+            kind: "new_usuals",
+            subjectKind: "food",
+            subjectId: "f-eggs",
+            createdAt: "2026-11-07T09:00:00.000Z",
+            payload: { foodName: "Eggs", productName: "Large Eggs" },
+        }),
+        previewNotificationRow({
+            ...base,
+            id: "n-removed-by-gone",
+            kind: "recipe_changes",
+            actorUserId: null,
+            createdAt: "2026-11-01T09:00:00.000Z",
+            payload: { recipeName: "Lentil soup" },
+        }),
+    ];
+}
+
+/** The first row's menu, open (the page script does this on a tap). */
+function withFirstMenuOpen(html: string): string {
+    return html
+        .replace(
+            'data-fd-menu-trigger="" aria-haspopup="menu" aria-expanded="false"',
+            'data-fd-menu-trigger="" aria-haspopup="menu" aria-expanded="true"',
+        )
+        .replace(
+            /(<div class="fd-menu__panel" role="menu"[^>]*?) hidden>/,
+            "$1>",
+        );
 }
 
 function previewAttention() {
@@ -2398,6 +2596,61 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             } as never);
         })(),
+        // FigCraft Screens › Notifications (387713), its ⋯ menus for a member
+        // (387797) and an admin or owner (387895), and the empty inbox.
+        notifications: renderNotificationsPage(
+            previewNotificationsView(chrome),
+        ),
+        "notifications-menu-member": withFirstMenuOpen(
+            renderNotificationsPage(previewNotificationsView(chrome)),
+        ),
+        "notifications-menu-admin": withFirstMenuOpen(
+            renderNotificationsPage(
+                previewNotificationsView(chrome, { canDismissEveryone: true }),
+            ),
+        ),
+        "notifications-menu-allergens": withFirstMenuOpen(
+            renderNotificationsPage(
+                previewNotificationsView(chrome, {
+                    inbox: {
+                        unread: 1,
+                        today: [
+                            previewNotificationRow({
+                                id: "n-allergen",
+                                kind: "allergens",
+                                subjectKind: "recipe",
+                                subjectId: RECIPE.id,
+                                payload: {
+                                    code: "recipe.allergen",
+                                    params: {
+                                        name: RECIPE.name,
+                                        allergens: ["peanut"],
+                                    },
+                                    related: [],
+                                },
+                            }),
+                        ],
+                        earlier: [],
+                        snoozed: [],
+                    },
+                }),
+            ),
+        ),
+        "notifications-events": renderNotificationsPage(
+            previewNotificationsView(chrome, {
+                inbox: {
+                    unread: 0,
+                    today: previewEventRows().slice(0, 2),
+                    earlier: previewEventRows().slice(2),
+                    snoozed: [],
+                },
+            }),
+        ),
+        "notifications-empty": renderNotificationsPage(
+            previewNotificationsView(chrome, {
+                inbox: { unread: 0, today: [], earlier: [], snoozed: [] },
+            }),
+        ),
         // The one-tap notices on the page behind "View all".
         "needs-attention-notices": (() => {
             const notices = previewOneTapNotices();

@@ -24,6 +24,8 @@ import { fdIcon, type FdIconName } from "./components/fd-icons.js";
 import { APP_PATHS } from "./route-map.js";
 import { initialsOf } from "./initials.js";
 import { memberAvatar } from "./components/v2/avatar.js";
+import { bell } from "./components/v2/bell.js";
+import { NOTIFICATIONS_PAGE } from "../copy/notifications.js";
 import {
     appHeadMeta,
     htmlOpen,
@@ -257,11 +259,34 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
     return `<div class="fd-sidebar">${household}${nav}${account}</div>`;
 }
 
-/** The account chip, top right (design: Header › Account chip). It sits over
- *  the page's title row, absolutely positioned inside <main>; shell.css keeps
- *  the title and its actions clear of it. Hidden from 1024 px, where the
- *  sidebar's Account row replaces it. Settings pages leave it out: they are
- *  where it points, and they carry the profile card and a back link. */
+/** The bell (design: Bell, with the green dot when something is new). It opens
+ *  the inbox. The phone cluster and the desktop top bar both carry one.
+ *  Turbo's hover prefetch is off for it: opening the inbox marks what it shows
+ *  as read, so a GET from a mouse passing over the bell would clear the dot
+ *  without the person opening anything. */
+function notificationsBell(chrome: AppChrome): string {
+    return String(
+        bell({
+            href: APP_PATHS.notifications,
+            label: NOTIFICATIONS_PAGE.bellLabel,
+            unread: chrome.notificationsUnread === true,
+            data: { "turbo-prefetch": "false" },
+        }),
+    );
+}
+
+/** The phone's top-right cluster (design: Header, the bell beside the account
+ *  chip). It sits over the page's title row, absolutely positioned inside
+ *  <main>; shell.css keeps the title and its actions clear of it. Hidden from
+ *  1024 px, where the top bar's bell and the sidebar's Account row replace it.
+ *  Settings pages and pages with their own Detail bar leave it out: Settings is
+ *  where the chip points and carries the profile card and a back link, and a
+ *  Detail bar is the page's whole top. */
+function phoneCluster(chrome: AppChrome): string {
+    return `<div class="fd-cluster">${notificationsBell(chrome)}${accountChip(chrome)}</div>`;
+}
+
+/** The account chip (design: Header › Account chip). */
 function accountChip(chrome: AppChrome): string {
     const name = chrome.identity?.viewerName ?? "";
     const label = name ? `Settings, signed in as ${name}` : "Settings";
@@ -301,7 +326,7 @@ function topBar(chrome: AppChrome): string {
     const scan = chrome.flags.barcodeCamera
         ? `<a class="fd-scan" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a>`
         : "";
-    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span>${scan}<a class="fd-logfood" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${fdIcon("plus")}<span>Log food</span></a></header>`;
+    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span>${scan}${notificationsBell(chrome)}<a class="fd-logfood" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${fdIcon("plus")}<span>Log food</span></a></header>`;
 }
 
 /** Head for the shell: the shared meta, then the base stylesheet and script
@@ -331,7 +356,7 @@ ${appHeadV2(chrome.title, chrome.theme)}
 ${sidebar(chrome, active)}
 <div class="fd-column">
 ${topBar(chrome)}
-<main class="app-main native fd-main">${active === "settings" ? "" : accountChip(chrome)}${active === "kitchen" ? withKitchenTabs(chrome.body, chrome) : chrome.body}</main>
+<main class="app-main native fd-main">${active === "settings" || chrome.v2Detail ? "" : phoneCluster(chrome)}${active === "kitchen" ? withKitchenTabs(chrome.body, chrome) : chrome.body}</main>
 </div>
 ${phoneTabs(chrome, active)}
 </div>
