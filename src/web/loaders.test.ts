@@ -1,22 +1,30 @@
 import { afterEach, expect, spyOn, test } from "bun:test";
+import { liveFoodsStore } from "../db/foods.js";
+import { liveGroceryStore } from "../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
 import {
     liveNoticesForDeps,
     liveNotificationsStore,
 } from "../db/notifications.js";
 import { householdClock } from "../db/restock.js";
+import { liveRulesStore } from "../db/rules.js";
+import { liveSettingsStore } from "../db/settings.js";
 import { setSqlForTests } from "../db/sql.js";
 import {
     seedFood,
     seedFridgeItem,
     seedFridgeLocation,
+    seedGroceryStore,
+    seedGrocerySection,
     seedHousehold,
     seedMember,
 } from "../db/testing/fixtures.js";
 import { describeDb } from "../db/testing/pg.js";
 import { findPgBin } from "../db/testing/pg-temp.js";
+import { addGroceryFoodById } from "../domain/grocery.js";
 import { dismissalKey } from "../domain/notice-dismissals.js";
 import { noticesFor } from "../domain/notices-for.js";
+import { addAllergen } from "../domain/rules.js";
 import { shiftLocalDate } from "../domain/tz.js";
 import type { HouseholdMember } from "../household.js";
 import { loadViewerNotices } from "./attention.js";
@@ -202,6 +210,97 @@ describeDb(
             expect(expiringRows.every((r) => r.dismissedAt === null)).toBe(
                 true,
             );
+        });
+
+        // The scene, with Peanut butter on the list and the owner allergic.
+        async function seedPeanutConflict() {
+            const hh = await seedScene();
+            const { sql } = getCtx();
+            await addAllergen(liveRulesStore(), {
+                householdId: hh.householdId,
+                userId: hh.owner.userId,
+                allergen: "peanut",
+            });
+            const foodId = await seedFood(sql, hh.householdId, {
+                name: "Peanut butter",
+            });
+            await sql`
+                update public.foods
+                set allergens = ${sql.array(["peanut"], "text")}
+                where id = ${foodId}::uuid
+            `;
+            const storeId = await seedGroceryStore(sql, hh.householdId);
+            const line = await addGroceryFoodById(
+                liveGroceryStore(),
+                liveSettingsStore(),
+                liveFoodsStore(),
+                {
+                    householdId: hh.householdId,
+                    storeId,
+                    sectionId: await seedGrocerySection(
+                        sql,
+                        hh.householdId,
+                        storeId,
+                    ),
+                    foodId,
+                    amount: 1,
+                    unit: "g",
+                },
+            );
+            return { hh, lineId: line.id };
+        }
+
+        const allergenRows = async (householdId: string) =>
+            (await openRows(householdId)).filter((r) => r.kind === "allergens");
+
+        test("a page files the Allergens conditions from its own read and still shows what it showed before", async () => {
+            const { hh, lineId } = await seedPeanutConflict();
+            const before = await shownBefore(hh.householdId);
+            for (let i = 0; i < 2; i++) {
+                const shown = await loadViewerNotices(hh.owner);
+                // The page shows no allergen notice: the list shows that one.
+                expect(
+                    shown.notices.some((n) => n.code.endsWith("allergen")),
+                ).toBe(false);
+                expect(shown.notices).toEqual(before.notices);
+                expect(shown.dismissals).toEqual(before.dismissals);
+                expect(shown.subjectNames).toEqual(before.subjectNames);
+                // The row is filed from that one read, and stays on every load.
+                const allergens = await allergenRows(hh.householdId);
+                expect(allergens.map((r) => r.noticeKey)).toEqual([
+                    `grocery.allergen|grocery_line|${lineId}|`,
+                    `grocery.allergen|grocery_line|${lineId}|`,
+                ]);
+                expect(allergens.map((r) => r.recipientUserId).sort()).toEqual(
+                    [hh.owner.userId, hh.memberId].sort(),
+                );
+            }
+        });
+
+        test("an allergen read that fails neither breaks the page nor resolves the stored rows", async () => {
+            const { hh } = await seedPeanutConflict();
+            const { sql } = getCtx();
+            await loadViewerNotices(hh.owner);
+            const filed = await allergenRows(hh.householdId);
+            expect(filed).toHaveLength(2);
+            const logged = spyOn(console, "error").mockImplementation(() => {});
+            await sql`alter table public.member_allergens rename to member_allergens_away`;
+            try {
+                const shown = await loadViewerNotices(hh.owner);
+                expect(shown.notices).toEqual(
+                    (await shownBefore(hh.householdId)).notices,
+                );
+                expect(
+                    logged.mock.calls.filter((call) =>
+                        String(call[0]).includes("allergen read failed"),
+                    ),
+                ).toHaveLength(1);
+            } finally {
+                logged.mockRestore();
+                await sql`alter table public.member_allergens_away rename to member_allergens`;
+            }
+            // Not read as "no one is allergic": the rows are as they were.
+            expect(await allergenRows(hh.householdId)).toEqual(filed);
         });
 
         test("a condition that clears resolves its rows on the next load", async () => {

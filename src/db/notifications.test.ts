@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import type { SQL } from "bun";
 import { runRestockCheck } from "../domain/restock.js";
+import { addGroceryFoodById } from "../domain/grocery.js";
 import {
     createMemoryNotificationsStore,
+    dismiss,
+    snooze,
     sweepNotifications,
     type NotificationPref,
     type NotificationRow,
@@ -10,9 +13,14 @@ import {
 } from "../domain/notifications.js";
 import { dismissalKey } from "../domain/notice-dismissals.js";
 import { noticesFor } from "../domain/notices-for.js";
+import { planRecipe } from "../domain/plan.js";
+import { addRecipeIngredientById, createRecipe } from "../domain/recipes.js";
+import { addAllergen } from "../domain/rules.js";
 import { shiftLocalDate } from "../domain/tz.js";
 import { liveRestockCheckDeps } from "../restock-runner.js";
 import { setFallbackActorForTests, withActor } from "./actor.js";
+import { liveFoodsStore } from "./foods.js";
+import { liveGroceryStore } from "./grocery.js";
 import { getHouseholdConfig, updateHouseholdConfig } from "./household.js";
 import { liveNoticeDismissalsStore } from "./notice-dismissals.js";
 import {
@@ -23,13 +31,20 @@ import {
     syncHouseholdNotifications,
     trySyncHouseholdNotifications,
     type NotificationSyncDeps,
+    type SyncOpts,
 } from "./notifications.js";
+import { liveRecipePlansStore } from "./plans.js";
+import { liveRecipesStore } from "./recipes.js";
 import { householdClock, householdToday } from "./restock.js";
+import { liveRulesStore } from "./rules.js";
+import { liveSettingsStore } from "./settings.js";
 import { setSqlForTests } from "./sql.js";
 import {
     seedFood,
     seedFridgeItem,
     seedFridgeLocation,
+    seedGroceryStore,
+    seedGrocerySection,
     seedHousehold,
     seedMember,
 } from "./testing/fixtures.js";
@@ -1273,6 +1288,7 @@ describeDb(
                         timezone,
                         actionable: true,
                         includeDismissed: true,
+                        allergens: true,
                     },
                 );
                 const deps: NotificationSyncDeps = {
@@ -1284,14 +1300,14 @@ describeDb(
                 const plan = await syncHouseholdNotifications(
                     deps,
                     c.householdId,
-                    { notices },
+                    { notices, allergens: true },
                 );
                 expect(plan.insert).toHaveLength(2);
                 // An empty list is a real answer: nothing is true any more.
                 const empty = await syncHouseholdNotifications(
                     deps,
                     c.householdId,
-                    { notices: [] },
+                    { notices: [], allergens: true },
                 );
                 expect(empty.resolve).toHaveLength(2);
                 expect(await openRows()).toEqual([]);
@@ -1309,12 +1325,538 @@ describeDb(
                 const result = await trySyncHouseholdNotifications(
                     deps,
                     c.householdId,
-                    { notices: [] },
+                    { notices: [], allergens: true },
                     (msg) => logged.push(msg),
                 );
                 expect(result).toBeNull();
                 expect(logged).toHaveLength(1);
                 expect(logged[0]).toContain("members unavailable");
+            });
+        });
+
+        describe("Allergens conditions", () => {
+            const syncDeps = (): NotificationSyncDeps =>
+                liveNotificationSyncDeps();
+
+            const openAllergens = async () =>
+                (await store.listOpenConditions(c.householdId)).filter(
+                    (r) => r.kind === "allergens",
+                );
+
+            /** What a page load reads for the sync: the one-tap notices, the
+             *  dismissed ones and the allergen conditions, in one read. */
+            async function pageNotices(allergens = true) {
+                const { today, timezone } = await householdClock(c.householdId);
+                const { notices } = await noticesFor(
+                    liveNoticesForDeps(),
+                    c.householdId,
+                    {
+                        today,
+                        timezone,
+                        actionable: true,
+                        includeDismissed: true,
+                        allergens,
+                    },
+                );
+                return notices;
+            }
+
+            const isAllergen = (code: string) => code.endsWith("allergen");
+
+            const allergic = (
+                userId: string,
+                allergen: "peanut" | "milk" = "peanut",
+            ) =>
+                addAllergen(liveRulesStore(), {
+                    householdId: c.householdId,
+                    userId,
+                    allergen,
+                });
+
+            async function peanutFood(sql: SQL, name = "Peanut butter") {
+                const foodId = await seedFood(sql, c.householdId, { name });
+                await sql`
+                    update public.foods
+                    set allergens = ${sql.array(["peanut"], "text")}
+                    where id = ${foodId}::uuid
+                `;
+                return foodId;
+            }
+
+            async function onTheList(sql: SQL, foodId: string) {
+                const storeId = await seedGroceryStore(sql, c.householdId);
+                const sectionId = await seedGrocerySection(
+                    sql,
+                    c.householdId,
+                    storeId,
+                );
+                return addGroceryFoodById(
+                    liveGroceryStore(),
+                    liveSettingsStore(),
+                    liveFoodsStore(),
+                    {
+                        householdId: c.householdId,
+                        storeId,
+                        sectionId,
+                        foodId,
+                        amount: 1,
+                        unit: "g",
+                    },
+                );
+            }
+
+            async function inTheFridge(sql: SQL, foodId: string) {
+                const locationId = await seedFridgeLocation(sql, c.householdId);
+                return seedFridgeItem(sql, c.householdId, locationId, foodId, {
+                    displayName: "Peanut butter",
+                    amount: 1,
+                    unit: "g",
+                });
+            }
+
+            async function plannedToday(foodId: string, daysAhead = 0) {
+                const recipe = await createRecipe(liveRecipesStore(), {
+                    householdId: c.householdId,
+                    creatorId: c.ownerId,
+                    name: `Satay ${daysAhead}`,
+                    yieldPortions: 2,
+                });
+                await addRecipeIngredientById(
+                    liveRecipesStore(),
+                    liveFoodsStore(),
+                    {
+                        householdId: c.householdId,
+                        recipeId: recipe.id,
+                        foodId,
+                        amount: 2,
+                        unit: "g",
+                    },
+                );
+                const today = await householdToday(c.householdId);
+                const planned = await planRecipe(liveRecipePlansStore(), {
+                    householdId: c.householdId,
+                    recipeId: recipe.id,
+                    recipeYield: 2,
+                    date: shiftLocalDate(today, daysAhead),
+                    slot: "dinner",
+                    today,
+                    createdBy: c.ownerId,
+                });
+                return { recipe, plan: planned!.plan };
+            }
+
+            test("every source becomes an Allergens row for every member", async () => {
+                await resetDb();
+                const { sql } = getCtx();
+                await allergic(c.ownerId);
+                const foodId = await peanutFood(sql);
+                const line = await onTheList(sql, foodId);
+                const itemId = await inTheFridge(sql, foodId);
+                const { recipe } = await plannedToday(foodId);
+                await syncHouseholdNotifications(syncDeps(), c.householdId);
+                const rows = await openAllergens();
+                expect(rows).toHaveLength(6);
+                expect(
+                    [...new Set(rows.map((r) => r.noticeKey))].sort(),
+                ).toEqual(
+                    [
+                        `grocery.allergen|grocery_line|${line.id}|`,
+                        `recipe.allergen|recipe|${recipe.id}|`,
+                        `food.product_allergen|fridge_item|${itemId}|`,
+                    ].sort(),
+                );
+                for (const userId of [c.ownerId, c.memberId]) {
+                    expect(
+                        rows.filter((r) => r.recipientUserId === userId),
+                    ).toHaveLength(3);
+                }
+                expect(rows).toSatisfy((all: NotificationRow[]) =>
+                    all.every(
+                        (r) =>
+                            r.bucket === "household" &&
+                            r.source === "condition" &&
+                            r.resolvedAt === null &&
+                            r.dismissedAt === null &&
+                            r.snoozedUntil === null,
+                    ),
+                );
+                const grocery = rows.find(
+                    (r) => r.subjectKind === "grocery_line",
+                );
+                expect(grocery?.payload).toMatchObject({
+                    code: "grocery.allergen",
+                    params: { allergens: ["peanut"], name: line.displayName },
+                    related: [{ kind: "member", id: c.ownerId }],
+                });
+            });
+
+            test("one row per conflict over page loads and ticks, and a page load does not resolve it", async () => {
+                await resetDb();
+                const { sql } = getCtx();
+                await allergic(c.ownerId);
+                await onTheList(sql, await peanutFood(sql));
+                // A page load that finds nothing yet files the row itself.
+                const first = await syncHouseholdNotifications(
+                    syncDeps(),
+                    c.householdId,
+                    { notices: await pageNotices(), allergens: true },
+                );
+                expect(first.insert).toHaveLength(2);
+                const rows = await openAllergens();
+                expect(rows).toHaveLength(2);
+                for (let i = 0; i < 3; i++) {
+                    // The page's one read carries the conflict...
+                    const notices = await pageNotices();
+                    expect(
+                        notices.filter((n) => isAllergen(n.code)),
+                    ).toHaveLength(1);
+                    // ...so filing it does not resolve the row or change it...
+                    expect(
+                        await syncHouseholdNotifications(
+                            syncDeps(),
+                            c.householdId,
+                            { notices, allergens: true },
+                        ),
+                    ).toEqual({ insert: [], resolve: [], update: [] });
+                    // ...and the tick, which reads its own, agrees.
+                    expect(
+                        await syncHouseholdNotifications(
+                            syncDeps(),
+                            c.householdId,
+                        ),
+                    ).toEqual({ insert: [], resolve: [], update: [] });
+                }
+                expect(byId(await openAllergens())).toEqual(byId(rows));
+                expect(
+                    (await store.listForHousehold(c.householdId)).filter(
+                        (r) => r.kind === "allergens",
+                    ),
+                ).toHaveLength(2);
+            });
+
+            test("a sync handed notices read without the allergen option is refused and writes nothing", async () => {
+                await resetDb();
+                const { sql } = getCtx();
+                await allergic(c.ownerId);
+                await onTheList(sql, await peanutFood(sql));
+                await syncHouseholdNotifications(syncDeps(), c.householdId);
+                const before = await openAllergens();
+                expect(before).toHaveLength(2);
+                const withoutOption = await pageNotices(false);
+                expect(withoutOption.some((n) => isAllergen(n.code))).toBe(
+                    false,
+                );
+                // The type refuses it too.
+                // @ts-expect-error -- notices need `allergens: true`
+                const unflagged: SyncOpts = { notices: withoutOption };
+                await expect(
+                    syncHouseholdNotifications(
+                        syncDeps(),
+                        c.householdId,
+                        unflagged,
+                    ),
+                ).rejects.toThrow("allergens: true");
+                const logged: string[] = [];
+                expect(
+                    await trySyncHouseholdNotifications(
+                        syncDeps(),
+                        c.householdId,
+                        unflagged,
+                        (msg) => logged.push(msg),
+                    ),
+                ).toBeNull();
+                expect(logged).toHaveLength(1);
+                // Nothing resolved, nothing changed.
+                expect(byId(await openAllergens())).toEqual(byId(before));
+                expect(
+                    (await store.listForHousehold(c.householdId)).filter(
+                        (r) => r.kind === "allergens",
+                    ),
+                ).toHaveLength(2);
+            });
+
+            test("a member who joins the conflict changes the payload, not the row", async () => {
+                await resetDb();
+                const { sql } = getCtx();
+                await allergic(c.ownerId);
+                await onTheList(sql, await peanutFood(sql));
+                await syncHouseholdNotifications(syncDeps(), c.householdId);
+                const before = await openAllergens();
+                await allergic(c.memberId);
+                const plan = await syncHouseholdNotifications(
+                    syncDeps(),
+                    c.householdId,
+                );
+                expect(plan.insert).toEqual([]);
+                expect(plan.resolve).toEqual([]);
+                expect(plan.update).toHaveLength(2);
+                const after = await openAllergens();
+                expect(byId(after).map((r) => r.id)).toEqual(
+                    byId(before).map((r) => r.id),
+                );
+                expect(
+                    (after[0]!.payload as { related: unknown[] }).related,
+                ).toHaveLength(2);
+            });
+
+            const goes: [
+                string,
+                (sql: SQL, ids: Record<string, string>) => Promise<void>,
+            ][] = [
+                [
+                    "the line is ticked",
+                    async (sql, ids) => {
+                        await sql`
+                            update public.grocery_lines set checked = true
+                            where id = ${ids.line}::uuid
+                        `;
+                    },
+                ],
+                [
+                    "the line is removed",
+                    async (sql, ids) => {
+                        await sql`
+                            delete from public.grocery_lines
+                            where id = ${ids.line}::uuid
+                        `;
+                    },
+                ],
+                [
+                    "the plan entry is removed",
+                    async (sql, ids) => {
+                        await sql`
+                            delete from public.recipe_plans
+                            where id = ${ids.plan}::uuid
+                        `;
+                    },
+                ],
+                [
+                    "the plan passes",
+                    async (sql, ids) => {
+                        await sql`
+                            update public.recipe_plans
+                            set date = date - 1
+                            where id = ${ids.plan}::uuid
+                        `;
+                    },
+                ],
+                [
+                    "the item is used up",
+                    async (sql, ids) => {
+                        await sql`
+                            delete from public.fridge_items
+                            where id = ${ids.item}::uuid
+                        `;
+                    },
+                ],
+                [
+                    "the allergen is removed from the member",
+                    async (sql) => {
+                        await sql`delete from public.member_allergens`;
+                    },
+                ],
+            ];
+
+            for (const [what, change] of goes) {
+                test(`it resolves when ${what}`, async () => {
+                    await resetDb();
+                    const { sql } = getCtx();
+                    await allergic(c.ownerId);
+                    const foodId = await peanutFood(sql);
+                    const line = await onTheList(sql, foodId);
+                    const item = await inTheFridge(sql, foodId);
+                    const { plan } = await plannedToday(foodId);
+                    await syncHouseholdNotifications(syncDeps(), c.householdId);
+                    const rows = await openAllergens();
+                    expect(rows).toHaveLength(6);
+                    await change(sql, { line: line.id, item, plan: plan.id });
+                    // The page load is the sync that has to see it go.
+                    await syncHouseholdNotifications(
+                        syncDeps(),
+                        c.householdId,
+                        {
+                            notices: await pageNotices(),
+                            allergens: true,
+                        },
+                    );
+                    const left = await openAllergens();
+                    const resolved = (
+                        await store.listForHousehold(c.householdId)
+                    ).filter(
+                        (r) => r.kind === "allergens" && r.resolvedAt !== null,
+                    );
+                    // The line, the plan and the item are one conflict each; the
+                    // allergen going takes all three, and so does nothing else.
+                    const wanted = what.startsWith("the allergen") ? 6 : 2;
+                    expect(resolved).toHaveLength(wanted);
+                    expect(left).toHaveLength(6 - wanted);
+                    expect(
+                        resolved.every((r) => !left.some((l) => l.id === r.id)),
+                    ).toBe(true);
+                    // A tick agrees with the page load.
+                    expect(
+                        await syncHouseholdNotifications(
+                            syncDeps(),
+                            c.householdId,
+                        ),
+                    ).toEqual({ insert: [], resolve: [], update: [] });
+                });
+            }
+
+            test("a recipe planned on any of the next seven days is flagged, one planned later is not", async () => {
+                await resetDb();
+                const { sql } = getCtx();
+                await allergic(c.ownerId);
+                const foodId = await peanutFood(sql);
+                const byDay: Record<number, string> = {};
+                for (const daysAhead of [3, 6, 7]) {
+                    byDay[daysAhead] = (
+                        await plannedToday(foodId, daysAhead)
+                    ).recipe.id;
+                }
+                await syncHouseholdNotifications(syncDeps(), c.householdId);
+                const flagged = new Set(
+                    (await openAllergens()).map((r) => r.subjectId),
+                );
+                expect(flagged.has(byDay[3]!)).toBe(true);
+                expect(flagged.has(byDay[6]!)).toBe(true);
+                expect(flagged.has(byDay[7]!)).toBe(false);
+                // Day seven comes into the window a day later.
+                await sql`update public.recipe_plans set date = date - 1`;
+                await syncHouseholdNotifications(syncDeps(), c.householdId);
+                expect(
+                    new Set((await openAllergens()).map((r) => r.subjectId)),
+                ).toEqual(new Set(Object.values(byDay)));
+            });
+
+            test("a plain food carries its usual product's allergen onto its lines and items", async () => {
+                await resetDb();
+                const { sql } = getCtx();
+                await allergic(c.ownerId);
+                const plain = await seedFood(sql, c.householdId, {
+                    name: "Granola",
+                });
+                const product = await peanutFood(sql, "Crunchy Granola");
+                await sql`
+                    update public.foods set generic_food_id = ${plain}::uuid
+                    where id = ${product}::uuid
+                `;
+                await sql`
+                    update public.foods set usual_product_id = ${product}::uuid
+                    where id = ${plain}::uuid
+                `;
+                const line = await onTheList(sql, plain);
+                const itemId = await inTheFridge(sql, plain);
+                await syncHouseholdNotifications(syncDeps(), c.householdId);
+                expect(
+                    [
+                        ...new Set(
+                            (await openAllergens()).map((r) => r.noticeKey),
+                        ),
+                    ].sort(),
+                ).toEqual(
+                    [
+                        `grocery.allergen|grocery_line|${line.id}|`,
+                        `food.product_allergen|fridge_item|${itemId}|`,
+                    ].sort(),
+                );
+            });
+
+            test("the restock tick, which acts as the household, files them and keeps them", async () => {
+                await resetDb();
+                const { sql } = getCtx();
+                await allergic(c.ownerId);
+                await onTheList(sql, await peanutFood(sql));
+                const tick = () =>
+                    withActor(
+                        { kind: "household", householdId: c.householdId },
+                        () =>
+                            syncHouseholdNotifications(
+                                syncDeps(),
+                                c.householdId,
+                            ),
+                    );
+                expect((await tick()).insert).toHaveLength(2);
+                expect(await tick()).toEqual({
+                    insert: [],
+                    resolve: [],
+                    update: [],
+                });
+                expect(await openAllergens()).toHaveLength(2);
+            });
+
+            test("an Allergens row cannot be dismissed or snoozed, for me or for everyone", async () => {
+                await resetDb();
+                const { sql } = getCtx();
+                await allergic(c.ownerId);
+                await onTheList(sql, await peanutFood(sql));
+                await syncHouseholdNotifications(syncDeps(), c.householdId);
+                const before = await openAllergens();
+                const [row] = before.filter(
+                    (r) => r.recipientUserId === c.ownerId,
+                );
+                const actor = { userId: c.ownerId, role: "owner" } as const;
+                const deps = syncDeps();
+                for (const scope of ["me", "everyone"] as const) {
+                    await expect(
+                        dismiss(deps, {
+                            householdId: c.householdId,
+                            actor,
+                            id: row!.id,
+                            scope,
+                            now: NOW,
+                        }),
+                    ).rejects.toMatchObject({ code: "locked" });
+                }
+                await expect(
+                    snooze(deps, {
+                        householdId: c.householdId,
+                        actor,
+                        id: row!.id,
+                        until: new Date(NOW.getTime() + DAY_MS),
+                        now: NOW,
+                    }),
+                ).rejects.toMatchObject({ code: "locked" });
+                // Nothing moved: not the rows, not a household dismissal.
+                expect(byId(await openAllergens())).toEqual(byId(before));
+                expect(
+                    await liveNoticeDismissalsStore().listForHousehold(
+                        c.householdId,
+                    ),
+                ).toEqual([]);
+            });
+
+            test("noticesFor gives allergen notices only when asked, so a page reads what it did", async () => {
+                await resetDb();
+                const { sql } = getCtx();
+                await allergic(c.ownerId);
+                const foodId = await peanutFood(sql);
+                await onTheList(sql, foodId);
+                await inTheFridge(sql, foodId);
+                await plannedToday(foodId);
+                const { today, timezone } = await householdClock(c.householdId);
+                const read = async (allergens?: boolean) =>
+                    (
+                        await noticesFor(liveNoticesForDeps(), c.householdId, {
+                            today,
+                            timezone,
+                            actionable: true,
+                            includeDismissed: true,
+                            allergens,
+                        })
+                    ).notices.map((n) => n.code);
+                const isAllergen = (code: string) => code.endsWith("allergen");
+                expect((await read()).filter(isAllergen)).toEqual([]);
+                expect((await read(false)).filter(isAllergen)).toEqual([]);
+                expect((await read(true)).filter(isAllergen).sort()).toEqual([
+                    "food.product_allergen",
+                    "grocery.allergen",
+                    "recipe.allergen",
+                ]);
+                // The rest of the read is the same either way.
+                expect(
+                    (await read(true)).filter((c) => !isAllergen(c)),
+                ).toEqual(await read());
             });
         });
 
