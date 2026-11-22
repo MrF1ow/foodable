@@ -24,6 +24,7 @@ import {
 import { listHouseholdsForRecipeSweep } from "./db/household.js";
 import { liveRecipesStore } from "./db/recipes.js";
 import { recipeFetchMemory } from "./db/fetch-memory.js";
+import { startNotificationSweep } from "./db/notifications.js";
 import { bootRestockRuns } from "./restock-runner.js";
 import { registerDiscoveryRoutes } from "./discovery.js";
 import { maskIp, redactPathForAccessLog } from "./net.js";
@@ -526,6 +527,9 @@ if (import.meta.main) {
     // was started in, so each job's ticks run as the system actor named here.
     // The flag pin sweep and the restock runner name their own actors.
     void runAsSystem("export sweep", async () => startExportCleanup());
+    void runAsSystem("notification sweep", async () =>
+        startNotificationSweep(),
+    );
     void runAsSystem("agent action snapshot purge", async () =>
         startAgentActionPurge({ store: liveAgentActionsStore() }),
     );

@@ -70,7 +70,7 @@ bun run db:dev status   # "stopped", exit 1
 ## Which tool fits which change
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
-- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off).
+- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off). Page loads sync `notifications`; db-less route tests log `sync failed` (fine).
 - **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" = another run holds them; wait until `ss -ltn` shows both free). No database. It also serves `/dev/gallery-v2` for the sheet and menu cases.
 - **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow, long `timeout`); clear tmp/app-preview first. Without `--shots`: serves :4787 (`PREVIEW_PORT`). Per page: `-390.png`, `-1440.png`.
 - **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`) compares the non-gallery shots of base and branch; exit 1 on a diff. One render at a time per tree; reuse the base.
