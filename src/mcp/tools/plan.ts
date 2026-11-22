@@ -2,6 +2,7 @@ import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { withAnalytics } from "../../analytics.js";
 import { liveFoodsStore } from "../../db/foods.js";
+import { liveNotifier } from "../../db/notify.js";
 import { loadWeekPlanInputs, type WeekPlanInputs } from "../../db/plan-week.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
@@ -14,6 +15,7 @@ import {
     checkPlanDay,
     PLAN_SLOTS,
     planRecipe,
+    unplanRecipe,
     type RecipePlan,
 } from "../../domain/plan.js";
 import {
@@ -355,6 +357,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                         {
                             householdId,
                             recipeId: recipe.id,
+                            recipeName: recipe.name,
                             recipeYield: recipe.yieldPortions,
                             date: args.date.trim(),
                             slot: args.slot,
@@ -367,6 +370,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                                 "plan-recipe",
                                 householdId,
                             ),
+                            notify: liveNotifier(householdId, actor.userId),
                         },
                     );
                     if (!outcome) throw new Error("Recipe not found.");
@@ -412,7 +416,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                 async () => {
                     const run = await runDestructive(
                         "unplan_recipe",
-                        async (rec, householdId) => {
+                        async (rec, householdId, notify) => {
                             const plans = liveRecipePlansStore();
                             const plan = await plans.getPlan(
                                 householdId,
@@ -428,9 +432,17 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                                 [args.plan_id],
                                 "deleted",
                             );
-                            const removed = await plans.removePlan(
+                            const removed = await unplanRecipe(
+                                plans,
                                 householdId,
                                 args.plan_id,
+                                {
+                                    recipes: liveRecipesStore(),
+                                    notify,
+                                    // Already read above: a second read inside
+                                    // the guard's transaction could abort it.
+                                    recipeName: recipe?.name ?? null,
+                                },
                             );
                             if (!removed) throw new Error("Plan not found.");
                             return {

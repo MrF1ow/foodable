@@ -11,6 +11,7 @@ import {
     setUsualProduct,
     usualProductRows,
     type Food,
+    type FoodsStore,
 } from "./foods.js";
 import {
     addUsualByHand,
@@ -23,6 +24,8 @@ import {
     type UsualByHandInput,
 } from "./usual-add.js";
 import { removeUsuals } from "./bulk.js";
+import { notifierFor } from "../db/notify.js";
+import { createMemoryNotificationsStore } from "./notifications.js";
 import { usualsAtZeroForDigest } from "./household-digest.js";
 
 const HH = "hh-usual-add";
@@ -1243,4 +1246,274 @@ test("a Type it that loses a race for the same new name reuses the food the othe
     const all = (await real.listFoods(HH)).filter((f) => f.name === "Oat milk");
     expect(all).toHaveLength(1);
     expect(all[0]!.id).toBe(food.id);
+});
+
+describe("Add a usual notifications", () => {
+    const ALICE = "alice";
+    const BOB = "bob";
+    const CAROL = "carol";
+
+    async function household(recipientsOn: string[]) {
+        const notifications = createMemoryNotificationsStore();
+        for (const userId of recipientsOn) {
+            await notifications.upsertPref({
+                householdId: HH,
+                userId,
+                kind: "new_usuals",
+                enabled: true,
+                updatedAt: "2026-11-22T10:00:00.000Z",
+            });
+        }
+        const deps = {
+            store: notifications,
+            listMembers: async () => [
+                { userId: ALICE, role: "owner" as const },
+                { userId: BOB, role: "member" as const },
+                { userId: CAROL, role: "member" as const },
+            ],
+            log: () => {},
+        };
+        return { notifications, notify: notifierFor(deps, HH, ALICE) };
+    }
+
+    /** Every recipient's rows, so "one event per action" reads as one row each. */
+    const perRecipient = (
+        rows: readonly { recipientUserId: string }[],
+    ): Record<string, number> =>
+        rows.reduce<Record<string, number>>((acc, row) => {
+            acc[row.recipientUserId] = (acc[row.recipientUserId] ?? 0) + 1;
+            return acc;
+        }, {});
+
+    test("Scan: filing a product under a food as its usual is one event, to the others who have it on", async () => {
+        const { notifications, notify } = await household([ALICE, BOB]);
+        const { store, plain, product } = setup();
+        const milk = await plain("Milk");
+        const scanned = await product("Horizon Milk");
+        await addUsualFromProduct(store, HH, {
+            productId: scanned.id,
+            foodId: milk.id,
+            stores,
+            notify,
+        });
+        const rows = await notifications.listForHousehold(HH);
+        expect(perRecipient(rows)).toEqual({ [BOB]: 1 });
+        expect(rows[0]).toMatchObject({
+            kind: "new_usuals",
+            actorUserId: ALICE,
+            subjectKind: "food",
+            subjectId: milk.id,
+            payload: { foodName: "Milk", productName: "Horizon Milk" },
+        });
+    });
+
+    test("Scan under a name that makes a new food is still one event", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, product } = setup();
+        const scanned = await product("Horizon Milk");
+        await addUsualFromProduct(store, HH, {
+            productId: scanned.id,
+            newFoodName: "Milk",
+            stores,
+            notify,
+        });
+        expect(perRecipient(await notifications.listForHousehold(HH))).toEqual({
+            [BOB]: 1,
+        });
+    });
+
+    test("Scan of a product that already is the usual is not new", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, plain, product } = setup();
+        const milk = await plain("Milk");
+        const scanned = await product("Horizon Milk");
+        const input = {
+            productId: scanned.id,
+            foodId: milk.id,
+            stores,
+            notify,
+        };
+        await addUsualFromProduct(store, HH, input);
+        await addUsualFromProduct(store, HH, input);
+        expect(perRecipient(await notifications.listForHousehold(HH))).toEqual({
+            [BOB]: 1,
+        });
+    });
+
+    test("Search: a food added as it is, with the stamp, is one event", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, product } = setup();
+        const butter = await product("Butter", { brand: "Kerrygold" });
+        await addUsualFromProduct(store, HH, {
+            productId: butter.id,
+            foodId: butter.id,
+            stores,
+            notify,
+        });
+        const rows = await notifications.listForHousehold(HH);
+        expect(perRecipient(rows)).toEqual({ [BOB]: 1 });
+        expect(rows[0]).toMatchObject({
+            subjectKind: "food",
+            subjectId: butter.id,
+            payload: { foodName: "Butter", productName: null },
+        });
+    });
+
+    test("Search whose usual check fails still adds the usual, and tells no one", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, product } = setup();
+        const butter = await product("Butter", { brand: "Kerrygold" });
+        const failing = {
+            ...store,
+            listFoods: async () => {
+                throw new Error("statement timeout");
+            },
+        };
+        const saved = await addUsualFromProduct(failing, HH, {
+            productId: butter.id,
+            foodId: butter.id,
+            stores,
+            notify,
+        });
+        expect(saved.usualAddedAt).not.toBeNull();
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("Search of a food that is already a usual is not new", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, product } = setup();
+        const butter = await product("Butter", { brand: "Kerrygold" });
+        const input = {
+            productId: butter.id,
+            foodId: butter.id,
+            stores,
+            notify,
+        };
+        await addUsualFromProduct(store, HH, input);
+        await addUsualFromProduct(store, HH, input);
+        expect(perRecipient(await notifications.listForHousehold(HH))).toEqual({
+            [BOB]: 1,
+        });
+    });
+
+    test("Type it: a new typed food is one event", async () => {
+        const { notifications, notify } = await household([BOB, CAROL]);
+        const { store } = setup();
+        await addUsualByHand(store, HH, hand({ notify }));
+        const rows = await notifications.listForHousehold(HH);
+        expect(perRecipient(rows)).toEqual({ [BOB]: 1, [CAROL]: 1 });
+        expect(rows[0]?.payload).toEqual({
+            foodName: "Half & Half",
+            productName: null,
+        });
+    });
+
+    test("Type it for a food the catalog already has is one event, and typing it again is not new", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, plain } = setup();
+        await plain("Half & Half", {
+            nutritionBasis: "100ml",
+            calories: 130,
+            proteinG: 3,
+            carbsG: 4,
+            fatG: 11,
+        });
+        await addUsualByHand(store, HH, hand({ notify }));
+        await addUsualByHand(store, HH, hand({ notify }));
+        expect(perRecipient(await notifications.listForHousehold(HH))).toEqual({
+            [BOB]: 1,
+        });
+    });
+
+    test("a refused Add a usual sends nothing", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, plain, product } = setup();
+        await expect(
+            addUsualByHand(store, HH, hand({ calories: "", notify })),
+        ).rejects.toBeInstanceOf(UsualInputError);
+        const scanned = await product("Horizon Milk", { offSourceId: "off:1" });
+        await expect(
+            addUsualFromProduct(store, HH, {
+                productId: scanned.id,
+                foodId: scanned.id,
+                stores,
+                notify,
+            }),
+        ).rejects.toBeInstanceOf(UsualInputError);
+        const milk = await plain("Milk");
+        await expect(
+            addUsualFromProduct(store, HH, {
+                productId: "no-such-food",
+                foodId: milk.id,
+                stores,
+                notify,
+            }),
+        ).rejects.toBeInstanceOf(FoodsInputError);
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("members who have the kind off get nothing", async () => {
+        const { notifications, notify } = await household([]);
+        const { store } = setup();
+        await addUsualByHand(store, HH, hand({ notify }));
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("Type it for a food that has a product but no usual product and no stamp is already a usual: no event", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, plain, product } = setup();
+        const milk = await plain("Half & Half", {
+            nutritionBasis: "100ml",
+            calories: 130,
+            proteinG: 3,
+            carbsG: 4,
+            fatG: 11,
+        });
+        const horizon = await product("Horizon Half & Half");
+        // Filed under it without being made the usual: a product is what makes
+        // Half & Half a usual, so typing it is nothing new.
+        await linkProduct(store, HH, horizon.id, milk.id);
+        await addUsualByHand(store, HH, hand({ notify }));
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    // Typing a food the catalog already has: the name lookup lists the
+    // catalog, and the check that the food is a usual already must not list it
+    // a second time, whether the food is one (stamped) or not yet.
+    test.each([
+        ["already a usual", "2026-11-01T10:00:00.000Z", 0],
+        ["not a usual yet", null, 1],
+    ])(
+        "Type it for a food that is %s does not read the catalog for the notification",
+        async (_label, usualAddedAt, events) => {
+            const { notifications, notify } = await household([BOB]);
+            const { store, plain } = setup();
+            const macros = {
+                nutritionBasis: "100ml" as const,
+                calories: 130,
+                proteinG: 3,
+                carbsG: 4,
+                fatG: 11,
+                usualAddedAt,
+            };
+            await plain("Half & Half", macros);
+            await plain("Cream", macros);
+            let listings = 0;
+            const counting: FoodsStore = {
+                ...store,
+                listFoods: async (householdId) => {
+                    listings += 1;
+                    return store.listFoods(householdId);
+                },
+            };
+            await addUsualByHand(counting, HH, hand({ name: "Half & Half" }));
+            const withoutNotify = listings;
+            listings = 0;
+            await addUsualByHand(counting, HH, hand({ name: "Cream", notify }));
+            expect(listings).toBe(withoutNotify);
+            expect(await notifications.listForHousehold(HH)).toHaveLength(
+                events,
+            );
+        },
+    );
 });

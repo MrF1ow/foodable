@@ -17,6 +17,7 @@ import {
     type EffectiveFood,
     type Food,
     type FoodsStore,
+    type Notify,
 } from "./foods.js";
 import { familyIdOf } from "./food-quantity.js";
 import { applyFilters, matchesRecipeQuery } from "./recipe-filters.js";
@@ -1210,16 +1211,31 @@ export async function createRecipe(
     });
 }
 
+/**
+ * Deletes a recipe. A removal (not an edit, not a new recipe) tells the
+ * household through `deps.notify`, once the store has deleted it, with the
+ * recipe's name as it stood.
+ */
 export async function deleteRecipe(
     store: RecipesStore,
     householdId: string,
     recipeId: string,
     actor: { userId: string; isOwner: boolean },
+    deps: { notify?: Notify } = {},
 ): Promise<boolean> {
     const recipe = await store.getRecipe(householdId, recipeId);
     if (!recipe) return false;
     assertCanDeleteRecipe(recipe, actor);
-    return store.deleteRecipe(householdId, recipeId);
+    const deleted = await store.deleteRecipe(householdId, recipeId);
+    if (deleted) {
+        await deps.notify?.({
+            kind: "recipe_changes",
+            subjectKind: "recipe",
+            subjectId: recipe.id,
+            payload: { recipeName: recipe.name },
+        });
+    }
+    return deleted;
 }
 
 /** Only the creator or the household owner may delete a recipe. */

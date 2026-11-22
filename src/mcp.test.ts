@@ -223,6 +223,9 @@ import {
     updateMemberScoreSettings,
 } from "./domain/score-settings.js";
 import { createMemoryNoticeDismissalsStore } from "./domain/notice-dismissals.js";
+import { createMemoryNotificationsStore } from "./domain/notifications.js";
+import type { NotificationKind } from "./domain/notification-kinds.js";
+import { setNotifyDepsForTests } from "./db/notify.js";
 import * as actualDbNoticeDismissals from "./db/notice-dismissals.js";
 import { createMemoryPlansStore } from "./domain/plan.js";
 import {
@@ -457,6 +460,7 @@ const db = {
     recipeImportFetcher: null as import("./fetch-safe.js").SafeFetcher | null,
     fetchMemoryStore: createMemoryFetchMemoryStore(),
     agentActions: createMemoryAgentActionsStore(),
+    notificationsStore: createMemoryNotificationsStore(),
     socialReaderStatusStore: createMemorySocialReaderStatusStore(),
 };
 
@@ -955,6 +959,7 @@ mock.module("./db/fetch-memory.js", () => ({
 
 afterAll(() => {
     setAgentActionDepsForTests(null);
+    setNotifyDepsForTests(null);
     setGoalDayRowsForTests(null);
     mock.module("./db/analytics.js", () => realDbAnalytics);
     mock.module("./db/nutrition.js", () => realNutrition);
@@ -1047,6 +1052,15 @@ beforeEach(() => {
     // The destructive tools record into this one, on the same memory stores
     // the tools write to.
     db.agentActions = createMemoryAgentActionsStore();
+    // The event notifications the write tools send land here, among the
+    // household's members as the memory household has them.
+    db.notificationsStore = createMemoryNotificationsStore();
+    setNotifyDepsForTests({
+        store: db.notificationsStore,
+        listMembers: async () =>
+            db.members.map((m) => ({ userId: m.userId, role: m.role })),
+        log: () => {},
+    });
     setAgentActionDepsForTests({
         store: db.agentActions,
         settings: db.settingsStore,
@@ -10163,6 +10177,564 @@ describe("/mcp destructive tools are guarded", () => {
                 });
             },
         );
+    });
+});
+
+describe("/mcp event notifications", () => {
+    const ACTOR = "u1";
+    const OTHER = "u2";
+
+    function addUtcDays(iso: string, delta: number): string {
+        const [y, m, d] = iso.split("-").map(Number);
+        return new Date(Date.UTC(y!, m! - 1, d! + delta))
+            .toISOString()
+            .slice(0, 10);
+    }
+
+    // A second member, with every event kind on for them (and for the actor,
+    // to show the actor still gets none). Plan tools are flag-gated.
+    beforeEach(async () => {
+        setFlagsForTests(createMemoryFlags({}));
+        db.members.push({
+            householdId: "hh-1",
+            userId: OTHER,
+            role: "member",
+            displayName: "U2",
+        });
+        for (const userId of [ACTOR, OTHER]) {
+            for (const kind of [
+                "recipe_changes",
+                "week_plan_changes",
+                "new_usuals",
+            ] as NotificationKind[]) {
+                await db.notificationsStore.upsertPref({
+                    householdId: "hh-1",
+                    userId,
+                    kind,
+                    enabled: true,
+                    updatedAt: "2026-11-22T10:00:00.000Z",
+                });
+            }
+        }
+    });
+    afterEach(() => resetFlagsForTests());
+
+    async function connect<T>(
+        app: Hono,
+        mode: EraMode,
+        run: (call: CallTool) => Promise<T>,
+    ): Promise<T> {
+        const transport = new StreamableHTTPClientTransport(
+            new URL("http://test.local/mcp"),
+            {
+                fetch: async (url, init) =>
+                    app.request(new Request(String(url), init)),
+            },
+        );
+        const client = new Client(
+            { name: "t", version: "0" },
+            { versionNegotiation: { mode } },
+        );
+        await client.connect(transport);
+        try {
+            return await run(
+                (name, args = {}) =>
+                    client.callTool({
+                        name,
+                        arguments: callToolArguments(name, args),
+                    }) as Promise<ToolResult>,
+            );
+        } finally {
+            await client.close();
+        }
+    }
+
+    const asUser = <T>(
+        userId: string,
+        mode: EraMode,
+        run: (call: CallTool) => Promise<T>,
+    ) => connect(appFor(userId), mode, run);
+
+    const events = async () =>
+        (await db.notificationsStore.listForHousehold("hh-1")).filter(
+            (row) => row.source === "event",
+        );
+
+    async function plannedBread(call: CallTool) {
+        const recipe = await call("create_recipe", {
+            name: "Bread",
+            yield_portions: 1,
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        const planned = await call("plan_recipe", {
+            recipe_id: recipeId,
+            date: addUtcDays(utcTodayFromDate(), 2),
+            slot: "dinner",
+        });
+        expect(planned.isError).toBeFalsy();
+        const planId = (
+            planned.structuredContent as { plan: { plan_id: string } }
+        ).plan.plan_id;
+        return { recipeId, planId };
+    }
+
+    test.each(ERAS)(
+        "plan_recipe tells the other members, once, and never the person it acts for (%p)",
+        async (era) => {
+            await asUser(ACTOR, era, async (call) => {
+                const recipe = await call("create_recipe", {
+                    name: "Bread",
+                    yield_portions: 1,
+                });
+                const recipeId = recipe.structuredContent?.id as string;
+                const args = {
+                    recipe_id: recipeId,
+                    date: addUtcDays(utcTodayFromDate(), 2),
+                    slot: "dinner",
+                };
+                expect((await call("plan_recipe", args)).isError).toBeFalsy();
+                // The same plan again is not a change.
+                expect((await call("plan_recipe", args)).isError).toBeFalsy();
+                const rows = await events();
+                expect(rows).toHaveLength(1);
+                expect(rows[0]).toMatchObject({
+                    recipientUserId: OTHER,
+                    actorUserId: ACTOR,
+                    kind: "week_plan_changes",
+                    subjectId: recipeId,
+                    payload: {
+                        recipeName: "Bread",
+                        date: args.date,
+                        slot: "dinner",
+                        change: "planned",
+                    },
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "unplan_recipe tells the others through unplanRecipe, after the guarded transaction commits (%p)",
+        async (era) => {
+            const real = db.agentActions;
+            let committed = false;
+            setAgentActionDepsForTests({
+                store: {
+                    ...real,
+                    atomically: async (fn) => {
+                        committed = false;
+                        const out = await real.atomically(fn);
+                        committed = true;
+                        return out;
+                    },
+                },
+                settings: db.settingsStore,
+                stock: db.stockStore,
+                foods: db.foodsStore,
+            });
+            const sentAfterCommit: boolean[] = [];
+            setNotifyDepsForTests({
+                store: {
+                    ...db.notificationsStore,
+                    insertMany: async (rows) => {
+                        sentAfterCommit.push(committed);
+                        return db.notificationsStore.insertMany(rows);
+                    },
+                },
+                listMembers: async () =>
+                    db.members.map((m) => ({
+                        userId: m.userId,
+                        role: m.role,
+                    })),
+                log: () => {},
+            });
+            await asUser(ACTOR, era, async (call) => {
+                const { planId } = await plannedBread(call);
+                const planRows = (await events()).length;
+                sentAfterCommit.length = 0;
+                const removed = await call("unplan_recipe", {
+                    plan_id: planId,
+                });
+                expect(removed.isError).toBeFalsy();
+                const rows = (await events()).slice(planRows);
+                expect(rows).toHaveLength(1);
+                expect(rows[0]).toMatchObject({
+                    recipientUserId: OTHER,
+                    actorUserId: ACTOR,
+                    kind: "week_plan_changes",
+                    payload: { recipeName: "Bread", change: "unplanned" },
+                });
+                expect(sentAfterCommit).toEqual([true]);
+                expect(await db.plansStore.getPlan("hh-1", planId)).toBeNull();
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a guarded call that is refused, throws or changes nothing sends nothing (%p)",
+        async (era) => {
+            await asUser(ACTOR, era, async (call) => {
+                const { planId } = await plannedBread(call);
+                const before = (await events()).length;
+
+                // Refused: the person's own switch is Off.
+                await db.settingsStore.setMemberAgentsCanDelete(
+                    "hh-1",
+                    ACTOR,
+                    false,
+                );
+                const refused = await call("unplan_recipe", {
+                    plan_id: planId,
+                });
+                expect(refused.isError).toBe(true);
+                expect(
+                    await db.plansStore.getPlan("hh-1", planId),
+                ).not.toBeNull();
+                await db.settingsStore.setMemberAgentsCanDelete(
+                    "hh-1",
+                    ACTOR,
+                    true,
+                );
+
+                // The transaction fails after the write has been queued: the
+                // action's own record cannot be written, so it rolls back.
+                const real = db.agentActions;
+                setAgentActionDepsForTests({
+                    store: {
+                        ...real,
+                        atomically: (fn) =>
+                            real.atomically((tx) =>
+                                fn({
+                                    ...tx,
+                                    insertAction: async () => {
+                                        throw new Error("record refused");
+                                    },
+                                }),
+                            ),
+                    },
+                    settings: db.settingsStore,
+                    stock: db.stockStore,
+                    foods: db.foodsStore,
+                });
+                const failed = await call("unplan_recipe", { plan_id: planId });
+                expect(failed.isError).toBe(true);
+
+                // A plan that is not there: nothing changed.
+                const gone = await call("unplan_recipe", {
+                    plan_id: crypto.randomUUID(),
+                });
+                expect(gone.isError).toBe(true);
+
+                expect((await events()).length).toBe(before);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "delete_recipe tells the others once, and a refused or empty delete sends nothing (%p)",
+        async (era) => {
+            let recipeId = "";
+            await asUser(ACTOR, era, async (call) => {
+                const recipe = await call("create_recipe", {
+                    name: "Beef chili",
+                    yield_portions: 4,
+                });
+                recipeId = recipe.structuredContent?.id as string;
+            });
+            // A member who did not write it may not delete it, and nothing is sent.
+            await db.settingsStore.setMemberAgentsCanDelete(
+                "hh-1",
+                OTHER,
+                true,
+            );
+            await asUser(OTHER, era, async (call) => {
+                const refused = await call("delete_recipe", { id: recipeId });
+                expect(refused.isError).toBe(true);
+            });
+            expect(await events()).toEqual([]);
+            await asUser(ACTOR, era, async (call) => {
+                const none = await call("delete_recipe", {
+                    id: crypto.randomUUID(),
+                });
+                expect(none.isError).toBeFalsy();
+                expect(await events()).toEqual([]);
+                const deleted = await call("delete_recipe", { id: recipeId });
+                expect(deleted.isError).toBeFalsy();
+                const rows = await events();
+                expect(rows).toHaveLength(1);
+                expect(rows[0]).toMatchObject({
+                    recipientUserId: OTHER,
+                    actorUserId: ACTOR,
+                    kind: "recipe_changes",
+                    subjectId: recipeId,
+                    payload: { recipeName: "Beef chili" },
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "the household token acts as its owner, so the owner gets nothing and the others do (%p)",
+        async (era) => {
+            await connect(appForHousehold("hh-1"), era, async (call) => {
+                const recipe = await call("create_recipe", {
+                    name: "Beef chili",
+                    yield_portions: 4,
+                    user_id: ACTOR,
+                });
+                const recipeId = recipe.structuredContent?.id as string;
+                expect(recipeId).toBeTruthy();
+                const deleted = await call("delete_recipe", {
+                    id: recipeId,
+                });
+                expect(deleted.isError).toBeFalsy();
+            });
+            const rows = await events();
+            expect(rows.map((r) => r.recipientUserId)).toEqual([OTHER]);
+            expect(rows[0]?.actorUserId).toBe(ACTOR);
+        },
+    );
+
+    test.each(ERAS)(
+        "set_usual_product tells the others when a product becomes the usual, not when it already was (%p)",
+        async (era) => {
+            await asUser(ACTOR, era, async (call) => {
+                const milk = await call("upsert_food", { name: "Milk" });
+                const milkId = milk.structuredContent?.id as string;
+                const horizon = await call("upsert_food", {
+                    name: "Horizon Milk",
+                    brand: "Horizon",
+                    generic_food_id: milkId,
+                });
+                const horizonId = horizon.structuredContent?.id as string;
+                // Creating the product filed Milk under the Usuals: its own
+                // event, which this test is not about.
+                const filed = (await events()).length;
+                const set = await call("set_usual_product", {
+                    food_id: milkId,
+                    product_food_id: horizonId,
+                });
+                expect(set.isError).toBeFalsy();
+                await call("set_usual_product", {
+                    food_id: milkId,
+                    product_food_id: horizonId,
+                });
+                await call("set_usual_product", {
+                    food_id: milkId,
+                    product_food_id: null,
+                });
+                const rows = (await events()).slice(filed);
+                expect(rows).toHaveLength(1);
+                expect(rows[0]).toMatchObject({
+                    recipientUserId: OTHER,
+                    actorUserId: ACTOR,
+                    kind: "new_usuals",
+                    subjectId: milkId,
+                    payload: {
+                        foodName: "Milk",
+                        productName: "Horizon Milk",
+                    },
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "link_product tells the others when it files a product under a food that was not a usual, not when it already was (%p)",
+        async (era) => {
+            await asUser(ACTOR, era, async (call) => {
+                const food = async (args: Record<string, unknown>) =>
+                    (await call("upsert_food", { new_food: true, ...args }))
+                        .structuredContent?.id as string;
+                const milk = await food({ name: "Milk" });
+                const horizon = await food({
+                    name: "Horizon Milk",
+                    brand: "Horizon",
+                });
+                const organic = await food({
+                    name: "Organic Valley Milk",
+                    brand: "Organic Valley",
+                });
+                expect(await events()).toEqual([]);
+                const linked = await call("link_product", {
+                    product_food_id: horizon,
+                    food_id: milk,
+                });
+                expect(linked.isError).toBeFalsy();
+                // Milk is a usual now: a second product, the same one again
+                // and unfiling it are not new.
+                await call("link_product", {
+                    product_food_id: organic,
+                    food_id: milk,
+                });
+                await call("link_product", {
+                    product_food_id: horizon,
+                    food_id: milk,
+                });
+                await call("link_product", {
+                    product_food_id: organic,
+                    food_id: null,
+                });
+                const rows = await events();
+                expect(rows).toHaveLength(1);
+                expect(rows[0]).toMatchObject({
+                    recipientUserId: OTHER,
+                    actorUserId: ACTOR,
+                    kind: "new_usuals",
+                    subjectKind: "food",
+                    subjectId: milk,
+                    payload: {
+                        foodName: "Milk",
+                        productName: "Horizon Milk",
+                    },
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "upsert_food with generic_food_id tells the others for the first product under a food, not for the next (%p)",
+        async (era) => {
+            await asUser(ACTOR, era, async (call) => {
+                const milk = (await call("upsert_food", { name: "Milk" }))
+                    .structuredContent?.id as string;
+                expect(await events()).toEqual([]);
+                const product = (name: string, brand: string) =>
+                    call("upsert_food", {
+                        name,
+                        brand,
+                        generic_food_id: milk,
+                    });
+                expect(
+                    (await product("Horizon Milk", "Horizon")).isError,
+                ).toBeFalsy();
+                await product("Organic Valley Milk", "Organic Valley");
+                // A refused one (no name) sends nothing.
+                expect((await product("", "Nobody")).isError).toBe(true);
+                const rows = await events();
+                expect(rows).toHaveLength(1);
+                expect(rows[0]).toMatchObject({
+                    recipientUserId: OTHER,
+                    actorUserId: ACTOR,
+                    kind: "new_usuals",
+                    subjectId: milk,
+                    payload: {
+                        foodName: "Milk",
+                        productName: "Horizon Milk",
+                    },
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "set_usual_product on a product not filed under the food yet files it and tells once, not twice (%p)",
+        async (era) => {
+            await asUser(ACTOR, era, async (call) => {
+                const food = async (args: Record<string, unknown>) =>
+                    (await call("upsert_food", { new_food: true, ...args }))
+                        .structuredContent?.id as string;
+                const milk = await food({ name: "Milk" });
+                const horizon = await food({
+                    name: "Horizon Milk",
+                    brand: "Horizon",
+                });
+                const set = await call("set_usual_product", {
+                    food_id: milk,
+                    product_food_id: horizon,
+                });
+                expect(set.isError).toBeFalsy();
+                const rows = await events();
+                expect(rows).toHaveLength(1);
+                expect(rows[0]?.payload).toEqual({
+                    foodName: "Milk",
+                    productName: "Horizon Milk",
+                });
+            });
+        },
+    );
+
+    // A JSON-RPC batch is one POST with several calls: the legacy era builds one
+    // server, so one tool context, for all of them, and they run side by side.
+    // Each guarded call must queue and send its own events and nobody else's.
+    test("a call in a real JSON-RPC batch sends its own events, not its neighbours'", async () => {
+        const ids: Record<string, string> = {};
+        await asUser(ACTOR, "legacy", async (call) => {
+            for (const name of ["Stew", "Soup"]) {
+                ids[name] = (
+                    await call("create_recipe", { name, yield_portions: 1 })
+                ).structuredContent?.id as string;
+            }
+        });
+        // The Stew call writes (so its event is queued) and then cannot save
+        // its record, so its transaction rolls back and nothing may be sent.
+        // The Soup call waits for that, so it flushes after Stew has queued:
+        // with one list shared by both, Soup's flush would send Stew's event.
+        const stewQueued = Promise.withResolvers<void>();
+        const real = db.agentActions;
+        setAgentActionDepsForTests({
+            store: {
+                ...real,
+                atomically: (fn) =>
+                    real.atomically((tx) =>
+                        fn({
+                            ...tx,
+                            insertAction: async (record) => {
+                                if (record.summary.includes("Stew")) {
+                                    stewQueued.resolve();
+                                    throw new Error("record refused");
+                                }
+                                await stewQueued.promise;
+                                return tx.insertAction(record);
+                            },
+                        }),
+                    ),
+            },
+            settings: db.settingsStore,
+            stock: db.stockStore,
+            foods: db.foodsStore,
+        });
+        const batch = ["Stew", "Soup"].map((name, index) => ({
+            jsonrpc: "2.0",
+            id: index + 1,
+            method: "tools/call",
+            params: {
+                name: "delete_recipe",
+                arguments: callToolArguments("delete_recipe", {
+                    id: ids[name],
+                }),
+            },
+        }));
+        const res = await appFor(ACTOR).request("http://test.local/mcp", {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                accept: "application/json, text/event-stream",
+            },
+            body: JSON.stringify(batch),
+        });
+        expect(res.status).toBe(200);
+        const frames = (await res.text())
+            .split("\n")
+            .filter((line) => line.startsWith("data:"))
+            .map(
+                (line) =>
+                    JSON.parse(line.slice(5)) as {
+                        id: number;
+                        result: { isError?: boolean };
+                    },
+            );
+        // Both calls answered, in one response: this was one batch.
+        expect(frames.map((f) => f.id).sort()).toEqual([1, 2]);
+        const byId = new Map(frames.map((f) => [f.id, f.result]));
+        expect(byId.get(1)?.isError).toBe(true);
+        expect(byId.get(2)?.isError).toBeFalsy();
+        // Stew's guard failed after it queued, Soup's committed: only Soup's
+        // event was sent. (The memory recipe store does not roll back, so the
+        // Stew row itself is not asserted here; the Postgres guard tests do.)
+        expect((await events()).map((r) => r.payload.recipeName)).toEqual([
+            "Soup",
+        ]);
     });
 });
 

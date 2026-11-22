@@ -1,5 +1,7 @@
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import type { FoodResult } from "../foods.js";
+import { notifierFor } from "../db/notify.js";
+import { createMemoryNotificationsStore } from "./notifications.js";
 import {
     catalogNutritionFromOff,
     offNutrientLevelsFromHit,
@@ -17,9 +19,16 @@ import {
     newFood,
     normalizeFoodName,
     searchFoodCatalog,
+    addProduct,
+    createProduct,
+    FoodsInputError,
+    isUsualFood,
+    linkProduct,
+    setUsualProduct,
     updateFood,
     usualProductRows,
     gramsPerEachFromOff,
+    type Food,
     type FoodsStore,
 } from "./foods.js";
 
@@ -969,4 +978,356 @@ test("isUsualGroceryLine: an archived generic or food gives no usual", () => {
             genericOf: () => undefined,
         }),
     ).toBe(false);
+});
+
+describe("new usual product notifications", () => {
+    const ALICE = "alice";
+    const BOB = "bob";
+    const CAROL = "carol";
+
+    async function household(recipientsOn: string[]) {
+        const notifications = createMemoryNotificationsStore();
+        for (const userId of recipientsOn) {
+            await notifications.upsertPref({
+                householdId: HH,
+                userId,
+                kind: "new_usuals",
+                enabled: true,
+                updatedAt: "2026-11-22T10:00:00.000Z",
+            });
+        }
+        const deps = {
+            store: notifications,
+            listMembers: async () => [
+                { userId: ALICE, role: "owner" as const },
+                { userId: BOB, role: "member" as const },
+                { userId: CAROL, role: "member" as const },
+            ],
+            log: () => {},
+        };
+        return { notifications, notify: notifierFor(deps, HH, ALICE) };
+    }
+
+    async function milkAndTwoBrands() {
+        const store = createMemoryFoodsStore();
+        const milk = await store.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        );
+        const horizon = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Horizon Milk",
+                brand: "Horizon",
+            }),
+        );
+        const organic = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Organic Valley Milk",
+                brand: "Organic Valley",
+            }),
+        );
+        return { store, milk, horizon, organic };
+    }
+
+    test("a product becoming the usual tells the others who have it on, never the person who set it", async () => {
+        const { notifications, notify } = await household([ALICE, BOB]);
+        const { store, milk, horizon } = await milkAndTwoBrands();
+        await setUsualProduct(store, HH, milk.id, horizon.id, { notify });
+        const rows = await notifications.listForHousehold(HH);
+        expect(rows.map((r) => r.recipientUserId)).toEqual([BOB]);
+        expect(rows[0]).toMatchObject({
+            kind: "new_usuals",
+            actorUserId: ALICE,
+            subjectKind: "food",
+            subjectId: milk.id,
+            payload: { foodName: "Milk", productName: "Horizon Milk" },
+        });
+    });
+
+    test("members who have the kind off get nothing", async () => {
+        const { notifications, notify } = await household([]);
+        const { store, milk, horizon } = await milkAndTwoBrands();
+        await setUsualProduct(store, HH, milk.id, horizon.id, { notify });
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("choosing the product that already is the usual, or clearing it, is not a new usual", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk, horizon } = await milkAndTwoBrands();
+        await setUsualProduct(store, HH, milk.id, horizon.id, { notify });
+        await setUsualProduct(store, HH, milk.id, horizon.id, { notify });
+        await setUsualProduct(store, HH, milk.id, null, { notify });
+        expect(await notifications.listForHousehold(HH)).toHaveLength(1);
+    });
+
+    test("swapping the usual to another product is a new usual product", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk, horizon, organic } = await milkAndTwoBrands();
+        await setUsualProduct(store, HH, milk.id, horizon.id, { notify });
+        await setUsualProduct(store, HH, milk.id, organic.id, { notify });
+        const names = (await notifications.listForHousehold(HH)).map(
+            (r) => r.payload.productName,
+        );
+        expect(names).toEqual(["Horizon Milk", "Organic Valley Milk"]);
+    });
+
+    test("a refused call sends nothing", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk, horizon } = await milkAndTwoBrands();
+        await expect(
+            setUsualProduct(store, HH, milk.id, milk.id, { notify }),
+        ).rejects.toBeInstanceOf(FoodsInputError);
+        await expect(
+            setUsualProduct(store, HH, milk.id, "no-such-food", { notify }),
+        ).rejects.toBeInstanceOf(FoodsInputError);
+        // The product belongs to another food.
+        const eggs = await store.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+        );
+        await store.updateFoodRow({ ...horizon, genericFoodId: eggs.id });
+        await expect(
+            setUsualProduct(store, HH, milk.id, horizon.id, { notify }),
+        ).rejects.toBeInstanceOf(FoodsInputError);
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("a write that fails sends nothing", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk, horizon } = await milkAndTwoBrands();
+        const failing = {
+            ...store,
+            updateFoodRow: async () => {
+                throw new Error("database is down");
+            },
+        } as unknown as FoodsStore;
+        await expect(
+            setUsualProduct(failing, HH, milk.id, horizon.id, { notify }),
+        ).rejects.toThrow("database is down");
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("the first product a food gets (addProduct) is a new usual, a later one is not", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk, horizon, organic } = await milkAndTwoBrands();
+        await addProduct(store, HH, milk.id, horizon.id, { notify });
+        await addProduct(store, HH, milk.id, organic.id, { notify });
+        const rows = await notifications.listForHousehold(HH);
+        expect(rows.map((r) => r.payload.productName)).toEqual([
+            "Horizon Milk",
+        ]);
+    });
+
+    test("a product made by hand as the usual (createProduct) is one event", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk } = await milkAndTwoBrands();
+        await createProduct(store, HH, milk.id, {
+            name: "Kirkland Milk",
+            makeUsual: true,
+            notify,
+        });
+        await createProduct(store, HH, milk.id, {
+            name: "Store Milk",
+            notify,
+        });
+        const rows = await notifications.listForHousehold(HH);
+        expect(rows.map((r) => r.payload.productName)).toEqual([
+            "Kirkland Milk",
+        ]);
+    });
+
+    test("filing a product under a food that was not a usual puts it on the list: one event naming both", async () => {
+        const { notifications, notify } = await household([ALICE, BOB]);
+        const { store, milk, horizon } = await milkAndTwoBrands();
+        await linkProduct(store, HH, horizon.id, milk.id, { notify });
+        const rows = await notifications.listForHousehold(HH);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+            recipientUserId: BOB,
+            actorUserId: ALICE,
+            kind: "new_usuals",
+            subjectKind: "food",
+            subjectId: milk.id,
+            payload: { foodName: "Milk", productName: "Horizon Milk" },
+        });
+    });
+
+    test("filing under a food that already is a usual sends none: it has a product, or was added by hand", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk, horizon, organic } = await milkAndTwoBrands();
+        // Milk has a product (silently), so a second product joins a usual.
+        await linkProduct(store, HH, horizon.id, milk.id);
+        await linkProduct(store, HH, organic.id, milk.id, { notify });
+        // Eggs was added to the Usuals by hand, with no product.
+        const eggs = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Eggs",
+                usualAddedAt: "2026-11-01T10:00:00.000Z",
+            }),
+        );
+        const kirkland = await store.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Kirkland Eggs",
+                brand: "Kirkland",
+            }),
+        );
+        await linkProduct(store, HH, kirkland.id, eggs.id, { notify });
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("filing where it already is, unlinking, and a refused link send none", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk, horizon, organic } = await milkAndTwoBrands();
+        await linkProduct(store, HH, horizon.id, milk.id);
+        await linkProduct(store, HH, horizon.id, milk.id, { notify });
+        await linkProduct(store, HH, horizon.id, null, { notify });
+        await expect(
+            linkProduct(store, HH, milk.id, milk.id, { notify }),
+        ).rejects.toBeInstanceOf(FoodsInputError);
+        await expect(
+            linkProduct(store, HH, horizon.id, "no-such-food", { notify }),
+        ).rejects.toBeInstanceOf(FoodsInputError);
+        // A product is not a food a product can be filed under.
+        await linkProduct(store, HH, organic.id, milk.id);
+        await expect(
+            linkProduct(store, HH, horizon.id, organic.id, { notify }),
+        ).rejects.toBeInstanceOf(FoodsInputError);
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("moving a product to a food that was not a usual is one event for that food", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk, horizon } = await milkAndTwoBrands();
+        const oatMilk = await store.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Oat milk" }),
+        );
+        await linkProduct(store, HH, horizon.id, milk.id);
+        await linkProduct(store, HH, horizon.id, oatMilk.id, { notify });
+        const rows = await notifications.listForHousehold(HH);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+            subjectId: oatMilk.id,
+            payload: { foodName: "Oat milk", productName: "Horizon Milk" },
+        });
+    });
+
+    test("one action, one event: making a standalone product the usual files it and announces once", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk, horizon } = await milkAndTwoBrands();
+        await setUsualProduct(store, HH, milk.id, horizon.id, { notify });
+        const rows = await notifications.listForHousehold(HH);
+        expect(rows.map((r) => r.payload)).toEqual([
+            { foodName: "Milk", productName: "Horizon Milk" },
+        ]);
+    });
+
+    test("a product made by hand under a food that was not a usual is one event, under one that was is none", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk } = await milkAndTwoBrands();
+        await createProduct(store, HH, milk.id, {
+            name: "Kirkland Milk",
+            notify,
+        });
+        await createProduct(store, HH, milk.id, {
+            name: "Store Milk",
+            notify,
+        });
+        const rows = await notifications.listForHousehold(HH);
+        expect(rows).toHaveLength(1);
+        expect(rows[0]).toMatchObject({
+            subjectId: milk.id,
+            payload: { foodName: "Milk", productName: "Kirkland Milk" },
+        });
+    });
+
+    test("a product that fails to be made sends nothing", async () => {
+        const { notifications, notify } = await household([BOB]);
+        const { store, milk } = await milkAndTwoBrands();
+        await expect(
+            createProduct(store, HH, milk.id, { name: "  ", notify }),
+        ).rejects.toBeInstanceOf(FoodsInputError);
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+});
+
+describe("isUsualFood", () => {
+    async function counted() {
+        const store = createMemoryFoodsStore();
+        let listings = 0;
+        const counting: FoodsStore = {
+            ...store,
+            listFoods: async (householdId) => {
+                listings += 1;
+                return store.listFoods(householdId);
+            },
+        };
+        const make = (name: string, over: Partial<Food> = {}) =>
+            store.insertFood(
+                newFood({ householdId: HH, kind: "food", name, ...over }),
+            );
+        return { store, counting, make, listings: () => listings };
+    }
+
+    test("a food added by hand, or with a usual product, is decided from its own row", async () => {
+        const { store, counting, make, listings } = await counted();
+        const stamped = await make("Eggs", {
+            usualAddedAt: "2026-11-01T10:00:00.000Z",
+        });
+        const milk = await make("Milk");
+        const horizon = await make("Horizon Milk", { brand: "Horizon" });
+        await setUsualProduct(store, HH, milk.id, horizon.id);
+        const withUsual = (await store.getFood(HH, milk.id))!;
+        expect(await isUsualFood(counting, HH, stamped)).toBe(true);
+        expect(await isUsualFood(counting, HH, withUsual)).toBe(true);
+        expect(listings()).toBe(0);
+    });
+
+    test("a food with a product filed under it and nothing else is a usual, found in the catalog", async () => {
+        const { store, counting, make, listings } = await counted();
+        const milk = await make("Milk");
+        const horizon = await make("Horizon Milk", { brand: "Horizon" });
+        expect(await isUsualFood(counting, HH, milk)).toBe(false);
+        await linkProduct(store, HH, horizon.id, milk.id);
+        expect(await isUsualFood(counting, HH, milk)).toBe(true);
+        expect(listings()).toBe(2);
+    });
+
+    test("an archived product does not make its food a usual, and a product or archived food is never one", async () => {
+        const { store, counting, make } = await counted();
+        const milk = await make("Milk");
+        const live = await make("Horizon Milk", {
+            brand: "Horizon",
+            genericFoodId: milk.id,
+        });
+        const horizon = (await store.updateFoodRow({
+            ...live,
+            archivedAt: "2026-11-02T10:00:00.000Z",
+        }))!;
+        // The store lists live foods only; a catalog the caller passes in
+        // may hold anything, and an archived product still does not count.
+        expect(await isUsualFood(counting, HH, milk)).toBe(false);
+        expect(await isUsualFood(counting, HH, milk, [milk, horizon])).toBe(
+            false,
+        );
+        expect(
+            await isUsualFood(counting, HH, {
+                ...horizon,
+                archivedAt: null,
+                usualAddedAt: "2026-11-01T10:00:00.000Z",
+            }),
+        ).toBe(false);
+        expect(
+            await isUsualFood(counting, HH, {
+                ...milk,
+                archivedAt: "2026-11-02T10:00:00.000Z",
+                usualAddedAt: "2026-11-01T10:00:00.000Z",
+            }),
+        ).toBe(false);
+    });
 });

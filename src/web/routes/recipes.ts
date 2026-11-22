@@ -84,6 +84,8 @@ import {
     checkPlanSlot,
     planRecipe,
     PlanInputError,
+    movePlannedRecipe,
+    unplanRecipe,
 } from "../../domain/plan.js";
 import {
     addMissingToGroceries,
@@ -93,6 +95,7 @@ import {
 } from "../../domain/plan-week.js";
 import { householdToday } from "../../db/restock.js";
 import { GroceryInputError } from "../../domain/grocery.js";
+import { liveNotifier } from "../../db/notify.js";
 import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
 import { loadWeekPlanInputs } from "../loaders-plan.js";
 
@@ -804,6 +807,7 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
             {
                 householdId: member.householdId,
                 recipeId,
+                recipeName: recipe.name,
                 recipeYield: recipe.yieldPortions,
                 date,
                 slot,
@@ -813,6 +817,7 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
             },
             {
                 transaction: planTransaction("plan-recipe", member.householdId),
+                notify: liveNotifier(member.householdId, userId),
             },
         );
         if (!outcome) return c.text("Not found", 404);
@@ -875,12 +880,15 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
         );
         // The same recipe already on that day and slot absorbs this plan
         // (its servings are added), so the week never shows it twice.
-        const moved = await plans.movePlan(
+        const moved = await movePlannedRecipe(
+            plans,
             member.householdId,
-            existing.id,
-            date,
-            slot,
-            servings,
+            existing,
+            { date, slot, servings },
+            {
+                recipes: liveRecipesStore(),
+                notify: liveNotifier(member.householdId, member.userId),
+            },
         );
         if (!moved) return redirectWithToast(c, back, "plan.gone");
         // The row that comes back is not this plan's when it merged.
@@ -932,7 +940,15 @@ recipesRoutes.post("/recipes/plan/:planId/remove", requireMember, async (c) => {
     const planId = c.req.param("planId");
     const removed =
         UUID_SHAPE.test(planId) &&
-        (await liveRecipePlansStore().removePlan(member.householdId, planId));
+        (await unplanRecipe(
+            liveRecipePlansStore(),
+            member.householdId,
+            planId,
+            {
+                recipes: liveRecipesStore(),
+                notify: liveNotifier(member.householdId, member.userId),
+            },
+        ));
     return redirectWithToast(c, back, removed ? "plan.removed" : "plan.gone");
 });
 
@@ -1007,10 +1023,16 @@ recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {
             ? "/settings/saved"
             : safeReturnPath(from, "/recipes");
     try {
-        await deleteRecipe(liveRecipesStore(), member.householdId, recipeId, {
-            userId,
-            isOwner: can(member, "recipe.delete_any").ok,
-        });
+        await deleteRecipe(
+            liveRecipesStore(),
+            member.householdId,
+            recipeId,
+            {
+                userId,
+                isOwner: can(member, "recipe.delete_any").ok,
+            },
+            { notify: liveNotifier(member.householdId, userId) },
+        );
     } catch (err) {
         const page = await recipeFormError(userId, recipeId, err, {
             openModalId: `recipe-delete-${recipeId}`,

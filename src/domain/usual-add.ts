@@ -1,8 +1,10 @@
 import { normalizeBarcode } from "../foods.js";
 import {
+    announceNewUsual,
     assertBarcodeFree,
     findFoodByNameAndBrand,
     FoodsInputError,
+    isUsualFood,
     linkProduct,
     matchFoodsByWords,
     newFood,
@@ -19,6 +21,7 @@ import {
     type FoodServing,
     type FoodsStore,
     type NutritionBasis,
+    type Notify,
     type UsualPurchasePatch,
     type UsualStoreLookup,
 } from "./foods.js";
@@ -141,6 +144,7 @@ async function findPlainFoodByName(
     householdId: string,
     kind: FoodKind,
     name: string,
+    catalog?: readonly Food[],
 ): Promise<Food | null> {
     const byName = await findFoodByNameAndBrand(
         store,
@@ -148,6 +152,7 @@ async function findPlainFoodByName(
         kind,
         name,
         null,
+        catalog,
     );
     if (byName && !byName.archivedAt) return byName;
     const aliasId = await store.getAliasFoodId(
@@ -175,6 +180,8 @@ export type UsualFromProductInput = {
     purchase?: UsualPurchasePatch;
     stores: UsualStoreLookup;
     createdBy?: string | null;
+    /** Told once the food is a usual that was not one before: one event per Add a usual. */
+    notify?: Notify;
 };
 
 /** A refusal from the shared food rules, shown under the food input. */
@@ -281,6 +288,7 @@ export async function addUsualFromProduct(
             await setUsualProduct(store, householdId, target.id, product.id, {
                 purchase: input.purchase,
                 stores: input.stores,
+                notify: input.notify,
             });
         }
     } catch (err) {
@@ -295,13 +303,21 @@ export async function addUsualFromProduct(
         throw underFoodField(err);
     }
     const refreshed = await liveFood(store, householdId, target.id);
+    // A product made the usual told the household from `setUsualProduct` (its
+    // own `linkProduct` is silent), so only the added-by-hand stamp is left
+    // to tell here: one Add a usual never sends two.
     if (!self) return refreshed;
+    // A failed check only costs the notification, never the add.
+    const isNew =
+        input.notify != null &&
+        !(await isUsualFood(store, householdId, refreshed).catch(() => true));
     const saved = await store.updateFoodRow({
         ...refreshed,
         usualAddedAt: nowIso(),
         updatedAt: nowIso(),
     });
     if (!saved) throw new FoodsInputError("Unknown food.");
+    if (isNew) await announceNewUsual(input.notify, saved, null);
     return saved;
 }
 
@@ -322,6 +338,8 @@ export type UsualByHandInput = {
     purchase?: UsualPurchasePatch;
     stores: UsualStoreLookup;
     createdBy?: string | null;
+    /** Told once the food is a usual that was not one before: one event per Add a usual. */
+    notify?: Notify;
 };
 
 const MACROS = [
@@ -492,7 +510,16 @@ async function addUsualByHandOnce(
         }
     }
 
-    const existing = await findPlainFoodByName(store, householdId, kind, name);
+    // One read of the catalog serves the name lookup and, when the food is
+    // there, the check that it is a usual already.
+    const catalog = await store.listFoods(householdId);
+    const existing = await findPlainFoodByName(
+        store,
+        householdId,
+        kind,
+        name,
+        catalog,
+    );
     if (existing?.genericFoodId) {
         throw new UsualInputError(
             `${existing.name} is a product of another food. Pick a different name.`,
@@ -515,6 +542,10 @@ async function addUsualByHandOnce(
     }
 
     const stamp = nowIso();
+    const isNew =
+        input.notify != null &&
+        (existing == null ||
+            !(await isUsualFood(store, householdId, existing, catalog)));
     let food: Food;
     if (!existing) {
         food = await store.insertFood(
@@ -573,6 +604,7 @@ async function addUsualByHandOnce(
         food = saved;
     }
     if (barcode) await store.setBarcode(householdId, barcode, food.id);
+    if (isNew) await announceNewUsual(input.notify, food, null);
     return food;
 }
 

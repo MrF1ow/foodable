@@ -1183,7 +1183,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     const actor = await callerActor();
                     const run = await runDestructive(
                         "delete_recipe",
-                        async (rec) => {
+                        async (rec, _householdId, notify) => {
                             const store = liveRecipesStore();
                             const recipe = await store.getRecipe(
                                 actor.householdId,
@@ -1225,6 +1225,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                     userId: actor.userId,
                                     isOwner: actor.isOwner,
                                 },
+                                { notify },
                             );
                             return {
                                 value: { deleted },

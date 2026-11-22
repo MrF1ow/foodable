@@ -11,6 +11,7 @@
  */
 import { Hono } from "hono";
 import { liveFoodsStore } from "../../db/foods.js";
+import { liveNotifier } from "../../db/notify.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import {
     FoodsInputError,
@@ -214,6 +215,7 @@ usualAddRoutes.post("/kitchen/usuals/add/product", requireMember, async (c) => {
             purchase: purchaseFromBody(body),
             stores: liveSettingsStore(),
             createdBy: c.get("userId"),
+            notify: liveNotifier(member.householdId, c.get("userId")),
         });
     } catch (err) {
         const shown = refusal(err);
@@ -287,6 +289,7 @@ usualAddRoutes.post("/kitchen/usuals/add/manual", requireMember, async (c) => {
             purchase: purchaseFromBody(body),
             stores: liveSettingsStore(),
             createdBy: c.get("userId"),
+            notify: liveNotifier(member.householdId, c.get("userId")),
         });
     } catch (err) {
         const shown = refusal(err);

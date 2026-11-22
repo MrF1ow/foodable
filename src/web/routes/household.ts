@@ -64,6 +64,7 @@ import {
     updateHouseholdConfig,
     updateSocialReaderEnabled,
 } from "../../db/household.js";
+import { liveNotifier } from "../../db/notify.js";
 import { liveRulesStore } from "../../db/rules.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import {
@@ -439,6 +440,7 @@ householdRoutes.post("/kitchen/usuals/:foodId", requireMember, async (c) => {
             {
                 purchase,
                 stores: liveSettingsStore(),
+                notify: liveNotifier(member.householdId, userId),
             },
         );
         // The new edit sheet posts "Add when it runs low" with the rest. An
@@ -511,7 +513,9 @@ householdRoutes.post(
             if (!picked) {
                 throw new FoodsInputError("Pick a food or scan a barcode.");
             }
-            await addProduct(store, member.householdId, foodId, picked.id);
+            await addProduct(store, member.householdId, foodId, picked.id, {
+                notify: liveNotifier(member.householdId, userId),
+            });
         } catch (err) {
             const page = await usualPickerFormError(userId, foodId, err, from);
             return c.html(page.html, page.status);
@@ -550,6 +554,7 @@ householdRoutes.post(
                 allergens: formAllergens(body),
                 // Same rule as addProduct: the first product is usual.
                 makeUsual: !plain.usualProductId,
+                notify: liveNotifier(member.householdId, userId),
             });
         } catch (err) {
             const page = await usualPickerFormError(userId, foodId, err, from);
@@ -1278,6 +1283,7 @@ householdRoutes.post(
                     member.householdId,
                     foodId,
                     raw.trim() === "" ? null : raw.trim(),
+                    { notify: liveNotifier(member.householdId, userId) },
                 );
             }
             if ("usual_product_id" in asText) {
@@ -1287,7 +1293,10 @@ householdRoutes.post(
                     member.householdId,
                     foodId,
                     raw.trim() === "" ? null : raw.trim(),
-                    { stores: settings },
+                    {
+                        stores: settings,
+                        notify: liveNotifier(member.householdId, userId),
+                    },
                 );
             }
             await updateFood(store, member.householdId, foodId, patch, {
