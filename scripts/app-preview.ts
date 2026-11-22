@@ -9,12 +9,25 @@
  *
  * --shots needs Chromium on PATH (google-chrome-stable, chromium, or
  * chromium-browser — not the PATH google-chrome wrapper, which pins the GUI
- * profile). Shots pass --force-prefers-reduced-motion so --virtual-time-budget
- * does not freeze page entrances half-done, a throwaway --user-data-dir, and
- * an emulated prefers-color-scheme so bare pages (OS theme) render light and
- * dark as different bytes.
+ * profile). One Chromium serves the whole run, driven over the DevTools
+ * protocol with a private context per shot (scripts/app-preview-shots.ts). It
+ * runs with reduced motion so the virtual-time budget does not freeze page
+ * entrances half-done, a throwaway --user-data-dir, and an emulated
+ * prefers-color-scheme so bare pages (OS theme) render light and dark as
+ * different bytes.
  * The server never imports this file.
  */
+import {
+    colorSchemeOf,
+    findChromium,
+    DESKTOP_WIDTH,
+    launchBrowser,
+    layoutOf,
+    MODAL_BUDGET_MS,
+    PAGE_BUDGET_MS,
+    PHONE_WIDTH,
+    windowsFor,
+} from "./app-preview-shots.js";
 import {
     PREVIEW_NOW,
     pinBrowserClock,
@@ -2653,31 +2666,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     };
 }
 
-function findChromium(): string | null {
-    // Prefer the real binary. PATH `google-chrome` is often a wrapper that
-    // pins --user-data-dir to the GUI profile and hangs headless shots.
-    for (const bin of [
-        "/usr/bin/google-chrome-stable",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-        "google-chrome-stable",
-        "chromium",
-        "chromium-browser",
-    ]) {
-        if (bin.startsWith("/")) {
-            try {
-                if (Bun.file(bin).size > 0) return bin;
-            } catch {
-                // missing
-            }
-            continue;
-        }
-        const path = Bun.which(bin);
-        if (path) return path;
-    }
-    return null;
-}
-
 async function logScannerPreview(theme: "light" | "dark"): Promise<string> {
     const chrome = {
         ...previewChrome(theme),
@@ -2864,79 +2852,79 @@ if (process.argv.includes("--shots")) {
         console.error("--shots: no chromium on PATH");
         process.exit(1);
     }
-    for (const name of names) {
-        const theme = name.endsWith("-dark") ? "dark" : "light";
-        const dataDir = `${OUT}/chrome-${name}`;
-        // Bare pages follow the OS; headless Chromium defaults to dark, so
-        // emulate the shot's colour scheme. --user-data-dir is throwaway so
-        // the GUI profile is never touched.
-        const colorScheme = theme === "dark" ? 2 : 1;
-        // The shell's two layouts: the phone nav at 390 wide, the sidebar and
-        // top bar at the design's 1440. Long pages (the dev gallery, Today,
-        // Settings) get a tall window so --shots capture every block.
-        const shotBase = name.replace(/-(?:light|dark)$/, "");
-        const growsWithPage = shotBase.startsWith("dev-gallery-v2");
-        const galleryFullPage =
-            growsWithPage ||
-            shotBase.startsWith("trends-v2") ||
-            shotBase === "nutrition" ||
-            shotBase === "nutrition-agent-notice" ||
-            shotBase === "settings" ||
-            shotBase === "settings-account" ||
-            shotBase === "settings-display" ||
-            shotBase === "settings-household-v2" ||
-            shotBase === "settings-household-v2-member" ||
-            shotBase.startsWith("settings-goals") ||
-            shotBase === "settings-saved" ||
-            shotBase === "settings-export" ||
-            shotBase.startsWith("settings-ai") ||
-            shotBase.startsWith("settings-score") ||
-            shotBase === "help" ||
-            shotBase === "recipes" ||
-            shotBase === "recipe";
-        // The dev gallery grows with every component it shows, so it is
-        // measured first and shot at its own height. The page is measured in
-        // an iframe of the shot's own width, since headless Chromium lays a
-        // phone-sized window out wider than --window-size says, and only once
-        // its fonts have loaded (timers, since no animation frame fires under
-        // virtual time; the colour scheme does not change the layout, and
-        // forcing it crashes the renderer once a page holds an iframe). Other
-        // long pages keep the fixed window: their shot size is part of the
-        // no-change diff.
-        const fullHeight = async (width: number): Promise<number> => {
-            const probe = `${OUT}/${name}.measure.html`;
-            await Bun.write(
-                probe,
-                `<!doctype html><iframe id="f" src="/${name}.html" style="width:${width}px;height:900px;border:0"></iframe><script>const wait=(ms)=>new Promise((r)=>setTimeout(r,ms));f.onload=async()=>{const d=f.contentDocument;await Promise.race([d.fonts.ready,wait(1500)]);await wait(200);document.documentElement.setAttribute("data-fd-height",String(Math.max(d.documentElement.scrollHeight,d.body.scrollHeight)))}</script>`,
+    const origin = `http://localhost:${PORT}`;
+    // One Chromium for the whole run, a private context per shot (see
+    // scripts/app-preview-shots.ts). Always closed, whatever happens.
+    const browser = await launchBrowser(chromium, `${OUT}/chrome-shots`);
+    try {
+        for (const name of names) {
+            // Bare pages follow the OS; headless Chromium defaults to dark, so
+            // emulate the shot's colour scheme.
+            const scheme = colorSchemeOf(name);
+            // The shell's two layouts: the phone nav at 390 wide, the sidebar
+            // and top bar at the design's 1440. Long pages (Today, Settings)
+            // get a tall window so --shots capture every block.
+            const layout = layoutOf(name);
+            // The dev gallery grows with every component it shows, so it is
+            // measured first and shot at its own height. The page is measured
+            // in an iframe of the shot's own width, since headless Chromium
+            // lays a phone-sized window out wider than the window says, and
+            // only once its fonts have loaded (timers, since no animation
+            // frame fires under virtual time; the colour scheme does not
+            // change the layout, and forcing it crashes the renderer once a
+            // page holds an iframe). Other long pages keep the fixed window:
+            // their shot size is part of the no-change diff.
+            const fullHeight = async (width: number): Promise<number> => {
+                const probe = `${OUT}/${name}.measure.html`;
+                await Bun.write(
+                    probe,
+                    `<!doctype html><iframe id="f" src="/${name}.html" style="width:${width}px;height:900px;border:0"></iframe><script>const wait=(ms)=>new Promise((r)=>setTimeout(r,ms));f.onload=async()=>{const d=f.contentDocument;await Promise.race([d.fonts.ready,wait(1500)]);await wait(200);document.documentElement.setAttribute("data-fd-height",String(Math.max(d.documentElement.scrollHeight,d.body.scrollHeight)))}</script>`,
+                );
+                try {
+                    return await browser.measure({
+                        url: `${origin}/${name}.measure.html`,
+                        viewport: { width: Math.max(width, 500), height: 900 },
+                        budgetMs: PAGE_BUDGET_MS,
+                    });
+                } finally {
+                    await Bun.$`rm -f ${probe}`.quiet();
+                }
+            };
+            const { phone, desktop } = windowsFor(
+                layout,
+                layout === "measured"
+                    ? {
+                          phone: await fullHeight(PHONE_WIDTH),
+                          desktop: await fullHeight(DESKTOP_WIDTH),
+                      }
+                    : undefined,
             );
-            const dom =
-                await Bun.$`timeout 60 ${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --user-data-dir=${dataDir} --window-size=${Math.max(width, 500)},900 --virtual-time-budget=3000 --dump-dom http://localhost:${PORT}/${name}.measure.html`.text();
-            await Bun.$`rm -f ${probe}`.quiet();
-            const found = /data-fd-height="(\d+)"/.exec(dom);
-            if (!found) throw new Error(`${name}: could not measure the page`);
-            return Number(found[1]);
-        };
-        const phone = growsWithPage
-            ? `390,${await fullHeight(390)}`
-            : galleryFullPage
-              ? "390,5400"
-              : "390,844";
-        const desktop = growsWithPage
-            ? `1440,${await fullHeight(1440)}`
-            : galleryFullPage
-              ? "1440,5400"
-              : "1440,960";
-        await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${phone} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-390.png http://localhost:${PORT}/${name}.html`.quiet();
-        console.log(`${OUT}/${name}-390.png`);
-        await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=${desktop} --virtual-time-budget=3000 --screenshot=${OUT}/${name}-1440.png http://localhost:${PORT}/${name}.html`.quiet();
-        console.log(`${OUT}/${name}-1440.png`);
+            for (const [suffix, viewport] of [
+                ["390", phone],
+                ["1440", desktop],
+            ] as const) {
+                const png = await browser.screenshot({
+                    url: `${origin}/${name}.html`,
+                    viewport,
+                    scheme,
+                    budgetMs: PAGE_BUDGET_MS,
+                });
+                await Bun.write(`${OUT}/${name}-${suffix}.png`, png);
+                console.log(`${OUT}/${name}-${suffix}.png`);
+            }
+        }
+        for (const name of modalShotPages) {
+            const png = await browser.screenshot({
+                url: `${origin}/${name}.html`,
+                viewport: { width: PHONE_WIDTH, height: 844 },
+                scheme: colorSchemeOf(name),
+                budgetMs: MODAL_BUDGET_MS,
+            });
+            await Bun.write(`${OUT}/${name}.png`, png);
+            console.log(`${OUT}/${name}.png`);
+        }
+    } finally {
+        await browser.close();
+        server.stop();
     }
-    for (const name of modalShotPages) {
-        const theme = name.endsWith("-dark") ? "dark" : "light";
-        const dataDir = `${OUT}/chrome-${name}`;
-        const colorScheme = theme === "dark" ? 2 : 1;
-        await Bun.$`${chromium} --headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage --hide-scrollbars --force-prefers-reduced-motion --blink-settings=preferredColorScheme=${colorScheme} --user-data-dir=${dataDir} --window-size=390,844 --virtual-time-budget=4000 --screenshot=${OUT}/${name}.png http://localhost:${PORT}/${name}.html`.quiet();
-        console.log(`${OUT}/${name}.png`);
-    }
-    server.stop();
 }
