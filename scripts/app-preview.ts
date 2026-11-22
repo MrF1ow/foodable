@@ -15,6 +15,12 @@
  * dark as different bytes.
  * The server never imports this file.
  */
+import {
+    PREVIEW_NOW,
+    pinBrowserClock,
+    pinServerClock,
+    pinTimeZone,
+} from "./preview-clock.js";
 import { fridgeNotices, utcTodayFromDate } from "../src/domain/stock.js";
 import { groceryRestockNotices } from "../src/domain/restock.js";
 import {
@@ -181,9 +187,6 @@ const PREVIEW_SHARED_LINKS: SharedLinkRow[] = [
         expiresAt: null,
     },
 ];
-
-/** The clock the Last active column reads, so the shots do not drift by day. */
-const PREVIEW_NOW = new Date("2026-11-12T18:00:00Z");
 
 // The Stores screens of the design: Costco with six sections and five lines on
 // the list, Trader Joe's, and a market with no sections yet.
@@ -2788,13 +2791,17 @@ async function logSheetPreview(
 // The hashed asset hrefs the pages carry only exist once the bundles are built.
 await Promise.all([getAppCss(), getAppJs(), getAppV2Css(), getAppV2Js()]);
 
+// Every page below reads this one instant, not the machine's clock.
+pinTimeZone();
+pinServerClock();
+
 const names: string[] = [];
 const modalShotPages: string[] = [];
 for (const theme of ["light", "dark"] as const) {
     const p = await pages(theme);
     for (const [name, html] of Object.entries(p)) {
         const file = `${name}-${theme}`;
-        await Bun.write(`${OUT}/${file}.html`, html);
+        await Bun.write(`${OUT}/${file}.html`, pinBrowserClock(html));
         names.push(file);
     }
     modalShotPages.push(
