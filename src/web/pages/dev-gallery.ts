@@ -63,6 +63,12 @@ import { statCard } from "../components/v2/stat-tiles-card.js";
 import { stepperControl } from "../components/v2/stepper-control.js";
 import { tableRow, tableRows } from "../components/v2/table-row.js";
 import { weekDay, weekStrip } from "../components/v2/week-strip.js";
+import { keyboardHint } from "../components/v2/keyboard-hint.js";
+import { pageLayout } from "../components/v2/page-layout.js";
+import { selectionBar } from "../components/v2/selection-bar.js";
+import { sideLink } from "../components/v2/side-link.js";
+import { sidebar } from "../components/v2/sidebar.js";
+import { topBar } from "../components/v2/top-bar.js";
 import { stepper } from "../components/v2/stepper.js";
 import {
     deltaStat,
@@ -594,29 +600,26 @@ type SheetExample = {
     today: string;
 };
 
-const FOOD_MACROS = [
-    { label: "kcal", value: 248, dot: "calories" },
-    { label: "Protein", value: 47, unit: "g", dot: "protein" },
-    { label: "Carbs", value: 0, unit: "g", dot: "carbs" },
-    { label: "Fat", value: 5, unit: "g", dot: "fat" },
-] as const;
-
-/** The design's Amount section: the stepper and the four macro tiles. */
+/** The design's Amount section: the Stepper and the four Macro tiles. */
 const amountContent = (sheetId: string): Html =>
     raw(
-        `${stepper({
+        `${stepperControl({
             name: `${sheetId}_amount`,
             id: `${sheetId}-amount`,
             label: "Amount",
             value: 150,
             min: 0,
             unit: "g",
-        })}${statTiles(FOOD_MACROS, { label: "Per portion" })}`,
+        })}${macroTiles({
+            label: "Per portion",
+            tiles: [
+                { kind: "kcal", value: "248" },
+                { kind: "protein", value: "47 g" },
+                { kind: "carbs", value: "0 g" },
+                { kind: "fat", value: "5 g" },
+            ],
+        })}`,
     );
-
-/** A stand-in for a component a later step builds (Field, Quick action). */
-const slot = (text: string): Html =>
-    raw(`<div class="fd-sheet-sample__slot">${text}</div>`);
 
 const SHEET_EXAMPLES: SheetExample[] = [
     {
@@ -636,7 +639,7 @@ const SHEET_EXAMPLES: SheetExample[] = [
             kind: "single",
             primary: { label: "Add to dinner" },
         },
-        today: "stepper + statTiles",
+        today: "Stepper control and Macro tiles, the real components",
     },
     {
         key: "edit",
@@ -647,8 +650,14 @@ const SHEET_EXAMPLES: SheetExample[] = [
         sections: (id) => [
             sheetSection({
                 kind: "fields",
-                label: "Name",
-                content: slot("Chicken thighs"),
+                // The design draws the box alone under the section's label; the
+                // Field builder draws its own label, so the section has none.
+                content: field({
+                    id: `${id}-name`,
+                    label: "Name",
+                    name: "name",
+                    value: "Chicken thighs",
+                }),
             }),
             sheetSection({
                 kind: "amount",
@@ -658,19 +667,18 @@ const SHEET_EXAMPLES: SheetExample[] = [
             sheetSection({
                 kind: "choice",
                 label: "Shared with",
-                content: choiceGroup({
-                    name: `${id}_shared`,
-                    legend: "Shared with",
-                    options: [
-                        { value: "all", label: "All", selected: true },
-                        { value: "me", label: "Just me" },
-                        { value: "household", label: "Household" },
+                content: segmented({
+                    label: "Shared with",
+                    segments: [
+                        { label: "All", selected: true },
+                        { label: "Just me" },
+                        { label: "Household" },
                     ],
                 }),
             }),
         ],
         actions: { kind: "pair", primary: { label: "Save" } },
-        today: "field and segmented are placeholders; stepper, statTiles, choiceGroup",
+        today: "Field, Stepper control, Macro tiles and Segmented, the real components",
     },
     {
         key: "put-away",
@@ -742,60 +750,44 @@ const SHEET_EXAMPLES: SheetExample[] = [
             sheetSection({
                 kind: "chips",
                 label: "Add to",
-                content: choiceGroup({
-                    name: `${id}_meal`,
-                    legend: "Add to",
-                    options: [
-                        { value: "breakfast", label: "Breakfast" },
-                        { value: "lunch", label: "Lunch" },
-                        { value: "dinner", label: "Dinner", selected: true },
-                        { value: "snacks", label: "Snacks" },
+                content: chipGroup({
+                    label: "Add to",
+                    select: "single",
+                    chips: [
+                        { label: "Breakfast" },
+                        { label: "Lunch" },
+                        { label: "Dinner", selected: true },
+                        { label: "Snacks" },
                     ],
                 }),
             }),
             sheetSection({
                 kind: "chips",
                 label: "Recent",
-                content: chipNav(
-                    [
-                        chipLink({
-                            label: "Scrambled eggs",
-                            count: 216,
-                            href: "#",
-                        }),
-                        chipLink({
-                            label: "Chicken rice bowl",
-                            count: 852,
-                            href: "#",
-                        }),
-                        chipLink({
-                            label: "Greek yogurt",
-                            count: 150,
-                            href: "#",
-                        }),
+                content: chipGroup({
+                    label: "Recent foods",
+                    select: "links",
+                    chips: [
+                        { label: "Scrambled eggs", count: 216, href: "#" },
+                        { label: "Chicken rice bowl", count: 852, href: "#" },
+                        { label: "Greek yogurt", count: 150, href: "#" },
                     ],
-                    { label: "Recent foods" },
-                ),
+                }),
             }),
             sheetSection({
                 kind: "tiles",
                 label: "Quick",
                 content: raw(
                     [
-                        ["scan", "Scan barcode"],
-                        ["camera", "Photo of meal"],
-                        ["bolt", "Quick calories"],
-                        ["drop", "Water +250 ml"],
-                    ]
-                        .map(
-                            ([name, label]) =>
-                                `<span class="fd-sheet-sample__tile"><span class="fd-sheet-sample__tile-icon">${icon(name as "scan")}</span>${label}</span>`,
-                        )
-                        .join(""),
+                        quickAction({ label: "Scan barcode", icon: "scan" }),
+                        quickAction({ label: "Photo of meal", icon: "camera" }),
+                        quickAction({ label: "Quick calories", icon: "bolt" }),
+                        quickAction({ label: "Water +250 ml", icon: "drop" }),
+                    ].join(""),
                 ),
             }),
         ],
-        today: "choiceGroup and chipLink; the search box and Quick tiles are the sheet's own and a placeholder",
+        today: "Chip group and Quick action, the real components; the search box is the sheet header's own",
     },
     {
         key: "log-results",
@@ -816,15 +808,16 @@ const SHEET_EXAMPLES: SheetExample[] = [
         sections: () => [
             sheetSection({
                 kind: "chips",
-                content: chipNav(
-                    [
-                        chipLink({ label: "All", href: "#", selected: true }),
-                        chipLink({ label: "Foods", href: "#" }),
-                        chipLink({ label: "Recipes", href: "#" }),
-                        chipLink({ label: "My foods", href: "#" }),
+                content: chipGroup({
+                    label: "Filter results",
+                    select: "links",
+                    chips: [
+                        { label: "All", href: "#", selected: true },
+                        { label: "Foods", href: "#" },
+                        { label: "Recipes", href: "#" },
+                        { label: "My foods", href: "#" },
                     ],
-                    { label: "Filter results" },
-                ),
+                }),
             }),
             sheetSection({
                 kind: "results",
@@ -866,7 +859,7 @@ const SHEET_EXAMPLES: SheetExample[] = [
             kind: "link",
             link: { label: "Not here? Scan the barcode" },
         },
-        today: "chipLink and itemRow (add)",
+        today: "Chip group and itemRow (add), the real components",
     },
     {
         key: "log-empty",
@@ -1149,7 +1142,7 @@ const ITEM_ROW_EXAMPLES: {
     {
         name: "Setting",
         id: 171872,
-        today: "settings rows: icon, title, subtitle, switch (a Segmented in the control slot is a later component)",
+        today: "settings rows: icon, title, subtitle, switch",
         row: {
             title: "Show cards in chat",
             subtitle: "Goals and meals as widgets",
@@ -1158,6 +1151,28 @@ const ITEM_ROW_EXAMPLES: {
                 kind: "toggle",
                 on: true,
                 label: "Show cards in chat",
+            },
+        },
+    },
+    {
+        name: "Setting · control slot",
+        id: 178196,
+        today: "the same row with the Segmented (Small) in its control slot; the frame draws it hidden",
+        row: {
+            title: "Show cards in chat",
+            subtitle: "Goals and meals as widgets",
+            lead: { kind: "icon", name: "cart" },
+            trailing: {
+                kind: "control",
+                html: segmented({
+                    label: "Show cards in chat",
+                    size: "small",
+                    segments: [
+                        { label: "All", selected: true },
+                        { label: "Just me" },
+                        { label: "Household" },
+                    ],
+                }),
             },
         },
     },
@@ -1856,6 +1871,155 @@ function navBarSection(): string {
     );
 }
 
+/** A labelled, dashed box that stands for a page's content in a layout. */
+const dummy = (label: string, height = 96): Html =>
+    raw(
+        `<div style="box-sizing:border-box;min-height:${height}px;display:grid;place-items:center;border:1px dashed var(--line);border-radius:var(--radius-md);background:var(--surface-panel);color:var(--text-tertiary);font:400 var(--text-label-size)/var(--text-label-line) var(--font-body)">${label}</div>`,
+    );
+
+function desktopShellSection(): string {
+    const sidebarLinks = (kitchenSubs: boolean) => [
+        {
+            label: "Today",
+            href: "#",
+            icon: "calendar" as const,
+            current: !kitchenSubs,
+        },
+        {
+            label: "Kitchen",
+            href: "#",
+            icon: "fridge" as const,
+            current: kitchenSubs ? ("group" as const) : false,
+            subs: kitchenSubs
+                ? [
+                      { label: "Fridge", href: "#", current: true },
+                      { label: "Groceries", href: "#" },
+                      { label: "Usuals", href: "#" },
+                  ]
+                : undefined,
+        },
+        { label: "Recipes", href: "#", icon: "book" as const },
+        { label: "Trends", href: "#", icon: "trend" as const },
+    ];
+    const sidebarStage = (kitchenSubs: boolean) =>
+        `<div style="width:248px;max-width:100%;height:640px;margin-top:var(--space-sm)">${sidebar(
+            {
+                household: {
+                    name: "The Flow household",
+                    meta: "3 members",
+                    href: "#",
+                    initials: "F",
+                },
+                links: sidebarLinks(kitchenSubs),
+                settings: { label: "Settings", href: "#" },
+                account: { name: "Ethan Flow", role: "Owner", href: "#" },
+                inline: true,
+            },
+        )}</div>`;
+    const wide = (html: string | Html) =>
+        `<div style="margin-top:var(--space-sm);max-width:1128px">${html}</div>`;
+    const header = (title: string, subtitle?: string) =>
+        pageHeaderV2({ title, subtitle, bell: {} });
+    const layouts = [
+        [
+            "Layout=Single (720)",
+            pageLayout({
+                layout: "single",
+                header: header("Kitchen", "24 items"),
+                content: raw(
+                    `${dummy("Content, 720 wide")}${dummy("More content")}`,
+                ),
+            }),
+        ],
+        [
+            "Layout=Narrow (480)",
+            pageLayout({
+                layout: "narrow",
+                header: header("Add a usual"),
+                content: raw(
+                    `${dummy("Content, 480 wide")}${dummy("More content")}`,
+                ),
+            }),
+        ],
+        [
+            "Layout=Two columns",
+            pageLayout({
+                layout: "two-columns",
+                header: header("Trends"),
+                left: dummy("Left column", 160),
+                right: dummy("Right column", 160),
+            }),
+        ],
+        [
+            "Layout=Settings (240 + 640)",
+            pageLayout({
+                layout: "settings",
+                header: header("Settings"),
+                menu: raw(
+                    ["Account", "Household", "Goals", "Display"]
+                        .map((l, i) =>
+                            sideLink({
+                                kind: "main",
+                                label: l,
+                                href: "#",
+                                icon: "user",
+                                current: i === 0,
+                            }),
+                        )
+                        .join(""),
+                ),
+                content: raw(
+                    `${dummy("Content, 640 wide")}${dummy("More content")}`,
+                ),
+            }),
+        ],
+    ] as const;
+    return block(
+        "Desktop shell",
+        "Keyboard hint 590349, Side link 590905, Sidebar 590906, Top bar 590953, Selection bar 593977, Page layout 677783, set in Desktop shell 593979. Page layouts are shown at the width of the column beside the sidebar: the content is centred.",
+        [
+            caption("Keyboard hint: ⌘K, Esc"),
+            `<div class="fd-gallery-row" style="margin-top:var(--space-sm)">${keyboardHint({ keys: "⌘K" })}${keyboardHint({ keys: "Esc", label: "Escape" })}</div>`,
+            caption(
+                "Side link: Kind=Main × Default, Current; Kind=Sub × Default, Current",
+            ),
+            `<div style="display:flex;flex-direction:column;gap:var(--space-2xs);width:216px;max-width:100%;margin-top:var(--space-sm)">${sideLink({ kind: "main", label: "Today", href: "#", icon: "calendar" })}${sideLink({ kind: "main", label: "Today", href: "#", icon: "calendar", current: true })}${sideLink({ kind: "sub", label: "Overview", href: "#" })}${sideLink({ kind: "sub", label: "Overview", href: "#", current: true })}</div>`,
+            caption("Sidebar: Today current; Kitchen's sections under it"),
+            `<div style="display:flex;flex-wrap:wrap;gap:var(--space-2xl)">${sidebarStage(false)}${sidebarStage(true)}</div>`,
+            caption(
+                "Top bar: search with a ⌘K hint, the bell, Log food; no scan button",
+            ),
+            wide(topBar({ logFood: { href: "#" } })),
+            wide(topBar({ logFood: { href: "#" }, bell: { unread: true } })),
+            caption("Selection bar: Placement=Floating, Placement=Inline"),
+            wide(
+                selectionBar({
+                    placement: "floating",
+                    count: 3,
+                    actions: [
+                        { label: "Cancel" },
+                        { label: "Discard", variant: "danger" },
+                    ],
+                }),
+            ),
+            `<div style="margin-top:var(--space-sm);max-width:900px">${selectionBar(
+                {
+                    placement: "inline",
+                    count: 3,
+                    actions: [
+                        { label: "Cancel" },
+                        { label: "Discard", variant: "danger" },
+                    ],
+                },
+            )}</div>`,
+            ...layouts.flatMap(([name, html]) => [
+                caption(`Page layout: ${name}`),
+                wide(html),
+            ]),
+        ].join(""),
+    );
+}
+
 function displayCardsSection(): string {
     return block(
         "Display & data · cards",
@@ -2054,6 +2218,7 @@ function devGalleryBody(): string {
         segmentedSection(),
         toggleFieldSection(),
         navBarSection(),
+        desktopShellSection(),
         displayCardsSection(),
         displayNutritionSection(),
         displayControlsSection(),

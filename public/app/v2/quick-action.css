@@ -35,6 +35,10 @@
     background: var(--surface-raised);
     color: var(--text-secondary);
 }
+.fd-quick-action__box .fd-icon {
+    width: var(--control-lg-icon);
+    height: var(--control-lg-icon);
+}
 .fd-quick-action__caption {
     font-size: var(--text-caption-size);
     line-height: var(--text-caption-line);

@@ -40,7 +40,10 @@
     cursor: pointer;
 }
 
-:where(.fd-btn[data-fd-btn]) :where(.fd-icon) {
+/* `svg.fd-icon` (one type, one class) outranks the bare `.fd-icon` size in
+ * components.css whatever the order, and still loses to any rule a context
+ * writes with two classes (`.fd-sheet .fd-btn--accent .fd-icon`). */
+:where(.fd-btn[data-fd-btn]) svg.fd-icon {
     flex: none;
     width: var(--fd-btn-icon);
     height: var(--fd-btn-icon);
