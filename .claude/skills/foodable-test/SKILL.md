@@ -71,7 +71,7 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
 - **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped.
-- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" = another run holds them; wait until `ss -ltn` shows both free). No database. It also serves `/dev/gallery-v2`, the sheet cases' page.
+- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" = another run holds them; wait until `ss -ltn` shows both free). No database. It also serves `/dev/gallery-v2` for the sheet and menu cases.
 - **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow, long `timeout`); clear tmp/app-preview first. Without `--shots`: serves :4787 (`PREVIEW_PORT`). Per page: `-390.png`, `-1440.png`.
 - **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`) compares the non-gallery shots of base and branch; exit 1 on a diff. One render at a time per tree; reuse the base.
 - **WebKit (Safari-class):** Playwright's WPE `MiniBrowser` starts only through a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH` (`bin`, `lib`, `share`), `WEBKIT_FORCE_COMPLEX_TEXT=1` and an `LD_LIBRARY_PATH` with its `lib`, `sys/lib` and an ICU 74 libs dir.
@@ -83,7 +83,7 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked.
 - **Migrations:** `bun run db:dryrun` (throwaway Postgres; needs `initdb`). `bun run db:rehearse` (production copy via `railway ssh`): only when asked.
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
-- **Types, lint, format:** `bun run typecheck`, `lint`, `format:check` (`format` fixes). Both need Bun ≥ 1.4.4 for `bun fmt`: put `$(mise where bun@1.4.4)/bin` first on PATH (`mise exec` misses the `bun` inside scripts).
+- **Types, lint, format:** `bun run typecheck`, `lint`, `format:check` (`format` fixes). `bun fmt` needs Bun ≥ 1.4.4: put `$(mise where bun@1.4.4)/bin` first on PATH (`mise exec` misses the `bun` inside scripts).
 
 `e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if that is the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 

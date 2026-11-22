@@ -14,46 +14,62 @@ const escapeRegExp = (text: string): string =>
 
 const rules = css.replace(/\/\*[\s\S]*?\*\//g, "");
 
-test("components.css has no colour literal: every colour is a token", () => {
-    expect(rules.match(/#[0-9a-fA-F]{3,8}\b/g)).toBeNull();
-    expect(
-        rules.match(/\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/g),
-    ).toBeNull();
-    // Named colours would slip past the checks above.
-    expect(
-        rules.match(
-            /:\s*(?:white|black|red|green|blue|gray|grey|orange|yellow|purple|pink)\b/g,
-        ),
-    ).toBeNull();
-});
+// The stylesheets that follow the component rules: same checks, same strictness.
+const menuRules = readFileSync(
+    join(import.meta.dir, "../../../../public/app/v2/menu.css"),
+    "utf8",
+).replace(/\/\*[\s\S]*?\*\//g, "");
+const guarded = [
+    { name: "components.css", rules, minClasses: 40 },
+    { name: "menu.css", rules: menuRules, minClasses: 10 },
+] as const;
 
-test("components.css only defines fd- classes and --fd- locals", () => {
-    const selectors = rules.replace(/\{[^{}]*\}/g, "{}");
-    const classes = [...selectors.matchAll(/\.([A-Za-z_][\w-]*)/g)].map(
-        (m) => m[1]!,
-    );
-    expect(classes.length).toBeGreaterThan(40);
-    expect(classes.filter((c) => !c.startsWith("fd-"))).toEqual([]);
-    const declared = [...rules.matchAll(/[{;]\s*(--[\w-]+)\s*:/g)].map(
-        (m) => m[1]!,
-    );
-    expect(declared.filter((v) => !v.startsWith("--fd-"))).toEqual([]);
-});
+for (const { name, rules: text } of guarded) {
+    test(`${name} has no colour literal: every colour is a token`, () => {
+        expect(text.match(/#[0-9a-fA-F]{3,8}\b/g)).toBeNull();
+        expect(
+            text.match(/\b(?:rgba?|hsla?|hwb|lab|lch|oklab|oklch|color)\(/g),
+        ).toBeNull();
+        // Named colours would slip past the checks above.
+        expect(
+            text.match(
+                /:\s*(?:white|black|red|green|blue|gray|grey|orange|yellow|purple|pink)\b/g,
+            ),
+        ).toBeNull();
+    });
+}
 
-test("every var(--x) it reads is a tokens.css name or an --fd- local", () => {
-    const tokens = readFileSync(
-        join(import.meta.dir, "../../../../public/app/v2/tokens.css"),
-        "utf8",
-    );
-    const defined = new Set(
-        [...tokens.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]!),
-    );
-    const used = [...rules.matchAll(/var\((--[\w-]+)/g)].map((m) => m[1]!);
-    const unknown = used.filter(
-        (v) => !defined.has(v) && !v.startsWith("--fd-"),
-    );
-    expect(unknown).toEqual([]);
-});
+for (const { name, rules: text, minClasses } of guarded) {
+    test(`${name} only defines fd- classes and --fd- locals`, () => {
+        const selectors = text.replace(/\{[^{}]*\}/g, "{}");
+        const classes = [...selectors.matchAll(/\.([A-Za-z_][\w-]*)/g)].map(
+            (m) => m[1]!,
+        );
+        expect(classes.length).toBeGreaterThan(minClasses);
+        expect(classes.filter((c) => !c.startsWith("fd-"))).toEqual([]);
+        const declared = [...text.matchAll(/[{;]\s*(--[\w-]+)\s*:/g)].map(
+            (m) => m[1]!,
+        );
+        expect(declared.filter((v) => !v.startsWith("--fd-"))).toEqual([]);
+    });
+}
+
+for (const { name, rules: text } of guarded) {
+    test(`every var(--x) ${name} reads is a tokens.css name or an --fd- local`, () => {
+        const tokens = readFileSync(
+            join(import.meta.dir, "../../../../public/app/v2/tokens.css"),
+            "utf8",
+        );
+        const defined = new Set(
+            [...tokens.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1]!),
+        );
+        const used = [...text.matchAll(/var\((--[\w-]+)/g)].map((m) => m[1]!);
+        const unknown = used.filter(
+            (v) => !defined.has(v) && !v.startsWith("--fd-"),
+        );
+        expect(unknown).toEqual([]);
+    });
+}
 
 test("transitions are switched off under prefers-reduced-motion", () => {
     expect(rules).toContain("prefers-reduced-motion: reduce");
@@ -326,6 +342,7 @@ const LEGACY_PARTIALS = [
     "gallery.css",
     "kitchen.css",
     "log-sheet.css",
+    "menu.css",
     "product.css",
     "recipes.css",
     "scanner.css",

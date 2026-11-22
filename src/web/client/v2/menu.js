@@ -1,0 +1,276 @@
+// The anchored menu (src/web/components/v2/menu.ts, `[data-fd-menu]`): a ⋯ or
+// Filter button opens a panel of items. Closes on Escape and on a tap outside,
+// arrow keys move between items, focus goes back to the trigger, and a
+// destructive item confirms in place (Cancel + the same verb, no popup).
+// The `<details>` menu (settings-duplicates) has no `[data-fd-menu]` and is
+// never touched here. Binding is idempotent per menu (a WeakSet), so Turbo
+// re-running onLoad on a morph never double-binds.
+
+const bound = new WeakSet();
+let documentBound = false;
+const EDGE = 8; // px kept clear of the screen edge when flipping the panel
+
+const panelOf = (root) => root.querySelector(".fd-menu__panel");
+const triggerOf = (root) => root.querySelector("[data-fd-menu-trigger]");
+const isOpen = (root) => {
+    const panel = panelOf(root);
+    return !!panel && !panel.hidden;
+};
+
+function items(root) {
+    const panel = panelOf(root);
+    if (!panel) return [];
+    return Array.from(
+        panel.querySelectorAll('[role="menuitem"], [role="menuitemcheckbox"]'),
+    ).filter((el) => !el.disabled && !el.closest("[hidden]"));
+}
+
+function resetConfirms(root) {
+    root.querySelectorAll("[data-fd-menu-confirm]").forEach((box) => {
+        const arm = box.querySelector("[data-fd-menu-arm]");
+        const row = box.querySelector(".fd-menu__confirm-row");
+        if (arm) arm.hidden = false;
+        if (row) row.hidden = true;
+    });
+}
+
+// Right-aligned under the trigger; flipped to start when that fits the screen
+// better, and above the trigger when it would leave the bottom. When neither
+// side fits, the side with more room is used and the panel is clamped inside
+// the screen margin.
+function place(root) {
+    const panel = panelOf(root);
+    const trigger = triggerOf(root);
+    if (!panel || !trigger) return;
+    delete panel.dataset.align;
+    delete panel.dataset.side;
+    panel.style.left = "";
+    panel.style.right = "";
+    // Measured before any flip: a panel hanging off an edge would widen the
+    // layout viewport and hide its own overflow.
+    const vw = document.documentElement.clientWidth;
+    const box = root.getBoundingClientRect();
+    const rect = panel.getBoundingClientRect();
+    const fits = (left) => left >= EDGE && left + rect.width <= vw - EDGE;
+    if (!fits(rect.left)) {
+        if (fits(box.left)) {
+            panel.dataset.align = "start";
+        } else {
+            const startRoom = vw - EDGE - box.left;
+            const endRoom = box.right - EDGE;
+            const startSide = startRoom > endRoom;
+            if (startSide) panel.dataset.align = "start";
+            const left = Math.max(
+                EDGE,
+                Math.min(
+                    startSide ? box.left : rect.left,
+                    vw - EDGE - rect.width,
+                ),
+            );
+            panel.style.right = "auto";
+            panel.style.left = left - box.left + "px";
+        }
+    }
+    const now = panel.getBoundingClientRect();
+    const room = trigger.getBoundingClientRect().top - EDGE;
+    if (now.bottom > window.innerHeight - EDGE && room >= now.height) {
+        panel.dataset.side = "top";
+    }
+}
+
+function close(root, restoreFocus) {
+    const panel = panelOf(root);
+    const trigger = triggerOf(root);
+    if (!panel || panel.hidden) return;
+    resetConfirms(root);
+    panel.hidden = true;
+    if (trigger) {
+        trigger.setAttribute("aria-expanded", "false");
+        if (restoreFocus) trigger.focus();
+    }
+}
+
+function closeAll(except, restoreFocus) {
+    document.querySelectorAll("[data-fd-menu]").forEach((root) => {
+        if (root !== except) close(root, restoreFocus);
+    });
+}
+
+function open(root, focusFirst) {
+    const panel = panelOf(root);
+    const trigger = triggerOf(root);
+    if (!panel || !trigger) return;
+    closeAll(root, false);
+    panel.hidden = false;
+    trigger.setAttribute("aria-expanded", "true");
+    place(root);
+    if (focusFirst) {
+        const first = items(root)[0];
+        if (first) first.focus();
+    }
+}
+
+function move(root, from, step) {
+    const list = items(root);
+    if (list.length === 0) return;
+    const at = list.indexOf(from);
+    let next;
+    if (step === "first") next = 0;
+    else if (step === "last") next = list.length - 1;
+    else if (at < 0) next = step > 0 ? 0 : list.length - 1;
+    else next = (at + step + list.length) % list.length;
+    list[next].focus();
+}
+
+function arm(root, box) {
+    const armButton = box.querySelector("[data-fd-menu-arm]");
+    const row = box.querySelector(".fd-menu__confirm-row");
+    if (!armButton || !row) return;
+    resetConfirms(root);
+    armButton.hidden = true;
+    row.hidden = false;
+    const cancel = row.querySelector("[data-fd-menu-cancel]");
+    if (cancel) cancel.focus();
+}
+
+function disarm(root, box) {
+    resetConfirms(root);
+    const armButton = box.querySelector("[data-fd-menu-arm]");
+    if (armButton) armButton.focus();
+}
+
+function bindMenu(root) {
+    if (bound.has(root)) return;
+    bound.add(root);
+    const trigger = triggerOf(root);
+    const panel = panelOf(root);
+    if (!trigger || !panel) return;
+
+    trigger.addEventListener("click", (event) => {
+        if (isOpen(root)) {
+            close(root, true);
+        } else {
+            // detail 0 is a keyboard activation: move into the menu.
+            open(root, event.detail === 0);
+        }
+    });
+
+    root.addEventListener("keydown", (event) => {
+        if (event.defaultPrevented || event.altKey || event.ctrlKey) return;
+        const key = event.key;
+        if (event.target === trigger) {
+            if (key === "ArrowDown" || key === "ArrowUp") {
+                event.preventDefault();
+                if (!isOpen(root)) open(root, false);
+                move(root, null, key === "ArrowDown" ? "first" : "last");
+            }
+            return;
+        }
+        if (!panel.contains(event.target)) return;
+        if (key === "ArrowDown") {
+            event.preventDefault();
+            move(root, event.target, 1);
+        } else if (key === "ArrowUp") {
+            event.preventDefault();
+            move(root, event.target, -1);
+        } else if (key === "Home") {
+            event.preventDefault();
+            move(root, event.target, "first");
+        } else if (key === "End") {
+            event.preventDefault();
+            move(root, event.target, "last");
+        } else if (key === "Tab") {
+            // Focus carries on past the menu; the menu does not stay open.
+            close(root, false);
+        } else if (key === " " && event.target.tagName === "A") {
+            // A link activates on Enter only; a menu item takes Space too.
+            event.preventDefault();
+            event.target.click();
+        }
+    });
+
+    panel.addEventListener("click", (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        const item = target && target.closest(".fd-menu__item");
+        if (!item || !panel.contains(item)) return;
+        const box = item.closest("[data-fd-menu-confirm]");
+        if (item.hasAttribute("data-fd-menu-arm") && box) {
+            arm(root, box);
+            return;
+        }
+        if (item.hasAttribute("data-fd-menu-cancel") && box) {
+            disarm(root, box);
+            return;
+        }
+        if (
+            item.getAttribute("role") === "menuitemcheckbox" &&
+            item.tagName === "BUTTON"
+        ) {
+            const checked = item.getAttribute("aria-checked") !== "true";
+            item.setAttribute("aria-checked", checked ? "true" : "false");
+            item.dispatchEvent(
+                new CustomEvent("fd-menu-select", {
+                    bubbles: true,
+                    detail: { checked },
+                }),
+            );
+            return;
+        }
+        // A link or a submit leaves the page; the menu is closed as it goes.
+        if (item.tagName === "A") close(root, false);
+    });
+}
+
+function bindDocument() {
+    if (documentBound) return;
+    documentBound = true;
+    // A press outside every open menu closes it; focus stays where the person
+    // put it.
+    document.addEventListener("pointerdown", (event) => {
+        const target = event.target instanceof Element ? event.target : null;
+        document.querySelectorAll("[data-fd-menu]").forEach((root) => {
+            if (isOpen(root) && !(target && root.contains(target))) {
+                close(root, false);
+            }
+        });
+    });
+    document.addEventListener(
+        "keydown",
+        (event) => {
+            if (event.key !== "Escape") return;
+            let handled = false;
+            document.querySelectorAll("[data-fd-menu]").forEach((root) => {
+                if (!isOpen(root)) return;
+                const wasInside = root.contains(document.activeElement);
+                const resting =
+                    !document.activeElement ||
+                    document.activeElement === document.body;
+                close(root, wasInside || resting);
+                handled = true;
+            });
+            // An open menu takes the Escape; a dialog around it stays open.
+            if (handled) event.preventDefault();
+        },
+        true,
+    );
+}
+
+function initMenus(scope) {
+    const root = scope && scope.querySelectorAll ? scope : document;
+    root.querySelectorAll("[data-fd-menu]").forEach(bindMenu);
+    bindDocument();
+}
+
+if (typeof window !== "undefined") {
+    if (window.FoodableApp && typeof window.FoodableApp.onLoad === "function") {
+        window.FoodableApp.onLoad(initMenus);
+    } else if (typeof document !== "undefined") {
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", () =>
+                initMenus(document),
+            );
+        } else {
+            initMenus(document);
+        }
+    }
+}

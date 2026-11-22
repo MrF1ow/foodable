@@ -25,6 +25,7 @@ import {
 } from "../components/v2/score-badge.js";
 import { sectionHeader as sectionHeaderV2 } from "../components/v2/section-header.js";
 import { raw, type Html } from "../components/v2/html.js";
+import { menu, type MenuItem } from "../components/v2/menu.js";
 import {
     sheet,
     sheetActions,
@@ -45,6 +46,7 @@ import {
 const DEV_GALLERY_EDIT_SHEET = "dev-gallery-edit-sheet";
 // Live sheets from parts: the trigger of each is on the gallery, for check:nav.
 const DEV_GALLERY_DIALOG_SHEET = "dev-gallery-dialog-sheet";
+const DEV_GALLERY_MENU_SHEET = "dev-gallery-menu-sheet";
 const DEV_GALLERY_SIDE_SHEET = "dev-gallery-side-sheet";
 const DEV_GALLERY_SEARCH_SHEET = "dev-gallery-search-sheet";
 
@@ -1343,12 +1345,170 @@ function sectionHeaderSection(): string {
     );
 }
 
+/** A menu drawn open, as in the design frames; its script still closes it on Escape or a tap outside. */
+function drawnOpen(html: Html): string {
+    return String(html)
+        .replace('aria-expanded="false"', 'aria-expanded="true"')
+        .replace(" hidden>", ">");
+}
+
+/** Room under the trigger for the panel, which sits out of flow. */
+function menuStage(html: string, height: number): string {
+    return `<div style="display:flex;align-items:flex-start;justify-content:flex-end;min-height:${height}px;max-width:300px">${html}</div>`;
+}
+
+function menuSection(): string {
+    const link = (label: string): MenuItem => ({
+        kind: "link",
+        label,
+        href: "#",
+    });
+    const member = [
+        link("Open"),
+        link("Snooze until tomorrow"),
+        link("Snooze 1 week"),
+        link("Dismiss"),
+        link("Turn off \u201cFood expiring\u201d"),
+    ];
+    const admin = [
+        link("Open"),
+        link("Snooze until tomorrow"),
+        link("Snooze 1 week"),
+        link("Dismiss for me"),
+        link("Dismiss for everyone"),
+        link("Turn off \u201cFood expiring\u201d"),
+    ];
+    const filters: MenuItem[] = [
+        { kind: "checked", label: "Cookable now", checked: true },
+        { kind: "checked", label: "High protein", checked: true },
+        { kind: "checked", label: "Under 30 min", checked: false },
+        { kind: "checked", label: "Favourites", checked: false },
+        link("Clear"),
+    ];
+    const stock: MenuItem[] = [
+        link("Edit amount or expiry"),
+        link("Add to grocery list"),
+        link("Eat"),
+        { kind: "separator" },
+        {
+            kind: "destructive",
+            label: "Discard",
+            confirmLabel: "Discard 3",
+            action: "/dev/gallery-v2",
+        },
+    ];
+    const more = (label: string, items: MenuItem[]) =>
+        menu({ label, anchor: "more", items });
+    return block(
+        "Menu",
+        "Menu 172271 and Menu item 172270 (default, checked, destructive, divider). A menu is anchored to a visible control: the \u22ef Icon button or the Filter button. Drawn open from Notifications \u00b7 \u22ef menu 387797 (member) and 387895 (admin), and Recipes \u00b7 filter pull-down 402075. A destructive item confirms in place: it turns into Cancel and the same verb.",
+        [
+            caption("Notifications \u00b7 \u22ef menu \u00b7 member (387797)"),
+            menuStage(drawnOpen(more("More for this notice", member)), 270),
+            caption("Notifications \u00b7 \u22ef menu \u00b7 admin (387895)"),
+            menuStage(drawnOpen(more("More for this notice", admin)), 310),
+            caption(
+                "Recipes \u00b7 filter pull-down (402075): Filter button, ticks, no filter name",
+            ),
+            menuStage(
+                drawnOpen(
+                    menu({
+                        label: "Filter recipes",
+                        anchor: "filter",
+                        filterCount: 2,
+                        items: filters,
+                    }),
+                ),
+                270,
+            ),
+            caption(
+                "Destructive item, closed and live: tap Discard to see Cancel and Discard 3 in its place",
+            ),
+            menuStage(
+                String(
+                    menu({
+                        label: "Actions for Milk",
+                        anchor: "more",
+                        items: stock,
+                        data: { gallery: "menu-more" },
+                    }),
+                ),
+                230,
+            ),
+            caption(
+                "Trigger near the left edge, closed and live: the panel stays inside the screen on a phone",
+            ),
+            `<div style="display:flex;padding-left:170px;min-height:230px">${menu(
+                {
+                    label: "Actions for Eggs",
+                    anchor: "more",
+                    items: stock,
+                    data: { gallery: "menu-near-left" },
+                },
+            )}</div>`,
+            caption(
+                "Menu inside a live sheet: Escape closes the menu first, a second Escape closes the sheet",
+            ),
+            sheetTrigger({
+                target: DEV_GALLERY_MENU_SHEET,
+                label: "Open sheet with a menu",
+                className: "fd-btn",
+            }),
+            sheet({
+                id: DEV_GALLERY_MENU_SHEET,
+                kind: "edit",
+                title: "Menu in a sheet",
+                body: menuStage(
+                    String(
+                        menu({
+                            label: "Actions for Oats",
+                            anchor: "more",
+                            items: [
+                                link("Edit amount or expiry"),
+                                {
+                                    kind: "destructive",
+                                    label: "Discard",
+                                    confirmLabel: "Discard 3",
+                                    action: "/dev/gallery-v2",
+                                    fields: { ids: "a,b,c" },
+                                },
+                            ],
+                            data: { gallery: "menu-in-sheet" },
+                        }),
+                    ),
+                    200,
+                ),
+                actions:
+                    '<button type="button" class="fd-btn" command="close" commandfor="' +
+                    DEV_GALLERY_MENU_SHEET +
+                    '">Close</button>',
+            }),
+            caption(
+                "Filter pull-down, closed and live: ticks toggle, the menu stays open",
+            ),
+            menuStage(
+                String(
+                    menu({
+                        label: "Filter recipes",
+                        anchor: "filter",
+                        filterCount: 1,
+                        items: filters,
+                        data: { gallery: "menu-filter" },
+                    }),
+                ),
+                270,
+            ),
+        ].join(""),
+    );
+}
+
 function devGalleryBody(): string {
     const sections = [
         ...SECTIONS.map((s) => s.render()),
         dotsSection(),
         sheetsSection(),
         sheetPartsSection(),
+        menuSection(),
         buttonSection(),
         itemRowExamplesSection(),
         itemRowOptionsSection(),

@@ -1,0 +1,197 @@
+/* ⋯ menu (src/web/components/v2/menu.ts). A <details>: the summary is the round
+ * trigger, the panel opens under it, right-aligned. While open, the trigger's
+ * ::before is a page-sized transparent backdrop, so a tap anywhere else lands
+ * on the summary and closes the menu without any script. */
+
+.fd-menu {
+    position: relative;
+    flex: none;
+}
+
+.fd-menu__trigger {
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+    cursor: pointer;
+    list-style: none;
+}
+
+.fd-menu__trigger::-webkit-details-marker {
+    display: none;
+}
+
+.fd-menu__trigger:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+.fd-menu[open] > .fd-menu__trigger {
+    background: var(--surface-raised);
+    color: var(--text-primary);
+}
+
+.fd-menu[open] > .fd-menu__trigger::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+    cursor: default;
+}
+
+.fd-menu__panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 41;
+    display: flex;
+    flex-direction: column;
+    min-width: 220px;
+    max-width: min(320px, calc(100vw - 32px));
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    box-shadow: 0 12px 32px var(--overlay-scrim);
+}
+
+.fd-menu__form {
+    display: contents;
+}
+
+.fd-menu__item {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    /* Opt out of the old app's 44px button floor for height only where the
+     * single-line item is shorter; two-line items grow past it anyway. */
+    min-height: 40px;
+    justify-content: center;
+    padding: 8px 12px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font: 400 15px/20px var(--font-body);
+    text-align: left;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.fd-menu__item:hover,
+.fd-menu__item:focus-visible {
+    background: var(--surface-track);
+    outline: none;
+}
+
+.fd-menu__item--danger {
+    color: var(--status-over);
+}
+
+.fd-menu__hint {
+    font: 400 12px/16px var(--font-body);
+    color: var(--text-secondary);
+}
+
+.fd-menu__sep {
+    height: 1px;
+    margin: 4px 6px;
+    border: 0;
+    background: var(--line);
+}
+
+/* scale-guard: checked */
+
+/* The anchored menu (menu({ anchor })): the design's Menu and Menu item. A
+ * ⋯ Icon button or a Filter button opens a panel of items under it; the panel
+ * is closed with `hidden` and driven by src/web/client/v2/menu.js. Everything
+ * here is scoped to `.fd-menu--anchored`, so the <details> menu above keeps its
+ * look. Menu 234 wide with a 6 inset, items 40 high, a 16 wide check column. */
+
+.fd-menu--anchored {
+    --fd-menu-width: 234px;
+    --fd-menu-inset: 6px;
+    --fd-menu-check: 16px;
+    --fd-menu-check-icon: 24px;
+}
+
+.fd-menu--anchored .fd-menu__panel {
+    box-sizing: border-box;
+    width: var(--fd-menu-width);
+    min-width: 0;
+    max-width: calc(100vw - var(--space-lg) - var(--space-lg));
+    padding: var(--fd-menu-inset);
+    border-radius: var(--radius-sm);
+    top: calc(100% + var(--space-xs));
+}
+
+/* menu.js flips the panel when it would leave the screen. */
+.fd-menu--anchored .fd-menu__panel[data-align="start"] {
+    right: auto;
+    left: 0;
+}
+
+.fd-menu--anchored .fd-menu__panel[data-side="top"] {
+    top: auto;
+    bottom: calc(100% + var(--space-xs));
+}
+
+.fd-menu--anchored .fd-menu__item {
+    box-sizing: border-box;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: var(--space-sm);
+    min-height: var(--control-md-height);
+    padding: var(--space-sm) var(--space-md);
+    border-radius: var(--radius-xs);
+    font-size: var(--text-body-size);
+}
+
+.fd-menu--anchored .fd-menu__sep {
+    margin: 0;
+}
+
+.fd-menu__text {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+
+/* Check column: a tick for a chosen option, an empty 16 wide space for the
+ * others, so every label in the menu starts at the same x. */
+.fd-menu__check {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: var(--fd-menu-check);
+    height: var(--fd-menu-check);
+    color: var(--text-secondary);
+}
+
+.fd-menu__check .fd-icon {
+    flex: none;
+    width: var(--fd-menu-check-icon);
+    height: var(--fd-menu-check-icon);
+}
+
+.fd-menu__item[aria-checked="false"] .fd-menu__check .fd-icon {
+    visibility: hidden;
+}
+
+/* Confirm in place: the item is replaced by Cancel and the same verb, side by
+ * side in its row. The form wraps only the verb and takes no box of its own. */
+.fd-menu__confirm-row {
+    display: flex;
+    gap: var(--space-xs);
+}
+
+.fd-menu--anchored .fd-menu__confirm-row .fd-menu__item {
+    flex: 1 1 0;
+    width: auto;
+    justify-content: center;
+}
