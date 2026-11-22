@@ -14,6 +14,7 @@
 import { button, filterButton } from "./button.js";
 import { cls, dataAttrs, esc, raw, safeHref, type Html } from "./html.js";
 import { icon } from "./icon.js";
+import { keyboardHint } from "./keyboard-hint.js";
 
 export type SearchFieldOptions = {
     /** Accessible name of the input. */
@@ -80,8 +81,11 @@ export function searchField(opts: SearchFieldOptions): Html {
     const parts = [
         `<span class="fd-search-field__lead">${icon(opts.linkDetected ? "link" : "search")}</span>`,
         `<input ${input}>`,
-        opts.shortcut
-            ? `<kbd class="fd-search-field__shortcut" aria-hidden="true">${esc(opts.shortcut)}</kbd>`
+        opts.shortcut?.trim()
+            ? keyboardHint({
+                  keys: opts.shortcut,
+                  className: "fd-search-field__shortcut",
+              })
             : "",
         opts.clear
             ? `<button type="button" class="fd-search-field__action" data-fd-search-clear aria-label="Clear search">${icon("close")}</button>`

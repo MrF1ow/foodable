@@ -57,8 +57,9 @@ test("every part shows in the design's order", () => {
     ].map((part) => html.indexOf(part));
     expect(order.every((i) => i > 0)).toBe(true);
     expect([...order].sort((a, b) => a - b)).toEqual(order);
+    // The shortcut is the shared keyboard hint, not a second chip of its own.
     expect(html).toContain(
-        '<kbd class="fd-search-field__shortcut" aria-hidden="true">⌘K</kbd>',
+        '<kbd class="fd-keyboard-hint fd-search-field__shortcut" aria-hidden="true">⌘K</kbd>',
     );
     expect(html).toContain('<a class="fd-search-field__action"');
     expect(html).toContain('href="/scan"');

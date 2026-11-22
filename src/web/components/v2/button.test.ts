@@ -100,6 +100,13 @@ test("a disabled button has the attribute; a disabled link loses its href", () =
     expect(link).toContain(`aria-disabled="true" tabindex="-1"`);
 });
 
+test("a disabled link has role=link, or aria-disabled is ignored and AT reads plain text", () => {
+    const link = button({ label: "Save", href: "/x", disabled: true });
+    expect(link).toContain(`role="link"`);
+    expect(link).toContain(`aria-disabled="true"`);
+    expect(button({ label: "Save", href: "/x" })).not.toContain("role=");
+});
+
 test("type submit and extra attributes are emitted; reserved ones are refused", () => {
     const html = button({
         label: "Save",

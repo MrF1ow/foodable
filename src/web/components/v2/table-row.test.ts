@@ -1,6 +1,18 @@
 import { describe, expect, test } from "bun:test";
-import { tableRow, tableRows } from "./table-row.js";
+import * as tableRowModule from "./table-row.js";
+import { tableRows, type TableRowOptions } from "./table-row.js";
 import { XSS, XSS_ESCAPED } from "./test-helpers.js";
+
+/** One row, through the only entry point: the table's inner markup. */
+const tableRow = (row: TableRowOptions) =>
+    String(tableRows({ label: "Table", rows: [row] }))
+        .replace(/^<div[^>]*role="table"[^>]*>/, "")
+        .replace(/<\/div>$/, "");
+
+test("the single row is not exported; tableRows is the entry point", () => {
+    expect("tableRow" in tableRowModule).toBe(false);
+    expect("tableRows" in tableRowModule).toBe(true);
+});
 
 describe("tableRow (FigCraft 381695)", () => {
     test("a row: the label, then one right-aligned cell per column", () => {
