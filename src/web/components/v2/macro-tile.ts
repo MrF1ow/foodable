@@ -32,7 +32,7 @@ export type MacroTileOptions = {
     className?: string;
 };
 
-export function macroTile(opts: MacroTileOptions): Html {
+function macroTile(opts: MacroTileOptions): Html {
     const kind = MACRO_KINDS[opts.kind];
     return raw(
         `<div class="${cls("fd-macro-tile", `fd-macro-tile--${opts.kind}`, opts.className)}"><dt class="fd-macro-tile__label">${dot(kind.dot, { size: "sm" })}${esc(opts.label ?? kind.label)}</dt><dd class="fd-macro-tile__value">${valueText(typeof opts.value === "number" && opts.value < 0 ? null : opts.value)}</dd></div>`,

@@ -19,7 +19,7 @@ export type TableRowOptions = {
     className?: string;
 };
 
-export function tableRow(opts: TableRowOptions): Html {
+function tableRow(opts: TableRowOptions): Html {
     const header = opts.kind === "header";
     const role = header ? "columnheader" : "cell";
     const cols = opts.cols

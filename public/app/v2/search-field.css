@@ -64,16 +64,10 @@
     outline: var(--space-2xs) solid var(--accent-text);
     outline-offset: var(--space-2xs);
 }
-.fd-search-field__shortcut {
-    flex: none;
-    padding: var(--space-2xs) var(--space-sm);
-    border-radius: var(--radius-xs);
-    background: var(--surface-raised);
-    color: var(--text-tertiary);
-    font: inherit;
-    font-size: var(--text-micro-size);
-    font-weight: 600;
-    line-height: var(--text-micro-line);
+/* The chip is a `.fd-keyboard-hint` (layout.css, which loads after this file);
+   the extra class outranks it so the chip keeps the row's own font family. */
+.fd-search-field__shortcut.fd-keyboard-hint {
+    font-family: inherit;
 }
 .fd-search-field__action {
     appearance: none;

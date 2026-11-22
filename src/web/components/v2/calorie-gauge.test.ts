@@ -9,6 +9,15 @@ const arcs = (html: string) =>
         ),
     ].map((m) => ({ kind: m[1]!, d: m[2]! }));
 
+test("a negative zero is spoken and drawn as 0, never -0", () => {
+    const html = String(calorieGauge({ consumed: -0, target: 2000 }));
+    expect(html).toContain("Eaten 0 of 2,000 kcal");
+    expect(html).not.toContain("-0");
+    expect(html).toContain(
+        '<span class="fd-calorie-gauge__figure">2,000</span>',
+    );
+});
+
 describe("calorieGauge (FigCraft 381807)", () => {
     test("the figure is what is left, over the target line", () => {
         const html = String(

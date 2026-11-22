@@ -63,7 +63,9 @@ export function calorieGauge(opts: CalorieGaugeOptions): Html {
     const share = known ? Math.min(1, Math.max(0, consumed / target)) : 0;
     // The text is worked out from the rounded figures, so "over" never sits
     // beside a spoken line that says the target was met.
-    const eaten = Math.round(consumed);
+    // `+ 0` turns a negative zero (`-0 >= 0` passes the check above) into 0, which
+    // Intl would otherwise print as "-0".
+    const eaten = Math.round(consumed) + 0;
     const goal = Math.round(target);
     const over = known && eaten > goal;
 

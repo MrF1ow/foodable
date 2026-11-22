@@ -44,6 +44,13 @@ test("the bell shows a dot, never a number, when something is new", () => {
     expect(html).not.toMatch(/fd-bell__dot[^>]*>\s*\d/);
 });
 
+test("the search shortcut is the shared keyboard hint, decorative", () => {
+    const html = topBar(BASE);
+    expect(html).toContain(
+        '<kbd class="fd-keyboard-hint fd-search-field__shortcut" aria-hidden="true">⌘K</kbd>',
+    );
+});
+
 test("the labels and the shortcut can be changed; the hint can be dropped", () => {
     const html = topBar({
         logFood: { href: "/x", label: "Add food" },

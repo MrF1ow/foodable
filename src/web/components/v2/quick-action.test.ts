@@ -56,8 +56,11 @@ describe("quickAction (FigCraft 303014)", () => {
                 disabled: true,
             }),
         );
-        expect(link).toContain('aria-disabled="true"');
+        expect(link).toContain('role="link" aria-disabled="true"');
         expect(link).not.toContain("href=");
+        expect(
+            String(quickAction({ label: "x", icon: "scan", href: "/a" })),
+        ).not.toContain("role=");
     });
 
     test("escapes the label and the class, refuses an unsafe href", () => {

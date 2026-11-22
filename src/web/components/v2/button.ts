@@ -87,7 +87,7 @@ function element(
     const extra = extraAttrs(options.attrs);
     if (options.href != null) {
         const state = options.disabled
-            ? ` aria-disabled="true" tabindex="-1"`
+            ? ` role="link" aria-disabled="true" tabindex="-1"`
             : ` href="${safeHref(options.href)}"`;
         return raw(
             `<a class="${classes}" data-fd-btn${aria}${extra}${state}>${content}</a>`,

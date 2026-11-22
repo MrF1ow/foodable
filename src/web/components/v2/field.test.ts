@@ -22,6 +22,23 @@ test("a field is a box around a named input", () => {
     expect(html).not.toContain("aria-invalid");
 });
 
+test("labelHidden keeps the accessible name and draws no label", () => {
+    const html = field({
+        id: "q",
+        label: "Amount",
+        name: "q",
+        labelHidden: true,
+    });
+    // The text stays inside the <label>, so the input is still named by it.
+    expect(html).toContain(
+        '<label class="fd-field__control"><span class="fd-visually-hidden">Amount</span>',
+    );
+    expect(html).not.toContain("fd-field__label");
+    expect(field({ id: "q", label: "Amount", name: "q" })).not.toContain(
+        "fd-visually-hidden",
+    );
+});
+
 test("type, value, placeholder, autocomplete, required and disabled are written", () => {
     const html = field({
         id: "p",

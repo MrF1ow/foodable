@@ -25,7 +25,7 @@ export function quickAction(opts: QuickActionOptions): Html {
     const inner = `<span class="fd-quick-action__box">${icon(opts.icon, 20)}</span>${showCaption ? `<span class="fd-quick-action__caption">${esc(opts.label)}</span>` : ""}`;
     if (opts.href != null) {
         const state = opts.disabled
-            ? ` aria-disabled="true" tabindex="-1"`
+            ? ` role="link" aria-disabled="true" tabindex="-1"`
             : ` href="${safeHref(opts.href)}"`;
         if (opts.disabled) safeHref(opts.href);
         return raw(`<a class="${classes}"${name}${state}>${inner}</a>`);

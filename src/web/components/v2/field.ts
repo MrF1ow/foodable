@@ -29,6 +29,11 @@ export type FieldOptions = {
     trailingIcon?: IconName;
     hint?: string;
     error?: string;
+    /**
+     * Keeps the label text as the input's accessible name but draws no label,
+     * for a field that sits under a caps label of its own.
+     */
+    labelHidden?: boolean;
     className?: string;
     data?: Readonly<Record<string, string>>;
 };
@@ -66,7 +71,10 @@ export function field(opts: FieldOptions): Html {
         : opts.hint
           ? `<span class="fd-field__hint" id="${esc(opts.id)}-hint">${esc(opts.hint)}</span>`
           : "";
+    const label = opts.labelHidden
+        ? `<span class="fd-visually-hidden">${esc(opts.label)}</span>`
+        : `<span class="fd-field__label">${esc(opts.label)}</span>`;
     return raw(
-        `<div class="${cls("fd-field", opts.error && "fd-field--invalid", opts.className)}"${dataAttrs(opts.data)}><label class="fd-field__control"><span class="fd-field__label">${esc(opts.label)}</span><span class="fd-field__box"><input ${input}>${trailing}</span></label>${note}</div>`,
+        `<div class="${cls("fd-field", opts.error && "fd-field--invalid", opts.className)}"${dataAttrs(opts.data)}><label class="fd-field__control">${label}<span class="fd-field__box"><input ${input}>${trailing}</span></label>${note}</div>`,
     );
 }
