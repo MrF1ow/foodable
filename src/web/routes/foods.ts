@@ -124,7 +124,7 @@ foodsRoutes.post("/foods/:id/add-to-grocery", requireMember, async (c) => {
         if (!page) return c.text("Not Found", 404);
         return c.html(renderProductV2Page({ ...page, error: message }), 400);
     }
-    // toast: none
+    // toast: none (the product page now reads "On your list")
     return c.redirect(productPagePath(food.id), 303);
 });
 

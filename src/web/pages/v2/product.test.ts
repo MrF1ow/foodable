@@ -529,6 +529,25 @@ describe("renderProductV2Page", () => {
         expect(html).toContain(`/foods/${f.id}/add-to-grocery`);
     });
 
+    test("Add to groceries becomes On your list once the food is on the list", () => {
+        const f = food({ name: "Milk" });
+        const off = renderProductV2Page(buildPreviewProductPageView(chrome, f));
+        expect(off).toContain("<span>Add to groceries</span>");
+        expect(off).toContain(`action="/foods/${f.id}/add-to-grocery"`);
+        expect(off).not.toContain("On your list");
+        const on = renderProductV2Page({
+            ...buildPreviewProductPageView(chrome, f),
+            onGroceryList: true,
+        });
+        expect(on).toContain("On your list");
+        expect(on).not.toContain("<span>Add to groceries</span>");
+        expect(on).not.toContain("/add-to-grocery");
+        // The control opens the list; it is not a second way to add.
+        expect(on).toMatch(
+            /<a class="fd-btn [^"]*fd-product-actions__add[^"]*" href="\/kitchen\/groceries">/,
+        );
+    });
+
     test("log pick opens on one portion when the food has a pack serving", () => {
         const half = food(HALF_AND_HALF);
         const pick = productLogPickPayload(half, undefined);

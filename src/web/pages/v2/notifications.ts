@@ -251,7 +251,14 @@ export function notificationOpenHref(row: NotificationRow): string {
             if (code === "recipe.allergen" && row.subjectKind === "recipe") {
                 return `/recipes/${encodeURIComponent(row.subjectId ?? "")}`;
             }
-            if (code === "food.product_allergen" && row.subjectId) {
+            // A fridge item's id is not a food's: its page is the Fridge.
+            if (row.subjectKind === "fridge_item")
+                return APP_PATHS.kitchenFridge;
+            if (
+                code === "food.product_allergen" &&
+                row.subjectKind === "food" &&
+                row.subjectId
+            ) {
                 return `${APP_PATHS.product}/${encodeURIComponent(row.subjectId)}`;
             }
             return APP_PATHS.kitchenGroceries;

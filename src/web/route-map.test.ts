@@ -78,6 +78,18 @@ describe("legacyRedirectTarget", () => {
             want: `${APP_PATHS.settingsHousehold}?x=1`,
         },
         { in: "/settings/household/dismissedx", want: null },
+        // Exact: a sub-path is not the list, so it is not rewritten onto
+        // `/settings/household/...`.
+        { in: "/settings/household/dismissed/x", want: null },
+        // The oldest URL of the list goes straight to Household, not through
+        // `/household` onto the legacy `/settings/household/dismissed`.
+        { in: "/household/dismissed", want: APP_PATHS.settingsHousehold },
+        { in: "/household/dismissed/", want: APP_PATHS.settingsHousehold },
+        {
+            in: "/household/dismissed?x=1",
+            want: `${APP_PATHS.settingsHousehold}?x=1`,
+        },
+        { in: "/household/dismissedx", want: "/settings/household/dismissedx" },
         // Exact: the Needs attention page itself is the inbox now, and what
         // used to hang under it (its dismiss POST) is gone, not moved.
         { in: "/needs-attention", want: APP_PATHS.notifications },

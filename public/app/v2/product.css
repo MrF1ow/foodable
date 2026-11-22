@@ -299,3 +299,12 @@
         font: 600 13px/32px var(--font-body);
     }
 }
+
+.fd-product-actions__add--listed {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: var(--accent-text);
+    text-decoration: none;
+}

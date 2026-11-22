@@ -2559,6 +2559,50 @@ describe("product routes (v2 foods)", () => {
         resetFlagsForTests();
     });
 
+    test("after Add to groceries the product page reads On your list", async () => {
+        const food = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        );
+        const page = async () =>
+            (
+                await productApp().request(`http://x/foods/${food.id}`, {
+                    headers: { cookie: cookieFor(ALICE) },
+                })
+            ).text();
+        const before = await page();
+        expect(before).toContain("<span>Add to groceries</span>");
+        expect(before).not.toContain("On your list");
+        const res = await productApp().request(
+            `http://x/foods/${food.id}/add-to-grocery`,
+            { method: "POST", headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/foods/${food.id}`);
+        const after = await page();
+        expect(after).toContain("On your list");
+        expect(after).not.toContain("<span>Add to groceries</span>");
+        resetFlagsForTests();
+    });
+
+    test("a ticked grocery line does not count as on the list", async () => {
+        const food = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+        );
+        await productApp().request(`http://x/foods/${food.id}/add-to-grocery`, {
+            method: "POST",
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const [line] = await db.groceryStore.listLines(HH);
+        await db.groceryStore.updateLine({ ...line!, checked: true });
+        const html = await (
+            await productApp().request(`http://x/foods/${food.id}`, {
+                headers: { cookie: cookieFor(ALICE) },
+            })
+        ).text();
+        expect(html).toContain("<span>Add to groceries</span>");
+        resetFlagsForTests();
+    });
+
     test("POST add-to-grocery returns 400 when no store", async () => {
         db.settingsStore = createMemorySettingsStore();
         const food = await db.foodsStore.insertFood(
