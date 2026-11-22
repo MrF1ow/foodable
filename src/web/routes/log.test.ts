@@ -73,6 +73,7 @@ const ALICE = "11111111-1111-4111-8111-111111111111";
 const BOB = "22222222-2222-4222-8222-222222222222";
 const HH = "hh-1";
 const BARCODE = "1111111111111";
+const MEAL_UUID = "33333333-3333-4333-8333-333333333333";
 
 const member: HouseholdMember = {
     userId: ALICE,
@@ -301,6 +302,10 @@ mock.module("../../db/nutrition.js", () => ({
         };
     },
     searchMeals: async () => [],
+    getMealById: async (userId: string, id: string) =>
+        userId === ALICE && id === MEAL_UUID
+            ? { ...defaultRecentHistoryMeals()[0]!, id: MEAL_UUID }
+            : null,
     getMealsByDate: async () => [],
     getWaterByDate: async () => [],
     getGoalsForDate: async () => null,
@@ -907,6 +912,30 @@ describe("GET /api/log/search", () => {
         expect(item.unit_hints).toEqual(["portion"]);
     });
 
+    test("every row says where it opens and whether it can be logged", async () => {
+        const body = await search("egg");
+        const food = body.groups.find((g) => g.kind === "food")!;
+        for (const item of food.items) {
+            expect(item.open).toBe(`/foods/${String(item.food_id)}`);
+            expect(item.loggable).toBe(true);
+        }
+        const off = body.groups.find((g) => g.kind === "off");
+        expect(off?.items[0]).toMatchObject({
+            open: `/foods/by-barcode/${BARCODE}`,
+            loggable: true,
+        });
+        const recipe = (await search("omelette")).groups.find(
+            (g) => g.kind === "recipe",
+        )!;
+        expect(recipe.items[0]!.open).toBe(
+            `/recipes/${String(recipe.items[0]!.recipe_id)}`,
+        );
+        expect(recipe.items[0]!.loggable).toBe(true);
+        const history = (await search("")).groups[0]!.items[0]!;
+        expect(history.open).toBe("/?log=meal:meal-recipe");
+        expect(history.loggable).toBe(true);
+    });
+
     test("recipe results use portion-only unit hints", async () => {
         const body = await search("omelette");
         const recipe = body.groups.find((g) => g.kind === "recipe");
@@ -971,6 +1000,40 @@ function logForm(fields: Record<string, string>): {
         },
     };
 }
+
+describe("GET /api/log/meal/:id", () => {
+    async function getMeal(id: string) {
+        return app.request(`http://x/api/log/meal/${id}`, {
+            headers: { cookie: sessionCookie(ALICE) },
+        });
+    }
+
+    test("returns the meal as a search row the log form can prefill from", async () => {
+        const res = await getMeal(MEAL_UUID);
+        expect(res.status).toBe(200);
+        const item = (await res.json()) as Record<string, unknown>;
+        expect(item).toMatchObject({
+            id: MEAL_UUID,
+            meal_id: MEAL_UUID,
+            name: "Chili night",
+            recipe_id: "recipe-chili",
+            amount: 1,
+            unit: "portion",
+            open: `/?log=meal:${MEAL_UUID}`,
+            loggable: true,
+        });
+    });
+
+    test("a meal that is not the viewer's is a 404", async () => {
+        expect(
+            (await getMeal("44444444-4444-4444-8444-444444444444")).status,
+        ).toBe(404);
+    });
+
+    test("an id that is not a uuid is a 404, not a query error", async () => {
+        expect((await getMeal("meal-1")).status).toBe(404);
+    });
+});
 
 describe("POST /log", () => {
     test("logging 150 g of a food writes one meal and scales totals 1.5× per 100 g", async () => {

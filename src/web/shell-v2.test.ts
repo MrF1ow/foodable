@@ -160,7 +160,7 @@ describe("the shell", () => {
             "Main tabs",
             "Today",
             "Kitchen",
-            "Search and log food",
+            "Search",
             "Recipes",
             "Trends",
         ]);

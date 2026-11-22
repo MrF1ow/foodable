@@ -3,6 +3,8 @@ import {
     mergeLogResults,
     recentHistoryStart,
     unitHintsForLog,
+    type LogSearchGroupKind,
+    type LogSearchSourceItem,
     type LogSearchSources,
 } from "./log-search.js";
 
@@ -356,5 +358,148 @@ describe("stock rows", () => {
         expect(item.stock_unit).toBe("lb");
         expect(item.amount).toBeUndefined();
         expect(item.unit).toBeUndefined();
+    });
+});
+
+describe("open target and loggable per kind", () => {
+    function firstItem(kind: LogSearchGroupKind, item: LogSearchSourceItem) {
+        const result = mergeLogResults({ [kind]: [item] }, "chicken");
+        return result.groups[0]!.items[0]!;
+    }
+
+    test("a household food opens its food page and can be logged", () => {
+        const item = firstItem("food", {
+            kind: "food",
+            id: "f1",
+            name: "Chicken",
+            food_id: "f1",
+            source: "household",
+        });
+        expect(item.open).toBe("/foods/f1");
+        expect(item.loggable).toBe(true);
+    });
+
+    test("a household product opens the same food page as a food", () => {
+        const item = firstItem("food", {
+            kind: "food",
+            id: "p9",
+            name: "Chicken breast",
+            brand: "Kirkland",
+            food_id: "p9",
+            source: "household",
+        });
+        expect(item.open).toBe("/foods/p9");
+        expect(item.loggable).toBe(true);
+    });
+
+    test("a recipe opens its recipe page and can be logged", () => {
+        const item = firstItem("recipe", {
+            kind: "recipe",
+            id: "r1",
+            recipe_id: "r1",
+            name: "Chicken soup",
+            source: "recipe",
+        });
+        expect(item.open).toBe("/recipes/r1");
+        expect(item.loggable).toBe(true);
+    });
+
+    test("an unverified recipe still opens its page but cannot be logged", () => {
+        const unverified = firstItem("recipe", {
+            kind: "recipe",
+            id: "r2",
+            recipe_id: "r2",
+            name: "Imported chicken stew",
+            source: "recipe",
+            verification: "unverified",
+        });
+        expect(unverified.open).toBe("/recipes/r2");
+        expect(unverified.loggable).toBe(false);
+        const verified = firstItem("recipe", {
+            kind: "recipe",
+            id: "r3",
+            recipe_id: "r3",
+            name: "Verified chicken stew",
+            source: "recipe",
+            verification: "verified",
+        });
+        expect(verified.loggable).toBe(true);
+    });
+
+    test("a past meal opens the prefilled log form and can be logged", () => {
+        const result = mergeLogResults(
+            {
+                history: [
+                    {
+                        kind: "history",
+                        id: "m1",
+                        meal_id: "m1",
+                        name: "Chicken and rice",
+                        source: "meal",
+                    },
+                ],
+            },
+            "",
+        );
+        const item = result.groups[0]!.items[0]!;
+        expect(item.open).toBe("/?log=meal:m1");
+        expect(item.loggable).toBe(true);
+    });
+
+    test("a fridge item opens its fridge sheet and can be logged when it is a food", () => {
+        const item = firstItem("stock", {
+            kind: "stock",
+            id: "s1",
+            name: "Chicken thighs",
+            food_id: "f1",
+            source: "fridge",
+        });
+        expect(item.open).toBe("/kitchen/fridge?item=s1");
+        expect(item.loggable).toBe(true);
+    });
+
+    test("a fridge item with no food behind it opens but cannot be logged", () => {
+        const item = firstItem("stock", {
+            kind: "stock",
+            id: "s2",
+            name: "Chicken stuff",
+            source: "fridge",
+        });
+        expect(item.open).toBe("/kitchen/fridge?item=s2");
+        expect(item.loggable).toBe(false);
+    });
+
+    test("an Open Food Facts row opens by barcode and can be logged", () => {
+        const item = firstItem("off", {
+            kind: "off",
+            id: "off:111",
+            name: "Chicken nuggets",
+            barcode: "111",
+            source: "off",
+        });
+        expect(item.open).toBe("/foods/by-barcode/111");
+        expect(item.loggable).toBe(true);
+    });
+
+    test("an Open Food Facts row with no barcode cannot be logged", () => {
+        const item = firstItem("off", {
+            kind: "off",
+            id: "off:x",
+            name: "Chicken mystery",
+            source: "off",
+        });
+        expect(item.loggable).toBe(false);
+        expect(item.open).toBe("/foods");
+    });
+
+    test("ids are escaped in the open path", () => {
+        const item = firstItem("off", {
+            kind: "off",
+            id: "off:a",
+            name: "Chicken odd",
+            barcode: "a/b c",
+            source: "off",
+        });
+        expect(item.open).toBe("/foods/by-barcode/a%2Fb%20c");
     });
 });

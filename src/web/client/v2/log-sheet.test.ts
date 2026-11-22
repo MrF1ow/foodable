@@ -1,4 +1,4 @@
-import { expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { formatLogMacroGrams } from "../../../domain/log-macro-format.js";
 
@@ -11,6 +11,7 @@ type LogMacroApi = {
     ) => Record<string, number | null> | null;
     allowedUnits: (item: Record<string, unknown>) => string[];
     openGroceryAddFromLink: () => void;
+    openLogFromLink: () => Promise<void>;
     portionLabel: (
         serving: { amount: number; unit: string },
         portions: number,
@@ -21,6 +22,16 @@ type LogMacroApi = {
         current: string,
     ) => string;
     recentChipHtml: (item: Record<string, unknown>) => string;
+    searchRowHtml: (
+        item: Record<string, unknown>,
+        kind: string,
+        rowIndex: number,
+    ) => string;
+    searchRowsHtml: (
+        rows: { item: Record<string, unknown>; kind: string }[],
+        pinned: Record<string, unknown> | null,
+    ) => string;
+    linkedMealFor: (query: string) => Record<string, unknown> | null;
     rebuildUnitChips: (
         form: { querySelector: (sel: string) => unknown },
         units: string[],
@@ -565,4 +576,204 @@ test("?add=1 opens the grocery add sheet once and drops the flag", () => {
         g.document = saved;
         win.location = savedLocation;
     }
+});
+
+describe("?log=meal:<id>", () => {
+    class Dialog extends (g.HTMLDialogElement as typeof HTMLElement) {
+        open = false;
+        title = { textContent: "" };
+        showModal() {
+            this.open = true;
+        }
+        close() {
+            this.open = false;
+        }
+        querySelector(sel: string) {
+            return sel === ".fd-sheet-title" ? this.title : null;
+        }
+    }
+
+    // The search sheet looks for its input; this one has none.
+    (globalThis as Record<string, unknown>).HTMLInputElement = class {};
+
+    async function run(
+        search: string,
+        respond: () => Promise<unknown>,
+    ): Promise<{
+        amount: InstanceType<typeof Dialog>;
+        searchSheet: InstanceType<typeof Dialog>;
+        fetched: string[];
+        replaced: string[];
+    }> {
+        const amount = new Dialog();
+        const searchSheet = new Dialog();
+        const fetched: string[] = [];
+        const replaced: string[] = [];
+        const win = g.window as Record<string, unknown>;
+        const savedLocation = win.location;
+        const savedFetch = (globalThis as Record<string, unknown>).fetch;
+        win.location = { pathname: "/", search, hash: "" };
+        win.history = {
+            state: null,
+            replaceState: (_s: unknown, _t: string, url: string) =>
+                replaced.push(url),
+        };
+        (globalThis as Record<string, unknown>).fetch = async (url: string) => {
+            fetched.push(url);
+            return respond();
+        };
+        const saved = g.document;
+        g.document = {
+            getElementById: (id: string) =>
+                id === "fd-log-amount"
+                    ? amount
+                    : id === "fd-log-search"
+                      ? searchSheet
+                      : null,
+            querySelector: () => null,
+        };
+        try {
+            await api.openLogFromLink();
+        } finally {
+            g.document = saved;
+            win.location = savedLocation;
+            (globalThis as Record<string, unknown>).fetch = savedFetch;
+        }
+        return { amount, searchSheet, fetched, replaced };
+    }
+
+    const ok = (item: Record<string, unknown>) => async () => ({
+        ok: true,
+        json: async () => item,
+    });
+
+    test("opens the amount form prefilled from the meal and drops the flag", async () => {
+        const out = await run(
+            "?date=2026-11-10&log=meal:3333",
+            ok({
+                id: "3333",
+                name: "Chili night",
+                recipe_id: "recipe-chili",
+                amount: 1,
+                unit: "portion",
+                loggable: true,
+            }),
+        );
+        expect(out.fetched).toEqual(["/api/log/meal/3333"]);
+        expect(out.replaced).toEqual(["/?date=2026-11-10"]);
+        expect(out.amount.open).toBe(true);
+        expect(out.amount.title.textContent).toBe("Chili night");
+    });
+
+    test("a meal with no single food opens search on its name instead", async () => {
+        const out = await run(
+            "?log=meal:3333",
+            ok({ id: "3333", name: "Pasta and salad", loggable: true }),
+        );
+        expect(out.amount.open).toBe(false);
+        expect(out.searchSheet.open).toBe(true);
+    });
+
+    test("a multi-item meal lands on a search row that logs it again whole", async () => {
+        const meal = {
+            id: "m1",
+            meal_id: "m1",
+            name: "Pasta and salad",
+            source: "meal",
+            unit_hints: [],
+            meal_kcal: 640,
+            open: "/?log=meal:m1",
+            loggable: true,
+        };
+        const out = await run("?date=2026-11-10&log=meal:m1", ok(meal));
+        expect(out.searchSheet.open).toBe(true);
+        // The sheet paints the meal's name as a search, so the row it shows is
+        // a history result, not an empty-state chip.
+        const row = api.searchRowHtml(meal, "history", 0);
+        expect(row).toContain('action="/meals/m1/again"');
+        expect(row).toContain('name="return_to" value="/?date=2026-11-10"');
+        expect(row).toContain('name="date" value="2026-11-10"');
+        expect(row).toMatch(/name="submit_key" value="[^"]{8,}"/);
+        expect(row).toContain('aria-label="Add Pasta and salad"');
+        expect(row).not.toContain("data-fd-log-pick");
+        expect(row).not.toContain("data-fd-log-row-pick");
+        // A history row with nothing to log again has no add action.
+        const bare = api.searchRowHtml(
+            { name: "Mystery", source: "meal", loggable: true },
+            "history",
+            1,
+        );
+        expect(bare).not.toContain("<form");
+        expect(bare).not.toContain("data-fd-log-pick");
+    });
+
+    test("the linked meal's row is offered first even when the name search does not reach it", async () => {
+        const meal = {
+            id: "old",
+            meal_id: "old",
+            name: "Oatmeal",
+            source: "meal",
+            unit_hints: [],
+            meal_kcal: 300,
+            loggable: true,
+        };
+        const out = await run("?log=meal:old", ok(meal));
+        expect(out.searchSheet.open).toBe(true);
+        const pinned = api.linkedMealFor("oatmeal ");
+        expect(pinned?.meal_id).toBe("old");
+        // Twenty newer meals with the same name, none of them the linked one.
+        const newer = Array.from({ length: 20 }, (_, i) => ({
+            kind: "history",
+            item: {
+                meal_id: `new${i}`,
+                name: "Oatmeal",
+                source: "meal",
+                unit_hints: [],
+                meal_kcal: 500,
+                loggable: true,
+            },
+        }));
+        const html = api.searchRowsHtml(newer, pinned);
+        expect(html.split('action="/meals/old/again"').length - 1).toBe(1);
+        expect(html.indexOf("/meals/old/again")).toBeLessThan(
+            html.indexOf("/meals/new0/again"),
+        );
+        // Another query is not the link's meal.
+        expect(api.linkedMealFor("porridge")).toBeNull();
+    });
+
+    test("the linked meal's row shows once when the results include it", () => {
+        const meal = {
+            meal_id: "m1",
+            name: "Oatmeal",
+            source: "meal",
+            unit_hints: [],
+            meal_kcal: 300,
+            loggable: true,
+        };
+        const rows = [
+            { kind: "history", item: { ...meal, meal_id: "m0" } },
+            { kind: "history", item: meal },
+        ];
+        const html = api.searchRowsHtml(rows, meal);
+        expect(html.split('action="/meals/m1/again"').length - 1).toBe(1);
+        expect(html.split('action="/meals/m0/again"').length - 1).toBe(1);
+        expect(html.indexOf("/meals/m1/again")).toBeLessThan(
+            html.indexOf("/meals/m0/again"),
+        );
+        // No link: rows paint as they came.
+        expect(api.searchRowsHtml(rows, null)).not.toContain("undefined");
+    });
+
+    test("a meal that is gone opens nothing", async () => {
+        const out = await run("?log=meal:3333", async () => ({ ok: false }));
+        expect(out.amount.open).toBe(false);
+        expect(out.searchSheet.open).toBe(false);
+    });
+
+    test("no flag, no fetch", async () => {
+        const out = await run("?date=2026-11-10", async () => ({ ok: false }));
+        expect(out.fetched).toEqual([]);
+        expect(out.replaced).toEqual([]);
+    });
 });

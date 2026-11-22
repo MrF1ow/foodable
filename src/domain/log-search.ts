@@ -48,6 +48,8 @@ export type LogSearchSourceItem = {
     logged_at?: string | null;
     /** Household / OFF product score 0–100 when scored. */
     product_score?: number | null;
+    /** Recipes only: an unverified recipe cannot be logged. */
+    verification?: "verified" | "unverified" | null;
 };
 
 export type LogSearchSources = Partial<
@@ -86,6 +88,10 @@ export type LogSearchResultItem = {
     stock_amount?: number | null;
     stock_unit?: string | null;
     product_score?: number | null;
+    /** The app path the row opens when it is tapped. */
+    open: string;
+    /** Whether the row can be logged; a row that cannot has no add button. */
+    loggable: boolean;
 };
 
 export type LogSearchResult = {
@@ -202,6 +208,48 @@ function historyUnitHints(item: LogSearchSourceItem): string[] {
     return [];
 }
 
+/**
+ * Where a row opens and whether it can be logged, by kind. A food, product
+ * and recipe open their own page; a past meal opens the log form prefilled
+ * from it; a fridge item opens its sheet; an Open Food Facts row opens by
+ * barcode. A row is loggable when something can stand behind a meal line: a
+ * food, a verified recipe, a past meal, or a barcode.
+ */
+function openTarget(item: LogSearchSourceItem): {
+    open: string;
+    loggable: boolean;
+} {
+    const seg = encodeURIComponent;
+    switch (item.kind) {
+        case "food":
+            return {
+                open: `/foods/${seg(item.food_id ?? item.id)}`,
+                loggable: true,
+            };
+        case "recipe":
+            return {
+                open: `/recipes/${seg(item.recipe_id ?? item.id)}`,
+                loggable: item.verification !== "unverified",
+            };
+        case "history":
+            return {
+                open: `/?log=meal:${seg(item.meal_id ?? item.id)}`,
+                loggable: true,
+            };
+        case "stock":
+            return {
+                open: `/kitchen/fridge?item=${seg(item.id)}`,
+                loggable: !!item.food_id?.trim(),
+            };
+        case "off": {
+            const code = item.barcode?.trim();
+            return code
+                ? { open: `/foods/by-barcode/${seg(code)}`, loggable: true }
+                : { open: "/foods", loggable: false };
+        }
+    }
+}
+
 function toResultItem(item: LogSearchSourceItem): LogSearchResultItem {
     const unit_hints =
         item.kind === "history"
@@ -212,6 +260,7 @@ function toResultItem(item: LogSearchSourceItem): LogSearchResultItem {
         name: item.name,
         unit_hints,
         source: item.source,
+        ...openTarget(item),
     };
     if (item.brand != null) out.brand = item.brand;
     if (item.food_id != null) out.food_id = item.food_id;

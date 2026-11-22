@@ -348,18 +348,57 @@ function scoreBadgeHtml(score) {
 }
 
 function searchRowHtml(item, kind, rowIndex) {
-    const relivable = kind !== "history" || logItemIsRelivable(item);
+    const relivable =
+        item.loggable !== false &&
+        (kind !== "history" || logItemIsRelivable(item));
     const subtitle = itemSubtitle(item, kind);
     const macros = macroLineHtml(macroParts(rowPreviewMacros(item, kind)));
+    // Several items or free text has no single food to pick, so its add action
+    // logs the whole meal again.
+    const againMealId =
+        kind === "history" && !relivable && item.loggable !== false
+            ? String(item.meal_id ?? "").trim()
+            : "";
     const add = relivable
         ? `<button type="button" class="fd-icon-btn" aria-label="Add ${esc(item.name)}" data-fd-log-pick="${esc(JSON.stringify({ ...item, kind }))}">${plusIcon()}</button>`
-        : "";
+        : againMealId
+          ? againFormHtml(
+                againMealId,
+                `<button type="submit" class="fd-icon-btn" aria-label="Add ${esc(item.name)}">${plusIcon()}</button>`,
+            )
+          : "";
     const rowId = rowIndex != null ? ` id="fd-log-result-${rowIndex}"` : "";
     const pickAttr = relivable
         ? ` data-fd-log-row-pick="${esc(JSON.stringify({ ...item, kind }))}"`
         : "";
     const badge = scoreBadgeHtml(item.product_score);
     return `<li class="fd-row fd-row--search" role="option"${rowId}${pickAttr}><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(item.name)}</span>${badge}</span><span class="fd-row__sub">${esc(subtitle)}</span>${macros}</div>${add}</div></li>`;
+}
+
+// The past meal a ?log=meal:<id> link landed on when it has no single food to
+// prefill. The search sheet shows its row first, so the meal that was tapped is
+// the one offered even when a name search would not reach it.
+let linkedMeal = null;
+
+function linkedMealFor(query) {
+    if (!linkedMeal) return null;
+    return query.trim().toLowerCase() === linkedMeal.name.trim().toLowerCase()
+        ? linkedMeal
+        : null;
+}
+
+// Result rows as html, the linked meal first and never twice.
+function searchRowsHtml(rows, pinned) {
+    const pinnedId = pinned ? String(pinned.meal_id ?? "").trim() : "";
+    const rest = pinnedId
+        ? rows.filter(
+              ({ item }) => String(item.meal_id ?? "").trim() !== pinnedId,
+          )
+        : rows;
+    const all = pinned ? [{ item: pinned, kind: "history" }, ...rest] : rest;
+    return all
+        .map(({ item, kind }, i) => searchRowHtml(item, kind, i))
+        .join("");
 }
 
 /** Page the chip returns to after logging a whole meal again. */
@@ -380,6 +419,11 @@ function againSubmitKey() {
     return `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`;
 }
 
+// The form that logs a whole past meal again, around its submit control.
+function againFormHtml(mealId, submitHtml) {
+    return `<form class="fd-log-recent-form" method="post" action="/meals/${encodeURIComponent(mealId)}/again"><input type="hidden" name="return_to" value="${esc(againReturnPath())}" /><input type="hidden" name="date" value="${esc(againDate())}" /><input type="hidden" name="submit_key" value="${esc(againSubmitKey())}" />${submitHtml}</form>`;
+}
+
 function recentChipHtml(item) {
     const relivable = logItemIsRelivable(item);
     const mealId = String(item.meal_id ?? "").trim();
@@ -394,7 +438,10 @@ function recentChipHtml(item) {
             : "";
     if (!relivable) {
         // Several items or free text: log the whole meal again as it was.
-        return `<form class="fd-log-recent-form" method="post" action="/meals/${encodeURIComponent(mealId)}/again"><input type="hidden" name="return_to" value="${esc(againReturnPath())}" /><input type="hidden" name="date" value="${esc(againDate())}" /><input type="hidden" name="submit_key" value="${esc(againSubmitKey())}" /><button type="submit" class="fd-chip fd-log-recent"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button></form>`;
+        return againFormHtml(
+            mealId,
+            `<button type="submit" class="fd-chip fd-log-recent"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button>`,
+        );
     }
     const payload = { ...item, kind: item.kind || "history" };
     return `<button type="button" class="fd-chip fd-log-recent" data-fd-log-pick="${esc(JSON.stringify(payload))}"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button>`;
@@ -595,11 +642,17 @@ function bindSearchSheet(root) {
         return out;
     }
 
+    function pinnedFor(q) {
+        const allow = FILTER[activeFilter] || FILTER.All;
+        return allow.has("history") ? linkedMealFor(q) : null;
+    }
+
     function paintRows(data) {
         const rows = filteredItems(data);
-        const html = rows
-            .map(({ item, kind }, i) => searchRowHtml(item, kind, i))
-            .join("");
+        const html = searchRowsHtml(
+            rows,
+            pinnedFor(String(input?.value || "")),
+        );
         activeRow = -1;
         if (list) {
             list.innerHTML = html;
@@ -639,7 +692,7 @@ function bindSearchSheet(root) {
     function paint(data) {
         lastData = data;
         const q = String(input?.value || "").trim();
-        const has = filteredItems(data).length > 0;
+        const has = filteredItems(data).length > 0 || !!pinnedFor(q);
         setMode(q.length > 0);
         if (!q) {
             paintEmpty(data);
@@ -709,6 +762,7 @@ function bindSearchSheet(root) {
             }
             return;
         }
+        linkedMeal = null;
         activeRow = -1;
         syncActiveRow();
         const back =
@@ -1077,9 +1131,45 @@ function openGroceryAddFromLink() {
     openSheet("fd-grocery-add");
 }
 
+// ?log=meal:<id> (a past meal chosen in search): open the log form prefilled
+// from that meal once, then drop the flag so a reload does not. A meal with
+// several items or free text has no single food to prefill, so it opens the
+// search sheet on its name with that meal's own row first, whose Add button
+// logs it again whole.
+async function openLogFromLink() {
+    const params = new URLSearchParams(window.location.search);
+    const match = /^meal:([^/\s]+)$/.exec(params.get("log") ?? "");
+    if (!match) return;
+    params.delete("log");
+    const query = params.toString();
+    window.history.replaceState(
+        window.history.state,
+        "",
+        `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`,
+    );
+    let item;
+    try {
+        const res = await fetch(
+            `/api/log/meal/${encodeURIComponent(match[1])}`,
+            { headers: { accept: "application/json" } },
+        );
+        if (!res.ok) return;
+        item = await res.json();
+    } catch (_) {
+        return;
+    }
+    const pick = { ...item, kind: "history" };
+    if (logItemIsRelivable(pick)) pickItem(pick);
+    else {
+        linkedMeal = pick;
+        openLogSearchSheet(null, item.name);
+    }
+}
+
 function init() {
     if (!document.querySelector(".fd-shell")) return;
     openGroceryAddFromLink();
+    void openLogFromLink();
     bindSearchSheet(document);
     bindAmountSheet(document);
     bindQuickCalSheet(document);
@@ -1096,12 +1186,16 @@ if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_LOG_MACROS) {
         portionLabel,
         amountAfterUnitChange,
         openGroceryAddFromLink,
+        openLogFromLink,
         allowedUnits,
         itemGrams,
         formatLogMacroKcal,
         formatLogMacroGrams,
         rebuildUnitChips,
         recentChipHtml,
+        searchRowHtml,
+        searchRowsHtml,
+        linkedMealFor,
     });
 }
 
