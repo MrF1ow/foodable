@@ -12,11 +12,19 @@
     gap: var(--space-xl);
     border-bottom: 1px solid var(--line);
 }
+/* The strip has no width of its own (`contain: inline-size`), so the row needs
+   a container-sized parent: a block, or a stretched flex or grid item. In a
+   shrink-to-fit parent it collapses. */
 .fd-tab-row__tabs {
     display: flex;
     align-items: flex-end;
     gap: var(--space-xl);
     min-width: 0;
+    /* Fill the row and report no width of their own: the row's min-content
+       (what a plain wrapper that is a grid item grows to) stays the trailing
+       slot's, so the column keeps its track and the tabs scroll. */
+    flex: 1 1 0;
+    contain: inline-size;
     /* Too many tabs scroll; they never run under the trailing slot. The row's
        own line is the underline, so no scrollbar is drawn. */
     overflow-x: auto;
