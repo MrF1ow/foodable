@@ -98,6 +98,7 @@ export const AGENT_TABLES = {
     food_barcodes: { key: ["household_id", "barcode"], scope: "household" },
     food_aliases: { key: ["household_id", "alias"], scope: "household" },
     notice_dismissals: { key: ["id"], scope: "household" },
+    notifications: { key: ["id"], scope: "household" },
     nutrition_goals: { key: ["user_id"], scope: "member" },
     nutrition_goal_days: { key: ["id"], scope: "member" },
 } as const satisfies Record<
@@ -466,6 +467,7 @@ const TABLE_LABELS: Record<AgentSnapshotTable, string> = {
     food_barcodes: "barcode",
     food_aliases: "food alias",
     notice_dismissals: "dismissed notice",
+    notifications: "notification",
     nutrition_goals: "nutrition goal",
     nutrition_goal_days: "nutrition goal day",
     foods: "food",
@@ -1043,6 +1045,43 @@ function clock(deps: { now?: () => Date }): Date {
 }
 
 /**
+ * What the guard would say to this person's agent for this tool: the
+ * household's switch first, then the person's role, then their own switch.
+ * Null when it would let the write run. The guard and anything that tells an
+ * agent beforehand what it may do read this one rule.
+ */
+export async function agentRefusal(
+    deps: Pick<AgentActionDeps, "settings">,
+    actor: Pick<AgentActionActor, "householdId" | "personId" | "role">,
+    tool: GuardedTool,
+): Promise<AgentActionsDisabledError | null> {
+    if (!(await deps.settings.getAgentDestructiveAllowed(actor.householdId))) {
+        return new AgentActionsDisabledError("household_off");
+    }
+    const action = Object.hasOwn(TOOL_ACTIONS, tool)
+        ? TOOL_ACTIONS[tool]
+        : null;
+    const allowed = action
+        ? can({ userId: actor.personId, role: actor.role }, action)
+        : ({
+              ok: false,
+              reason: "That tool has no permission rule.",
+          } as const);
+    if (!allowed.ok) {
+        return new AgentActionsDisabledError("not_permitted", allowed.reason);
+    }
+    if (
+        !(await deps.settings.getMemberAgentsCanDelete(
+            actor.householdId,
+            actor.personId,
+        ))
+    ) {
+        return new AgentActionsDisabledError("person_off");
+    }
+    return null;
+}
+
+/**
  * The guard every destructive agent tool goes through. In one transaction it
  * checks that the household switch is not Off, that the acting person's role
  * allows the tool's action, and that their own switch is On (nothing is
@@ -1059,34 +1098,8 @@ export async function withAgentAction<T>(
     return deps.store.atomically(async (tx) => {
         // Read inside the transaction, so a switch turned Off a moment ago is
         // seen, and still before the write runs.
-        if (
-            !(await deps.settings.getAgentDestructiveAllowed(actor.householdId))
-        ) {
-            throw new AgentActionsDisabledError("household_off");
-        }
-        const action = Object.hasOwn(TOOL_ACTIONS, meta.tool)
-            ? TOOL_ACTIONS[meta.tool]
-            : null;
-        const allowed = action
-            ? can({ userId: actor.personId, role: actor.role }, action)
-            : ({
-                  ok: false,
-                  reason: "That tool has no permission rule.",
-              } as const);
-        if (!allowed.ok) {
-            throw new AgentActionsDisabledError(
-                "not_permitted",
-                allowed.reason,
-            );
-        }
-        if (
-            !(await deps.settings.getMemberAgentsCanDelete(
-                actor.householdId,
-                actor.personId,
-            ))
-        ) {
-            throw new AgentActionsDisabledError("person_off");
-        }
+        const refusal = await agentRefusal(deps, actor, meta.tool);
+        if (refusal) throw refusal;
         const watch = createLedgerWatch(deps, actor.householdId);
         const { recorder, changes } = createRecorder(tx, watch);
         const result = await write(recorder);
@@ -1774,11 +1787,13 @@ export async function purgeExpiredAgentSnapshots(
     return deps.store.purgeSnapshots(now);
 }
 
+/** What a destructive tool's result says when its change can be undone. */
+export const AGENT_UNDO_HINT =
+    "The household can undo this for 24 hours in Settings › AI connections.";
+
 /** The sentence a destructive tool appends to its result; empty when there is nothing to undo. */
 export function agentUndoHint(entry: AgentActionEntry): string {
-    return entry.canUndo
-        ? "The household can undo this for 24 hours in Settings › AI connections."
-        : "";
+    return entry.canUndo ? AGENT_UNDO_HINT : "";
 }
 
 function iso(value: unknown): string {

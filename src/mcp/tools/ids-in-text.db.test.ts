@@ -294,20 +294,60 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         () => ({}),
     ),
     // ---- writes that return a new id ----
+    snooze_notice: noIds(
+        "returns the time it snoozed to, no row ids",
+        async (_s, make) => {
+            const listed = await make("list_notices");
+            const row = (listed.notifications as any[]).find(
+                (n) => n.kind !== "allergens",
+            );
+            return { notification_id: row.id, until: "week" };
+        },
+    ),
+    // A notification's id and its subject's are both in the list's text, each
+    // under the input that takes it.
     dismiss_notice: noIds(
         "echoes only ids the caller passed in",
         async (_s, make) => {
-            const listed = await make("list_notices");
-            const notice = (listed.notices as any[]).find((n) => n.dismiss);
+            // The snooze row's notification is hidden, not gone.
+            const listed = await make("list_notices", {
+                include_snoozed: true,
+            });
+            // An Allergens row cannot be dismissed: take another.
+            const row = (listed.notifications as any[]).find(
+                (n) => n.kind !== "allergens",
+            );
+            return { notification_id: row.id };
+        },
+    ),
+    // The data-quality form dismisses with the fields the item lists.
+    "dismiss_notice#data-quality": noIds(
+        "echoes only ids the caller passed in",
+        async (_s, make) => {
+            await make("upsert_food", { name: "rolled oat" });
+            const oats = (await make("upsert_food", {
+                name: "rolled oats",
+                on_similar: "create",
+            })) as { id: string };
+            const food = await make("get_food", { food_id: oats.id });
+            const dupe = (food.notices as any[]).find((n) => n.dismiss);
             return {
-                code: notice.dismiss.code,
-                subject_kind: notice.dismiss.subject_kind,
-                subject_id: notice.dismiss.subject_id,
-                ...(notice.dismiss.related_id
-                    ? { related_id: notice.dismiss.related_id }
+                code: dupe.dismiss.code,
+                subject_kind: dupe.dismiss.subject_kind,
+                subject_id: dupe.dismiss.subject_id,
+                ...(dupe.dismiss.related_id
+                    ? { related_id: dupe.dismiss.related_id }
                     : {}),
             };
         },
+    ),
+    mark_notices_read: noIds("returns a count, no row ids", async () => ({
+        notification_ids: "all",
+    })),
+    get_notification_settings: noIds("returns kinds, no row ids", () => ({})),
+    set_notification_settings: noIds(
+        "returns the one setting, no row ids",
+        () => ({ kind: "week_plan_changes", enabled: true }),
     ),
     add_fridge_location: () => ({ name: "Pantry" }),
     add_fridge_item: (s) => ({

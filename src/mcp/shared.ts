@@ -66,6 +66,7 @@ import {
     AGENT_DESTRUCTIVE_SETTING,
     AGENT_PERSONAL_SETTING,
     AgentActionsDisabledError,
+    agentRefusal,
     agentUndoHint,
     withAgentAction,
     type AgentActionActor,
@@ -97,6 +98,7 @@ import type {
 } from "../domain/foods.js";
 import type { Notice, NoticeCode } from "../domain/notices.js";
 import { NOTICE_CODES } from "../domain/notices.js";
+import { kindForNoticeCode } from "../domain/notification-kinds.js";
 import {
     noticeActionFor,
     noticeCodeDismissible,
@@ -265,7 +267,10 @@ export const NOTICE_DIGEST_GROUP_ORDER = [
     "other",
 ] as const;
 
+/** A notice the inbox carries is dismissed there, by its notification_id; the
+ * `dismiss` fields are the data-quality marks' form of dismiss_notice. */
 function noticeWireDismiss(notice: Notice): WireNotice["dismiss"] {
+    if (kindForNoticeCode(notice.code) !== null) return null;
     if (!noticeCodeDismissible(notice.code)) return null;
     let related_id: string | null = null;
     if (noticeDismissPair(notice.code)) {
@@ -287,7 +292,9 @@ function noticeWireDismiss(notice: Notice): WireNotice["dismiss"] {
 export function noticeToWire(notice: Notice): WireNotice {
     const subject = notice.subject;
     const digest = noticeDigestWire(notice);
-    const canDismiss = noticeCodeDismissible(notice.code);
+    const canDismiss =
+        noticeCodeDismissible(notice.code) &&
+        kindForNoticeCode(notice.code) === null;
     return {
         code: notice.code,
         severity: notice.severity,
@@ -1208,6 +1215,13 @@ const NOTICE_KIND_INPUT: Record<
     member: "user_id",
 };
 
+/** The id of what a notice or notification is about, labelled by the input that takes it. */
+export function subjectIdTag(kind: string, id: string): string {
+    const input =
+        NOTICE_KIND_INPUT[kind as keyof typeof NOTICE_KIND_INPUT] ?? "id";
+    return idTag(id, input);
+}
+
 /**
  * The ids a notice carries, for the end of its text line. A dismissable one
  * carries exactly what dismiss_notice takes, under those input names: `code`,
@@ -1596,11 +1610,18 @@ export type ToolContext = {
     requireCan: (action: Action, memberId?: string) => Promise<void>;
     callerActor: () => Promise<{
         userId: string;
+        role: PermissionRole;
         isOwner: boolean;
         householdId: string;
     }>;
     analytics: { userId: string };
     uiMeta: (widgetKey: string) => Record<string, unknown>;
+    /**
+     * Whether the guard would let this person's agent run `tool` now: the
+     * household's switch, the person's role and their own switch, by the
+     * rule `runDestructive` applies. For telling an agent what it may do.
+     */
+    agentMayRun: (tool: GuardedTool) => Promise<boolean>;
     /**
      * Runs a destructive write through the household's agent-action guard: the
      * switch is checked first, the rows the write will change are recorded as
@@ -2025,15 +2046,31 @@ export function createToolContext(
     }
     async function callerActor(): Promise<{
         userId: string;
+        role: PermissionRole;
         isOwner: boolean;
         householdId: string;
     }> {
         const person = await actingPerson();
         return {
             userId: person.userId,
+            role: person.role,
             isOwner: can(person, "household.owner_only").ok,
             householdId: person.householdId,
         };
+    }
+    async function agentMayRun(tool: GuardedTool): Promise<boolean> {
+        const person = await actingPerson();
+        return (
+            (await agentRefusal(
+                agentActionDeps(),
+                {
+                    householdId: person.householdId,
+                    personId: person.userId,
+                    role: person.role,
+                },
+                tool,
+            )) === null
+        );
     }
     // What the household's activity list calls this agent: the OAuth app the
     // token was issued to, or the shared token.
@@ -2179,6 +2216,7 @@ export function createToolContext(
         callerActor,
         analytics,
         uiMeta,
+        agentMayRun,
         runDestructive,
     };
 }

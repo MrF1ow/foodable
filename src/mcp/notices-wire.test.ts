@@ -2,7 +2,19 @@ import { test, expect } from "bun:test";
 import type { Notice } from "../domain/notices.js";
 import { NOTICE_CODES, type NoticeCode } from "../domain/notices.js";
 import { noticeSentence } from "../copy/notices.js";
+import { eventSentence } from "../copy/notifications.js";
 import { noticeToWire, NOTICE_SCHEMA } from "./shared.js";
+import { runningLowStrip } from "../web/pages/v2/kitchen-usuals.js";
+import { APP_PATHS } from "../web/route-map.js";
+import { NOTIFICATION_SCHEMA, notificationToWire } from "./tools/notices.js";
+import {
+    kindForNoticeCode,
+    NOTIFICATION_KIND_IDS,
+    NOTIFICATION_KINDS,
+    type NotificationKind,
+} from "../domain/notification-kinds.js";
+import { fanOutEvent, syncConditions } from "../domain/notifications.js";
+import { allergenConditionNotices } from "../domain/notices-allergens.js";
 import { fridgeNotices } from "../domain/stock.js";
 import { groceryRestockNotices } from "../domain/restock.js";
 import { recipeNotices, type RecipeIngredient } from "../domain/recipes.js";
@@ -539,4 +551,329 @@ test("product checks digest as the product with the check as detail", () => {
     expect(w.group_label).toBe("Product checks");
     expect(w.dot_tone).toBe("over");
     expect(w.detail_tone).toBe("over");
+});
+
+const INBOX_NOW = new Date("2026-06-01T12:00:00.000Z");
+const OWNER = { userId: "pat-id", role: "owner" as const };
+const MEMBER = { userId: "sam-id", role: "member" as const };
+// The member the weigh-in notice names (see producerNotices).
+const ALEX = { userId: "u1", role: "member" as const };
+
+test("an inbox notice offers no dismiss form; a data-quality mark keeps its own", async () => {
+    const notices = await producerNotices();
+    let inbox = 0;
+    let marks = 0;
+    for (const notice of notices) {
+        const w = noticeToWire(notice);
+        if (kindForNoticeCode(notice.code) !== null) {
+            inbox += 1;
+            // Dismissed by notification_id from list_notices, never by code.
+            expect(w.dismiss, notice.code).toBeNull();
+            expect(w.can_dismiss, notice.code).toBe(false);
+        } else if (w.can_dismiss) {
+            marks += 1;
+            expect(w.dismiss, notice.code).not.toBeNull();
+            expect(w.dismiss!.code).toBe(notice.code);
+        }
+    }
+    expect(inbox).toBeGreaterThan(0);
+    expect(marks).toBeGreaterThan(0);
+});
+
+test("every condition the inbox stores reads as its notice does and parses as a notification", async () => {
+    const notices = await producerNotices();
+    const plan = syncConditions({
+        householdId: HH,
+        notices,
+        rows: [],
+        members: [OWNER, MEMBER, ALEX],
+        now: INBOX_NOW,
+    });
+    expect(plan.insert.length).toBeGreaterThan(0);
+    const kinds = new Set<string>();
+    for (const row of plan.insert) {
+        kinds.add(row.kind);
+        const w = notificationToWire(row, new Map(), true);
+        expect(() => NOTIFICATION_SCHEMA.parse(w), row.kind).not.toThrow();
+        expect(w.message.length).toBeGreaterThan(0);
+        expect(w.open.startsWith("/"), w.open).toBe(true);
+        expect(w.read).toBe(false);
+        // The sentence is the notice's own, from the stored parameters.
+        const payload = row.payload as { code: Notice["code"] };
+        const source = notices.find(
+            (n) =>
+                n.code === payload.code &&
+                n.subject.id === row.subjectId &&
+                JSON.stringify(n.params) ===
+                    JSON.stringify((row.payload as { params: unknown }).params),
+        );
+        expect(source, `${payload.code} ${row.subjectId}`).toBeTruthy();
+        // The sentence is the notice's own, except that an Allergens row,
+        // which is read apart from its item, leads with the item's name.
+        const own = noticeSentence(source!);
+        const name = (source!.params as { name?: unknown }).name;
+        expect(w.message).toBe(
+            row.kind === "allergens" && typeof name === "string"
+                ? `${name} contains ${own.replace(/^Contains /, "")}`
+                : own,
+        );
+        // For everyone is a household row's, and never Allergens'; the guard's
+        // verdict on the agent (here: allowed) decides the rest.
+        expect(w.can_dismiss_for_everyone).toBe(
+            row.bucket === "household" &&
+                NOTIFICATION_KINDS[row.kind].canDisable,
+        );
+        // Where the guard would refuse the agent, none says it can.
+        expect(
+            notificationToWire(row, new Map(), false).can_dismiss_for_everyone,
+        ).toBe(false);
+        // A snooze still running is on the wire; one that has run out is not.
+        const later = new Date(INBOX_NOW.getTime() + 3_600_000).toISOString();
+        const earlier = new Date(INBOX_NOW.getTime() - 3_600_000).toISOString();
+        expect(
+            notificationToWire(
+                { ...row, snoozedUntil: later },
+                new Map(),
+                true,
+                INBOX_NOW,
+            ).snoozed_until,
+        ).toBe(later);
+        expect(
+            notificationToWire(
+                { ...row, snoozedUntil: earlier },
+                new Map(),
+                true,
+                INBOX_NOW,
+            ).snoozed_until,
+        ).toBeNull();
+    }
+    for (const kind of [
+        "allergens",
+        "food_expiring",
+        "running_low",
+        "weigh_in_due",
+    ]) {
+        expect(kinds.has(kind), kind).toBe(true);
+    }
+});
+
+test("every event kind fans out to a wire notification that names who did it", () => {
+    const events = [
+        {
+            kind: "recipe_changes" as const,
+            subjectKind: "recipe",
+            subjectId: "rec-1",
+            payload: { recipeName: "Beef chili" },
+        },
+        {
+            kind: "week_plan_changes" as const,
+            subjectKind: "recipe",
+            subjectId: "rec-2",
+            payload: {
+                recipeName: "Lasagna",
+                date: "2026-12-01",
+                slot: "dinner",
+                change: "planned",
+            },
+        },
+        {
+            kind: "new_usuals" as const,
+            subjectKind: "food",
+            subjectId: "f-1",
+            payload: { foodName: "Eggs", productName: null },
+        },
+    ];
+    for (const event of events) {
+        const [row] = fanOutEvent({
+            householdId: HH,
+            event,
+            actorUserId: MEMBER.userId,
+            members: [OWNER, MEMBER],
+            prefs: [
+                {
+                    householdId: HH,
+                    userId: OWNER.userId,
+                    kind: event.kind,
+                    enabled: true,
+                    updatedAt: INBOX_NOW.toISOString(),
+                },
+            ],
+            now: INBOX_NOW,
+        });
+        // The actor gets none; the owner, who turned it on, gets one.
+        expect(row!.recipientUserId).toBe(OWNER.userId);
+        const w = notificationToWire(
+            row!,
+            new Map([[MEMBER.userId, "Sam"]]),
+            true,
+        );
+        expect(() => NOTIFICATION_SCHEMA.parse(w), event.kind).not.toThrow();
+        expect(w.message).toBe(eventSentence(row!, "Sam"));
+        expect(w.message.startsWith("Sam ")).toBe(true);
+        expect(w.subject).toEqual({
+            kind: event.subjectKind,
+            id: event.subjectId,
+        });
+        expect(w.bucket).toBe("household");
+        expect(w.can_dismiss_for_everyone).toBe(true);
+        // A person who left the household reads as Someone.
+        expect(notificationToWire(row!, new Map(), true).message).toStartWith(
+            "Someone ",
+        );
+    }
+    expect(NOTIFICATION_KIND_IDS.length).toBe(7);
+});
+
+test("an Allergens row names its item and opens that item's page, whichever kind of item it is", () => {
+    const peanutButter: Food = {
+        ...newFood({ householdId: HH, kind: "food", name: "Peanut butter" }),
+        id: "pb",
+        allergens: ["peanut"],
+    };
+    const notices = allergenConditionNotices({
+        today: TODAY,
+        members: [
+            {
+                userId: "pat-id",
+                displayName: "Pat",
+                allergens: [
+                    {
+                        id: "a1",
+                        householdId: HH,
+                        userId: "pat-id",
+                        allergen: "peanut",
+                        otherLabel: null,
+                    },
+                ],
+            },
+        ],
+        lines: [
+            {
+                id: "gl-1",
+                displayName: "Crunchy peanut butter",
+                foodId: "pb",
+                checked: false,
+            },
+        ],
+        plans: [{ recipeId: "rec-1", date: TODAY }],
+        recipes: [{ id: "rec-1", name: "Pad thai" }],
+        ingredients: [
+            { recipeId: "rec-1", displayName: "Peanut butter", foodId: "pb" },
+        ],
+        fridgeItems: [{ id: "fi-1", displayName: "Jif jar", foodId: "pb" }],
+        foodsById: effectiveFoodsFromListed([peanutButter]),
+    });
+    const plan = syncConditions({
+        householdId: HH,
+        notices,
+        rows: [],
+        members: [OWNER],
+        now: INBOX_NOW,
+    });
+    const bySubject = new Map(
+        plan.insert.map((row) => [
+            row.subjectKind,
+            notificationToWire(row, new Map(), true),
+        ]),
+    );
+    expect([...bySubject.keys()].sort()).toEqual([
+        "fridge_item",
+        "grocery_line",
+        "recipe",
+    ]);
+    const line = bySubject.get("grocery_line")!;
+    expect(line.message).toBe("Crunchy peanut butter contains peanut — Pat.");
+    expect(line.open).toBe("/kitchen/groceries");
+    const recipe = bySubject.get("recipe")!;
+    expect(recipe.message).toBe("Pad thai contains peanut — Pat.");
+    expect(recipe.open).toBe("/recipes/rec-1");
+    const item = bySubject.get("fridge_item")!;
+    expect(item.message).toBe("Jif jar contains peanut — Pat.");
+    expect(item.subject).toEqual({ kind: "fridge_item", id: "fi-1" });
+    expect(item.open).toBe("/kitchen/fridge");
+    // A food subject (no producer gives one today) opens the food's page.
+    const food = notificationToWire(
+        { ...plan.insert[0]!, subjectKind: "food", subjectId: "f-9" },
+        new Map(),
+        true,
+    );
+    expect(food.open).toBe("/foods/f-9");
+});
+
+test("a Running low row opens the page whose strip shows it", () => {
+    const notice: Notice = {
+        code: "grocery.running_low",
+        severity: "warn",
+        subject: { kind: "food", id: "f-milk" },
+        related: [],
+        params: {
+            name: "Milk",
+            foodId: "f-milk",
+            reason: "below 1 l",
+            dismissScope: "",
+        },
+    };
+    // The page the row opens renders the notice with its actions...
+    const strip = String(runningLowStrip([notice]));
+    expect(strip).toContain("Running low");
+    expect(strip).toContain("Milk");
+    // ...and its Dismiss and Add to list come back to that same page.
+    expect(strip).toContain(APP_PATHS.kitchenUsuals);
+    const [row] = syncConditions({
+        householdId: HH,
+        notices: [notice],
+        rows: [],
+        members: [OWNER],
+        now: INBOX_NOW,
+    }).insert;
+    expect(notificationToWire(row!, new Map(), true).open).toBe(
+        APP_PATHS.kitchenUsuals,
+    );
+});
+
+test("every notification kind opens the page that shows it", () => {
+    const [anyRow] = syncConditions({
+        householdId: HH,
+        notices: [
+            {
+                code: "fridge.expiring",
+                severity: "warn",
+                subject: { kind: "fridge_item", id: "fi-9" },
+                related: [],
+                params: { name: "Milk", daysLeft: 1, expiresOn: TODAY },
+            },
+        ],
+        rows: [],
+        members: [OWNER],
+        now: INBOX_NOW,
+    }).insert;
+    const opens = (
+        kind: NotificationKind,
+        subjectKind: string | null,
+        subjectId: string | null,
+    ) =>
+        notificationToWire(
+            { ...anyRow!, kind, subjectKind, subjectId },
+            new Map(),
+            true,
+        ).open;
+    expect(opens("food_expiring", "fridge_item", "fi-9")).toBe(
+        "/kitchen/fridge",
+    );
+    // The strip with Add to list and Dismiss is on the Usuals page (and the
+    // Fridge page); the Groceries page does not show a running-low usual.
+    expect(opens("running_low", "food", "f-9")).toBe("/kitchen/usuals");
+    expect(opens("weigh_in_due", "member", "u-9")).toBe("/");
+    expect(opens("recipe_changes", "recipe", "rec-9")).toBe("/recipes");
+    // The week strip is on the Recipes page; a recipe's own page does not say
+    // where it is planned.
+    expect(opens("week_plan_changes", "recipe", "rec-9")).toBe("/recipes");
+    expect(opens("week_plan_changes", null, null)).toBe("/recipes");
+    expect(opens("new_usuals", "food", "f-9")).toBe("/kitchen/usuals");
+    expect(opens("allergens", "grocery_line", "gl-9")).toBe(
+        "/kitchen/groceries",
+    );
+    expect(opens("allergens", "recipe", "rec-9")).toBe("/recipes/rec-9");
+    expect(opens("allergens", "fridge_item", "fi-9")).toBe("/kitchen/fridge");
+    expect(opens("allergens", "food", "f-9")).toBe("/foods/f-9");
 });
