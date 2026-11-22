@@ -278,7 +278,8 @@ describe("/app-v2.js", () => {
         // +~1.2 KB Profile pictures: a picture that fails to load shows initials.
         // +~11 KB Settings autosave: a marked form submits when a field is left; one save at a time, an edit in progress survives the response, a rejected or failed field keeps its text, leaving mid-save posts with keepalive.
         // +~5.2 KB Settings autosave: whole forms (Product score) save on any control's change, keep an unsaved edit through the refresh, and queue their reset buttons; a refreshed form forgets what it last sent.
-        expect(js.length).toBeLessThan(171_000);
+        // +~0.7 KB Item row: the swipe client also drives the Item row's face and beds.
+        expect(js.length).toBeLessThan(172_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

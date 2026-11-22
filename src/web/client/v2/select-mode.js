@@ -83,7 +83,7 @@ document.addEventListener(
             const root = rootFor(toggle.getAttribute("data-fd-select-toggle"));
             if (!root) return;
             setSelecting(root, true);
-            const first = boxes(root)[0];
+            const first = boxes(root).find((box) => !box.disabled);
             if (first) first.focus();
             return;
         }
@@ -103,7 +103,7 @@ document.addEventListener(
         // A row only picks in select mode: nothing in it opens, follows or submits.
         event.stopPropagation();
         // The box's own tap is the checkbox's to toggle.
-        if (target.closest(".fd-row__select")) return;
+        if (target.closest(".fd-row__select, .fd-item-row__select")) return;
         event.preventDefault();
         flip(root, row);
     },

@@ -52,8 +52,32 @@ if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_SWIPE_DECISION) {
 
 const rowInit = new WeakSet();
 
+// The two row families that swipe: the older `fd-row` rows and the Item row.
+// A swipe right reveals the lead action (Again), a swipe left the trail one
+// (Delete).
+const KINDS = [
+    {
+        row: "fd-row--swipe",
+        body: ".fd-row__body",
+        link: ".fd-row__body--link",
+        action: (side) => `.fd-row__action--${side}`,
+    },
+    {
+        row: "fd-item-row--swipe",
+        body: ".fd-item-row__face",
+        link: ".fd-item-row__face--link",
+        action: (side) =>
+            side === "lead"
+                ? ".fd-item-row__bed--again"
+                : ".fd-item-row__bed--delete",
+    },
+];
+
+const kindOf = (row) =>
+    row.classList ? KINDS.find((k) => row.classList.contains(k.row)) : null;
+
 function setSwipeX(row, px) {
-    const body = row.querySelector(".fd-row__body");
+    const body = row.querySelector(kindOf(row).body);
     if (!body || !body.style) return;
     if (px === 0) {
         body.style.removeProperty("--fd-swipe-x");
@@ -68,7 +92,7 @@ function setSwipeX(row, px) {
 }
 
 function snapBack(row) {
-    const body = row.querySelector(".fd-row__body");
+    const body = row.querySelector(kindOf(row).body);
     if (!body || !body.style) return;
     row.removeAttribute("data-swipe-dragging");
     row.removeAttribute("data-swipe-open");
@@ -89,7 +113,7 @@ function snapBack(row) {
 }
 
 function submitSwipeAction(row, side) {
-    const wrap = row.querySelector(`.fd-row__action--${side}`);
+    const wrap = row.querySelector(kindOf(row).action(side));
     if (!wrap) return;
     const form =
         typeof wrap.querySelector === "function"
@@ -104,14 +128,15 @@ function submitSwipeAction(row, side) {
 }
 
 function initSwipeRow(row) {
-    if (!row.classList || !row.classList.contains("fd-row--swipe")) return;
+    const kind = kindOf(row);
+    if (!kind) return;
     if (!mq(MQ_COARSE)) return;
     if (rowInit.has(row)) return;
     rowInit.add(row);
 
     const body =
         typeof row.querySelector === "function"
-            ? row.querySelector(".fd-row__body")
+            ? row.querySelector(kind.body)
             : null;
     if (!body) return;
 
@@ -125,7 +150,7 @@ function initSwipeRow(row) {
 
     const bodyNavLink =
         typeof row.querySelector === "function"
-            ? row.querySelector(".fd-row__body--link")
+            ? row.querySelector(kind.link)
             : null;
 
     const stopListening = () => {
@@ -262,7 +287,11 @@ function initSwipeRow(row) {
 }
 
 function initSwipeRows(root) {
-    root.querySelectorAll(".fd-row--swipe").forEach((row) => initSwipeRow(row));
+    KINDS.forEach((kind) =>
+        root
+            .querySelectorAll(`.${kind.row}`)
+            .forEach((row) => initSwipeRow(row)),
+    );
 }
 
 window.FoodableApp.onLoad(initSwipeRows);
