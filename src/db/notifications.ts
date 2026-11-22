@@ -1,4 +1,5 @@
 import type { Notice } from "../domain/notices.js";
+import type { GroceryAllergenMember } from "../domain/grocery.js";
 import { noticesFor, type NoticesForDeps } from "../domain/notices-for.js";
 import {
     notificationFromDb,
@@ -15,6 +16,7 @@ import {
     type NotificationsStore,
     type SyncPlan,
 } from "../domain/notifications.js";
+import { memberAllergenFromRow, type MemberAllergen } from "../domain/rules.js";
 import { liveFoodsStore } from "./foods.js";
 import { liveFridgeStore } from "./fridge.js";
 import { liveGroceryStore } from "./grocery.js";
@@ -437,6 +439,46 @@ export function liveNotificationsStore(): NotificationsStore {
     };
 }
 
+const ALLERGEN_COLS = "id, household_id, user_id, allergen, other_label";
+
+/** Every member of the household with their allergens, from one household-wide
+ * read of `member_allergens`. Most households have none on file, and then the
+ * members are not listed either. */
+async function liveAllergenMembers(
+    householdId: string,
+): Promise<GroceryAllergenMember[]> {
+    // One transaction for both reads.
+    return run(async (tx) => {
+        let data: unknown[];
+        try {
+            data = await rows(
+                tx,
+                tx`
+                    select ${tx.unsafe(ALLERGEN_COLS)}
+                    from public.member_allergens
+                    where household_id = ${householdId}
+                    order by created_at asc
+                `,
+            );
+        } catch (err) {
+            throw pgError("list household allergens", err);
+        }
+        if (data.length === 0) return [];
+        const byUser = new Map<string, MemberAllergen[]>();
+        for (const row of data) {
+            const allergen = memberAllergenFromRow(row as never);
+            const list = byUser.get(allergen.userId) ?? [];
+            list.push(allergen);
+            byUser.set(allergen.userId, list);
+        }
+        return (await listHouseholdMembers(householdId)).map((member) => ({
+            displayName: member.displayName,
+            userId: member.userId,
+            allergens: byUser.get(member.userId) ?? [],
+        }));
+    });
+}
+
 /** Everything `noticesFor` reads, live: the one set of stores the app's pages
  * and the sync build their notices from. */
 export function liveNoticesForDeps(): NoticesForDeps {
@@ -448,14 +490,16 @@ export function liveNoticesForDeps(): NoticesForDeps {
         grocery: liveGroceryStore(),
         plans: liveRecipePlansStore(),
         weighIns: liveWeighInStore(),
+        allergenMembers: liveAllergenMembers,
     };
 }
 
 export type NotificationSyncDeps = NotificationsDeps & {
     listMembers(householdId: string): Promise<NotificationMember[]>;
     /** The household's notices as a sync reads them: the one-tap kinds
-     * included (`actionable`) and the ones the household dismissed too, so a
-     * dismissed condition that is still true reads as true. */
+     * included (`actionable`), the allergen conditions (`allergens`), and the
+     * ones the household dismissed too, so a dismissed condition that is still
+     * true reads as true. */
     loadNotices(householdId: string): Promise<readonly Notice[]>;
 };
 
@@ -473,7 +517,13 @@ export function liveNotificationSyncDeps(): NotificationSyncDeps {
             const { notices } = await noticesFor(
                 liveNoticesForDeps(),
                 householdId,
-                { today, timezone, actionable: true, includeDismissed: true },
+                {
+                    today,
+                    timezone,
+                    actionable: true,
+                    includeDismissed: true,
+                    allergens: true,
+                },
             );
             return notices;
         },
@@ -481,17 +531,35 @@ export function liveNotificationSyncDeps(): NotificationSyncDeps {
 }
 
 /**
+ * What a sync may be handed besides the clock: nothing, and it reads its own
+ * notices, or notices the caller already read. Those must have been read with
+ * `actionable`, `includeDismissed` and `allergens: true`, and say so
+ * (`allergens: true`): a read without the allergen conditions would read as
+ * "nothing conflicts" and resolve every Allergens row.
+ */
+export type SyncOpts = { now?: Date } & (
+    { notices?: undefined } | { notices: readonly Notice[]; allergens: true }
+);
+
+/**
  * Make the household's stored notifications match what is true now: a row
  * for each member a condition reaches, and the rows of conditions that have
- * cleared resolved. Pass `notices` when the caller has already read them
- * (actionable, household dismissals included, as `loadNotices` does) so they
- * are not computed twice; without them the sync reads its own.
+ * cleared resolved. Pass `notices` when the caller has already read them (see
+ * `SyncOpts`, as `loadNotices` does) so they are not computed twice; without
+ * them the sync reads its own. Notices handed over without saying they were
+ * read with the allergen option are refused (nothing is read or written)
+ * rather than topped up, so no caller pays for a second read of them.
  */
 export async function syncHouseholdNotifications(
     deps: NotificationSyncDeps,
     householdId: string,
-    opts?: { notices?: readonly Notice[]; now?: Date },
+    opts?: SyncOpts,
 ): Promise<SyncPlan> {
+    if (opts?.notices && opts.allergens !== true) {
+        throw new Error(
+            "syncHouseholdNotifications: notices must be read with allergens: true",
+        );
+    }
     const notices = opts?.notices ?? (await deps.loadNotices(householdId));
     // One transaction for the reads and the writes: a page load pays for one
     // round trip to open it, and the writes land together.
@@ -511,7 +579,7 @@ export async function syncHouseholdNotifications(
 export async function trySyncHouseholdNotifications(
     deps: NotificationSyncDeps,
     householdId: string,
-    opts?: { notices?: readonly Notice[]; now?: Date },
+    opts?: SyncOpts,
     log: (message: string) => void = (message) => console.error(message),
 ): Promise<SyncPlan | null> {
     try {

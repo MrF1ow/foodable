@@ -5,6 +5,7 @@ import {
     trySyncHouseholdNotifications,
 } from "../db/notifications.js";
 import { dismissedKeySet, isDismissedIn } from "../domain/notice-dismissals.js";
+import { NOTIFICATION_KINDS } from "../domain/notification-kinds.js";
 import {
     needsAttentionCount,
     tabDotsFromNotices,
@@ -89,25 +90,33 @@ export function attentionFromNotices(
     };
 }
 
+const ALLERGEN_CODES: ReadonlySet<string> = new Set(
+    NOTIFICATION_KINDS.allergens.noticeCodes,
+);
+
 /**
- * The notices the household has not dismissed: what a page shows. A read made
- * with `includeDismissed` holds the dismissed ones too (so the stored
- * notifications can tell a condition is still true); this takes them out again,
- * by the dismissals the same result carries.
+ * The notices a page shows. A read made for the stored notifications holds
+ * more than that: the notices the household dismissed (so the sync can tell a
+ * condition is still true) and the Allergens conditions (which the pages and
+ * tools show where they are made: the grocery list, the recipe, the product
+ * check). This takes both out again, by the dismissals the same result
+ * carries.
  */
-export function withoutHouseholdDismissed<
+export function shownOnPage<
     T extends Pick<NoticesForResult, "notices" | "dismissals">,
 >(result: T): T {
     const dismissed = dismissedKeySet(result.dismissals);
-    if (dismissed.size === 0) return result;
-    return {
-        ...result,
-        notices: result.notices.filter((n) => !isDismissedIn(n, dismissed)),
-    };
+    const shown = result.notices.filter(
+        (n) => !ALLERGEN_CODES.has(n.code) && !isDismissedIn(n, dismissed),
+    );
+    return shown.length === result.notices.length
+        ? result
+        : { ...result, notices: shown };
 }
 
 /** Seam for tests: how a page load brings the household's stored
- *  notifications up to date from the notices it just read. */
+ *  notifications up to date from the notices it just read (with the dismissed
+ *  ones and the Allergens conditions in them, as a sync needs). */
 export type SyncStoredNotifications = (
     householdId: string,
     notices: readonly Notice[],
@@ -121,7 +130,45 @@ const syncStoredNotifications: SyncStoredNotifications = (
 ) =>
     trySyncHouseholdNotifications(liveNotificationSyncDeps(), householdId, {
         notices,
+        allergens: true,
     });
+
+/**
+ * The notices deps for a page's read, with one guard on the members' allergens.
+ * That read is for the stored notifications, so a page never waits on it or
+ * breaks for it: when it fails it reads as no members, and `read()` says it
+ * did not succeed, so the caller does not hand the sync a read that would
+ * look like "no one has an allergen" and resolve every Allergens row.
+ */
+function pageNoticesDeps(): {
+    deps: ReturnType<typeof liveNoticesForDeps>;
+    allergensRead(): boolean;
+} {
+    const deps = liveNoticesForDeps();
+    const members = deps.allergenMembers;
+    let ok = true;
+    return {
+        deps: {
+            ...deps,
+            allergenMembers: members
+                ? async (householdId) => {
+                      try {
+                          return await members(householdId);
+                      } catch (err) {
+                          ok = false;
+                          const message =
+                              err instanceof Error ? err.message : String(err);
+                          console.error(
+                              `[notifications] household=${householdId.slice(0, 8)} allergen read failed: ${message}`,
+                          );
+                          return [];
+                      }
+                  }
+                : undefined,
+        },
+        allergensRead: () => ok,
+    };
+}
 
 export async function loadHouseholdNotices(
     householdId: string,
@@ -146,17 +193,19 @@ export async function loadHouseholdNotices(
         : null;
     const today =
         opts?.today ?? clock?.today ?? (await householdToday(householdId));
-    const result = await noticesFor(liveNoticesForDeps(), householdId, {
+    const { deps, allergensRead } = pageNoticesDeps();
+    const result = await noticesFor(deps, householdId, {
         ...opts,
         today,
         timezone: clock?.timezone,
-        // The stored notifications read the dismissed notices too, and the
-        // page takes them out again below.
+        // The stored notifications read the dismissed notices and the
+        // Allergens conditions too, and the page takes them out again below.
         includeDismissed: opts?.actionable ? true : undefined,
+        allergens: opts?.actionable ? true : undefined,
     });
     if (!opts?.actionable) return result;
-    await syncNotifications(householdId, result.notices);
-    return withoutHouseholdDismissed(result);
+    if (allergensRead()) await syncNotifications(householdId, result.notices);
+    return shownOnPage(result);
 }
 
 /** The household's notices for a signed-in viewer, the one-tap ones included.

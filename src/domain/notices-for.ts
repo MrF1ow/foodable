@@ -29,7 +29,12 @@ import {
     type RecipesStore,
 } from "./recipes.js";
 import type { FridgeItem } from "./fridge.js";
-import type { GroceryLine, GroceryListStore } from "./grocery.js";
+import type {
+    GroceryAllergenMember,
+    GroceryLine,
+    GroceryListStore,
+} from "./grocery.js";
+import { allergenConditionNotices } from "./notices-allergens.js";
 import {
     PLAN_NOTICE_DAYS,
     planMissingNotices,
@@ -37,8 +42,8 @@ import {
     weighInDueNotices,
     type WeighInStore,
 } from "./notices-actionable.js";
-import type { PlansStore } from "./plan.js";
-import { addPlanDays, planRecipesOf } from "./plan-week.js";
+import type { PlansStore, RecipePlan } from "./plan.js";
+import { addPlanDays, planRecipesOf, WEEK_PLAN_DAYS } from "./plan-week.js";
 import { groceryRestockNotices } from "./restock.js";
 import { fridgeNotices } from "./stock.js";
 
@@ -55,6 +60,9 @@ export type NoticesForDeps = {
     plans?: PlansStore;
     /** Latest weigh-ins, for the weigh-in notice. Without it none is produced. */
     weighIns?: WeighInStore;
+    /** Every member with their allergens, for the allergen conditions. Without
+     *  it none is produced. */
+    allergenMembers?: (householdId: string) => Promise<GroceryAllergenMember[]>;
 };
 
 export type RecipesListPrefetch = {
@@ -212,6 +220,16 @@ export async function noticesFor(
         actionable?: boolean;
         /** The household's time zone, for counting days since a weigh-in. Default UTC. */
         timezone?: string;
+        /**
+         * Also produce the allergen conditions: an open grocery line, a recipe
+         * planned in the next seven days or a fridge item that a member's
+         * allergen conflicts with. Off by default: the pages and tools show
+         * those warnings where they are made (the grocery list, the recipe, the
+         * product check), so only the stored notifications ask for them. They
+         * are built from what the read already loaded; what it adds is the
+         * members' allergens and, only when someone has one, the plan window.
+         */
+        allergens?: boolean;
     },
 ): Promise<NoticesForResult> {
     const today = opts.today;
@@ -227,6 +245,7 @@ export async function noticesFor(
         catalogFoods,
         aliasMap,
         barcodedIds,
+        allergenMembers,
     ] = await Promise.all([
         listRecipes(deps.recipes, householdId),
         deps.fridge.listItems(householdId),
@@ -238,6 +257,9 @@ export async function noticesFor(
         deps.foods.listFoods(householdId),
         deps.foods.listAllAliases(householdId),
         deps.foods.listBarcodedFoodIds(householdId),
+        opts.allergens && deps.allergenMembers
+            ? deps.allergenMembers(householdId)
+            : Promise.resolve([] as GroceryAllergenMember[]),
     ]);
     const groceryWithFoods = grocery
         ? {
@@ -360,13 +382,37 @@ export async function noticesFor(
     if (grocery) {
         raw.push(...groceryRestockNotices(grocery.lines, fridgeItems, today));
     }
+    // The plan window both the one-tap notices and the allergen conditions
+    // need, read once: the longer of the two, and only as far as someone needs
+    // it (no one with an allergen on file means no allergen read at all).
+    const allergic = allergenMembers.some(
+        (member) => member.allergens.length > 0,
+    );
+    const noticeLastDay = addPlanDays(today, PLAN_NOTICE_DAYS - 1);
+    const noticePlanDays =
+        opts.actionable && grocery && deps.plans ? PLAN_NOTICE_DAYS : 0;
+    const planDays = Math.max(noticePlanDays, allergic ? WEEK_PLAN_DAYS : 0);
+    const plans =
+        deps.plans && planDays > 0
+            ? await deps.plans.listPlans(
+                  householdId,
+                  today,
+                  addPlanDays(today, planDays - 1),
+              )
+            : undefined;
+    // One effective-food map for the catalog, shared by what reads it.
+    let listedFoodsById: Map<string, EffectiveFood> | undefined;
+    const listedFoods = () =>
+        (listedFoodsById ??= effectiveFoodsFromListed(catalogFoods));
+
     if (opts.actionable) {
         const actionable = await actionableNotices(deps, householdId, {
             today,
             timezone: opts.timezone ?? "UTC",
-            catalogFoods,
+            listedFoods,
             fridgeItems,
             lines: grocery?.lines,
+            plans: plans?.filter((plan) => plan.date <= noticeLastDay),
             recipes,
             allIngredients,
         });
@@ -374,6 +420,45 @@ export async function noticesFor(
         for (const [key, name] of actionable.subjectNames) {
             subjectNames.set(key, name);
         }
+    }
+
+    if (allergic) {
+        // From what this read already holds: the list, the plans just read,
+        // the recipes and their ingredients, the fridge and the catalog. Only
+        // a food the catalog does not list (an archived one a line, an
+        // ingredient or an item still names) is read again.
+        const foodsById = new Map(listedFoods());
+        for (const [id, food] of catalog) {
+            if (!foodsById.has(id)) foodsById.set(id, food);
+        }
+        const unlisted = new Set<string>();
+        for (const id of [
+            ...(grocery?.lines ?? []).map((line) => line.foodId),
+            ...fridgeItems.map((item) => item.foodId),
+        ]) {
+            if (id && !foodsById.has(id)) unlisted.add(id);
+        }
+        if (unlisted.size > 0) {
+            for (const [id, food] of await effectiveFoodsByIds(
+                deps.foods,
+                householdId,
+                unlisted,
+            )) {
+                foodsById.set(id, food);
+            }
+        }
+        raw.push(
+            ...allergenConditionNotices({
+                today,
+                members: allergenMembers,
+                lines: grocery?.lines ?? [],
+                plans: plans ?? [],
+                recipes,
+                ingredients: allIngredients,
+                fridgeItems,
+                foodsById,
+            }),
+        );
     }
 
     let filtered = raw;
@@ -423,9 +508,12 @@ async function actionableNotices(
     input: {
         today: string;
         timezone: string;
-        catalogFoods: readonly Food[];
+        /** The catalog's effective foods (computed once per read). */
+        listedFoods: () => ReadonlyMap<string, EffectiveFood>;
         fridgeItems: readonly FridgeItem[];
         lines: readonly GroceryLine[] | undefined;
+        /** The plans of the next `PLAN_NOTICE_DAYS` days; none without a plans store. */
+        plans: readonly RecipePlan[] | undefined;
         recipes: readonly Recipe[];
         allIngredients: readonly RecipeIngredient[];
     },
@@ -434,7 +522,7 @@ async function actionableNotices(
     const subjectNames = new Map<string, string>();
     const { lines } = input;
     if (lines) {
-        const foodsById = effectiveFoodsFromListed(input.catalogFoods);
+        const foodsById = input.listedFoods();
         notices.push(
             ...runningLowNotices({
                 foodsById,
@@ -443,12 +531,8 @@ async function actionableNotices(
                 today: input.today,
             }),
         );
-        if (deps.plans) {
-            const plans = await deps.plans.listPlans(
-                householdId,
-                input.today,
-                addPlanDays(input.today, PLAN_NOTICE_DAYS - 1),
-            );
+        if (input.plans) {
+            const { plans } = input;
             const recipes = planRecipesOf(
                 plans,
                 input.recipes,
