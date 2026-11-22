@@ -122,6 +122,10 @@ insert into public.person_rules (household_id, user_id, body)
     values ('${HH_B}', '${USER_B}', 'No pork');
 insert into public.notice_dismissals (household_id, code, subject_kind, subject_id)
     values ('${HH_B}', 'fridge.expiring', 'food', '${FOOD_B}');
+insert into public.notifications (household_id, recipient_user_id, kind, bucket, source, notice_key)
+    values ('${HH_B}', '${USER_B}', 'food_expiring', 'household', 'condition', 'fridge.expiring:${FOOD_B}');
+insert into public.notification_prefs (household_id, user_id, kind, enabled)
+    values ('${HH_B}', '${USER_B}', 'food_expiring', false);
 insert into public.household_invites (household_id, code_hash, expires_at)
     values ('${HH_B}', repeat('c', 64), now() + interval '7 days');
 insert into public.social_reader_status (household_id, reader)

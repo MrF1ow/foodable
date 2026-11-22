@@ -663,6 +663,58 @@ begin
         end;
     end;
 
+    -- Notifications: both tables, the unique open-row index and the three
+    -- lookup indexes, row level security and the service_role grants.
+    declare
+        t text;
+        p text;
+        idx text;
+    begin
+        foreach t in array array['notifications', 'notification_prefs'] loop
+            if to_regclass('public.' || t) is null then
+                raise exception '% table missing', t;
+            end if;
+            if not exists (
+                select 1 from pg_tables
+                where schemaname = 'public' and tablename = t and rowsecurity
+            ) then
+                raise exception '% RLS not enabled', t;
+            end if;
+            foreach p in array array['select', 'insert', 'update', 'delete'] loop
+                if not has_table_privilege('service_role', 'public.' || t, p) then
+                    raise exception 'service_role lacks % on %', p, t;
+                end if;
+            end loop;
+        end loop;
+
+        foreach idx in array array[
+            'notifications_open_key',
+            'notifications_recipient_created_idx',
+            'notifications_household_open_key_idx',
+            'notifications_dismissed_idx',
+            'notifications_resolved_idx'
+        ] loop
+            if not exists (
+                select 1 from pg_indexes
+                where schemaname = 'public'
+                  and tablename = 'notifications'
+                  and indexname = idx
+            ) then
+                raise exception '% index missing', idx;
+            end if;
+        end loop;
+
+        if not exists (
+            select 1 from pg_indexes
+            where schemaname = 'public'
+              and indexname = 'notifications_open_key'
+              and indexdef ilike 'create unique index%'
+              and indexdef ilike '%where (resolved_at is null)%'
+        ) then
+            raise exception 'notifications_open_key is not a unique partial index';
+        end if;
+    end;
+
     if exists (
         select 1
         from information_schema.columns
