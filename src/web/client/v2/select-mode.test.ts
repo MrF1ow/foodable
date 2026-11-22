@@ -103,6 +103,7 @@ type Event = {
     key?: string;
     stopped: boolean;
     prevented: boolean;
+    defaultPrevented: boolean;
     stopPropagation(): void;
     preventDefault(): void;
     formData?: FormDataLike;
@@ -112,7 +113,7 @@ type FormDataLike = {
     append(k: string, v: string): void;
 };
 
-async function setup() {
+async function setup(menu?: "before" | "after") {
     const doc = new El("document");
     const listeners: Record<string, { fn: Handler; capture: boolean }[]> = {};
     const document = Object.assign(doc, {
@@ -177,14 +178,46 @@ async function setup() {
     root.add(bar, list, dialog);
     document.add(new El("div").add(toggle), root, otherForm);
 
+    // An anchored menu inside the list, open. Its own Escape listener closes
+    // every open menu and prevents the default, as menu.js does.
+    const panel = new El("div", { class: "fd-menu__panel" });
+    const menuRoot = new El("div", { "data-fd-menu": "" }).add(panel);
+    if (menu) {
+        a.li.add(menuRoot);
+        panel.hidden = false;
+    } else panel.hidden = true;
+    const addMenuListener = () =>
+        document.addEventListener(
+            "keydown",
+            ((event: Event) => {
+                if (event.key !== "Escape") return;
+                let handled = false;
+                for (const root of document.querySelectorAll(
+                    "[data-fd-menu]",
+                )) {
+                    const p = root.querySelector(".fd-menu__panel");
+                    if (!p || p.hidden) continue;
+                    p.hidden = true;
+                    handled = true;
+                }
+                if (handled) event.preventDefault();
+            }) as Handler,
+            true,
+        );
+    if (menu === "before") addMenuListener();
+
     const src = await Bun.file("./src/web/client/v2/select-mode.js").text();
     new Function("window", "document", src)(window, document);
+    if (menu === "after") addMenuListener();
 
     function event(target: El, extra: Record<string, unknown> = {}): Event {
         const e: Event = {
             target,
             stopped: false,
             prevented: false,
+            get defaultPrevented() {
+                return e.prevented;
+            },
             stopPropagation() {
                 e.stopped = true;
             },
@@ -243,6 +276,7 @@ async function setup() {
         send,
         tick,
         rerun: () => onLoad!(document),
+        panel,
         openDialog: () => dialog.setAttribute("open", ""),
     };
 }
@@ -394,6 +428,35 @@ describe("select mode", () => {
         t.dialog.removeAttribute("open");
         t.fire("keydown", t.event(t.root, { key: "Escape" }));
         expect(t.root.hasAttribute("data-fd-selecting")).toBe(false);
+    });
+
+    for (const order of ["before", "after"] as const) {
+        test(`Escape that closes an open menu keeps select mode on (menu listener ${order} select mode's)`, async () => {
+            const t = await setup(order);
+            t.click(t.toggle);
+            t.fire("keydown", t.event(t.root, { key: "Escape" }));
+            expect(t.panel.hidden).toBe(true);
+            expect(t.root.hasAttribute("data-fd-selecting")).toBe(true);
+            // The next Escape, with the menu gone, leaves select mode.
+            t.fire("keydown", t.event(t.root, { key: "Escape" }));
+            expect(t.root.hasAttribute("data-fd-selecting")).toBe(false);
+        });
+    }
+
+    test("plain Escape with no menu leaves select mode", async () => {
+        const t = await setup();
+        t.click(t.toggle);
+        t.fire("keydown", t.event(t.root, { key: "Escape" }));
+        expect(t.root.hasAttribute("data-fd-selecting")).toBe(false);
+    });
+
+    test("an Escape something else already handled keeps select mode on", async () => {
+        const t = await setup();
+        t.click(t.toggle);
+        const e = t.event(t.root, { key: "Escape" });
+        e.preventDefault();
+        t.fire("keydown", e);
+        expect(t.root.hasAttribute("data-fd-selecting")).toBe(true);
     });
 
     test("a page shown again in select mode (Turbo restore) starts over", async () => {
