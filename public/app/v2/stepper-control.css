@@ -1,0 +1,60 @@
+/* Stepper (src/web/components/v2/stepper-control.ts): the round buttons are
+ * the one button (button.css, Icon button at the lg tier); this styles the
+ * figure between them. The live .fd-stepper rules are in components.css. */
+
+.fd-stepper-control {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-sm);
+}
+.fd-stepper-control__value {
+    display: flex;
+    align-items: baseline;
+    justify-content: center;
+    gap: var(--space-xs);
+    min-width: 0;
+}
+.fd-stepper-control__input {
+    --fd-input-w: calc(var(--fd-chars, 3) * 1ch);
+    box-sizing: content-box;
+    width: var(--fd-input-w);
+    max-width: 100%;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-display);
+    font-size: var(--text-figure-size);
+    font-weight: 700;
+    line-height: 53px;
+    text-align: right;
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+@supports (field-sizing: content) {
+    .fd-stepper-control__input {
+        field-sizing: content;
+        width: auto;
+    }
+}
+.fd-stepper-control__input::-webkit-outer-spin-button,
+.fd-stepper-control__input::-webkit-inner-spin-button {
+    appearance: none;
+    -webkit-appearance: none;
+    margin: 0;
+}
+.fd-stepper-control__input:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}
+.fd-stepper-control__unit {
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: var(--text-body-size);
+    line-height: 20px;
+}

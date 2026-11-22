@@ -1,0 +1,291 @@
+/* The Display & data cards: Card, Mini card, Stat tile, Empty state, Table
+ * row, Score card and Profile card (src/web/components/v2/card.ts and its
+ * siblings). Sizes, padding, gap, radius and type size come from the scale in
+ * tokens.css; the few fixed widths are component-local `--fd-*` variables.
+ * Line heights are the design's measured ones (its text has Auto line height),
+ * which the scale's 22 and 18 do not equal for body and label text. */
+
+/* ---- Card ---- */
+
+.fd-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    box-sizing: border-box;
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    color: var(--text-primary);
+}
+.fd-card__content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    min-width: 0;
+    font-family: var(--font-body);
+    font-size: var(--text-body-size);
+    line-height: 20px;
+}
+
+/* ---- Mini card ---- */
+
+.fd-mini-card {
+    --fd-mini-card-w: 128px;
+    display: flex;
+    flex: none;
+    flex-direction: column;
+    gap: var(--space-xs);
+    box-sizing: border-box;
+    width: var(--fd-mini-card-w);
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-weight: 400;
+    text-decoration: none;
+}
+.fd-mini-card__label {
+    font-size: var(--text-caption-size);
+    font-weight: 500;
+    line-height: var(--text-caption-line);
+}
+.fd-mini-card__label--over {
+    color: var(--status-over);
+}
+.fd-mini-card__label--warn {
+    color: var(--status-warn);
+}
+.fd-mini-card__label--muted {
+    color: var(--text-secondary);
+}
+.fd-mini-card__title {
+    font-size: var(--text-body-size);
+    font-weight: 600;
+    line-height: 20px;
+}
+.fd-mini-card__meta {
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+}
+a.fd-mini-card:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}
+
+/* ---- Stat tile ---- */
+
+.fd-stat-card {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: var(--space-xs);
+    box-sizing: border-box;
+    min-width: 0;
+    padding: var(--space-md);
+    border-radius: var(--radius-md);
+    background: var(--surface-panel);
+    font-family: var(--font-body);
+}
+.fd-stat-card__value {
+    color: var(--text-primary);
+    font-size: var(--text-title-section-size);
+    font-weight: 600;
+    line-height: var(--text-title-section-line);
+}
+.fd-stat-card__label {
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+}
+
+/* ---- Empty state ---- */
+
+.fd-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-3xl) 0;
+    font-family: var(--font-body);
+    text-align: center;
+}
+.fd-empty-state__title {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: var(--text-title-section-size);
+    font-weight: 600;
+    line-height: var(--text-title-section-line);
+}
+.fd-empty-state__body {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+}
+.fd-empty-state__action {
+    margin-top: var(--space-md);
+}
+
+/* ---- Table row ---- */
+
+.fd-table-rows {
+    display: block;
+}
+.fd-table-row {
+    --fd-table-col-w: 84px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    box-sizing: border-box;
+    padding: var(--space-md) 0;
+    border-bottom: 1px solid var(--line);
+    font-family: var(--font-body);
+}
+.fd-table-row__label {
+    flex: 1 1 0;
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: var(--text-body-size);
+    line-height: 20px;
+    text-align: left;
+}
+.fd-table-row__col {
+    flex: none;
+    width: var(--fd-table-col-w);
+    color: var(--text-secondary);
+    font-size: var(--text-label-size);
+    font-weight: 500;
+    line-height: 17px;
+    text-align: right;
+}
+.fd-table-row--header .fd-table-row__label,
+.fd-table-row--header .fd-table-row__col {
+    color: var(--text-tertiary);
+    font-size: var(--text-micro-size);
+    font-weight: 600;
+    line-height: var(--text-micro-line);
+    text-transform: uppercase;
+}
+
+/* ---- Score card ---- */
+
+.fd-score-card {
+    --fd-band-color: var(--accent-text);
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    box-sizing: border-box;
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    font-family: var(--font-body);
+}
+.fd-score-card--middling {
+    --fd-band-color: var(--status-warn);
+}
+.fd-score-card--poor {
+    --fd-band-color: var(--status-over);
+}
+.fd-score-card--unknown {
+    --fd-band-color: var(--text-tertiary);
+}
+.fd-score-card__num {
+    flex: none;
+    color: var(--fd-band-color);
+    font-family: var(--font-display);
+    font-size: var(--text-figure-size);
+    font-weight: 700;
+    line-height: 53px;
+}
+.fd-score-card__text {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+.fd-score-card__verdict {
+    color: var(--text-primary);
+    font-size: var(--text-title-section-size);
+    font-weight: 600;
+    line-height: var(--text-title-section-line);
+}
+.fd-score-card__note,
+.fd-score-card__max {
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+}
+.fd-score-card__max {
+    flex: none;
+}
+
+/* ---- Profile card ---- */
+
+.fd-profile-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    box-sizing: border-box;
+    padding: var(--space-lg);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+    font-family: var(--font-body);
+}
+.fd-profile-card__who {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+.fd-profile-card__id {
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+.fd-profile-card__name {
+    color: var(--text-primary);
+    font-size: var(--text-title-section-size);
+    font-weight: 600;
+    line-height: var(--text-title-section-line);
+}
+.fd-profile-card__email {
+    overflow: hidden;
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.fd-profile-card__fields {
+    display: flex;
+    gap: var(--space-2xl);
+    margin: 0;
+}
+.fd-profile-card__field {
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    min-width: 0;
+}
+.fd-profile-card__key {
+    color: var(--text-tertiary);
+    font-size: var(--text-micro-size);
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    line-height: var(--text-micro-line);
+    text-transform: uppercase;
+}
+.fd-profile-card__val {
+    overflow: hidden;
+    margin: 0;
+    color: var(--text-primary);
+    font-size: var(--text-body-size);
+    line-height: 20px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}

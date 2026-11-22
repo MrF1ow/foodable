@@ -1,0 +1,69 @@
+/* Week day and Week strip (src/web/components/v2/week-strip.ts). The previous
+ * and next buttons are the one button (button.css). */
+
+.fd-week-strip {
+    display: flex;
+    align-items: center;
+    font-family: var(--font-body);
+}
+.fd-week-strip__days {
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+}
+.fd-week-day {
+    --fd-week-gap: 6px;
+    --fd-week-num: 30px;
+    --fd-week-dot: 5px;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--fd-week-gap);
+    box-sizing: border-box;
+    min-width: 0;
+    min-height: 0;
+    margin: 0;
+    padding: var(--space-xs) 0;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-decoration: none;
+    cursor: pointer;
+}
+.fd-week-day__weekday {
+    color: var(--text-tertiary);
+    font-size: var(--text-micro-size);
+    line-height: var(--text-micro-line);
+}
+.fd-week-day__num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--fd-week-num);
+    height: var(--fd-week-num);
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+    font-size: var(--control-md-text);
+    font-weight: 500;
+    line-height: 18px;
+}
+.fd-week-day--selected .fd-week-day__num {
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+.fd-week-day__dot {
+    width: var(--fd-week-dot);
+    height: var(--fd-week-dot);
+    border-radius: var(--radius-pill);
+    background: transparent;
+}
+.fd-week-day__dot--on {
+    background: var(--macro-calories);
+}
+.fd-week-day:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: calc(var(--space-2xs) * -1);
+}
