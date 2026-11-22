@@ -245,10 +245,30 @@ describe("TOOL_ACTIONS", () => {
         }
         for (const [tool, action] of Object.entries(TOOL_ACTIONS)) {
             if (action === "stores.manage") continue;
+            if (action === "notification.dismiss_everyone") continue;
+            if (action === "notification.snooze_everyone") continue;
             expect([tool, can(actor("member"), action).ok]).toEqual([
                 tool,
                 true,
             ]);
         }
+    });
+
+    test("dismiss_notice is the dismiss-for-everyone action: a manager's, never a member's", () => {
+        expect(TOOL_ACTIONS.dismiss_notice).toBe(
+            "notification.dismiss_everyone",
+        );
+        expect(can(actor("member"), TOOL_ACTIONS.dismiss_notice).ok).toBe(
+            false,
+        );
+        expect(can(actor("admin"), TOOL_ACTIONS.dismiss_notice).ok).toBe(true);
+        expect(can(actor("owner"), TOOL_ACTIONS.dismiss_notice).ok).toBe(true);
+    });
+
+    test("snooze_notice is the snooze-for-everyone action: a manager's, never a member's", () => {
+        expect(TOOL_ACTIONS.snooze_notice).toBe("notification.snooze_everyone");
+        expect(can(actor("member"), TOOL_ACTIONS.snooze_notice).ok).toBe(false);
+        expect(can(actor("admin"), TOOL_ACTIONS.snooze_notice).ok).toBe(true);
+        expect(can(actor("owner"), TOOL_ACTIONS.snooze_notice).ok).toBe(true);
     });
 });

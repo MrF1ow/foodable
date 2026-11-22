@@ -191,7 +191,13 @@ import {
 } from "./mcp/tools/recipes.js";
 import { MEAL_PROGRESS_OUTPUT_SCHEMA } from "./mcp/shared.js";
 import { NOTICE_SCHEMA } from "./mcp/shared.js";
-import { LIST_NOTICES_OUTPUT_SCHEMA } from "./mcp/tools/notices.js";
+import {
+    GET_NOTIFICATION_SETTINGS_OUTPUT_SCHEMA,
+    LIST_NOTICES_OUTPUT_SCHEMA,
+    MARK_NOTICES_READ_OUTPUT_SCHEMA,
+    SET_NOTIFICATION_SETTINGS_OUTPUT_SCHEMA,
+    SNOOZE_NOTICE_OUTPUT_SCHEMA,
+} from "./mcp/tools/notices.js";
 import { createMemoryGroceryStore } from "./domain/grocery.js";
 import { utcTodayFromDate } from "./domain/stock.js";
 import { WEEKDAY_NAMES } from "./domain/weekdays.js";
@@ -199,7 +205,11 @@ import { PLAN_UNKNOWN_LINE_NOTE } from "./copy/toasts.js";
 import { fridgeExpiryLine } from "./copy/notices.js";
 import { createMemoryFetchMemoryStore } from "./domain/fetch-memory.js";
 import { createMemoryAgentActionsStore } from "./domain/agent-actions.js";
-import { setAgentActionDepsForTests, stripIdTags } from "./mcp/shared.js";
+import {
+    householdAllergenMembers,
+    setAgentActionDepsForTests,
+    stripIdTags,
+} from "./mcp/shared.js";
 import { setGoalDayRowsForTests } from "./db/agent-actions-goal-days.js";
 import {
     createMemoryRecipesStore,
@@ -226,6 +236,8 @@ import { createMemoryNoticeDismissalsStore } from "./domain/notice-dismissals.js
 import { createMemoryNotificationsStore } from "./domain/notifications.js";
 import type { NotificationKind } from "./domain/notification-kinds.js";
 import { setNotifyDepsForTests } from "./db/notify.js";
+import { setNotificationSyncDepsForTests } from "./db/notifications.js";
+import { noticesFor } from "./domain/notices-for.js";
 import * as actualDbNoticeDismissals from "./db/notice-dismissals.js";
 import { createMemoryPlansStore } from "./domain/plan.js";
 import {
@@ -960,6 +972,7 @@ mock.module("./db/fetch-memory.js", () => ({
 afterAll(() => {
     setAgentActionDepsForTests(null);
     setNotifyDepsForTests(null);
+    setNotificationSyncDepsForTests(null);
     setGoalDayRowsForTests(null);
     mock.module("./db/analytics.js", () => realDbAnalytics);
     mock.module("./db/nutrition.js", () => realNutrition);
@@ -1060,6 +1073,37 @@ beforeEach(() => {
         listMembers: async () =>
             db.members.map((m) => ({ userId: m.userId, role: m.role })),
         log: () => {},
+    });
+    // The inbox tools read and write the same notification rows, on the memory
+    // stores the other tools write to; a sync reads the notices from them.
+    setNotificationSyncDepsForTests({
+        store: db.notificationsStore,
+        dismissals: db.dismissalsStore,
+        listMembers: async () =>
+            db.members.map((m) => ({ userId: m.userId, role: m.role })),
+        loadNotices: async (householdId) =>
+            (
+                await noticesFor(
+                    {
+                        foods: db.foodsStore,
+                        fridge: db.fridgeStore,
+                        recipes: db.recipesStore,
+                        dismissals: db.dismissalsStore,
+                        grocery: db.groceryStore,
+                        plans: db.plansStore,
+                        weighIns: createMemoryWeighInStore(db.weighInRows),
+                        allergenMembers: householdAllergenMembers,
+                    },
+                    householdId,
+                    {
+                        today: utcTodayFromDate(),
+                        timezone: "UTC",
+                        actionable: true,
+                        includeDismissed: true,
+                        allergens: true,
+                    },
+                )
+            ).notices,
     });
     setAgentActionDepsForTests({
         store: db.agentActions,
@@ -2399,7 +2443,7 @@ describe("set_alcohol_tracking", () => {
 });
 
 describe("the notice tool descriptions match what the tools do", () => {
-    test("dismiss_notice says to pass related_id back; list_notices does not promise the badge", async () => {
+    test("dismiss_notice names both forms; list_notices sends data-quality marks to their item", async () => {
         const server = new McpServer(
             { name: "t", version: "0.0.0" },
             { capabilities: { tools: {}, resources: {} } },
@@ -2412,10 +2456,43 @@ describe("the notice tool descriptions match what the tools do", () => {
         await client.close();
         await server.close();
         const dismiss = tools.find((t) => t.name === "dismiss_notice");
+        // The data-quality form keeps its related_id; the inbox form is
+        // named with its scope and what the guard does for everyone.
         expect(dismiss?.description).toContain("related_id");
+        expect(dismiss?.description).toContain("notification_id");
+        expect(dismiss?.description).toContain("everyone");
+        // Undo is all or nothing, so neither description promises it
+        // unconditionally: a member changing their own copy ends it.
+        expect(dismiss?.description).toContain("undoable");
+        expect(dismiss?.description).toContain(
+            "unless someone has changed their copy since",
+        );
+        expect(dismiss?.description).toContain("get_week_plan");
         expect(dismiss?.description).not.toContain("info-level");
+        const snooze = tools.find((t) => t.name === "snooze_notice");
+        expect(snooze?.description).toContain("undoable");
+        expect(snooze?.description).toContain(
+            "unless someone has changed their copy since",
+        );
+        const week = tools.find((t) => t.name === "get_week_plan");
+        expect(week?.description).toContain("`notices`");
+        expect(week?.description).toContain("dismiss_notice");
         const list = tools.find((t) => t.name === "list_notices");
         expect(list?.description).not.toContain("badge");
+        expect(list?.description).toContain("get_recipe");
+        expect(list?.description).toContain("get_food");
+        expect(list?.description).toContain("notification_id");
+        for (const name of [
+            "snooze_notice",
+            "mark_notices_read",
+            "get_notification_settings",
+            "set_notification_settings",
+        ]) {
+            expect(
+                tools.some((t) => t.name === name),
+                name,
+            ).toBe(true);
+        }
     });
 });
 
@@ -4649,6 +4726,16 @@ describe("household config tools", () => {
         });
     });
 
+    test("CLAUDE.md says how many tools there are: as many as the snapshot has names", async () => {
+        const snapshot = (await Bun.file(
+            new URL("./mcp/tools-list.snapshot.json", import.meta.url),
+        ).json()) as string[];
+        const claude = await Bun.file(
+            new URL("../CLAUDE.md", import.meta.url),
+        ).text();
+        expect(claude).toContain(`There are ${snapshot.length} tools`);
+    });
+
     // Every tool description is paid for in every conversation's context, so
     // tools/list is budgeted. These are what main measured on ee31a2f2 (before
     // the agent-parity work) with every flag on, the same listing the snapshot
@@ -4660,14 +4747,17 @@ describe("household config tools", () => {
     // Raising either constant is a deliberate, reviewed edit: trim a
     // description first, and say in the PR why the list has to grow.
     describe("tools/list size", () => {
+        // +2964: snooze_notice, mark_notices_read and the two notification
+        // settings tools, with list_notices and dismiss_notice reworded and
+        // reshaped for the inbox.
         // +336: the optional `hidden_nutrients` list in the five card tools'
         // output schemas (Settings › Nutrients shown), after trimming the
         // merge_foods description to pay for its new Settings path.
         // +234: the optional `filters` and `query` inputs on list_recipes (the
         // Recipes page's filter registry), explained in the tool description
         // rather than per field, in as few words as fit.
-        const TOOLS_LIST_MAX_CHARS = 226365;
-        const TOOLS_LIST_MAX_COUNT = 98;
+        const TOOLS_LIST_MAX_CHARS = 229329;
+        const TOOLS_LIST_MAX_COUNT = 102;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
             const snapshot = (await Bun.file(
@@ -8393,159 +8483,810 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
-    test("list_notices count matches household notices; filters narrow notices only", async () => {
-        function addDaysUtc(iso: string, delta: number): string {
-            const [y, m, d] = iso.split("-").map(Number);
-            return new Date(Date.UTC(y!, m! - 1, d! + delta))
-                .toISOString()
-                .slice(0, 10);
+    describe("the notification inbox", () => {
+        const UTC_DAY = 86_400_000;
+        const daysFromNow = (delta: number) =>
+            new Date(Date.now() + delta * UTC_DAY).toISOString().slice(0, 10);
+
+        async function listed(
+            call: CallTool,
+            args: Record<string, unknown> = {},
+        ) {
+            const out = await call("list_notices", args);
+            expect(out.isError).toBeFalsy();
+            return {
+                text: textOf(out),
+                ...LIST_NOTICES_OUTPUT_SCHEMA.parse(out.structuredContent),
+            };
         }
-        await withPat(async (call) => {
-            const loc = await call("add_fridge_location", { name: "Fridge" });
-            const locationId = loc.structuredContent?.id as string;
-            const today = utcTodayFromDate();
+
+        /** A fridge item that expires in `days` days: one food-expiring condition. */
+        async function expiring(
+            call: CallTool,
+            name = "Soon kefir",
+            days = 3,
+        ): Promise<string> {
+            const loc =
+                (await db.fridgeStore.listLocations("hh-1"))[0] ??
+                ({
+                    id: (await call("add_fridge_location", { name: "Fridge" }))
+                        .structuredContent?.id,
+                } as { id: string });
             const added = await call("add_fridge_item", {
-                location_id: locationId,
+                location_id: loc.id,
                 kind: "food",
-                name: "Soon kefir",
+                name,
                 amount: 1,
                 unit: "g",
             });
-            const itemId = added.structuredContent?.id as string;
+            const id = added.structuredContent?.id as string;
             const row = (await db.fridgeStore.listItems("hh-1")).find(
-                (r) => r.id === itemId,
+                (r) => r.id === id,
             );
             await db.fridgeStore.updateItem({
                 ...row!,
-                expiresOn: addDaysUtc(today, 4),
+                expiresOn: daysFromNow(days),
             });
-            const plain = await call("upsert_food", { name: "Half and half" });
-            const plainId = plain.structuredContent?.id as string;
-            const recipe = await call("create_recipe", {
-                name: "Coffee",
-                yield_portions: 1,
-            });
-            const recipeId = recipe.structuredContent?.id as string;
-            await call("add_recipe_ingredient", {
-                recipe_id: recipeId,
-                food_id: plainId,
-                amount: 60,
-                unit: "ml",
-            });
+            return id;
+        }
 
-            const listed = await call("list_notices", {});
-            expect(listed.isError).toBeFalsy();
-            const sc = listed.structuredContent as {
-                count: number;
-                notices: unknown[];
-            };
-            expect(sc.count).toBeGreaterThanOrEqual(2);
-            for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
-            expect(sc.count).toBeGreaterThanOrEqual(sc.notices.length);
+        const promote = (userId: string, role: "member" | "admin") => {
+            const member = db.members.find((m) => m.userId === userId)!;
+            member.role = role;
+        };
 
-            const byCode = await call("list_notices", {
-                code: "fridge.expiring",
+        test("a condition that just became true is listed with no page load before it", async () => {
+            await withUser(alice, async (call) => {
+                const itemId = await expiring(call);
+                const sc = await listed(call);
+                expect(sc.count).toBe(1);
+                expect(sc.notifications).toHaveLength(1);
+                const n = sc.notifications[0]!;
+                expect(n).toMatchObject({
+                    kind: "food_expiring",
+                    bucket: "household",
+                    read: false,
+                    snoozed_until: null,
+                    can_dismiss_for_everyone: true,
+                    subject: { kind: "fridge_item", id: itemId },
+                    open: "/kitchen/fridge",
+                });
+                expect(n.message).toContain("Soon kefir");
+                expect(sc.text).toContain(`[notification_id: ${n.id}]`);
+                expect(sc.text).toContain(`[id: ${itemId}]`);
             });
-            const codeSc = byCode.structuredContent as {
-                count: number;
-                notices: Array<{ code: string }>;
-            };
-            expect(codeSc.count).toBe(sc.count);
-            expect(
-                codeSc.notices.every((n) => n.code === "fridge.expiring"),
-            ).toBe(true);
-
-            const bySeverity = await call("list_notices", { severity: "info" });
-            const sevSc = bySeverity.structuredContent as {
-                count: number;
-                notices: Array<{ severity: string }>;
-            };
-            expect(sevSc.count).toBe(sc.count);
-            expect(sevSc.notices.every((n) => n.severity === "info")).toBe(
-                true,
-            );
-
-            const byKind = await call("list_notices", {
-                subject_kind: "recipe_ingredient",
-            });
-            const kindSc = byKind.structuredContent as {
-                count: number;
-                notices: Array<{ subject: { kind: string } }>;
-            };
-            expect(kindSc.count).toBe(sc.count);
-            expect(
-                kindSc.notices.every(
-                    (n) => n.subject.kind === "recipe_ingredient",
-                ),
-            ).toBe(true);
         });
-    });
 
-    test("dismiss_notice on info then list; warn and unknown subject error", async () => {
-        function addDaysUtc(iso: string, delta: number): string {
-            const [y, m, d] = iso.split("-").map(Number);
-            return new Date(Date.UTC(y!, m! - 1, d! + delta))
-                .toISOString()
-                .slice(0, 10);
-        }
-        await withUser(alice, async (call) => {
-            const loc = await call("add_fridge_location", { name: "Fridge" });
-            const locationId = loc.structuredContent?.id as string;
-            const today = utcTodayFromDate();
-            const added = await call("add_fridge_item", {
-                location_id: locationId,
-                kind: "food",
-                name: "Soon butter",
-                amount: 1,
-                unit: "g",
+        test("every member has their own copy, and only a manager may dismiss for everyone", async () => {
+            let aliceId = "";
+            await withUser(alice, async (call) => {
+                await expiring(call);
+                aliceId = (await listed(call)).notifications[0]!.id;
             });
-            const itemId = added.structuredContent?.id as string;
-            const row = (await db.fridgeStore.listItems("hh-1")).find(
-                (r) => r.id === itemId,
-            );
-            await db.fridgeStore.updateItem({
-                ...row!,
-                expiresOn: addDaysUtc(today, 3),
+            await withUser(bob, async (call) => {
+                const sc = await listed(call);
+                expect(sc.count).toBe(1);
+                expect(sc.notifications[0]!.id).not.toBe(aliceId);
+                expect(sc.notifications[0]!.can_dismiss_for_everyone).toBe(
+                    false,
+                );
             });
+        });
 
-            const ok = await call("dismiss_notice", {
-                code: "fridge.expiring",
-                subject_kind: "fridge_item",
-                subject_id: itemId,
+        test("bucket narrows the list and never the unread count", async () => {
+            await withUser(alice, async (call) => {
+                await expiring(call);
+                db.weighInRows.push({
+                    userId: alice,
+                    displayName: "Alice",
+                    lastLoggedAt: `${daysFromNow(-9)}T12:00:00Z`,
+                });
+                const all = await listed(call);
+                expect(all.count).toBe(2);
+                expect(all.notifications.map((n) => n.kind).sort()).toEqual([
+                    "food_expiring",
+                    "weigh_in_due",
+                ]);
+                const personal = await listed(call, { bucket: "personal" });
+                expect(personal.count).toBe(2);
+                expect(personal.notifications.map((n) => n.kind)).toEqual([
+                    "weigh_in_due",
+                ]);
+                expect(personal.notifications[0]!.bucket).toBe("personal");
+                expect(
+                    personal.notifications[0]!.can_dismiss_for_everyone,
+                ).toBe(false);
+                const household = await listed(call, { bucket: "household" });
+                expect(household.count).toBe(2);
+                expect(household.notifications.map((n) => n.kind)).toEqual([
+                    "food_expiring",
+                ]);
             });
-            expect(ok.isError).toBeFalsy();
-            const after = await call("list_notices", {});
-            const notices = (
-                after.structuredContent as {
-                    notices: Array<{ code: string; subject: { id: string } }>;
+            // The weigh-in is personal: no one else's inbox has it.
+            await withUser(bob, async (call) => {
+                const sc = await listed(call);
+                expect(sc.notifications.map((n) => n.kind)).toEqual([
+                    "food_expiring",
+                ]);
+            });
+        });
+
+        test("nothing needs attention says so", async () => {
+            await withUser(alice, async (call) => {
+                const sc = await listed(call);
+                expect(sc.count).toBe(0);
+                expect(sc.notifications).toEqual([]);
+                expect(sc.text).toBe("Nothing needs attention.");
+            });
+        });
+
+        test("snooze_notice hides a row until its time, for the person alone when a member", async () => {
+            await withUser(bob, async (call) => {
+                await expiring(call);
+                const id = (await listed(call)).notifications[0]!.id;
+                const out = await call("snooze_notice", {
+                    notification_id: id,
+                    until: "week",
+                });
+                expect(out.isError).toBeFalsy();
+                const sc = out.structuredContent as {
+                    snoozed: boolean;
+                    snoozed_until: string;
+                    for_everyone: boolean;
+                };
+                expect(sc.snoozed).toBe(true);
+                expect(sc.for_everyone).toBe(false);
+                expect(Date.parse(sc.snoozed_until)).toBeGreaterThan(
+                    Date.now() + 6 * UTC_DAY,
+                );
+                const after = await listed(call);
+                expect(after.count).toBe(0);
+                expect(after.notifications).toEqual([]);
+                const withSnoozed = await listed(call, {
+                    include_snoozed: true,
+                });
+                expect(withSnoozed.notifications).toHaveLength(1);
+                expect(withSnoozed.notifications[0]!.snoozed_until).toBe(
+                    sc.snoozed_until,
+                );
+                expect(withSnoozed.text).toContain("snoozed until");
+                // The unread count leaves the snoozed row out, and the text
+                // says so instead of calling the same row unread.
+                expect(withSnoozed.text.split("\n")[0]).toBe(
+                    "0 unread (1 snoozed).",
+                );
+                const line = withSnoozed.text.split("\n")[1]!;
+                expect(line).toContain("snoozed until");
+                expect(line).not.toContain("unread");
+            });
+            await withUser(alice, async (call) => {
+                const sc = await listed(call);
+                expect(sc.count).toBe(1);
+            });
+        });
+
+        test("with include_snoozed the text counts the snoozed rows apart from the unread ones", async () => {
+            await withUser(bob, async (call) => {
+                await expiring(call, "Kefir", 3);
+                await expiring(call, "Yogurt", 4);
+                const rows = (await listed(call)).notifications;
+                expect(rows).toHaveLength(2);
+                const kefir = rows.find((n) => n.message.includes("Kefir"))!;
+                await call("snooze_notice", {
+                    notification_id: kefir.id,
+                    until: "week",
+                });
+
+                // Without include_snoozed the snoozed row is not there to mention.
+                const plain = await listed(call);
+                expect(plain.text.split("\n")[0]).toBe("1 unread.");
+
+                const both = await listed(call, { include_snoozed: true });
+                const [head, ...lines] = both.text.split("\n");
+                expect(head).toBe("1 unread (1 snoozed).");
+                const kefirLine = lines.find((l) => l.includes("Kefir"))!;
+                const yogurtLine = lines.find((l) => l.includes("Yogurt"))!;
+                expect(kefirLine).toContain("snoozed until");
+                expect(kefirLine).not.toContain("unread");
+                expect(yogurtLine).toContain("(unread)");
+                expect(yogurtLine).not.toContain("snoozed");
+
+                // A bucket that holds none of them does not claim any.
+                const personal = await listed(call, {
+                    include_snoozed: true,
+                    bucket: "personal",
+                });
+                expect(personal.text).not.toContain("snoozed)");
+            });
+        });
+
+        test("an owner's or admin's snooze of a household row covers every member", async () => {
+            await withUser(bob, async (call) => {
+                await expiring(call);
+                await listed(call);
+            });
+            await withUser(alice, async (call) => {
+                const id = (await listed(call)).notifications[0]!.id;
+                const out = await call("snooze_notice", {
+                    notification_id: id,
+                    until: "tomorrow",
+                });
+                expect(out.structuredContent).toMatchObject({
+                    snoozed: true,
+                    for_everyone: true,
+                });
+                expect(textOf(out)).toContain("for every member");
+            });
+            await withUser(bob, async (call) => {
+                const sc = await listed(call);
+                expect(sc.notifications).toEqual([]);
+            });
+        });
+
+        test("snooze_notice refuses a time that makes no sense", async () => {
+            await withUser(alice, async (call) => {
+                await expiring(call);
+                const id = (await listed(call)).notifications[0]!.id;
+                for (const until of [
+                    "yesterday",
+                    "2020-01-01T08:30",
+                    "2099-01-01T08:30",
+                    "",
+                ]) {
+                    const out = await call("snooze_notice", {
+                        notification_id: id,
+                        until,
+                    });
+                    expect(out.isError, until).toBe(true);
                 }
-            ).notices;
-            expect(
-                notices.some(
-                    (n) =>
-                        n.subject.id === itemId && n.code === "fridge.expiring",
-                ),
-            ).toBe(false);
-
-            const warn = await call("dismiss_notice", {
-                code: "fridge.expired",
-                subject_kind: "fridge_item",
-                subject_id: itemId,
+                const none = await call("snooze_notice", {
+                    notification_id: crypto.randomUUID(),
+                    until: "week",
+                });
+                expect(none.isError).toBe(true);
+                expect(textOf(none)).toContain("No such notification");
+                expect((await listed(call)).count).toBe(1);
             });
-            expect(warn.isError).toBe(true);
-            expect(textOf(warn)).toContain("This notice can't be dismissed");
+        });
 
-            const missing = await call("dismiss_notice", {
-                code: "fridge.expiring",
-                subject_kind: "fridge_item",
-                subject_id: crypto.randomUUID(),
+        test("mark_notices_read marks the ids it is given, then all", async () => {
+            await withUser(alice, async (call) => {
+                await expiring(call, "First kefir");
+                await expiring(call, "Second kefir");
+                const sc = await listed(call);
+                expect(sc.count).toBe(2);
+                const [first, second] = sc.notifications;
+                const one = await call("mark_notices_read", {
+                    notification_ids: [first!.id],
+                });
+                expect(one.structuredContent).toEqual({ marked_read: 1 });
+                const mid = await listed(call);
+                expect(mid.count).toBe(1);
+                expect(
+                    mid.notifications.find((n) => n.id === first!.id)!.read,
+                ).toBe(true);
+                const again = await call("mark_notices_read", {
+                    notification_ids: [first!.id],
+                });
+                expect(again.structuredContent).toEqual({ marked_read: 0 });
+                const all = await call("mark_notices_read", {
+                    notification_ids: "all",
+                });
+                expect(all.structuredContent).toEqual({ marked_read: 1 });
+                expect(textOf(all)).toBe("Marked 1 read.");
+                const end = await listed(call);
+                expect(end.count).toBe(0);
+                expect(end.notifications.every((n) => n.read)).toBe(true);
+                expect(second!.read).toBe(false);
             });
-            expect(missing.isError).toBe(true);
-            expect(textOf(missing).toLowerCase()).toContain("not open");
+        });
+
+        test("an agent acts only for its own person: another member's row is refused", async () => {
+            let bobRow = "";
+            await withUser(bob, async (call) => {
+                await expiring(call);
+                bobRow = (await listed(call)).notifications[0]!.id;
+            });
+            await withUser(alice, async (call) => {
+                await listed(call);
+                for (const [tool, args] of [
+                    ["dismiss_notice", { notification_id: bobRow }],
+                    [
+                        "dismiss_notice",
+                        { notification_id: bobRow, scope: "everyone" },
+                    ],
+                    [
+                        "snooze_notice",
+                        { notification_id: bobRow, until: "week" },
+                    ],
+                    ["mark_notices_read", { notification_ids: [bobRow] }],
+                ] as const) {
+                    const out = await call(tool, args);
+                    expect(out.isError, `${tool} ${JSON.stringify(args)}`).toBe(
+                        true,
+                    );
+                }
+                // Nothing of Bob's moved.
+                const row = await db.notificationsStore.get("hh-1", bobRow);
+                expect(row).toMatchObject({
+                    readAt: null,
+                    snoozedUntil: null,
+                    dismissedAt: null,
+                });
+            });
+        });
+
+        test("the household token acts as the owner", async () => {
+            await withPat(async (call) => {
+                await expiring(call);
+                const sc = await listed(call);
+                expect(sc.count).toBe(1);
+                const row = await db.notificationsStore.get(
+                    "hh-1",
+                    sc.notifications[0]!.id,
+                );
+                expect(row!.recipientUserId).toBe(alice);
+                expect(sc.notifications[0]!.can_dismiss_for_everyone).toBe(
+                    true,
+                );
+            });
+        });
+
+        test("dismiss_notice for me leaves only the caller's inbox", async () => {
+            await withUser(bob, async (call) => {
+                await expiring(call);
+                const id = (await listed(call)).notifications[0]!.id;
+                const out = await call("dismiss_notice", {
+                    notification_id: id,
+                });
+                expect(out.isError).toBeFalsy();
+                expect(out.structuredContent).toEqual({ dismissed: true });
+                expect(textOf(out)).toBe("Dismissed for you.");
+                const again = await call("dismiss_notice", {
+                    notification_id: id,
+                    scope: "me",
+                });
+                expect(again.isError).toBeFalsy();
+                expect(textOf(again)).toBe("Already dismissed.");
+                expect((await listed(call)).notifications).toEqual([]);
+                // A guarded delete it is not: nothing is recorded.
+                expect(db.agentActions.__records()).toEqual([]);
+            });
+            await withUser(alice, async (call) => {
+                expect((await listed(call)).count).toBe(1);
+            });
+        });
+
+        test("dismiss_notice for everyone: a manager may, and it is recorded and undoable; a member is refused", async () => {
+            let bobId = "";
+            await withUser(bob, async (call) => {
+                await expiring(call);
+                const mine = (await listed(call)).notifications[0]!;
+                bobId = mine.id;
+                expect(mine.can_dismiss_for_everyone).toBe(false);
+                const refused = await call("dismiss_notice", {
+                    notification_id: mine.id,
+                    scope: "everyone",
+                });
+                expect(refused.isError).toBe(true);
+                expect(textOf(refused)).toContain("owner or an admin");
+                expect(refused.structuredContent).toEqual({ dismissed: false });
+                expect(db.agentActions.__records()).toEqual([]);
+                expect((await listed(call)).count).toBe(1);
+            });
+            await withUser(alice, async (call) => {
+                const mine = (await listed(call)).notifications[0]!;
+                const out = await call("dismiss_notice", {
+                    notification_id: mine.id,
+                    scope: "everyone",
+                });
+                expect(out.isError).toBeFalsy();
+                expect(out.structuredContent).toEqual({ dismissed: true });
+                expect(textOf(out)).toContain("Dismissed for everyone.");
+                expect(textOf(out)).toContain("undo");
+                const records = db.agentActions.__records();
+                expect(records).toHaveLength(1);
+                expect(records[0]).toMatchObject({
+                    tool: "dismiss_notice",
+                    destructive: true,
+                    undoable: true,
+                });
+                expect(records[0]!.summary).toContain("Dismissed for everyone");
+                expect((await listed(call)).notifications).toEqual([]);
+            });
+            await withUser(bob, async (call) => {
+                // Bob's copy is gone with it, whatever his id was.
+                const sc = await listed(call);
+                expect(sc.notifications.map((n) => n.id)).not.toContain(bobId);
+                expect(sc.notifications).toEqual([]);
+            });
+        });
+
+        test("an admin may dismiss for everyone; the personal switch and the household's off still apply", async () => {
+            await withUser(bob, async (call) => {
+                promote(bob, "admin");
+                await expiring(call);
+                const id = (await listed(call)).notifications[0]!.id;
+                // The household's off refuses everyone, an admin too.
+                await db.settingsStore.setAgentDestructiveAllowed(
+                    "hh-1",
+                    false,
+                );
+                const off = await call("dismiss_notice", {
+                    notification_id: id,
+                    scope: "everyone",
+                });
+                expect(off.isError).toBe(true);
+                expect(textOf(off)).toContain("Nothing was changed");
+                await db.settingsStore.setAgentDestructiveAllowed("hh-1", true);
+                // So does the person's own switch.
+                await db.settingsStore.setMemberAgentsCanDelete(
+                    "hh-1",
+                    bob,
+                    false,
+                );
+                const personOff = await call("dismiss_notice", {
+                    notification_id: id,
+                    scope: "everyone",
+                });
+                expect(personOff.isError).toBe(true);
+                expect(db.agentActions.__records()).toEqual([]);
+                await db.settingsStore.setMemberAgentsCanDelete(
+                    "hh-1",
+                    bob,
+                    true,
+                );
+                const ok = await call("dismiss_notice", {
+                    notification_id: id,
+                    scope: "everyone",
+                });
+                expect(ok.isError).toBeFalsy();
+                expect(db.agentActions.__records()).toHaveLength(1);
+            });
+        });
+
+        test("can_dismiss_for_everyone is true only where the dismiss would be allowed", async () => {
+            await withUser(alice, async (call) => {
+                await expiring(call);
+                const flag = async () =>
+                    (await listed(call)).notifications[0]!
+                        .can_dismiss_for_everyone;
+                expect(await flag()).toBe(true);
+                // Their own switch Off: the guard would refuse, so it says no.
+                await db.settingsStore.setMemberAgentsCanDelete(
+                    "hh-1",
+                    alice,
+                    false,
+                );
+                expect(await flag()).toBe(false);
+                await db.settingsStore.setMemberAgentsCanDelete(
+                    "hh-1",
+                    alice,
+                    true,
+                );
+                expect(await flag()).toBe(true);
+                // The household's switch Off stops every person's agent.
+                await db.settingsStore.setAgentDestructiveAllowed(
+                    "hh-1",
+                    false,
+                );
+                expect(await flag()).toBe(false);
+                await db.settingsStore.setAgentDestructiveAllowed("hh-1", true);
+                expect(await flag()).toBe(true);
+            });
+        });
+
+        test("dismiss_notice refuses a notification_id with any field of the data-quality form", async () => {
+            await withUser(alice, async (call) => {
+                await expiring(call);
+                const id = (await listed(call)).notifications[0]!.id;
+                for (const extra of [
+                    { code: "food.possible_duplicate" },
+                    { subject_kind: "food" },
+                    { subject_id: crypto.randomUUID() },
+                    { related_id: crypto.randomUUID() },
+                ]) {
+                    const out = await call("dismiss_notice", {
+                        notification_id: id,
+                        ...extra,
+                    });
+                    expect(out.isError, JSON.stringify(extra)).toBe(true);
+                    expect(out.structuredContent).toEqual({ dismissed: false });
+                    expect(textOf(out)).toContain("not both");
+                }
+                // Nothing moved.
+                expect((await listed(call)).count).toBe(1);
+                expect(db.agentActions.__records()).toEqual([]);
+            });
+        });
+
+        test("an owner's or admin's snooze for everyone is guarded: recorded, and refused when a switch is Off", async () => {
+            let bobRow = "";
+            await withUser(bob, async (call) => {
+                await expiring(call);
+                bobRow = (await listed(call)).notifications[0]!.id;
+                // A member's own snooze is a plain write: nothing recorded.
+                const own = await call("snooze_notice", {
+                    notification_id: bobRow,
+                    until: "tomorrow",
+                });
+                expect(own.isError).toBeFalsy();
+                expect(own.structuredContent).toMatchObject({
+                    for_everyone: false,
+                });
+                expect(db.agentActions.__records()).toEqual([]);
+            });
+            await withUser(alice, async (call) => {
+                const mine = (await listed(call)).notifications[0]!;
+                await db.settingsStore.setAgentDestructiveAllowed(
+                    "hh-1",
+                    false,
+                );
+                const off = await call("snooze_notice", {
+                    notification_id: mine.id,
+                    until: "week",
+                });
+                expect(off.isError).toBe(true);
+                expect(textOf(off)).toContain("Nothing was changed");
+                await db.settingsStore.setAgentDestructiveAllowed("hh-1", true);
+                await db.settingsStore.setMemberAgentsCanDelete(
+                    "hh-1",
+                    alice,
+                    false,
+                );
+                const personOff = await call("snooze_notice", {
+                    notification_id: mine.id,
+                    until: "week",
+                });
+                expect(personOff.isError).toBe(true);
+                expect(db.agentActions.__records()).toEqual([]);
+                expect(
+                    (await db.notificationsStore.get("hh-1", bobRow))!
+                        .snoozedUntil,
+                ).not.toBeNull();
+                await db.settingsStore.setMemberAgentsCanDelete(
+                    "hh-1",
+                    alice,
+                    true,
+                );
+                const ok = await call("snooze_notice", {
+                    notification_id: mine.id,
+                    until: "week",
+                });
+                expect(ok.isError, textOf(ok)).toBeFalsy();
+                expect(ok.structuredContent).toMatchObject({
+                    snoozed: true,
+                    for_everyone: true,
+                });
+                expect(textOf(ok)).toContain("for every member");
+                // Recorded; whether the rows can be put back needs the real
+                // tables (see the guard's database tests).
+                expect(textOf(ok)).toContain("recorded in Settings");
+                const records = db.agentActions.__records();
+                expect(records).toHaveLength(1);
+                expect(records[0]).toMatchObject({
+                    tool: "snooze_notice",
+                    destructive: true,
+                });
+                expect(records[0]!.summary).toContain("Snoozed for everyone");
+            });
+        });
+
+        test("dismissing an event for everyone stamps every copy and records them", async () => {
+            await withUser(bob, async (call) => {
+                // Recipe changes are off until a person turns them on.
+                const set = await call("set_notification_settings", {
+                    kind: "recipe_changes",
+                    enabled: true,
+                });
+                expect(set.isError).toBeFalsy();
+            });
+            // Alice removes a recipe: Bob hears of it, Alice does not.
+            await withUser(alice, async (call) => {
+                const recipe = await call("create_recipe", {
+                    name: "Lentil soup",
+                    yield_portions: 2,
+                });
+                const out = await call("delete_recipe", {
+                    id: recipe.structuredContent?.id,
+                });
+                expect(out.isError).toBeFalsy();
+                expect((await listed(call)).notifications).toEqual([]);
+            });
+            let bobNotice = "";
+            await withUser(bob, async (call) => {
+                const sc = await listed(call);
+                expect(sc.notifications).toHaveLength(1);
+                const n = sc.notifications[0]!;
+                bobNotice = n.id;
+                expect(n.kind).toBe("recipe_changes");
+                expect(n.message).toBe("Alice removed Lentil soup.");
+                expect(n.open).toBe("/recipes");
+                expect(n.subject?.kind).toBe("recipe");
+            });
+            await withUser(bob, async (call) => {
+                promote(bob, "admin");
+                const out = await call("dismiss_notice", {
+                    notification_id: bobNotice,
+                    scope: "everyone",
+                });
+                expect(out.isError).toBeFalsy();
+                expect((await listed(call)).notifications).toEqual([]);
+                const rows = (
+                    await db.notificationsStore.listForHousehold("hh-1")
+                ).filter((r) => r.kind === "recipe_changes");
+                expect(rows.length).toBeGreaterThan(0);
+                expect(rows.every((r) => r.dismissedAt !== null)).toBe(true);
+                const records = db.agentActions
+                    .__records()
+                    .filter((r) => r.tool === "dismiss_notice");
+                expect(records).toHaveLength(1);
+                expect(records[0]).toMatchObject({ destructive: true });
+            });
+        });
+
+        test("Allergens cannot be dismissed, snoozed or turned off", async () => {
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Safeway",
+            );
+            await withPat(async (call) => {
+                await call("set_household_rules", {
+                    person: [
+                        { user_id: bob, allergens: [{ allergen: "peanut" }] },
+                    ],
+                });
+                await call("upsert_food", {
+                    name: "Peanut Butter",
+                    allergens: ["peanut"],
+                });
+                await call("add_grocery_line", {
+                    store_id: store.id,
+                    kind: "food",
+                    name: "Peanut Butter",
+                    amount: 1,
+                });
+                const sc = await listed(call);
+                const allergen = sc.notifications.find(
+                    (n) => n.kind === "allergens",
+                );
+                expect(allergen).toBeTruthy();
+                expect(allergen!.message).toBe(
+                    "Peanut Butter contains peanut — Bob.",
+                );
+                expect(allergen!.can_dismiss_for_everyone).toBe(false);
+                expect(allergen!.open).toBe("/kitchen/groceries");
+                expect(sc.text).toContain("can't be dismissed or snoozed");
+                for (const scope of ["me", "everyone"] as const) {
+                    const out = await call("dismiss_notice", {
+                        notification_id: allergen!.id,
+                        scope,
+                    });
+                    expect(out.isError, scope).toBe(true);
+                    expect(textOf(out)).toContain("Allergen");
+                }
+                const snooze = await call("snooze_notice", {
+                    notification_id: allergen!.id,
+                    until: "week",
+                });
+                expect(snooze.isError).toBe(true);
+                expect(textOf(snooze)).toContain("Allergen");
+                const off = await call("set_notification_settings", {
+                    kind: "allergens",
+                    enabled: false,
+                });
+                expect(off.isError).toBe(true);
+                expect(textOf(off)).toContain("Allergen");
+                const on = await call("set_notification_settings", {
+                    kind: "allergens",
+                    enabled: true,
+                });
+                expect(on.isError).toBeFalsy();
+                // It is still there, unread, with nothing recorded.
+                const after = await listed(call);
+                expect(
+                    after.notifications.some((n) => n.id === allergen!.id),
+                ).toBe(true);
+                expect(db.agentActions.__records()).toEqual([]);
+            });
+        });
+
+        test("get_notification_settings and set_notification_settings read and change a person's kinds", async () => {
+            await withUser(alice, async (call) => {
+                const got = await call("get_notification_settings");
+                expect(got.isError).toBeFalsy();
+                const sc = GET_NOTIFICATION_SETTINGS_OUTPUT_SCHEMA.parse(
+                    got.structuredContent,
+                );
+                expect(sc.settings.map((s) => s.kind)).toEqual([
+                    "allergens",
+                    "food_expiring",
+                    "running_low",
+                    "weigh_in_due",
+                    "recipe_changes",
+                    "week_plan_changes",
+                    "new_usuals",
+                ]);
+                const byKind = Object.fromEntries(
+                    sc.settings.map((s) => [s.kind, s]),
+                );
+                expect(byKind.allergens).toMatchObject({
+                    label: "Allergens",
+                    enabled: true,
+                    can_turn_off: false,
+                });
+                expect(byKind.food_expiring).toMatchObject({
+                    label: "Food expiring",
+                    enabled: true,
+                    can_turn_off: true,
+                });
+                expect(byKind.recipe_changes!.enabled).toBe(false);
+                expect(textOf(got)).toContain(
+                    "Recipe changes by others [kind: recipe_changes]: off",
+                );
+
+                const turnedOn = await call("set_notification_settings", {
+                    kind: "recipe_changes",
+                    enabled: true,
+                });
+                expect(
+                    SET_NOTIFICATION_SETTINGS_OUTPUT_SCHEMA.parse(
+                        turnedOn.structuredContent,
+                    ),
+                ).toEqual({
+                    kind: "recipe_changes",
+                    label: "Recipe changes by others",
+                    enabled: true,
+                    can_turn_off: true,
+                });
+                expect(textOf(turnedOn)).toBe(
+                    "Recipe changes by others is on.",
+                );
+
+                // A kind that is off leaves the inbox.
+                await expiring(call);
+                expect((await listed(call)).count).toBe(1);
+                await call("set_notification_settings", {
+                    kind: "food_expiring",
+                    enabled: false,
+                });
+                const quiet = await listed(call);
+                expect(quiet.count).toBe(0);
+                expect(quiet.notifications).toEqual([]);
+                const settings = GET_NOTIFICATION_SETTINGS_OUTPUT_SCHEMA.parse(
+                    (await call("get_notification_settings")).structuredContent,
+                ).settings;
+                expect(
+                    settings.find((s) => s.kind === "food_expiring")!.enabled,
+                ).toBe(false);
+                // Someone else's choices are theirs.
+            });
+            await withUser(bob, async (call) => {
+                const settings = GET_NOTIFICATION_SETTINGS_OUTPUT_SCHEMA.parse(
+                    (await call("get_notification_settings")).structuredContent,
+                ).settings;
+                expect(
+                    settings.find((s) => s.kind === "food_expiring")!.enabled,
+                ).toBe(true);
+                expect(
+                    settings.find((s) => s.kind === "recipe_changes")!.enabled,
+                ).toBe(false);
+            });
+        });
+
+        test("set_notification_settings names no kind it does not have", async () => {
+            await withUser(alice, async (call) => {
+                const out = await call("set_notification_settings", {
+                    kind: "everything",
+                    enabled: false,
+                });
+                expect(out.isError).toBe(true);
+            });
         });
     });
 
-    test("food.possible_duplicate list, dismiss pair either order, merge, get_food", async () => {
+    test("food.possible_duplicate comes with its food: get_food lists it, the code form dismisses it, a merge clears it", async () => {
         await withUser(alice, async (call) => {
             const a = await call("upsert_food", { name: "chicken egg" });
             const b = await call("upsert_food", {
@@ -8559,96 +9300,135 @@ describe("phone-app domain MCP tools", () => {
                 calories: 100,
             });
 
-            const byCode = await call("list_notices", {
-                code: "food.possible_duplicate",
-            });
-            const notices = (
-                byCode.structuredContent as {
-                    notices: Array<{
-                        code: string;
-                        subject: { id: string };
-                        related: Array<{ id: string }>;
-                    }>;
-                }
-            ).notices.filter((n) => n.code === "food.possible_duplicate");
+            // Not in the inbox: it is a mark on the food.
+            const inbox = LIST_NOTICES_OUTPUT_SCHEMA.parse(
+                (await call("list_notices")).structuredContent,
+            );
+            expect(inbox.notifications).toEqual([]);
+            const got = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: idA })).structuredContent,
+            );
+            const dupe = got.notices.find(
+                (n) => n.code === "food.possible_duplicate",
+            );
+            expect(dupe).toBeTruthy();
             expect(
-                notices.some(
-                    (n) =>
-                        (n.subject.id === idA &&
-                            n.related.some((r) => r.id === idB)) ||
-                        (n.subject.id === idB &&
-                            n.related.some((r) => r.id === idA)),
-                ),
-            ).toBe(true);
-            for (const n of notices) NOTICE_SCHEMA.parse(n);
+                [dupe!.subject.id, ...dupe!.related.map((r) => r.id)].sort(),
+            ).toEqual([idA, idB].sort());
+            for (const n of got.notices) NOTICE_SCHEMA.parse(n);
 
-            const oat = await call("upsert_food", { name: "rolled oat" });
-            const oats = await call("upsert_food", { name: "rolled oats" });
-            const oatId = oat.structuredContent?.id as string;
-            const oatsId = oats.structuredContent?.id as string;
-
+            // Dismissed with its own form, pair either way round.
             const dismissSwapped = await call("dismiss_notice", {
                 code: "food.possible_duplicate",
                 subject_kind: "food",
-                subject_id: oatsId,
-                related_id: oatId,
+                subject_id: idB,
+                related_id: idA,
             });
             expect(dismissSwapped.isError).toBeFalsy();
-            const afterSwapped = await call("list_notices", {
-                code: "food.possible_duplicate",
+            expect(dismissSwapped.structuredContent).toEqual({
+                dismissed: true,
             });
+            const after = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: idA })).structuredContent,
+            );
             expect(
-                (
-                    afterSwapped.structuredContent as {
-                        notices: Array<{ subject: { id: string } }>;
-                    }
-                ).notices.some(
-                    (n) => n.subject.id === oatId || n.subject.id === oatsId,
-                ),
+                after.notices.some((n) => n.code === "food.possible_duplicate"),
             ).toBe(false);
-
-            const dismissDirect = await call("dismiss_notice", {
-                code: "food.possible_duplicate",
-                subject_kind: "food",
-                subject_id: idA,
-                related_id: idB,
-            });
-            expect(dismissDirect.isError).toBeFalsy();
 
             const pita = await call("upsert_food", { name: "pita" });
             const pitas = await call("upsert_food", { name: "pitas" });
             const pitaId = pita.structuredContent?.id as string;
             const pitasId = pitas.structuredContent?.id as string;
-            const gotFood = await call("get_food", { food_id: pitaId });
-            const withNotice = GET_FOOD_OUTPUT.parse(gotFood.structuredContent);
+            const withNotice = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: pitaId })).structuredContent,
+            );
             expect(
                 withNotice.notices.some(
                     (n) => n.code === "food.possible_duplicate",
                 ),
             ).toBe(true);
-            for (const n of withNotice.notices) NOTICE_SCHEMA.parse(n);
 
-            await call("merge_foods", {
-                keep_id: pitaId,
-                drop_id: pitasId,
-            });
-            const afterMerge = await call("list_notices", {
-                code: "food.possible_duplicate",
-            });
+            await call("merge_foods", { keep_id: pitaId, drop_id: pitasId });
+            const afterMerge = GET_FOOD_OUTPUT.parse(
+                (await call("get_food", { food_id: pitaId })).structuredContent,
+            );
             expect(
-                (
-                    afterMerge.structuredContent as {
-                        notices: Array<{
-                            code: string;
-                            subject: { id: string };
-                        }>;
-                    }
-                ).notices.some(
-                    (n) =>
-                        n.code === "food.possible_duplicate" &&
-                        (n.subject.id === pitaId || n.subject.id === pitasId),
+                afterMerge.notices.some(
+                    (n) => n.code === "food.possible_duplicate",
                 ),
             ).toBe(false);
+        });
+    });
+
+    test("dismiss_notice with a data-quality code still dismisses, and refuses what the inbox owns", async () => {
+        await withUser(alice, async (call) => {
+            const itemId = await (async () => {
+                const loc = await call("add_fridge_location", {
+                    name: "Fridge",
+                });
+                const added = await call("add_fridge_item", {
+                    location_id: loc.structuredContent?.id,
+                    kind: "food",
+                    name: "Soon butter",
+                    amount: 1,
+                    unit: "g",
+                });
+                return added.structuredContent?.id as string;
+            })();
+            const row = (await db.fridgeStore.listItems("hh-1")).find(
+                (r) => r.id === itemId,
+            );
+            await db.fridgeStore.updateItem({
+                ...row!,
+                expiresOn: new Date(Date.now() + 3 * 86_400_000)
+                    .toISOString()
+                    .slice(0, 10),
+            });
+
+            // An inbox condition goes by its notification_id, not by code.
+            const refused = await call("dismiss_notice", {
+                code: "fridge.expiring",
+                subject_kind: "fridge_item",
+                subject_id: itemId,
+            });
+            expect(refused.isError).toBe(true);
+            expect(textOf(refused)).toContain("notification_id");
+            expect(refused.structuredContent).toEqual({ dismissed: false });
+            // The fridge's own notice no longer offers the old form.
+            const fridge = await call("get_fridge");
+            expect(textOf(fridge)).not.toContain("[code: ");
+
+            const neither = await call("dismiss_notice", {});
+            expect(neither.isError).toBe(true);
+            expect(textOf(neither)).toContain("notification_id");
+            const both = await call("dismiss_notice", {
+                notification_id: crypto.randomUUID(),
+                code: "food.possible_duplicate",
+                subject_kind: "food",
+                subject_id: crypto.randomUUID(),
+            });
+            expect(both.isError).toBe(true);
+            const scoped = await call("dismiss_notice", {
+                scope: "me",
+                code: "food.possible_duplicate",
+                subject_kind: "food",
+                subject_id: crypto.randomUUID(),
+            });
+            expect(scoped.isError).toBe(true);
+            expect(textOf(scoped)).toContain("whole household");
+            const missing = await call("dismiss_notice", {
+                code: "food.possible_duplicate",
+                subject_kind: "food",
+                subject_id: crypto.randomUUID(),
+            });
+            expect(missing.isError).toBe(true);
+            expect(textOf(missing).toLowerCase()).toContain("not open");
+            const warn = await call("dismiss_notice", {
+                code: "fridge.expired",
+                subject_kind: "fridge_item",
+                subject_id: itemId,
+            });
+            expect(warn.isError).toBe(true);
         });
     });
 });
@@ -10885,7 +11665,12 @@ describe("household config plurals_same_food over HTTP", () => {
     });
 });
 
-describe("household notices with actions over HTTP", () => {
+describe("the notification tools over HTTP", () => {
+    // A notification's undo is all or nothing, so the result says when it is
+    // refused: once someone has changed their own copy.
+    const UNDO_SENTENCE =
+        "The household can undo this for 24 hours in Settings › AI connections, unless someone has changed their copy since.";
+
     function addUtcDays(iso: string, delta: number): string {
         const [y, m, d] = iso.split("-").map(Number);
         return new Date(Date.UTC(y!, m! - 1, d! + delta))
@@ -10893,14 +11678,8 @@ describe("household notices with actions over HTTP", () => {
             .slice(0, 10);
     }
 
-    const CODES = [
-        "grocery.running_low",
-        "plan.missing_ingredient",
-        "nutrition.weigh_in_due",
-    ];
-
-    // A usual with nothing in stock, a recipe planned for tomorrow that needs
-    // flour, and a member whose last weigh-in was nine days ago.
+    // A usual with nothing in stock, a fridge item that expires in three
+    // days, and a member whose last weigh-in was nine days ago.
     async function seed(call: CallTool) {
         const today = utcTodayFromDate();
         await db.foodsStore.insertFood(
@@ -10913,24 +11692,20 @@ describe("household notices with actions over HTTP", () => {
                 usualAmount: { amount: 12, unit: "each" },
             }),
         );
-        const flour = await call("upsert_food", { name: "Flour" });
-        const recipe = await call("create_recipe", {
-            name: "Bread",
-            yield_portions: 1,
-        });
-        const recipeId = recipe.structuredContent?.id as string;
-        await call("add_recipe_ingredient", {
-            recipe_id: recipeId,
-            food_id: flour.structuredContent?.id as string,
-            amount: 200,
+        const loc = await call("add_fridge_location", { name: "Fridge" });
+        const added = await call("add_fridge_item", {
+            location_id: loc.structuredContent?.id,
+            kind: "food",
+            name: "Soon kefir",
+            amount: 1,
             unit: "g",
         });
-        await db.plansStore.addPlan({
-            householdId: "hh-1",
-            recipeId,
-            date: addUtcDays(today, 1),
-            slot: "dinner",
-            servings: 1,
+        const row = (await db.fridgeStore.listItems("hh-1")).find(
+            (r) => r.id === added.structuredContent?.id,
+        );
+        await db.fridgeStore.updateItem({
+            ...row!,
+            expiresOn: addUtcDays(today, 3),
         });
         db.weighInRows.push({
             userId: "u1",
@@ -10939,176 +11714,308 @@ describe("household notices with actions over HTTP", () => {
         });
     }
 
-    type Wire = {
-        code: string;
-        message: string;
-        action: { label: string } | null;
-        can_dismiss: boolean;
-        dismiss: {
-            code: string;
-            subject_kind: string;
-            subject_id: string;
-            related_id: string | null;
-        } | null;
-    };
+    const KINDS: string[] = ["food_expiring", "running_low", "weigh_in_due"];
 
-    async function listed(call: CallTool, args: Record<string, unknown> = {}) {
+    async function inbox(call: CallTool, args: Record<string, unknown> = {}) {
         const out = await call("list_notices", args);
         expect(out.isError).toBeFalsy();
-        const sc = out.structuredContent as { count: number; notices: Wire[] };
-        for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
-        return sc;
+        return {
+            text: textOf(out),
+            ...LIST_NOTICES_OUTPUT_SCHEMA.parse(out.structuredContent),
+        };
     }
 
+    const callOf =
+        (client: Client): CallTool =>
+        async (name, args = {}) =>
+            (await client.callTool({ name, arguments: args })) as ToolResult;
+
     test.each(ERAS)(
-        "list_notices carries the three with their actions and each can be dismissed (%p)",
+        "list_notices is the inbox: the three kinds, with their sentences and ids (%p)",
         async (era) => {
             await withHttpClient("u1", era, async (client) => {
-                const call: CallTool = async (name, args = {}) =>
-                    (await client.callTool({
-                        name,
-                        arguments: args,
-                    })) as ToolResult;
+                const call = callOf(client);
                 await seed(call);
-                const sc = await listed(call);
-                const mine = sc.notices.filter((n) => CODES.includes(n.code));
-                expect(mine.map((n) => n.code).sort()).toEqual(
-                    [...CODES].sort(),
-                );
-                const byCode = Object.fromEntries(mine.map((n) => [n.code, n]));
-                expect(byCode["grocery.running_low"]).toMatchObject({
-                    message: "Running low: Eggs (0 left, below 3)",
-                    action: { label: "Add to list" },
-                });
-                expect(byCode["plan.missing_ingredient"]).toMatchObject({
-                    message: "Flour, 200 g, missing for Bread, tomorrow",
-                    action: { label: "Add" },
-                });
-                expect(byCode["nutrition.weigh_in_due"]).toMatchObject({
-                    message: "U1 hasn't weighed in for 9 days",
-                    action: { label: "Weigh in" },
-                });
-                expect(sc.count).toBeGreaterThanOrEqual(3);
-
-                const narrowed = await listed(call, {
-                    code: "plan.missing_ingredient",
-                });
-                expect(narrowed.notices).toHaveLength(1);
-
-                for (const n of mine) {
-                    expect(n.can_dismiss).toBe(true);
-                    const d = n.dismiss!;
-                    const out = await call("dismiss_notice", {
-                        code: d.code,
-                        subject_kind: d.subject_kind,
-                        subject_id: d.subject_id,
-                        ...(d.related_id ? { related_id: d.related_id } : {}),
-                    });
-                    expect(out.isError).toBeFalsy();
-                }
-                const after = await listed(call);
+                const sc = await inbox(call);
                 expect(
-                    after.notices.filter((n) => CODES.includes(n.code)),
-                ).toEqual([]);
+                    sc.notifications.map((n) => n.kind as string).sort(),
+                ).toEqual([...KINDS].sort());
+                expect(sc.count).toBe(3);
+                const byKind = Object.fromEntries(
+                    sc.notifications.map((n) => [n.kind, n]),
+                );
+                expect(byKind.running_low).toMatchObject({
+                    message: "Running low: Eggs (0 left, below 3)",
+                    bucket: "household",
+                    // Its strip, with Add to list and Dismiss, is on Usuals.
+                    open: "/kitchen/usuals",
+                });
+                expect(byKind.weigh_in_due).toMatchObject({
+                    message: "U1 hasn't weighed in for 9 days",
+                    bucket: "personal",
+                    open: "/",
+                    subject: { kind: "member", id: "u1" },
+                });
+                expect(byKind.food_expiring!.message).toContain("Soon kefir");
+                // The text names every id the structured result has.
+                const lines = sc.text.split("\n").slice(1);
+                expect(lines).toHaveLength(3);
+                for (const n of sc.notifications) {
+                    const line = lines.find((l) =>
+                        l.includes(`[notification_id: ${n.id}]`),
+                    );
+                    expect(line, n.kind).toBeTruthy();
+                    expect(line).toContain(n.subject!.id);
+                }
             });
         },
     );
 
-    /** The tags of one text line, `[label: value]` by label. */
-    const tagsOf = (line: string): Record<string, string> =>
-        Object.fromEntries(
-            [...line.matchAll(/\[([a-z_]+): ([^\]]+)\]/g)].map((m) => [
-                m[1]!,
-                m[2]!,
-            ]),
-        );
-
     test.each(ERAS)(
-        "a notice can be dismissed from the list_notices text alone (%p)",
+        "a notification can be dismissed from the list_notices text alone (%p)",
         async (era) => {
             await withHttpClient("u1", era, async (client) => {
-                const call: CallTool = async (name, args = {}) =>
-                    (await client.callTool({
-                        name,
-                        arguments: args,
-                    })) as ToolResult;
+                const call = callOf(client);
                 await seed(call);
-                // A pair notice, whose dismissal also needs the other food.
+                const ids = [
+                    ...(await inbox(call)).text.matchAll(
+                        /\[notification_id: ([^\]]+)\]/g,
+                    ),
+                ].map((m) => m[1]!);
+                expect(ids).toHaveLength(3);
+                for (const id of ids) {
+                    const out = await call("dismiss_notice", {
+                        notification_id: id,
+                    });
+                    expect(out.isError, textOf(out)).toBeFalsy();
+                }
+                const after = await inbox(call);
+                expect(after.notifications).toEqual([]);
+                expect(after.text).toBe("Nothing needs attention.");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "plan gaps and restocked lines stay out of the inbox (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = callOf(client);
+                const today = utcTodayFromDate();
+                const flour = await call("upsert_food", { name: "Flour" });
+                const recipe = await call("create_recipe", {
+                    name: "Bread",
+                    yield_portions: 1,
+                });
+                const recipeId = recipe.structuredContent?.id as string;
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: flour.structuredContent?.id as string,
+                    amount: 200,
+                    unit: "g",
+                });
+                await db.plansStore.addPlan({
+                    householdId: "hh-1",
+                    recipeId,
+                    date: addUtcDays(today, 1),
+                    slot: "dinner",
+                    servings: 1,
+                });
+                // The gap is on the plan and the recipe, not in the inbox.
+                expect((await inbox(call)).notifications).toEqual([]);
+                const week = await call("get_week_plan");
+                expect(week.isError).toBeFalsy();
+                expect(textOf(week)).toContain("Flour");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "snooze, mark read and the settings tools answer in their schemas (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = callOf(client);
+                await seed(call);
+                const sc = await inbox(call);
+                const [first, second] = sc.notifications;
+
+                const snoozed = await call("snooze_notice", {
+                    notification_id: first!.id,
+                    until: "tomorrow",
+                });
+                expect(snoozed.isError).toBeFalsy();
+                const snoozeOut = SNOOZE_NOTICE_OUTPUT_SCHEMA.parse(
+                    snoozed.structuredContent,
+                );
+                expect(snoozeOut.snoozed).toBe(true);
+                expect(Date.parse(snoozeOut.snoozed_until!)).toBeGreaterThan(
+                    Date.now(),
+                );
+                expect((await inbox(call)).count).toBe(2);
+                const withSnoozed = await inbox(call, {
+                    include_snoozed: true,
+                });
+                expect(withSnoozed.notifications).toHaveLength(3);
+                expect(
+                    withSnoozed.notifications.find((n) => n.id === first!.id)!
+                        .snoozed_until,
+                ).toBe(snoozeOut.snoozed_until);
+
+                const read = await call("mark_notices_read", {
+                    notification_ids: [second!.id],
+                });
+                expect(
+                    MARK_NOTICES_READ_OUTPUT_SCHEMA.parse(
+                        read.structuredContent,
+                    ),
+                ).toEqual({ marked_read: 1 });
+                const readAll = await call("mark_notices_read", {
+                    notification_ids: "all",
+                });
+                expect(readAll.isError).toBeFalsy();
+                expect((await inbox(call)).count).toBe(0);
+
+                const settings = GET_NOTIFICATION_SETTINGS_OUTPUT_SCHEMA.parse(
+                    (await call("get_notification_settings")).structuredContent,
+                );
+                expect(settings.settings).toHaveLength(7);
+                const set = await call("set_notification_settings", {
+                    kind: "week_plan_changes",
+                    enabled: true,
+                });
+                expect(
+                    SET_NOTIFICATION_SETTINGS_OUTPUT_SCHEMA.parse(
+                        set.structuredContent,
+                    ),
+                ).toMatchObject({ kind: "week_plan_changes", enabled: true });
+                const allergens = await call("set_notification_settings", {
+                    kind: "allergens",
+                    enabled: false,
+                });
+                expect(allergens.isError).toBe(true);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "dismiss for everyone as the owner is recorded and says how to undo it (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = callOf(client);
+                await seed(call);
+                const row = (await inbox(call)).notifications.find(
+                    (n) => n.kind === "food_expiring",
+                )!;
+                expect(row.can_dismiss_for_everyone).toBe(true);
+                const out = await call("dismiss_notice", {
+                    notification_id: row.id,
+                    scope: "everyone",
+                });
+                expect(out.isError).toBeFalsy();
+                expect(textOf(out)).toContain("Dismissed for everyone.");
+                expect(textOf(out)).toContain(UNDO_SENTENCE);
+                expect(
+                    db.agentActions
+                        .__records()
+                        .filter((r) => r.tool === "dismiss_notice"),
+                ).toHaveLength(1);
+                expect(
+                    (await inbox(call)).notifications.map((n) => n.kind),
+                ).not.toContain("food_expiring");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "snooze for everyone as the owner is recorded, and the household's Off stops it (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = callOf(client);
+                await seed(call);
+                const row = (await inbox(call)).notifications.find(
+                    (n) => n.kind === "food_expiring",
+                )!;
+                const out = await call("snooze_notice", {
+                    notification_id: row.id,
+                    until: "week",
+                });
+                expect(out.isError, textOf(out)).toBeFalsy();
+                expect(
+                    SNOOZE_NOTICE_OUTPUT_SCHEMA.parse(out.structuredContent),
+                ).toMatchObject({ snoozed: true, for_everyone: true });
+                expect(textOf(out)).toContain("recorded in Settings");
+                expect(
+                    db.agentActions
+                        .__records()
+                        .filter((r) => r.tool === "snooze_notice"),
+                ).toHaveLength(1);
+                // The household's switch Off stops it, and the inbox says so.
+                await db.settingsStore.setAgentDestructiveAllowed(
+                    "hh-1",
+                    false,
+                );
+                const other = (await inbox(call)).notifications.find(
+                    (n) => n.kind === "running_low",
+                )!;
+                expect(other.can_dismiss_for_everyone).toBe(false);
+                const refused = await call("snooze_notice", {
+                    notification_id: other.id,
+                    until: "week",
+                });
+                expect(refused.isError).toBe(true);
+                expect(
+                    db.agentActions
+                        .__records()
+                        .filter((r) => r.tool === "snooze_notice"),
+                ).toHaveLength(1);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a data-quality dismiss over HTTP still works, and the inbox's codes are refused (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = callOf(client);
                 await call("upsert_food", { name: "rolled oat" });
                 const oats = await call("upsert_food", {
                     name: "rolled oats",
                     on_similar: "create",
                 });
-                expect(oats.isError).toBeFalsy();
-                const listing = await call("list_notices", {});
-                const lines = textOf(listing)
+                const oatsId = oats.structuredContent?.id as string;
+                const food = GET_FOOD_OUTPUT.parse(
+                    (await call("get_food", { food_id: oatsId }))
+                        .structuredContent,
+                );
+                const dupe = food.notices.find(
+                    (n) => n.code === "food.possible_duplicate",
+                )!;
+                // get_food's text carries the dismiss form, by its input names.
+                const line = textOf(await call("get_food", { food_id: oatsId }))
                     .split("\n")
-                    .filter((line) => line.includes("[code: "));
-                // Nothing below reads structuredContent: only the text.
-                const codes = lines.map((line) => tagsOf(line).code);
-                for (const code of [...CODES, "food.possible_duplicate"]) {
-                    expect(codes).toContain(code);
-                }
-                // The pair notice needs its related_id to be dismissed at all.
-                expect(
-                    lines.some(
-                        (line) =>
-                            tagsOf(line).code === "food.possible_duplicate" &&
-                            tagsOf(line).related_id,
-                    ),
-                ).toBe(true);
-                for (const line of lines) {
-                    const tags = tagsOf(line);
-                    expect(tags.subject_kind).toBeTruthy();
-                    expect(tags.subject_id).toBeTruthy();
-                    const out = await call("dismiss_notice", {
-                        code: tags.code,
-                        subject_kind: tags.subject_kind,
-                        subject_id: tags.subject_id,
-                        ...(tags.related_id
-                            ? { related_id: tags.related_id }
-                            : {}),
-                    });
-                    expect(
-                        out.isError,
-                        `${line} -> ${textOf(out)}`,
-                    ).toBeFalsy();
-                }
-                const after = await call("list_notices", {});
-                expect(
-                    textOf(after)
-                        .split("\n")
-                        .filter((line) => line.includes("[code: ")),
-                ).toEqual([]);
-            });
-        },
-    );
-
-    test.each(ERAS)(
-        "only dismiss.related_id is labelled related_id; a non-dismissable notice names no dismiss inputs (%p)",
-        async (era) => {
-            await withHttpClient("u1", era, async (client) => {
-                const call: CallTool = async (name, args = {}) =>
-                    (await client.callTool({
-                        name,
-                        arguments: args,
-                    })) as ToolResult;
-                await seed(call);
-                const sc = await listed(call);
-                const lines = textOf(await call("list_notices", {}))
-                    .split("\n")
-                    .slice(1);
-                expect(lines).toHaveLength(sc.notices.length);
-                sc.notices.forEach((n, i) => {
-                    const tags = tagsOf(lines[i]!);
-                    expect(tags.related_id ?? null).toBe(
-                        n.dismiss?.related_id ?? null,
-                    );
-                    if (n.dismiss == null) {
-                        expect(tags.code).toBeUndefined();
-                        expect(tags.subject_kind).toBeUndefined();
-                    }
+                    .find((l) =>
+                        l.includes("[code: food.possible_duplicate]"),
+                    )!;
+                expect(line).toContain("[subject_kind: food]");
+                expect(line).toContain(
+                    `[subject_id: ${dupe.dismiss!.subject_id}]`,
+                );
+                const out = await call("dismiss_notice", {
+                    code: dupe.dismiss!.code,
+                    subject_kind: dupe.dismiss!.subject_kind,
+                    subject_id: dupe.dismiss!.subject_id,
+                    ...(dupe.dismiss!.related_id
+                        ? { related_id: dupe.dismiss!.related_id }
+                        : {}),
                 });
+                expect(out.isError, textOf(out)).toBeFalsy();
+                const refused = await call("dismiss_notice", {
+                    code: "grocery.running_low",
+                    subject_kind: "food",
+                    subject_id: oatsId,
+                });
+                expect(refused.isError).toBe(true);
+                expect(textOf(refused)).toContain("notification_id");
             });
         },
     );
@@ -12729,6 +13636,92 @@ describe("plan tools over HTTP", () => {
     );
 
     test.each(ERAS)(
+        "get_week_plan carries what the plan is missing as a notice with its dismiss fields, and dismiss_notice dismisses it (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({}));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId, flourId } = await seedBread(call);
+                const day = addUtcDays(utcTodayFromDate(), 2);
+
+                // Nothing is planned, so nothing is missing and nothing to say.
+                const empty = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    (await call("get_week_plan")).structuredContent,
+                );
+                expect(empty.notices).toEqual([]);
+
+                const planned = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("plan_recipe", {
+                            recipe_id: recipeId,
+                            date: day,
+                            slot: "dinner",
+                        })
+                    ).structuredContent,
+                );
+
+                const read = await call("get_week_plan");
+                const week = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    read.structuredContent,
+                );
+                expect(week.missing).toHaveLength(1);
+                expect(week.notices).toHaveLength(1);
+                // The shape every other tool sends a notice in.
+                const notice = NOTICE_SCHEMA.parse(week.notices[0]);
+                expect(notice).toMatchObject({
+                    code: "plan.missing_ingredient",
+                    severity: "warn",
+                    subject: { kind: "food", id: flourId },
+                    can_dismiss: true,
+                    dismiss: {
+                        code: "plan.missing_ingredient",
+                        subject_kind: "food",
+                        subject_id: flourId,
+                        related_id: planned.plan.plan_id,
+                    },
+                });
+                expect(notice.message).toContain("Flour");
+                expect(notice.message).toContain("Bread");
+                // The text names the fields dismiss_notice takes.
+                const text = textOf(read);
+                expect(text).toContain(notice.message);
+                expect(text).toContain("[code: plan.missing_ingredient]");
+                expect(text).toContain("[subject_kind: food]");
+                expect(text).toContain(`[subject_id: ${flourId}]`);
+                expect(text).toContain(`[related_id: ${planned.plan.plan_id}]`);
+
+                const dismissed = await call("dismiss_notice", {
+                    code: notice.dismiss!.code,
+                    subject_kind: notice.dismiss!.subject_kind,
+                    subject_id: notice.dismiss!.subject_id,
+                    related_id: notice.dismiss!.related_id ?? undefined,
+                });
+                expect(dismissed.isError).toBeFalsy();
+                expect(dismissed.structuredContent).toEqual({
+                    dismissed: true,
+                });
+
+                // Only the notice goes: the plan still lists what it needs.
+                const after = await call("get_week_plan");
+                const again = WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                    after.structuredContent,
+                );
+                expect(again.notices).toEqual([]);
+                expect(again.missing).toHaveLength(1);
+                expect(textOf(after)).not.toContain("plan.missing_ingredient");
+
+                // It is not an inbox kind: list_notices never carried it.
+                const inbox = LIST_NOTICES_OUTPUT_SCHEMA.parse(
+                    (await call("list_notices")).structuredContent,
+                );
+                expect(
+                    inbox.notifications.map((n) => n.message).join("\n"),
+                ).not.toContain("Flour");
+            });
+        },
+    );
+
+    test.each(ERAS)(
         "get_week_plan starts at from and a recipe with nutrition shows kcal per portion (%p)",
         async (era) => {
             setFlagsForTests(createMemoryFlags({}));
@@ -13818,19 +14811,16 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         name: "list_notices",
                         arguments: {},
                     });
-                    const sc0 = empty.structuredContent as {
-                        count: number;
-                        notices: unknown[];
-                    };
-                    expect(() =>
-                        LIST_NOTICES_OUTPUT_SCHEMA.parse(sc0),
-                    ).not.toThrow();
+                    const sc0 = LIST_NOTICES_OUTPUT_SCHEMA.parse(
+                        empty.structuredContent,
+                    );
+                    expect(sc0).toEqual({ count: 0, notifications: [] });
                 });
             },
         );
 
         test.each(ERAS)(
-            "list_notices output parses with notices present (%p)",
+            "list_notices output parses with notifications present (%p)",
             async (mode) => {
                 setFlagsForTests(createMemoryFlags({}));
                 function addDaysUtc(iso: string, delta: number): string {
@@ -13871,15 +14861,12 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         name: "list_notices",
                         arguments: {},
                     });
-                    const sc = listed.structuredContent as {
-                        count: number;
-                        notices: unknown[];
-                    };
-                    expect(sc.count).toBeGreaterThanOrEqual(1);
-                    for (const n of sc.notices) NOTICE_SCHEMA.parse(n);
-                    expect(() =>
-                        LIST_NOTICES_OUTPUT_SCHEMA.parse(sc),
-                    ).not.toThrow();
+                    const sc = LIST_NOTICES_OUTPUT_SCHEMA.parse(
+                        listed.structuredContent,
+                    );
+                    expect(sc.count).toBe(1);
+                    expect(sc.notifications).toHaveLength(1);
+                    expect(sc.notifications[0]!.kind).toBe("food_expiring");
                 });
             },
         );

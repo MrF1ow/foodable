@@ -1,15 +1,17 @@
 <!doctype html>
 <!--
-  Needs attention digest (MCP Apps). Served for list_notices.
+  Notifications inbox (MCP Apps). Served for list_notices.
 
-  One card: grouped notice rows with Dismiss calling dismiss_notice when the
-  host supports server tools.
+  One card: the person's notifications, personal ones first, then the
+  household's, each with Dismiss calling dismiss_notice (for the person
+  only) when the host supports server tools. Allergen rows have no Dismiss:
+  they clear when the cause is fixed.
 -->
 <html lang="en">
     <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>Needs attention</title>
+        <title>Notifications</title>
         <style>
             /*@include shared/v2/tokens.css@*/
 
@@ -39,147 +41,126 @@
 
             /*@include shared/util.js@*/
 
+            /*@include shared/date.js@*/
+
             /*@include shared/v2/ui.js@*/
 
             const T = {
-                title: "Needs attention",
-                loading: "Loading notices…",
+                title: "Notifications",
+                loading: "Loading notifications…",
                 empty: "Nothing needs attention.",
                 emptyFiltered: "Nothing matches this filter.",
+                personal: "For you",
+                household: "Household",
+                dismiss: "Dismiss",
+                dismissFailed: "Could not dismiss.",
+                snoozedUntil: "Snoozed until",
             };
 
-            const GROUP_ORDER = [
-                "expiring",
-                "running_low",
-                "recipe_gaps",
-                "household",
-                "other",
-            ];
+            // What each kind is called, as Settings and the tools name it.
+            const KIND_LABELS = {
+                allergens: "Allergens",
+                food_expiring: "Food expiring",
+                running_low: "Running low",
+                weigh_in_due: "Weigh-in due",
+                recipe_changes: "Recipe changes by others",
+                week_plan_changes: "Week plan changes",
+                new_usuals: "New usual products",
+            };
 
-            // Design sample (FigCraft Widget/Needs attention).
+            const BUCKET_ORDER = ["personal", "household"];
+
+            const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+            // The stored instant, as the viewer's own clock reads it: "Wed,
+            // Dec 2, 19:30". A snooze is at most a year ahead, so the weekday
+            // and date say which day without a year. Anything that is not a
+            // date passes through untouched.
+            function snoozedWhen(iso) {
+                const d = new Date(iso);
+                if (Number.isNaN(d.getTime())) return String(iso);
+                const pad = (n) => String(n).padStart(2, "0");
+                return `${WEEKDAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${d.getDate()}, ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+            }
+
+            // A populated inbox: two kinds of condition, an allergen, and what
+            // other people changed; some read, one for the person alone.
             const SAMPLE = {
-                count: 5,
-                notices: [
+                count: 4,
+                notifications: [
                     {
-                        code: "fridge.expiring",
-                        severity: "warn",
-                        subject: {
-                            kind: "fridge_item",
-                            id: "fi-salmon",
-                            recipe_id: null,
-                        },
-                        related: [],
+                        id: "n-allergen",
+                        kind: "allergens",
+                        bucket: "household",
+                        message: "Peanut butter contains peanut — Pat.",
+                        created_at: "2026-12-01T14:05:00.000Z",
+                        read: false,
+                        snoozed_until: null,
+                        can_dismiss_for_everyone: false,
+                        subject: { kind: "grocery_line", id: "gl-pb" },
+                        open: "/kitchen/groceries",
+                    },
+                    {
+                        id: "n-salmon",
+                        kind: "food_expiring",
+                        bucket: "household",
                         message: "Salmon 1 lb expires tomorrow",
-                        action: null,
-                        title: "Salmon",
-                        detail: "tomorrow",
-                        detail_tone: "over",
-                        group_key: "expiring",
-                        group_label: "Expiring",
-                        dot_tone: "over",
-                        can_dismiss: true,
-                        dismiss_label: "Dismiss",
-                        dismiss: {
-                            code: "fridge.expiring",
-                            subject_kind: "fridge_item",
-                            subject_id: "fi-salmon",
-                            related_id: null,
-                        },
+                        created_at: "2026-12-01T13:30:00.000Z",
+                        read: false,
+                        snoozed_until: null,
+                        can_dismiss_for_everyone: true,
+                        subject: { kind: "fridge_item", id: "fi-salmon" },
+                        open: "/kitchen/fridge",
                     },
                     {
-                        code: "fridge.expiring",
-                        severity: "info",
-                        subject: {
-                            kind: "fridge_item",
-                            id: "fi-spinach",
-                            recipe_id: null,
-                        },
-                        related: [],
-                        message: "Baby spinach ½ bag expires in 2 days",
-                        action: null,
-                        title: "Baby spinach",
-                        detail: "2 days",
-                        detail_tone: "warn",
-                        group_key: "expiring",
-                        group_label: "Expiring",
-                        dot_tone: "warn",
-                        can_dismiss: true,
-                        dismiss_label: "Dismiss",
-                        dismiss: {
-                            code: "fridge.expiring",
-                            subject_kind: "fridge_item",
-                            subject_id: "fi-spinach",
-                            related_id: null,
-                        },
+                        id: "n-weigh",
+                        kind: "weigh_in_due",
+                        bucket: "personal",
+                        message: "You haven't weighed in for 9 days",
+                        created_at: "2026-12-01T09:00:00.000Z",
+                        read: false,
+                        snoozed_until: null,
+                        can_dismiss_for_everyone: false,
+                        subject: { kind: "member", id: "u-alex" },
+                        open: "/",
                     },
                     {
-                        code: "grocery.restocked",
-                        severity: "info",
-                        subject: {
-                            kind: "grocery_line",
-                            id: "gl-eggs",
-                            recipe_id: null,
-                        },
-                        related: [],
-                        message: "Added because Eggs expires Friday",
-                        action: null,
-                        title: "Eggs",
-                        detail: "Friday",
-                        detail_tone: null,
-                        group_key: "running_low",
-                        group_label: "Running low",
-                        dot_tone: "warn",
-                        can_dismiss: true,
-                        dismiss_label: "Dismiss",
-                        dismiss: {
-                            code: "grocery.restocked",
-                            subject_kind: "grocery_line",
-                            subject_id: "gl-eggs",
-                            related_id: null,
-                        },
-                    },
-                    {
-                        code: "recipe.no_nutrition",
-                        severity: "warn",
-                        subject: {
-                            kind: "recipe_ingredient",
-                            id: "ing-lemon",
-                            recipe_id: "rec-salmon",
-                        },
-                        related: [],
+                        id: "n-plan",
+                        kind: "week_plan_changes",
+                        bucket: "household",
                         message:
-                            "Lemon: no nutrition — add it, or pick a usual product",
-                        action: { label: "Pick usual product" },
-                        title: "Lemon",
-                        detail: "Sat · salmon",
-                        detail_tone: null,
-                        group_key: "recipe_gaps",
-                        group_label: "Missing for planned meals",
-                        dot_tone: "warn",
-                        can_dismiss: false,
-                        dismiss_label: "Dismiss",
-                        dismiss: null,
+                            "Sarah moved Lasagna from lunch on Mon, Nov 30 to dinner on Tue, Dec 1.",
+                        created_at: "2026-11-30T18:20:00.000Z",
+                        read: false,
+                        snoozed_until: null,
+                        can_dismiss_for_everyone: true,
+                        subject: { kind: "recipe", id: "rec-lasagna" },
+                        open: "/recipes/rec-lasagna",
                     },
                     {
-                        code: "recipe.no_food",
-                        severity: "warn",
-                        subject: {
-                            kind: "recipe_ingredient",
-                            id: "ing-beans",
-                            recipe_id: "rec-chili",
-                        },
-                        related: [],
-                        message: "Kidney beans: not linked to a food",
-                        action: null,
-                        title: "Kidney beans",
-                        detail: "Sun · chili",
-                        detail_tone: null,
-                        group_key: "recipe_gaps",
-                        group_label: "Missing for planned meals",
-                        dot_tone: "warn",
-                        can_dismiss: false,
-                        dismiss_label: "Dismiss",
-                        dismiss: null,
+                        id: "n-usual",
+                        kind: "new_usuals",
+                        bucket: "household",
+                        message:
+                            "Sarah added Eggs to the usuals with Kirkland Large Eggs.",
+                        created_at: "2026-11-29T16:10:00.000Z",
+                        read: true,
+                        snoozed_until: null,
+                        can_dismiss_for_everyone: true,
+                        subject: { kind: "food", id: "f-eggs" },
+                        open: "/kitchen/usuals",
+                    },
+                    {
+                        id: "n-recipe",
+                        kind: "recipe_changes",
+                        bucket: "household",
+                        message: "Sarah removed Beef chili.",
+                        created_at: "2026-11-28T12:00:00.000Z",
+                        read: true,
+                        snoozed_until: null,
+                        can_dismiss_for_everyone: true,
+                        subject: { kind: "recipe", id: "rec-chili" },
+                        open: "/recipes",
                     },
                 ],
             };
@@ -195,32 +176,35 @@
                 return `<section class="card">${inner}</section>`;
             }
 
-            function noticeDismissKey(n) {
-                if (!n || !n.dismiss) return "";
-                const d = n.dismiss;
-                const rel = d.related_id == null ? "" : String(d.related_id);
-                return [d.code, d.subject_kind, d.subject_id, rel].join("|");
+            // Allergen rows can't be dismissed: they clear when the cause does.
+            function canDismiss(n, showDismiss) {
+                return showDismiss && n.kind !== "allergens";
             }
 
-            function rowNotice(n, showDismiss) {
-                const dot = n.dot_tone ? { tone: n.dot_tone } : {};
-                const key = noticeDismissKey(n);
-                const inFlight = key !== "" && dismissing.has(key);
+            function rowNotification(n, showDismiss) {
+                const key = String(n.id);
+                const inFlight = dismissing.has(key);
+                const kind = KIND_LABELS[n.kind] || "";
+                const sub = n.snoozed_until
+                    ? `${T.snoozedUntil} ${snoozedWhen(n.snoozed_until)}`
+                    : kind;
                 const row = {
-                    dot,
-                    title: n.title,
-                    sub: n.detail,
-                    subTone:
-                        n.detail && n.detail_tone ? n.detail_tone : undefined,
-                    attrs: {
-                        "data-notice-key": key,
+                    dot: {
+                        tone: n.read
+                            ? "dim"
+                            : n.kind === "allergens"
+                              ? "over"
+                              : "warn",
                     },
+                    title: n.message,
+                    sub,
+                    attrs: { "data-notification-id": key },
                 };
-                if (showDismiss && n.can_dismiss && n.dismiss) {
-                    row.action = inFlight ? "…" : n.dismiss_label || "Dismiss";
+                if (canDismiss(n, showDismiss)) {
+                    row.action = inFlight ? "…" : T.dismiss;
                     row.actionAttrs = {
                         "data-dismiss-key": key,
-                        title: n.dismiss_label || "Dismiss",
+                        title: T.dismiss,
                         "aria-disabled": inFlight ? "true" : "false",
                     };
                 }
@@ -228,14 +212,16 @@
                 const errHtml = err
                     ? `<p class="err note is-warn">${esc(err)}</p>`
                     : "";
-                return `<div class="row-wrap" data-notice-key="${esc(key)}">${v2Row(
+                return `<div class="row-wrap" data-notification-id="${esc(key)}">${v2Row(
                     row,
                 )}${errHtml}</div>`;
             }
 
             function renderBody(data, showDismiss) {
-                const notices = Array.isArray(data.notices) ? data.notices : [];
-                if (notices.length === 0) {
+                const list = Array.isArray(data.notifications)
+                    ? data.notifications
+                    : [];
+                if (list.length === 0) {
                     const emptyCopy =
                         typeof data.count === "number" && data.count > 0
                             ? T.emptyFiltered
@@ -245,36 +231,28 @@
                             `<p class="note">${esc(emptyCopy)}</p>`,
                     );
                 }
-                const byGroup = new Map();
-                notices.forEach((n) => {
-                    const key = n.group_key || "other";
-                    const list = byGroup.get(key) || {
-                        label: n.group_label || "Other",
-                        rows: [],
-                    };
-                    list.rows.push(rowNotice(n, showDismiss));
-                    byGroup.set(key, list);
+                const byBucket = new Map();
+                list.forEach((n) => {
+                    const bucket =
+                        n.bucket === "personal" ? "personal" : "household";
+                    const rows = byBucket.get(bucket) || [];
+                    rows.push(rowNotification(n, showDismiss));
+                    byBucket.set(bucket, rows);
                 });
-                const groups = [];
-                for (const key of GROUP_ORDER) {
-                    const g = byGroup.get(key);
-                    if (g) {
-                        groups.push(
-                            `<div class="grp">${v2Label(g.label)}<div class="rows">${g.rows.join("")}</div></div>`,
-                        );
-                        byGroup.delete(key);
-                    }
-                }
-                for (const g of byGroup.values()) {
-                    groups.push(
-                        `<div class="grp">${v2Label(g.label)}<div class="rows">${g.rows.join("")}</div></div>`,
-                    );
-                }
-                const count =
+                const groups = BUCKET_ORDER.filter((b) => byBucket.has(b)).map(
+                    (b) =>
+                        `<div class="grp">${v2Label(T[b])}<div class="rows">${byBucket
+                            .get(b)
+                            .join("")}</div></div>`,
+                );
+                const unread =
                     typeof data.count === "number"
-                        ? String(data.count)
-                        : String(notices.length);
-                return card(v2Header(T.title, count) + groups.join(""));
+                        ? data.count
+                        : list.filter((n) => !n.read).length;
+                return card(
+                    v2Header(T.title, unread > 0 ? String(unread) : undefined) +
+                        groups.join(""),
+                );
             }
 
             function render(data) {
@@ -290,8 +268,8 @@
                 }
                 MODEL = {
                     count: data.count ?? 0,
-                    notices: Array.isArray(data.notices)
-                        ? data.notices.map((n) => ({ ...n }))
+                    notifications: Array.isArray(data.notifications)
+                        ? data.notifications.map((n) => ({ ...n }))
                         : [],
                     errors: MODEL && MODEL.errors ? { ...MODEL.errors } : {},
                 };
@@ -299,54 +277,52 @@
                 v2Paint(renderBody(MODEL, showDismiss));
             }
 
-            function removeNoticeByKey(key) {
-                if (!MODEL || !key) return;
-                const before = MODEL.notices.length;
-                MODEL.notices = MODEL.notices.filter(
-                    (n) => noticeDismissKey(n) !== key,
+            function removeNotification(id) {
+                if (!MODEL || !id) return;
+                const gone = MODEL.notifications.find(
+                    (n) => String(n.id) === id,
                 );
-                if (MODEL.notices.length === before) return;
-                MODEL.count = Math.max(
-                    0,
-                    (typeof MODEL.count === "number"
-                        ? MODEL.count
-                        : MODEL.notices.length + 1) - 1,
+                if (!gone) return;
+                MODEL.notifications = MODEL.notifications.filter(
+                    (n) => String(n.id) !== id,
                 );
-                if (MODEL.errors[key]) delete MODEL.errors[key];
+                // The count is the unread ones: only an unread row lowers it.
+                if (!gone.read) MODEL.count = Math.max(0, MODEL.count - 1);
+                if (MODEL.errors[id]) delete MODEL.errors[id];
                 const showDismiss = !!(API && API.canCallTools);
                 v2Paint(renderBody(MODEL, showDismiss));
             }
 
-            function setRowError(key, message) {
+            function setRowError(id, message) {
                 if (!MODEL) return;
-                MODEL.errors[key] = message;
+                MODEL.errors[id] = message;
                 const showDismiss = !!(API && API.canCallTools);
                 v2Paint(renderBody(MODEL, showDismiss));
             }
 
-            async function onDismissClick(key) {
+            async function onDismissClick(id) {
                 if (!MODEL || !API || !API.canCallTools) return;
-                if (!key || dismissing.has(key)) return;
-                const notice = MODEL.notices.find(
-                    (n) => noticeDismissKey(n) === key,
+                if (!id || dismissing.has(id)) return;
+                const notification = MODEL.notifications.find(
+                    (n) => String(n.id) === id,
                 );
-                if (!notice || !notice.dismiss) return;
-                const args = { ...notice.dismiss };
-                if (args.related_id == null) delete args.related_id;
-                if (MODEL.errors[key]) delete MODEL.errors[key];
-                dismissing.add(key);
+                if (!notification || notification.kind === "allergens") return;
+                if (MODEL.errors[id]) delete MODEL.errors[id];
+                dismissing.add(id);
                 const showDismiss = !!(API && API.canCallTools);
                 v2Paint(renderBody(MODEL, showDismiss));
                 try {
-                    const res = await API.callTool("dismiss_notice", args);
+                    const res = await API.callTool("dismiss_notice", {
+                        notification_id: id,
+                        scope: "me",
+                    });
                     const sc =
                         (res && res.structuredContent) ||
                         (res && res.result && res.result.structuredContent);
-                    const dismissed = sc && sc.dismissed === true;
-                    if (dismissed) {
-                        dismissing.delete(key);
+                    if (sc && sc.dismissed === true) {
+                        dismissing.delete(id);
                         dismissSettleUntil = Date.now() + DISMISS_SETTLE_MS;
-                        removeNoticeByKey(key);
+                        removeNotification(id);
                         return;
                     }
                     const text =
@@ -354,16 +330,14 @@
                             res.content &&
                             res.content[0] &&
                             res.content[0].text) ||
-                        "Could not dismiss.";
-                    dismissing.delete(key);
-                    setRowError(key, text);
+                        T.dismissFailed;
+                    dismissing.delete(id);
+                    setRowError(id, text);
                 } catch (e) {
-                    dismissing.delete(key);
+                    dismissing.delete(id);
                     setRowError(
-                        key,
-                        e && e.message
-                            ? String(e.message)
-                            : "Could not dismiss.",
+                        id,
+                        e && e.message ? String(e.message) : T.dismissFailed,
                     );
                 }
             }
@@ -372,7 +346,7 @@
                 if (!payload || typeof payload !== "object") return null;
                 if (
                     typeof payload.count === "number" &&
-                    Array.isArray(payload.notices)
+                    Array.isArray(payload.notifications)
                 ) {
                     return payload;
                 }

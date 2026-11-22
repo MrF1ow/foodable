@@ -61,6 +61,9 @@ type Who =
 
 const UNDO_SENTENCE =
     "The household can undo this for 24 hours in Settings › AI connections.";
+// A notification's undo is all or nothing, so its tools say when it is refused.
+const NOTICE_UNDO_SENTENCE =
+    "The household can undo this for 24 hours in Settings › AI connections, unless someone has changed their copy since.";
 const REFUSAL = "Any agent can delete is Off in Settings › AI connections.";
 const PERSON_REFUSAL =
     "Your agents can delete is Off in Settings › AI connections for the person you act for.";
@@ -3430,6 +3433,760 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                     asA,
                 );
                 expect(grocery.isError).toBeFalsy();
+            });
+        });
+    });
+    // ---------- notifications: dismiss_notice for everyone ----------
+
+    describe("dismiss_notice for everyone goes through the guard", () => {
+        const text = (result: Result) =>
+            result.content.map((c) => c.text).join("\n");
+
+        type Inbox = {
+            count: number;
+            notifications: {
+                id: string;
+                kind: string;
+                message: string;
+                can_dismiss_for_everyone: boolean;
+            }[];
+        };
+
+        async function inboxOf(who: Who): Promise<Inbox> {
+            const out = await call("list_notices", {}, "legacy", who);
+            expect(out.isError).toBeFalsy();
+            return out.structuredContent as Inbox;
+        }
+
+        const as = (userId: string): Who => ({
+            kind: "user",
+            userId,
+            client: "Claude",
+        });
+
+        /** A second person, in the household with the role and own switch given. */
+        async function person(
+            role: "member" | "admin",
+            agentsCanDelete = true,
+        ): Promise<string> {
+            return seedMember(getCtx().sql, householdId, {
+                role,
+                displayName: role,
+                agentsCanDelete,
+            });
+        }
+
+        /** A fridge item that expires in three days: a Food expiring condition. */
+        async function expiringItem(name = "Kefir"): Promise<string> {
+            const id = await fridgeItem(await food(name), 100);
+            await getCtx().sql`
+                update public.fridge_items
+                set expires_on = current_date + 3
+                where id = ${id}
+            `;
+            return id;
+        }
+
+        /** An event row for each person, as a recipe removal writes them. */
+        async function recipeRemoved(
+            recipients: string[],
+            actor: string | null,
+        ): Promise<string[]> {
+            const key = `event:${crypto.randomUUID()}`;
+            const ids: string[] = [];
+            for (const recipient of recipients) {
+                const [row] = await getCtx().sql`
+                    insert into public.notifications (
+                        household_id, recipient_user_id, kind, bucket, source,
+                        notice_key, subject_kind, subject_id, actor_user_id,
+                        payload
+                    )
+                    values (
+                        ${householdId}, ${recipient}, 'recipe_changes',
+                        'household', 'event', ${key}, 'recipe',
+                        ${crypto.randomUUID()}, ${actor},
+                        ${JSON.stringify({ recipeName: "Beef chili" })}::jsonb
+                    )
+                    returning id
+                `;
+                ids.push(row!.id as string);
+            }
+            return ids;
+        }
+
+        async function turnOn(userId: string, kind: string): Promise<void> {
+            await getCtx().sql`
+                insert into public.notification_prefs (household_id, user_id, kind, enabled)
+                values (${householdId}, ${userId}, ${kind}, true)
+                on conflict (user_id, kind) do update set enabled = true
+            `;
+        }
+
+        test("a dismissible condition: recorded, gone from every inbox, and undo brings it back", async () => {
+            const bee = await person("member");
+            await expiringItem();
+            const mine = (await inboxOf(owner())).notifications[0]!;
+            expect(mine.kind).toBe("food_expiring");
+            expect((await inboxOf(as(bee))).notifications).toHaveLength(1);
+            const before = await fingerprint();
+
+            const out = await call("dismiss_notice", {
+                notification_id: mine.id,
+                scope: "everyone",
+            });
+            expect(out.isError, text(out)).toBeFalsy();
+            expect(out.structuredContent).toEqual({ dismissed: true });
+            expect(text(out)).toContain(NOTICE_UNDO_SENTENCE);
+
+            expect((await inboxOf(owner())).notifications).toEqual([]);
+            expect((await inboxOf(as(bee))).notifications).toEqual([]);
+            expect(await count("notice_dismissals")).toBe(1);
+
+            const [entry] = await actions();
+            expect(entry).toMatchObject({
+                tool: "dismiss_notice",
+                destructive: true,
+                undoable: true,
+                connection: "Claude",
+            });
+            expect(entry!.summary).toContain("Dismissed for everyone");
+            expect(entry!.summary).toContain("Kefir");
+            expect(
+                (
+                    entry!.snapshot.changes as { table: string; op: string }[]
+                ).map((r) => `${r.table}:${r.op}`),
+            ).toEqual(["notice_dismissals:inserted"]);
+
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await count("notice_dismissals")).toBe(0);
+            expect((await inboxOf(owner())).notifications).toHaveLength(1);
+            expect((await inboxOf(as(bee))).notifications).toHaveLength(1);
+            expect(await fingerprint()).toBe(before);
+        });
+
+        test("a dismissal the household already made is not the agent's: nothing is recorded, and undo leaves it", async () => {
+            await expiringItem("Kefir");
+            await expiringItem("Yogurt");
+            const inbox = (await inboxOf(owner())).notifications;
+            const kefir = inbox.find((n) => n.message.includes("Kefir"))!;
+            const yogurt = inbox.find((n) => n.message.includes("Yogurt"))!;
+            const [stored] = await rows(
+                "select notice_key from public.notifications where id = $1",
+                kefir.id,
+            );
+            const [code, subjectKind, subjectId, ...related] = String(
+                stored!.notice_key,
+            ).split("|");
+            // Dismissed in the app, on Kitchen, before the agent acts.
+            await getCtx().sql`
+                insert into public.notice_dismissals (
+                    household_id, code, subject_kind, subject_id, related_key,
+                    dismissed_by
+                )
+                values (
+                    ${householdId}, ${code}, ${subjectKind},
+                    ${subjectId}::uuid, ${related.join("|")}, ${ownerId}
+                )
+            `;
+            const [fromApp] = await rows(
+                "select id from public.notice_dismissals",
+            );
+
+            // An agent that still holds the id dismisses it for everyone.
+            const again = await call("dismiss_notice", {
+                notification_id: kefir.id,
+                scope: "everyone",
+            });
+            expect(again.isError, text(again)).toBeFalsy();
+            expect(again.structuredContent).toEqual({ dismissed: true });
+            expect(text(again)).toBe("Already dismissed for everyone.");
+            expect(await actions()).toEqual([]);
+
+            // A dismissal it does make is recorded, and only that one is undone.
+            const made = await call("dismiss_notice", {
+                notification_id: yogurt.id,
+                scope: "everyone",
+            });
+            expect(made.isError, text(made)).toBeFalsy();
+            expect(text(made)).toContain(NOTICE_UNDO_SENTENCE);
+            expect(await count("notice_dismissals")).toBe(2);
+            const [entry] = await actions();
+            expect(
+                (
+                    entry!.snapshot.changes as { table: string; op: string }[]
+                ).map((r) => `${r.table}:${r.op}`),
+            ).toEqual(["notice_dismissals:inserted"]);
+
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(
+                await rows("select id from public.notice_dismissals"),
+            ).toEqual([fromApp!]);
+            const left = (await inboxOf(owner())).notifications;
+            expect(left.map((n) => n.id)).toEqual([yogurt.id]);
+        });
+
+        test("two identical calls in one batch record one insert, and the other records nothing", async () => {
+            await expiringItem();
+            const mine = (await inboxOf(owner())).notifications[0]!;
+            const answers = await callBatch(
+                owner() as Extract<Who, { kind: "user" }>,
+                [1, 2].map((id) => ({
+                    id,
+                    name: "dismiss_notice",
+                    args: { notification_id: mine.id, scope: "everyone" },
+                })),
+            );
+            const texts: string[] = [];
+            for (const answer of answers.values()) {
+                expect(answer.isError, text(answer)).toBeFalsy();
+                expect(answer.structuredContent).toEqual({ dismissed: true });
+                texts.push(text(answer));
+            }
+            expect(
+                texts.filter((t) => t.includes(NOTICE_UNDO_SENTENCE)),
+            ).toHaveLength(1);
+            expect(
+                texts.filter((t) => t === "Already dismissed for everyone."),
+            ).toHaveLength(1);
+            expect(await count("notice_dismissals")).toBe(1);
+            const entries = await actions();
+            expect(entries).toHaveLength(1);
+            expect(
+                (
+                    entries[0]!.snapshot.changes as {
+                        table: string;
+                        op: string;
+                    }[]
+                ).map((r) => `${r.table}:${r.op}`),
+            ).toEqual(["notice_dismissals:inserted"]);
+            expect((await undo(entries[0]!.id)).status).toBe("undone");
+            expect(await count("notice_dismissals")).toBe(0);
+            expect((await inboxOf(owner())).notifications).toHaveLength(1);
+        });
+
+        test("two identical event dismissals in one batch record the copies once", async () => {
+            const bee = await person("member");
+            const [forOwner] = await recipeRemoved([ownerId, bee], null);
+            await turnOn(ownerId, "recipe_changes");
+            await turnOn(bee, "recipe_changes");
+            const answers = await callBatch(
+                owner() as Extract<Who, { kind: "user" }>,
+                [1, 2].map((id) => ({
+                    id,
+                    name: "dismiss_notice",
+                    args: { notification_id: forOwner!, scope: "everyone" },
+                })),
+            );
+            for (const answer of answers.values()) {
+                expect(answer.isError, text(answer)).toBeFalsy();
+            }
+            const entries = await actions();
+            expect(entries).toHaveLength(1);
+            expect(
+                (
+                    entries[0]!.snapshot.changes as {
+                        table: string;
+                        op: string;
+                    }[]
+                ).map((r) => `${r.table}:${r.op}`),
+            ).toEqual(["notifications:updated", "notifications:updated"]);
+            expect((await undo(entries[0]!.id)).status).toBe("undone");
+            expect((await inboxOf(as(bee))).notifications).toHaveLength(1);
+        });
+
+        test("an event: every copy is recorded as it was, and undo puts each back", async () => {
+            const bee = await person("member");
+            const [forOwner, forBee] = await recipeRemoved(
+                [ownerId, bee],
+                null,
+            );
+            await turnOn(ownerId, "recipe_changes");
+            await turnOn(bee, "recipe_changes");
+            expect((await inboxOf(owner())).notifications).toHaveLength(1);
+
+            const out = await call("dismiss_notice", {
+                notification_id: forOwner,
+                scope: "everyone",
+            });
+            expect(out.isError, text(out)).toBeFalsy();
+            const stamped = await rows(
+                "select id, dismissed_at, dismissed_by from public.notifications order by id",
+            );
+            expect(stamped.every((r) => r.dismissed_at !== null)).toBe(true);
+            expect(stamped.every((r) => r.dismissed_by === ownerId)).toBe(true);
+            expect((await inboxOf(as(bee))).notifications).toEqual([]);
+
+            const [entry] = await actions();
+            const tables = (
+                entry!.snapshot.changes as { table: string; op: string }[]
+            ).map((r) => `${r.table}:${r.op}`);
+            expect(tables.sort()).toEqual([
+                "notifications:updated",
+                "notifications:updated",
+            ]);
+
+            expect((await undo(entry!.id)).status).toBe("undone");
+            const back = await rows(
+                "select id, dismissed_at, dismissed_by from public.notifications",
+            );
+            expect(back.every((r) => r.dismissed_at === null)).toBe(true);
+            expect(back.every((r) => r.dismissed_by === null)).toBe(true);
+            expect(back.map((r) => r.id).sort()).toEqual(
+                [forOwner, forBee].sort(),
+            );
+            expect((await inboxOf(as(bee))).notifications).toHaveLength(1);
+        });
+
+        test("a member is refused, and nothing is written or recorded", async () => {
+            const bee = await person("member");
+            await expiringItem();
+            const row = (await inboxOf(as(bee))).notifications[0]!;
+            const before = await fingerprint();
+            const out = await call(
+                "dismiss_notice",
+                { notification_id: row.id, scope: "everyone" },
+                "legacy",
+                as(bee),
+            );
+            expect(out.isError).toBe(true);
+            expect(text(out)).toContain("owner or an admin");
+            expect(await count("notice_dismissals")).toBe(0);
+            expect(await actions()).toEqual([]);
+            expect(await fingerprint()).toBe(before);
+            expect((await inboxOf(as(bee))).notifications).toHaveLength(1);
+            // For themselves, the same member may.
+            const mine = await call(
+                "dismiss_notice",
+                { notification_id: row.id },
+                "legacy",
+                as(bee),
+            );
+            expect(mine.isError, text(mine)).toBeFalsy();
+            expect((await inboxOf(as(bee))).notifications).toEqual([]);
+            expect((await inboxOf(owner())).notifications).toHaveLength(1);
+            expect(await actions()).toEqual([]);
+        });
+
+        test("an admin may, under both switches, and the household's off still stops them", async () => {
+            const admin = await person("admin");
+            await expiringItem();
+            const row = (await inboxOf(as(admin))).notifications[0]!;
+            await asUser(
+                ownerId,
+                () =>
+                    liveSettingsStore().setAgentDestructiveAllowed(
+                        householdId,
+                        false,
+                    ),
+                householdId,
+            );
+            const off = await call(
+                "dismiss_notice",
+                { notification_id: row.id, scope: "everyone" },
+                "legacy",
+                as(admin),
+            );
+            expect(off.isError).toBe(true);
+            expect(text(off)).toContain(REFUSAL);
+            expect(await actions()).toEqual([]);
+            await asUser(
+                ownerId,
+                () =>
+                    liveSettingsStore().setAgentDestructiveAllowed(
+                        householdId,
+                        true,
+                    ),
+                householdId,
+            );
+            const ok = await call(
+                "dismiss_notice",
+                { notification_id: row.id, scope: "everyone" },
+                "legacy",
+                as(admin),
+            );
+            expect(ok.isError, text(ok)).toBeFalsy();
+            expect(await actions()).toHaveLength(1);
+        });
+
+        test("an admin whose own switch is Off is refused with their own switch named", async () => {
+            const admin = await person("admin", false);
+            await expiringItem();
+            const row = (await inboxOf(as(admin))).notifications[0]!;
+            const out = await call(
+                "dismiss_notice",
+                { notification_id: row.id, scope: "everyone" },
+                "legacy",
+                as(admin),
+            );
+            expect(out.isError).toBe(true);
+            expect(text(out)).toContain(PERSON_REFUSAL);
+            expect(await actions()).toEqual([]);
+        });
+
+        test("an agent acts only for its person: another member's row is refused", async () => {
+            const bee = await person("member");
+            await expiringItem();
+            await inboxOf(owner());
+            const beesRow = (await inboxOf(as(bee))).notifications[0]!;
+            for (const scope of ["me", "everyone"] as const) {
+                const out = await call("dismiss_notice", {
+                    notification_id: beesRow.id,
+                    scope,
+                });
+                expect(out.isError, scope).toBe(true);
+            }
+            const snooze = await call("snooze_notice", {
+                notification_id: beesRow.id,
+                until: "week",
+            });
+            expect(snooze.isError).toBe(true);
+            const read = await call("mark_notices_read", {
+                notification_ids: [beesRow.id],
+            });
+            expect(read.isError).toBe(true);
+            const [row] = await rows(
+                "select read_at, snoozed_until, dismissed_at from public.notifications where id = $1",
+                beesRow.id,
+            );
+            expect(row).toEqual({
+                read_at: null,
+                snoozed_until: null,
+                dismissed_at: null,
+            });
+            expect(await actions()).toEqual([]);
+        });
+
+        test("an Allergens row cannot be dismissed, for me or for everyone, and no entry is recorded", async () => {
+            const [row] = await getCtx().sql`
+                insert into public.notifications (
+                    household_id, recipient_user_id, kind, bucket, source,
+                    notice_key, subject_kind, subject_id, payload
+                )
+                values (
+                    ${householdId}, ${ownerId}, 'allergens', 'household',
+                    'condition',
+                    ${`grocery.allergen|grocery_line|${crypto.randomUUID()}|`},
+                    'grocery_line', ${crypto.randomUUID()},
+                    ${JSON.stringify({
+                        code: "grocery.allergen",
+                        params: { allergens: ["peanut"] },
+                        related: [{ kind: "member", id: ownerId, name: "Pat" }],
+                    })}::jsonb
+                )
+                returning id
+            `;
+            for (const scope of ["me", "everyone"] as const) {
+                const out = await call("dismiss_notice", {
+                    notification_id: row!.id as string,
+                    scope,
+                });
+                expect(out.isError, scope).toBe(true);
+                expect(text(out)).toContain("Allergen");
+            }
+            const snooze = await call("snooze_notice", {
+                notification_id: row!.id as string,
+                until: "week",
+            });
+            expect(snooze.isError).toBe(true);
+            const [after] = await rows(
+                "select dismissed_at, snoozed_until from public.notifications where id = $1",
+                row!.id,
+            );
+            expect(after).toEqual({ dismissed_at: null, snoozed_until: null });
+            expect(await actions()).toEqual([]);
+        });
+
+        test("both protocol eras reach the same refusal and the same entry", async () => {
+            const bee = await person("member");
+            await expiringItem();
+            const row = (await inboxOf(as(bee))).notifications[0]!;
+            const modern: Era = { pin: "2026-07-28" };
+            const refused = await call(
+                "dismiss_notice",
+                { notification_id: row.id, scope: "everyone" },
+                modern,
+                as(bee),
+            );
+            expect(refused.isError).toBe(true);
+            expect(text(refused)).toContain("owner or an admin");
+            const mine = (await inboxOf(owner())).notifications[0]!;
+            const ok = await call(
+                "dismiss_notice",
+                { notification_id: mine.id, scope: "everyone" },
+                modern,
+            );
+            expect(ok.isError, text(ok)).toBeFalsy();
+            expect(await actions()).toHaveLength(1);
+        });
+
+        test("can_dismiss_for_everyone is true only where the call would be allowed", async () => {
+            const admin = await person("admin", false);
+            const bee = await person("member");
+            await expiringItem();
+            const flag = async (who: Who) =>
+                (await inboxOf(who)).notifications[0]!.can_dismiss_for_everyone;
+            // The role allows it, the person's own switch is Off: refused.
+            expect(await flag(as(admin))).toBe(false);
+            expect(await flag(owner())).toBe(true);
+            // A member is never allowed.
+            expect(await flag(as(bee))).toBe(false);
+            // The admin turns their switch On.
+            await getCtx().sql`
+                update public.household_members
+                set agents_can_delete = true
+                where household_id = ${householdId} and user_id = ${admin}
+            `;
+            expect(await flag(as(admin))).toBe(true);
+            // The household's switch Off stops everyone's.
+            await asUser(
+                ownerId,
+                () =>
+                    liveSettingsStore().setAgentDestructiveAllowed(
+                        householdId,
+                        false,
+                    ),
+                householdId,
+            );
+            expect(await flag(as(admin))).toBe(false);
+            expect(await flag(owner())).toBe(false);
+        });
+
+        describe("snooze_notice for everyone goes through the guard", () => {
+            type Copy = {
+                recipient_user_id: string;
+                snoozed_until: Date | null;
+                snoozed_by: string | null;
+            };
+            const copies = async (): Promise<Copy[]> =>
+                (await rows(
+                    `select recipient_user_id, snoozed_until, snoozed_by
+                     from public.notifications
+                     where kind = 'food_expiring'
+                     order by recipient_user_id`,
+                )) as Copy[];
+            const copyOf = async (userId: string): Promise<Copy> =>
+                (await copies()).find(
+                    (row) => row.recipient_user_id === userId,
+                )!;
+            const changesOf = (entry: Record<string, any>) =>
+                (entry.snapshot.changes as { table: string; op: string }[])
+                    .map((r) => `${r.table}:${r.op}`)
+                    .sort();
+            const householdSwitch = (allowed: boolean) =>
+                asUser(
+                    ownerId,
+                    () =>
+                        liveSettingsStore().setAgentDestructiveAllowed(
+                            householdId,
+                            allowed,
+                        ),
+                    householdId,
+                );
+            const untilIn = (days: number) =>
+                `${new Date(Date.now() + days * 86_400_000)
+                    .toISOString()
+                    .slice(0, 16)}Z`;
+
+            test("allowed: every copy is snoozed over what members set, recorded, and undo gives each its own back", async () => {
+                const bee = await person("member");
+                const cat = await person("member");
+                await expiringItem();
+                const mine = (await inboxOf(owner())).notifications[0]!;
+                const beeRow = (await inboxOf(as(bee))).notifications[0]!;
+                const catRow = (await inboxOf(as(cat))).notifications[0]!;
+                // Bee snoozes their own copy to tomorrow, Cat theirs for a year
+                // or so: a member's own snooze is a plain write.
+                for (const [who, row, until] of [
+                    [bee, beeRow, "tomorrow"],
+                    [cat, catRow, untilIn(300)],
+                ] as const) {
+                    const own = await call(
+                        "snooze_notice",
+                        { notification_id: row.id, until },
+                        "legacy",
+                        as(who),
+                    );
+                    expect(own.isError, text(own)).toBeFalsy();
+                    expect(own.structuredContent).toMatchObject({
+                        for_everyone: false,
+                    });
+                }
+                expect(await actions()).toEqual([]);
+                const before = await copies();
+                expect(
+                    before.filter((r) => r.snoozed_until !== null),
+                ).toHaveLength(2);
+
+                const out = await call("snooze_notice", {
+                    notification_id: mine.id,
+                    until: "week",
+                });
+                expect(out.isError, text(out)).toBeFalsy();
+                expect(out.structuredContent).toMatchObject({
+                    snoozed: true,
+                    for_everyone: true,
+                });
+                expect(text(out)).toContain("for every member");
+                expect(text(out)).toContain(NOTICE_UNDO_SENTENCE);
+
+                // The owner's and Bee's copies take the week; Cat's longer
+                // snooze is left alone.
+                const week = (await copyOf(ownerId)).snoozed_until!;
+                expect(week.getTime()).toBeGreaterThan(
+                    Date.now() + 6 * 86_400_000,
+                );
+                const bees = await copyOf(bee);
+                expect(bees.snoozed_until).toEqual(week);
+                expect(bees.snoozed_by).toBe(ownerId);
+                expect(await copyOf(cat)).toEqual(
+                    before.find((r) => r.recipient_user_id === cat)!,
+                );
+
+                const [entry] = await actions();
+                expect(entry).toMatchObject({
+                    tool: "snooze_notice",
+                    destructive: true,
+                    undoable: true,
+                    connection: "Claude",
+                });
+                expect(entry!.summary).toContain("Snoozed for everyone");
+                expect(entry!.summary).toContain("Kefir");
+                expect(changesOf(entry!)).toEqual([
+                    "notifications:updated",
+                    "notifications:updated",
+                ]);
+
+                expect((await undo(entry!.id)).status).toBe("undone");
+                expect(await copies()).toEqual(before);
+            });
+
+            test('once a member snoozes their own copy again, undo is refused whole: that is what the result\'s "unless someone has changed their copy" means', async () => {
+                const bee = await person("member");
+                await expiringItem();
+                const mine = (await inboxOf(owner())).notifications[0]!;
+                const beeRow = (await inboxOf(as(bee))).notifications[0]!;
+                const out = await call("snooze_notice", {
+                    notification_id: mine.id,
+                    until: "week",
+                });
+                expect(text(out)).toContain(NOTICE_UNDO_SENTENCE);
+                const [entry] = await actions();
+
+                const own = await call(
+                    "snooze_notice",
+                    { notification_id: beeRow.id, until: untilIn(30) },
+                    "legacy",
+                    as(bee),
+                );
+                expect(own.isError, text(own)).toBeFalsy();
+                const mid = await copies();
+
+                // The guard puts every copy back or none: Bee's changed copy
+                // refuses the whole undo, and nothing moves.
+                expect((await undo(entry!.id)).status).toBe("conflict");
+                expect(await copies()).toEqual(mid);
+            });
+
+            test("the household's Off and the person's own Off refuse it, and nothing changes or is recorded", async () => {
+                const admin = await person("admin", false);
+                await person("member");
+                await expiringItem();
+                const mine = (await inboxOf(owner())).notifications[0]!;
+                const adminRow = (await inboxOf(as(admin))).notifications[0]!;
+                const before = await copies();
+
+                const personOff = await call(
+                    "snooze_notice",
+                    { notification_id: adminRow.id, until: "week" },
+                    "legacy",
+                    as(admin),
+                );
+                expect(personOff.isError).toBe(true);
+                expect(text(personOff)).toContain(PERSON_REFUSAL);
+
+                await householdSwitch(false);
+                const off = await call("snooze_notice", {
+                    notification_id: mine.id,
+                    until: "week",
+                });
+                expect(off.isError).toBe(true);
+                expect(text(off)).toContain(REFUSAL);
+
+                expect(await copies()).toEqual(before);
+                expect(await actions()).toEqual([]);
+                expect((await inboxOf(owner())).notifications).toHaveLength(1);
+            });
+
+            test("a member's own snooze and a personal row are plain writes, whatever the switches say", async () => {
+                const bee = await person("member", false);
+                await expiringItem();
+                const beeRow = (await inboxOf(as(bee))).notifications[0]!;
+                const [weighIn] = await getCtx().sql`
+                    insert into public.notifications (
+                        household_id, recipient_user_id, kind, bucket, source,
+                        notice_key, subject_kind, subject_id, payload
+                    )
+                    values (
+                        ${householdId}, ${ownerId}, 'weigh_in_due', 'personal',
+                        'condition',
+                        ${`nutrition.weigh_in_due|member|${ownerId}|`},
+                        'member', ${ownerId},
+                        ${JSON.stringify({
+                            code: "nutrition.weigh_in_due",
+                            params: { name: "Owner", days: 9 },
+                            related: [],
+                        })}::jsonb
+                    )
+                    returning id
+                `;
+                await householdSwitch(false);
+
+                const own = await call(
+                    "snooze_notice",
+                    { notification_id: beeRow.id, until: "week" },
+                    "legacy",
+                    as(bee),
+                );
+                expect(own.isError, text(own)).toBeFalsy();
+                expect(own.structuredContent).toMatchObject({
+                    for_everyone: false,
+                });
+                const personal = await call("snooze_notice", {
+                    notification_id: weighIn!.id as string,
+                    until: "week",
+                });
+                expect(personal.isError, text(personal)).toBeFalsy();
+                expect(personal.structuredContent).toMatchObject({
+                    for_everyone: false,
+                });
+                expect(text(personal)).not.toContain("every member");
+                expect(await actions()).toEqual([]);
+                expect((await copyOf(bee)).snoozed_by).toBe(bee);
+            });
+
+            test("both protocol eras reach the same refusal and the same entry", async () => {
+                await person("member");
+                await expiringItem();
+                const mine = (await inboxOf(owner())).notifications[0]!;
+                const modern: Era = { pin: "2026-07-28" };
+                await householdSwitch(false);
+                const refused = await call(
+                    "snooze_notice",
+                    { notification_id: mine.id, until: "week" },
+                    modern,
+                );
+                expect(refused.isError).toBe(true);
+                expect(text(refused)).toContain(REFUSAL);
+                expect(await actions()).toEqual([]);
+                await householdSwitch(true);
+                const ok = await call(
+                    "snooze_notice",
+                    { notification_id: mine.id, until: "week" },
+                    modern,
+                );
+                expect(ok.isError, text(ok)).toBeFalsy();
+                expect(text(ok)).toContain(NOTICE_UNDO_SENTENCE);
+                expect(await actions()).toHaveLength(1);
             });
         });
     });

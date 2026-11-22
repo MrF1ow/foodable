@@ -2195,16 +2195,14 @@ test("import-meals v2: file names and cells reach the markup escaped", async () 
 // ---- attention v2 -----------------------------------------------------------
 
 type DismissArgs = {
-    code: string;
-    subject_kind: string;
-    subject_id: string;
-    related_id?: string | null;
+    notification_id: string;
+    scope: string;
 };
 
 async function mountAttention(
     html: string,
     opts: {
-        data: { count: number; notices: object[] };
+        data: { count: number; notifications: object[] };
         canCallTools?: boolean;
         /** Test-only: click handler still respects aria-disabled unless set. */
         bypassAriaDisabled?: boolean;
@@ -2340,73 +2338,76 @@ async function mountAttention(
     return mount;
 }
 
-const ATTENTION_DISMISS_A = "fridge.expiring|fridge_item|fi-1|";
-const ATTENTION_DISMISS_B = "fridge.expiring|fridge_item|fi-2|";
+const ATTENTION_DISMISS_A = "n-1";
+const ATTENTION_DISMISS_B = "n-2";
+
+function notification(over: Record<string, unknown>) {
+    return {
+        id: "n-x",
+        kind: "food_expiring",
+        bucket: "household",
+        message: "Plain",
+        created_at: "2026-12-01T12:00:00.000Z",
+        read: false,
+        snoozed_until: null,
+        can_dismiss_for_everyone: false,
+        subject: null,
+        open: "/kitchen/fridge",
+        ...over,
+    };
+}
 
 const ATTENTION_SAMPLE = {
     count: 2,
-    notices: [
-        {
-            code: "fridge.expiring",
-            severity: "info",
-            subject: {
-                kind: "fridge_item",
-                id: "fi-1",
-                recipe_id: null,
-            },
-            related: [],
-            message: "Test &lt;img&gt;",
-            action: null,
-            title: "Baby <img> spinach",
-            detail: "tomorrow",
-            detail_tone: "over",
-            group_key: "expiring",
-            group_label: "Expiring",
-            dot_tone: "over",
-            can_dismiss: true,
-            dismiss_label: "Dismiss",
-            dismiss: {
-                code: "fridge.expiring",
-                subject_kind: "fridge_item",
-                subject_id: "fi-1",
-                related_id: null,
-            },
-        },
-        {
-            code: "fridge.expiring",
-            severity: "info",
-            subject: {
-                kind: "fridge_item",
-                id: "fi-2",
-                recipe_id: null,
-            },
-            related: [],
-            message: "Second item",
-            action: null,
-            title: "Second row",
-            detail: "2 days",
-            detail_tone: "warn",
-            group_key: "expiring",
-            group_label: "Expiring",
-            dot_tone: "warn",
-            can_dismiss: true,
-            dismiss_label: "Dismiss",
-            dismiss: {
-                code: "fridge.expiring",
-                subject_kind: "fridge_item",
-                subject_id: "fi-2",
-                related_id: null,
-            },
-        },
+    notifications: [
+        notification({
+            id: "n-1",
+            message: "Test <img> spinach",
+            subject: { kind: "fridge_item", id: "fi-1" },
+        }),
+        notification({
+            id: "n-2",
+            kind: "weigh_in_due",
+            bucket: "personal",
+            message: "Second row",
+            subject: { kind: "member", id: "u-1" },
+            open: "/",
+        }),
     ],
 };
 
-test("attention v2 sample renders grouped rows", async () => {
+test("attention v2 sample is a populated inbox in the notification shape", async () => {
+    const html = await v2Widget("attention");
+    // With no host the widget paints its built-in sample.
+    const body = renderWidget(html, undefined);
+    expect(body).toContain("Notifications");
+    expect(body).toContain("For you");
+    expect(body).toContain("Household");
+    for (const label of [
+        "Allergens",
+        "Food expiring",
+        "Weigh-in due",
+        "Recipe changes by others",
+        "Week plan changes",
+        "New usual products",
+    ]) {
+        expect(body).toContain(label);
+    }
+    expect(body).toContain("Peanut butter contains peanut — Pat.");
+    expect(body).toContain("Sarah removed Beef chili.");
+    // Four of the six rows are unread. Painted with no host, it offers no
+    // Dismiss: nothing could be called.
+    expect(body).toContain('class="hd-meta">4</span>');
+    expect(body).not.toContain('class="act"');
+});
+
+test("attention v2 groups personal rows before the household's, with a kind line", async () => {
     const html = await v2Widget("attention");
     const body = renderWidget(html, ATTENTION_SAMPLE);
-    expect(body).toContain("Expiring");
-    expect(body).not.toContain("Salmon");
-    expect(body).toContain("Baby &lt;img&gt; spinach");
+    expect(body.indexOf("For you")).toBeGreaterThan(-1);
+    expect(body.indexOf("For you")).toBeLessThan(body.indexOf("Household"));
+    expect(body).toContain("Weigh-in due");
+    expect(body).toContain("Food expiring");
 });
 
 test("attention v2: Dismiss success keeps the chat settings footer", async () => {
@@ -2418,20 +2419,54 @@ test("attention v2: Dismiss success keeps the chat settings footer", async () =>
     expect(w.html()).toContain(WIDGET_FOOTER);
 });
 
-test("attention v2: Dismiss calls dismiss_notice and removes the row", async () => {
+test("attention v2: Dismiss calls dismiss_notice for the person and removes the row", async () => {
     const w = await mountAttention(await v2Widget("attention"), {
         data: ATTENTION_SAMPLE,
     });
     expect(w.html()).toContain('class="act"');
     await w.dismissKey(ATTENTION_DISMISS_A);
-    expect(w.calls[0]).toEqual({
-        code: "fridge.expiring",
-        subject_kind: "fridge_item",
-        subject_id: "fi-1",
-    });
-    expect(w.html()).not.toContain("Baby &lt;img&gt; spinach");
+    expect(w.calls[0]).toEqual({ notification_id: "n-1", scope: "me" });
+    expect(w.html()).not.toContain("Test &lt;img&gt; spinach");
     expect(w.html()).toContain("Second row");
     expect(w.html()).toContain('class="hd-meta">1</span>');
+});
+
+test("attention v2: dismissing a read row leaves the unread count alone", async () => {
+    const w = await mountAttention(await v2Widget("attention"), {
+        data: {
+            count: 1,
+            notifications: [
+                notification({ id: "n-read", message: "Old news", read: true }),
+                notification({ id: "n-new", message: "Fresh" }),
+            ],
+        },
+    });
+    await w.dismissKey("n-read");
+    expect(w.html()).not.toContain("Old news");
+    expect(w.html()).toContain('class="hd-meta">1</span>');
+});
+
+test("attention v2: an allergen row has no Dismiss and a call for it is not sent", async () => {
+    const data = {
+        count: 2,
+        notifications: [
+            notification({
+                id: "n-allergen",
+                kind: "allergens",
+                message: "Peanut butter contains peanut — Pat.",
+            }),
+            notification({ id: "n-other", message: "Other" }),
+        ],
+    };
+    const w = await mountAttention(await v2Widget("attention"), {
+        data,
+        bypassAriaDisabled: true,
+    });
+    expect(w.html()).not.toContain('data-dismiss-key="n-allergen"');
+    expect(w.html()).toContain('data-dismiss-key="n-other"');
+    await w.dismissKey("n-allergen");
+    expect(w.calls).toEqual([]);
+    expect(w.html()).toContain("contains peanut");
 });
 
 test("attention v2: rapid double Dismiss removes only the targeted row", async () => {
@@ -2441,8 +2476,8 @@ test("attention v2: rapid double Dismiss removes only the targeted row", async (
     });
     await w.doubleDismissKey(ATTENTION_DISMISS_A);
     expect(w.calls.length).toBe(1);
-    expect(w.calls[0]?.subject_id).toBe("fi-1");
-    expect(w.html()).not.toContain("Baby &lt;img&gt; spinach");
+    expect(w.calls[0]?.notification_id).toBe("n-1");
+    expect(w.html()).not.toContain("Test &lt;img&gt; spinach");
     expect(w.html()).toContain("Second row");
 });
 
@@ -2457,7 +2492,7 @@ test("attention v2: Dismiss is aria-disabled while the call is in flight", async
             await gate;
             return {
                 structuredContent: { dismissed: true },
-                content: [{ type: "text", text: "Notice dismissed." }],
+                content: [{ type: "text", text: "Dismissed for you." }],
             };
         },
     });
@@ -2492,7 +2527,7 @@ test("attention v2: after a fast dismiss, settle window blocks the next row", as
     setSystemTime(t0 + 500);
     await w.dismissKey(ATTENTION_DISMISS_B);
     expect(w.calls.length).toBe(2);
-    expect(w.calls[1]?.subject_id).toBe("fi-2");
+    expect(w.calls[1]?.notification_id).toBe("n-2");
 });
 
 test("attention v2: a failed dismiss keeps the row and shows the error", async () => {
@@ -2504,7 +2539,7 @@ test("attention v2: a failed dismiss keeps the row and shows the error", async (
         }),
     });
     await w.dismissKey(ATTENTION_DISMISS_A);
-    expect(w.html()).toContain("Baby &lt;img&gt; spinach");
+    expect(w.html()).toContain("Test &lt;img&gt; spinach");
     const html = w.html();
     expect(html).toContain('class="err note is-warn"');
     expect(html).toMatch(
@@ -2512,30 +2547,78 @@ test("attention v2: a failed dismiss keeps the row and shows the error", async (
     );
 });
 
-test("attention v2: empty filter copy when count is positive", async () => {
+test("attention v2: empty filter copy when the unread count is positive", async () => {
     const html = await v2Widget("attention");
-    const body = renderWidget(html, { count: 3, notices: [] });
+    const body = renderWidget(html, { count: 3, notifications: [] });
     expect(body).toContain("Nothing matches this filter.");
 });
 
-test("attention v2: urgency detail tone without toning stock detail", async () => {
+test("attention v2: an empty inbox says nothing needs attention", async () => {
+    const html = await v2Widget("attention");
+    const body = renderWidget(html, { count: 0, notifications: [] });
+    expect(body).toContain("Nothing needs attention.");
+});
+
+test("attention v2: a snoozed row says until when", async () => {
     const html = await v2Widget("attention");
     const body = renderWidget(html, {
-        count: 2,
-        notices: [
-            {
-                ...ATTENTION_SAMPLE.notices[0],
-                detail: "9 left",
-                detail_tone: null,
-                dot_tone: "warn",
-            },
-            ATTENTION_SAMPLE.notices[1],
+        count: 0,
+        notifications: [
+            notification({
+                id: "n-snoozed",
+                message: "Later",
+                read: true,
+                snoozed_until: "2026-12-02T14:00:00.000Z",
+            }),
         ],
     });
-    expect(body).toContain("9 left");
-    expect(body).not.toContain('row-s is-warn">9 left');
-    expect(body).not.toContain('row-s is-over">9 left');
-    expect(body).toContain('row-s is-warn">2 days');
+    expect(body).toContain("Snoozed until ");
+    expect(body).not.toContain("2026-12-02T14:00:00.000Z");
+});
+
+test("attention v2: a snoozed row's time reads in the viewer's local time", async () => {
+    const html = await v2Widget("attention");
+    const zone = process.env.TZ;
+    try {
+        // 14:00 UTC is 19:30 in India the same day, and 03:00 the next day in
+        // Auckland (a date and a weekday on).
+        for (const [tz, expected] of [
+            ["Asia/Kolkata", "Snoozed until Wed, Dec 2, 19:30"],
+            ["Pacific/Auckland", "Snoozed until Thu, Dec 3, 03:00"],
+            ["UTC", "Snoozed until Wed, Dec 2, 14:00"],
+        ] as const) {
+            process.env.TZ = tz;
+            const body = renderWidget(html, {
+                count: 0,
+                notifications: [
+                    notification({
+                        id: "n-snoozed",
+                        message: "Later",
+                        read: true,
+                        snoozed_until: "2026-12-02T14:00:00.000Z",
+                    }),
+                ],
+            });
+            expect(body).toContain(expected);
+            expect(body).not.toContain("T14:00:00");
+        }
+        // A value that is not a date is shown as it came.
+        const odd = renderWidget(html, {
+            count: 0,
+            notifications: [
+                notification({
+                    id: "n-odd",
+                    message: "Later",
+                    read: true,
+                    snoozed_until: "next week",
+                }),
+            ],
+        });
+        expect(odd).toContain("Snoozed until next week");
+    } finally {
+        if (zone === undefined) delete process.env.TZ;
+        else process.env.TZ = zone;
+    }
 });
 
 test("attention v2: canCallTools false hides every Dismiss", async () => {
@@ -2546,7 +2629,7 @@ test("attention v2: canCallTools false hides every Dismiss", async () => {
     expect(w.html()).not.toContain('class="act"');
 });
 
-test("attention v2: notice text is escaped", async () => {
+test("attention v2: notification text is escaped", async () => {
     const html = await v2Widget("attention");
     const body = renderWidget(html, ATTENTION_SAMPLE);
     expect(body).not.toContain("<script>");
@@ -5116,6 +5199,33 @@ test("week-plan v2: every day is a row, a planned recipe shows its kcal per port
     expect(body).toContain("Salmon, rice &amp; spinach");
     expect(body).not.toContain("kcal");
     expect((body.match(/>Nothing planned</g) ?? []).length).toBe(6);
+});
+
+test("week-plan v2: the notices get_week_plan now sends do not change the card", async () => {
+    const html = await v2Widget("week-plan");
+    const plain = (await mountRecipe(html, { data: weekData() })).html();
+    const withNotices = (
+        await mountRecipe(html, {
+            data: {
+                ...weekData(),
+                notices: [
+                    {
+                        code: "plan.missing_ingredient",
+                        severity: "warn",
+                        message: "Spinach, 200 g, missing for Salmon, today",
+                        dismiss: {
+                            code: "plan.missing_ingredient",
+                            subject_kind: "food",
+                            subject_id: "food-spinach",
+                            related_id: "plan-1",
+                        },
+                    },
+                ],
+            },
+        })
+    ).html();
+    expect(withNotices).toBe(plain);
+    expect(withNotices).toContain("Salmon, rice &amp; spinach");
 });
 
 test("week-plan v2: a day with two recipes names each one's meal, a day with one does not", async () => {

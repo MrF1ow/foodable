@@ -21,7 +21,6 @@ watches:
 ## Rules first
 
 - Bun loads `.env` on its own, and a real `.env` can hold production secrets. Pass every variable the process needs on the command line (a process env var beats `.env`), and start the server with `bun --no-env-file` so nothing else leaks in. `bun --no-env-file run <script>` does **not** reach the inner `bun`: use it only on `bun <file>` or `bun test`.
-- Never print, copy or commit `.env` values; use throwaway secrets.
 - `bun run db:dev` defaults to the user's own dev database (data dir ~/.local/share/foodable/pg, port 54330, run by `foodable-db.service`). `db:dev stop` would stop it and `init` would migrate it, with no force flag to guard either. **Always** set `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` first (below), or run only `status` or `url`. `db:dev` reads only those two (plus `PG_BIN`), never `DATABASE_URL`, so it is safe under `bun run`.
 - Never use port 8080 or 54330: the user's dev server and database live there.
 
@@ -77,7 +76,7 @@ bun run db:dev status   # "stopped", exit 1
 - **WebKit (Safari-class):** WPE `MiniBrowser` needs a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH`, `WEBKIT_FORCE_COMPLEX_TEXT=1` and `LD_LIBRARY_PATH` (its `lib`, `sys/lib`, ICU 74).
 - **Barcode scans on a running server** hit live Open Food Facts; unit tests stub it.
 - **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
-- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
+- **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`; `attention` paints a populated inbox (unread and read, an allergen row with no Dismiss). CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
 - **App-wide middleware (body limit, CORS):** import `app` from `src/index.ts`, as `src/index.test.ts` does.
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked.
@@ -90,11 +89,11 @@ bun run db:dev status   # "stopped", exit 1
 ## Never touch
 
 - Production data: Railway Postgres is internal-only; `bun run db:rehearse` only when asked, no `railway ssh` of your own.
-- `.env`, and any value in it (never print, copy or commit). Not `docker-compose.yml` (loads `.env`).
+- `.env`, and any value in it (never print, copy or commit; use throwaway secrets). Not `docker-compose.yml` (loads `.env`).
 - The design file `Foodable Design.figcraft`: read-only, never edit or save it.
 - The user's dev server, `foodable*.service` units, `foodable-db.service`, and anything on :8080 or :54330: never kill, restart or reuse.
 - `main` and the rulesets.
 
 ## When this skill is out of date
 
-The `watches:` list in the frontmatter names the files this skill describes. If your change touches one, update this skill in the same PR, or the **skill-drift** check fails (`bun scripts/conventions/skill-drift.ts`). Skills and CLAUDE.md also have a size budget (`.github/agent-context-budget.json`); growing past it needs the `agent-context-increase` label (`bun scripts/conventions/context-budget.ts`).
+The `watches:` list in the frontmatter names the files this skill describes. If your change touches one, update this skill in the same PR, or the **skill-drift** check fails (`bun scripts/conventions/skill-drift.ts`). Skills and CLAUDE.md also have a size budget (`bun scripts/conventions/context-budget.ts`); growing past it needs the `agent-context-increase` label.

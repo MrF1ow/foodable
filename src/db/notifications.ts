@@ -503,7 +503,18 @@ export type NotificationSyncDeps = NotificationsDeps & {
     loadNotices(householdId: string): Promise<readonly Notice[]>;
 };
 
+let testSyncDeps: NotificationSyncDeps | null = null;
+
+/** Test only: serve every `liveNotificationSyncDeps()` caller (the MCP read
+ * and action tools included) from `deps`, or from Postgres again with null. */
+export function setNotificationSyncDepsForTests(
+    deps: NotificationSyncDeps | null,
+): void {
+    testSyncDeps = deps;
+}
+
 export function liveNotificationSyncDeps(): NotificationSyncDeps {
+    if (testSyncDeps) return testSyncDeps;
     return {
         store: liveNotificationsStore(),
         dismissals: liveNoticeDismissalsStore(),

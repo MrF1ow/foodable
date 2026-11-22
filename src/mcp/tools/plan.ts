@@ -2,14 +2,17 @@ import { type McpServer } from "@modelcontextprotocol/server";
 import { z } from "zod";
 import { withAnalytics } from "../../analytics.js";
 import { liveFoodsStore } from "../../db/foods.js";
+import { liveFridgeStore } from "../../db/fridge.js";
+import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
 import { liveNotifier } from "../../db/notify.js";
 import { loadWeekPlanInputs, type WeekPlanInputs } from "../../db/plan-week.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
 import { liveRecipesStore } from "../../db/recipes.js";
-import { householdToday } from "../../db/restock.js";
+import { householdClock, householdToday } from "../../db/restock.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { GroceryInputError } from "../../domain/grocery.js";
+import { noticesFor } from "../../domain/notices-for.js";
 import {
     checkPlanDate,
     checkPlanDay,
@@ -33,6 +36,8 @@ import {
     uiMetaForKey,
     destructiveOutcome,
     withUndo,
+    noticeIdTags,
+    noticeToWire,
     type ToolContext,
     idTag,
 } from "../shared.js";
@@ -56,6 +61,25 @@ const NEEDED_BY_SCHEMA = z.object({
     recipe_name: z.string(),
     date: z.string(),
     slot: z.enum(PLAN_SLOTS),
+});
+
+/**
+ * What an agent acts on in a plan notice. The notices are sent exactly as every
+ * tool sends them (`noticeToWire`, so `NOTICE_SCHEMA` parses each one); this
+ * names only the fields it needs, and is loose about the rest, because
+ * tools/list pays for every character of the full schema.
+ */
+const PLAN_NOTICE_SCHEMA = z.looseObject({
+    code: z.string(),
+    message: z.string(),
+    dismiss: z
+        .object({
+            code: z.string(),
+            subject_kind: z.literal("food"),
+            subject_id: z.string(),
+            related_id: z.string().nullable(),
+        })
+        .nullable(),
 });
 
 export const WEEK_PLAN_OUTPUT_SCHEMA = z.object({
@@ -88,6 +112,8 @@ export const WEEK_PLAN_OUTPUT_SCHEMA = z.object({
             needed_by: z.array(NEEDED_BY_SCHEMA),
         }),
     ),
+    /** The notices about the plan the household has not dismissed (what it is missing), each with the `dismiss` fields dismiss_notice takes. */
+    notices: z.array(PLAN_NOTICE_SCHEMA),
 });
 
 export const PLAN_RECIPE_OUTPUT_SCHEMA = z.object({
@@ -219,7 +245,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Week Plan",
             description:
-                "Read the household's week plan: seven days from `from` (default the household's today), each with the recipes planned on it by meal slot (breakfast, lunch, dinner, snack), and what the planned recipes still need that the kitchen does not hold (`missing`). Each plan has a plan_id for unplan_recipe. To put the missing foods on the grocery list call add_plan_missing_to_groceries.",
+                "Read the household's week plan: seven days from `from` (default the household's today), each with the recipes planned on it by meal slot, what the planned recipes still need that the kitchen does not hold (`missing`), and the plan's open `notices` (dismiss_notice takes each one's `dismiss` fields). Each plan has a plan_id for unplan_recipe. To put the missing foods on the grocery list call add_plan_missing_to_groceries.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -242,7 +268,8 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                 "get_week_plan",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const today = await householdToday(householdId);
+                    const { today, timezone } =
+                        await householdClock(householdId);
                     const inputs = await loadWeekPlanInputs(
                         householdId,
                         args.from === undefined
@@ -278,6 +305,24 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             foodsById: inputs.foodsById,
                         },
                     ).map(missingWire);
+                    // What the Recipes and Today pages dismiss in place: the
+                    // plan's missing foods, read the way those pages read them
+                    // (from the household's today, whatever `from` is).
+                    const { notices: found } = await noticesFor(
+                        {
+                            foods: liveFoodsStore(),
+                            fridge: liveFridgeStore(),
+                            recipes: liveRecipesStore(),
+                            dismissals: liveNoticeDismissalsStore(),
+                            grocery: liveGroceryStore(),
+                            plans: liveRecipePlansStore(),
+                        },
+                        householdId,
+                        { today, timezone, actionable: true },
+                    );
+                    const notices = found
+                        .filter((n) => n.code === "plan.missing_ingredient")
+                        .map(noticeToWire);
                     const plannedCount = days.reduce(
                         (sum, day) => sum + day.plans.length,
                         0,
@@ -299,6 +344,16 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                         missing.length > 0
                             ? `Missing for the plan:\n${missingLines.join("\n")}`
                             : "Nothing missing for the plan.",
+                        ...(notices.length > 0
+                            ? [
+                                  `Notices (dismiss_notice takes the fields in brackets):\n${notices
+                                      .map(
+                                          (n) =>
+                                              `- ${n.message}${noticeIdTags(n)}`,
+                                      )
+                                      .join("\n")}`,
+                              ]
+                            : []),
                     ].join("\n");
                     return {
                         content: [{ type: "text" as const, text }],
@@ -308,6 +363,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             planned_count: plannedCount,
                             days,
                             missing,
+                            notices,
                         },
                     };
                 },
