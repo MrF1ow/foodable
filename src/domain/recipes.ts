@@ -19,6 +19,7 @@ import {
     type FoodsStore,
 } from "./foods.js";
 import { familyIdOf } from "./food-quantity.js";
+import { applyFilters, matchesRecipeQuery } from "./recipe-filters.js";
 import { canonicalUnitText } from "./quantity.js";
 import {
     missingGramsGap,
@@ -248,6 +249,12 @@ export type RecipeListFilter = {
         allergens: MemberAllergen[];
         dislikes: { displayName: string }[];
     } | null;
+    /** The shared registry (`recipe-filters.ts`): every id here must hold (AND). */
+    filters?: readonly string[];
+    /** Recipes whose name contains this text. */
+    query?: string;
+    /** The recipes the caller has starred, for the `favourites` filter. */
+    favouriteIds?: ReadonlySet<string>;
 };
 
 export type RecipeImportIngredient = {
@@ -2091,10 +2098,13 @@ export async function listRecipesFiltered(
 ): Promise<Recipe[]> {
     const recipes = await store.listRecipes(householdId);
     const matched: Recipe[] = [];
+    const flags = new Map<string, RecipeFilterFlags>();
+    const needFlags = (filter.filters?.length ?? 0) > 0;
     for (const recipe of recipes) {
         const ingredients = await store.listIngredients(householdId, recipe.id);
         if (
-            recipeMatchesFilter(
+            !matchesRecipeQuery(recipe, filter.query ?? "") ||
+            !recipeMatchesFilter(
                 recipe,
                 ingredients,
                 foodsById,
@@ -2102,10 +2112,32 @@ export async function listRecipesFiltered(
                 filter,
             )
         ) {
-            matched.push(recipe);
+            continue;
         }
+        matched.push(recipe);
+        if (!needFlags) continue;
+        flags.set(
+            recipe.id,
+            recipeFilterFlags(
+                {
+                    recipe,
+                    ingredients,
+                    macrosPerPortion: macrosForPerson(
+                        ingredients,
+                        recipe.yieldPortions,
+                        1,
+                        foodsById,
+                    ),
+                },
+                fridgeStock,
+                foodsById,
+            ),
+        );
     }
-    return matched;
+    return applyFilters(matched, filter.filters ?? [], {
+        flags,
+        favouriteIds: filter.favouriteIds ?? new Set(),
+    });
 }
 
 type ImportLineResolved = {

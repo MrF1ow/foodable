@@ -4649,7 +4649,10 @@ describe("household config tools", () => {
         // +336: the optional `hidden_nutrients` list in the five card tools'
         // output schemas (Settings › Nutrients shown), after trimming the
         // merge_foods description to pay for its new Settings path.
-        const TOOLS_LIST_MAX_CHARS = 226131;
+        // +234: the optional `filters` and `query` inputs on list_recipes (the
+        // Recipes page's filter registry), explained in the tool description
+        // rather than per field, in as few words as fit.
+        const TOOLS_LIST_MAX_CHARS = 226365;
         const TOOLS_LIST_MAX_COUNT = 98;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
@@ -17157,4 +17160,203 @@ describe("share link tools", () => {
             }
         });
     });
+});
+
+describe("list_recipes filters and query over HTTP", () => {
+    type Call = (
+        name: string,
+        args?: Record<string, unknown>,
+    ) => Promise<ToolResult>;
+
+    /** Pancakes (quick, starred), Omelette (quick), Stew (slow, starred). */
+    async function seed(call: Call) {
+        const make = async (
+            name: string,
+            prep_minutes: number,
+            cook_minutes: number,
+        ) => {
+            const made = await call("create_recipe", {
+                name,
+                yield_portions: 2,
+                prep_minutes,
+                cook_minutes,
+            });
+            expect(made.isError).toBeFalsy();
+            return made.structuredContent?.id as string;
+        };
+        const pancakes = await make("Pancakes", 5, 5);
+        await make("Omelette", 5, 5);
+        const stew = await make("Stew", 30, 120);
+        await db.recipesStore.setFavourite("hh-1", "u1", pancakes, true);
+        await db.recipesStore.setFavourite("hh-1", "u1", stew, true);
+    }
+
+    async function names(call: Call, args: Record<string, unknown>) {
+        const listed = await call("list_recipes", args);
+        expect(listed.isError).toBeFalsy();
+        return (listed.structuredContent?.recipes as { name: string }[])
+            .map((recipe) => recipe.name)
+            .sort();
+    }
+
+    test.each(ERAS)("filters combine with AND (%p)", async (era) => {
+        await withHttpClient("u1", era, async (client) => {
+            const call: Call = async (name, args = {}) =>
+                (await client.callTool({
+                    name,
+                    arguments: args,
+                })) as ToolResult;
+            await seed(call);
+            expect(await names(call, {})).toEqual([
+                "Omelette",
+                "Pancakes",
+                "Stew",
+            ]);
+            expect(await names(call, { filters: ["quick"] })).toEqual([
+                "Omelette",
+                "Pancakes",
+            ]);
+            expect(await names(call, { filters: ["favourites"] })).toEqual([
+                "Pancakes",
+                "Stew",
+            ]);
+            expect(
+                await names(call, { filters: ["quick", "favourites"] }),
+            ).toEqual(["Pancakes"]);
+            expect(await names(call, { filters: [] })).toEqual([
+                "Omelette",
+                "Pancakes",
+                "Stew",
+            ]);
+        });
+    });
+
+    test.each(ERAS)(
+        "query matches the name and combines with filters (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                expect(await names(call, { query: "OME" })).toEqual([
+                    "Omelette",
+                ]);
+                expect(
+                    await names(call, { query: "e", filters: ["favourites"] }),
+                ).toEqual(["Pancakes", "Stew"]);
+                expect(
+                    await names(call, { query: "stew", filters: ["quick"] }),
+                ).toEqual([]);
+                expect(await names(call, { query: "  " })).toHaveLength(3);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "favourites are the caller's own stars, not another member's (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                const omelette = (
+                    (await call("list_recipes", { query: "omelette" }))
+                        .structuredContent?.recipes as { id: string }[]
+                )[0]!.id;
+                // Another member stars Omelette; u1's own stars are untouched.
+                await db.recipesStore.setFavourite(
+                    "hh-1",
+                    "u2",
+                    omelette,
+                    true,
+                );
+                expect(await names(call, { filters: ["favourites"] })).toEqual([
+                    "Pancakes",
+                    "Stew",
+                ]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "the household token reads the owner's stars (%p)",
+        async (era) => {
+            const app = appForHousehold("hh-1");
+            const transport = new StreamableHTTPClientTransport(
+                new URL("http://test.local/mcp"),
+                {
+                    fetch: async (url, init) =>
+                        app.request(new Request(String(url), init)),
+                },
+            );
+            const client = new Client(
+                { name: "t", version: "0" },
+                { versionNegotiation: { mode: era } },
+            );
+            await client.connect(transport);
+            try {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                const omelette = (
+                    (await call("list_recipes", { query: "omelette" }))
+                        .structuredContent?.recipes as { id: string }[]
+                )[0]!.id;
+                await db.recipesStore.setFavourite(
+                    "hh-1",
+                    "u2",
+                    omelette,
+                    true,
+                );
+                expect(await names(call, { filters: ["favourites"] })).toEqual([
+                    "Pancakes",
+                    "Stew",
+                ]);
+            } finally {
+                await client.close();
+            }
+        },
+    );
+
+    test.each(ERAS)(
+        "the existing filters still apply with the new ones (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                await seed(call);
+                expect(
+                    await names(call, {
+                        verification: "verified",
+                        filters: ["quick"],
+                    }),
+                ).toEqual(["Omelette", "Pancakes"]);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "an unknown filter id is refused by the schema (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const result = (await client.callTool({
+                    name: "list_recipes",
+                    arguments: { filters: ["nonsense"] },
+                })) as ToolResult;
+                expect(result.isError).toBe(true);
+            });
+        },
+    );
 });

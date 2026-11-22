@@ -287,7 +287,8 @@ describe("/app-v2.js", () => {
         // +~1.1 KB Log link: `?log=meal:<id>` opens the log form prefilled from that past meal.
         // +~0.6 KB Log search: a past meal with several items has an Add button that logs it again whole.
         // +~1.2 KB Log link: a past meal with no single food shows its own row first in the search sheet, never twice.
-        expect(js.length).toBeLessThan(196_000);
+        // +~0.5 KB Recipes: typing in the search box hides the cards whose name misses it.
+        expect(js.length).toBeLessThan(196_800);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

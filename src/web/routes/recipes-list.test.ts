@@ -1861,3 +1861,104 @@ describe("This week on the pages", () => {
         expect(open.html).toContain(`value="${day}"`);
     });
 });
+
+describe("GET /recipes with ?filter and ?q", () => {
+    async function getList(query: string, as = ALICE): Promise<string> {
+        const res = await recipesApp().request(`http://x/recipes${query}`, {
+            headers: { cookie: cookieFor(as) },
+        });
+        expect(res.status).toBe(200);
+        return res.text();
+    }
+
+    /** Pancakes (quick, starred), Omelette (quick), Stew (slow, starred). */
+    async function seed() {
+        const omelette = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Omelette",
+            yieldPortions: 1,
+            prepMinutes: 5,
+            cookMinutes: 5,
+        });
+        const stew = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Stew",
+            yieldPortions: 4,
+            prepMinutes: 30,
+            cookMinutes: 120,
+        });
+        await db.recipesStore.setFavourite(HH, ALICE, db.recipeId, true);
+        await db.recipesStore.setFavourite(HH, ALICE, stew.id, true);
+        return { omelette: omelette.id, stew: stew.id };
+    }
+
+    test("one filter narrows the list", async () => {
+        await seed();
+        const html = await getList("?filter=quick");
+        expect(html).toContain("Pancakes");
+        expect(html).toContain("Omelette");
+        expect(html).not.toContain("Stew");
+    });
+
+    test("?filter=a,b keeps only recipes that pass both", async () => {
+        await seed();
+        const html = await getList("?filter=quick,favourites");
+        expect(html).toContain("Pancakes");
+        expect(html).not.toContain("Omelette");
+        expect(html).not.toContain("Stew");
+        // The Filter button counts both, and both chips read as on.
+        expect(html).toContain('data-fd-recipes-filter-count="2"');
+        expect(html).not.toContain("fd-recipes-filter-button");
+        expect(
+            html.match(/<a class="fd-chip fd-chip--selected"/g)?.length,
+        ).toBe(2);
+        // The search form carries the filters on, so a search keeps them.
+        expect(html).toContain('name="filter" value="quick,favourites"');
+    });
+
+    test("?q= and ?filter= combine", async () => {
+        await seed();
+        const html = await getList("?q=pan&filter=quick");
+        expect(html).toContain("Pancakes");
+        expect(html).not.toContain("Omelette");
+        const none = await getList("?q=stew&filter=quick");
+        expect(none).not.toContain("fd-row--recipe");
+        expect(none).toContain("No recipes match this search.");
+    });
+
+    test("?q= alone filters by name", async () => {
+        await seed();
+        const html = await getList("?q=omel");
+        expect(html).toContain("Omelette");
+        expect(html).not.toContain("Pancakes");
+        expect(html).toContain('data-fd-recipes-filter-count="0"');
+    });
+
+    test("unknown, repeated and empty filters are ignored", async () => {
+        await seed();
+        const all = await getList("?filter=");
+        expect(all).toContain("Pancakes");
+        expect(all).toContain("Stew");
+        expect(all).toContain('data-fd-recipes-filter-count="0"');
+        const messy = await getList("?filter=nonsense,quick,quick");
+        expect(messy).toContain("Omelette");
+        expect(messy).not.toContain("Stew");
+        expect(messy).toContain('data-fd-recipes-filter-count="1"');
+    });
+
+    test("starring from a filtered list keeps every filter", async () => {
+        const res = await postFavourite(
+            new URLSearchParams({
+                on: "1",
+                back: "list",
+                q: "pan",
+                filter: "quick,favourites,nonsense",
+            }),
+        );
+        expect(res.headers.get("location")).toBe(
+            `/recipes?q=pan&filter=quick,favourites#recipe-${db.recipeId}`,
+        );
+    });
+});
