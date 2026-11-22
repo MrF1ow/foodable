@@ -3,7 +3,13 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { classifyShots, differs, pngSize } from "./preview-diff";
+import {
+    classifyShots,
+    differs,
+    parseArgs,
+    pngSize,
+    USAGE,
+} from "./preview-diff";
 
 const SHOTS = ["today.png", "kitchen.png", "dev-gallery.png"];
 
@@ -176,14 +182,6 @@ describe("differs", () => {
     const dir = mkdtempSync(join(tmpdir(), "preview-diff-"));
     afterAll(() => rmSync(dir, { recursive: true, force: true }));
 
-    test("a size mismatch counts as changed", async () => {
-        const a = join(dir, "short.png");
-        const b = join(dir, "tall.png");
-        writeFileSync(a, pngHeader(390, 844));
-        writeFileSync(b, pngHeader(390, 900));
-        expect(await differs(a, b)).toBe(true);
-    });
-
     test("a file that is not a PNG counts as changed", async () => {
         const a = join(dir, "junk.png");
         const b = join(dir, "other.png");
@@ -215,6 +213,29 @@ describe("differs", () => {
         if (r.status !== 0) throw new Error(String(r.stderr));
         return path;
     }
+
+    pixelTest("a size mismatch counts as changed", async () => {
+        const a = join(dir, "short.png");
+        const b = join(dir, "tall.png");
+        for (const [path, size] of [
+            [a, "390x844"],
+            [b, "390x900"],
+        ] as const) {
+            const r = spawnSync("magick", [
+                "-size",
+                size,
+                "xc:#808080",
+                `PNG32:${path}`,
+            ]);
+            expect(r.status).toBe(0);
+        }
+        const sizeOf = (path: string) =>
+            spawnSync("magick", ["identify", "-format", "%wx%h", path], {
+                encoding: "utf8",
+            }).stdout;
+        expect([sizeOf(a), sizeOf(b)]).toEqual(["390x844", "390x900"]);
+        expect(await differs(a, b)).toBe(true);
+    });
 
     pixelTest(
         "one red pixel on a same-size image counts as changed",
@@ -266,4 +287,88 @@ describe("differs", () => {
             expect(await differs(a, b)).toBe(false);
         },
     );
+});
+
+describe("parseArgs", () => {
+    test("no arguments gives the defaults", () => {
+        expect(parseArgs([])).toEqual({
+            kind: "run",
+            options: {
+                base: "origin/main",
+                work: "tmp/preview-diff",
+                reuseBase: false,
+                reuseHead: false,
+                keep: false,
+            },
+        });
+    });
+
+    test("every flag is read", () => {
+        expect(
+            parseArgs([
+                "--base",
+                "v1.2.0",
+                "--work",
+                "/tmp/w",
+                "--reuse-base",
+                "--reuse-head",
+                "--keep",
+            ]),
+        ).toEqual({
+            kind: "run",
+            options: {
+                base: "v1.2.0",
+                work: "/tmp/w",
+                reuseBase: true,
+                reuseHead: true,
+                keep: true,
+            },
+        });
+    });
+
+    test("--help and -h ask for the usage", () => {
+        expect(parseArgs(["--help"])).toEqual({ kind: "help" });
+        expect(parseArgs(["-h"])).toEqual({ kind: "help" });
+        expect(parseArgs(["--keep", "--help"])).toEqual({ kind: "help" });
+    });
+
+    test.each([
+        [["--bogus"], "--bogus"],
+        [["--base"], "--base"],
+        [["--work"], "--work"],
+        [["--base", "--keep"], "--base"],
+        [["stray"], "stray"],
+        [["--keep", "--no-cache"], "--no-cache"],
+    ])("%p is refused, naming %p", (argv, bad) => {
+        const r = parseArgs(argv);
+        expect(r.kind).toBe("error");
+        if (r.kind === "error") expect(r.message).toContain(bad);
+    });
+});
+
+describe("the command line", () => {
+    const run = (...args: string[]) =>
+        spawnSync(
+            "bun",
+            ["--no-env-file", "scripts/preview-diff.ts", ...args],
+            {
+                cwd: join(import.meta.dir, ".."),
+                encoding: "utf8",
+                timeout: 10_000,
+            },
+        );
+
+    test("--help prints the usage on stdout and exits 0", () => {
+        const r = run("--help");
+        expect(r.status).toBe(0);
+        expect(r.stdout).toBe(USAGE);
+    });
+
+    test("an unknown flag prints the usage on stderr and exits 2, before any render", () => {
+        const r = run("--bogus");
+        expect(r.status).toBe(2);
+        expect(r.stdout).toBe("");
+        expect(r.stderr).toContain("--bogus");
+        expect(r.stderr).toContain(USAGE);
+    });
 });
