@@ -94,6 +94,60 @@ export function runSettingsStoreContract(
             );
         });
 
+        test("a member's agents switch is their own: off until set, and one member's never moves another's", async () => {
+            await reset();
+            const c = ctx();
+            const store = createStore();
+            const other = c.ensureMember
+                ? await c.ensureMember()
+                : crypto.randomUUID();
+            // A member added the way the app adds one starts Off.
+            expect(
+                await store.getMemberAgentsCanDelete(c.householdId, other),
+            ).toBe(false);
+            // Someone who is not a member of the household has no switch.
+            expect(
+                await store.getMemberAgentsCanDelete(
+                    c.householdId,
+                    crypto.randomUUID(),
+                ),
+            ).toBe(false);
+            expect(
+                await store.setMemberAgentsCanDelete(
+                    c.householdId,
+                    other,
+                    true,
+                ),
+            ).toBe(true);
+            expect(
+                await store.getMemberAgentsCanDelete(c.householdId, other),
+            ).toBe(true);
+            // Neither the household's switch nor another household's member moves with it.
+            expect(await store.getAgentDestructiveAllowed(c.householdId)).toBe(
+                true,
+            );
+            expect(
+                await store.getMemberAgentsCanDelete(c.otherHouseholdId, other),
+            ).toBe(false);
+            await store.setAgentDestructiveAllowed(c.householdId, false);
+            expect(
+                await store.getMemberAgentsCanDelete(c.householdId, other),
+            ).toBe(true);
+            expect(
+                await store.setMemberAgentsCanDelete(
+                    c.householdId,
+                    other,
+                    false,
+                ),
+            ).toBe(false);
+            expect(
+                await store.getMemberAgentsCanDelete(c.householdId, other),
+            ).toBe(false);
+            expect(await store.getAgentDestructiveAllowed(c.householdId)).toBe(
+                false,
+            );
+        });
+
         test("listStores and insertStore sort order", async () => {
             await reset();
             const c = ctx();

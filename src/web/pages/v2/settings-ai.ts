@@ -2,6 +2,7 @@ import type { AppChromeBase } from "../../attention.js";
 import type { AiConnection } from "../../../db/tokens.js";
 import {
     AGENT_DESTRUCTIVE_SETTING,
+    AGENT_PERSONAL_SETTING,
     type AgentActionEntry,
 } from "../../../domain/agent-actions.js";
 import { mayUndoAgentAction } from "../../../domain/notices-agent.js";
@@ -25,6 +26,8 @@ export const UNKNOWN_APP_MARKER = "unknown";
 
 export const AI_DISCONNECT_PATH = "/settings/ai-connections/disconnect";
 export const AI_DESTRUCTIVE_PATH = "/settings/ai-connections/destructive";
+/** The person's own "Your agents can delete" switch. */
+export const AI_AGENT_DELETE_PATH = "/settings/ai-connections/agent-delete";
 export const AI_WIDGETS_PATH = "/settings/ai-connections/widgets";
 export const AI_PAGE_PATH = "/settings/ai-connections";
 
@@ -69,8 +72,15 @@ export type AgentActivityRow = {
 export type SettingsAiV2View = {
     chrome: AppChromeBase;
     connections: readonly AiConnection[];
-    /** The household switch; only the owner may change it. */
+    /** The household switch, the owner's off for everyone's agents; only the owner may change it. */
     destructive: { allowed: boolean; canChange: boolean };
+    /**
+     * This person's own switch for the agents they connected. `householdOffBy`
+     * is the owner's name while the household switch is off and this person
+     * cannot change it (so their own row reads Off, with no switch); null otherwise. A
+     * view without it (the dev preview's fixtures) shows the switch off.
+     */
+    personal?: { canDelete: boolean; householdOffBy: string | null };
     /** This member's `widgets_enabled`: the cards agents show in chat. */
     showCards: boolean;
     /** Newest first. */
@@ -250,11 +260,29 @@ function agentSwitchRow(opts: {
     return `<li class="fd-settings-ai__row"><form method="post" action="${esc(opts.action)}" class="fd-settings-ai__switch-form"${turbo}><input type="hidden" name="${esc(opts.field)}" value="${opts.on ? "0" : "1"}" />${text}<button type="submit" class="fd-switch" role="switch" aria-checked="${opts.on ? "true" : "false"}" aria-label="${esc(opts.title)}"><span class="fd-switch__knob" aria-hidden="true"></span></button></form></li>`;
 }
 
+/** A row with no control: the value as text, nothing to press or post. */
+function agentValueRow(opts: {
+    value: string;
+    title: string;
+    sub: string;
+}): string {
+    const text = `<span class="fd-settings-ai__text"><span class="fd-settings-ai__name">${esc(opts.title)}</span><span class="fd-settings-ai__meta">${esc(opts.sub)}</span></span>`;
+    return `<li class="fd-settings-ai__row">${text}<span class="fd-settings-ai__status">${esc(opts.value)}</span></li>`;
+}
+
 export const AI_SHOW_CARDS_TITLE = "Show cards in chat";
+/** The owner's household-wide off. */
 export const AI_DESTRUCTIVE_TITLE = AGENT_DESTRUCTIVE_SETTING;
+/** Each person's own switch. */
+export const AI_PERSONAL_TITLE = AGENT_PERSONAL_SETTING;
+export const AI_HOUSEHOLD_LABEL = "HOUSEHOLD · OWNER ONLY";
 
 function agentsSection(view: SettingsAiV2View): string {
     const { allowed, canChange } = view.destructive;
+    const { canDelete, householdOffBy } = view.personal ?? {
+        canDelete: false,
+        householdOffBy: null,
+    };
     const cards = agentSwitchRow({
         action: AI_WIDGETS_PATH,
         field: "enabled",
@@ -262,17 +290,35 @@ function agentsSection(view: SettingsAiV2View): string {
         title: AI_SHOW_CARDS_TITLE,
         sub: "Your goals and meals as widgets",
     });
-    const destructive = canChange
-        ? agentSwitchRow({
-              action: AI_DESTRUCTIVE_PATH,
-              field: "allowed",
-              on: allowed,
-              title: AI_DESTRUCTIVE_TITLE,
-              sub: "Owner only · logged and undoable",
-              turboFalse: true,
-          })
-        : `<li class="fd-settings-ai__row"><span class="fd-settings-ai__text"><span class="fd-settings-ai__name">${esc(AI_DESTRUCTIVE_TITLE)}</span><span class="fd-settings-ai__meta">Owner only · logged and undoable</span></span><span class="fd-settings-ai__status">${allowed ? "Allowed" : "Off"}</span></li>`;
-    return `<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Agents</h2><ul class="fd-settings-ai__list" data-fd-ai-agents>${cards}${destructive}</ul>`;
+    // Whose switch is whose: this one is the person's own; the owner's
+    // household switch under it can turn every person's off at once.
+    const own =
+        householdOffBy != null
+            ? agentValueRow({
+                  value: "Off",
+                  title: AI_PERSONAL_TITLE,
+                  sub: `Turned off for the household by ${householdOffBy.trim() || "the owner"}`,
+              })
+            : agentSwitchRow({
+                  action: AI_AGENT_DELETE_PATH,
+                  field: "allowed",
+                  on: canDelete,
+                  title: AI_PERSONAL_TITLE,
+                  sub: "Off by default · only what you can delete",
+              });
+    const household = canChange
+        ? `<li class="fd-settings-ai__row"><span class="fd-settings-ai__meta">${esc(AI_HOUSEHOLD_LABEL)}</span></li>${agentSwitchRow(
+              {
+                  action: AI_DESTRUCTIVE_PATH,
+                  field: "allowed",
+                  on: allowed,
+                  title: AI_DESTRUCTIVE_TITLE,
+                  sub: "Off stops every member's agents",
+                  turboFalse: true,
+              },
+          )}`
+        : "";
+    return `<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Agents</h2><ul class="fd-settings-ai__list" data-fd-ai-agents>${cards}${own}${household}</ul>`;
 }
 
 function activityControl(row: AgentActivityRow, back: AiUndoBack): string {

@@ -1157,22 +1157,37 @@ export async function renderSettingsAiV2Route(
     const timezone = profile?.timezone?.trim() || "UTC";
     const now = new Date();
     const chrome = await viewerChromeWithAttention(profile, gate.viewer);
-    const [connections, allowed, entries, members] = await Promise.all([
-        // Only the caller's own connections: the id is the session's.
-        listConnections(viewerUserId),
-        liveSettingsStore().getAgentDestructiveAllowed(householdId),
-        listAgentActions(liveAgentActionDeps(), householdId, {
-            limit: AI_ACTIVITY_LIMIT,
-            now,
-        }),
-        listHouseholdMembers(householdId),
-    ]);
+    const [connections, allowed, canDelete, entries, members] =
+        await Promise.all([
+            // Only the caller's own connections: the id is the session's.
+            listConnections(viewerUserId),
+            liveSettingsStore().getAgentDestructiveAllowed(householdId),
+            liveSettingsStore().getMemberAgentsCanDelete(
+                householdId,
+                viewerUserId,
+            ),
+            listAgentActions(liveAgentActionDeps(), householdId, {
+                limit: AI_ACTIVITY_LIMIT,
+                now,
+            }),
+            listHouseholdMembers(householdId),
+        ]);
     return {
         status: 200,
         html: renderSettingsAiV2Page({
             chrome,
             connections,
             destructive: { allowed, canChange: isOwner },
+            personal: {
+                canDelete,
+                // The owner turned it off themselves, so only others are told who did.
+                householdOffBy:
+                    allowed || isOwner
+                        ? null
+                        : (members.find(
+                              (m) => can(m, "household.owner_only").ok,
+                          )?.displayName ?? ""),
+            },
             showCards: widgetsEnabledFromProfile(profile),
             activity: agentActivityRows(entries, {
                 viewerUserId,

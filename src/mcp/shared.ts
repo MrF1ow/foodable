@@ -63,6 +63,7 @@ export {
 } from "../domain/import.js";
 import {
     AGENT_DESTRUCTIVE_SETTING,
+    AGENT_PERSONAL_SETTING,
     AgentActionsDisabledError,
     agentUndoHint,
     withAgentAction,
@@ -72,7 +73,11 @@ import {
     type AgentUndoDeps,
     type SnapshotRecorder,
 } from "../domain/agent-actions.js";
-import { can } from "../domain/permissions.js";
+import {
+    can,
+    type GuardedTool,
+    type PermissionRole,
+} from "../domain/permissions.js";
 import { alreadyHaveTag } from "../domain/linking.js";
 import { listFridge } from "../domain/fridge.js";
 import {
@@ -1577,22 +1582,71 @@ export type ToolContext = {
      * it goes, and the change can be undone for 24 hours. See `runDestructive`.
      */
     runDestructive: <T>(
-        tool: string,
+        tool: GuardedTool,
         write: (
             rec: SnapshotRecorder,
             householdId: string,
         ) => Promise<DestructiveWrite<T>>,
+        options?: DestructiveOptions,
     ) => Promise<DestructiveRun<T>>;
 };
 
-/** What the household's setting is called, as a person sees it. */
-export { AGENT_DESTRUCTIVE_SETTING };
+/**
+ * What a destructive call says about whose entries it changes. A tool that
+ * resolves a person (its own `user_id` / `target_member`) passes the one it
+ * resolved as `target`; the guard refuses when that is not the person the
+ * agent acts for, because in the app a person deletes only their own entries.
+ * It is an argument and not state of the tool context, because a batch runs its
+ * calls concurrently against one context: a sibling call must not be able to
+ * change who another call's guard compares against. A tool that touches
+ * household data and no person's entries passes nothing.
+ */
+export type DestructiveOptions = { target?: string };
 
-/** What a refused destructive call tells the agent. Names the setting. */
+/** What the household's setting and a person's own are called, as a person sees them. */
+export { AGENT_DESTRUCTIVE_SETTING, AGENT_PERSONAL_SETTING };
+
+/** What a call refused by the owner's household-wide off tells the agent. Names the setting. */
 export const AGENT_ACTIONS_OFF_TEXT =
     `${AGENT_DESTRUCTIVE_SETTING} is Off in Settings › AI connections. ` +
-    "Ask the household owner to turn it on, or make this change in the app. " +
+    "Ask the household owner to turn it on for everyone's agents, or make this change in the app. " +
     "Nothing was changed.";
+
+/** What a call refused by the person's own switch tells the agent. Names that switch. */
+export const AGENT_PERSON_OFF_TEXT =
+    `${AGENT_PERSONAL_SETTING} is Off in Settings › AI connections for the person you act for. ` +
+    "Ask them to turn it on there, or make this change in the app. " +
+    "Nothing was changed.";
+
+/**
+ * What a refused destructive call tells the agent: the cause, and the one
+ * switch that would change it (the household's off, or the person's own). A
+ * role that may not do the thing is told so instead of being sent to a switch.
+ */
+export function agentRefusalText(err: AgentActionsDisabledError): string {
+    switch (err.reason) {
+        case "household_off":
+            return AGENT_ACTIONS_OFF_TEXT;
+        case "person_off":
+            return AGENT_PERSON_OFF_TEXT;
+        case "not_permitted":
+            return err.message;
+    }
+}
+
+/**
+ * What a destructive call aimed at another person's entries is told. In the
+ * app a person deletes only their own meals, water, weight and goals, so an
+ * agent acting for one person may not delete another's, whoever's switch is On.
+ */
+export function otherPersonRefusalText(name: string | undefined): string {
+    const who = name?.trim() ? name.trim() : "the other person";
+    return (
+        "An agent can do no more than the person it acts for can in the app, " +
+        "and a person deletes only their own entries. " +
+        `Nothing was changed. Ask ${who} to do it, or their agent.`
+    );
+}
 
 /** Analytics bucket for a call the household's switch refused. */
 export const AGENT_ACTIONS_OFF_CATEGORY = "agent_actions_disabled";
@@ -1848,9 +1902,11 @@ export function createToolContext(
         }
         return memberId;
     }
-    async function callerActor(): Promise<{
+    // Who the agent acts for: the signed-in member, or the owner for the
+    // household token. Their role caps what the agent may do.
+    async function actingPerson(): Promise<{
         userId: string;
-        isOwner: boolean;
+        role: PermissionRole;
         householdId: string;
     }> {
         if (auth.kind === "household") {
@@ -1862,7 +1918,7 @@ export function createToolContext(
             }
             return {
                 userId: owner.userId,
-                isOwner: true,
+                role: "owner",
                 householdId: auth.householdId,
             };
         }
@@ -1873,8 +1929,20 @@ export function createToolContext(
         }
         return {
             userId: check.member.userId,
-            isOwner: can(check.member, "household.owner_only").ok,
+            role: check.member.role,
             householdId: check.member.householdId,
+        };
+    }
+    async function callerActor(): Promise<{
+        userId: string;
+        isOwner: boolean;
+        householdId: string;
+    }> {
+        const person = await actingPerson();
+        return {
+            userId: person.userId,
+            isOwner: can(person, "household.owner_only").ok,
+            householdId: person.householdId,
         };
     }
     // What the household's activity list calls this agent: the OAuth app the
@@ -1882,17 +1950,42 @@ export function createToolContext(
     const connection =
         auth.kind === "household" ? "household token" : (client ?? "OAuth app");
     async function runDestructive<T>(
-        tool: string,
+        tool: GuardedTool,
         write: (
             rec: SnapshotRecorder,
             householdId: string,
         ) => Promise<DestructiveWrite<T>>,
+        options: DestructiveOptions = {},
     ): Promise<DestructiveRun<T>> {
-        const householdId = await callerHouseholdId();
+        const person = await actingPerson();
+        const householdId = person.householdId;
+        const { target } = options;
+        // Ids reach here in whatever letter case the caller typed; Postgres
+        // compares uuids case-insensitively, so this does too.
+        if (
+            target != null &&
+            target.toLowerCase() !== person.userId.toLowerCase()
+        ) {
+            const other = await getHouseholdMembership(target, householdId);
+            return {
+                refused: true,
+                result: {
+                    content: [
+                        {
+                            type: "text",
+                            text: otherPersonRefusalText(other?.displayName),
+                        },
+                    ],
+                    isError: true,
+                },
+            };
+        }
         const actor: AgentActionActor = {
             householdId,
             memberId: auth.kind === "user" ? auth.userId : null,
             connection,
+            personId: person.userId,
+            role: person.role,
         };
         try {
             const { result, action } = await withAgentAction(
@@ -1926,7 +2019,7 @@ export function createToolContext(
                     refused: true,
                     result: {
                         content: [
-                            { type: "text", text: AGENT_ACTIONS_OFF_TEXT },
+                            { type: "text", text: agentRefusalText(err) },
                         ],
                         isError: true,
                     },

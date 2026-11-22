@@ -51,8 +51,7 @@ type Who =
 
 const UNDO_SENTENCE =
     "The household can undo this for 24 hours in Settings › AI connections.";
-const REFUSAL =
-    "Allow destructive changes is Off in Settings › AI connections.";
+const REFUSAL = "Any agent can delete is Off in Settings › AI connections.";
 
 const ADMIN_TOOLS = [
     "clear_grocery_list",
@@ -1491,8 +1490,8 @@ describeDb(
             const { sql } = getCtx();
             await sql`insert into public.users (id, email) values (${memberId}, ${`m-${memberId}@foodable.test`})`;
             await sql`
-            insert into public.household_members (household_id, user_id, role, display_name)
-            values (${householdId}, ${memberId}, 'member', 'Bee')
+            insert into public.household_members (household_id, user_id, role, display_name, agents_can_delete)
+            values (${householdId}, ${memberId}, 'member', 'Bee', true)
         `;
             const member: Who = {
                 kind: "user",

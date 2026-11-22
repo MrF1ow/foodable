@@ -37,6 +37,7 @@ const MCP_URL = "https://food.example.test/mcp";
 
 const BASE_VIEW = {
     destructive: { allowed: true, canChange: true },
+    personal: { canDelete: false, householdOffBy: null },
     showCards: true,
     activity: [],
 };
@@ -59,6 +60,7 @@ function render(
         chrome,
         connections,
         destructive: { allowed: true, canChange: true },
+        personal: { canDelete: false, householdOffBy: null },
         showCards: true,
         activity: [],
         now: NOW,
@@ -189,7 +191,8 @@ describe("settings AI connections page", () => {
                 `Disconnect x ${payload}`,
                 "Copy address",
                 "Show cards in chat",
-                "Allow destructive changes",
+                "Your agents can delete",
+                "Any agent can delete",
                 "Close",
                 "Close",
             ]);
@@ -317,14 +320,19 @@ function rows(entries: AgentActionEntry[], viewerUserId = OWNER_ID) {
     });
 }
 
+type Destructive = { allowed: boolean; canChange: boolean };
+type Personal = { canDelete: boolean; householdOffBy: string | null };
+
 function withActivity(
     activity: ReturnType<typeof rows>,
-    destructive = { allowed: true, canChange: true },
+    destructive: Destructive = { allowed: true, canChange: true },
+    personal: Personal = { canDelete: false, householdOffBy: null },
 ) {
     return renderSettingsAiV2Body({
         chrome,
         connections: [],
         destructive,
+        personal,
         showCards: true,
         activity,
         now: NOW,
@@ -333,34 +341,130 @@ function withActivity(
     });
 }
 
-describe("the destructive switch", () => {
-    test("the owner gets a switch that posts the opposite value", () => {
+/** The `<li>` of the row whose title is `title`. */
+function rowOf(html: string, title: string): string {
+    const rows = html.match(/<li class="fd-settings-ai__row">.*?<\/li>/g) ?? [];
+    const found = rows.find((row) => row.includes(`>${title}</span>`));
+    if (!found) throw new Error(`no row titled ${title}`);
+    return found;
+}
+
+describe("the household switch (the owner's household-wide off)", () => {
+    test("the owner gets a switch that posts the opposite value, under an owner-only heading", () => {
         const on = withActivity([]);
-        expect(on).toContain("Allow destructive changes");
+        expect(on).toContain("Any agent can delete");
+        expect(on).toContain("HOUSEHOLD · OWNER ONLY");
+        expect(on).toContain("Off stops every member's agents");
         expect(on).toContain('action="/settings/ai-connections/destructive"');
-        expect(on).toContain('name="allowed" value="0"');
-        expect(on).toContain('role="switch" aria-checked="true"');
-        expect(on).toContain('data-turbo="false"');
+        const row = rowOf(on, "Any agent can delete");
+        expect(row).toContain('name="allowed" value="0"');
+        expect(row).toContain('role="switch" aria-checked="true"');
+        expect(row).toContain('data-turbo="false"');
         // The old "Off: agents can still read and add…" paragraph is gone.
         expect(on).not.toContain("Off: agents can still read");
+        expect(on).not.toContain("Allow destructive changes");
         const off = withActivity([], { allowed: false, canChange: true });
-        expect(off).toContain('name="allowed" value="1"');
-        expect(off).toContain('aria-checked="false"');
+        const offRow = rowOf(off, "Any agent can delete");
+        expect(offRow).toContain('name="allowed" value="1"');
+        expect(offRow).toContain('aria-checked="false"');
     });
 
-    test("anyone else gets the value as text, no form", () => {
-        const html = withActivity([], { allowed: false, canChange: false });
-        expect(html).toContain("Allow destructive changes");
+    test("anyone else does not see the household switch at all, only their own", () => {
+        const html = withActivity([], { allowed: true, canChange: false });
+        expect(html).not.toContain("Any agent can delete");
+        expect(html).not.toContain("HOUSEHOLD · OWNER ONLY");
         expect(html).not.toContain("/settings/ai-connections/destructive");
-        // Only the member's own cards switch is left.
+        // The member's own cards switch and their own delete switch.
+        expect(html.match(/role="switch"/g)).toHaveLength(2);
+    });
+});
+
+describe("a person's own switch: Your agents can delete", () => {
+    const PATH = "/settings/ai-connections/agent-delete";
+
+    test("it is off by default, says what it covers, and posts the opposite value", () => {
+        const html = withActivity([], { allowed: true, canChange: false });
+        const row = rowOf(html, "Your agents can delete");
+        expect(row).toContain("Off by default · only what you can delete");
+        expect(row).toContain(`action="${PATH}"`);
+        expect(row).toContain('name="allowed" value="1"');
+        expect(row).toContain('role="switch" aria-checked="false"');
+        expect(row).not.toContain("disabled");
+        // A form of the app's own: no Turbo opt-out, like the cards switch.
+        expect(row).not.toContain("data-turbo");
+        const on = withActivity(
+            [],
+            { allowed: true, canChange: false },
+            { canDelete: true, householdOffBy: null },
+        );
+        const onRow = rowOf(on, "Your agents can delete");
+        expect(onRow).toContain('name="allowed" value="0"');
+        expect(onRow).toContain('aria-checked="true"');
+    });
+
+    test("the owner has their own switch beside the household one, own switch first", () => {
+        const html = withActivity([]);
+        expect(html).toContain(`action="${PATH}"`);
+        expect(html.indexOf("Show cards in chat")).toBeLessThan(
+            html.indexOf("Your agents can delete"),
+        );
+        expect(html.indexOf("Your agents can delete")).toBeLessThan(
+            html.indexOf("HOUSEHOLD · OWNER ONLY"),
+        );
+        expect(html.indexOf("HOUSEHOLD · OWNER ONLY")).toBeLessThan(
+            html.indexOf("Any agent can delete"),
+        );
+        expect(html.indexOf("Any agent can delete")).toBeLessThan(
+            html.indexOf("Recent agent changes"),
+        );
+        // Three switches: cards, their own, the household's.
+        expect(html.match(/role="switch"/g)).toHaveLength(3);
+    });
+
+    test("with the household switch off a member's own row has no switch, reads Off, says who turned it off, and posts nothing", () => {
+        const html = withActivity(
+            [],
+            { allowed: false, canChange: false },
+            { canDelete: true, householdOffBy: "Ethan" },
+        );
+        const row = rowOf(html, "Your agents can delete");
+        expect(row).toContain("Turned off for the household by Ethan");
+        expect(row).not.toContain("Off by default");
+        expect(row).not.toContain("fd-switch");
+        expect(row).not.toContain("<button");
+        expect(row).not.toContain('role="switch"');
+        expect(row).not.toContain("<form");
+        expect(row).not.toContain(PATH);
+        expect(row).toContain(">Off</span>");
+        // Only the cards switch is left a switch in the Agents group.
         expect(html.match(/role="switch"/g)).toHaveLength(1);
-        expect(html).toContain("Owner only");
-        expect(html).not.toContain("Only the household owner can change this.");
+    });
+
+    test("a missing owner name still reads", () => {
+        const html = withActivity(
+            [],
+            { allowed: false, canChange: false },
+            { canDelete: false, householdOffBy: "" },
+        );
+        expect(rowOf(html, "Your agents can delete")).toContain(
+            "Turned off for the household by the owner",
+        );
+    });
+
+    test("the owner's own switch stays live when they turned the household off", () => {
+        const html = withActivity(
+            [],
+            { allowed: false, canChange: true },
+            { canDelete: true, householdOffBy: null },
+        );
+        const row = rowOf(html, "Your agents can delete");
+        expect(row).toContain(`action="${PATH}"`);
+        expect(row).not.toContain("disabled");
     });
 });
 
 describe("the Agents group", () => {
-    test("Show cards in chat sits beside the destructive switch and posts the opposite value", () => {
+    test("Show cards in chat sits first and posts the opposite value", () => {
         const on = withActivity([]);
         expect(on).toContain(">Agents</h2>");
         expect(on).toContain("Show cards in chat");
@@ -368,22 +472,20 @@ describe("the Agents group", () => {
         expect(on).toContain('action="/settings/ai-connections/widgets"');
         expect(on).toContain('name="enabled" value="0"');
         // The cards form takes part in Turbo (no full reload); the owner-only
-        // destructive form keeps its existing opt-out.
+        // household form keeps its existing opt-out.
         const cards = on.match(
             /<form[^>]*action="\/settings\/ai-connections\/widgets"[^>]*>/,
         )?.[0];
         expect(cards).toBeDefined();
         expect(cards).not.toContain("data-turbo");
         expect(on.indexOf("Show cards in chat")).toBeLessThan(
-            on.indexOf("Allow destructive changes"),
-        );
-        expect(on.indexOf("Allow destructive changes")).toBeLessThan(
-            on.indexOf("Recent agent changes"),
+            on.indexOf("Your agents can delete"),
         );
         const off = renderSettingsAiV2Body({
             chrome,
             connections: [],
             destructive: { allowed: true, canChange: true },
+            personal: { canDelete: false, householdOffBy: null },
             showCards: false,
             activity: [],
             now: NOW,

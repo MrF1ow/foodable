@@ -38,6 +38,7 @@ import {
 import { liveExportArchiveStore } from "../../db/exports.js";
 import { revokeConnection } from "../../db/tokens.js";
 import {
+    AI_AGENT_DELETE_PATH,
     AI_DESTRUCTIVE_PATH,
     AI_DISCONNECT_PATH,
     AI_PAGE_PATH,
@@ -444,6 +445,29 @@ settingsRoutes.post(
         );
     },
 );
+
+// "Your agents can delete": the signed-in member's own switch for the agents
+// they connected. The person is the session's, never the form, so a member can
+// only ever move their own. It counts only while the household switch is on.
+settingsRoutes.post(AI_AGENT_DELETE_PATH, requireMember, async (c) => {
+    const member = siteMember(c);
+    const body = await c.req.parseBody();
+    const value = formText(body, "allowed").trim();
+    if (value !== "0" && value !== "1") {
+        const page = await renderSettingsAiV2Route(c.get("userId"), {
+            mcpUrl: `${getBaseUrl(c)}/mcp`,
+            error: "Choose On or Off.",
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    await liveSettingsStore().setMemberAgentsCanDelete(
+        member.householdId,
+        member.userId,
+        value === "1",
+    );
+    // toast: none the switch shows the new state
+    return c.redirect(AI_PAGE_PATH, 303);
+});
 
 // "Show cards in chat": the member's own switch (profiles.widgets_enabled).
 settingsRoutes.post(AI_WIDGETS_PATH, requireMember, async (c) => {

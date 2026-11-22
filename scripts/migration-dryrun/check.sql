@@ -803,6 +803,18 @@ begin
         end if;
     end;
 
+    -- The household's agent switch was off, so no member's agents gained a
+    -- delete right from the per-person switch.
+    if (select count(*) from public.household_members) <> 2 then
+        raise exception 'expected 2 household members, got %',
+            (select count(*) from public.household_members);
+    end if;
+    if exists (
+        select 1 from public.household_members where agents_can_delete is not false
+    ) then
+        raise exception 'a member took agents_can_delete true from a household whose switch was off';
+    end if;
+
     -- A person's own data: foodable_app reaches it through policies on the
     -- user and the household's members, never without one.
     declare

@@ -53,21 +53,47 @@ const OTHER = "00000000-0000-4000-8000-0000000000c1";
 const T0 = new Date("2026-11-13T12:00:00.000Z");
 const HOUR = 60 * 60 * 1000;
 
+const ADMIN = "00000000-0000-4000-8000-0000000000d1";
+
 const asMember: AgentActionActor = {
     householdId: HH,
     memberId: MEMBER,
     connection: "Claude",
+    personId: MEMBER,
+    role: "member",
 };
+const asAdmin: AgentActionActor = {
+    householdId: HH,
+    memberId: ADMIN,
+    connection: "Claude",
+    personId: ADMIN,
+    role: "admin",
+};
+const asOwner: AgentActionActor = {
+    householdId: HH,
+    memberId: OWNER,
+    connection: "Claude",
+    personId: OWNER,
+    role: "owner",
+};
+// The household token acts as the owner: their switch and role decide.
 const asHouseholdToken: AgentActionActor = {
     householdId: HH,
     memberId: null,
     connection: "household token",
+    personId: OWNER,
+    role: "owner",
 };
 
 function setup() {
     const store = createMemoryAgentActionsStore();
     store.__setOwner(HH, OWNER);
     const settings = createMemorySettingsStore();
+    // Every person starts with their own switch on, so a test about something
+    // else is not refused; the tests about the switches turn them off.
+    for (const person of [OWNER, ADMIN, MEMBER]) {
+        void settings.setMemberAgentsCanDelete(HH, person, true);
+    }
     const stock = createMemoryStockStore();
     const foods = createMemoryFoodsStore();
     const fridge = createMemoryFridgeStore();
@@ -211,11 +237,12 @@ describe("recording an agent action", () => {
         );
         await expect(attempt).rejects.toBeInstanceOf(AgentActionsDisabledError);
         await expect(attempt).rejects.toThrow(
-            "Settings › AI connections › Allow destructive changes is Off",
+            "Settings › AI connections › Any agent can delete is Off",
         );
         expect(ran).toBe(false);
         expect(store.__records()).toEqual([]);
         // The switch is per household.
+        await settings.setMemberAgentsCanDelete(OTHER, MEMBER, true);
         const { result } = await withAgentAction(
             deps,
             { ...asMember, householdId: OTHER },
@@ -254,7 +281,7 @@ describe("recording an agent action", () => {
         const { action } = await withAgentAction(
             deps,
             asMember,
-            { tool: "delete_account", summary: "Gone", undoable: false },
+            { tool: "delete_water", summary: "Gone", undoable: false },
             async (rec) => {
                 await rec.captureByIds("grocery_lines", [L1], "deleted");
             },
@@ -283,7 +310,7 @@ describe("recording an agent action", () => {
             withAgentAction(
                 deps,
                 asMember,
-                { tool: "t", summary: "s" },
+                { tool: "delete_grocery_line", summary: "s" },
                 async (rec) => {
                     rec.deleted("users" as never, [{ id: OWNER }]);
                 },
@@ -293,7 +320,7 @@ describe("recording an agent action", () => {
             withAgentAction(
                 deps,
                 asMember,
-                { tool: "t", summary: "s" },
+                { tool: "delete_grocery_line", summary: "s" },
                 async (rec) => {
                     rec.deleted("grocery_lines", [{ name: "no id" }]);
                 },
@@ -424,7 +451,7 @@ describe("undoing an agent action", () => {
         const { action } = await withAgentAction(
             s.deps,
             asMember,
-            { tool: "import_recipe_from_text", summary: "Replaced the recipe" },
+            { tool: "delete_recipe", summary: "Replaced the recipe" },
             async (rec) => {
                 s.store.__seed("grocery_lines", made);
                 rec.inserted("grocery_lines", [L1]);
@@ -489,7 +516,7 @@ describe("undoing an agent action", () => {
             return withAgentAction(
                 s.deps,
                 asMember,
-                { tool: "delete_store", summary: "Deleted Costco" },
+                { tool: "delete_grocery_lines", summary: "Deleted Costco" },
                 async (rec) => {
                     const capture = {
                         grocery_stores: [storeId],
@@ -546,7 +573,7 @@ describe("undoing an agent action", () => {
             const { action } = await withAgentAction(
                 s.deps,
                 asMember,
-                { tool: "add_store", summary: "Added Costco" },
+                { tool: "update_grocery_line", summary: "Added Costco" },
                 async (rec) => {
                     s.store.__seed("grocery_stores", {
                         id: storeId,
@@ -621,7 +648,10 @@ describe("undoing an agent action", () => {
         const { action } = await withAgentAction(
             s.deps,
             asMember,
-            { tool: "delete_store", summary: "Deleted the Costco store" },
+            {
+                tool: "delete_grocery_lines",
+                summary: "Deleted the Costco store",
+            },
             async (rec) => {
                 // Put back in this order: Spare goes in, then Costco hits the
                 // taken name and takes Spare down with it.
@@ -1036,7 +1066,7 @@ describe("undo keeps the stock ledger balanced", () => {
         const { action } = await withAgentAction(
             f.deps,
             asMember,
-            { tool: "update_fridge_item", summary: "Set the eggs to 3" },
+            { tool: "move_fridge_items", summary: "Set the eggs to 3" },
             async (rec) => {
                 await rec.captureByIds("fridge_items", [itemId], "updated");
                 await updateFridgeItemQuantityAdjust(
@@ -1192,7 +1222,7 @@ describe("undo keeps the stock ledger balanced", () => {
         const { action } = await withAgentAction(
             f.deps,
             asMember,
-            { tool: "put_away_grocery_lines", summary: "Stocked eggs" },
+            { tool: "move_fridge_items", summary: "Stocked eggs" },
             async (rec) => {
                 const added = await addFridgeItemAdjust(
                     f.fridge,
@@ -1241,7 +1271,7 @@ describe("an insert is not undone over what was added to it since", () => {
         return withAgentAction(
             s.deps,
             asMember,
-            { tool: "set_store_sections", summary: "Added Dairy" },
+            { tool: "update_grocery_line", summary: "Added Dairy" },
             async (rec) => {
                 s.store.__seed("grocery_sections", {
                     id: sectionId,
@@ -1338,7 +1368,7 @@ describe("an insert is not undone over what was added to it since", () => {
         const { action } = await withAgentAction(
             s.deps,
             asMember,
-            { tool: "put_away_grocery_lines", summary: "Stocked" },
+            { tool: "move_fridge_items", summary: "Stocked" },
             async (rec) => {
                 s.store.__seed("fridge_items", {
                     id: itemId,
@@ -1563,7 +1593,7 @@ describe("tables keyed by more than an id", () => {
         const { action } = await withAgentAction(
             s.deps,
             asMember,
-            { tool: "upsert_food", summary: "Moved an alias" },
+            { tool: "merge_foods", summary: "Moved an alias" },
             async (rec) => {
                 await rec.captureByKeys(
                     "food_aliases",
@@ -1626,7 +1656,7 @@ describe("tables keyed by more than an id", () => {
             withAgentAction(
                 s.deps,
                 asMember,
-                { tool: "t", summary: "s" },
+                { tool: "delete_grocery_line", summary: "s" },
                 write as never,
             );
         await expect(
@@ -1655,6 +1685,227 @@ describe("tables keyed by more than an id", () => {
                 ),
             ),
         ).rejects.toThrow(/display_name/);
+    });
+});
+
+describe("who may delete: the household's off, the person's own switch, their role", () => {
+    const ROLES = [
+        { role: "member", actor: asMember, person: MEMBER },
+        { role: "admin", actor: asAdmin, person: ADMIN },
+        { role: "owner", actor: asOwner, person: OWNER },
+    ] as const;
+
+    async function attempt(
+        s: ReturnType<typeof setup>,
+        actor: AgentActionActor,
+        tool: "delete_grocery_line" | "delete_store",
+    ) {
+        s.store.__seed("grocery_lines", groceryLine(L1, "Milk"));
+        let ran = false;
+        const outcome = await withAgentAction(
+            s.deps,
+            actor,
+            { tool, summary: "Deleted Milk" },
+            async (rec) => {
+                ran = true;
+                await rec.captureByIds("grocery_lines", [L1], "deleted");
+                s.store.__remove("grocery_lines", L1);
+            },
+        ).then(
+            () => null,
+            (err: unknown) => err,
+        );
+        return { outcome, ran };
+    }
+
+    for (const { role, actor, person } of ROLES) {
+        test(`${role}: allowed with their switch on and the household on`, async () => {
+            const s = setup();
+            const { outcome, ran } = await attempt(
+                s,
+                actor,
+                "delete_grocery_line",
+            );
+            expect(outcome).toBeNull();
+            expect(ran).toBe(true);
+            expect(s.store.__records()).toHaveLength(1);
+            expect(s.store.__records()[0]!.memberId).toBe(person);
+        });
+
+        test(`${role}: their own switch off refuses, names that switch, and writes nothing`, async () => {
+            const s = setup();
+            await s.settings.setMemberAgentsCanDelete(HH, person, false);
+            const { outcome, ran } = await attempt(
+                s,
+                actor,
+                "delete_grocery_line",
+            );
+            expect(outcome).toBeInstanceOf(AgentActionsDisabledError);
+            expect((outcome as AgentActionsDisabledError).reason).toBe(
+                "person_off",
+            );
+            expect((outcome as Error).message).toContain(
+                "Your agents can delete",
+            );
+            expect(ran).toBe(false);
+            expect(s.store.__records()).toEqual([]);
+            expect(s.store.__rows("grocery_lines")).toHaveLength(1);
+        });
+
+        test(`${role}: the household off refuses even with their own switch on, and says so`, async () => {
+            const s = setup();
+            await s.settings.setAgentDestructiveAllowed(HH, false);
+            const { outcome, ran } = await attempt(
+                s,
+                actor,
+                "delete_grocery_line",
+            );
+            expect(outcome).toBeInstanceOf(AgentActionsDisabledError);
+            expect((outcome as AgentActionsDisabledError).reason).toBe(
+                "household_off",
+            );
+            expect((outcome as Error).message).toContain(
+                "Any agent can delete",
+            );
+            expect(ran).toBe(false);
+            expect(s.store.__records()).toEqual([]);
+        });
+
+        test(`${role}: with both off, the household's off is the cause named`, async () => {
+            const s = setup();
+            await s.settings.setAgentDestructiveAllowed(HH, false);
+            await s.settings.setMemberAgentsCanDelete(HH, person, false);
+            const { outcome } = await attempt(s, actor, "delete_grocery_line");
+            expect((outcome as AgentActionsDisabledError).reason).toBe(
+                "household_off",
+            );
+        });
+    }
+
+    test("an admin-only action is refused to a member whose switch is on, and allowed to an admin and the owner", async () => {
+        const s = setup();
+        const refused = await attempt(s, asMember, "delete_store");
+        expect(refused.outcome).toBeInstanceOf(AgentActionsDisabledError);
+        expect((refused.outcome as AgentActionsDisabledError).reason).toBe(
+            "not_permitted",
+        );
+        expect((refused.outcome as Error).message).toContain(
+            "Only the household owner or an admin can do that.",
+        );
+        // The refusal is about the role, not the switch: it does not send the
+        // person to a switch that would change nothing.
+        expect((refused.outcome as Error).message).not.toContain(
+            "Your agents can delete",
+        );
+        expect(refused.ran).toBe(false);
+        expect(s.store.__records()).toEqual([]);
+        for (const actor of [asAdmin, asOwner]) {
+            const t = setup();
+            const allowed = await attempt(t, actor, "delete_store");
+            expect(allowed.outcome).toBeNull();
+            expect(allowed.ran).toBe(true);
+        }
+    });
+
+    test("the household token is the owner: their switch decides, under the household off", async () => {
+        const s = setup();
+        const allowed = await attempt(s, asHouseholdToken, "delete_store");
+        expect(allowed.outcome).toBeNull();
+        expect(s.store.__records()[0]).toMatchObject({
+            memberId: null,
+            connection: "household token",
+        });
+
+        const off = setup();
+        await off.settings.setMemberAgentsCanDelete(HH, OWNER, false);
+        const refusedOwner = await attempt(
+            off,
+            asHouseholdToken,
+            "delete_grocery_line",
+        );
+        expect((refusedOwner.outcome as AgentActionsDisabledError).reason).toBe(
+            "person_off",
+        );
+        // Another member's switch is not the token's.
+        const other = setup();
+        await other.settings.setMemberAgentsCanDelete(HH, MEMBER, false);
+        expect(
+            (await attempt(other, asHouseholdToken, "delete_grocery_line"))
+                .outcome,
+        ).toBeNull();
+
+        const householdOff = setup();
+        await householdOff.settings.setAgentDestructiveAllowed(HH, false);
+        const refused = await attempt(
+            householdOff,
+            asHouseholdToken,
+            "delete_grocery_line",
+        );
+        expect((refused.outcome as AgentActionsDisabledError).reason).toBe(
+            "household_off",
+        );
+    });
+
+    test("one member's switch does not decide another's", async () => {
+        const s = setup();
+        await s.settings.setMemberAgentsCanDelete(HH, MEMBER, false);
+        expect(
+            (await attempt(s, asAdmin, "delete_grocery_line")).outcome,
+        ).toBeNull();
+    });
+
+    test("a person with no switch of their own (not a member) is refused", async () => {
+        const s = setup();
+        const stranger: AgentActionActor = {
+            ...asMember,
+            memberId: OTHER,
+            personId: OTHER,
+        };
+        const { outcome, ran } = await attempt(
+            s,
+            stranger,
+            "delete_grocery_line",
+        );
+        expect((outcome as AgentActionsDisabledError).reason).toBe(
+            "person_off",
+        );
+        expect(ran).toBe(false);
+    });
+
+    test("the switches are read inside the write transaction, so one turned off a moment ago refuses", async () => {
+        const s = setup();
+        const original = s.store.atomically.bind(s.store);
+        s.store.atomically = async (fn) => {
+            await s.settings.setMemberAgentsCanDelete(HH, MEMBER, false);
+            return original(fn);
+        };
+        const { outcome, ran } = await attempt(
+            s,
+            asMember,
+            "delete_grocery_line",
+        );
+        expect((outcome as AgentActionsDisabledError).reason).toBe(
+            "person_off",
+        );
+        expect(ran).toBe(false);
+    });
+
+    test("an unmapped tool name is refused rather than allowed", async () => {
+        const s = setup();
+        const outcome = await withAgentAction(
+            s.deps,
+            asOwner,
+            // @ts-expect-error not a guarded tool: the table has no action for it
+            { tool: "not_a_tool", summary: "x" },
+            async () => "ran",
+        ).then(
+            () => null,
+            (err: unknown) => err,
+        );
+        expect(outcome).toBeInstanceOf(AgentActionsDisabledError);
+        expect((outcome as AgentActionsDisabledError).reason).toBe(
+            "not_permitted",
+        );
     });
 });
 
@@ -1896,7 +2147,7 @@ describe("what an update restores", () => {
         return withAgentAction(
             s.deps,
             asMember,
-            { tool: "update_household_config", summary: "Changed it" },
+            { tool: "update_grocery_line", summary: "Changed it" },
             async (rec) => {
                 await rec.captureByIds("households", [L1], "updated");
                 s.store.__seed("households", end);
@@ -2058,7 +2309,7 @@ describe("the ledger is corrected for this action only", () => {
         const { action } = await withAgentAction(
             f.deps,
             asMember,
-            { tool: "put_away_grocery_lines", summary: "Stocked 6" },
+            { tool: "move_fridge_items", summary: "Stocked 6" },
             async (rec) => {
                 const added = await addFridgeItemAdjust(
                     f.fridge,
@@ -2209,7 +2460,7 @@ describe("capturing what a delete takes with it", () => {
         const { action } = await withAgentAction(
             s.deps,
             asMember,
-            { tool: "delete_grocery_store", summary: "Deleted Costco" },
+            { tool: "delete_grocery_lines", summary: "Deleted Costco" },
             async (rec) => {
                 reports.push(
                     await rec.captureCascade("grocery_stores", [{ id: STORE }]),
@@ -2265,7 +2516,7 @@ describe("capturing what a delete takes with it", () => {
         await withAgentAction(
             s.deps,
             asMember,
-            { tool: "delete_grocery_store", summary: "x" },
+            { tool: "delete_grocery_lines", summary: "x" },
             async (rec) => {
                 reports.push(
                     await rec.captureCascade("grocery_stores", [
@@ -2322,7 +2573,7 @@ describe("undo never puts back what has moved on since", () => {
         const { action } = await withAgentAction(
             s.deps,
             asMember,
-            { tool: "set_store_sections", summary: "Added a section" },
+            { tool: "update_grocery_line", summary: "Added a section" },
             async (rec) => {
                 s.store.__seed("grocery_lines", groceryLine(L1, "Olives"));
                 rec.inserted("grocery_lines", [L1]);
@@ -2355,7 +2606,7 @@ describe("undo never puts back what has moved on since", () => {
         const { action } = await withAgentAction(
             s.deps,
             asMember,
-            { tool: "x", summary: "Added and dropped" },
+            { tool: "delete_grocery_line", summary: "Added and dropped" },
             async (rec) => {
                 s.store.__seed("grocery_lines", groceryLine(L1, "Olives"));
                 rec.inserted("grocery_lines", [L1]);
@@ -2640,7 +2891,7 @@ describe("undo locks the rows it checks", () => {
         const { action } = await withAgentAction(
             deps,
             asMember,
-            { tool: "change_lists", summary: "Changed" },
+            { tool: "clear_grocery_list", summary: "Changed" },
             async (rec) => {
                 await rec.captureByIds("grocery_lines", [L1], "updated");
                 s.store.__seed(
@@ -2725,7 +2976,7 @@ describe("the memory store follows keys, not an id column", () => {
         const { action } = await withAgentAction(
             s.deps,
             asMember,
-            { tool: "clear_goals", summary: "Cleared goals" },
+            { tool: "set_nutrition_goals", summary: "Cleared goals" },
             async (rec) => {
                 await rec.captureByKeys(
                     "nutrition_goal_days",

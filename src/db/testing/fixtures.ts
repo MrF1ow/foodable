@@ -6,7 +6,19 @@ export type SeededHousehold = {
     householdId: string;
 };
 
-export async function seedHousehold(sql: SQL): Promise<SeededHousehold> {
+export type SeedHouseholdOptions = {
+    /**
+     * The owner's own agent delete switch. On by default, so a test that runs a
+     * destructive tool as the owner is not refused; pass `false` to see the
+     * switch's default for a person who never turned it on.
+     */
+    agentsCanDelete?: boolean;
+};
+
+export async function seedHousehold(
+    sql: SQL,
+    opts: SeedHouseholdOptions = {},
+): Promise<SeededHousehold> {
     const userId = crypto.randomUUID();
     const householdId = crypto.randomUUID();
     const email = `test-${userId}@foodable.test`;
@@ -23,11 +35,55 @@ export async function seedHousehold(sql: SQL): Promise<SeededHousehold> {
             household_id,
             user_id,
             role,
-            display_name
+            display_name,
+            agents_can_delete
         )
-        values (${householdId}, ${userId}, ${"owner"}, ${"Owner"})
+        values (
+            ${householdId},
+            ${userId},
+            ${"owner"},
+            ${"Owner"},
+            ${opts.agentsCanDelete ?? true}
+        )
     `;
     return { userId, householdId };
+}
+
+/**
+ * Another member of a seeded household. Their agent switch is off unless the
+ * test turns it on, as for a member added in the app.
+ */
+export async function seedMember(
+    sql: SQL,
+    householdId: string,
+    opts: {
+        role?: "member" | "admin";
+        displayName?: string;
+        agentsCanDelete?: boolean;
+    } = {},
+): Promise<string> {
+    const userId = crypto.randomUUID();
+    await sql`
+        insert into public.users (id, email)
+        values (${userId}, ${`test-${userId}@foodable.test`})
+    `;
+    await sql`
+        insert into public.household_members (
+            household_id,
+            user_id,
+            role,
+            display_name,
+            agents_can_delete
+        )
+        values (
+            ${householdId},
+            ${userId},
+            ${opts.role ?? "member"},
+            ${opts.displayName ?? "Member"},
+            ${opts.agentsCanDelete ?? false}
+        )
+    `;
+    return userId;
 }
 
 export async function seedGroceryStore(

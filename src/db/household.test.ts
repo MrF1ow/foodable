@@ -1,4 +1,11 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import {
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    test,
+} from "bun:test";
 import {
     EMPTY_HOUSEHOLD_PREFERENCES,
     HouseholdAlreadyExistsError,
@@ -20,7 +27,7 @@ import {
     updateMemberDisplayName,
 } from "./household.js";
 import { describeDb } from "./testing/pg.js";
-import { asUser, seedHousehold } from "./testing/fixtures.js";
+import { asUser, seedHousehold, seedMember } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
 import { setSqlForTests } from "./sql.js";
 
@@ -466,5 +473,98 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
             setHouseholdMemberRole(householdId, ownerId, "admin"),
             "That person is not a member you can change.",
         );
+    });
+
+    describe("the per-member agent delete switch (migration backfill)", () => {
+        // The backfill is the migration file's own `update`, read from disk and
+        // run as written, so the test cannot drift from what production applies.
+        // `bun run db:dryrun` also runs the whole file against a household whose
+        // switch is off.
+        const MIGRATION_PATH = `${import.meta.dir}/../../db/migrations/20261121230000_member_agent_delete.sql`;
+        let BACKFILL = "";
+
+        beforeAll(async () => {
+            const text = await Bun.file(MIGRATION_PATH).text();
+            const found = text.match(
+                /^update public\.household_members\b[^;]*;/im,
+            );
+            if (!found) throw new Error("no backfill update in the migration");
+            BACKFILL = found[0];
+        });
+
+        async function householdWithPrefs(
+            prefs: Record<string, unknown>,
+            memberSwitch: boolean,
+        ): Promise<{ householdId: string; userIds: string[] }> {
+            const { sql } = getCtx();
+            const created = await seedHousehold(sql, {
+                agentsCanDelete: memberSwitch,
+            });
+            await sql`
+                update public.households
+                set household_preferences = ${JSON.stringify(prefs)}::jsonb
+                where id = ${created.householdId}
+            `;
+            const other = await seedMember(sql, created.householdId, {
+                agentsCanDelete: memberSwitch,
+            });
+            return {
+                householdId: created.householdId,
+                userIds: [created.userId, other],
+            };
+        }
+
+        async function switches(householdId: string): Promise<boolean[]> {
+            const found = await getCtx().sql`
+                select agents_can_delete
+                from public.household_members
+                where household_id = ${householdId}
+            `;
+            return found.map(
+                (row: { agents_can_delete: boolean }) => row.agents_can_delete,
+            );
+        }
+
+        test("a new member's switch is off", async () => {
+            const { sql } = getCtx();
+            const added = await seedMember(sql, householdId);
+            const [row] = await sql`
+                select agents_can_delete
+                from public.household_members
+                where user_id = ${added}
+            `;
+            expect(row.agents_can_delete).toBe(false);
+        });
+
+        test("every member takes the household's value: true, false or no key", async () => {
+            const allowed = await householdWithPrefs(
+                { "agents.destructive_allowed": true },
+                false,
+            );
+            const off = await householdWithPrefs(
+                { "agents.destructive_allowed": false },
+                true,
+            );
+            const absent = await householdWithPrefs(
+                { "grocery.use_usual_store": true },
+                false,
+            );
+            // Anything but a stored false counts as allowed, as the app reads it.
+            const odd = await householdWithPrefs(
+                { "agents.destructive_allowed": "maybe" },
+                false,
+            );
+            const { sql } = getCtx();
+            await sql.unsafe(BACKFILL);
+            expect(await switches(allowed.householdId)).toEqual([true, true]);
+            expect(await switches(off.householdId)).toEqual([false, false]);
+            expect(await switches(absent.householdId)).toEqual([true, true]);
+            expect(await switches(odd.householdId)).toEqual([true, true]);
+        });
+
+        test("the backfill is scoped by a where, so no contract line is needed", () => {
+            expect(BACKFILL).toMatch(/^update public\.household_members\b/i);
+            expect(BACKFILL).toMatch(/\bwhere\b/i);
+        });
     });
 });

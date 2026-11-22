@@ -85,6 +85,8 @@ import { evaluateViewerFlags, type ViewerFlags } from "./viewer-flags.js";
 import {
     AGENT_ACTIONS_OFF_TEXT,
     AGENT_DESTRUCTIVE_SETTING,
+    AGENT_PERSON_OFF_TEXT,
+    AGENT_PERSONAL_SETTING,
     createToolContext,
     MEAL_LOGGED_WIDGET_URI,
     widgetUri,
@@ -1051,6 +1053,9 @@ beforeEach(() => {
         stock: db.stockStore,
         foods: db.foodsStore,
     });
+    // The owner's own agents may delete, as in a household that had agents
+    // allowed; the tests about the switches turn it (and others') off.
+    void db.settingsStore.setMemberAgentsCanDelete("hh-1", "u1", true);
     // Per-day goal overrides live in db.goalDays; the destructive goal write
     // reads and removes them by row id.
     setGoalDayRowsForTests({
@@ -1790,6 +1795,43 @@ describe("set_nutrition_goals accepts a caffeine limit", () => {
             expect(db.goals!.daily_caffeine_mg).toBe(400);
             await call("set_nutrition_goals", { daily_caffeine_mg: null });
             expect(db.goals!.daily_caffeine_mg).toBeNull();
+        });
+    });
+
+    test("null on a stored target is a guarded clear: recorded, and refused while the person's switch is off", async () => {
+        await withTools(null, async (call) => {
+            await call("set_nutrition_goals", {
+                daily_caffeine_mg: 400,
+                daily_protein_g: 130,
+            });
+            const cleared = await call("set_nutrition_goals", {
+                daily_caffeine_mg: null,
+            });
+            expect(cleared.isError).toBeFalsy();
+            // This memory store holds no goals row to snapshot, so the entry
+            // is not undoable here; the database tests cover the undo.
+            expect(textOf(cleared)).toContain(
+                "recorded in Settings › AI connections",
+            );
+            expect(db.goals!.daily_caffeine_mg).toBeNull();
+            expect(db.agentActions.__records()).toHaveLength(1);
+
+            await db.settingsStore.setMemberAgentsCanDelete(
+                "hh-1",
+                "u1",
+                false,
+            );
+            const refused = await call("set_nutrition_goals", {
+                daily_protein_g: null,
+            });
+            expect(refused.isError).toBe(true);
+            expect(db.goals!.daily_protein_g).toBe(130);
+            expect(db.agentActions.__records()).toHaveLength(1);
+            // Naming a target that was never set is no clear at all.
+            const nothing = await call("set_nutrition_goals", {
+                daily_caffeine_mg: null,
+            });
+            expect(nothing.isError).toBeFalsy();
         });
     });
 });
@@ -5724,6 +5766,14 @@ describe("phone-app domain MCP tools", () => {
                 displayName: "Bob",
             },
         ];
+        // These tests are not about the agent switch: both people's agents may delete.
+        for (const person of [alice, bob]) {
+            void db.settingsStore.setMemberAgentsCanDelete(
+                "hh-1",
+                person,
+                true,
+            );
+        }
     }
 
     async function withPat(run: (call: CallTool) => Promise<void>) {
@@ -8701,35 +8751,49 @@ async function sseFrame(r: Response): Promise<Record<string, unknown>> {
 describe("/mcp destructive tools are guarded", () => {
     const UNDO_SENTENCE =
         "The household can undo this for 24 hours in Settings › AI connections.";
-    const REFUSAL =
-        "Allow destructive changes is Off in Settings › AI connections.";
+    const REFUSAL = "Any agent can delete is Off in Settings › AI connections.";
+    const PERSON_REFUSAL =
+        "Your agents can delete is Off in Settings › AI connections for the person you act for.";
 
-    test("every place that names the switch names the one the AI page shows", () => {
+    test("every place that names the switches names the ones the AI page shows", () => {
         const html = renderSettingsAiV2Body({
             chrome: {} as never,
             connections: [],
             destructive: { allowed: false, canChange: true },
+            personal: { canDelete: true, householdOffBy: null },
             showCards: true,
             activity: [],
             now: new Date(),
             timezone: "UTC",
             mcpUrl: "https://example.test/mcp",
         } as never);
-        expect(html).toContain("Allow destructive changes");
-        expect(AGENT_DESTRUCTIVE_SETTING).toBe("Allow destructive changes");
+        expect(html).toContain("Any agent can delete");
+        expect(html).toContain("Your agents can delete");
+        expect(AGENT_DESTRUCTIVE_SETTING).toBe("Any agent can delete");
+        expect(AGENT_PERSONAL_SETTING).toBe("Your agents can delete");
         expect(AGENT_ACTIONS_OFF_TEXT).toContain(REFUSAL);
+        expect(AGENT_PERSON_OFF_TEXT).toContain(PERSON_REFUSAL);
         expect(new AgentActionsDisabledError().message).toContain(
-            "Settings › AI connections › Allow destructive changes is Off",
+            "Settings › AI connections › Any agent can delete is Off",
+        );
+        expect(new AgentActionsDisabledError("person_off").message).toContain(
+            "Settings › AI connections › Your agents can delete is Off",
         );
         expect(SERVER_INSTRUCTIONS).toContain(
-            "(Allow destructive changes, in Settings › AI connections)",
+            "(Your agents can delete, in Settings › AI connections, off until they turn it on)",
+        );
+        expect(SERVER_INSTRUCTIONS).toContain(
+            "The household owner's Any agent can delete switch",
         );
         for (const text of [
             AGENT_ACTIONS_OFF_TEXT,
+            AGENT_PERSON_OFF_TEXT,
             new AgentActionsDisabledError().message,
+            new AgentActionsDisabledError("person_off").message,
             SERVER_INSTRUCTIONS,
         ]) {
             expect(text).not.toContain("Agents may make destructive changes");
+            expect(text).not.toContain("Allow destructive changes");
         }
     });
 
@@ -9246,6 +9310,151 @@ describe("/mcp destructive tools are guarded", () => {
                 );
             },
         );
+
+        test.each(ERAS)(
+            "a person's own switch Off refuses, naming that switch, and changes nothing (%p)",
+            async (era) => {
+                await withClientFor(
+                    appWith({ kind: "user", userId: "u1" }, "Claude"),
+                    era,
+                    async (call) => {
+                        const arranged = await scenarios.delete_water!(call);
+                        await mirror();
+                        await db.settingsStore.setMemberAgentsCanDelete(
+                            "hh-1",
+                            "u1",
+                            false,
+                        );
+                        const result = await call(arranged.tool, arranged.args);
+                        expect(result.isError).toBe(true);
+                        expect(textOf(result)).toContain(PERSON_REFUSAL);
+                        expect(textOf(result)).toContain(
+                            "Ask them to turn it on",
+                        );
+                        // It is not the household's switch that said no.
+                        expect(textOf(result)).not.toContain(REFUSAL);
+                        expect(db.rowIds.has("w1")).toBe(true);
+                        expect(db.agentActions.__records()).toEqual([]);
+                        expect(
+                            db.analyticsRows.find(
+                                (r) => r.tool_name === "delete_water",
+                            ),
+                        ).toMatchObject({
+                            success: false,
+                            error_category: "agent_actions_disabled",
+                        });
+                    },
+                );
+            },
+        );
+
+        test.each(ERAS)(
+            "the household's off is the cause named when both are off, and when only it is (%p)",
+            async (era) => {
+                for (const own of [true, false]) {
+                    await withClientFor(
+                        appWith({ kind: "user", userId: "u1" }, "Claude"),
+                        era,
+                        async (call) => {
+                            const arranged =
+                                await scenarios.delete_water!(call);
+                            await mirror();
+                            await db.settingsStore.setMemberAgentsCanDelete(
+                                "hh-1",
+                                "u1",
+                                own,
+                            );
+                            await db.settingsStore.setAgentDestructiveAllowed(
+                                "hh-1",
+                                false,
+                            );
+                            const result = await call(
+                                arranged.tool,
+                                arranged.args,
+                            );
+                            expect(result.isError).toBe(true);
+                            expect(textOf(result)).toContain(REFUSAL);
+                            expect(textOf(result)).not.toContain(
+                                PERSON_REFUSAL,
+                            );
+                            expect(db.rowIds.has("w1")).toBe(true);
+                        },
+                    );
+                }
+            },
+        );
+
+        test("the household token is the owner's agent: their switch decides, not a member's", async () => {
+            db.members.push({
+                householdId: "hh-1",
+                userId: "u2",
+                role: "member",
+                displayName: "U2",
+            });
+            await db.settingsStore.setMemberAgentsCanDelete(
+                "hh-1",
+                "u2",
+                false,
+            );
+            await withClientFor(
+                appWith({ kind: "household", householdId: "hh-1" }),
+                "legacy",
+                async (call) => {
+                    const arranged = await scenarios.delete_grocery_line!(call);
+                    await mirror();
+                    await db.settingsStore.setMemberAgentsCanDelete(
+                        "hh-1",
+                        "u1",
+                        false,
+                    );
+                    const refused = await call(arranged.tool, arranged.args);
+                    expect(refused.isError).toBe(true);
+                    expect(textOf(refused)).toContain(PERSON_REFUSAL);
+                    expect(db.agentActions.__records()).toEqual([]);
+                    await db.settingsStore.setMemberAgentsCanDelete(
+                        "hh-1",
+                        "u1",
+                        true,
+                    );
+                    const allowed = await call(arranged.tool, arranged.args);
+                    expect(allowed.isError).toBeFalsy();
+                    expect(db.agentActions.__records()).toMatchObject([
+                        { memberId: null, connection: "household token" },
+                    ]);
+                },
+            );
+        });
+
+        test("a member's agent is another person: their own switch, not the owner's", async () => {
+            db.members.push({
+                householdId: "hh-1",
+                userId: "u2",
+                role: "member",
+                displayName: "U2",
+            });
+            await withClientFor(
+                appWith({ kind: "user", userId: "u2" }, "Claude"),
+                "legacy",
+                async (call) => {
+                    // The owner's switch is on (set in reset); the member's is not.
+                    const arranged = await scenarios.delete_water!(call);
+                    await mirror();
+                    const refused = await call(arranged.tool, arranged.args);
+                    expect(refused.isError).toBe(true);
+                    expect(textOf(refused)).toContain(PERSON_REFUSAL);
+                    await db.settingsStore.setMemberAgentsCanDelete(
+                        "hh-1",
+                        "u2",
+                        true,
+                    );
+                    const allowed = await call(arranged.tool, arranged.args);
+                    expect(allowed.isError).toBeFalsy();
+                    expect(db.agentActions.__records()).toMatchObject([
+                        { memberId: "u2", tool: "delete_water" },
+                    ]);
+                },
+            );
+        });
 
         test("the household token records no member", async () => {
             await withClientFor(
