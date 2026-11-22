@@ -156,6 +156,12 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             when: /^docs\/fetcher\.md$/,
             tests: /^src\/fetch-safe\.test\.ts$/,
         },
+        // preview-diff.test.ts runs real git in a temporary repository and
+        // builds shot folders in temporary directories.
+        {
+            when: /^scripts\/preview-diff\.ts$/,
+            tests: /^scripts\/preview-diff\.test\.ts$/,
+        },
         // ---- scanners that read every source file
         {
             when: /^(src|scripts)\/.+\.(ts|js)$/,
