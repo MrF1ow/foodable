@@ -13,6 +13,13 @@ class FakeEl {
     children: FakeEl[] = [];
     focused = false;
     isConnected = true;
+    hidden = false;
+    disabled = false;
+    /** False for a control CSS removes from the layout (display: none). */
+    rendered = true;
+    getClientRects() {
+        return this.rendered ? [{}] : [];
+    }
     classList = { contains: (c: string) => this.classes.includes(c) };
     get tagName() {
         return this.tag.toUpperCase();
@@ -48,6 +55,7 @@ class FakeEl {
     matches(sel: string) {
         return sel.split(",").some((part) => {
             const s = part.trim();
+            if (s.startsWith("[")) return this.attrs.has(s.slice(1, -1));
             return s.startsWith(".")
                 ? this.classes.includes(s.slice(1))
                 : this.tag === s;
@@ -103,6 +111,11 @@ class FakeDialog extends FakeEl {
     }
     hasAttribute(name: string) {
         return this.attrs.has(name);
+    }
+    /** What the Tab trap collects; set by the trap tests. */
+    tabbables: FakeEl[] = [];
+    querySelectorAll() {
+        return this.tabbables;
     }
     querySelector(sel: string) {
         if (sel.includes("input")) return this.field;
@@ -1093,4 +1106,89 @@ test("closed sheets and browsers without visualViewport are left alone", () => {
     const bare = rig({}, { field: true });
     openIt(bare.dialog);
     expect(bare.dialog.style.bottom).toBeUndefined();
+});
+
+// ---- Tab trap in dialog and side sheets ----
+
+function trapRig(placement: "fd-sheet--dialog" | "fd-sheet--side" | string) {
+    const r = rig();
+    r.dialog.classes.push(placement);
+    const a = new FakeEl("button", [], r.dialog.body);
+    const b = new FakeEl("input", [], r.dialog.body);
+    const c = new FakeEl("button", [], r.dialog.body);
+    r.dialog.tabbables = [a, b, c];
+    return { ...r, a, b, c };
+}
+
+function tab(r: ReturnType<typeof trapRig>, active: FakeEl, shiftKey = false) {
+    r.doc.activeElement = active;
+    focusLog.length = 0;
+    let prevented = false;
+    r.dialog.fire("keydown", {
+        key: "Tab",
+        shiftKey,
+        defaultPrevented: false,
+        preventDefault: () => {
+            prevented = true;
+        },
+    });
+    return { prevented, focused: focusLog[focusLog.length - 1] ?? null };
+}
+
+for (const placement of ["fd-sheet--dialog", "fd-sheet--side"]) {
+    test(`${placement}: Tab from the last control wraps to the first`, () => {
+        const r = trapRig(placement);
+        const out = tab(r, r.c);
+        expect(out.prevented).toBe(true);
+        expect(out.focused).toBe(r.a);
+    });
+
+    test(`${placement}: Shift+Tab from the first control wraps to the last`, () => {
+        const r = trapRig(placement);
+        const out = tab(r, r.a, true);
+        expect(out.prevented).toBe(true);
+        expect(out.focused).toBe(r.c);
+    });
+
+    test(`${placement}: Tab inside the sheet is left to the browser`, () => {
+        const r = trapRig(placement);
+        expect(tab(r, r.a).prevented).toBe(false);
+        expect(tab(r, r.b, true).prevented).toBe(false);
+    });
+
+    test(`${placement}: a control CSS hides is not the last or first stop`, () => {
+        const r = trapRig(placement);
+        const bedEnd = new FakeEl("button", [], r.dialog.body);
+        bedEnd.rendered = false;
+        const bedStart = new FakeEl("button", [], r.dialog.body);
+        bedStart.rendered = false;
+        r.dialog.tabbables = [bedStart, r.a, r.b, r.c, bedEnd];
+        const fwd = tab(r, r.c);
+        expect(fwd.prevented).toBe(true);
+        expect(fwd.focused).toBe(r.a);
+        const back = tab(r, r.a, true);
+        expect(back.prevented).toBe(true);
+        expect(back.focused).toBe(r.c);
+    });
+
+    test(`${placement}: disabled and inert controls are skipped`, () => {
+        const r = trapRig(placement);
+        const off = new FakeEl("button", [], r.dialog.body);
+        off.disabled = true;
+        const inertHost = new FakeEl("div", [], r.dialog.body);
+        inertHost.attrs.add("inert");
+        const inside = new FakeEl("button", [], inertHost);
+        r.dialog.tabbables = [off, r.a, r.b, r.c, inside];
+        expect(tab(r, r.c).focused).toBe(r.a);
+        expect(tab(r, r.a, true).focused).toBe(r.c);
+    });
+}
+
+test("the trap leaves today's edit and confirm sheets alone", () => {
+    for (const placement of ["fd-sheet--edit", "fd-sheet--confirm"]) {
+        const r = trapRig(placement);
+        expect(tab(r, r.c).prevented).toBe(false);
+        expect(tab(r, r.a, true).prevented).toBe(false);
+        expect(focusLog.length).toBe(0);
+    }
 });

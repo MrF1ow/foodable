@@ -1046,6 +1046,202 @@ try {
 
     await goto("/");
 
+    // ---- Sheets from parts on the dev gallery: placement, open and close,
+    // Escape, focus back on the trigger. A sheet is a bottom sheet on the
+    // phone, a dialog or a side panel from 1024px up.
+    async function pressKey(
+        key: string,
+        code: string,
+        vk: number,
+        modifiers = 0,
+    ) {
+        await send("Input.dispatchKeyEvent", {
+            type: "rawKeyDown",
+            key,
+            code,
+            modifiers,
+            windowsVirtualKeyCode: vk,
+            nativeVirtualKeyCode: vk,
+        });
+        await send("Input.dispatchKeyEvent", {
+            type: "keyUp",
+            key,
+            code,
+            modifiers,
+            windowsVirtualKeyCode: vk,
+            nativeVirtualKeyCode: vk,
+        });
+        await sleep(120);
+    }
+    // A real pointer press, so the button takes focus the way it does for a
+    // person (el.click() would leave focus on the body).
+    async function mouseClick(sel: string) {
+        const pt = await ev<{ x: number; y: number } | null>(`(() => {
+            const el = document.querySelector(${JSON.stringify(sel)});
+            if (!el) return null;
+            el.scrollIntoView({ block: "center" });
+            const r = el.getBoundingClientRect();
+            return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        })()`);
+        if (!pt) throw new Error(`mouseClick: no element matches ${sel}`);
+        for (const type of ["mousePressed", "mouseReleased"]) {
+            await send("Input.dispatchMouseEvent", {
+                type,
+                x: pt.x,
+                y: pt.y,
+                button: "left",
+                clickCount: 1,
+            });
+        }
+    }
+    // Wait for the open or close animation, which a loaded machine runs slowly.
+    const settle = (id: string) =>
+        ev(
+            `Promise.all(document.getElementById(${JSON.stringify(id)}).getAnimations().map((a) => a.finished.catch(() => null)))`,
+        );
+    const sheetState = (id: string, trigger: string) =>
+        ev<{
+            open: boolean;
+            left: number;
+            right: number;
+            top: number;
+            bottom: number;
+            vw: number;
+            vh: number;
+            width: number;
+            triggerFocused: boolean;
+            inside: boolean;
+        }>(`(() => {
+            const d = document.getElementById(${JSON.stringify(id)});
+            const t = document.querySelector(${JSON.stringify(trigger)});
+            const r = d.getBoundingClientRect();
+            return {
+                open: d.open,
+                left: Math.round(r.left),
+                right: Math.round(r.right),
+                top: Math.round(r.top),
+                bottom: Math.round(r.bottom),
+                vw: window.innerWidth,
+                vh: window.innerHeight,
+                width: Math.round(r.width),
+                triggerFocused: document.activeElement === t,
+                inside: d.contains(document.activeElement),
+            };
+        })()`);
+    async function sheetCase(
+        name: string,
+        width: number,
+        id: string,
+        form: "bottom" | "dialog" | "side",
+        wide: number,
+    ) {
+        const trigger = `[commandfor="${id}"]`;
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: 900,
+            deviceScaleFactor: 1,
+            mobile: width < 1024,
+        });
+        await goto("/dev/gallery-v2");
+        await setMarker();
+        await mouseClick(trigger);
+        await sleep(100);
+        await settle(id);
+        const opened = await sheetState(id, trigger);
+        // Where it sits: bottom = full width on the bottom edge; dialog =
+        // centred at its width; side = its width on the right edge.
+        const placed =
+            opened.open &&
+            (form === "bottom"
+                ? opened.width === opened.vw && opened.bottom === opened.vh
+                : form === "dialog"
+                  ? opened.width === wide &&
+                    opened.left === Math.round((opened.vw - wide) / 2)
+                  : opened.width === wide &&
+                    opened.right === opened.vw &&
+                    opened.top === 0 &&
+                    opened.bottom === opened.vh);
+        await pressKey("Escape", "Escape", 27);
+        const afterEsc = await sheetState(id, trigger);
+        await mouseClick(trigger);
+        await sleep(100);
+        await settle(id);
+        let trapped = true;
+        if (form !== "bottom") {
+            // Tab past the last control and Shift+Tab before the first: focus
+            // stays inside the sheet, going round both ways.
+            const count = await ev<number>(
+                `document.getElementById(${JSON.stringify(id)}).querySelectorAll('a[href], button:not([disabled]), input:not([disabled])').length`,
+            );
+            for (let i = 0; i < count + 2; i++) {
+                await pressKey("Tab", "Tab", 9);
+                trapped &&= (await sheetState(id, trigger)).inside;
+            }
+            for (let i = 0; i < count + 2; i++) {
+                await pressKey("Tab", "Tab", 9, 8);
+                trapped &&= (await sheetState(id, trigger)).inside;
+            }
+        }
+        // The search sheet has no close button (the design's search header is
+        // the box alone): Escape is its way out.
+        const closer = `#${id} [command="close"]`;
+        if (
+            await ev<boolean>(
+                `!!document.querySelector(${JSON.stringify(closer)})`,
+            )
+        ) {
+            await mouseClick(closer);
+        } else {
+            await pressKey("Escape", "Escape", 27);
+        }
+        await sleep(300);
+        const afterClose = await sheetState(id, trigger);
+        record(
+            name,
+            placed &&
+                !afterEsc.open &&
+                afterEsc.triggerFocused &&
+                trapped &&
+                !afterClose.open &&
+                afterClose.triggerFocused,
+            { opened, placed, afterEsc, trapped, afterClose, ex: drain() },
+        );
+    }
+    await sheetCase(
+        "v2 gallery sheet at 390px: bottom sheet, Escape and close, focus back",
+        390,
+        "dev-gallery-dialog-sheet",
+        "bottom",
+        0,
+    );
+    await sheetCase(
+        "v2 gallery sheet at 1440px: dialog, Escape and close, focus kept and back",
+        1440,
+        "dev-gallery-dialog-sheet",
+        "dialog",
+        480,
+    );
+    await sheetCase(
+        "v2 gallery search sheet at 1440px: wide dialog, Escape and close, focus kept and back",
+        1440,
+        "dev-gallery-search-sheet",
+        "dialog",
+        600,
+    );
+    await sheetCase(
+        "v2 gallery sheet at 1440px: side panel, Escape and close, focus kept and back",
+        1440,
+        "dev-gallery-side-sheet",
+        "side",
+        480,
+    );
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 430,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+
     await control("session=app");
     await goto("/settings/account");
     await setMarker();

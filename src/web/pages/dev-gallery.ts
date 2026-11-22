@@ -24,7 +24,17 @@ import {
     scoreVerdict,
 } from "../components/v2/score-badge.js";
 import { sectionHeader as sectionHeaderV2 } from "../components/v2/section-header.js";
-import { sheet, sheetTrigger } from "../components/v2/sheet.js";
+import { raw, type Html } from "../components/v2/html.js";
+import {
+    sheet,
+    sheetActions,
+    sheetHeader,
+    sheetSection,
+    sheetTrigger,
+    type SheetActionsOptions,
+    type SheetHeaderOptions,
+    type SheetPlacement,
+} from "../components/v2/sheet.js";
 import { stepper } from "../components/v2/stepper.js";
 import {
     deltaStat,
@@ -33,6 +43,10 @@ import {
 } from "../components/v2/stat-tiles.js";
 
 const DEV_GALLERY_EDIT_SHEET = "dev-gallery-edit-sheet";
+// Live sheets from parts: the trigger of each is on the gallery, for check:nav.
+const DEV_GALLERY_DIALOG_SHEET = "dev-gallery-dialog-sheet";
+const DEV_GALLERY_SIDE_SHEET = "dev-gallery-side-sheet";
+const DEV_GALLERY_SEARCH_SHEET = "dev-gallery-search-sheet";
 
 function block(title: string, note: string, body: string): string {
     return `<section class="fd-gallery-block"><h2 class="fd-gallery-title">${title}</h2><p class="fd-gallery-note">${note}</p>${body}</section>`;
@@ -536,6 +550,385 @@ function sheetsSection(): string {
     );
 }
 
+type SheetExample = {
+    key: string;
+    name: string;
+    /** The FigCraft instance. */
+    figId: number;
+    /** From 1024px up; the phone is always a bottom sheet. */
+    placement: SheetPlacement;
+    header: SheetHeaderOptions;
+    /** Sections, built with the sheet's id. */
+    sections: (sheetId: string) => Html[];
+    actions?: SheetActionsOptions;
+    /** Today's builder for the slot contents, named in the caption. */
+    today: string;
+};
+
+const FOOD_MACROS = [
+    { label: "kcal", value: 248, dot: "calories" },
+    { label: "Protein", value: 47, unit: "g", dot: "protein" },
+    { label: "Carbs", value: 0, unit: "g", dot: "carbs" },
+    { label: "Fat", value: 5, unit: "g", dot: "fat" },
+] as const;
+
+/** The design's Amount section: the stepper and the four macro tiles. */
+const amountContent = (sheetId: string): Html =>
+    raw(
+        `${stepper({
+            name: `${sheetId}_amount`,
+            id: `${sheetId}-amount`,
+            label: "Amount",
+            value: 150,
+            min: 0,
+            unit: "g",
+        })}${statTiles(FOOD_MACROS, { label: "Per portion" })}`,
+    );
+
+/** A stand-in for a component a later step builds (Field, Quick action). */
+const slot = (text: string): Html =>
+    raw(`<div class="fd-sheet-sample__slot">${text}</div>`);
+
+const SHEET_EXAMPLES: SheetExample[] = [
+    {
+        key: "log-food",
+        name: "Sheet · Log food",
+        figId: 172872,
+        placement: "dialog",
+        header: {
+            kind: "title",
+            title: "Chicken breast, grilled",
+            subtitle: "Generic · 165 kcal per 100 g",
+        },
+        sections: (id) => [
+            sheetSection({ kind: "amount", content: amountContent(id) }),
+        ],
+        actions: {
+            kind: "single",
+            primary: { label: "Add to dinner" },
+        },
+        today: "stepper + statTiles",
+    },
+    {
+        key: "edit",
+        name: "Sheet · Edit",
+        figId: 172926,
+        placement: "side",
+        header: { kind: "title", title: "Chicken thighs", subtitle: "Fridge" },
+        sections: (id) => [
+            sheetSection({
+                kind: "fields",
+                label: "Name",
+                content: slot("Chicken thighs"),
+            }),
+            sheetSection({
+                kind: "amount",
+                label: "Amount",
+                content: amountContent(id),
+            }),
+            sheetSection({
+                kind: "choice",
+                label: "Shared with",
+                content: choiceGroup({
+                    name: `${id}_shared`,
+                    legend: "Shared with",
+                    options: [
+                        { value: "all", label: "All", selected: true },
+                        { value: "me", label: "Just me" },
+                        { value: "household", label: "Household" },
+                    ],
+                }),
+            }),
+        ],
+        actions: { kind: "pair", primary: { label: "Save" } },
+        today: "field and segmented are placeholders; stepper, statTiles, choiceGroup",
+    },
+    {
+        key: "put-away",
+        name: "Sheet · Put away",
+        figId: 173069,
+        placement: "dialog",
+        header: { kind: "title", title: "Put away", subtitle: "4 items" },
+        sections: () => [
+            sheetSection({
+                kind: "rows",
+                content: listGroup({
+                    style: "card",
+                    rows: [
+                        itemRow({
+                            title: "Account",
+                            lead: { kind: "icon", name: "cart" },
+                            trailing: { kind: "chevron" },
+                        }),
+                        itemRow({
+                            title: "Household & members",
+                            value: "3",
+                            lead: { kind: "icon", name: "cart" },
+                            trailing: { kind: "chevron" },
+                        }),
+                        itemRow({
+                            title: "Goals",
+                            value: "Recomp",
+                            lead: { kind: "icon", name: "cart" },
+                            trailing: { kind: "chevron" },
+                        }),
+                    ],
+                }),
+            }),
+        ],
+        actions: { kind: "single", primary: { label: "Put away" } },
+        today: "itemRow in a card listGroup",
+    },
+    {
+        key: "confirm",
+        name: "Sheet · Confirm",
+        figId: 173358,
+        placement: "dialog",
+        header: { kind: "title", title: "Remove Milk?" },
+        sections: () => [
+            sheetSection({
+                kind: "message",
+                text: "Removes Milk from your usuals. Its products stay in the catalog.",
+            }),
+        ],
+        actions: { kind: "destructive", danger: { label: "Remove" } },
+        today: "the message of confirmSheet",
+    },
+    {
+        key: "log-search",
+        name: "Sheet · Log · search",
+        figId: 175699,
+        placement: "dialog",
+        header: {
+            kind: "search",
+            title: "Log food",
+            search: {
+                name: "q",
+                label: "Search foods, recipes, barcodes",
+                placeholder: "Search foods, recipes, barcodes",
+                scan: { label: "Scan a barcode" },
+            },
+        },
+        sections: (id) => [
+            sheetSection({
+                kind: "chips",
+                label: "Add to",
+                content: choiceGroup({
+                    name: `${id}_meal`,
+                    legend: "Add to",
+                    options: [
+                        { value: "breakfast", label: "Breakfast" },
+                        { value: "lunch", label: "Lunch" },
+                        { value: "dinner", label: "Dinner", selected: true },
+                        { value: "snacks", label: "Snacks" },
+                    ],
+                }),
+            }),
+            sheetSection({
+                kind: "chips",
+                label: "Recent",
+                content: chipNav(
+                    [
+                        chipLink({
+                            label: "Scrambled eggs",
+                            count: 216,
+                            href: "#",
+                        }),
+                        chipLink({
+                            label: "Chicken rice bowl",
+                            count: 852,
+                            href: "#",
+                        }),
+                        chipLink({
+                            label: "Greek yogurt",
+                            count: 150,
+                            href: "#",
+                        }),
+                    ],
+                    { label: "Recent foods" },
+                ),
+            }),
+            sheetSection({
+                kind: "tiles",
+                label: "Quick",
+                content: raw(
+                    [
+                        ["scan", "Scan barcode"],
+                        ["camera", "Photo of meal"],
+                        ["bolt", "Quick calories"],
+                        ["drop", "Water +250 ml"],
+                    ]
+                        .map(
+                            ([name, label]) =>
+                                `<span class="fd-sheet-sample__tile"><span class="fd-sheet-sample__tile-icon">${icon(name as "scan")}</span>${label}</span>`,
+                        )
+                        .join(""),
+                ),
+            }),
+        ],
+        today: "choiceGroup and chipLink; the search box and Quick tiles are the sheet's own and a placeholder",
+    },
+    {
+        key: "log-results",
+        name: "Sheet · Log · results",
+        figId: 175907,
+        placement: "dialog",
+        header: {
+            kind: "search",
+            title: "Log food",
+            search: {
+                name: "q",
+                label: "Search foods, recipes, barcodes",
+                placeholder: "Search foods, recipes, barcodes",
+                value: "chick",
+                clear: { label: "Clear search" },
+            },
+        },
+        sections: () => [
+            sheetSection({
+                kind: "chips",
+                content: chipNav(
+                    [
+                        chipLink({ label: "All", href: "#", selected: true }),
+                        chipLink({ label: "Foods", href: "#" }),
+                        chipLink({ label: "Recipes", href: "#" }),
+                        chipLink({ label: "My foods", href: "#" }),
+                    ],
+                    { label: "Filter results" },
+                ),
+            }),
+            sheetSection({
+                kind: "results",
+                content: listGroup({
+                    rows: [
+                        itemRow({
+                            title: "Chicken thighs",
+                            subtitle:
+                                "In your fridge · 0.5 lb · 209 / 100 g kcal",
+                            macros: { protein: 26, carbs: 0, fat: 11 },
+                            trailing: {
+                                kind: "add",
+                                label: "Add Chicken thighs",
+                            },
+                        }),
+                        itemRow({
+                            title: "Chicken breast, grilled",
+                            subtitle: "Generic · 165 / 100 g kcal",
+                            macros: { protein: 26, carbs: 0, fat: 11 },
+                            trailing: {
+                                kind: "add",
+                                label: "Add Chicken breast, grilled",
+                            },
+                        }),
+                        itemRow({
+                            title: "Chicken caesar wrap",
+                            subtitle: "Logged 3 times · 540 kcal",
+                            macros: { protein: 26, carbs: 0, fat: 11 },
+                            trailing: {
+                                kind: "add",
+                                label: "Add Chicken caesar wrap",
+                            },
+                        }),
+                    ],
+                }),
+            }),
+        ],
+        actions: {
+            kind: "link",
+            link: { label: "Not here? Scan the barcode" },
+        },
+        today: "chipLink and itemRow (add)",
+    },
+    {
+        key: "log-empty",
+        name: "Sheet · Log · nothing found",
+        figId: 176155,
+        placement: "dialog",
+        header: {
+            kind: "search",
+            title: "Log food",
+            search: {
+                name: "q",
+                label: "Search foods, recipes, barcodes",
+                placeholder: "Search foods, recipes, barcodes",
+                value: "chiken",
+                clear: { label: "Clear search" },
+            },
+        },
+        sections: () => [
+            sheetSection({
+                kind: "empty",
+                text: "Nothing called \u201cchiken\u201d",
+            }),
+        ],
+        actions: { kind: "link", link: { label: "Scan the barcode" } },
+        today: "the empty message of the log sheet",
+    },
+];
+
+/** One example as an inert sample: the same parts as a live sheet, in the page. */
+function sheetSample(example: SheetExample): string {
+    const id = `sample-${example.key}`;
+    const classes = [
+        "fd-sheet-sample",
+        `fd-sheet-sample--${example.placement}`,
+        example.header.kind === "search" && "fd-sheet-sample--search",
+    ]
+        .filter(Boolean)
+        .join(" ");
+    const actions = example.actions
+        ? `\n${sheetActions({ ...example.actions, sheetId: id })}`
+        : "";
+    return `<div>${caption(`${example.name} ${example.figId} · phone: bottom; 1024px up: ${example.placement} · today: ${example.today}`)}<div class="${classes}" inert><div class="fd-sheet-panel">${sheetHeader({ ...example.header, sheetId: id })}<div class="fd-sheet-body">${example.sections(id).join("\n")}</div>${actions}</div></div></div>`;
+}
+
+/** A live sheet from the same parts, opened from a trigger. */
+function liveSheet(id: string, example: SheetExample): string {
+    return sheet({
+        id,
+        placement: example.placement,
+        header: example.header,
+        body: raw(example.sections(id).join("\n")),
+        actions: example.actions,
+    });
+}
+
+function sheetPartsSection(): string {
+    const byKey = (key: string) =>
+        SHEET_EXAMPLES.find((e) => e.key === key) as SheetExample;
+    const live = [
+        {
+            id: DEV_GALLERY_DIALOG_SHEET,
+            example: byKey("log-food"),
+            label: "Open Log food (dialog)",
+        },
+        {
+            id: DEV_GALLERY_SIDE_SHEET,
+            example: byKey("edit"),
+            label: "Open Edit (side)",
+        },
+        {
+            id: DEV_GALLERY_SEARCH_SHEET,
+            example: byKey("log-search"),
+            label: "Open Log search (dialog)",
+        },
+    ];
+    const triggers = live
+        .map((l) =>
+            sheetTrigger({
+                target: l.id,
+                label: l.label,
+                className: "fd-btn",
+            }),
+        )
+        .join("");
+    return block(
+        "Sheet · header, section and actions",
+        "Sheet 591786 with Sheet header 175498, Sheet section 172791 and Sheet actions 172816: the seven examples (172872 … 176155) as inert samples, then live sheets to open. The phone is always a bottom sheet; from 1024px a quick task is a dialog and an edit a side panel.",
+        `<div class="fd-gallery-row">${triggers}</div>${live.map((l) => liveSheet(l.id, l.example)).join("")}<div class="fd-sheet-samples">${SHEET_EXAMPLES.map(sheetSample).join("")}</div>`,
+    );
+}
+
 function buttonSection(): string {
     const row = (...items: string[]) =>
         `<div class="fd-gallery-row">${items.join("")}</div>`;
@@ -955,6 +1348,7 @@ function devGalleryBody(): string {
         ...SECTIONS.map((s) => s.render()),
         dotsSection(),
         sheetsSection(),
+        sheetPartsSection(),
         buttonSection(),
         itemRowExamplesSection(),
         itemRowOptionsSection(),
