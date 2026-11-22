@@ -20,6 +20,7 @@ export type SettingsV2Section =
     | "nutrients"
     | "goals"
     | "score"
+    | "notifications"
     | "saved"
     | "ai"
     | "export";
@@ -29,6 +30,7 @@ type MenuIcon =
     | "users"
     | "target"
     | "gauge"
+    | "bell"
     | "bookmark"
     | "sun"
     | "download"
@@ -50,6 +52,7 @@ const MENU_ICON_PATHS: Record<MenuIcon, string> = {
     users: '<path d="M8 13a3 3 0 1 0-3-3"/><path d="M16 12a3 3 0 1 0-3-3"/><path d="M4 19v-1.2a4 4 0 0 1 4-4"/><path d="M12 19v-1.2a4 4 0 0 1 4-4"/><path d="M20 19v-1.2a4 4 0 0 0-3.15-3.88"/>',
     target: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1.25" fill="currentColor" stroke="none"/>',
     gauge: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3.5"/>',
+    bell: '<path d="M6 17V11a6 6 0 0 1 12 0v6l1.5 2h-15Z"/><path d="M10 21h4"/>',
     bookmark: '<path d="M8 5h8v14l-4-3-4 3V5Z"/>',
     sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>',
     download:
@@ -111,6 +114,12 @@ const SETTINGS_MENU_PREFS: readonly MenuRow[] = [
         label: "Product score",
         href: "/settings/product-score",
         icon: "gauge",
+    },
+    {
+        id: "notifications",
+        label: "Notifications",
+        href: APP_PATHS.settingsNotifications,
+        icon: "bell",
     },
 ];
 
@@ -214,6 +223,13 @@ const SETTINGS_DESKTOP_NAV: readonly DesktopNavRow[] = [
         href: APP_PATHS.settingsUnits,
         icon: "ruler",
         covers: ["units", "nutrients"],
+    },
+    {
+        id: "notifications",
+        label: "Notifications",
+        href: APP_PATHS.settingsNotifications,
+        icon: "bell",
+        covers: ["notifications"],
     },
     {
         id: "ai",

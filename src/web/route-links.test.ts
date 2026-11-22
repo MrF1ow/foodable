@@ -93,7 +93,6 @@ describe("rendered pages have no legacy links", () => {
                     lastRunOn: null,
                 },
                 unverifiedRecipeExpiryDays: null,
-                dismissedCount: 0,
                 isOwner: true,
                 canManage: true,
                 viewerUserId: ME.userId,
@@ -132,7 +131,6 @@ describe("rendered pages have no legacy links", () => {
             "needs attention",
             renderNeedsAttentionPage({
                 chrome,
-                showDismissed: false,
                 result: {
                     notices: [],
                     dismissals: [],

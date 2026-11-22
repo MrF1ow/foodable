@@ -28,7 +28,7 @@
 //    field is left again.
 //  - `data-fd-autosave="form"` marks a form of several controls with no single
 //    input to watch (Settings › Product score: preset, four sliders; or a
-//    one-click switch). Its value is the whole form's controls, taken after the
+//    one-click switch, or a row's switch form in a list). Its value is the whole form's controls, taken after the
 //    page's own `change` handlers ran, and it is saved when any of them
 //    changes. A click on a switch form is an intent, so it is queued as is.
 //    Its morph is skipped while the form holds an unsaved edit, and a refused
@@ -103,12 +103,15 @@ function wholeChanged(form) {
 }
 
 // The field a form saves: Goals' hidden `field`, else the input's own name; a
-// whole form is its action plus its `intent`.
+// whole form is its action plus its `intent` (or, for a list of switches that
+// share one action such as Settings › Notifications, its `kind`).
 function nameOf(form) {
     const field = form.querySelector('input[name="field"]');
     if (field && field.value) return field.value;
     if (isWhole(form)) {
-        const intent = form.querySelector('input[name="intent"]');
+        const intent = form.querySelector(
+            'input[name="intent"], input[name="kind"]',
+        );
         return `${form.getAttribute("action") || ""}|${intent ? intent.value : ""}`;
     }
     const input = inputOf(form);

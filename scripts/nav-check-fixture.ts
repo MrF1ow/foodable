@@ -44,6 +44,7 @@ import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-accoun
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderNotificationsPage } from "../src/web/pages/v2/notifications.js";
+import { renderSettingsNotificationsV2Page } from "../src/web/pages/v2/settings-notifications.js";
 import type { NotificationRow } from "../src/domain/notifications.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
@@ -238,7 +239,6 @@ function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
             lastRunOn: null,
         },
         unverifiedRecipeExpiryDays: null,
-        dismissedCount: 0,
         isOwner: true,
         canManage: true,
         viewerUserId: ME.userId,
@@ -307,6 +307,10 @@ async function pages(
         "dev-gallery-v2": renderDevGalleryV2Page(chrome as never),
         household: householdPage(chrome),
         notifications: notificationsPage(chrome),
+        "settings-notifications": renderSettingsNotificationsV2Page({
+            chrome: chrome as never,
+            prefs: [],
+        }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };
@@ -347,6 +351,7 @@ const ROUTE_BASE: Record<string, string> = {
     "/dev/gallery-v2": "dev-gallery-v2",
     "/settings/household": "household",
     "/notifications": "notifications",
+    "/settings/notifications": "settings-notifications",
     "/create-household": "create-household",
 };
 

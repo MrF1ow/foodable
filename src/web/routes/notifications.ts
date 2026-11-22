@@ -1,6 +1,7 @@
 /**
  * The Notifications inbox and what it does to a notification: dismiss, snooze,
- * and the post that turns a kind off. These only adapt: the rules (who may dismiss for
+ * and Settings › Notifications, the page and the post that turn a kind on or
+ * off (from the inbox's menu or from the page itself). These only adapt: the rules (who may dismiss for
  * everyone, which kinds never move) are phase 2's `dismiss`, `snooze` and
  * `setPref`, which ask `can()`. A success answers 303 back to the inbox with no
  * toast; a refusal renders the inbox in place with the reason and a 4xx.
@@ -37,11 +38,14 @@ import { formText } from "../form.js";
 import { requireMember, siteMember } from "../middleware.js";
 import {
     inboxHref,
-    NOTIFICATIONS_SETTINGS_ACTION,
     parseInboxBucket,
     renderNotificationsPage,
     type InboxBucket,
 } from "../pages/v2/notifications.js";
+import {
+    NOTIFICATIONS_SETTINGS_PATH,
+    renderSettingsNotificationsV2Page,
+} from "../pages/v2/settings-notifications.js";
 
 /** What a page load works out before it reads the inbox: the stored rows
  * brought up to date, and the zone "today" is told in. */
@@ -231,12 +235,38 @@ export function createNotificationsRoutes(
         );
     }
 
-    /** Runs one action: 303 back to the inbox, or the inbox in place with the
-     * reason when the domain refuses. */
+    /** Settings › Notifications: the viewer's own choice for each kind. */
+    async function renderSettings(
+        c: Context,
+        viewer: HouseholdMember,
+        outcome: { error?: string; status?: RefusalStatus } = {},
+    ) {
+        const prepared = await deps.prepare(viewer);
+        const [prefs, chrome] = await Promise.all([
+            deps.notifications.store.listPrefs(
+                viewer.householdId,
+                viewer.userId,
+            ),
+            deps.chrome(viewer, prepared),
+        ]);
+        return c.html(
+            renderSettingsNotificationsV2Page({
+                chrome,
+                prefs,
+                error: outcome.error,
+            }),
+            outcome.status ?? 200,
+        );
+    }
+
+    /** Runs one action: 303 back to where it came from (the inbox, or
+     * Settings › Notifications when `to` says so), or that page in place with
+     * the reason when the domain refuses. */
     async function act(
         c: Context,
         run: (viewer: HouseholdMember, now: Date) => Promise<void>,
         body: Record<string, string | File | (string | File)[]>,
+        to: "inbox" | "settings" = "inbox",
     ) {
         const viewer = siteMember(c);
         const bucket = parseInboxBucket(formText(body, "bucket"));
@@ -244,15 +274,21 @@ export function createNotificationsRoutes(
             await run(viewer, deps.now());
         } catch (err) {
             if (err instanceof NotificationActionError) {
-                return renderInbox(c, viewer, bucket, {
+                const outcome = {
                     error: err.reason,
                     status: statusOf(err),
-                });
+                };
+                return to === "settings"
+                    ? renderSettings(c, viewer, outcome)
+                    : renderInbox(c, viewer, bucket, outcome);
             }
             throw err;
         }
         // toast: none
-        return c.redirect(inboxHref(bucket), 303);
+        return c.redirect(
+            to === "settings" ? NOTIFICATIONS_SETTINGS_PATH : inboxHref(bucket),
+            303,
+        );
     }
 
     router.get("/notifications", deps.auth, (c) =>
@@ -304,10 +340,20 @@ export function createNotificationsRoutes(
         );
     });
 
-    router.post(NOTIFICATIONS_SETTINGS_ACTION, deps.auth, async (c) => {
+    router.get(NOTIFICATIONS_SETTINGS_PATH, deps.auth, (c) =>
+        renderSettings(c, siteMember(c)),
+    );
+
+    router.post(NOTIFICATIONS_SETTINGS_PATH, deps.auth, async (c) => {
         const body = await c.req.parseBody();
         const kind = formText(body, "kind");
         const enabled = formText(body, "enabled");
+        // Only the two pages that post here may be returned to: any other
+        // value goes back to the inbox, so this is never an open redirect.
+        const to =
+            formText(body, "return") === NOTIFICATIONS_SETTINGS_PATH
+                ? "settings"
+                : "inbox";
         return act(
             c,
             async (viewer, now) => {
@@ -340,6 +386,7 @@ export function createNotificationsRoutes(
                 });
             },
             body,
+            to,
         );
     });
 

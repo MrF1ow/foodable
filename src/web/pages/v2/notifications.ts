@@ -2,7 +2,7 @@
  * The Notifications inbox (FigCraft Screens › Notifications and Desktop ›
  * Notifications): a Detail bar, All / Just me / Household, then TODAY, EARLIER
  * and SNOOZED lists of Item rows, each with a ⋯ menu. A member's menu offers
- * Open, the two Snoozes and Dismiss; an admin or owner sees Dismiss
+ * Open, the two Snoozes, Dismiss and Turn off "<kind>"; an admin or owner sees Dismiss
  * for me and Dismiss for everyone on a household row; an Allergens row offers
  * only Open, since it cannot be dismissed or snoozed.
  *
@@ -39,7 +39,7 @@ import { renderAppShell } from "../../shell.js";
 export type InboxBucket = "all" | "personal" | "household";
 
 export const NOTIFICATIONS_PATH = APP_PATHS.notifications;
-export const NOTIFICATIONS_SETTINGS_ACTION = "/settings/notifications";
+export const NOTIFICATIONS_SETTINGS_ACTION = APP_PATHS.settingsNotifications;
 
 export function parseInboxBucket(value: string | undefined): InboxBucket {
     return value === "personal" || value === "household" ? value : "all";
@@ -370,6 +370,12 @@ export function notificationMenuItems(
         snooze("tomorrow", COPY.snoozeTomorrow),
         snooze("week", COPY.snoozeWeek),
         ...dismissals,
+        {
+            kind: "post",
+            label: COPY.turnOff(NOTIFICATION_KIND_LABELS[row.kind]),
+            action: NOTIFICATIONS_SETTINGS_ACTION,
+            fields: { kind: row.kind, enabled: "false", ...back },
+        },
     ];
 }
 

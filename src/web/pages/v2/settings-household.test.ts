@@ -65,7 +65,6 @@ function baseView(
             time: "09:00",
         },
         unverifiedRecipeExpiryDays: 30,
-        dismissedCount: 2,
         socialReaders: { tiktok: true, facebook: false },
         isOwner: true,
         canManage: true,
@@ -270,7 +269,6 @@ describe("settings household v2", () => {
         "Restock day",
         "Recipe link readers",
         "Unverified recipes",
-        "Dismissed notices",
         "Rotate join token",
     ];
 
@@ -283,7 +281,7 @@ describe("settings household v2", () => {
         ].map((m) => m[1]!);
     }
 
-    test("the Household group shows the nine rows in the design's order with their values", () => {
+    test("the Household group shows the eight rows in the design's order with their values", () => {
         const html = renderSettingsHouseholdV2Page(baseView());
         expect(groupRows(html)).toEqual(GROUP_ROWS);
         expect(html).toContain("America/Denver");
@@ -293,7 +291,7 @@ describe("settings household v2", () => {
         expect(html).toContain('href="/settings/household/stores"');
         expect(html).toContain('href="/settings/household/restock"');
         expect(html).toContain('href="/settings/household/readers"');
-        expect(html).toContain('href="/settings/household/dismissed"');
+        expect(html).not.toContain("/settings/household/dismissed");
     });
 
     test("the store list, plurals block and readers section are gone", () => {
@@ -305,7 +303,7 @@ describe("settings household v2", () => {
         expect(html).not.toContain("Treat singular and plural");
         expect(html).not.toContain(">Social post readers</");
         expect(html).not.toContain("/settings/household/social-readers");
-        expect(html).not.toContain(">Dismissed notices</h2>");
+        expect(html).not.toContain("Dismissed notices");
         // Possible duplicates moved to Saved foods & recipes.
         expect(html).not.toContain('id="fd-dup-section"');
         expect(html).not.toContain("dup-merge");

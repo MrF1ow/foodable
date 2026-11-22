@@ -203,3 +203,9 @@ export const NOTIFICATION_AGO = {
     yesterday: "yesterday",
     days: (n: number): string => `${n} days ago`,
 } as const;
+
+export const NOTIFICATIONS_SETTINGS = {
+    title: "Notifications",
+    baseLabel: "Base · on unless you turn them off",
+    extrasLabel: "Extras · off unless you turn them on",
+} as const;

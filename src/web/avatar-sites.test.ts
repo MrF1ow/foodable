@@ -165,7 +165,6 @@ describe("Household member rows", () => {
                 lastRunOn: null,
             },
             unverifiedRecipeExpiryDays: null,
-            dismissedCount: 0,
             isOwner: true,
             canManage: true,
             viewerUserId: ME,

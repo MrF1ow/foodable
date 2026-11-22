@@ -5,6 +5,7 @@ export const APP_PATHS = {
     recipes: "/recipes",
     settings: "/settings",
     settingsHelp: "/settings/help",
+    settingsNotifications: "/settings/notifications",
     needsAttention: "/needs-attention",
     notifications: "/notifications",
     createHousehold: "/create-household",
@@ -22,6 +23,8 @@ export const APP_PATHS = {
 
 /** Longest match first — segment-boundary prefixes only. */
 export const LEGACY_PATH_MOVES: readonly { from: string; to: string }[] = [
+    // The Dismissed notices list is gone: dismissing a notice has nothing to show.
+    { from: "/settings/household/dismissed", to: APP_PATHS.settingsHousehold },
     { from: "/household/usual-products", to: APP_PATHS.kitchenUsuals },
     { from: "/settings/foods", to: APP_PATHS.settingsHouseholdItems },
     { from: "/fridge", to: APP_PATHS.kitchenFridge },
