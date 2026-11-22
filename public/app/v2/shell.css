@@ -536,3 +536,30 @@ body.fd-body .toast-region {
         bottom: calc(24px + env(safe-area-inset-bottom, 0px));
     }
 }
+
+/* scale-guard: checked */
+
+/* The design's Sidebar (src/web/components/v2/sidebar.ts) is the .fd-sidebar
+ * block above with its own parts inside (layout.css). These two modifiers are
+ * all it changes; the live sidebar, which never carries them, renders as
+ * before. --design is a column at every width (the live one is hidden below
+ * 1024, and its column, width and border sit in the media rule), 248 wide at
+ * most and never wider than its box, with the design's padding; --inline lets
+ * it sit in the page flow, as tall as its box, instead of sticking to the
+ * window. */
+.fd-sidebar--design {
+    --fd-sidebar-w: 248px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+    width: min(var(--fd-sidebar-w), 100%);
+    padding: var(--space-2xl) var(--space-lg);
+    border-right: 1px solid var(--line);
+    font-family: var(--font-body);
+}
+.fd-sidebar--inline {
+    position: relative;
+    top: auto;
+    height: 100%;
+}

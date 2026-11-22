@@ -1,0 +1,272 @@
+/* The desktop shell components (src/web/components/v2/): Keyboard hint, Side
+ * link, the Sidebar's parts, Top bar, Selection bar and Page layout. Sizes
+ * come from the scale in tokens.css; the fixed widths are the --fd-* locals at
+ * the top of each component. The Sidebar block itself is the live .fd-sidebar
+ * in shell.css; its two modifiers are the marked part at the end of that
+ * file. */
+
+/* ---- Keyboard hint ---- */
+
+.fd-keyboard-hint {
+    flex: none;
+    padding: var(--space-2xs) var(--space-sm);
+    border-radius: var(--radius-xs);
+    background: var(--surface-raised);
+    color: var(--text-tertiary);
+    font-family: var(--font-body);
+    font-size: var(--text-micro-size);
+    font-weight: 600;
+    line-height: var(--text-micro-line);
+}
+
+/* ---- Side link ---- */
+
+.fd-side-link {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    min-width: 0;
+    padding: 0 var(--space-md);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-weight: 400;
+    text-decoration: none;
+}
+.fd-side-link--main {
+    height: var(--control-md-height);
+    font-size: var(--control-md-text);
+    line-height: var(--text-label-line);
+}
+.fd-side-link--sub {
+    height: var(--control-sm-height);
+    gap: var(--space-xl);
+    font-size: var(--text-label-size);
+    line-height: var(--text-label-line);
+}
+.fd-side-link .fd-icon,
+.fd-sidebar__account .fd-icon {
+    flex: none;
+    width: var(--control-md-icon);
+    height: var(--control-md-icon);
+}
+.fd-side-link__indent {
+    flex: none;
+    width: var(--control-md-icon);
+    height: 1px;
+}
+.fd-side-link__label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+/* The current page is told by type: brighter, Medium, no background. */
+.fd-side-link--current {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+.fd-side-link:focus-visible,
+.fd-sidebar__household:focus-visible,
+.fd-sidebar__account:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}
+@media (hover: hover) and (pointer: fine) {
+    .fd-side-link:not(.fd-side-link--current):hover {
+        background: var(--surface-raised);
+        color: var(--text-primary);
+    }
+}
+
+/* ---- Sidebar parts ---- */
+
+.fd-sidebar__household,
+.fd-sidebar__account {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    color: inherit;
+    text-decoration: none;
+}
+.fd-sidebar__household {
+    padding: 0 var(--space-sm) var(--space-2xl);
+}
+.fd-sidebar__account {
+    padding: var(--space-md) var(--space-sm) 0;
+    border-top: 1px solid var(--line);
+    color: var(--text-tertiary);
+}
+.fd-sidebar__text {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+}
+.fd-sidebar__title {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: var(--text-body-size);
+    font-weight: 600;
+    line-height: 20px;
+}
+.fd-sidebar__account .fd-sidebar__title {
+    font-weight: 500;
+}
+.fd-sidebar__meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: var(--text-caption-size);
+    font-weight: 400;
+    line-height: var(--text-caption-line);
+}
+.fd-sidebar__nav {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2xs);
+}
+/* Settings sits at the foot, above the account row. */
+.fd-sidebar__settings {
+    margin-top: auto;
+}
+
+/* ---- Top bar ---- */
+
+.fd-top-bar {
+    --fd-top-bar-search-w: 360px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-lg) var(--space-3xl);
+    background: var(--surface-bg);
+    font-family: var(--font-body);
+}
+.fd-top-bar__search {
+    flex: 0 1 var(--fd-top-bar-search-w);
+    min-width: 0;
+}
+.fd-top-bar__spacer {
+    flex: 1 1 0;
+}
+
+/* ---- Selection bar ---- */
+
+.fd-selection-bar {
+    --fd-selection-bar-floating-w: 350px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-md) var(--space-md) var(--space-lg);
+    background: var(--surface-panel);
+    font-family: var(--font-body);
+}
+.fd-selection-bar--floating {
+    width: min(var(--fd-selection-bar-floating-w), 100%);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 var(--space-md) var(--space-3xl) var(--overlay-scrim);
+}
+.fd-selection-bar--inline {
+    width: 100%;
+    border-radius: var(--radius-md);
+}
+.fd-selection-bar__count {
+    flex: 1;
+    min-width: 0;
+    color: var(--text-primary);
+    font-size: var(--text-label-size);
+    font-weight: 500;
+    line-height: var(--text-label-line);
+}
+.fd-selection-bar__actions {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+/* ---- Page layout ---- */
+
+.fd-page-layout {
+    --fd-page-layout-single-w: 720px;
+    --fd-page-layout-narrow-w: 480px;
+    --fd-page-layout-menu-w: 240px;
+    --fd-page-layout-settings-w: 640px;
+    --fd-page-layout-column-min: 280px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+}
+.fd-page-layout__box {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3xl);
+    width: 100%;
+    min-width: 0;
+}
+.fd-page-layout--single > .fd-page-layout__box {
+    max-width: var(--fd-page-layout-single-w);
+}
+.fd-page-layout--narrow > .fd-page-layout__box {
+    max-width: var(--fd-page-layout-narrow-w);
+}
+.fd-page-layout--settings > .fd-page-layout__box {
+    max-width: calc(
+        var(--fd-page-layout-menu-w) + var(--space-3xl) +
+            var(--fd-page-layout-settings-w)
+    );
+}
+.fd-page-layout__header {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    min-width: 0;
+}
+.fd-page-layout__content,
+.fd-page-layout__column,
+.fd-page-layout__menu {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+.fd-page-layout__content,
+.fd-page-layout__column {
+    gap: var(--space-2xl);
+}
+.fd-page-layout__menu {
+    gap: var(--space-2xs);
+}
+.fd-page-layout__columns {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: var(--space-3xl);
+}
+.fd-page-layout__column {
+    flex: 1 1 0;
+    min-width: min(100%, var(--fd-page-layout-column-min));
+}
+.fd-page-layout--settings .fd-page-layout__menu {
+    flex: 0 0 min(var(--fd-page-layout-menu-w), 100%);
+}
+.fd-page-layout--settings .fd-page-layout__content {
+    flex: 1 1 var(--fd-page-layout-settings-w);
+    max-width: var(--fd-page-layout-settings-w);
+}

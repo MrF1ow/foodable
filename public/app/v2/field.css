@@ -69,6 +69,10 @@
     flex: none;
     color: var(--text-secondary);
 }
+.fd-field__icon .fd-icon {
+    width: var(--control-lg-icon);
+    height: var(--control-lg-icon);
+}
 .fd-field__box:focus-within {
     outline: var(--space-2xs) solid var(--accent-text);
     outline-offset: var(--space-2xs);
