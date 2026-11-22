@@ -663,7 +663,7 @@
 .fd-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--fd-s-6);
+    gap: var(--space-sm);
 }
 
 .fd-chip:not(.fd-chip--choice),
