@@ -58,7 +58,7 @@ export function navBar(opts: NavBarOptions): Html {
     const tab = (t: (typeof NAV_BAR_TABS)[number]) =>
         `<a class="fd-tab" href="${esc(t.href)}"${t.id === opts.active ? ' aria-current="page"' : ""} aria-label="${esc(t.label)}">${fdIcon(t.icon)}<span class="fd-tab-dot" aria-hidden="true"></span></a>`;
     const [today, kitchen, recipes, trends] = NAV_BAR_TABS;
-    const log = `<a class="fd-log" href="${safeHref(opts.logHref ?? DEFAULT_LOG_HREF)}" data-fd-open-sheet="${NAV_LOG_SHEET_ID}" aria-label="Search and log food" title="Search and log food">${fdIcon("search", 2)}</a>`;
+    const log = `<a class="fd-log" href="${safeHref(opts.logHref ?? DEFAULT_LOG_HREF)}" data-fd-open-sheet="${NAV_LOG_SHEET_ID}" aria-label="Search" title="Search">${fdIcon("search", 2)}</a>`;
     return raw(
         `<nav class="fd-tabs fd-nav-bar${opts.inline ? " fd-tabs--inline" : ""}" aria-label="Main tabs">${tab(today!)}${tab(kitchen!)}${log}${tab(recipes!)}${tab(trends!)}</nav>`,
     );

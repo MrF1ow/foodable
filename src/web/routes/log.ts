@@ -6,6 +6,7 @@ import { liveFridgeStore } from "../../db/fridge.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { recentLogs } from "../../db/meals.js";
 import {
+    getMealById,
     getMealsByDate,
     insertMeal,
     searchMeals,
@@ -363,6 +364,7 @@ export async function buildLogSearchSources(input: {
             recipe_id: row.id,
             name: row.name,
             source: "recipe",
+            verification: row.verification,
             kcal_per_portion: macros?.calories ?? null,
             protein_g_per_portion: macros?.protein_g ?? null,
             carbs_g_per_portion: macros?.carbs_g ?? null,
@@ -476,6 +478,39 @@ logRoutes.get("/api/log/search", requireMember, async (c) => {
 
     const merged = mergeLogResults(sources, q);
     return c.json(trimSources(merged, limit));
+});
+
+const MEAL_ID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * One past meal as a search row, for `/?log=meal:<id>`: the log form opens
+ * prefilled from it exactly as it would from a history result. The id must be
+ * a uuid (the column is uuid-typed, so anything else would fail the query)
+ * and the meal must be the viewer's own.
+ */
+logRoutes.get("/api/log/meal/:id", requireMember, async (c) => {
+    const member = siteMember(c);
+    const id = c.req.param("id");
+    if (!MEAL_ID_RE.test(id)) return c.json({ error: "not_found" }, 404);
+    const meal = await getMealById(member.userId, id);
+    if (!meal) return c.json({ error: "not_found" }, 404);
+    const { weights } = await scoreSettingsForViewer(
+        liveScoreSettingsStore(),
+        member.householdId,
+        member.userId,
+    );
+    const listed = await liveFoodsStore().listFoods(member.householdId);
+    const foodsById = new Map(listed.map((row) => [row.id, row]));
+    const item = await enrichHistoryItem(
+        historyItemFromMeal(meal, foodsById, weights),
+        member.householdId,
+        member.userId,
+        foodsById,
+    );
+    return c.json(
+        mergeLogResults({ history: [item] }, "").groups[0]!.items[0]!,
+    );
 });
 
 export function logSearchGroupKinds(

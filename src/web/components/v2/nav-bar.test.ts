@@ -10,7 +10,7 @@ function liveMarkup(active: string): string {
     const tab = (t: (typeof FD_TABS)[number]) =>
         `<a class="fd-tab" href="${t.href}"${t.id === active ? ' aria-current="page"' : ""} aria-label="${t.label}">${fdIcon(t.icon)}<span class="fd-tab-dot" aria-hidden="true"></span></a>`;
     const [today, kitchen, recipes, trends] = FD_TABS;
-    const log = `<a class="fd-log" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Search and log food" title="Search and log food">${fdIcon("search", 2)}</a>`;
+    const log = `<a class="fd-log" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Search" title="Search">${fdIcon("search", 2)}</a>`;
     return `<nav class="fd-tabs" aria-label="Main tabs">${tab(today!)}${tab(kitchen!)}${log}${tab(recipes!)}${tab(trends!)}</nav>`;
 }
 

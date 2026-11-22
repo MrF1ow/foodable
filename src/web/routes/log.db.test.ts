@@ -314,3 +314,85 @@ describeDb(pgAvailable !== null, "log copy-yesterday db", (getCtx) => {
         expect(copied?.calories).toBe(fresh.totals.calories);
     });
 });
+
+describeDb(pgAvailable !== null, "log search recipes db", (getCtx) => {
+    let userId: string;
+    let householdId: string;
+
+    beforeEach(async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        ({ userId, householdId } = await seedHousehold(sql));
+    });
+
+    afterEach(() => {
+        setSqlForTests(null);
+        resetFlagsForTests();
+    });
+
+    const hono = new Hono();
+    hono.route("/", logRoutes);
+
+    async function insertRecipe(
+        name: string,
+        verification: "verified" | "unverified",
+    ): Promise<string> {
+        const id = crypto.randomUUID();
+        await getCtx().sql`
+            insert into public.recipes (id, household_id, creator_id, name, yield_portions, verification)
+            values (${id}, ${householdId}, ${userId}, ${name}, ${2}, ${verification})
+        `;
+        return id;
+    }
+
+    async function searchRecipes(q: string) {
+        const res = await hono.request(`http://test/api/log/search?q=${q}`, {
+            headers: { cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}` },
+        });
+        const body = (await res.json()) as {
+            groups: {
+                kind: string;
+                items: { name: string; open: string; loggable: boolean }[];
+            }[];
+        };
+        return body.groups.find((g) => g.kind === "recipe")?.items ?? [];
+    }
+
+    test("an unverified recipe is listed but not loggable, and logging it is refused", async () => {
+        const recipeId = await insertRecipe("Zorbo stew", "unverified");
+        const rows = await searchRecipes("zorbo");
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.open).toBe(`/recipes/${recipeId}`);
+        expect(rows[0]!.loggable).toBe(false);
+
+        const post = await hono.request("http://test/log", {
+            method: "POST",
+            headers: {
+                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+                "content-type": "application/x-www-form-urlencoded",
+                origin: "http://test",
+            },
+            body: new URLSearchParams({
+                recipe_id: recipeId,
+                amount: "1",
+                unit: "portion",
+                meal_type: "dinner",
+                display_name: "Zorbo stew",
+                return_to: "/",
+            }),
+        });
+        expect(post.status).toBe(400);
+        const [{ n }] = await getCtx().sql`
+            select count(*)::int as n from public.meals where user_id = ${userId}
+        `;
+        expect(n).toBe(0);
+    });
+
+    test("a verified recipe is loggable", async () => {
+        await insertRecipe("Zorbo soup", "verified");
+        const rows = await searchRecipes("zorbo");
+        expect(rows).toHaveLength(1);
+        expect(rows[0]!.loggable).toBe(true);
+    });
+});

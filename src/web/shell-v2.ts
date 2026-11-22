@@ -217,7 +217,7 @@ function phoneTabs(chrome: AppChrome, active: V2NavId): string {
         return `<a class="fd-tab" href="${escapeHtml(t.href)}"${current} aria-label="${ariaLabel(t.label, attention)}">${fdIcon(t.icon)}<span class="${dotClass("fd-tab-dot", attention)}" aria-hidden="true"></span></a>`;
     };
     const [today, kitchen, recipes, trends] = FD_TABS;
-    const log = `<a class="fd-log" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Search and log food" title="Search and log food">${fdIcon("search", 2)}</a>`;
+    const log = `<a class="fd-log" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Search" title="Search">${fdIcon("search", 2)}</a>`;
     return `<nav class="fd-tabs" aria-label="Main tabs">${tab(today!)}${tab(kitchen!)}${log}${tab(recipes!)}${tab(trends!)}</nav>`;
 }
 

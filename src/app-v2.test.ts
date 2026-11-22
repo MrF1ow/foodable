@@ -284,7 +284,10 @@ describe("/app-v2.js", () => {
         // +~7.5 KB Segmented and chip groups: arrow-key radio selection, toggles, and a change event, on the new markup only. Each script keeps its own roving-focus helper rather than a shared one, so the two stay independent.
         // +~0.8 KB Segmented and chip groups: a named Segmented is native radios, so its script only adds a change detail; a modifier on an arrow key is left to the browser.
         // +~0.3 KB Select mode: Escape that an open menu took leaves the selection on.
-        expect(js.length).toBeLessThan(192_700);
+        // +~1.1 KB Log link: `?log=meal:<id>` opens the log form prefilled from that past meal.
+        // +~0.6 KB Log search: a past meal with several items has an Add button that logs it again whole.
+        // +~1.2 KB Log link: a past meal with no single food shows its own row first in the search sheet, never twice.
+        expect(js.length).toBeLessThan(196_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
