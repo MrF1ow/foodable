@@ -1633,6 +1633,20 @@ function tabsSection(): string {
                 "Tabs without the trailing slot",
                 tabs({ label: "Kitchen", tabs: kitchen.slice(0, 2) }),
             ),
+            stage(
+                "Tabs in a plain wrapper that is a grid item: the 1fr columns of a 330 px grid stay 159 px wide each and the tabs scroll",
+                `<div data-gallery-case="tabs-in-grid-item" style="display:grid;grid-template-columns:1fr 1fr;gap:var(--space-md);width:330px"><div style="border:1px dashed var(--line);background:var(--surface-raised)">${tabs(
+                    {
+                        label: "Kitchen",
+                        tabs: [
+                            ...kitchen,
+                            { label: "Recipes", href: "#" },
+                            { label: "Stores", href: "#" },
+                        ],
+                    },
+                )}</div><div style="border:1px dashed var(--line)">Next column</div></div>`,
+                false,
+            ),
         ].join(""),
     );
 }
