@@ -771,3 +771,14 @@ test("touch-action none covers the grabber and title row, not the search box", (
     );
     expect(grip?.[1]).toContain("touch-action: none");
 });
+
+test("the results section spaces its list rows 12px apart", () => {
+    const rule = stripped.match(
+        /\.fd-sheet__section--results \.fd-list-group \{([^}]*)\}/,
+    );
+    expect(rule?.[1]).toContain("display: flex");
+    expect(rule?.[1]).toContain("flex-direction: column");
+    expect(rule?.[1]).toContain("gap: var(--space-md)");
+    expect(tokens).toMatch(/--space-md:\s*12px/);
+    expect(stripped).not.toMatch(/fd-sheet-sample__(slot|tile)/);
+});
