@@ -1,0 +1,167 @@
+/* Chip and Chip group, Segment and Segmented (src/web/components/v2/chip.ts,
+ * segmented.ts). The chips are `fd-pill-chip*`: `.fd-chip` is the live chip
+ * and keeps its own rules. A selected chip or segment is filled with the
+ * primary text colour and its label reads on the page background, as the
+ * design draws it. The outline of an Off chip and the track is an inset
+ * shadow, so it takes no room. */
+
+.fd-pill-chip-group {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--control-sm-gap);
+}
+.fd-pill-chip {
+    appearance: none;
+    box-sizing: border-box;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: var(--control-sm-gap);
+    height: var(--control-sm-height);
+    min-height: 0;
+    margin: 0;
+    padding: 0 var(--control-sm-padding);
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--line);
+    color: var(--text-primary);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--control-sm-text);
+    font-weight: 500;
+    line-height: var(--text-label-line);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.fd-pill-chip__count {
+    color: var(--text-secondary);
+    font-weight: 400;
+}
+.fd-pill-chip--on {
+    background: var(--text-primary);
+    box-shadow: none;
+    color: var(--surface-bg);
+}
+.fd-pill-chip--on .fd-pill-chip__count {
+    color: var(--surface-bg);
+}
+.fd-pill-chip:disabled {
+    color: var(--text-tertiary);
+    cursor: default;
+}
+.fd-pill-chip:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}
+
+.fd-segmented {
+    --fd-segmented-small-segment: 26px;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    width: 100%;
+    background: var(--surface-raised);
+    box-shadow: inset 0 0 0 1px var(--line);
+}
+.fd-segmented--regular {
+    height: var(--control-md-height);
+    padding: var(--space-xs);
+    border-radius: var(--control-md-radius);
+}
+.fd-segmented--small {
+    height: var(--control-sm-height);
+    padding: var(--space-2xs);
+    border-radius: var(--control-sm-radius);
+}
+.fd-segmented__segment {
+    appearance: none;
+    box-sizing: border-box;
+    display: flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    height: var(--control-sm-height);
+    min-height: 0;
+    margin: 0;
+    padding: 0 var(--control-sm-padding);
+    border: 0;
+    border-radius: var(--control-sm-radius);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--control-sm-text);
+    font-weight: 500;
+    line-height: var(--text-label-line);
+    white-space: nowrap;
+}
+.fd-segmented > .fd-segmented__segment {
+    flex: 1 1 0;
+}
+/* A named group: a label around a visually hidden native radio and the drawn
+ * face. The radio sits over the face, invisible, so it takes the tap, the
+ * focus and the arrow keys; the face is drawn from :checked. */
+.fd-segmented__option {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    min-width: 0;
+    /* Inside .native a label that holds an input gets a row height of its own. */
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+}
+.fd-segmented__input {
+    appearance: none;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: inherit;
+    opacity: 0;
+}
+.fd-segmented__option .fd-segmented__segment {
+    flex: 1 1 auto;
+}
+.fd-segmented__input:checked + .fd-segmented__segment {
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+.fd-segmented__input:disabled {
+    cursor: default;
+}
+.fd-segmented__input:disabled + .fd-segmented__segment {
+    color: var(--text-tertiary);
+    cursor: default;
+}
+.fd-segmented__input:focus-visible + .fd-segmented__segment {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}
+
+.fd-segmented--small .fd-segmented__segment {
+    height: var(--fd-segmented-small-segment);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+}
+.fd-segmented__segment--selected {
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+.fd-segmented__segment:disabled {
+    color: var(--text-tertiary);
+    cursor: default;
+}
+.fd-segmented__segment:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}

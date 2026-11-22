@@ -281,7 +281,9 @@ describe("/app-v2.js", () => {
         // +~0.7 KB Item row: the swipe client also drives the Item row's face and beds.
         // +~2.0 KB Sheets: a dialog or side sheet keeps Tab inside it (rendered, enabled controls only), and its header is a drag grip.
         // +~9.4 KB Menu: an anchored menu opens, closes on Escape and a tap outside, moves by arrow keys, confirms in place and returns focus; its panel flips or clamps to stay inside the screen.
-        expect(js.length).toBeLessThan(183_600);
+        // +~7.5 KB Segmented and chip groups: arrow-key radio selection, toggles, and a change event, on the new markup only. Each script keeps its own roving-focus helper rather than a shared one, so the two stay independent.
+        // +~0.8 KB Segmented and chip groups: a named Segmented is native radios, so its script only adds a change detail; a modifier on an arrow key is left to the browser.
+        expect(js.length).toBeLessThan(192_300);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
@@ -1075,5 +1077,73 @@ describe("autosave.js whole forms", () => {
             detail: { newElement: {} },
         });
         expect(ok).toBe(true);
+    });
+});
+
+describe("new component rules that must beat the page's own", () => {
+    async function rule(selector: string): Promise<string> {
+        const css = (await getAppV2Css()).replace(/\/\*[\s\S]*?\*\//g, "");
+        const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        const blocks = [
+            ...css.matchAll(
+                new RegExp(`(?<![\\w.#-])${escaped}\\s*\\{([^}]*)\\}`, "g"),
+            ),
+        ];
+        return blocks.map((m) => m[1]).join(";");
+    }
+
+    test("the Toggle track is its own height inside .native, where a checkbox label is 36 px", async () => {
+        const decls = await rule(".fd-toggle");
+        expect(decls).toMatch(/min-height:\s*0\b/);
+        expect(decls).toContain("height: var(--fd-toggle-h)");
+    });
+
+    test("both Bell elements draw the glyph from the box's top left", async () => {
+        const decls = await rule(".fd-bell .fd-icon");
+        expect(decls).toMatch(/position:\s*absolute/);
+        expect(decls).toMatch(/top:\s*0\b/);
+        expect(decls).toMatch(/left:\s*0\b/);
+    });
+
+    test("a Field's typed text is regular although its label is bold", async () => {
+        expect(await rule(".fd-field__input")).toMatch(/font-weight:\s*400/);
+    });
+
+    test("a search input's own clear button is hidden, so the design's X is the only one", async () => {
+        expect(
+            await rule(".fd-search-field__input::-webkit-search-cancel-button"),
+        ).toMatch(/display:\s*none/);
+        expect(
+            await rule(".fd-field__input::-webkit-search-cancel-button"),
+        ).toMatch(/display:\s*none/);
+    });
+
+    test("the Tabs row can shrink and its tabs scroll instead of overlapping the trailing slot", async () => {
+        expect(await rule(".fd-tab-row")).toMatch(/min-width:\s*0/);
+        const tabs = await rule(".fd-tab-row__tabs");
+        expect(tabs).toMatch(/overflow-x:\s*auto/);
+        expect(tabs).toMatch(/scrollbar-width:\s*none/);
+        expect(await rule(".fd-tab-row__trailing")).toMatch(/flex:\s*none/);
+    });
+
+    test("a small Segmented control sets its labels in the caption size", async () => {
+        const decls = await rule(".fd-segmented--small .fd-segmented__segment");
+        expect(decls).toContain("font-size: var(--text-caption-size)");
+        expect(decls).toContain("line-height: var(--text-caption-line)");
+    });
+
+    test("the in-flow Nav bar restores the display the desktop rule hides", async () => {
+        expect(await rule(".fd-tabs.fd-tabs--inline")).toMatch(
+            /display:\s*flex/,
+        );
+    });
+
+    test("the page title sets its own tracking instead of inheriting the h1's", async () => {
+        expect(await rule(".fd-page-header__title")).toContain(
+            "letter-spacing: var(--fd-page-header-tracking)",
+        );
+        expect(await rule(".fd-page-header")).toContain(
+            "--fd-page-header-tracking: -0.5px",
+        );
     });
 });
