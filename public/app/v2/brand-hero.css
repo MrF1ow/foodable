@@ -1,0 +1,65 @@
+/* Brand hero (src/web/components/v2/brand-hero.ts): the glow, the mark, the
+ * name and the tagline, centred. The glow is drawn from the accent token. */
+
+.fd-brand-hero {
+    --fd-hero-h: 370px;
+    --fd-hero-top: 186px;
+    --fd-hero-glow-w: 510px;
+    --fd-hero-glow-h: 420px;
+    --fd-hero-glow-top: 40px;
+    --fd-hero-mark-w: 64px;
+    --fd-hero-tagline-gap: 7px;
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    box-sizing: border-box;
+    width: 100%;
+    min-height: var(--fd-hero-h);
+    padding: var(--fd-hero-top) var(--space-xl) 0;
+    overflow-x: clip;
+    font-family: var(--font-body);
+    text-align: center;
+}
+.fd-brand-hero__glow {
+    position: absolute;
+    top: var(--fd-hero-glow-top);
+    left: 50%;
+    width: var(--fd-hero-glow-w);
+    height: var(--fd-hero-glow-h);
+    border-radius: var(--radius-pill);
+    background: radial-gradient(
+        closest-side,
+        color-mix(in srgb, var(--accent-fill) 18%, transparent),
+        transparent
+    );
+    transform: translateX(-50%);
+    pointer-events: none;
+}
+.fd-brand-hero__mark {
+    position: relative;
+    display: block;
+    width: var(--fd-hero-mark-w);
+    color: var(--accent-fill);
+}
+.fd-brand-hero__mark svg {
+    display: block;
+    width: 100%;
+    height: auto;
+}
+.fd-brand-hero__title {
+    position: relative;
+    margin: var(--space-lg) 0 0;
+    color: var(--text-primary);
+    font-family: var(--font-display);
+    font-size: var(--text-figure-size);
+    font-weight: 700;
+    line-height: 53px;
+}
+.fd-brand-hero__tagline {
+    position: relative;
+    margin: var(--fd-hero-tagline-gap) 0 0;
+    color: var(--text-secondary);
+    font-size: var(--text-body-size);
+    line-height: 20px;
+}

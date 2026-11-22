@@ -1,0 +1,55 @@
+/* Avatar (initials) and Score badge (src/web/components/v2/avatar-initials.ts,
+ * score-badge-pill.ts). The live .fd-avatar and .fd-score keep their own
+ * rules in components.css and shell.css. */
+
+.fd-avatar-initials {
+    --fd-avatar-size: 32px;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    width: var(--fd-avatar-size);
+    height: var(--fd-avatar-size);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: var(--text-caption-size);
+    font-weight: 500;
+    line-height: var(--text-caption-line);
+}
+
+.fd-score-pill {
+    --fd-band-color: var(--accent-fill);
+    --fd-pill-dot: 7px;
+    --fd-pill-pad-start: 6px;
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-2xs) var(--space-sm) var(--space-2xs)
+        var(--fd-pill-pad-start);
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+}
+.fd-score-pill--middling {
+    --fd-band-color: var(--status-warn);
+}
+.fd-score-pill--poor {
+    --fd-band-color: var(--status-over);
+}
+.fd-score-pill__dot {
+    flex: none;
+    width: var(--fd-pill-dot);
+    height: var(--fd-pill-dot);
+    border-radius: var(--radius-pill);
+    background: var(--fd-band-color);
+}
+.fd-score-pill__num {
+    font-size: var(--text-caption-size);
+    font-weight: 500;
+    line-height: var(--text-caption-line);
+}

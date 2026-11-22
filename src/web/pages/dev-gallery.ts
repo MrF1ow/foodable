@@ -46,6 +46,23 @@ import {
     type SheetHeaderOptions,
     type SheetPlacement,
 } from "../components/v2/sheet.js";
+import { avatarInitials } from "../components/v2/avatar-initials.js";
+import { brandHero } from "../components/v2/brand-hero.js";
+import { calorieGauge } from "../components/v2/calorie-gauge.js";
+import { card } from "../components/v2/card.js";
+import { emptyState } from "../components/v2/empty-state.js";
+import { macroBar } from "../components/v2/macro-bar.js";
+import { macroTile, macroTiles } from "../components/v2/macro-tile.js";
+import { miniCard } from "../components/v2/mini-card.js";
+import { nutrientLine } from "../components/v2/nutrient-line.js";
+import { profileCard } from "../components/v2/profile-card.js";
+import { quickAction } from "../components/v2/quick-action.js";
+import { scoreCard } from "../components/v2/score-card.js";
+import { scorePill } from "../components/v2/score-badge-pill.js";
+import { statCard } from "../components/v2/stat-tiles-card.js";
+import { stepperControl } from "../components/v2/stepper-control.js";
+import { tableRow, tableRows } from "../components/v2/table-row.js";
+import { weekDay, weekStrip } from "../components/v2/week-strip.js";
 import { stepper } from "../components/v2/stepper.js";
 import {
     deltaStat,
@@ -1839,6 +1856,184 @@ function navBarSection(): string {
     );
 }
 
+function displayCardsSection(): string {
+    return block(
+        "Display & data · cards",
+        "Card 381516, Mini card 172377, Stat tile 381522, Empty state 381519, Table row 381695, Score card 381529, Profile card 381535, with the design's example data.",
+        [
+            stage("Card", card({ children: raw("<span>Card content</span>") })),
+            stage(
+                "Mini card: Tomorrow, Salmon, 1 lb (over); warn without meta",
+                `<div class="fd-gallery-row">${miniCard({ label: "Tomorrow", title: "Salmon", meta: "1 lb" })}${miniCard({ label: "In 3 days", title: "Yoghurt", tone: "warn" })}${miniCard({ label: "Next week", title: "Cheddar", meta: "200 g", tone: "muted", href: "#" })}</div>`,
+            ),
+            stage(
+                "Stat tile: two to a row; a value with no data",
+                `<div class="fd-gallery-row" style="flex-wrap:nowrap">${statCard({ value: "2,057", label: "Avg kcal" })}${statCard({ value: null, label: "Avg protein" })}</div>`,
+            ),
+            stage(
+                "Empty state: title and body; with an action",
+                `${emptyState({ title: "Nothing here yet", body: "Things you add show up here" })}${emptyState({ title: "No meals today", body: "Log your first meal.", action: button({ label: "Log food", variant: "primary" }) })}`,
+            ),
+            stage(
+                "Table row: Header and Row, with an unknown cell",
+                tableRows({
+                    label: "Nutrition per serving",
+                    rows: [
+                        {
+                            kind: "header",
+                            label: "Calories",
+                            cols: ["40", "133"],
+                        },
+                        { label: "Calories", cols: ["40", "133"] },
+                        { label: "Fibre", cols: [null, "2 g"] },
+                    ],
+                }),
+            ),
+            stage(
+                "Score card: good, middling, poor, no score",
+                [
+                    scoreCard({ score: 96, note: "Your weights: Balanced" }),
+                    scoreCard({ score: 52, note: "Your weights: Balanced" }),
+                    scoreCard({ score: 18, note: "Your weights: Balanced" }),
+                    scoreCard({ score: null, note: "Not enough data" }),
+                ]
+                    .map(
+                        (c) =>
+                            `<div style="margin-bottom:var(--space-sm)">${c}</div>`,
+                    )
+                    .join(""),
+            ),
+            stage(
+                "Profile card",
+                profileCard({
+                    name: "Ethan Flow",
+                    email: "ethan@example.com",
+                    fields: [
+                        { key: "Household", value: "The Flow household" },
+                        { key: "Members", value: "3" },
+                        { key: "Role", value: "Owner" },
+                    ],
+                }),
+            ),
+        ].join(""),
+    );
+}
+
+function macroBarRow(bars: Html[]): string {
+    return `<div class="fd-gallery-row" style="flex-wrap:nowrap;align-items:flex-start">${bars
+        .map((b) => `<div style="flex:1;min-width:0">${b}</div>`)
+        .join("")}</div>`;
+}
+
+function displayNutritionSection(): string {
+    const days = Array.from({ length: 7 }, (_, i) => ({
+        weekday: "SMTWTFS"[i]!,
+        day: i + 1,
+        label: `${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][i]} ${i + 1} November`,
+        selected: i === 6,
+        marked: true,
+    }));
+    return block(
+        "Display & data · nutrition",
+        "Macro tile 172344 and Macro tiles 172345, Macro bar 382028, Nutrient line 382047, Calorie gauge 381807, Week day 381765 and Week strip 381771.",
+        [
+            stage(
+                "Macro tile: kcal, protein, carbs, fat; a tile with no data",
+                macroTiles({
+                    label: "Macros",
+                    tiles: [
+                        { kind: "kcal", value: "248" },
+                        { kind: "protein", value: "47 g" },
+                        { kind: "carbs", value: "0 g" },
+                        { kind: "fat", value: null },
+                    ],
+                }),
+            ),
+            stage(
+                "Macro bar: protein, carbs, fat at 96 / 210 g",
+                macroBarRow([
+                    macroBar({ kind: "protein", value: 96, target: 210 }),
+                    macroBar({ kind: "carbs", value: 96, target: 210 }),
+                    macroBar({ kind: "fat", value: 96, target: 210 }),
+                ]),
+            ),
+            stage(
+                "Macro bar: over the target; no data",
+                macroBarRow([
+                    macroBar({ kind: "fat", value: 240, target: 210 }),
+                    macroBar({ kind: "carbs", value: null, target: 210 }),
+                ]),
+            ),
+            stage(
+                "Nutrient line: a link with a chevron; plain",
+                `${nutrientLine({
+                    href: "#",
+                    items: [
+                        { value: "1.6 / 3 L", dot: "water" },
+                        { label: "Fiber", value: "18 g" },
+                        { label: "Sugar", value: "31 g" },
+                        { label: "Caffeine", value: "180 mg" },
+                    ],
+                })}${nutrientLine({
+                    items: [
+                        { value: "0.4 / 3 L", dot: "water" },
+                        { label: "Fiber", value: null },
+                    ],
+                })}`,
+            ),
+            stage(
+                "Calorie gauge: 1,284 of 2,421 kcal; over; no goal",
+                `<div class="fd-gallery-row" style="gap:var(--space-xl)">${calorieGauge({ consumed: 1284, target: 2421, protein: 384, carbs: 513, fat: 387 })}${calorieGauge({ consumed: 2600, target: 2421, protein: 500, carbs: 1100, fat: 1000 })}${calorieGauge({ consumed: 600, target: null })}</div>`,
+            ),
+            stage(
+                "Week day: Default, Selected, marked and unmarked",
+                `<div class="fd-gallery-row" style="gap:0">${weekDay({ weekday: "S", day: 1, label: "Sunday 1 November", marked: true })}${weekDay({ weekday: "S", day: 1, label: "Sunday 1 November", marked: true, selected: true })}${weekDay({ weekday: "M", day: 2, label: "Monday 2 November" })}</div>`,
+            ),
+            stage(
+                "Week strip: previous, seven days, next",
+                weekStrip({
+                    label: "Week",
+                    days,
+                    previous: { label: "Previous week", href: "#" },
+                    next: { label: "Next week", href: "#" },
+                }),
+            ),
+        ].join(""),
+    );
+}
+
+function displayControlsSection(): string {
+    return block(
+        "Display & data · stepper, avatar, badge, action, hero",
+        "Stepper 172312 (the live stepper script drives it), Avatar 171937, Score badge 171563, Quick action 303014, Brand hero 383401.",
+        [
+            stage(
+                "Stepper: 150 g; at its minimum",
+                `${stepperControl({ name: "g-amount", label: "Amount", value: 150, unit: "g", step: 5, min: 0, max: 2000 })}${stepperControl({ name: "g-min", label: "Servings", value: 0, min: 0, unit: "servings" })}`,
+            ),
+            stage(
+                "Avatar (initials), with and without a name",
+                `<div class="fd-gallery-row">${avatarInitials({ name: "Ethan Flow", label: "Ethan Flow" })}${avatarInitials({ initials: "MK" })}</div>`,
+            ),
+            stage(
+                "Score badge: good, middling, poor",
+                `<div class="fd-gallery-row">${scorePill(74)}${scorePill(52)}${scorePill(18)}</div>`,
+            ),
+            stage(
+                "Quick action: with caption, without, disabled",
+                `<div class="fd-gallery-row" style="align-items:flex-start;gap:var(--space-lg)">${quickAction({ label: "Scan barcode", icon: "scan" })}${quickAction({ label: "Scan barcode", icon: "scan", caption: false })}${quickAction({ label: "Search", icon: "search", disabled: true })}</div>`,
+            ),
+            stage(
+                "Brand hero",
+                brandHero({
+                    title: "Foodable",
+                    tagline: "Your household's kitchen, in one place.",
+                }),
+            ),
+        ].join(""),
+    );
+}
+
 function devGalleryBody(): string {
     const sections = [
         ...SECTIONS.map((s) => s.render()),
@@ -1859,6 +2054,9 @@ function devGalleryBody(): string {
         segmentedSection(),
         toggleFieldSection(),
         navBarSection(),
+        displayCardsSection(),
+        displayNutritionSection(),
+        displayControlsSection(),
         iconsSection(),
     ].join("\n");
     return `<div class="fd-gallery">${pageHeader({ title: "v2 components" })}${sections}</div>`;
