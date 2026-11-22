@@ -280,7 +280,8 @@ describe("/app-v2.js", () => {
         // +~5.2 KB Settings autosave: whole forms (Product score) save on any control's change, keep an unsaved edit through the refresh, and queue their reset buttons; a refreshed form forgets what it last sent.
         // +~0.7 KB Item row: the swipe client also drives the Item row's face and beds.
         // +~2.0 KB Sheets: a dialog or side sheet keeps Tab inside it (rendered, enabled controls only), and its header is a drag grip.
-        expect(js.length).toBeLessThan(174_100);
+        // +~9.4 KB Menu: an anchored menu opens, closes on Escape and a tap outside, moves by arrow keys, confirms in place and returns focus; its panel flips or clamps to stay inside the screen.
+        expect(js.length).toBeLessThan(183_600);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

@@ -1235,6 +1235,360 @@ try {
         "side",
         480,
     );
+    // ---- Menus on the dev gallery: open from the trigger, Escape and a tap
+    // outside close it, confirm in place (Cancel + the verb), focus back on the
+    // trigger, arrow keys between items.
+    const menuState = (root: string) =>
+        ev<{
+            open: boolean;
+            expanded: string | null;
+            triggerFocused: boolean;
+            inside: boolean;
+            activeLabel: string;
+            left: number;
+            right: number;
+            vw: number;
+            armShown: boolean;
+            confirmShown: boolean;
+            confirmLabels: string[];
+            checked: string[];
+        }>(`(() => {
+            const r = document.querySelector(${JSON.stringify(root)});
+            const panel = r.querySelector(".fd-menu__panel");
+            const trigger = r.querySelector("[data-fd-menu-trigger]");
+            const shown = (el) => !!el && !el.hidden && !el.closest("[hidden]");
+            const box = panel.getBoundingClientRect();
+            const row = r.querySelector(".fd-menu__confirm-row");
+            const active = document.activeElement;
+            return {
+                open: !panel.hidden,
+                expanded: trigger.getAttribute("aria-expanded"),
+                triggerFocused: active === trigger,
+                inside: panel.contains(active),
+                activeLabel: active && panel.contains(active) ? (active.textContent || "").trim() : "",
+                left: Math.round(box.left),
+                right: Math.round(box.right),
+                vw: window.innerWidth,
+                armShown: shown(r.querySelector("[data-fd-menu-arm]")),
+                confirmShown: shown(row),
+                confirmLabels: row ? Array.from(row.querySelectorAll(".fd-menu__item")).map((b) => (b.textContent || "").trim()) : [],
+                checked: Array.from(r.querySelectorAll('[aria-checked="true"]')).map((b) => (b.textContent || "").trim()),
+            };
+        })()`);
+    async function menuCase(name: string, width: number) {
+        const root = '[data-gallery="menu-more"]';
+        const trigger = `${root} [data-fd-menu-trigger]`;
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: 900,
+            deviceScaleFactor: 1,
+            mobile: width < 1024,
+        });
+        await goto("/dev/gallery-v2");
+        await setMarker();
+        // The menu is far down the page: scroll there at once (the page may
+        // scroll smoothly), so the click lands where the trigger is.
+        await ev(
+            `document.querySelector(${JSON.stringify(trigger)}).scrollIntoView({ block: "center", behavior: "instant" })`,
+        );
+        await sleep(300);
+        await mouseClick(trigger);
+        await sleep(100);
+        const opened = await menuState(root);
+        await pressKey("Escape", "Escape", 27);
+        const afterEsc = await menuState(root);
+        await mouseClick(trigger);
+        await sleep(100);
+        await mouseClick(".fd-gallery-title");
+        await sleep(100);
+        const afterOutside = await menuState(root);
+        // Confirm in place: arm, see Cancel + the verb, Cancel restores.
+        await mouseClick(trigger);
+        await sleep(100);
+        await mouseClick(`${root} [data-fd-menu-arm]`);
+        await sleep(100);
+        const armed = await menuState(root);
+        await mouseClick(`${root} [data-fd-menu-cancel]`);
+        await sleep(100);
+        const cancelled = await menuState(root);
+        // An armed menu closed with Escape comes back unarmed.
+        await mouseClick(`${root} [data-fd-menu-arm]`);
+        await pressKey("Escape", "Escape", 27);
+        await mouseClick(trigger);
+        await sleep(100);
+        const reopened = await menuState(root);
+        await pressKey("Escape", "Escape", 27);
+        const noPopup = await ev<boolean>(
+            `!document.querySelector("dialog[open]")`,
+        );
+        record(
+            name,
+            opened.open &&
+                opened.expanded === "true" &&
+                opened.left >= 0 &&
+                opened.right <= opened.vw &&
+                !afterEsc.open &&
+                afterEsc.expanded === "false" &&
+                afterEsc.triggerFocused &&
+                !afterOutside.open &&
+                armed.open &&
+                !armed.armShown &&
+                armed.confirmShown &&
+                armed.confirmLabels.join("|") === "Cancel|Discard 3" &&
+                armed.activeLabel === "Cancel" &&
+                cancelled.open &&
+                cancelled.armShown &&
+                !cancelled.confirmShown &&
+                cancelled.activeLabel === "Discard" &&
+                reopened.armShown &&
+                !reopened.confirmShown &&
+                noPopup,
+            {
+                opened,
+                afterEsc,
+                afterOutside,
+                armed,
+                cancelled,
+                reopened,
+                noPopup,
+                ex: drain(),
+            },
+        );
+    }
+    await menuCase(
+        "v2 gallery menu at 390px: open, Escape, tap outside, confirm in place",
+        390,
+    );
+    await menuCase(
+        "v2 gallery menu at 1440px: open, Escape, tap outside, confirm in place",
+        1440,
+    );
+
+    {
+        const root = '[data-gallery="menu-filter"]';
+        const trigger = `${root} [data-fd-menu-trigger]`;
+        await goto("/dev/gallery-v2");
+        await setMarker();
+        // Keyboard only: the trigger takes focus, ArrowDown opens and lands on
+        // the first item, arrows and Home / End move, Escape closes and the
+        // focus goes back to the trigger.
+        await ev(`document.querySelector(${JSON.stringify(trigger)}).focus()`);
+        await pressKey("ArrowDown", "ArrowDown", 40);
+        const first = await menuState(root);
+        await pressKey("ArrowDown", "ArrowDown", 40);
+        const second = await menuState(root);
+        await pressKey("ArrowUp", "ArrowUp", 38);
+        await pressKey("ArrowUp", "ArrowUp", 38);
+        const wrapped = await menuState(root);
+        await pressKey("Home", "Home", 36);
+        const home = await menuState(root);
+        await pressKey("End", "End", 35);
+        const end = await menuState(root);
+        // A tick toggles and the menu stays open.
+        await mouseClick(`${root} [role="menuitemcheckbox"]`);
+        await sleep(100);
+        const toggled = await menuState(root);
+        await pressKey("Escape", "Escape", 27);
+        const closed = await menuState(root);
+        record(
+            "v2 gallery filter menu: arrow keys, Home and End, ticks toggle, Escape returns focus",
+            first.open &&
+                first.activeLabel === "Cookable now" &&
+                second.activeLabel === "High protein" &&
+                wrapped.activeLabel === "Clear" &&
+                home.activeLabel === "Cookable now" &&
+                end.activeLabel === "Clear" &&
+                toggled.open &&
+                toggled.checked.join("|") === "High protein" &&
+                !closed.open &&
+                closed.triggerFocused,
+            { first, second, wrapped, home, end, toggled, closed, ex: drain() },
+        );
+    }
+
+    // ---- Menus in other settings: Enter opens and lands on the first item, a
+    // trigger near the left edge keeps its panel on screen, Escape inside a
+    // sheet closes only the menu, Tab closes it, one menu closes another, the
+    // verb posts its fields, and a tick fires fd-menu-select.
+    {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width: 390,
+            height: 900,
+            deviceScaleFactor: 1,
+            mobile: true,
+        });
+        const pressEnter = async () => {
+            for (const type of ["keyDown", "keyUp"]) {
+                await send("Input.dispatchKeyEvent", {
+                    type,
+                    key: "Enter",
+                    code: "Enter",
+                    text: type === "keyDown" ? "\r" : undefined,
+                    windowsVirtualKeyCode: 13,
+                    nativeVirtualKeyCode: 13,
+                });
+            }
+            await sleep(120);
+        };
+        const trigger = (root: string) => `${root} [data-fd-menu-trigger]`;
+        const focus = (sel: string) =>
+            ev(`document.querySelector(${JSON.stringify(sel)}).focus()`);
+        await goto("/dev/gallery-v2");
+        await setMarker();
+
+        const near = '[data-gallery="menu-near-left"]';
+        await ev(
+            `document.querySelector(${JSON.stringify(trigger(near))}).scrollIntoView({ block: "center", behavior: "instant" })`,
+        );
+        await sleep(300);
+        // Put the trigger 190px from the left edge whatever the page padding
+        // is: right-aligned the panel would start at -10, and starting at the
+        // trigger it would end at 424, so neither side alone fits 390.
+        await ev(`(() => {
+            const t = document.querySelector(${JSON.stringify(trigger(near))});
+            const box = t.closest("[data-gallery]").parentElement;
+            const shift = 190 - t.getBoundingClientRect().left;
+            box.style.paddingLeft = (parseFloat(getComputedStyle(box).paddingLeft) + shift) + "px";
+        })()`);
+        await focus(trigger(near));
+        await pressEnter();
+        const nearOpen = await menuState(near);
+        await pressKey("Escape", "Escape", 27);
+        record(
+            "v2 gallery menu near the left edge at 390px: Enter opens on the first item, the panel stays on screen",
+            nearOpen.open &&
+                nearOpen.activeLabel === "Edit amount or expiry" &&
+                // The emulated width, not innerWidth: a panel hanging off the
+                // edge widens the layout viewport and would pass its own check.
+                nearOpen.left >= 0 &&
+                nearOpen.right <= 390,
+            { nearOpen, ex: drain() },
+        );
+
+        // One menu closes another, without a pointer press in between.
+        const more = '[data-gallery="menu-more"]';
+        const filter = '[data-gallery="menu-filter"]';
+        await mouseClick(trigger(more));
+        await sleep(100);
+        const moreOpen = await menuState(more);
+        await focus(trigger(filter));
+        await pressKey("ArrowDown", "ArrowDown", 40);
+        const afterSwap = await menuState(more);
+        const filterOpen = await menuState(filter);
+        // A tick fires fd-menu-select with its new state, and the menu stays open.
+        await ev(`(() => {
+            window.__picked = [];
+            document.addEventListener("fd-menu-select", (e) => {
+                window.__picked.push({
+                    label: (e.target.textContent || "").trim(),
+                    checked: e.detail.checked,
+                });
+            });
+        })()`);
+        await mouseClick(`${filter} [role="menuitemcheckbox"]`);
+        await mouseClick(`${filter} [role="menuitemcheckbox"]`);
+        const picked =
+            await ev<{ label: string; checked: boolean }[]>("window.__picked");
+        await pressKey("Escape", "Escape", 27);
+        record(
+            "v2 gallery menus: opening one closes another, a tick fires fd-menu-select",
+            moreOpen.open &&
+                !afterSwap.open &&
+                afterSwap.expanded === "false" &&
+                filterOpen.open &&
+                filterOpen.activeLabel === "Cookable now" &&
+                JSON.stringify(picked) ===
+                    JSON.stringify([
+                        { label: "Cookable now", checked: false },
+                        { label: "Cookable now", checked: true },
+                    ]),
+            { moreOpen, afterSwap, filterOpen, picked, ex: drain() },
+        );
+
+        // A menu inside a live sheet.
+        const sheetId = "dev-gallery-menu-sheet";
+        const inSheet = '[data-gallery="menu-in-sheet"]';
+        const sheetOpen = () =>
+            ev<boolean>(`document.getElementById("${sheetId}").open`);
+        await mouseClick(`[commandfor="${sheetId}"]`);
+        await sleep(100);
+        await settle(sheetId);
+        const sheetOpened = await sheetOpen();
+        await mouseClick(trigger(inSheet));
+        await sleep(100);
+        const menuOpen = await menuState(inSheet);
+        await pressKey("Escape", "Escape", 27);
+        const afterFirst = await menuState(inSheet);
+        const sheetAfterFirst = await sheetOpen();
+        // Tab leaves the menu closed.
+        await mouseClick(trigger(inSheet));
+        await sleep(100);
+        await pressKey("ArrowDown", "ArrowDown", 40);
+        await pressKey("Tab", "Tab", 9);
+        const afterTab = await menuState(inSheet);
+        // The verb posts its fields (the submit is caught, not followed).
+        await ev(`(() => {
+            window.__posted = null;
+            document.addEventListener(
+                "submit",
+                (e) => {
+                    e.preventDefault();
+                    window.__posted = {
+                        action: e.target.getAttribute("action"),
+                        fields: Array.from(new FormData(e.target)),
+                    };
+                },
+                true,
+            );
+        })()`);
+        await mouseClick(trigger(inSheet));
+        await sleep(100);
+        await mouseClick(`${inSheet} [data-fd-menu-arm]`);
+        await sleep(100);
+        await mouseClick(`${inSheet} .fd-menu__confirm-row form button`);
+        await sleep(100);
+        const posted = await ev<{
+            action: string;
+            fields: [string, string][];
+        } | null>("window.__posted");
+        // The caught submit left the menu open: Escape closes it and the sheet
+        // stays; Escape again closes the sheet.
+        const menuAfterPost = await menuState(inSheet);
+        await pressKey("Escape", "Escape", 27);
+        const stillOpen = await sheetOpen();
+        await pressKey("Escape", "Escape", 27);
+        await settle(sheetId);
+        const sheetClosed = !(await sheetOpen());
+        record(
+            "v2 gallery menu in a sheet at 390px: Escape closes the menu then the sheet, Tab closes it, the verb posts its fields",
+            sheetOpened &&
+                menuOpen.open &&
+                menuOpen.right <= 390 &&
+                !afterFirst.open &&
+                afterFirst.triggerFocused &&
+                sheetAfterFirst &&
+                !afterTab.open &&
+                menuAfterPost.open &&
+                posted?.action === "/dev/gallery-v2" &&
+                JSON.stringify(posted.fields) ===
+                    JSON.stringify([["ids", "a,b,c"]]) &&
+                stillOpen &&
+                sheetClosed,
+            {
+                sheetOpened,
+                menuOpen,
+                afterFirst,
+                sheetAfterFirst,
+                afterTab,
+                posted,
+                menuAfterPost,
+                stillOpen,
+                sheetClosed,
+                ex: drain(),
+            },
+        );
+    }
+
     await send("Emulation.setDeviceMetricsOverride", {
         width: 430,
         height: 800,
