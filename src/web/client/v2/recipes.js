@@ -47,6 +47,20 @@ FoodableApp.onLoad((root) => {
     const syncInputs = () => activeSearchInput(searchForm);
     syncInputs();
     matchMedia("(min-width: 1024px)").addEventListener("change", syncInputs);
+    // Filter as you type: hide the rendered cards whose name misses the text.
+    // The server stays the source on load (and on Enter); a link is not a search.
+    searchForm.addEventListener("input", (event) => {
+        if (!(event.target instanceof HTMLInputElement)) return;
+        const text = event.target.value.trim().toLowerCase();
+        const isLink = /^https?:\/\//i.test(text);
+        for (const row of document.querySelectorAll(".fd-row--recipe")) {
+            const title = row.querySelector(".fd-recipes-card__title");
+            row.hidden =
+                !isLink &&
+                text !== "" &&
+                !(title?.textContent ?? "").toLowerCase().includes(text);
+        }
+    });
     searchForm.addEventListener("submit", (event) => {
         const input = activeSearchInput(searchForm);
         const value = input.value.trim();

@@ -87,11 +87,12 @@ import {
     recipeFilters,
     recipeNotices,
 } from "../domain/recipes.js";
+import { renderRecipesListV2Page } from "./pages/v2/recipes-list.js";
 import {
-    applyV2RecipeListFilters,
-    parseV2RecipeListFilter,
-    renderRecipesListV2Page,
-} from "./pages/v2/recipes-list.js";
+    applyFilters,
+    matchesRecipeQuery,
+    parseFilterParam,
+} from "../domain/recipe-filters.js";
 import {
     renderKitchenFridgeV2Page,
     type KitchenFridgeFoodMeta,
@@ -1848,7 +1849,7 @@ export async function renderRecipesListPage(
         noticeResult,
     );
     const v2Query = filter.q?.trim() ?? "";
-    const v2Filter = parseV2RecipeListFilter(filter.filter);
+    const v2Filters = parseFilterParam(filter.filter);
     const { recipes, allIngredients, fridgeItems, foodsById } =
         noticeResult.recipesListPrefetch;
     const ingredientsByRecipe = new Map<string, typeof allIngredients>();
@@ -1898,7 +1899,19 @@ export async function renderRecipesListPage(
             .map((ingredient) => ingredient.displayName),
     }));
     const cookableCount = cards.filter((card) => card.flags.cookable).length;
-    const filtered = applyV2RecipeListFilters(cards, v2Query, v2Filter);
+    const kept = new Set(
+        applyFilters(
+            recipes.filter((recipe) => matchesRecipeQuery(recipe, v2Query)),
+            v2Filters,
+            {
+                flags: new Map(
+                    cards.map((card) => [card.recipe.id, card.flags]),
+                ),
+                favouriteIds,
+            },
+        ).map((recipe) => recipe.id),
+    );
+    const filtered = cards.filter((card) => kept.has(card.recipe.id));
     const loadedWeek = await loadWeekPlanView(householdId);
     const week = opts.planEdit
         ? (withPlanEditDraft(loadedWeek, opts.planEdit) ?? loadedWeek)
@@ -1908,7 +1921,7 @@ export async function renderRecipesListPage(
         html: renderRecipesListV2Page({
             chrome,
             query: v2Query,
-            filter: v2Filter,
+            filters: v2Filters,
             cards: filtered,
             cookableCount,
             totalCount: recipes.length,

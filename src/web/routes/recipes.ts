@@ -67,11 +67,9 @@ import {
     addMentionedIngredient,
     dismissFlaggedMention,
 } from "../../domain/recipe-mentions-check.js";
+import { parseFilterParam } from "../../domain/recipe-filters.js";
 import { answerSharedRecipeImport } from "./recipes-shared-import.js";
-import {
-    parseV2RecipeListFilter,
-    recipesListV2Href,
-} from "../pages/v2/recipes-list.js";
+import { recipesListV2Href } from "../pages/v2/recipes-list.js";
 import {
     parsePlanBack,
     PLAN_SHEET_ID,
@@ -693,7 +691,7 @@ recipesRoutes.post("/recipes/:id/favourite", requireMember, async (c) => {
     if (formText(body, "back") === "list") {
         const list = recipesListV2Href({
             q: formText(body, "q"),
-            filter: parseV2RecipeListFilter(formText(body, "filter")),
+            filters: parseFilterParam(formText(body, "filter")),
         });
         // toast: none (the star shows the new state)
         return c.redirect(`${list}#recipe-${recipeId}`, 303);

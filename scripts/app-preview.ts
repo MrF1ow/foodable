@@ -1742,7 +1742,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             chrome,
             sharedImportEnabled: true,
             query: "",
-            filter: "",
+            filters: [],
             totalCount: 2,
             cookableCount: 1,
             cards: [
@@ -1976,7 +1976,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "recipes-favourites": renderRecipesListV2Page({
             chrome,
             query: "",
-            filter: "favourites",
+            filters: ["favourites"],
             totalCount: 3,
             cookableCount: 1,
             cards: [

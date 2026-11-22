@@ -100,6 +100,7 @@ import {
     type LoadedRecipe,
 } from "../../domain/recipe-mentions-check.js";
 import { RecipeInputError } from "../../domain/recipes.js";
+import { RECIPE_FILTER_IDS } from "../../domain/recipe-filters.js";
 
 export const ADD_RECIPE_INGREDIENT_OUTPUT_SCHEMA = z.object({
     status: WRITE_STATUS,
@@ -634,7 +635,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "List Recipes",
             description:
-                "List household recipes. Filter by tag, recipes whose fridge stock fully covers every ingredient (can_make_now), or recipes safe for a member (no catalog allergen hits and no dislikes).",
+                "List household recipes. Filter by tag, recipes whose fridge stock fully covers every ingredient (can_make_now), or recipes safe for a member (no catalog allergen hits and no dislikes). `filters`: all must hold; `favourites` is your own stars, `cookable` is can_make_now. `query`: name contains.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -646,6 +647,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 can_make_now: z.boolean().optional(),
                 safe_for: z.string().optional(),
                 verification: z.enum(["verified", "unverified"]).optional(),
+                filters: z.array(z.enum(RECIPE_FILTER_IDS)).optional(),
+                query: z.string().optional(),
             }),
             outputSchema: z.object({
                 recipes: z.array(z.object(RECIPE_FIELDS)),
@@ -660,7 +663,9 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         Boolean(args.tag?.trim()) ||
                         args.can_make_now === true ||
                         Boolean(args.safe_for) ||
-                        Boolean(args.verification);
+                        Boolean(args.verification) ||
+                        (args.filters?.length ?? 0) > 0 ||
+                        Boolean(args.query?.trim());
                     let recipes;
                     if (filterOn) {
                         const fridge = await listFridge(
@@ -699,6 +704,16 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 canMakeNow: args.can_make_now === true,
                                 safeFor,
                                 verification: args.verification ?? null,
+                                filters: args.filters,
+                                query: args.query,
+                                favouriteIds: new Set(
+                                    args.filters?.includes("favourites")
+                                        ? await liveRecipesStore().listFavourites(
+                                              householdId,
+                                              (await callerActor()).userId,
+                                          )
+                                        : [],
+                                ),
                             },
                         );
                     } else {

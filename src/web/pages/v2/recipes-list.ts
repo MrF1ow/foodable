@@ -4,6 +4,10 @@ import {
     type RecipeFilterFlags,
     type RecipeMacros,
 } from "../../../domain/recipes.js";
+import {
+    filterParamValue,
+    RECIPE_FILTERS,
+} from "../../../domain/recipe-filters.js";
 import { formatLogMacroGrams } from "../../../domain/log-macro-format.js";
 import type { RecipeSourceKind } from "../../../domain/recipe-import.js";
 import type { Notice } from "../../../domain/notices.js";
@@ -22,9 +26,6 @@ import {
     type WeekPlanView,
 } from "./recipes-plan.js";
 
-export type V2RecipeListFilter =
-    "" | "cookable" | "protein" | "quick" | "favourites";
-
 export type V2RecipeCard = {
     recipe: Recipe;
     flags: RecipeFilterFlags;
@@ -37,7 +38,8 @@ export type V2RecipeCard = {
 export type RecipesListV2View = {
     chrome: AppChromeBase;
     query: string;
-    filter: V2RecipeListFilter;
+    /** The filters in force (`?filter=a,b`), known ids only. */
+    filters?: string[];
     cards: V2RecipeCard[];
     cookableCount?: number;
     totalCount: number;
@@ -75,41 +77,44 @@ export type RecipesListV2View = {
 
 export function recipesListV2Href(opts: {
     q?: string;
-    filter?: V2RecipeListFilter;
+    filters?: readonly string[];
 }): string {
     const params = new URLSearchParams();
     const q = opts.q?.trim() ?? "";
     if (q) params.set("q", q);
-    if (opts.filter) params.set("filter", opts.filter);
-    const query = params.toString();
+    const filter = filterParamValue(opts.filters ?? []);
+    if (filter) params.set("filter", filter);
+    // A comma is legal in a query; keep `?filter=a,b` readable.
+    const query = params.toString().replaceAll("%2C", ",");
     return query ? `/recipes?${query}` : "/recipes";
 }
 
-export function parseV2RecipeListFilter(
-    raw: string | undefined,
-): V2RecipeListFilter {
-    if (
-        raw === "cookable" ||
-        raw === "protein" ||
-        raw === "quick" ||
-        raw === "favourites"
-    ) {
-        return raw;
-    }
-    return "";
+/** A chip toggles its filter: on adds it to the ones in force, on again removes it. */
+function activeFilters(view: RecipesListV2View): string[] {
+    return view.filters ?? [];
 }
 
 function filterChip(
-    label: string,
-    value: V2RecipeListFilter,
+    id: string,
     view: RecipesListV2View,
     count?: number,
 ): ReturnType<typeof chipLink> {
+    const entry = RECIPE_FILTERS.find((filter) => filter.id === id)!;
+    const on = activeFilters(view).includes(id);
     return chipLink({
-        label,
-        href: recipesListV2Href({ q: view.query, filter: value }),
-        selected: view.filter === value,
+        label: entry.label,
+        href: recipesListV2Href({
+            q: view.query,
+            filters: on
+                ? activeFilters(view).filter((other) => other !== id)
+                : [...activeFilters(view), id],
+        }),
+        selected: on,
         count: count != null && count > 0 ? count : undefined,
+        title:
+            id === "quick"
+                ? "Only recipes with a known total time; unknown time is excluded."
+                : undefined,
     });
 }
 
@@ -177,7 +182,11 @@ function recipeCard(card: V2RecipeCard, view: RecipesListV2View): string {
         recipeId: recipe.id,
         recipeName: recipe.name,
         on: card.favourite === true,
-        back: { kind: "list", query: view.query.trim(), filter: view.filter },
+        back: {
+            kind: "list",
+            query: view.query.trim(),
+            filter: filterParamValue(activeFilters(view)),
+        },
         className: "fd-recipes-card__star",
     });
     const planDay = view.planDate
@@ -256,8 +265,10 @@ function searchFieldValue(view: RecipesListV2View): string {
 
 export function renderRecipesListBody(view: RecipesListV2View): string {
     const q = esc(searchFieldValue(view));
-    const filterHidden = view.filter
-        ? `<input type="hidden" name="filter" value="${esc(view.filter)}" />`
+    const filters = activeFilters(view);
+    const filterValue = filterParamValue(filters);
+    const filterHidden = filterValue
+        ? `<input type="hidden" name="filter" value="${esc(filterValue)}" />`
         : "";
     const importDuplicate =
         view.importDuplicateRecipeId != null
@@ -267,28 +278,37 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
         view.importError && view.importDuplicateRecipeId == null
             ? `<p class="fd-recipes-import-error" role="alert">${esc(view.importError)}</p>`
             : "";
-    const chips = chipNav(
-        [
-            filterChip("Cookable now", "cookable", view, view.cookableCount),
-            filterChip("High protein", "protein", view),
-            chipLink({
-                label: "Under 30 min",
-                href: recipesListV2Href({ q: view.query, filter: "quick" }),
-                selected: view.filter === "quick",
-                title: "Only recipes with a known total time; unknown time is excluded.",
-            }),
-            filterChip("Favourites", "favourites", view),
-        ],
-        { label: "Recipe filters", className: "fd-recipes-chips" },
+    const chips = String(
+        chipNav(
+            RECIPE_FILTERS.map((filter) =>
+                filterChip(
+                    filter.id,
+                    view,
+                    filter.id === "cookable" ? view.cookableCount : undefined,
+                ),
+            ),
+            {
+                label:
+                    filters.length > 0
+                        ? `Recipe filters, ${filters.length} on`
+                        : "Recipe filters",
+                className: "fd-recipes-chips",
+            },
+        ),
+    ).replace(
+        "<nav ",
+        () => `<nav data-fd-recipes-filter-count="${filters.length}" `,
     );
-    const chipsHtml = String(chips);
+    const chipsHtml = chips;
     const emptyAll =
         view.totalCount === 0
             ? `<p class="fd-recipes-empty">No recipes yet. Paste a link above to import one.</p>`
             : "";
     const emptyFilter =
         view.totalCount > 0 && view.cards.length === 0
-            ? view.filter === "favourites" && !view.query.trim()
+            ? filters.length === 1 &&
+              filters[0] === "favourites" &&
+              !view.query.trim()
                 ? `<p class="fd-recipes-empty">No favourites yet. Tap the star on a recipe to keep it here.</p>`
                 : `<p class="fd-recipes-empty">No recipes match this search.</p>`
             : "";
@@ -385,23 +405,5 @@ export function renderRecipesListV2Page(view: RecipesListV2View): string {
         title: "Recipes",
         active: "recipes",
         body: renderRecipesListBody(view),
-    });
-}
-
-export function applyV2RecipeListFilters(
-    cards: V2RecipeCard[],
-    query: string,
-    filter: V2RecipeListFilter,
-): V2RecipeCard[] {
-    const needle = query.trim().toLowerCase();
-    return cards.filter((card) => {
-        if (needle && !card.recipe.name.toLowerCase().includes(needle)) {
-            return false;
-        }
-        if (filter === "cookable" && !card.flags.cookable) return false;
-        if (filter === "protein" && !card.flags.highProtein) return false;
-        if (filter === "quick" && !card.flags.quick) return false;
-        if (filter === "favourites" && card.favourite !== true) return false;
-        return true;
     });
 }

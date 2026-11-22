@@ -1,12 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import type { Recipe } from "../../../domain/recipes.js";
-import {
-    applyV2RecipeListFilters,
-    parseV2RecipeListFilter,
-    renderRecipesListBody,
-    recipesListV2Href,
-} from "./recipes-list.js";
+import { renderRecipesListBody, recipesListV2Href } from "./recipes-list.js";
 
 const RECIPE: Recipe = {
     id: "r1",
@@ -48,13 +43,13 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "egg",
-            filter: "cookable",
+            filters: [],
             cards: [],
             totalCount: 0,
         });
         expect(html).toContain('href="/recipes?q=egg&amp;filter=cookable"');
         expect(html).toContain('href="/recipes?q=egg&amp;filter=protein"');
-        expect(html).toContain('aria-current="true"');
+        expect(html).not.toContain('aria-current="true"');
         expect(html).toContain(
             "Only recipes with a known total time; unknown time is excluded.",
         );
@@ -64,7 +59,7 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             totalCount: 2,
             cards: [
                 {
@@ -104,7 +99,7 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             cards: [],
             totalCount: 0,
             cookableCount: 5,
@@ -117,7 +112,7 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             cards: [],
             totalCount: 3,
             cookableCount: 2,
@@ -137,7 +132,7 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             totalCount: 1,
             cards: [
                 {
@@ -162,7 +157,7 @@ describe("recipes list v2 page", () => {
         const none = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             cards: [],
             totalCount: 0,
         });
@@ -170,7 +165,7 @@ describe("recipes list v2 page", () => {
         const nomatch = renderRecipesListBody({
             chrome,
             query: "xyz",
-            filter: "",
+            filters: [],
             cards: [],
             totalCount: 2,
         });
@@ -181,7 +176,7 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             cards: [],
             totalCount: 0,
         });
@@ -197,7 +192,7 @@ describe("recipes list v2 page", () => {
         const base = {
             chrome,
             query: "",
-            filter: "" as const,
+            filters: [],
             cards: [],
             totalCount: 0,
             sharedImportEnabled: true,
@@ -298,7 +293,7 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             totalCount: 1,
             cards: [
                 {
@@ -323,7 +318,7 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             cards: [],
             totalCount: 0,
             importDuplicateRecipeId: "r-dup",
@@ -336,7 +331,7 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             cards: [],
             totalCount: 0,
             importPasteStep: true,
@@ -355,7 +350,7 @@ describe("recipes list v2 page", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             cards: [],
             totalCount: 0,
             importUrl: "https://example.com/dish",
@@ -363,44 +358,52 @@ describe("recipes list v2 page", () => {
         expect(html).toContain('value="https://example.com/dish"');
     });
 
-    test("recipesListV2Href and applyV2RecipeListFilters", () => {
-        expect(recipesListV2Href({ q: "a", filter: "quick" })).toBe(
+    test("recipesListV2Href writes the filters as one comma list", () => {
+        expect(recipesListV2Href({ q: "a", filters: ["quick"] })).toBe(
             "/recipes?q=a&filter=quick",
         );
-        const cards = [
-            {
-                recipe: RECIPE,
-                flags: {
-                    cookable: true,
-                    highProtein: true,
-                    quick: true,
-                    missingCount: 0,
-                    hasIngredients: true,
-                },
-                macrosPerPortion: MACROS,
-                missingNames: [],
-            },
-            {
-                recipe: { ...RECIPE, id: "r2", name: "Oatmeal" },
-                flags: {
-                    cookable: false,
-                    highProtein: false,
-                    quick: true,
-                    missingCount: 1,
-                    hasIngredients: true,
-                },
-                macrosPerPortion: MACROS,
-                missingNames: ["Milk"],
-            },
-        ];
-        expect(
-            applyV2RecipeListFilters(cards, "shak", "").map((c) => c.recipe.id),
-        ).toEqual(["r1"]);
-        expect(
-            applyV2RecipeListFilters(cards, "", "cookable").map(
-                (c) => c.recipe.id,
-            ),
-        ).toEqual(["r1"]);
+        expect(recipesListV2Href({ filters: ["quick", "cookable"] })).toBe(
+            "/recipes?filter=quick,cookable",
+        );
+        expect(recipesListV2Href({ filters: [] })).toBe("/recipes");
+    });
+
+    test("with two filters on, each chip toggles only itself and the Filter button counts them", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "egg",
+            filters: ["cookable", "quick"],
+            cards: [],
+            totalCount: 0,
+        });
+        // cookable is on: its chip drops it, keeping quick.
+        expect(html).toContain('href="/recipes?q=egg&amp;filter=quick"');
+        // quick is on: its chip drops it, keeping cookable.
+        expect(html).toContain('href="/recipes?q=egg&amp;filter=cookable"');
+        // protein is off: its chip adds it to the end.
+        expect(html).toContain(
+            'href="/recipes?q=egg&amp;filter=cookable,quick,protein"',
+        );
+        expect(html).toMatch(
+            /<nav data-fd-recipes-filter-count="2"[^>]*aria-label="Recipe filters, 2 on"/,
+        );
+        expect(html).not.toContain('<p class="fd-recipes-filter-button');
+        expect(html).toContain('name="filter" value="cookable,quick"');
+        expect(html.match(/fd-chip--selected/g)?.length).toBe(2);
+    });
+
+    test("with no filter on there is no count", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filters: [],
+            cards: [],
+            totalCount: 0,
+        });
+        expect(html).toContain('data-fd-recipes-filter-count="0"');
+        expect(html).toContain('aria-label="Recipe filters"');
+        expect(html).not.toContain("fd-recipes-filter-button");
+        expect(html).not.toMatch(/<p[^>]*>\s*Filter/);
     });
 });
 
@@ -424,7 +427,7 @@ describe("recipes list v2 favourites", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "egg",
-            filter: "",
+            filters: [],
             cards: [],
             totalCount: 0,
         });
@@ -441,7 +444,7 @@ describe("recipes list v2 favourites", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "favourites",
+            filters: ["favourites"],
             cards: [],
             totalCount: 3,
         });
@@ -450,33 +453,11 @@ describe("recipes list v2 favourites", () => {
         );
     });
 
-    test("parseV2RecipeListFilter accepts favourites", () => {
-        expect(parseV2RecipeListFilter("favourites")).toBe("favourites");
-        expect(parseV2RecipeListFilter("favorites")).toBe("");
-    });
-
-    test("applyV2RecipeListFilters keeps only starred cards", () => {
-        const cards = [
-            card("r1", "Shakshuka", true),
-            card("r2", "Oatmeal", false),
-            card("r3", "Stew"),
-        ];
-        expect(
-            applyV2RecipeListFilters(cards, "", "favourites").map(
-                (c) => c.recipe.id,
-            ),
-        ).toEqual(["r1"]);
-        // Search narrows within the favourites.
-        expect(applyV2RecipeListFilters(cards, "oat", "favourites")).toEqual(
-            [],
-        );
-    });
-
     test("an empty favourites filter says so", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "favourites",
+            filters: ["favourites"],
             cards: [],
             totalCount: 4,
         });
@@ -488,7 +469,7 @@ describe("recipes list v2 favourites", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "egg",
-            filter: "cookable",
+            filters: ["cookable"],
             totalCount: 2,
             cards: [card("r1", "Shakshuka", false)],
         });
@@ -514,7 +495,7 @@ describe("recipes list v2 favourites", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             totalCount: 1,
             cards: [card("r1", "Shakshuka", true)],
         });
@@ -530,7 +511,7 @@ describe("recipes list v2 favourites", () => {
         const html = renderRecipesListBody({
             chrome,
             query: "",
-            filter: "",
+            filters: [],
             totalCount: 1,
             cards: [card("r1", 'Mac "n" <cheese>', false)],
         });

@@ -742,6 +742,8 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "can_make_now", required: false },
             { name: "safe_for", required: false },
             { name: "verification", required: false },
+            { name: "filters", required: false },
+            { name: "query", required: false },
         ],
         hasPhotoHint: false,
     },
