@@ -64,9 +64,9 @@ describeDb(
                 `;
                 await sql`
                     insert into public.household_members (
-                        household_id, user_id, role, display_name
+                        household_id, user_id, role, display_name, agents_can_delete
                     )
-                    values (${householdId}, ${id}, ${"member"}, ${name})
+                    values (${householdId}, ${id}, ${"member"}, ${name}, ${true})
                 `;
                 return id;
             };
@@ -127,6 +127,14 @@ describeDb(
                             memberId:
                                 opts.as === undefined ? memberId : opts.as,
                             connection: opts.connection ?? "Claude",
+                            personId:
+                                (opts.as === undefined ? memberId : opts.as) ??
+                                ownerId,
+                            role:
+                                (opts.as === undefined ? memberId : opts.as) ===
+                                null
+                                    ? "owner"
+                                    : "member",
                         },
                         {
                             tool: "delete_grocery_line",
@@ -175,9 +183,12 @@ describeDb(
             `/settings/ai-connections/actions/${id}/undo`;
         const SWITCH = "/settings/ai-connections/destructive";
 
-        test("the owner sees the switch on, and turning it Off persists and makes the guard refuse", async () => {
+        const OWN = "/settings/ai-connections/agent-delete";
+
+        test("the owner sees the household switch on, and turning it Off persists and makes the guard refuse", async () => {
             const html = await (await page(ownerId)).text();
-            expect(html).toContain("Allow destructive changes");
+            expect(html).toContain("Any agent can delete");
+            expect(html).toContain("HOUSEHOLD · OWNER ONLY");
             expect(html).toContain('role="switch" aria-checked="true"');
             expect(html).toContain(`action="${SWITCH}"`);
             expect(html).not.toContain("agents can still read and add");
@@ -193,8 +204,9 @@ describeDb(
                     householdId,
                 ),
             ).toBe(false);
-            expect(await (await page(ownerId)).text()).toContain(
-                'role="switch" aria-checked="false"',
+            const off = await (await page(ownerId)).text();
+            expect(off).toMatch(
+                /aria-checked="false"[^>]*aria-label="Any agent can delete"/,
             );
             await expect(
                 withAgentAction(
@@ -203,6 +215,8 @@ describeDb(
                         householdId,
                         memberId: null,
                         connection: "household token",
+                        personId: ownerId,
+                        role: "owner",
                     },
                     { tool: "delete_grocery_line", summary: "x" },
                     async () => {},
@@ -219,15 +233,14 @@ describeDb(
             ).toBe(true);
         });
 
-        test("a member sees the value read-only, and posting the switch is a 403 that changes nothing", async () => {
+        test("a member does not see the household switch, and posting it is a 403 that changes nothing", async () => {
             const html = await (await page(memberId)).text();
-            expect(html).toContain("Allow destructive changes");
-            expect(html).toContain("Owner only");
-            expect(html).not.toContain(
-                "Only the household owner can change this.",
-            );
+            expect(html).not.toContain("Any agent can delete");
+            expect(html).not.toContain("HOUSEHOLD · OWNER ONLY");
             expect(html).not.toContain(`action="${SWITCH}"`);
-            expect(html).not.toContain('name="allowed"');
+            // Their own switch is there.
+            expect(html).toContain("Your agents can delete");
+            expect(html).toContain(`action="${OWN}"`);
 
             const res = await post(memberId, SWITCH, { allowed: "0" });
 
@@ -235,6 +248,136 @@ describeDb(
             expect(
                 await liveSettingsStore().getAgentDestructiveAllowed(
                     householdId,
+                ),
+            ).toBe(true);
+        });
+
+        test("a member turns their own switch on and off; nobody else's moves, and the guard follows", async () => {
+            const settings = liveSettingsStore();
+            // Members are added with their switch off.
+            const { sql } = getCtx();
+            const fresh = crypto.randomUUID();
+            await sql`
+                insert into public.users (id, email)
+                values (${fresh}, ${`fresh-${fresh}@foodable.test`})
+            `;
+            await sql`
+                insert into public.household_members (household_id, user_id, role, display_name)
+                values (${householdId}, ${fresh}, 'member', 'Fresh')
+            `;
+            const offHtml = await (await page(fresh)).text();
+            expect(offHtml).toMatch(
+                /aria-checked="false"[^>]*aria-label="Your agents can delete"/,
+            );
+            expect(offHtml).toContain(
+                "Off by default · only what you can delete",
+            );
+            const guard = () =>
+                withAgentAction(
+                    liveAgentActionDeps(),
+                    {
+                        householdId,
+                        memberId: fresh,
+                        connection: "Claude",
+                        personId: fresh,
+                        role: "member",
+                    },
+                    { tool: "delete_grocery_line", summary: "x" },
+                    async () => {},
+                );
+            await expect(guard()).rejects.toMatchObject({
+                reason: "person_off",
+            });
+
+            const on = await post(fresh, OWN, { allowed: "1" });
+            expect(on.status).toBe(303);
+            expect(on.headers.get("location")).toBe("/settings/ai-connections");
+            expect(
+                await settings.getMemberAgentsCanDelete(householdId, fresh),
+            ).toBe(true);
+            // Nobody else's switch moved, nor the household's.
+            expect(
+                await settings.getMemberAgentsCanDelete(householdId, otherId),
+            ).toBe(true);
+            expect(await settings.getAgentDestructiveAllowed(householdId)).toBe(
+                true,
+            );
+            await guard();
+            expect(await (await page(fresh)).text()).toMatch(
+                /aria-checked="true"[^>]*aria-label="Your agents can delete"/,
+            );
+
+            expect((await post(fresh, OWN, { allowed: "0" })).status).toBe(303);
+            expect(
+                await settings.getMemberAgentsCanDelete(householdId, fresh),
+            ).toBe(false);
+            await expect(guard()).rejects.toMatchObject({
+                reason: "person_off",
+            });
+        });
+
+        test("the owner's own switch is theirs, not the household's, and a member's post cannot reach another person's", async () => {
+            const settings = liveSettingsStore();
+            await settings.setMemberAgentsCanDelete(
+                householdId,
+                ownerId,
+                false,
+            );
+            expect((await post(ownerId, OWN, { allowed: "1" })).status).toBe(
+                303,
+            );
+            expect(
+                await settings.getMemberAgentsCanDelete(householdId, ownerId),
+            ).toBe(true);
+            // The form names no person: whoever is signed in is the one changed.
+            await settings.setMemberAgentsCanDelete(householdId, otherId, true);
+            expect(
+                (
+                    await post(memberId, OWN, {
+                        allowed: "0",
+                        user_id: otherId,
+                        member: otherId,
+                    })
+                ).status,
+            ).toBe(303);
+            expect(
+                await settings.getMemberAgentsCanDelete(householdId, otherId),
+            ).toBe(true);
+            expect(
+                await settings.getMemberAgentsCanDelete(householdId, memberId),
+            ).toBe(false);
+        });
+
+        test("with the household switch off a member sees their own as plain Off, naming the owner", async () => {
+            await post(ownerId, SWITCH, { allowed: "0" });
+            const html = await (await page(memberId)).text();
+            expect(html).toContain("Turned off for the household by Owner");
+            expect(html).not.toMatch(
+                /<button[^>]*aria-label="Your agents can delete"/,
+            );
+            // The owner sees no such line: they turned it off themselves.
+            const ownerHtml = await (await page(ownerId)).text();
+            expect(ownerHtml).not.toContain("Turned off for the household by");
+            await post(ownerId, SWITCH, { allowed: "1" });
+            expect(await (await page(memberId)).text()).not.toContain(
+                "Turned off for the household by",
+            );
+        });
+
+        test("an own-switch post with no value is refused as a bad choice, and anyone not signed in is turned away", async () => {
+            const bad = await post(memberId, OWN, { allowed: "maybe" });
+            expect(bad.status).toBe(400);
+            expect(await bad.text()).toContain("Choose On or Off.");
+            const anonymous = await app.request(`http://test${OWN}`, {
+                method: "POST",
+                headers: FORM,
+                body: new URLSearchParams({ allowed: "1" }).toString(),
+            });
+            expect([401, 403]).toContain(anonymous.status);
+            expect(
+                await liveSettingsStore().getMemberAgentsCanDelete(
+                    householdId,
+                    memberId,
                 ),
             ).toBe(true);
         });

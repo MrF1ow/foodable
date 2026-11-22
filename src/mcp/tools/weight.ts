@@ -515,6 +515,7 @@ export function registerWeightTools(server: McpServer, ctx: ToolContext) {
                                 changed: deleted,
                             };
                         },
+                        { target: userId },
                     );
                     if (run.refused) return run.result;
                     return {

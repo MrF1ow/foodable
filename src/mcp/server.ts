@@ -25,6 +25,7 @@ import { buildFlagContext } from "../flags.js";
 import { loadViewerFlags, type ViewerFlags } from "../viewer-flags.js";
 import {
     AGENT_DESTRUCTIVE_SETTING,
+    AGENT_PERSONAL_SETTING,
     createToolContext,
     NUTRIENT_COVERAGE,
     type AlcoholDisplay,
@@ -88,7 +89,7 @@ When get_week_plan is available, the household's week plan can be read and chang
 
 When list_stores is available, the household's grocery stores can be read and changed: list_stores shows the stores in order with their sections, line counts and the default store (every store and section id comes from there), create_store, update_store, delete_store, reorder_stores and set_store_sections change them, and clear_grocery_list, move_grocery_lines and update_grocery_line clear, move and edit grocery lines. Use them when the person asks for that change; all but list_stores and create_store overwrite or remove what the household set, so they are destructive tools too. The same switch also covers four kitchen tools: move_fridge_items and delete_fridge_items move and remove several fridge items at once, delete_grocery_lines removes several grocery lines, and remove_usual takes a plain food off the Usuals list (its products come off the food and its restock schedule resets). All four are destructive tools too.
 
-Destructive tools (the ones that delete, remove, discard, clear, unplan or merge) change or remove household data without asking first. Call them only when the person asked for that change, never on your own initiative. After one, tell the person what was removed or changed, and that the household can undo it for 24 hours in Settings › AI connections. If a tool says agents may not make destructive changes, tell the person the setting's name (${AGENT_DESTRUCTIVE_SETTING}, in Settings › AI connections) and do not retry another way.
+Destructive tools (the ones that delete, remove, discard, clear, unplan or merge) change or remove household data without asking first. Call them only when the person asked for that change, never on your own initiative. After one, tell the person what was removed or changed, and that the household can undo it for 24 hours in Settings › AI connections. Each person has their own switch for the agents they connected (${AGENT_PERSONAL_SETTING}, in Settings › AI connections, off until they turn it on). The household owner's ${AGENT_DESTRUCTIVE_SETTING} switch there turns every person's agents off at once, and an agent never does more than the person it acts for can in the app (changing stores, for one, is for an owner or admin). If a destructive tool is refused, its message names the switch or the role that said no: tell the person that and do not retry another way.
 
 Member targeting — nutrition is per person. On an OAuth user token, omit user_id to act as the caller; pass target_member on writes (log_meal, update_meal, delete_meal, bulk_import_meals, log_water, delete_water, log_weight, update_weight, delete_weight, set_nutrition_goals, log_recipe_portion) to log for another household member. user_id on those writes is not a way to sudo. On a household token, pass user_id to pick whose nutrition to read or write. Call list_members when you need ids. Fridge, grocery, recipes, and the food catalog are household-scoped.
 

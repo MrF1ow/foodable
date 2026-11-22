@@ -11,6 +11,13 @@ insert into public.households (id, name, fridge_locations) values
     ('11111111-1111-1111-1111-111111111111', 'Home',
      array['Fridge', 'Freezer', 'Freezer', 'Pantry ']);
 
+-- The household switch is off: the one stored value that must not grant an
+-- agent a delete right when each member gets their own switch.
+update public.households
+set household_preferences = household_preferences
+    || '{"agents.destructive_allowed": false}'::jsonb
+where id = '11111111-1111-1111-1111-111111111111';
+
 insert into public.household_members (household_id, user_id, role, display_name) values
     ('11111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-0000000000a1', 'owner', 'A'),
     ('11111111-1111-1111-1111-111111111111', '00000000-0000-0000-0000-0000000000b2', 'member', 'B');

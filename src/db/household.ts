@@ -578,6 +578,42 @@ async function rotateHouseholdMcpTokenInTx(args: {
     });
 }
 
+/**
+ * Writes one member's "Your agents can delete" switch and returns it, or null
+ * when that person is not a member of the household. Runs as the system:
+ * nothing in foodable_app writes household_members (a policy that did would
+ * let a member change their own role), so the route that calls this only ever
+ * names the signed-in member.
+ */
+export async function setMemberAgentsCanDelete(
+    householdId: string,
+    userId: string,
+    allowed: boolean,
+): Promise<boolean | null> {
+    return runAsSystem("a member setting their agents' delete switch", () =>
+        run(async (tx) => {
+            try {
+                const data = await maybeOne<{ allowed: unknown }>(
+                    tx,
+                    tx`
+                        update ${tx.unsafe(HOUSEHOLD_MEMBERS)}
+                        set agents_can_delete = ${allowed}::boolean
+                        where household_id = ${householdId}
+                          and user_id = ${userId}
+                        returning agents_can_delete as allowed
+                    `,
+                    "save member agents switch",
+                );
+                return data ? data.allowed === true : null;
+            } catch (err) {
+                const message =
+                    err instanceof Error ? err.message : String(err);
+                throw new Error(`Failed to save agents switch: ${message}`);
+            }
+        }),
+    );
+}
+
 export async function updateMemberDisplayName(
     householdId: string,
     userId: string,

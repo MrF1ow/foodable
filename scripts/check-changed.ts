@@ -227,6 +227,11 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             tests: /^src\/domain\/geometry\.test\.ts$/,
         },
         // ---- fixtures read from disk
+        // household.test.ts runs the backfill statement of this migration from the file.
+        {
+            when: /^db\/migrations\/20261121230000_member_agent_delete\.sql$/,
+            tests: /^src\/db\/household\.test\.ts$/,
+        },
         {
             when: /^src\/domain\/fixtures\//,
             tests: /^src\/(domain\/(recipe-text|recipe-import|recipe-jsonld|recipe-mentions|social-readers)|db\/recipes|mcp)\.test\.ts$/,

@@ -31,9 +31,11 @@ export type GrocerySection = {
 export const GROCERY_DEFAULT_STORE_KEY = "grocery.default_store_id";
 export const GROCERY_USE_USUAL_STORE_KEY = "grocery.use_usual_store";
 /**
- * The household's switch for destructive agent changes. Missing, or anything
- * but a stored `false`, means Allowed, so a household that never touched it
- * and a household whose preferences were rewritten both stay on.
+ * The household's switch for destructive agent changes, the owner's
+ * household-wide off: when it is Off no member's agents may delete, whatever
+ * their own switch says. Missing, or anything but a stored `false`, means
+ * Allowed, so a household that never touched it and a household whose
+ * preferences were rewritten both stay on.
  */
 export const AGENTS_DESTRUCTIVE_ALLOWED_KEY = "agents.destructive_allowed";
 
@@ -91,6 +93,21 @@ export type SettingsStore = {
         householdId: string,
         allowed: boolean,
     ): Promise<boolean>;
+    /**
+     * Whether the agents this person connected may delete (default: no). The
+     * person's own switch: it only counts while the household switch is not
+     * off. A person who is not a member has none, so it reads false.
+     */
+    getMemberAgentsCanDelete(
+        householdId: string,
+        userId: string,
+    ): Promise<boolean>;
+    /** Writes one member's switch and returns it. The caller checks it is their own. */
+    setMemberAgentsCanDelete(
+        householdId: string,
+        userId: string,
+        allowed: boolean,
+    ): Promise<boolean>;
     listStores(householdId: string): Promise<GroceryStore[]>;
     insertStore(row: GroceryStore): Promise<GroceryStore>;
     /** Writes the store's name; null when the store is not this household's. */
@@ -132,6 +149,7 @@ export function createMemorySettingsStore(): MemorySettingsStore {
     const locations = new Map<string, string | null>();
     const preferences = new Map<string, GroceryPreferences>();
     const agentSwitch = new Map<string, boolean>();
+    const memberSwitch = new Map<string, boolean>();
     const stores: GroceryStore[] = [];
     const sections: GrocerySection[] = [];
 
@@ -161,6 +179,13 @@ export function createMemorySettingsStore(): MemorySettingsStore {
         },
         async setAgentDestructiveAllowed(householdId, allowed) {
             agentSwitch.set(householdId, allowed);
+            return allowed;
+        },
+        async getMemberAgentsCanDelete(householdId, userId) {
+            return memberSwitch.get(`${householdId}:${userId}`) ?? false;
+        },
+        async setMemberAgentsCanDelete(householdId, userId, allowed) {
+            memberSwitch.set(`${householdId}:${userId}`, allowed);
             return allowed;
         },
         __removeStore(householdId, storeId) {

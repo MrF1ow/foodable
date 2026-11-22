@@ -101,3 +101,17 @@ test("the memory settings store keeps the agents switch per household", async ()
     expect(await store.setAgentDestructiveAllowed(HH, true)).toBe(true);
     expect(await store.getAgentDestructiveAllowed(HH)).toBe(true);
 });
+
+test("the memory settings store keeps each member's agents switch, off until set", async () => {
+    const store = createMemorySettingsStore();
+    expect(await store.getMemberAgentsCanDelete(HH, "u1")).toBe(false);
+    expect(await store.setMemberAgentsCanDelete(HH, "u1", true)).toBe(true);
+    expect(await store.getMemberAgentsCanDelete(HH, "u1")).toBe(true);
+    // Per person and per household, and apart from the household's own switch.
+    expect(await store.getMemberAgentsCanDelete(HH, "u2")).toBe(false);
+    expect(await store.getMemberAgentsCanDelete("hh-2", "u1")).toBe(false);
+    await store.setAgentDestructiveAllowed(HH, false);
+    expect(await store.getMemberAgentsCanDelete(HH, "u1")).toBe(true);
+    expect(await store.setMemberAgentsCanDelete(HH, "u1", false)).toBe(false);
+    expect(await store.getAgentDestructiveAllowed(HH)).toBe(false);
+});

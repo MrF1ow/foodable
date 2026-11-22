@@ -1009,6 +1009,7 @@ export function registerNutritionEditTools(
                                 changed: deleted,
                             };
                         },
+                        { target: userId },
                     );
                     if (run.refused) return run.result;
                     return {

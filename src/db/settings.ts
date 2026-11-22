@@ -11,6 +11,7 @@ import {
     groceryStoreToRow,
     type SettingsStore,
 } from "../domain/settings.js";
+import { setMemberAgentsCanDelete as setMemberAgentsCanDeleteAsSystem } from "./household.js";
 import {
     definedColumns,
     insertReturning,
@@ -21,6 +22,7 @@ import {
 } from "./sql.js";
 
 const HOUSEHOLDS = "households";
+const HOUSEHOLD_MEMBERS = "household_members";
 const GROCERY_STORES = "grocery_stores";
 const GROCERY_SECTIONS = "grocery_sections";
 const GROCERY_STORE_COLS = "id, household_id, name, sort_order";
@@ -175,6 +177,37 @@ export function liveSettingsStore(): SettingsStore {
                     throw pgError("save agents switch", err);
                 }
             });
+        },
+        async getMemberAgentsCanDelete(householdId, userId) {
+            return run(async (tx) => {
+                try {
+                    const data = await maybeOne<{ allowed: unknown }>(
+                        tx,
+                        tx`
+                            select agents_can_delete as allowed
+                            from ${tx.unsafe(HOUSEHOLD_MEMBERS)}
+                            where household_id = ${householdId}
+                              and user_id = ${userId}
+                        `,
+                        "load member agents switch",
+                    );
+                    // No membership row, or anything but a stored true: off.
+                    return data?.allowed === true;
+                } catch (err) {
+                    throw pgError("load member agents switch", err);
+                }
+            });
+        },
+        // Written as the system (see `setMemberAgentsCanDelete` in
+        // ./household.ts): nothing in foodable_app writes household_members.
+        async setMemberAgentsCanDelete(householdId, userId, allowed) {
+            const saved = await setMemberAgentsCanDeleteAsSystem(
+                householdId,
+                userId,
+                allowed,
+            );
+            if (saved === null) throw new SettingsInputError("Unknown member.");
+            return saved;
         },
         async listStores(householdId) {
             return run(async (tx) => {

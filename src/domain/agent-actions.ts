@@ -3,11 +3,14 @@
  *
  * An agent may delete, clear or overwrite without asking first. The price is
  * that every such change is recorded, with the rows as they were, and can be
- * undone for 24 hours. One household switch turns the whole thing off.
+ * undone for 24 hours. Each person has their own switch for the agents they
+ * connected (off until they turn it on), the owner's household switch turns
+ * every person's agents off at once, and an agent never does more than its
+ * person's role can in the app.
  *
  * `withAgentAction` is the one guard a destructive tool goes through: it
- * checks the switch, runs the write, and records the entry plus a snapshot in
- * the same transaction. `undoAgentAction` replays the snapshot. The snapshot
+ * checks the switches and the role, runs the write, and records the entry plus
+ * a snapshot in the same transaction. `undoAgentAction` replays the snapshot. The snapshot
  * is a generic before-image of rows (`{ table, op, row }`), so no tool needs
  * its own undo code: it names the rows it is about to change and the module can
  * put them back. `captureCascade` names a row and records everything deleting
@@ -42,6 +45,12 @@
  * be undone when it cannot.
  */
 import { FoodsInputError, findFoodById, type FoodsStore } from "./foods.js";
+import {
+    TOOL_ACTIONS,
+    can,
+    type GuardedTool,
+    type PermissionRole,
+} from "./permissions.js";
 import type { SettingsStore } from "./settings.js";
 import type { StockStore } from "./stock.js";
 
@@ -320,6 +329,13 @@ export type AgentActionActor = {
     memberId: string | null;
     /** What the agent connected through, e.g. "household token" or a client name. */
     connection: string;
+    /**
+     * The person the agent acts for: `memberId`, or the owner for the household
+     * token. Their own switch decides, and their role caps what it may do.
+     */
+    personId: string;
+    /** That person's role. */
+    role: PermissionRole;
 };
 
 /** The stored row, camelCase. `snapshot` is null once purged or when not undoable. */
@@ -354,20 +370,55 @@ export type AgentActionEntry = {
 };
 
 /**
- * What the household's switch is called on Settings › AI connections. The page,
- * the MCP refusal, the guard's error and the server instructions all read it
- * from here, so an agent is never sent to a name the page does not show.
+ * What the owner's household-wide switch is called on Settings › AI
+ * connections. The page, the MCP refusal, the guard's error and the server
+ * instructions all read it from here, so an agent is never sent to a name the
+ * page does not show.
  */
-export const AGENT_DESTRUCTIVE_SETTING = "Allow destructive changes";
+export const AGENT_DESTRUCTIVE_SETTING = "Any agent can delete";
+
+/** What each person's own switch is called on the same page. */
+export const AGENT_PERSONAL_SETTING = "Your agents can delete";
+
+/**
+ * Why the guard refused. The household's off is checked first, then the
+ * person's role (a switch cannot grant what the role lacks, so a member is not
+ * sent to one that would change nothing), then the person's own switch.
+ */
+export type AgentRefusalReason =
+    "household_off" | "person_off" | "not_permitted";
+
+const REFUSAL_MESSAGES: Record<
+    Exclude<AgentRefusalReason, "not_permitted">,
+    string
+> = {
+    household_off:
+        "The household owner has turned destructive agent changes off for everyone's agents: " +
+        `Settings › AI connections › ${AGENT_DESTRUCTIVE_SETTING} is Off. ` +
+        "Nothing was changed. Tell the person to ask the household owner to turn it on, or to make this change in the app.",
+    person_off:
+        "The person you act for has not let their agents delete: " +
+        `Settings › AI connections › ${AGENT_PERSONAL_SETTING} is Off. ` +
+        "Nothing was changed. Tell the person to turn it on if they want you to do this, or to make this change in the app.",
+};
 
 export class AgentActionsDisabledError extends Error {
     readonly code = "agent_actions_disabled" as const;
 
-    constructor() {
+    /**
+     * @param reason what refused it; the household's off when not said.
+     * @param detail for `not_permitted`, why the person's role may not.
+     */
+    constructor(
+        readonly reason: AgentRefusalReason = "household_off",
+        detail?: string,
+    ) {
         super(
-            "The household has turned destructive agent changes off: " +
-                `Settings › AI connections › ${AGENT_DESTRUCTIVE_SETTING} is Off. ` +
-                "Nothing was changed. Tell the person to turn it on if they want you to do this.",
+            reason === "not_permitted"
+                ? "An agent can do no more than the person it acts for can in the app. " +
+                      `${detail ?? "Their role does not allow that."} ` +
+                      "Nothing was changed. Tell the person to make this change in the app, or to ask the household owner or an admin."
+                : REFUSAL_MESSAGES[reason],
         );
         this.name = "AgentActionsDisabledError";
     }
@@ -678,7 +729,10 @@ export type AgentActionsStore = {
 
 export type AgentActionDeps = {
     store: AgentActionsStore;
-    settings: Pick<SettingsStore, "getAgentDestructiveAllowed">;
+    settings: Pick<
+        SettingsStore,
+        "getAgentDestructiveAllowed" | "getMemberAgentsCanDelete"
+    >;
     /**
      * Needed by a write that records fridge items: the stock movements it
      * writes are recorded with it, so undo can write the opposite ones.
@@ -694,7 +748,8 @@ export type AgentUndoDeps = {
 };
 
 export type AgentActionMeta<T> = {
-    tool: string;
+    /** A guarded tool: `TOOL_ACTIONS` gives the action the person's role must allow. */
+    tool: GuardedTool;
     summary: string | ((result: T) => string);
     /** False keeps the entry but takes no snapshot, for a change that cannot be put back. */
     undoable?: boolean;
@@ -989,9 +1044,10 @@ function clock(deps: { now?: () => Date }): Date {
 
 /**
  * The guard every destructive agent tool goes through. In one transaction it
- * checks the household switch (nothing is written when it is Off), runs
- * `write`, and records the entry and snapshot. When `write` throws, the write
- * rolls back and nothing is recorded.
+ * checks that the household switch is not Off, that the acting person's role
+ * allows the tool's action, and that their own switch is On (nothing is
+ * written when any of them says no), runs `write`, and records the entry and
+ * snapshot. When `write` throws, the write rolls back and nothing is recorded.
  */
 export async function withAgentAction<T>(
     deps: AgentActionDeps,
@@ -1006,7 +1062,30 @@ export async function withAgentAction<T>(
         if (
             !(await deps.settings.getAgentDestructiveAllowed(actor.householdId))
         ) {
-            throw new AgentActionsDisabledError();
+            throw new AgentActionsDisabledError("household_off");
+        }
+        const action = Object.hasOwn(TOOL_ACTIONS, meta.tool)
+            ? TOOL_ACTIONS[meta.tool]
+            : null;
+        const allowed = action
+            ? can({ userId: actor.personId, role: actor.role }, action)
+            : ({
+                  ok: false,
+                  reason: "That tool has no permission rule.",
+              } as const);
+        if (!allowed.ok) {
+            throw new AgentActionsDisabledError(
+                "not_permitted",
+                allowed.reason,
+            );
+        }
+        if (
+            !(await deps.settings.getMemberAgentsCanDelete(
+                actor.householdId,
+                actor.personId,
+            ))
+        ) {
+            throw new AgentActionsDisabledError("person_off");
         }
         const watch = createLedgerWatch(deps, actor.householdId);
         const { recorder, changes } = createRecorder(tx, watch);

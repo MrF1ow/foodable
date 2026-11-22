@@ -22,7 +22,7 @@ watches:
 
 - Bun loads `.env` on its own, and a real `.env` can hold production secrets. Pass every variable the process needs on the command line (a process env var beats `.env`), and start the server with `bun --no-env-file` so nothing else leaks in. `bun --no-env-file run <script>` does **not** reach the inner `bun`: use it only on `bun <file>` or `bun test`.
 - Never print, copy or commit `.env` values; use throwaway secrets.
-- `bun run db:dev` defaults to the user's own dev database (data dir ~/.local/share/foodable/pg, port 54330, run by `foodable-db.service`). `db:dev stop` would stop it and `init` would migrate it, with no force flag to guard either. **Always** set `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` first (below), or run only `status` or `url`. `db:dev` reads only those two (plus `PG_BIN`) and never `DATABASE_URL`, so it is safe under `bun run` even though the inner `bun` loads `.env`.
+- `bun run db:dev` defaults to the user's own dev database (data dir ~/.local/share/foodable/pg, port 54330, run by `foodable-db.service`). `db:dev stop` would stop it and `init` would migrate it, with no force flag to guard either. **Always** set `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` first (below), or run only `status` or `url`. `db:dev` reads only those two (plus `PG_BIN`), never `DATABASE_URL`, so it is safe under `bun run`.
 - Never use port 8080 or 54330: the user's dev server and database live there.
 
 ## Isolated stack (one-off verification)
@@ -57,24 +57,24 @@ For row level security, set a throwaway `foodable_app` password (`psql`) and add
 
 It binds `0.0.0.0` (LAN): keep runs short. No answer: `$STACK/server.log`. App: `http://127.0.0.1:$APP_PORT`; the first sign-up on an empty database is the owner (`docs/self-hosting.md`, "First-user flow").
 
-Not `bun run dev`/`start`: `dev` runs `gen:all` (rewrites tracked files) and `--watch`, and the inner `bun` loads `.env`. Run `gen:all` only in a fresh worktree or after login copy or token changes.
+Not `bun run dev`/`start`: `dev` runs `gen:all` (rewrites tracked files) and `--watch`, and its inner `bun` loads `.env`. Run `gen:all` only in a fresh worktree or after login/token changes.
 
 Stop everything:
 
 ```bash
-kill "$(cat "$STACK/server.pid")"      # SIGTERM
-bun run db:dev stop                    # stops only the cluster in $FOODABLE_PG_DIR
-bun run db:dev status                  # "stopped", exit 1 is expected
+kill "$(cat "$STACK/server.pid")"
+bun run db:dev stop     # only the cluster in $FOODABLE_PG_DIR
+bun run db:dev status   # "stopped", exit 1
 ```
 
 ## Which tool fits which change
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
-- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped.
+- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off).
 - **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" = another run holds them; wait until `ss -ltn` shows both free). No database. It also serves `/dev/gallery-v2` for the sheet and menu cases.
 - **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow, long `timeout`); clear tmp/app-preview first. Without `--shots`: serves :4787 (`PREVIEW_PORT`). Per page: `-390.png`, `-1440.png`.
 - **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`) compares the non-gallery shots of base and branch; exit 1 on a diff. One render at a time per tree; reuse the base.
-- **WebKit (Safari-class):** Playwright's WPE `MiniBrowser` starts only through a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH` (`bin`, `lib`, `share`), `WEBKIT_FORCE_COMPLEX_TEXT=1` and an `LD_LIBRARY_PATH` with its `lib`, `sys/lib` and an ICU 74 libs dir.
+- **WebKit (Safari-class):** WPE `MiniBrowser` needs a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH` (`bin`, `lib`, `share`), `WEBKIT_FORCE_COMPLEX_TEXT=1`, and `LD_LIBRARY_PATH` with its `lib`, `sys/lib` and ICU 74 libs.
 - **Barcode scans on a running server** hit live Open Food Facts; unit tests stub it.
 - **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
 - **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.

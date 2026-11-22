@@ -45,6 +45,7 @@ import {
     seedGrocerySection,
     seedGroceryStore,
     seedHousehold,
+    seedMember,
 } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
 
@@ -103,8 +104,8 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             values (${memberId}, ${`member-${memberId}@foodable.test`})
         `;
         await sql`
-            insert into public.household_members (household_id, user_id, role, display_name)
-            values (${primary.householdId}, ${memberId}, 'member', 'Member')
+            insert into public.household_members (household_id, user_id, role, display_name, agents_can_delete)
+            values (${primary.householdId}, ${memberId}, 'member', 'Member', true)
         `;
         // Two households exist; pin the actor so it is not a coin flip.
         setFallbackActorForTests({
@@ -147,6 +148,8 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
         householdId: ctx.householdId,
         memberId: ctx.memberId,
         connection: "Claude",
+        personId: ctx.memberId,
+        role: "member",
     });
     const lineCtx = (): StoreContractCtx => ({
         householdId: ctx.householdId,
@@ -386,7 +389,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
         const { action } = await withAgentAction(
             deps,
             actor(),
-            { tool: "delete_food", summary: "Deleted Granola" },
+            { tool: "merge_foods", summary: "Deleted Granola" },
             async (rec) => {
                 await rec.captureByIds("foods", [foodId], "deleted");
                 await run(
@@ -425,7 +428,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
         const { action } = await withAgentAction(
             deps,
             actor(),
-            { tool: "replace_list", summary: "Rewrote the list" },
+            { tool: "clear_grocery_list", summary: "Rewrote the list" },
             async (rec) => {
                 await rec.captureByIds("grocery_lines", [milk.id], "updated");
                 await grocery.updateLine({
@@ -544,7 +547,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
         const { action } = await withAgentAction(
             deps,
             actor(),
-            { tool: "delete_grocery_store", summary: "Deleted Costco" },
+            { tool: "delete_grocery_lines", summary: "Deleted Costco" },
             async (rec) => {
                 await rec.captureByIds("grocery_lines", [line.id], "deleted");
                 await rec.captureByIds(
@@ -609,7 +612,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
         const { action } = await withAgentAction(
             deps,
             actor(),
-            { tool: "delete_stuff", summary: "Deleted Spare and Aldi" },
+            { tool: "delete_grocery_lines", summary: "Deleted Spare and Aldi" },
             async (rec) => {
                 // Put back in this order: Spare goes in, then Aldi hits the name.
                 await rec.captureByIds("grocery_stores", [spare.id], "deleted");
@@ -854,6 +857,208 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
         expect(result).toBe("done");
     });
 
+    describe("who may delete, against the real tables", () => {
+        type Person = {
+            role: "member" | "admin" | "owner";
+            userId: string;
+        };
+
+        async function people(): Promise<Person[]> {
+            const sql = getCtx().sql;
+            return [
+                { role: "member", userId: ctx.memberId },
+                {
+                    role: "admin",
+                    userId: await seedMember(sql, ctx.householdId, {
+                        role: "admin",
+                        displayName: "Admin",
+                    }),
+                },
+                { role: "owner", userId: ctx.ownerId },
+            ];
+        }
+
+        async function attempt(
+            person: Person,
+            tool: "delete_grocery_line" | "delete_store",
+            memberId: string | null = person.userId,
+        ): Promise<"went_through" | AgentActionsDisabledError> {
+            const grocery = liveGroceryStore();
+            const milk = await grocery.insertLine(
+                sampleGroceryLine(lineCtx(), { displayName: "Milk" }),
+            );
+            const recorded = (
+                await liveAgentActionsStore().list(ctx.householdId, 50)
+            ).length;
+            let ran = false;
+            try {
+                await withAgentAction(
+                    liveAgentActionDeps(),
+                    {
+                        householdId: ctx.householdId,
+                        memberId,
+                        connection: memberId ? "Claude" : "household token",
+                        personId: person.userId,
+                        role: person.role,
+                    },
+                    { tool, summary: "Deleted Milk" },
+                    async (rec) => {
+                        ran = true;
+                        await rec.captureByIds(
+                            "grocery_lines",
+                            [milk.id],
+                            "deleted",
+                        );
+                        await grocery.deleteLine(ctx.householdId, milk.id);
+                    },
+                );
+                expect(ran).toBe(true);
+                return "went_through";
+            } catch (err) {
+                if (!(err instanceof AgentActionsDisabledError)) throw err;
+                // Refused before the write: nothing ran and the line is still there.
+                expect(ran).toBe(false);
+                expect(
+                    (await grocery.listLines(ctx.householdId)).some(
+                        (line) => line.id === milk.id,
+                    ),
+                ).toBe(true);
+                expect(
+                    (await liveAgentActionsStore().list(ctx.householdId, 50))
+                        .length,
+                ).toBe(recorded);
+                return err;
+            }
+        }
+
+        test("each role is allowed with their own switch on and refused with it off, whatever the others' switches say", async () => {
+            const settings = liveSettingsStore();
+            const everyone = await people();
+            for (const person of everyone) {
+                // Every switch off but this person's: the others do not count.
+                for (const other of everyone) {
+                    await settings.setMemberAgentsCanDelete(
+                        ctx.householdId,
+                        other.userId,
+                        other.userId === person.userId,
+                    );
+                }
+                expect(await attempt(person, "delete_grocery_line")).toBe(
+                    "went_through",
+                );
+                await settings.setMemberAgentsCanDelete(
+                    ctx.householdId,
+                    person.userId,
+                    false,
+                );
+                const refused = await attempt(person, "delete_grocery_line");
+                expect(refused).toBeInstanceOf(AgentActionsDisabledError);
+                expect((refused as AgentActionsDisabledError).reason).toBe(
+                    "person_off",
+                );
+            }
+        });
+
+        test("the household off refuses every role whose own switch is on", async () => {
+            const settings = liveSettingsStore();
+            const everyone = await people();
+            for (const person of everyone) {
+                await settings.setMemberAgentsCanDelete(
+                    ctx.householdId,
+                    person.userId,
+                    true,
+                );
+            }
+            await settings.setAgentDestructiveAllowed(ctx.householdId, false);
+            for (const person of everyone) {
+                const refused = await attempt(person, "delete_grocery_line");
+                expect((refused as AgentActionsDisabledError).reason).toBe(
+                    "household_off",
+                );
+            }
+            // Turning it back on gives each their own switch again, untouched.
+            await settings.setAgentDestructiveAllowed(ctx.householdId, true);
+            for (const person of everyone) {
+                expect(await attempt(person, "delete_grocery_line")).toBe(
+                    "went_through",
+                );
+            }
+        });
+
+        test("a member's agent is refused an admin-only action even with their switch on", async () => {
+            const [member, admin, owner] = await people();
+            const settings = liveSettingsStore();
+            for (const person of [member!, admin!, owner!]) {
+                await settings.setMemberAgentsCanDelete(
+                    ctx.householdId,
+                    person.userId,
+                    true,
+                );
+            }
+            const refused = await attempt(member!, "delete_store");
+            expect((refused as AgentActionsDisabledError).reason).toBe(
+                "not_permitted",
+            );
+            expect(await attempt(admin!, "delete_store")).toBe("went_through");
+            expect(await attempt(owner!, "delete_store")).toBe("went_through");
+        });
+
+        test("the household token is checked as the owner: the owner's switch and role", async () => {
+            const settings = liveSettingsStore();
+            const owner = { role: "owner", userId: ctx.ownerId } as const;
+            expect(await attempt(owner, "delete_store", null)).toBe(
+                "went_through",
+            );
+            // A member's switch is not the token's.
+            await settings.setMemberAgentsCanDelete(
+                ctx.householdId,
+                ctx.memberId,
+                false,
+            );
+            expect(await attempt(owner, "delete_grocery_line", null)).toBe(
+                "went_through",
+            );
+            await settings.setMemberAgentsCanDelete(
+                ctx.householdId,
+                ctx.ownerId,
+                false,
+            );
+            const refused = await attempt(owner, "delete_grocery_line", null);
+            expect((refused as AgentActionsDisabledError).reason).toBe(
+                "person_off",
+            );
+        });
+
+        test("the person's switch is read from household_members, per household", async () => {
+            const settings = liveSettingsStore();
+            await settings.setMemberAgentsCanDelete(
+                ctx.householdId,
+                ctx.memberId,
+                false,
+            );
+            const [row] = (await getCtx().sql`
+                select agents_can_delete, role
+                from public.household_members
+                where household_id = ${ctx.householdId} and user_id = ${ctx.memberId}
+            `) as { agents_can_delete: boolean; role: string }[];
+            expect(row).toEqual({ agents_can_delete: false, role: "member" });
+            // Turning one member's switch never touches another household's.
+            expect(
+                await settings.getMemberAgentsCanDelete(
+                    ctx.otherHouseholdId,
+                    ctx.ownerId,
+                ),
+            ).toBe(false);
+            await expect(
+                settings.setMemberAgentsCanDelete(
+                    ctx.householdId,
+                    crypto.randomUUID(),
+                    true,
+                ),
+            ).rejects.toThrow("Unknown member.");
+        });
+    });
+
     test("changing the household config keeps the switch Off", async () => {
         const settings = liveSettingsStore();
         await settings.setAgentDestructiveAllowed(ctx.householdId, false);
@@ -893,7 +1098,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             const { action } = await withAgentAction(
                 liveAgentActionDeps(),
                 actor(),
-                { tool: "delete_grocery_store", summary: "Deleted Costco" },
+                { tool: "delete_grocery_lines", summary: "Deleted Costco" },
                 async (rec) => {
                     // The parent is recorded before its children.
                     await rec.captureByIds(
@@ -931,7 +1136,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             const { action } = await withAgentAction(
                 liveAgentActionDeps(),
                 actor(),
-                { tool: "add_grocery_store", summary: "Added Lidl" },
+                { tool: "update_grocery_line", summary: "Added Lidl" },
                 async (rec) => {
                     const made = await createGroceryStore(
                         settings,
@@ -961,7 +1166,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             return withAgentAction(
                 liveAgentActionDeps(),
                 actor(),
-                { tool: "set_store_sections", summary: "Added Cheese shelf" },
+                { tool: "update_grocery_line", summary: "Added Cheese shelf" },
                 async (rec) => {
                     await run(
                         (tx) => tx`
@@ -1030,7 +1235,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             const { action } = await withAgentAction(
                 liveAgentActionDeps(),
                 actor(),
-                { tool: "put_away_grocery_lines", summary: "Stocked eggs" },
+                { tool: "move_fridge_items", summary: "Stocked eggs" },
                 async (rec) => {
                     const added = await addFridgeItemAdjust(
                         fridge,
@@ -1144,7 +1349,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
                 liveAgentActionDeps(),
                 actor(),
                 {
-                    tool: "delete_grocery_store",
+                    tool: "delete_grocery_lines",
                     summary: "Cleared the default",
                 },
                 async (rec) => {
@@ -1296,7 +1501,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             const { action } = await withAgentAction(
                 liveAgentActionDeps(),
                 actor(),
-                { tool: "delete_grocery_store", summary: "Deleted Aldi" },
+                { tool: "delete_grocery_lines", summary: "Deleted Aldi" },
                 async (rec) => {
                     await rec.captureByIds(
                         "grocery_stores",
@@ -1425,7 +1630,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             const { action } = await withAgentAction(
                 liveAgentActionDeps(),
                 actor(),
-                { tool: "upsert_food", summary: "Moved an alias" },
+                { tool: "merge_foods", summary: "Moved an alias" },
                 async (rec) => {
                     await rec.captureByKeys(
                         "food_aliases",
@@ -1536,6 +1741,8 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
                         householdId: ctx.householdId,
                         memberId,
                         connection: memberId ? "Claude" : "household token",
+                        personId: memberId ?? ctx.ownerId,
+                        role: memberId ? "member" : "owner",
                     },
                     { tool: "delete_grocery_line", summary: "Deleted a line" },
                     async (rec) => {
@@ -1675,7 +1882,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             const { action } = await withAgentAction(
                 liveAgentActionDeps(),
                 actor(),
-                { tool: "create_store", summary: "Added Aldi" },
+                { tool: "update_grocery_line", summary: "Added Aldi" },
                 async (rec) => {
                     await run(
                         (tx) =>
@@ -1800,7 +2007,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
                 const { action } = await withAgentAction(
                     liveAgentActionDeps(),
                     actor(),
-                    { tool: "delete_grocery_store", summary: "Deleted Costco" },
+                    { tool: "delete_grocery_lines", summary: "Deleted Costco" },
                     async (rec) => {
                         await rec.captureByIds(
                             "households",
@@ -1987,7 +2194,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             const { action } = await withAgentAction(
                 liveAgentActionDeps(),
                 actor(),
-                { tool: "put_away_grocery_lines", summary: "Stocked 6 g" },
+                { tool: "move_fridge_items", summary: "Stocked 6 g" },
                 async (rec) => {
                     const added = await addFridgeItemAdjust(
                         fridge,
@@ -2031,7 +2238,7 @@ describeDb(pgAvailable !== null, "agent actions (live)", (getCtx) => {
             const { action } = await withAgentAction(
                 liveAgentActionDeps(),
                 actor(),
-                { tool: "delete_grocery_store", summary: "Deleted Main" },
+                { tool: "delete_grocery_lines", summary: "Deleted Main" },
                 async (rec) => {
                     reports.push(
                         await rec.captureCascade("grocery_stores", [

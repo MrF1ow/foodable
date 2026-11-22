@@ -23,6 +23,7 @@ import {
     seedFridgeLocation,
     seedGroceryStore,
     seedHousehold,
+    seedMember,
 } from "../../db/testing/fixtures.js";
 import { describeDb } from "../../db/testing/pg.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
@@ -60,8 +61,9 @@ type Who =
 
 const UNDO_SENTENCE =
     "The household can undo this for 24 hours in Settings › AI connections.";
-const REFUSAL =
-    "Allow destructive changes is Off in Settings › AI connections.";
+const REFUSAL = "Any agent can delete is Off in Settings › AI connections.";
+const PERSON_REFUSAL =
+    "Your agents can delete is Off in Settings › AI connections for the person you act for.";
 
 async function callTool(
     who: Who,
@@ -102,6 +104,53 @@ async function callTool(
     }
 }
 
+/**
+ * One JSON-RPC batch as one POST: the calls share a tool context and run
+ * concurrently, which is what the guard has to survive. Answers come back
+ * keyed by request id.
+ */
+async function callBatch(
+    who: Extract<Who, { kind: "user" }>,
+    calls: { id: number; name: string; args: Record<string, unknown> }[],
+): Promise<Map<number, Result>> {
+    const app = new Hono();
+    app.all("/mcp", (c) => {
+        c.set("authContext", { kind: "user", userId: who.userId });
+        if (who.client) c.set("tokenClient", who.client);
+        return handleMcp(c);
+    });
+    const res = await app.request(
+        new Request("http://test.local/mcp", {
+            method: "POST",
+            headers: {
+                "content-type": "application/json",
+                accept: "application/json, text/event-stream",
+                "mcp-protocol-version": "2025-11-25",
+            },
+            body: JSON.stringify(
+                calls.map((one) => ({
+                    jsonrpc: "2.0",
+                    id: one.id,
+                    method: "tools/call",
+                    params: { name: one.name, arguments: one.args },
+                })),
+            ),
+        }),
+    );
+    expect(res.status).toBe(200);
+    // The answer is a JSON array, or the same messages as server-sent events.
+    const raw = await res.text();
+    const messages = res.headers.get("content-type")?.includes("text/event")
+        ? raw
+              .split("\n")
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => JSON.parse(line.slice(5)))
+        : [JSON.parse(raw)];
+    const body = messages.flat() as { id: number; result: Result }[];
+    expect(body).toHaveLength(calls.length);
+    return new Map(body.map((one) => [one.id, one.result]));
+}
+
 type Arranged = {
     tool: string;
     args: Record<string, unknown>;
@@ -131,6 +180,7 @@ const FINGERPRINT_TABLES = [
     "meal_items",
     "water_log",
     "weight_log",
+    "nutrition_goals",
     "nutrition_goal_days",
 ];
 
@@ -768,6 +818,270 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         });
     }
 
+    // ---------- who may delete: household off, own switch, role ----------
+
+    describe("the person's own switch, the household's off and the role", () => {
+        type Role = "member" | "admin" | "owner";
+        const ROLES: Role[] = ["member", "admin", "owner"];
+
+        async function personFor(role: Role, own: boolean): Promise<Who> {
+            const userId =
+                role === "owner"
+                    ? ownerId
+                    : await seedMember(getCtx().sql, householdId, {
+                          role,
+                          displayName: role,
+                      });
+            await asUser(
+                ownerId,
+                () =>
+                    liveSettingsStore().setMemberAgentsCanDelete(
+                        householdId,
+                        userId,
+                        own,
+                    ),
+                householdId,
+            );
+            return { kind: "user", userId, client: "Claude" };
+        }
+
+        async function setHousehold(allowed: boolean): Promise<void> {
+            await asUser(
+                ownerId,
+                () =>
+                    liveSettingsStore().setAgentDestructiveAllowed(
+                        householdId,
+                        allowed,
+                    ),
+                householdId,
+            );
+        }
+
+        async function setOwn(who: Who, own: boolean): Promise<void> {
+            await asUser(
+                ownerId,
+                () =>
+                    liveSettingsStore().setMemberAgentsCanDelete(
+                        householdId,
+                        (who as { userId: string }).userId,
+                        own,
+                    ),
+                householdId,
+            );
+        }
+
+        const text = (result: Result) =>
+            result.content.map((c) => c.text).join("\n");
+
+        for (const role of ROLES) {
+            for (const own of [true, false]) {
+                for (const householdOn of [true, false]) {
+                    const allowed = own && householdOn;
+                    test(`${role}, own switch ${own ? "on" : "off"}, household ${householdOn ? "on" : "off"}: ${allowed ? "deletes and records it for them" : "is refused and changes nothing"}`, async () => {
+                        const arranged = await scenarios.delete_grocery_line!();
+                        const who = await personFor(role, own);
+                        await setHousehold(householdOn);
+                        const before = await fingerprint();
+                        const result = await call(
+                            arranged.tool,
+                            arranged.args,
+                            "legacy",
+                            who,
+                        );
+                        if (allowed) {
+                            expect(result.isError).toBeFalsy();
+                            expect(text(result)).toContain(UNDO_SENTENCE);
+                            const [entry] = await actions();
+                            expect(entry).toMatchObject({
+                                member_id: (who as { userId: string }).userId,
+                                tool: "delete_grocery_line",
+                            });
+                            // Undo is unchanged: still the owner, within 24 hours.
+                            expect((await undo(entry!.id)).status).toBe(
+                                "undone",
+                            );
+                            await arranged.restored();
+                        } else {
+                            expect(result.isError).toBe(true);
+                            // The household's off is the cause named whenever it is Off.
+                            expect(text(result)).toContain(
+                                householdOn ? PERSON_REFUSAL : REFUSAL,
+                            );
+                            expect(text(result)).not.toContain(
+                                householdOn ? REFUSAL : PERSON_REFUSAL,
+                            );
+                            expect(await fingerprint()).toBe(before);
+                            expect(await actions()).toEqual([]);
+                        }
+                    });
+                }
+            }
+        }
+
+        test.each(ERAS)(
+            "both refusals read the same on both protocol eras (%p)",
+            async (era) => {
+                const arranged = await scenarios.delete_grocery_line!();
+                const bee = await personFor("member", false);
+                const person = await call(
+                    arranged.tool,
+                    arranged.args,
+                    era,
+                    bee,
+                );
+                expect(person.isError).toBe(true);
+                expect(text(person)).toContain(PERSON_REFUSAL);
+                await setHousehold(false);
+                const household = await call(
+                    arranged.tool,
+                    arranged.args,
+                    era,
+                    bee,
+                );
+                expect(household.isError).toBe(true);
+                expect(text(household)).toContain(REFUSAL);
+                expect(await actions()).toEqual([]);
+            },
+        );
+
+        test("the household token is the owner's agent: the owner's switch, under the household off", async () => {
+            const token: Who = { kind: "household", householdId };
+            // A member's own switch is off: it is not the token's.
+            await personFor("member", false);
+            const arranged = await scenarios.delete_grocery_line!();
+            // The owner's switch is on (their seeded default): the token deletes,
+            // whatever a member's switch says.
+            const allowed = await call(
+                arranged.tool,
+                arranged.args,
+                "legacy",
+                token,
+            );
+            expect(allowed.isError).toBeFalsy();
+            const [entry] = await actions();
+            expect(entry).toMatchObject({
+                member_id: null,
+                connection: "household token",
+            });
+            expect((await undo(entry!.id)).status).toBe("undone");
+
+            await personFor("owner", false);
+            const refusedOwner = await call(
+                arranged.tool,
+                arranged.args,
+                "legacy",
+                token,
+            );
+            expect(refusedOwner.isError).toBe(true);
+            expect(text(refusedOwner)).toContain(PERSON_REFUSAL);
+
+            await personFor("owner", true);
+            await setHousehold(false);
+            const refusedHousehold = await call(
+                arranged.tool,
+                arranged.args,
+                "legacy",
+                token,
+            );
+            expect(refusedHousehold.isError).toBe(true);
+            expect(text(refusedHousehold)).toContain(REFUSAL);
+            expect(await count("grocery_lines")).toBe(1);
+        });
+
+        test("the bulk tier follows the same switches: clearing and deleting many", async () => {
+            const bee = await personFor("member", false);
+            const clear = await scenarios.clear_checked_grocery_lines!();
+            const before = await fingerprint();
+            const refused = await call(clear.tool, clear.args, "legacy", bee);
+            expect(refused.isError).toBe(true);
+            expect(text(refused)).toContain(PERSON_REFUSAL);
+            expect(await fingerprint()).toBe(before);
+
+            await setOwn(bee, true);
+            const cleared = await call(clear.tool, clear.args, "legacy", bee);
+            expect(cleared.isError).toBeFalsy();
+            await clear.changed();
+            const [entry] = await actions();
+            expect(entry).toMatchObject({
+                member_id: (bee as { userId: string }).userId,
+                tool: "clear_checked_grocery_lines",
+            });
+            expect((await undo(entry!.id)).status).toBe("undone");
+            await clear.restored();
+
+            // And the household's off stops the bulk delete for the same person.
+            await setHousehold(false);
+            const lines = await rows("select id from public.grocery_lines");
+            const many = await call(
+                "delete_grocery_lines",
+                { ids: lines.slice(0, 2).map((row) => row.id) },
+                "legacy",
+                bee,
+            );
+            expect(many.isError).toBe(true);
+            expect(text(many)).toContain(REFUSAL);
+            expect(await count("grocery_lines")).toBe(3);
+        });
+
+        test("a member's agent is refused an admin-only action even with their switch on; an admin's is allowed", async () => {
+            const store = await call("create_store", { name: "Aldi" });
+            expect(store.isError).toBeFalsy();
+            const storeRow = (
+                await rows(
+                    "select id from public.grocery_stores where name = 'Aldi'",
+                )
+            )[0]!.id as string;
+            const bee = await personFor("member", true);
+            const refused = await call(
+                "delete_store",
+                { id: storeRow },
+                "legacy",
+                bee,
+            );
+            expect(refused.isError).toBe(true);
+            expect(text(refused)).toMatch(/owner or an admin/);
+            expect(await actions()).toEqual([]);
+            expect(
+                (
+                    await rows(
+                        "select id from public.grocery_stores where name = 'Aldi'",
+                    )
+                ).length,
+            ).toBe(1);
+
+            const admin = await personFor("admin", true);
+            const done = await call(
+                "delete_store",
+                { id: storeRow },
+                "legacy",
+                admin,
+            );
+            expect(done.isError).toBeFalsy();
+            expect(await actions()).toHaveLength(1);
+        });
+
+        test("turning a person's switch off does not take back the 24 hour undo of what they did", async () => {
+            const arranged = await scenarios.delete_grocery_line!();
+            const bee = await personFor("member", true);
+            const done = await call(
+                arranged.tool,
+                arranged.args,
+                "legacy",
+                bee,
+            );
+            expect(done.isError).toBeFalsy();
+            await setOwn(bee, false);
+            await setHousehold(false);
+            const [entry] = await actions();
+            expect(
+                Date.parse(entry!.undo_expires_at) -
+                    Date.parse(entry!.created_at),
+            ).toBe(24 * 60 * 60 * 1000);
+            expect((await undo(entry!.id)).status).toBe("undone");
+            await arranged.restored();
+        });
+    });
+
     test.each(ERAS)(
         "a destructive call records and answers the same on both protocol eras (%p)",
         async (era) => {
@@ -1347,14 +1661,16 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
 
     test("emptying a day's last goal removes its override, which is recorded and undone too", async () => {
         const [day] = await goalDays(["2099-01-01"]);
-        // Set a target and drop the other: the override still has one.
+        // Drop one target: the override still has the other, and the change
+        // is already recorded, since a person's target went.
         const kept = await call("set_nutrition_goals", {
             date: "2099-01-01",
             daily_protein_g: null,
         });
         expect(kept.isError).toBeFalsy();
+        expect(kept.content[0]!.text).toContain(UNDO_SENTENCE);
         expect(await count("nutrition_goal_days")).toBe(1);
-        expect(await actions()).toEqual([]);
+        expect(await actions()).toHaveLength(1);
 
         const emptied = await call("set_nutrition_goals", {
             date: "2099-01-01",
@@ -1363,7 +1679,9 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         expect(emptied.isError).toBeFalsy();
         expect(emptied.content[0]!.text).toContain(UNDO_SENTENCE);
         expect(await count("nutrition_goal_days")).toBe(0);
-        const entry = await actionFor("set_nutrition_goals");
+        const entry = (await actions()).find((one) =>
+            one.summary.includes("removed"),
+        )!;
         expect((await undo(entry.id)).status).toBe("undone");
         expect(
             await rows(
@@ -1474,5 +1792,657 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             "select date::text as date, daily_calories from public.nutrition_goal_days order by date",
         );
         expect(back).toEqual([{ date: "2099-01-01", daily_calories: 2000 }]);
+    });
+
+    describe("an agent deletes only the entries of the person it acts for", () => {
+        const OTHER_PERSON =
+            "An agent can do no more than the person it acts for can in the app, " +
+            "and a person deletes only their own entries. Nothing was changed. Ask Bea to do it, or their agent.";
+        const text = (result: Result) =>
+            result.content.map((c) => c.text).join("\n");
+
+        test("with its own switch On, A's agent cannot delete B's meal, water, weight or goals, but can delete A's", async () => {
+            const { sql } = getCtx();
+            const a = await seedMember(sql, householdId, {
+                agentsCanDelete: true,
+                displayName: "Ann",
+            });
+            const b = await seedMember(sql, householdId, {
+                agentsCanDelete: false,
+                displayName: "Bea",
+            });
+            const asA: Who = { kind: "user", userId: a, client: "Claude" };
+            const asB: Who = { kind: "user", userId: b, client: "Claude" };
+
+            // A's agent may log for B: only deleting is limited.
+            const logged = await call(
+                "log_meal",
+                {
+                    description: "Bea's dinner",
+                    calories: 500,
+                    meal_type: "dinner",
+                    target_member: b,
+                },
+                "legacy",
+                asA,
+            );
+            expect(logged.isError).toBeFalsy();
+            await call("log_water", { amount_ml: 250 }, "legacy", asB);
+            await call("log_weight", { weight: 70, unit: "kg" }, "legacy", asB);
+            await sql`
+                insert into public.nutrition_goal_days (
+                    household_id, user_id, date, daily_calories
+                )
+                values (${householdId}, ${b}, '2099-01-01'::date, ${2000})
+            `;
+            const [meal] = await rows(
+                "select id from public.meals where user_id = $1",
+                b,
+            );
+            const [water] = await rows(
+                "select id from public.water_log where user_id = $1",
+                b,
+            );
+            const [weight] = await rows(
+                "select id from public.weight_log where user_id = $1",
+                b,
+            );
+            expect(meal && water && weight).toBeTruthy();
+            const before = await fingerprint();
+
+            for (const era of ERAS) {
+                for (const [tool, args] of [
+                    ["delete_meal", { id: meal!.id, target_member: b }],
+                    ["delete_water", { id: water!.id, target_member: b }],
+                    ["delete_weight", { id: weight!.id, target_member: b }],
+                    [
+                        "set_nutrition_goals",
+                        { date: "2099-01-01", clear: true, target_member: b },
+                    ],
+                ] as const) {
+                    const refused = await call(tool, args, era, asA);
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain(OTHER_PERSON);
+                }
+            }
+            expect(await fingerprint()).toBe(before);
+            expect(await actions()).toEqual([]);
+
+            // The household token acts as the owner, so it is bound the same way.
+            const token: Who = { kind: "household", householdId };
+            const viaToken = await call(
+                "delete_meal",
+                { id: meal!.id, user_id: b },
+                "legacy",
+                token,
+            );
+            expect(viaToken.isError).toBe(true);
+            expect(text(viaToken)).toContain(OTHER_PERSON);
+            expect(await fingerprint()).toBe(before);
+
+            // A's own entries still go, through the same guard.
+            await call("log_water", { amount_ml: 100 }, "legacy", asA);
+            const [mine] = await rows(
+                "select id from public.water_log where user_id = $1",
+                a,
+            );
+            const own = await call(
+                "delete_water",
+                { id: mine!.id },
+                "legacy",
+                asA,
+            );
+            expect(own.isError).toBeFalsy();
+            expect(await count("water_log")).toBe(1);
+            expect((await actions()).length).toBe(1);
+
+            // And naming oneself as the target is not another person.
+            await call("log_water", { amount_ml: 100 }, "legacy", asA);
+            const [again] = await rows(
+                "select id from public.water_log where user_id = $1",
+                a,
+            );
+            const self = await call(
+                "delete_water",
+                { id: again!.id, target_member: a },
+                "legacy",
+                asA,
+            );
+            expect(self.isError).toBeFalsy();
+        });
+
+        test("an id in upper case is the same person: own deletes work, another person's are still refused", async () => {
+            const { sql } = getCtx();
+            const a = await seedMember(sql, householdId, {
+                agentsCanDelete: true,
+                displayName: "Ann",
+            });
+            const b = await seedMember(sql, householdId, {
+                agentsCanDelete: false,
+                displayName: "Bea",
+            });
+            const asA: Who = { kind: "user", userId: a, client: "Claude" };
+            await call("log_water", { amount_ml: 100 }, "legacy", asA);
+            await call("log_water", { amount_ml: 120 }, "legacy", {
+                kind: "user",
+                userId: b,
+                client: "Claude",
+            });
+            const [own] = await rows(
+                "select id from public.water_log where user_id = $1",
+                a,
+            );
+            const [theirs] = await rows(
+                "select id from public.water_log where user_id = $1",
+                b,
+            );
+            const refused = await call(
+                "delete_water",
+                { id: theirs!.id, target_member: b.toUpperCase() },
+                "legacy",
+                asA,
+            );
+            expect(refused.isError).toBe(true);
+            expect(text(refused)).toContain(OTHER_PERSON);
+            expect(await count("water_log")).toBe(2);
+
+            const deleted = await call(
+                "delete_water",
+                { id: own!.id, target_member: a.toUpperCase() },
+                "legacy",
+                asA,
+            );
+            expect(deleted.isError).toBeFalsy();
+            expect(await count("water_log")).toBe(1);
+            expect((await actions()).length).toBe(1);
+        });
+
+        test("calls in one JSON-RPC batch cannot change whose entries a delete is checked against", async () => {
+            const { sql } = getCtx();
+            const a = await seedMember(sql, householdId, {
+                agentsCanDelete: true,
+                displayName: "Ann",
+            });
+            const b = await seedMember(sql, householdId, {
+                agentsCanDelete: false,
+                displayName: "Bea",
+            });
+            const asA: Who = { kind: "user", userId: a, client: "Claude" };
+            const asB: Who = { kind: "user", userId: b, client: "Claude" };
+
+            for (let round = 0; round < 6; round++) {
+                for (const ml of [200, 300, 400, 500]) {
+                    await call("log_water", { amount_ml: ml }, "legacy", asB);
+                }
+                const bWater = await rows(
+                    "select id from public.water_log where user_id = $1",
+                    b,
+                );
+                expect(bWater.length).toBe(4);
+
+                // B's entries are named for deletion alongside writes that name
+                // A: a write is not a delete, and it must not make the delete
+                // next to it look like one of A's own.
+                const results = await callBatch(asA, [
+                    ...bWater.map((row, i) => ({
+                        id: 100 + i,
+                        name: "delete_water",
+                        args: { id: row.id, target_member: b },
+                    })),
+                    ...[0, 1, 2].map((i) => ({
+                        id: 10 + i,
+                        name: "log_water",
+                        args: { amount_ml: 10 + i, target_member: a },
+                    })),
+                ]);
+                for (let i = 0; i < bWater.length; i++) {
+                    const refused = results.get(100 + i)!;
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain(OTHER_PERSON);
+                }
+                for (const id of [10, 11, 12]) {
+                    expect(results.get(id)!.isError).toBeFalsy();
+                }
+                // Not one of B's entries went, and nothing was recorded.
+                expect(
+                    (
+                        await rows(
+                            "select id from public.water_log where user_id = $1",
+                            b,
+                        )
+                    ).length,
+                ).toBe(4);
+                expect(await actions()).toEqual([]);
+
+                await sql`delete from public.water_log`;
+            }
+        });
+
+        test("in a batch, A's own delete still goes while the delete of B's entry beside it is refused", async () => {
+            const { sql } = getCtx();
+            const a = await seedMember(sql, householdId, {
+                agentsCanDelete: true,
+                displayName: "Ann",
+            });
+            const b = await seedMember(sql, householdId, {
+                agentsCanDelete: false,
+                displayName: "Bea",
+            });
+            const asA: Who = { kind: "user", userId: a, client: "Claude" };
+            const asB: Who = { kind: "user", userId: b, client: "Claude" };
+            await call("log_water", { amount_ml: 100 }, "legacy", asA);
+            await call("log_water", { amount_ml: 250 }, "legacy", asB);
+            const [mine] = await rows(
+                "select id from public.water_log where user_id = $1",
+                a,
+            );
+            const [theirs] = await rows(
+                "select id from public.water_log where user_id = $1",
+                b,
+            );
+            const results = await callBatch(asA, [
+                {
+                    id: 1,
+                    name: "delete_water",
+                    args: { id: theirs!.id, target_member: b },
+                },
+                { id: 2, name: "delete_water", args: { id: mine!.id } },
+                {
+                    id: 3,
+                    name: "log_water",
+                    args: { amount_ml: 25, target_member: b },
+                },
+            ]);
+            expect(results.get(1)!.isError).toBe(true);
+            expect(text(results.get(1)!)).toContain(OTHER_PERSON);
+            expect(results.get(2)!.isError).toBeFalsy();
+            expect(results.get(3)!.isError).toBeFalsy();
+            expect(
+                (
+                    await rows(
+                        "select id from public.water_log where user_id = $1 order by logged_at",
+                        b,
+                    )
+                ).length,
+            ).toBe(2);
+            expect(await count("water_log")).toBe(2);
+            const recorded = await actions();
+            expect(recorded.length).toBe(1);
+            expect(recorded[0]!.member_id).toBe(a);
+        });
+
+        // ---------- clearing goals ----------
+
+        describe("clearing a goal target", () => {
+            const GOALS = {
+                daily_calories: 2000,
+                daily_protein_g: 120,
+            };
+            const goalRow = async (user: string) =>
+                (
+                    await rows(
+                        "select daily_calories, daily_protein_g::float as daily_protein_g, daily_fat_g::float as daily_fat_g from public.nutrition_goals where user_id = $1",
+                        user,
+                    )
+                )[0];
+            const dayRows = (user: string) =>
+                rows(
+                    "select date::text as date, daily_calories, daily_protein_g::float as daily_protein_g, daily_fat_g::float as daily_fat_g from public.nutrition_goal_days where user_id = $1 order by date",
+                    user,
+                );
+            let a: string;
+            let b: string;
+            let asA: Who;
+            let asB: Who;
+            beforeEach(async () => {
+                const { sql } = getCtx();
+                a = await seedMember(sql, householdId, {
+                    agentsCanDelete: true,
+                    displayName: "Ann",
+                });
+                b = await seedMember(sql, householdId, {
+                    agentsCanDelete: false,
+                    displayName: "Bea",
+                });
+                asA = { kind: "user", userId: a, client: "Claude" };
+                asB = { kind: "user", userId: b, client: "Claude" };
+            });
+
+            test("A's agent cannot clear B's default goals, whoever's switch is On", async () => {
+                await call("set_nutrition_goals", GOALS, "legacy", asB);
+                const before = await goalRow(b);
+                expect(before).toMatchObject(GOALS);
+                const fingerprinted = await fingerprint();
+                for (const era of ERAS) {
+                    const refused = await call(
+                        "set_nutrition_goals",
+                        {
+                            daily_calories: null,
+                            daily_protein_g: null,
+                            target_member: b,
+                        },
+                        era,
+                        asA,
+                    );
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain(OTHER_PERSON);
+                }
+                expect(await goalRow(b)).toEqual(before);
+                expect(await fingerprint()).toBe(fingerprinted);
+                expect(await actions()).toEqual([]);
+                // The household token acts as the owner, so it is bound too.
+                const viaToken = await call(
+                    "set_nutrition_goals",
+                    { daily_calories: null, user_id: b },
+                    "legacy",
+                    { kind: "household", householdId },
+                );
+                expect(viaToken.isError).toBe(true);
+                expect(text(viaToken)).toContain(OTHER_PERSON);
+                expect(await goalRow(b)).toEqual(before);
+            });
+
+            test("A's agent cannot null one of B's day targets either", async () => {
+                const { sql } = getCtx();
+                await sql`
+                    insert into public.nutrition_goal_days (
+                        household_id, user_id, date, daily_calories, daily_protein_g
+                    )
+                    values (${householdId}, ${b}, '2099-01-01'::date, ${2000}, ${150})
+                `;
+                const before = await dayRows(b);
+                const refused = await call(
+                    "set_nutrition_goals",
+                    {
+                        date: "2099-01-01",
+                        daily_protein_g: null,
+                        target_member: b,
+                    },
+                    "legacy",
+                    asA,
+                );
+                expect(refused.isError).toBe(true);
+                expect(text(refused)).toContain(OTHER_PERSON);
+                expect(await dayRows(b)).toEqual(before);
+                expect(await actions()).toEqual([]);
+            });
+
+            test("with the person's own switch Off, their agent cannot clear their own goals", async () => {
+                await call("set_nutrition_goals", GOALS, "legacy", asB);
+                const before = await goalRow(b);
+                const refused = await call(
+                    "set_nutrition_goals",
+                    { daily_calories: null },
+                    "legacy",
+                    asB,
+                );
+                expect(refused.isError).toBe(true);
+                expect(text(refused)).toContain(PERSON_REFUSAL);
+                expect(await goalRow(b)).toEqual(before);
+                expect(await actions()).toEqual([]);
+
+                // The same goes for a target on a day.
+                const { sql } = getCtx();
+                await sql`
+                    insert into public.nutrition_goal_days (
+                        household_id, user_id, date, daily_calories, daily_protein_g
+                    )
+                    values (${householdId}, ${b}, '2099-01-01'::date, ${2000}, ${150})
+                `;
+                const days = await dayRows(b);
+                const dayRefused = await call(
+                    "set_nutrition_goals",
+                    { date: "2099-01-01", daily_protein_g: null },
+                    "legacy",
+                    asB,
+                );
+                expect(dayRefused.isError).toBe(true);
+                expect(text(dayRefused)).toContain(PERSON_REFUSAL);
+                expect(await dayRows(b)).toEqual(days);
+                expect(await actions()).toEqual([]);
+
+                // Nor can it clear the target weight.
+                await call(
+                    "set_nutrition_goals",
+                    { target_weight: 70, unit: "kg" },
+                    "legacy",
+                    asB,
+                );
+                const weightRefused = await call(
+                    "set_nutrition_goals",
+                    { target_weight: null },
+                    "legacy",
+                    asB,
+                );
+                expect(weightRefused.isError).toBe(true);
+                expect(text(weightRefused)).toContain(PERSON_REFUSAL);
+                const [{ n }] = (await rows(
+                    "select count(*)::int as n from public.nutrition_goals where user_id = $1 and target_weight_g is not null",
+                    b,
+                )) as [{ n: number }];
+                expect(n).toBe(1);
+            });
+
+            test("clearing a stored goal name or note is a delete: refused with the switch Off, and across people", async () => {
+                const labelled = {
+                    ...GOALS,
+                    goal_name: "Recomp",
+                    goal_note: "my note",
+                };
+                const labels = async (user: string) =>
+                    (
+                        await rows(
+                            "select goal_name, goal_note from public.nutrition_goals where user_id = $1",
+                            user,
+                        )
+                    )[0];
+                await call("set_nutrition_goals", labelled, "legacy", asB);
+                const before = await labels(b);
+                expect(before).toEqual({
+                    goal_name: "Recomp",
+                    goal_note: "my note",
+                });
+                for (const args of [
+                    { goal_name: null },
+                    { goal_note: null },
+                    { goal_name: "   " },
+                    { goal_note: "" },
+                ]) {
+                    // B's own switch is Off.
+                    const own = await call(
+                        "set_nutrition_goals",
+                        args,
+                        "legacy",
+                        asB,
+                    );
+                    expect(own.isError).toBe(true);
+                    expect(text(own)).toContain(PERSON_REFUSAL);
+                    // A's switch is On, but these are B's goals.
+                    const other = await call(
+                        "set_nutrition_goals",
+                        { ...args, target_member: b },
+                        "legacy",
+                        asA,
+                    );
+                    expect(other.isError).toBe(true);
+                    expect(text(other)).toContain(OTHER_PERSON);
+                }
+                expect(await labels(b)).toEqual(before);
+                expect(await actions()).toEqual([]);
+            });
+
+            test("with the switch On, A's agent clears A's own name and note: recorded, and undo restores them", async () => {
+                await call(
+                    "set_nutrition_goals",
+                    { ...GOALS, goal_name: "Recomp", goal_note: "my note" },
+                    "legacy",
+                    asA,
+                );
+                const labels = async () =>
+                    (
+                        await rows(
+                            "select goal_name, goal_note from public.nutrition_goals where user_id = $1",
+                            a,
+                        )
+                    )[0];
+                const cleared = await call(
+                    "set_nutrition_goals",
+                    { goal_name: null, goal_note: "  " },
+                    "legacy",
+                    asA,
+                );
+                expect(cleared.isError).toBeFalsy();
+                expect(text(cleared)).toContain(UNDO_SENTENCE);
+                expect(await labels()).toEqual({
+                    goal_name: null,
+                    goal_note: null,
+                });
+                const [entry] = await actions();
+                expect(entry!.summary).toContain(
+                    "Cleared goal_name, goal_note from the default goals",
+                );
+                const out = await undoAgentAction(liveAgentActionDeps(), {
+                    householdId,
+                    userId: ownerId,
+                    actionId: entry!.id,
+                    now: new Date(),
+                });
+                expect(out.status).toBe("undone");
+                expect(await labels()).toEqual({
+                    goal_name: "Recomp",
+                    goal_note: "my note",
+                });
+            });
+
+            test("setting or renaming a goal name, or clearing one that was never set, stays an ordinary write", async () => {
+                // B's switch is Off.
+                const named = await call(
+                    "set_nutrition_goals",
+                    { ...GOALS, goal_name: "Cut" },
+                    "legacy",
+                    asB,
+                );
+                expect(named.isError).toBeFalsy();
+                const renamed = await call(
+                    "set_nutrition_goals",
+                    { goal_name: "Bulk", goal_note: null },
+                    "legacy",
+                    asB,
+                );
+                expect(renamed.isError).toBeFalsy();
+                expect(text(renamed)).not.toContain(UNDO_SENTENCE);
+                expect(await actions()).toEqual([]);
+            });
+
+            test("with the switch On, A's agent clears A's own default goals: recorded, and undo puts them back", async () => {
+                await call("set_nutrition_goals", GOALS, "legacy", asA);
+                const before = await goalRow(a);
+                const cleared = await call(
+                    "set_nutrition_goals",
+                    { daily_calories: null, daily_protein_g: null },
+                    "legacy",
+                    asA,
+                );
+                expect(cleared.isError).toBeFalsy();
+                expect(text(cleared)).toContain(UNDO_SENTENCE);
+                expect(await goalRow(a)).toMatchObject({
+                    daily_calories: null,
+                    daily_protein_g: null,
+                });
+                const [entry] = await actions();
+                expect(entry).toMatchObject({
+                    tool: "set_nutrition_goals",
+                    member_id: a,
+                    destructive: true,
+                    undoable: true,
+                });
+                expect(entry!.summary).toContain(
+                    "Cleared daily_calories, daily_protein_g from the default goals",
+                );
+                expect(entry!.snapshot).not.toBeNull();
+                const out = await undoAgentAction(liveAgentActionDeps(), {
+                    householdId,
+                    userId: ownerId,
+                    actionId: entry!.id,
+                    now: new Date(),
+                });
+                expect(out.status).toBe("undone");
+                expect(await goalRow(a)).toEqual(before);
+            });
+
+            test("setting a value, or clearing a target that was never set, stays an ordinary write", async () => {
+                // A's agent may still set B's goals: only clearing is limited.
+                const set = await call(
+                    "set_nutrition_goals",
+                    { ...GOALS, target_member: b },
+                    "legacy",
+                    asA,
+                );
+                expect(set.isError).toBeFalsy();
+                expect(text(set)).not.toContain(UNDO_SENTENCE);
+                expect(await goalRow(b)).toMatchObject(GOALS);
+                // B's switch is Off, and B's own agent may still change a value
+                // and null a target that has none.
+                const nothing = await call(
+                    "set_nutrition_goals",
+                    { daily_calories: 2200, daily_fat_g: null },
+                    "legacy",
+                    asB,
+                );
+                expect(nothing.isError).toBeFalsy();
+                expect(await goalRow(b)).toMatchObject({
+                    daily_calories: 2200,
+                    daily_fat_g: null,
+                });
+                expect(await actions()).toEqual([]);
+            });
+
+            test("a day write that nulls one target and sets another undoes whole, removing what it added", async () => {
+                const { sql } = getCtx();
+                await sql`
+                    insert into public.nutrition_goal_days (
+                        household_id, user_id, date, daily_calories, daily_protein_g
+                    )
+                    values (${householdId}, ${a}, '2099-01-01'::date, ${2000}, ${150})
+                `;
+                const before = await dayRows(a);
+                const wrote = await call(
+                    "set_nutrition_goals",
+                    {
+                        from: "2099-01-01",
+                        to: "2099-01-02",
+                        daily_protein_g: null,
+                        daily_fat_g: 70,
+                    },
+                    "legacy",
+                    asA,
+                );
+                expect(wrote.isError).toBeFalsy();
+                expect(text(wrote)).toContain(UNDO_SENTENCE);
+                expect(await dayRows(a)).toEqual([
+                    {
+                        date: "2099-01-01",
+                        daily_calories: 2000,
+                        daily_protein_g: null,
+                        daily_fat_g: 70,
+                    },
+                    {
+                        date: "2099-01-02",
+                        daily_calories: null,
+                        daily_protein_g: null,
+                        daily_fat_g: 70,
+                    },
+                ]);
+                const [entry] = await actions();
+                const out = await undoAgentAction(liveAgentActionDeps(), {
+                    householdId,
+                    userId: ownerId,
+                    actionId: entry!.id,
+                    now: new Date(),
+                });
+                expect(out.status).toBe("undone");
+                expect(await dayRows(a)).toEqual(before);
+            });
+        });
     });
 });

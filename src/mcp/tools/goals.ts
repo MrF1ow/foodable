@@ -9,6 +9,7 @@ import {
     getWaterByDate,
     getLatestWeight,
     type NutritionGoalDayInput,
+    type NutritionGoals,
 } from "../../db/nutrition.js";
 import {
     goalDayRows,
@@ -158,6 +159,49 @@ function overridesEmptiedBy(
     );
 }
 
+/**
+ * The existing overrides in which this patch turns a target that has a value
+ * into null: a person's target goes, whether or not the override survives it.
+ * An override the patch empties is one of them.
+ */
+function overridesNulledBy(
+    existing: readonly GoalDayRow[],
+    patch: NutritionGoalDayInput,
+): GoalDayRow[] {
+    return existing.filter((row) =>
+        GOAL_DAY_FIELDS.some(
+            (field) => patch[field] === null && row[field] != null,
+        ),
+    );
+}
+
+/**
+ * The standing targets, name and note this call turns from a value into null.
+ * Setting a value, or clearing one that was never set, is not among them.
+ * `label` holds the cleaned name and note: undefined keeps the stored one, and
+ * null (what null or blank becomes) clears it.
+ */
+function defaultTargetsCleared(
+    args: Record<string, unknown>,
+    existing: NutritionGoals | null,
+    label: { goal_name?: string | null; goal_note?: string | null },
+): string[] {
+    if (existing == null) return [];
+    const cleared: string[] = GOAL_DAY_FIELDS.filter(
+        (field) => args[field] === null && existing[field] != null,
+    );
+    if (args.target_weight === null && existing.target_weight_g != null) {
+        cleared.push("target_weight");
+    }
+    if (label.goal_name === null && existing.goal_name != null) {
+        cleared.push("goal_name");
+    }
+    if (label.goal_note === null && existing.goal_note != null) {
+        cleared.push("goal_note");
+    }
+    return cleared;
+}
+
 /** Whether the patch changes a field this override holds. */
 function overrideChangedBy(
     row: GoalDayRow,
@@ -208,7 +252,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Set Nutrition Goals",
             description:
-                "Set the user's daily calorie and macro targets, and optionally a target body weight. Pass only the fields you want to update — omitted fields keep their previous value. Pass null explicitly to clear a target. Calories, protein, carbs, fat, fiber and water are targets to REACH; sugar, alcohol and caffeine are limits to STAY UNDER, and progress against them is worded accordingly. Gram targets are in grams, the caffeine limit in MILLIGRAMS. For a limit, 0 is a real value ('none at all'), not 'unset'. Omit date, from and to to change the standing defaults; pass date for one calendar day, or from and to (inclusive, YYYY-MM-DD) for a per-day override on each day in the range, at most 92 days per call. Per-day overrides do not accept target_weight — set that on the defaults instead. Pass clear: true with a date or range to remove those overrides and fall back to the defaults; removing overrides (clear, or nulling a day's last target) is recorded and the household can undo it for 24 hours, and is refused while the household has turned off destructive agent changes. goal_name (at most 40 characters) and goal_note (at most 280) label the standing goals, for example Recomp; they apply to the defaults only, an omitted one keeps its stored value, and null or blank clears it. Saving any target also records today (in the user's timezone) as the day the goals were set; changing only the name or note leaves that day alone. Targets are the user's own choice; this is not medical or dietary advice.",
+                "Set the user's daily calorie and macro targets, and optionally a target body weight. Pass only the fields you want to update — omitted fields keep their previous value. Pass null to clear a target. Calories, protein, carbs, fat, fiber and water are targets to REACH; sugar, alcohol and caffeine are limits to STAY UNDER, and progress against them is worded accordingly. Gram targets are in grams, the caffeine limit in MILLIGRAMS. For a limit, 0 is a real value ('none at all'), not 'unset'. Omit date, from and to to change the standing defaults; pass date for one calendar day, or from and to (inclusive, YYYY-MM-DD) for a per-day override on each day in the range, at most 92 days per call. Per-day overrides do not accept target_weight — set that on the defaults instead. Pass clear: true with a date or range to remove those overrides and fall back to the defaults; clearing overrides (clear) or a set target (null) is recorded and undoable for 24 hours, and refused when agent deletes are off for the household or the person, or aimed at another person's goals. goal_name (at most 40 characters) and goal_note (at most 280) label the standing goals, for example Recomp; they apply to the defaults only, an omitted one keeps its stored value, and null or blank clears it. Saving any target also records today (in the user's timezone) as the day the goals were set; changing only the name or note leaves that day alone. Targets are the user's own choice; this is not medical or dietary advice.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -427,6 +471,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                                         changed: removed > 0,
                                     };
                                 },
+                                { target: userId },
                             );
                             if (run.refused) return run.result;
                             const defaults =
@@ -461,12 +506,14 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                             );
                         }
 
-                        // Nulling a day's last target removes its override, so
-                        // that goes through the guard like a clear does. A write
-                        // that leaves every override standing does not.
-                        const emptiesOne =
+                        // Nulling a target that has a value, on any day, takes
+                        // something a person set, so that goes through the
+                        // guard like a clear does: refused while a switch is
+                        // off, refused across persons, recorded, undoable. A
+                        // write that only sets values does not.
+                        const nullsOne =
                             Object.values(dayPatch).includes(null) &&
-                            overridesEmptiedBy(
+                            overridesNulledBy(
                                 await goalDayRows().list(
                                     userId,
                                     householdId,
@@ -475,16 +522,14 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                                 dayPatch,
                             ).length > 0;
                         let undoNote = "";
-                        if (emptiesOne) {
+                        if (nullsOne) {
                             const run = await runDestructive(
                                 "set_nutrition_goals",
                                 async (rec) => {
                                     // The same call also rewrites the overrides
                                     // it leaves standing, and undo puts back all
                                     // of it, so all of it is recorded, read again
-                                    // here inside the write. A patch that empties
-                                    // an override holds nothing but nulls, so it
-                                    // adds no row for undo to remove.
+                                    // here inside the write.
                                     const found = await goalDayRows().list(
                                         userId,
                                         householdId,
@@ -522,15 +567,36 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                                         days,
                                         dayPatch,
                                     );
+                                    // A patch that also sets a value adds an
+                                    // override on a day that had none, and undo
+                                    // removes it again.
+                                    const known = new Set(
+                                        found.map((row) => row.id),
+                                    );
+                                    const added = (
+                                        await goalDayRows().list(
+                                            userId,
+                                            householdId,
+                                            days,
+                                        )
+                                    )
+                                        .filter((row) => !known.has(row.id))
+                                        .map((row) => row.id);
+                                    rec.inserted("nutrition_goal_days", added);
+                                    const parts = [
+                                        emptied.length > 0
+                                            ? `removed ${overrides(emptied.length)}`
+                                            : "",
+                                        rewritten.length > 0
+                                            ? `rewrote ${overrides(rewritten.length)}`
+                                            : "",
+                                    ].filter(Boolean);
                                     return {
                                         value: null,
-                                        summary: `Cleared a goal target for ${label}: removed ${overrides(emptied.length)}${
-                                            rewritten.length > 0
-                                                ? `, rewrote ${overrides(rewritten.length)}`
-                                                : ""
-                                        }`,
+                                        summary: `Cleared a goal target for ${label}${parts.length > 0 ? `: ${parts.join(", ")}` : ""}`,
                                     };
                                 },
+                                { target: userId },
                             );
                             if (run.refused) return run.result;
                             undoNote = run.undo;
@@ -641,7 +707,41 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                             timezoneFromProfile(profile) ?? "UTC",
                         );
                     }
-                    const goals = await upsertNutritionGoals(userId, merged);
+                    // Turning a target, the name or the note that has a value
+                    // into null (or blank) clears what a person set, so it goes through the guard like clearing a
+                    // day's overrides does. Setting values, or naming a target
+                    // that was never set, is an ordinary write.
+                    const cleared = defaultTargetsCleared(args, existing, {
+                        goal_name: goalName,
+                        goal_note: goalNote,
+                    });
+                    let goals: NutritionGoals;
+                    let undoNote = "";
+                    if (cleared.length > 0) {
+                        const run = await runDestructive(
+                            "set_nutrition_goals",
+                            async (rec) => {
+                                await rec.captureByKeys(
+                                    "nutrition_goals",
+                                    [{ user_id: userId }],
+                                    "updated",
+                                );
+                                return {
+                                    value: await upsertNutritionGoals(
+                                        userId,
+                                        merged,
+                                    ),
+                                    summary: `Cleared ${cleared.join(", ")} from the default goals`,
+                                };
+                            },
+                            { target: userId },
+                        );
+                        if (run.refused) return run.result;
+                        goals = run.value;
+                        undoNote = run.undo;
+                    } else {
+                        goals = await upsertNutritionGoals(userId, merged);
+                    }
                     // An alcohol target set by someone who has alcohol tracking
                     // off is saved but invisible everywhere else, so say so here
                     // rather than let the goal silently vanish from the list.
@@ -654,7 +754,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `Goals updated.\n\n${formatGoals(goals, displayUnit, alcohol)}${alcoholNote}`,
+                                text: `${withUndo("Goals updated.", undoNote)}\n\n${formatGoals(goals, displayUnit, alcohol)}${alcoholNote}`,
                             },
                         ],
                         structuredContent: {
