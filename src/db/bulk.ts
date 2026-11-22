@@ -15,8 +15,10 @@ import {
     removeUsuals,
     type BulkResult,
 } from "../domain/bulk.js";
+import type { Notify } from "../domain/foods.js";
 import { liveFoodsStore } from "./foods.js";
 import { liveFridgeStore } from "./fridge.js";
+import { createNotifyQueue, liveNotifier } from "./notify.js";
 import { liveRecipesStore } from "./recipes.js";
 import { run } from "./sql.js";
 import { liveStockStore } from "./stock.js";
@@ -31,20 +33,31 @@ export function bulkLockKey(householdId: string, action: BulkAction): string {
 /**
  * Runs `fn` as one transaction behind the batch lock. Every store call `fn`
  * makes joins the transaction, so if it throws, none of its writes stay.
+ *
+ * `fn` gets a `notify` for the household's event notifications (`actorUserId`
+ * is the person who acted, who gets none). It only queues them: they are sent
+ * once the transaction has committed, so a batch that throws, and so rolls
+ * back, sends nothing. The queue is made here, for this one call.
  */
-export function inBulkTransaction<T>(
+export async function inBulkTransaction<T>(
     householdId: string,
     action: BulkAction,
-    fn: () => Promise<T>,
+    fn: (notify: Notify) => Promise<T>,
+    actorUserId: string | null = null,
 ): Promise<T> {
-    return run(async (tx) => {
+    const queue = createNotifyQueue(liveNotifier(householdId, actorUserId));
+    const result = await run(async (tx) => {
         await tx`
             select pg_advisory_xact_lock(
                 hashtextextended(${bulkLockKey(householdId, action)}, 0)
             )
         `;
-        return fn();
+        return fn(queue.notify);
     });
+    // `run` has returned, so the batch committed. A throw skipped this line
+    // and the queue is dropped with it.
+    await queue.flush();
+    return result;
 }
 
 export function bulkDiscardFridgeItems(input: {
@@ -77,7 +90,14 @@ export function bulkDeleteSavedItems(input: {
     recipeIds: readonly string[];
     actor: { userId: string; isOwner: boolean };
 }): Promise<BulkResult> {
-    return inBulkTransaction(input.householdId, "saved-delete", () =>
-        deleteSavedItems(liveFoodsStore(), liveRecipesStore(), input),
+    return inBulkTransaction(
+        input.householdId,
+        "saved-delete",
+        (notify) =>
+            deleteSavedItems(liveFoodsStore(), liveRecipesStore(), {
+                ...input,
+                notify,
+            }),
+        input.actor.userId,
     );
 }

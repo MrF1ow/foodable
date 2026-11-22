@@ -13,7 +13,12 @@
  * nothing is written. A batch where some ids have work and others are gone is
  * refused whole: the page the person selected on is out of date.
  */
-import { updateFood, usualProductRows, type FoodsStore } from "./foods.js";
+import {
+    updateFood,
+    usualProductRows,
+    type FoodsStore,
+    type Notify,
+} from "./foods.js";
 import { removeUsual } from "./usual-add.js";
 import { type FridgeStore } from "./fridge.js";
 import {
@@ -180,7 +185,9 @@ export async function removeUsuals(
  * snapshots), a recipe is deleted, as each row's Delete does. A food that is
  * already archived counts as done, so a repeat of a mixed selection (foods
  * archived, recipes gone) is still `already`. A recipe the member may not
- * delete fails the whole batch before anything is written.
+ * delete fails the whole batch before anything is written. Each recipe
+ * deleted tells the household through `input.notify`; the live adapter hands
+ * it a queue that sends only once the batch has committed.
  */
 export async function deleteSavedItems(
     foods: FoodsStore,
@@ -190,6 +197,8 @@ export async function deleteSavedItems(
         foodIds: readonly string[];
         recipeIds: readonly string[];
         actor: { userId: string; isOwner: boolean };
+        /** Told once per recipe deleted, as a single delete tells it. */
+        notify?: Notify;
     },
 ): Promise<BulkResult> {
     type Target = { kind: "food"; id: string } | { kind: "recipe"; id: string };
@@ -233,6 +242,7 @@ export async function deleteSavedItems(
                 input.householdId,
                 target.id,
                 input.actor,
+                { notify: input.notify },
             );
         }
     }

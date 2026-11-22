@@ -13,6 +13,7 @@ import { liveFoodsStore, mergeLiveFoods } from "../../db/foods.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
+import { liveNotifier } from "../../db/notify.js";
 import { listHouseholdMembers } from "../../db/household.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveRulesStore } from "../../db/rules.js";
@@ -987,7 +988,7 @@ function conversionFoodRow(row: Food) {
 }
 
 export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
-    const { callerHouseholdId, analytics, runDestructive } = ctx;
+    const { callerActor, callerHouseholdId, analytics, runDestructive } = ctx;
     server.registerTool(
         "get_food",
         {
@@ -1163,7 +1164,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "upsert_food",
                 async () => {
-                    const householdId = await callerHouseholdId();
+                    const { householdId, userId } = await callerActor();
                     const store = liveFoodsStore();
                     const onSimilar = onSimilarFor(args);
                     try {
@@ -1313,6 +1314,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                                     caffeineMg: args.caffeine_mg,
                                     nutritionSource: args.nutrition_source,
                                     allergens: args.allergens,
+                                    notify: liveNotifier(householdId, userId),
                                 },
                             );
                         } else {
@@ -1569,13 +1571,14 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "link_product",
                 async () => {
-                    const householdId = await callerHouseholdId();
+                    const { householdId, userId } = await callerActor();
                     const store = liveFoodsStore();
                     const saved = await linkProduct(
                         store,
                         householdId,
                         args.product_food_id,
                         args.food_id,
+                        { notify: liveNotifier(householdId, userId) },
                     );
                     const [aliases, barcodes] = await Promise.all([
                         store.listAliases(householdId, saved.id),
@@ -1621,7 +1624,7 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
             withAnalytics(
                 "set_usual_product",
                 async () => {
-                    const householdId = await callerHouseholdId();
+                    const { householdId, userId } = await callerActor();
                     const store = liveFoodsStore();
                     const settings = liveSettingsStore();
                     const hasPurchase =
@@ -1649,9 +1652,12 @@ export function registerCatalogFoodTools(server: McpServer, ctx: ToolContext) {
                         householdId,
                         args.food_id,
                         args.product_food_id,
-                        purchase != null
-                            ? { purchase, stores: settings }
-                            : undefined,
+                        {
+                            ...(purchase != null
+                                ? { purchase, stores: settings }
+                                : {}),
+                            notify: liveNotifier(householdId, userId),
+                        },
                     );
                     const [aliases, barcodes] = await Promise.all([
                         store.listAliases(householdId, saved.id),

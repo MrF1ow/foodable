@@ -16,6 +16,15 @@ import {
     type MemoryNoticeDismissalsHolder,
     type NoticeDismissalsStore,
 } from "./notice-dismissals.js";
+import type { NotificationEvent } from "./notifications.js";
+
+/**
+ * Sends one household event to the members who want it. A sender is bound to
+ * the household and to the person who acted (an agent's action counts as its
+ * person's), and never throws: it runs after the write it reports has
+ * committed, so a failed notification is logged and the write stands.
+ */
+export type Notify = (event: NotificationEvent) => Promise<void>;
 
 export type FoodKind = "food" | "supply";
 
@@ -1407,11 +1416,13 @@ export async function findFoodByNameAndBrand(
     kind: FoodKind,
     name: string,
     brand: string | null,
+    /** The household's catalog when the caller has read it already: reused, not listed again. */
+    catalog?: readonly Food[],
 ): Promise<Food | null> {
     const normalized = normalizeFoodName(name.trim());
     if (!normalized) return null;
     const targetBrand = normalizeFoodBrand(brand);
-    const listed = await store.listFoods(householdId);
+    const listed = catalog ?? (await store.listFoods(householdId));
     const row = listed.find(
         (food) =>
             food.kind === kind &&
@@ -2965,11 +2976,70 @@ async function saveFood(store: FoodsStore, row: Food): Promise<Food> {
     return saved;
 }
 
+/**
+ * Whether a plain food is on the Usuals list: it was added by hand, or it has
+ * live products. The one rule `usualProductRows` applies to the whole catalog,
+ * here for one food and a listed catalog.
+ */
+function isUsualIn(food: Food, listed: readonly Food[]): boolean {
+    if (food.archivedAt || food.genericFoodId) return false;
+    return (
+        food.usualAddedAt != null ||
+        listed.some((row) => !row.archivedAt && row.genericFoodId === food.id)
+    );
+}
+
+/**
+ * Whether the food is on the Usuals list now. The food's own row settles it
+ * when it was added by hand or has a usual product; only a food with neither
+ * needs the catalog, to see whether a product is filed under it, and uses
+ * `catalog` when the caller has read it already.
+ */
+export async function isUsualFood(
+    store: FoodsStore,
+    householdId: string,
+    food: Food,
+    catalog?: readonly Food[],
+): Promise<boolean> {
+    if (food.archivedAt || food.genericFoodId) return false;
+    if (food.usualAddedAt != null || food.usualProductId != null) return true;
+    return isUsualIn(food, catalog ?? (await store.listFoods(householdId)));
+}
+
+/**
+ * Tells the household a food has joined the Usuals: a product was filed under
+ * a food that was not on the list, or a plain food was added to it by hand.
+ */
+export async function announceNewUsual(
+    notify: Notify | undefined,
+    food: Pick<Food, "id" | "name">,
+    productName: string | null,
+): Promise<void> {
+    await notify?.({
+        kind: "new_usuals",
+        subjectKind: "food",
+        subjectId: food.id,
+        payload: { foodName: food.name, productName },
+    });
+}
+
+/**
+ * Files a product under a plain food, or takes it out with a null `foodId`.
+ *
+ * Filing a product under a food that was not a usual puts that food on the
+ * Usuals list (a food with live products is one), so it tells the household
+ * through `opts.notify` once it is saved. Filing under a food that already is
+ * a usual, or filing a product where it already is, or unlinking, tells
+ * nobody. A caller that goes on to make the product the usual
+ * (`setUsualProduct`) leaves `notify` out here: that one tells it, so one
+ * action never sends two.
+ */
 export async function linkProduct(
     store: FoodsStore,
     householdId: string,
     productId: string,
     foodId: string | null,
+    opts: { notify?: Notify } = {},
 ): Promise<Food> {
     const product = await requireLiveFood(store, householdId, productId);
     if (foodId === null) {
@@ -2988,7 +3058,10 @@ export async function linkProduct(
         throw new FoodsInputError("Pick two different foods.");
     }
     const food = await requireLiveFood(store, householdId, foodId);
-    const productChildren = await liveProductsOf(store, householdId, productId);
+    const listed = await store.listFoods(householdId);
+    const productChildren = listed.filter(
+        (row) => row.genericFoodId === productId,
+    );
     if (product.genericFoodId) {
         assertProductRow(product, productChildren);
     } else {
@@ -3018,7 +3091,10 @@ export async function linkProduct(
             });
         }
     }
-    return saveFood(store, { ...filed, genericFoodId: foodId });
+    const wasUsual = isUsualIn(food, listed);
+    const saved = await saveFood(store, { ...filed, genericFoodId: foodId });
+    if (!wasUsual) await announceNewUsual(opts.notify, food, saved.name);
+    return saved;
 }
 
 export async function setUsualPurchase(
@@ -3342,6 +3418,7 @@ export async function addProduct(
     householdId: string,
     foodId: string,
     productId: string,
+    opts: { notify?: Notify } = {},
 ): Promise<{ product: Food; madeUsual: boolean }> {
     const food = await requireLiveFood(store, householdId, foodId);
     if (food.genericFoodId) {
@@ -3350,7 +3427,9 @@ export async function addProduct(
     const product = await linkProduct(store, householdId, productId, foodId);
     const refreshed = await requireLiveFood(store, householdId, foodId);
     if (refreshed.usualProductId) return { product, madeUsual: false };
-    await setUsualProduct(store, householdId, foodId, productId);
+    await setUsualProduct(store, householdId, foodId, productId, {
+        notify: opts.notify,
+    });
     return { product, madeUsual: true };
 }
 
@@ -3368,12 +3447,23 @@ export async function removeProduct(
     return linkProduct(store, householdId, productId, null);
 }
 
+/**
+ * Makes a product the food's usual (or clears it with `null`). A product that
+ * becomes the usual where another, or none, was before is a new usual product:
+ * it tells the household through `opts.notify` once everything is saved.
+ * Choosing the product that already is the usual, or clearing it, tells
+ * nobody.
+ */
 export async function setUsualProduct(
     store: FoodsStore,
     householdId: string,
     foodId: string,
     productId: string | null,
-    opts?: { purchase?: UsualPurchasePatch; stores?: UsualStoreLookup },
+    opts?: {
+        purchase?: UsualPurchasePatch;
+        stores?: UsualStoreLookup;
+        notify?: Notify;
+    },
 ): Promise<Food> {
     if (opts?.purchase != null) {
         await parseUsualPurchase(householdId, opts.purchase, opts.stores);
@@ -3399,6 +3489,10 @@ export async function setUsualProduct(
     }
     const product = await requireLiveFood(store, householdId, productId);
     assertSameKindLiveNotSelf(food, product, foodId, productId);
+    const announce = async () => {
+        if (food.usualProductId === productId) return;
+        await announceNewUsual(opts?.notify, food, product.name);
+    };
     if (product.genericFoodId === foodId) {
         await saveFood(store, { ...food, usualProductId: productId });
         if (opts?.purchase != null) {
@@ -3412,6 +3506,7 @@ export async function setUsualProduct(
                 },
             );
         }
+        await announce();
         return requireLiveFood(store, householdId, foodId);
     }
     if (product.genericFoodId && product.genericFoodId !== foodId) {
@@ -3427,6 +3522,7 @@ export async function setUsualProduct(
             stores: opts.stores!,
         });
     }
+    await announce();
     return requireLiveFood(store, householdId, foodId);
 }
 
@@ -3452,6 +3548,11 @@ export async function createProduct(
         nutritionSource?: NutritionSource | null;
         makeUsual?: boolean;
         createdBy?: string | null;
+        /**
+         * Told once the new product has put the food on the Usuals list or
+         * made the product its usual (one event for either, never both).
+         */
+        notify?: Notify;
     },
 ): Promise<Food> {
     const plain = await requireLiveFood(store, householdId, foodId);
@@ -3477,6 +3578,12 @@ export async function createProduct(
     const allergens = (input.allergens ?? []).filter(
         (code) => isNamedAllergen(code) || code === "other",
     );
+    // Only a product that is not made the usual needs this: `setUsualProduct`
+    // tells it, and says it once.
+    const wasUsual =
+        input.notify != null && !input.makeUsual
+            ? await isUsualFood(store, householdId, plain)
+            : true;
     const created = await store.insertFood(
         newFood({
             householdId,
@@ -3495,7 +3602,11 @@ export async function createProduct(
         }),
     );
     if (input.makeUsual) {
-        await setUsualProduct(store, householdId, foodId, created.id);
+        await setUsualProduct(store, householdId, foodId, created.id, {
+            notify: input.notify,
+        });
+    } else if (!wasUsual) {
+        await announceNewUsual(input.notify, plain, created.name);
     }
     return created;
 }

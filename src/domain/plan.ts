@@ -2,6 +2,10 @@
 // file is the store seam (types, the input checks both stores share, and an
 // in-memory twin of the Postgres adapter); planning logic builds on it.
 
+import type { Notify } from "./foods.js";
+import type { NotificationEvent } from "./notifications.js";
+import type { RecipesStore } from "./recipes.js";
+
 export const PLAN_SLOTS = ["breakfast", "lunch", "dinner", "snack"] as const;
 export type PlanSlot = (typeof PLAN_SLOTS)[number];
 
@@ -155,13 +159,18 @@ export type PlanTransaction = <T>(fn: () => Promise<T>) => Promise<T>;
  * the slot, then the servings (default: `recipeYield`). Planning the same
  * recipe on the same day and slot twice is one plan: the existing one comes
  * back with `alreadyPlanned`. Null when the store does not know the recipe.
- * The check and the insert run inside `opts.transaction`.
+ * The check and the insert run inside `opts.transaction`. A new plan tells the
+ * household through `opts.notify` once that transaction has finished, with
+ * `recipeName` as it stands; the plan that was already there changes nothing,
+ * so it sends nothing.
  */
 export async function planRecipe(
     store: PlansStore,
     input: {
         householdId: string;
         recipeId: string;
+        /** The name the notification freezes; the caller already has the recipe. */
+        recipeName?: string | null;
         recipeYield: number;
         date: string;
         slot: string;
@@ -169,7 +178,7 @@ export async function planRecipe(
         today: string;
         createdBy: string | null;
     },
-    opts: { transaction?: PlanTransaction } = {},
+    opts: { transaction?: PlanTransaction; notify?: Notify } = {},
 ): Promise<{ plan: RecipePlan; alreadyPlanned: boolean } | null> {
     const date = checkPlanDay(input.date, input.today);
     const slot = checkPlanSlot(input.slot);
@@ -177,7 +186,7 @@ export async function planRecipe(
         input.servings ?? input.recipeYield,
     );
     const runTx: PlanTransaction = opts.transaction ?? ((fn) => fn());
-    return runTx(async () => {
+    const outcome = await runTx(async () => {
         const existing = (
             await store.listPlans(input.householdId, date, date)
         ).find((p) => p.recipeId === input.recipeId && p.slot === slot);
@@ -192,6 +201,105 @@ export async function planRecipe(
         });
         return plan ? { plan, alreadyPlanned: false } : null;
     });
+    if (outcome && !outcome.alreadyPlanned) {
+        await opts.notify?.(
+            planEvent("planned", outcome.plan, input.recipeName ?? null),
+        );
+    }
+    return outcome;
+}
+
+/**
+ * Takes one entry off the week plan. True when it was there. The recipe
+ * itself is untouched. The removal tells the household through `deps.notify`
+ * once the store has removed it, with the recipe's name and the day it was
+ * planned for. This is the one way the app and the agent tools unplan.
+ */
+export async function unplanRecipe(
+    store: PlansStore,
+    householdId: string,
+    planId: string,
+    deps: {
+        recipes: Pick<RecipesStore, "getRecipe">;
+        notify?: Notify;
+        /** The recipe's name when the caller already has it: no read then. */
+        recipeName?: string | null;
+    },
+): Promise<boolean> {
+    const plan = await store.getPlan(householdId, planId);
+    if (!plan) return false;
+    // The name is read before the removal: a failed read after it would
+    // fail an unplan that already happened. Without the name the event
+    // still goes, unnamed.
+    const recipeName = !deps.notify
+        ? null
+        : deps.recipeName !== undefined
+          ? deps.recipeName
+          : await deps.recipes
+                .getRecipe(householdId, plan.recipeId)
+                .then((recipe) => recipe?.name ?? null)
+                .catch(() => null);
+    const removed = await store.removePlan(householdId, planId);
+    if (removed && deps.notify) {
+        await deps.notify(planEvent("unplanned", plan, recipeName));
+    }
+    return removed;
+}
+
+/**
+ * Moves one entry to another day or meal (and sets its servings). The same
+ * recipe already planned there absorbs it (`PlansStore.movePlan`). A move to
+ * another day or meal tells the household through `deps.notify`, with where
+ * it was and where it is now; a servings-only change does not. Null when the
+ * household has no such plan.
+ */
+export async function movePlannedRecipe(
+    store: PlansStore,
+    householdId: string,
+    plan: Pick<RecipePlan, "id" | "recipeId" | "date" | "slot">,
+    to: { date: string; slot: PlanSlot; servings?: number },
+    deps: { recipes: Pick<RecipesStore, "getRecipe">; notify?: Notify },
+): Promise<RecipePlan | null> {
+    const relocates = to.date !== plan.date || to.slot !== plan.slot;
+    // Read before the write, as in unplanRecipe: a failed name read never
+    // fails a move that already happened.
+    const recipeName =
+        deps.notify && relocates
+            ? await deps.recipes
+                  .getRecipe(householdId, plan.recipeId)
+                  .then((recipe) => recipe?.name ?? null)
+                  .catch(() => null)
+            : null;
+    const moved = await store.movePlan(
+        householdId,
+        plan.id,
+        to.date,
+        to.slot,
+        to.servings,
+    );
+    if (moved && relocates && deps.notify) {
+        const event = planEvent("moved", moved, recipeName);
+        event.payload = {
+            ...event.payload,
+            fromDate: plan.date,
+            fromSlot: plan.slot,
+        };
+        await deps.notify(event);
+    }
+    return moved;
+}
+
+function planEvent(
+    change: "planned" | "unplanned" | "moved",
+    plan: Pick<RecipePlan, "recipeId" | "date" | "slot">,
+    recipeName: string | null,
+): NotificationEvent {
+    return {
+        kind: "week_plan_changes",
+        subjectKind: "recipe",
+        subjectId: plan.recipeId,
+        payload: { recipeName, date: plan.date, slot: plan.slot, change },
+    };
 }
 
 /** Position of a slot within the day, for ordering. */

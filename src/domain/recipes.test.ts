@@ -1,4 +1,4 @@
-import { test, expect, setSystemTime } from "bun:test";
+import { describe, test, expect, setSystemTime } from "bun:test";
 import {
     addFoodByBarcode,
     addFoodById,
@@ -56,6 +56,8 @@ import {
 } from "./foods.js";
 import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
 import type { FoodResult } from "../foods.js";
+import { notifierFor } from "../db/notify.js";
+import { createMemoryNotificationsStore } from "./notifications.js";
 
 const HH = "hh-1";
 const ALICE = "alice";
@@ -2072,4 +2074,148 @@ test("recipeFilters cookable, quick, and missing count", () => {
     expect(partialTime?.quick).toBe(false);
     expect(cookable?.quick).toBe(false);
     expect(cookable?.highProtein).toBe(true);
+});
+
+describe("deleteRecipe notifications", () => {
+    const CAROL = "carol";
+
+    /** A household of three, each recipient's `recipe_changes` preference as given. */
+    async function household(recipientsOn: string[]) {
+        const notifications = createMemoryNotificationsStore();
+        for (const userId of recipientsOn) {
+            await notifications.upsertPref({
+                householdId: HH,
+                userId,
+                kind: "recipe_changes",
+                enabled: true,
+                updatedAt: "2026-11-22T10:00:00.000Z",
+            });
+        }
+        const deps = {
+            store: notifications,
+            listMembers: async () => [
+                { userId: ALICE, role: "owner" as const },
+                { userId: BOB, role: "member" as const },
+                { userId: CAROL, role: "member" as const },
+            ],
+            log: () => {},
+        };
+        return { notifications, deps };
+    }
+
+    async function soup(store: ReturnType<typeof createMemoryRecipesStore>) {
+        return createRecipe(store, {
+            householdId: HH,
+            creatorId: BOB,
+            name: "Beef chili",
+            yieldPortions: 4,
+        });
+    }
+
+    test("removing a recipe tells the others who have it on, never the person who removed it", async () => {
+        const { notifications, deps } = await household([ALICE, BOB]);
+        const store = createMemoryRecipesStore();
+        const recipe = await soup(store);
+        const deleted = await deleteRecipe(
+            store,
+            HH,
+            recipe.id,
+            { userId: ALICE, isOwner: true },
+            { notify: notifierFor(deps, HH, ALICE) },
+        );
+        expect(deleted).toBe(true);
+        const rows = await notifications.listForHousehold(HH);
+        // Alice has the kind on too, but she is the one who acted; Carol has
+        // not turned it on.
+        expect(rows.map((r) => r.recipientUserId)).toEqual([BOB]);
+        expect(rows[0]).toMatchObject({
+            kind: "recipe_changes",
+            actorUserId: ALICE,
+            subjectKind: "recipe",
+            subjectId: recipe.id,
+            payload: { recipeName: "Beef chili" },
+        });
+    });
+
+    test("the payload carries the recipe's name as it stood when it was removed", async () => {
+        const { notifications, deps } = await household([BOB]);
+        const store = createMemoryRecipesStore();
+        const recipe = await soup(store);
+        await updateRecipe(store, HH, recipe.id, { name: "Chili" });
+        await deleteRecipe(
+            store,
+            HH,
+            recipe.id,
+            { userId: ALICE, isOwner: true },
+            { notify: notifierFor(deps, HH, ALICE) },
+        );
+        const [row] = await notifications.listForHousehold(HH);
+        expect(row?.payload).toEqual({ recipeName: "Chili" });
+    });
+
+    test("members who have the kind off get nothing", async () => {
+        const { notifications, deps } = await household([]);
+        const store = createMemoryRecipesStore();
+        const recipe = await soup(store);
+        await deleteRecipe(
+            store,
+            HH,
+            recipe.id,
+            { userId: ALICE, isOwner: true },
+            { notify: notifierFor(deps, HH, ALICE) },
+        );
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("a delete that is refused, finds no recipe or fails writes nothing", async () => {
+        const { notifications, deps } = await household([ALICE, BOB]);
+        const store = createMemoryRecipesStore();
+        const recipe = await soup(store);
+        const notify = notifierFor(deps, HH, CAROL);
+        await expect(
+            deleteRecipe(
+                store,
+                HH,
+                recipe.id,
+                { userId: CAROL, isOwner: false },
+                { notify },
+            ),
+        ).rejects.toBeInstanceOf(RecipeForbiddenError);
+        expect(
+            await deleteRecipe(
+                store,
+                HH,
+                "no-such-recipe",
+                { userId: ALICE, isOwner: true },
+                { notify },
+            ),
+        ).toBe(false);
+        const failing = {
+            ...store,
+            deleteRecipe: async () => {
+                throw new Error("database is down");
+            },
+        };
+        await expect(
+            deleteRecipe(
+                failing,
+                HH,
+                recipe.id,
+                { userId: ALICE, isOwner: true },
+                { notify },
+            ),
+        ).rejects.toThrow("database is down");
+        expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("a delete with no notify dep is the delete it always was", async () => {
+        const store = createMemoryRecipesStore();
+        const recipe = await soup(store);
+        expect(
+            await deleteRecipe(store, HH, recipe.id, {
+                userId: BOB,
+                isOwner: false,
+            }),
+        ).toBe(true);
+    });
 });

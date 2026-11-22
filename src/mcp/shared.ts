@@ -24,6 +24,7 @@ import {
 } from "../db/household.js";
 import { liveFridgeStore } from "../db/fridge.js";
 import { liveFoodsStore } from "../db/foods.js";
+import { createNotifyQueue, liveNotifier } from "../db/notify.js";
 import { liveRecipesStore } from "../db/recipes.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveAgentActionDeps } from "../db/agent-actions.js";
@@ -88,7 +89,12 @@ import {
 } from "../domain/grocery.js";
 import { listRecipes } from "../domain/recipes.js";
 import { effectiveFoodsByIds } from "../domain/foods.js";
-import type { Food, OnSimilar, SimilarFoodsEntry } from "../domain/foods.js";
+import type {
+    Food,
+    Notify,
+    OnSimilar,
+    SimilarFoodsEntry,
+} from "../domain/foods.js";
 import type { Notice, NoticeCode } from "../domain/notices.js";
 import { NOTICE_CODES } from "../domain/notices.js";
 import {
@@ -1599,12 +1605,18 @@ export type ToolContext = {
      * Runs a destructive write through the household's agent-action guard: the
      * switch is checked first, the rows the write will change are recorded as
      * it goes, and the change can be undone for 24 hours. See `runDestructive`.
+     *
+     * The write gets a `notify` for the household's event notifications, with
+     * the person the agent acts for as the one who acted. It queues them; they
+     * are sent only after the guard's transaction has committed, so a write
+     * that is refused, throws or changes nothing sends none.
      */
     runDestructive: <T>(
         tool: GuardedTool,
         write: (
             rec: SnapshotRecorder,
             householdId: string,
+            notify: Notify,
         ) => Promise<DestructiveWrite<T>>,
         options?: DestructiveOptions,
     ) => Promise<DestructiveRun<T>>;
@@ -2032,6 +2044,7 @@ export function createToolContext(
         write: (
             rec: SnapshotRecorder,
             householdId: string,
+            notify: Notify,
         ) => Promise<DestructiveWrite<T>>,
         options: DestructiveOptions = {},
     ): Promise<DestructiveRun<T>> {
@@ -2068,6 +2081,12 @@ export function createToolContext(
             personId: person.userId,
             role: person.role,
         };
+        // This call's own queue, never kept on the tool context: a batch runs
+        // its calls concurrently against one context, and each call's events
+        // are its own. It is flushed only below, once the transaction is done.
+        const queue = createNotifyQueue(
+            liveNotifier(householdId, person.userId),
+        );
         try {
             const { result, action } = await withAgentAction(
                 agentActionDeps(),
@@ -2077,7 +2096,7 @@ export function createToolContext(
                     summary: (done: DestructiveWrite<T>) => done.summary,
                 },
                 async (rec) => {
-                    const done = await write(rec, householdId);
+                    const done = await write(rec, householdId, queue.notify);
                     // Throwing rolls the transaction back, so a call that
                     // changed nothing leaves no entry behind.
                     if (done.changed === false) {
@@ -2086,6 +2105,9 @@ export function createToolContext(
                     return done;
                 },
             );
+            // The guard's transaction has committed. A refusal, a throw or
+            // NothingChanged skipped this line, and the queue goes with the call.
+            await queue.flush();
             return {
                 refused: false,
                 value: result.value,
