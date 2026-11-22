@@ -5,6 +5,10 @@ import { liveFoodsStore } from "./db/foods.js";
 import { liveFridgeStore } from "./db/fridge.js";
 import { liveGroceryStore } from "./db/grocery.js";
 import { liveNoticeDismissalsStore } from "./db/notice-dismissals.js";
+import {
+    liveNotificationSyncDeps,
+    trySyncHouseholdNotifications,
+} from "./db/notifications.js";
 import { getHouseholdOwnerProfile } from "./db/household.js";
 import {
     listRestockEnabledHouseholds,
@@ -70,6 +74,7 @@ export function liveRestockCheckDeps() {
     const grocery = liveGroceryStore();
     const settings = liveSettingsStore();
     const dismissals = liveNoticeDismissalsStore();
+    const notifications = liveNotificationSyncDeps();
     return {
         // Finding which households are due spans every household, so it is
         // the system's; each household's own check then acts as that household.
@@ -92,8 +97,21 @@ export function liveRestockCheckDeps() {
         // Expiring food plus the usuals that are due. The `restock-runner`
         // kill switch still gates every household (see listEnabled).
         source: "schedules" as const,
+        // Each household the runner ticks also has its stored notifications
+        // brought up to date, so a condition's row is stamped close to when it
+        // appeared, with no one on the page. A failed sync is logged and does
+        // not stop the tick.
         forHousehold: <T>(householdId: string, work: () => Promise<T>) =>
-            withActor({ kind: "household", householdId }, work),
+            withActor({ kind: "household", householdId }, async () => {
+                try {
+                    return await work();
+                } finally {
+                    await trySyncHouseholdNotifications(
+                        notifications,
+                        householdId,
+                    );
+                }
+            }),
     };
 }
 

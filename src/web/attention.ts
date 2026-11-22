@@ -1,11 +1,10 @@
 import { householdClock, householdToday } from "../db/restock.js";
-import { liveGroceryStore } from "../db/grocery.js";
-import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
-import { liveFoodsStore } from "../db/foods.js";
-import { liveFridgeStore } from "../db/fridge.js";
-import { liveRecipePlansStore } from "../db/plans.js";
-import { liveRecipesStore } from "../db/recipes.js";
-import { liveWeighInStore } from "../db/weigh-ins.js";
+import {
+    liveNoticesForDeps,
+    liveNotificationSyncDeps,
+    trySyncHouseholdNotifications,
+} from "../db/notifications.js";
+import { dismissedKeySet, isDismissedIn } from "../domain/notice-dismissals.js";
 import {
     needsAttentionCount,
     tabDotsFromNotices,
@@ -90,6 +89,40 @@ export function attentionFromNotices(
     };
 }
 
+/**
+ * The notices the household has not dismissed: what a page shows. A read made
+ * with `includeDismissed` holds the dismissed ones too (so the stored
+ * notifications can tell a condition is still true); this takes them out again,
+ * by the dismissals the same result carries.
+ */
+export function withoutHouseholdDismissed<
+    T extends Pick<NoticesForResult, "notices" | "dismissals">,
+>(result: T): T {
+    const dismissed = dismissedKeySet(result.dismissals);
+    if (dismissed.size === 0) return result;
+    return {
+        ...result,
+        notices: result.notices.filter((n) => !isDismissedIn(n, dismissed)),
+    };
+}
+
+/** Seam for tests: how a page load brings the household's stored
+ *  notifications up to date from the notices it just read. */
+export type SyncStoredNotifications = (
+    householdId: string,
+    notices: readonly Notice[],
+) => Promise<unknown>;
+
+/** Logs a failure and carries on: a page never waits on, or breaks for, the
+ *  notifications behind its bell. */
+const syncStoredNotifications: SyncStoredNotifications = (
+    householdId,
+    notices,
+) =>
+    trySyncHouseholdNotifications(liveNotificationSyncDeps(), householdId, {
+        notices,
+    });
+
 export async function loadHouseholdNotices(
     householdId: string,
     opts?: {
@@ -100,32 +133,35 @@ export async function loadHouseholdNotices(
         clock?: { today: string; timezone: string };
         /**
          * Also load the notices that come with a one-tap action (running low,
-         * missing for the plan, weigh-in due).
+         * missing for the plan, weigh-in due). This is the page's own read:
+         * it also brings the household's stored notifications up to date from
+         * the same notices, so one request still computes them once.
          */
         actionable?: boolean;
     },
+    syncNotifications: SyncStoredNotifications = syncStoredNotifications,
 ): Promise<NoticesForResult> {
     const clock = opts?.actionable
         ? (opts.clock ?? (await householdClock(householdId)))
         : null;
     const today =
         opts?.today ?? clock?.today ?? (await householdToday(householdId));
-    return noticesFor(
-        {
-            foods: liveFoodsStore(),
-            fridge: liveFridgeStore(),
-            recipes: liveRecipesStore(),
-            dismissals: liveNoticeDismissalsStore(),
-            grocery: liveGroceryStore(),
-            plans: liveRecipePlansStore(),
-            weighIns: liveWeighInStore(),
-        },
-        householdId,
-        { ...opts, today, timezone: clock?.timezone },
-    );
+    const result = await noticesFor(liveNoticesForDeps(), householdId, {
+        ...opts,
+        today,
+        timezone: clock?.timezone,
+        // The stored notifications read the dismissed notices too, and the
+        // page takes them out again below.
+        includeDismissed: opts?.actionable ? true : undefined,
+    });
+    if (!opts?.actionable) return result;
+    await syncNotifications(householdId, result.notices);
+    return withoutHouseholdDismissed(result);
 }
 
-/** The household's notices for a signed-in viewer, the one-tap ones included. */
+/** The household's notices for a signed-in viewer, the one-tap ones included.
+ *  The read also brings the household's stored notifications up to date (see
+ *  `loadHouseholdNotices`), and the notices it returns are what the page shows. */
 export async function loadViewerNotices(
     viewer: HouseholdMember,
     opts?: { refCounts?: ReadonlyMap<string, number>; today?: string },

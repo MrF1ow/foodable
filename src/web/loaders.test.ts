@@ -1,5 +1,28 @@
-import { test, expect } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
+import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
+import {
+    liveNoticesForDeps,
+    liveNotificationsStore,
+} from "../db/notifications.js";
+import { householdClock } from "../db/restock.js";
+import { setSqlForTests } from "../db/sql.js";
+import {
+    seedFood,
+    seedFridgeItem,
+    seedFridgeLocation,
+    seedHousehold,
+    seedMember,
+} from "../db/testing/fixtures.js";
+import { describeDb } from "../db/testing/pg.js";
+import { findPgBin } from "../db/testing/pg-temp.js";
+import { dismissalKey } from "../domain/notice-dismissals.js";
+import { noticesFor } from "../domain/notices-for.js";
+import { shiftLocalDate } from "../domain/tz.js";
+import type { HouseholdMember } from "../household.js";
+import { loadViewerNotices } from "./attention.js";
 import { createHouseholdFormHtml, forbiddenDashboardHtml } from "./loaders.js";
+
+const pgAvailable = await findPgBin();
 
 test("create-household form posts name fields and has no widgets", () => {
     const html = createHouseholdFormHtml();
@@ -48,3 +71,169 @@ test("bare pages stamp data-theme when preview asks, and always show the top bar
     expect(forbidden).toContain('class="empty"');
     expect(forbidden).not.toContain("bottom-nav");
 });
+
+describeDb(
+    pgAvailable !== null,
+    "a page load syncs stored notifications",
+    (getCtx) => {
+        afterEach(() => setSqlForTests(null));
+
+        type Household = {
+            householdId: string;
+            owner: HouseholdMember;
+            memberId: string;
+            itemId: string;
+        };
+
+        // An owner and a member; Milk in the fridge expiring in two days; the
+        // member's last weigh-in ten days ago.
+        async function seedScene(): Promise<Household> {
+            const { sql, truncateAll } = getCtx();
+            await truncateAll();
+            setSqlForTests(sql);
+            const { householdId, userId } = await seedHousehold(sql);
+            const memberId = await seedMember(sql, householdId, {
+                displayName: "Mia",
+            });
+            const foodId = await seedFood(sql, householdId, { name: "Milk" });
+            const locationId = await seedFridgeLocation(sql, householdId);
+            const itemId = await seedFridgeItem(
+                sql,
+                householdId,
+                locationId,
+                foodId,
+                { displayName: "Milk", amount: 1, unit: "l" },
+            );
+            const { today } = await householdClock(householdId);
+            await sql`
+            update public.fridge_items
+            set expires_on = ${shiftLocalDate(today, 2)}
+            where id = ${itemId}::uuid
+        `;
+            await sql`
+            insert into public.weight_log (user_id, weight_g, logged_at)
+            values (${memberId}::uuid, ${80_000}, now() - interval '10 days')
+        `;
+            return {
+                householdId,
+                owner: {
+                    householdId,
+                    userId,
+                    role: "owner",
+                    displayName: "Owner",
+                },
+                memberId,
+                itemId,
+            };
+        }
+
+        // What the pages showed before notifications were stored: the household's
+        // notices with its dismissals applied, read on their own.
+        async function shownBefore(householdId: string) {
+            const { today, timezone } = await householdClock(householdId);
+            return noticesFor(liveNoticesForDeps(), householdId, {
+                today,
+                timezone,
+                actionable: true,
+            });
+        }
+
+        const openRows = async (householdId: string) =>
+            (
+                await liveNotificationsStore().listOpenConditions(householdId)
+            ).sort(
+                (a, b) =>
+                    a.kind.localeCompare(b.kind) ||
+                    a.recipientUserId.localeCompare(b.recipientUserId),
+            );
+
+        test("a page load writes a row for each condition and member, Weigh-in due included", async () => {
+            const hh = await seedScene();
+            expect(await openRows(hh.householdId)).toEqual([]);
+            const result = await loadViewerNotices(hh.owner);
+            const rows = await openRows(hh.householdId);
+            expect(
+                rows
+                    .map((r) => [r.kind, r.recipientUserId, r.subjectId])
+                    .sort(),
+            ).toEqual(
+                [
+                    ["food_expiring", hh.owner.userId, hh.itemId],
+                    ["food_expiring", hh.memberId, hh.itemId],
+                    ["weigh_in_due", hh.memberId, hh.memberId],
+                ].sort(),
+            );
+            // The page still gets the notices themselves.
+            expect(result.notices.map((n) => n.code).sort()).toEqual([
+                "fridge.expiring",
+                "nutrition.weigh_in_due",
+            ]);
+        });
+
+        test("the notices a page shows are what it showed before, and one the household dismissed stays hidden", async () => {
+            const hh = await seedScene();
+            const first = await loadViewerNotices(hh.owner);
+            expect(first.notices).toEqual(
+                (await shownBefore(hh.householdId)).notices,
+            );
+            // The household dismisses the expiring item for everyone.
+            const expiring = first.notices.find(
+                (n) => n.code === "fridge.expiring",
+            )!;
+            await liveNoticeDismissalsStore().insert({
+                householdId: hh.householdId,
+                ...dismissalKey(expiring),
+                dismissedBy: hh.owner.userId,
+            });
+            const before = await shownBefore(hh.householdId);
+            expect(before.notices.map((n) => n.code)).toEqual([
+                "nutrition.weigh_in_due",
+            ]);
+            for (let i = 0; i < 3; i++) {
+                const shown = await loadViewerNotices(hh.owner);
+                expect(shown.notices).toEqual(before.notices);
+                expect(shown.dismissals).toEqual(before.dismissals);
+            }
+            // Its rows are still there, one open row each, for the day it clears.
+            const expiringRows = (await openRows(hh.householdId)).filter(
+                (r) => r.kind === "food_expiring",
+            );
+            expect(expiringRows).toHaveLength(2);
+            expect(expiringRows.every((r) => r.dismissedAt === null)).toBe(
+                true,
+            );
+        });
+
+        test("a condition that clears resolves its rows on the next load", async () => {
+            const hh = await seedScene();
+            const { sql } = getCtx();
+            await loadViewerNotices(hh.owner);
+            await sql`delete from public.fridge_items where id = ${hh.itemId}::uuid`;
+            await loadViewerNotices(hh.owner);
+            expect((await openRows(hh.householdId)).map((r) => r.kind)).toEqual(
+                ["weigh_in_due"],
+            );
+        });
+
+        test("a failing sync is logged and the page still gets its notices", async () => {
+            const hh = await seedScene();
+            const { sql } = getCtx();
+            const logged = spyOn(console, "error").mockImplementation(() => {});
+            // Take the table away: the sync cannot read or write.
+            await sql`alter table public.notifications rename to notifications_away`;
+            try {
+                const shown = await loadViewerNotices(hh.owner);
+                expect(shown.notices).toEqual(
+                    (await shownBefore(hh.householdId)).notices,
+                );
+                expect(logged).toHaveBeenCalledTimes(1);
+                expect(String(logged.mock.calls[0]?.[0])).toContain(
+                    "[notifications]",
+                );
+            } finally {
+                logged.mockRestore();
+                await sql`alter table public.notifications_away rename to notifications`;
+            }
+        });
+    },
+);
