@@ -16,7 +16,7 @@ import {
     signUpUser,
     touchUserSeen,
 } from "./users.js";
-import { setSqlForTests } from "./sql.js";
+import { pgCode, setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
 
@@ -47,6 +47,11 @@ const EXPECTED_USER_FKS: {
     { table: "agent_actions", column: "member_id", deltype: "n" },
     { table: "agent_actions", column: "undone_by", deltype: "n" },
     { table: "stock_movements", column: "actor_user_id", deltype: "n" },
+    { table: "notifications", column: "recipient_user_id", deltype: "c" },
+    { table: "notification_prefs", column: "user_id", deltype: "c" },
+    { table: "notifications", column: "actor_user_id", deltype: "n" },
+    { table: "notifications", column: "snoozed_by", deltype: "n" },
+    { table: "notifications", column: "dismissed_by", deltype: "n" },
     { table: "export_archives", column: "user_id", deltype: "c" },
     { table: "flag_assignments", column: "user_id", deltype: "c" },
     { table: "flag_beta_members", column: "user_id", deltype: "c" },
@@ -93,6 +98,7 @@ const CASCADE_TABLES = [
     "member_dislikes",
     "member_score_settings",
     "nutrition_goal_days",
+    "notification_prefs",
     "nutrition_goals",
     "person_rules",
     "profiles",
@@ -135,6 +141,29 @@ async function seedCascadeAndSetNullRows(
     await sql`
         insert into member_score_settings (user_id, household_id, preset)
         values (${userId}, ${householdId}, ${"planet"})
+    `;
+    await sql`
+        insert into notification_prefs (household_id, user_id, kind, enabled)
+        values (${householdId}, ${userId}, ${"food_expiring"}, ${false})
+    `;
+    await sql`
+        insert into notifications (
+            household_id, recipient_user_id, kind, bucket, source, notice_key,
+            actor_user_id, snoozed_by, dismissed_by
+        )
+        values (
+            ${householdId}, ${otherUserId}, ${"recipe_changes"}, ${"household"},
+            ${"event"}, ${`event:${otherUserId}`}, ${userId}, ${userId}, ${userId}
+        )
+    `;
+    await sql`
+        insert into notifications (
+            household_id, recipient_user_id, kind, bucket, source, notice_key
+        )
+        values (
+            ${householdId}, ${userId}, ${"food_expiring"}, ${"household"},
+            ${"condition"}, ${`fridge.expiring:${userId}`}
+        )
     `;
     await sql`
         insert into nutrition_goals (user_id, daily_calories)
@@ -310,6 +339,57 @@ describeDb(pgAvailable !== null, "users db", (getCtx) => {
             where household_id = ${householdId}
         `;
         expect(share.created_by).toBeNull();
+        const [own] = await sql`
+            select count(*)::int as n from notifications
+            where recipient_user_id = ${userId}
+        `;
+        expect(own.n).toBe(0);
+        const [note] = await sql`
+            select actor_user_id, snoozed_by, dismissed_by from notifications
+            where household_id = ${householdId}
+        `;
+        expect(note.actor_user_id).toBeNull();
+        expect(note.snoozed_by).toBeNull();
+        expect(note.dismissed_by).toBeNull();
+    });
+
+    test("a person has one open notification per key, dismissed or not, and a fresh one after it resolves", async () => {
+        const { sql } = getCtx();
+        const { userId, householdId } = await seedHousehold(sql);
+        const insert = () => sql`
+            insert into notifications (
+                household_id, recipient_user_id, kind, bucket, source, notice_key
+            )
+            values (
+                ${householdId}, ${userId}, ${"food_expiring"}, ${"household"},
+                ${"condition"}, ${"fridge.expiring:milk"}
+            )
+        `;
+        await insert();
+        const dup = await insert().then(
+            () => null,
+            (e: unknown) => e,
+        );
+        expect(pgCode(dup)).toBe("23505");
+        await sql`
+            update notifications set dismissed_at = now()
+            where recipient_user_id = ${userId}
+        `;
+        const dismissedDup = await insert().then(
+            () => null,
+            (e: unknown) => e,
+        );
+        expect(pgCode(dismissedDup)).toBe("23505");
+        await sql`
+            update notifications set resolved_at = now()
+            where recipient_user_id = ${userId}
+        `;
+        await insert();
+        const [row] = await sql`
+            select count(*)::int as n from notifications
+            where recipient_user_id = ${userId}
+        `;
+        expect(row.n).toBe(2);
     });
 
     test("no-action tables block delete until cleared", async () => {
