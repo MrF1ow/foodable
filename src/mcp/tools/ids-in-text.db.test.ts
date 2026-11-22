@@ -407,10 +407,8 @@ const CALLS: Record<string, CallRow | CallSpec> = {
     cook_recipe: withNewRow(
         (s) => ({
             recipe_id: s.recipe,
-            portions_by_member: [
-                { user_id: s.owner, portions: 1 },
-                { user_id: s.member, portions: 1 },
-            ],
+            // A meal is logged only for the person the caller acts for.
+            portions_by_member: [{ user_id: s.owner, portions: 1 }],
             deduct_stock: false,
             log_meals: true,
             meal_type: "dinner",

@@ -24,7 +24,7 @@ const ALLERGEN_ROW = z.object({
 });
 
 export function registerRulesTools(server: McpServer, ctx: ToolContext) {
-    const { callerHouseholdId, requireHouseholdMemberId, analytics } = ctx;
+    const { callerHouseholdId, requireCan, analytics } = ctx;
     server.registerTool(
         "get_household_rules",
         {
@@ -222,6 +222,16 @@ export function registerRulesTools(server: McpServer, ctx: ToolContext) {
                         );
                     }
                     const householdId = await callerHouseholdId();
+                    // Ask before anything is written, so a refusal leaves no
+                    // part of the call behind. As in the app, store rules are
+                    // the household managers', and a person's rules are their
+                    // own unless an owner or admin edits them.
+                    if (args.store_rules?.length) {
+                        await requireCan("stores.manage");
+                    }
+                    for (const row of args.person ?? []) {
+                        await requireCan("rules.edit_person", row.user_id);
+                    }
                     const store = liveRulesStore();
                     const added = {
                         store_rules: 0,
@@ -238,7 +248,6 @@ export function registerRulesTools(server: McpServer, ctx: ToolContext) {
                         added.store_rules += 1;
                     }
                     for (const row of args.person ?? []) {
-                        await requireHouseholdMemberId(row.user_id);
                         for (const body of row.rules ?? []) {
                             await addPersonRule(store, {
                                 householdId,

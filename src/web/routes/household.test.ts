@@ -3365,6 +3365,45 @@ describe("household settings sub-pages", () => {
         });
     });
 
+    describe("a person's allergens, dislikes and rules", () => {
+        test("a member adds only their own; an admin and the owner add anyone's", async () => {
+            const refused = [
+                ["allergens", "allergen=peanut"],
+                ["dislikes", "display_name=Olives"],
+                ["rules", "body=No%20pork"],
+            ] as const;
+            for (const [kind, body] of refused) {
+                const r = await post(
+                    `/settings/household/members/${ALICE}/${kind}`,
+                    BOB,
+                    body,
+                );
+                expect([kind, r.status]).toEqual([kind, 400]);
+                expect(await r.text()).toContain(
+                    "You can only edit your own rules.",
+                );
+            }
+            expect(await db.rulesStore.listAllergens(HH, ALICE)).toEqual([]);
+
+            const own = await post(
+                `/settings/household/members/${BOB}/allergens`,
+                BOB,
+                "allergen=peanut",
+            );
+            expect(own.status).toBe(303);
+            expect(await db.rulesStore.listAllergens(HH, BOB)).toHaveLength(1);
+
+            for (const who of [ADMIN, ALICE]) {
+                const r = await post(
+                    `/settings/household/members/${BOB}/dislikes`,
+                    who,
+                    `display_name=Olives${who === ADMIN ? "A" : "O"}`,
+                );
+                expect(r.status).toBe(303);
+            }
+        });
+    });
+
     describe("invites", () => {
         test("the invites page and its forms are the owner's: 403 for a member and an admin", async () => {
             // The owner gets past the gate (the page itself reads invites from

@@ -2167,7 +2167,7 @@ describe("set_nutrition_goals per-day overrides", () => {
         });
     });
 
-    test("target_member writes the other member's override", async () => {
+    test("target_member refuses the other member's override and accepts the caller's", async () => {
         db.goals = goals({ daily_calories: 2000 });
         db.members = [
             {
@@ -2184,15 +2184,22 @@ describe("set_nutrition_goals per-day overrides", () => {
             },
         ];
         await withTools(null, async (call) => {
-            const r = await call("set_nutrition_goals", {
+            const refused = await call("set_nutrition_goals", {
                 target_member: bob,
+                date: "2026-07-04",
+                daily_calories: 2800,
+            });
+            expect(refused.isError).toBe(true);
+            expect(db.goalDays).toHaveLength(0);
+            const r = await call("set_nutrition_goals", {
+                target_member: "u1",
                 date: "2026-07-04",
                 daily_calories: 2800,
             });
             expect(r.isError).toBeFalsy();
             expect(
                 db.goalDays.some(
-                    (o) => o.user_id === bob && o.daily_calories === 2800,
+                    (o) => o.user_id === "u1" && o.daily_calories === 2800,
                 ),
             ).toBe(true);
         });
@@ -4160,14 +4167,23 @@ describe("household person targeting", () => {
         });
     });
 
-    test("PAT set_nutrition_goals for a member writes that user", async () => {
+    test("PAT set_nutrition_goals writes the owner's goals and refuses another member's", async () => {
         await withHousehold(async (call) => {
-            const r = await call("set_nutrition_goals", {
+            const refused = await call("set_nutrition_goals", {
                 daily_calories: 1800,
                 user_id: bob,
             });
+            expect(refused.isError).toBe(true);
+            expect(textOf(refused)).toContain(
+                "An agent can only add, change or delete the entries of the person it acts for. Nothing was changed. Ask Bob to do it, or their agent. On the household's shared connection that person is the household owner.",
+            );
+            expect(db.goals).toBeNull();
+            const r = await call("set_nutrition_goals", {
+                daily_calories: 1800,
+                user_id: alice,
+            });
             expect(r.isError).toBeFalsy();
-            expect(db.goals?.user_id).toBe(bob);
+            expect(db.goals?.user_id).toBe(alice);
             expect(db.goals?.daily_calories).toBe(1800);
         });
     });
@@ -6375,7 +6391,7 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
-    test("cook_recipe deducts stock and logs one meal per member", async () => {
+    test("cook_recipe deducts stock and logs a meal for the person it acts for", async () => {
         db.barcodeFoods[cottage.barcode] = cottage;
         await withUser(alice, async (call) => {
             const loc = await call("add_fridge_location", { name: "Fridge" });
@@ -6398,15 +6414,13 @@ describe("phone-app domain MCP tools", () => {
             });
             const cooked = await call("cook_recipe", {
                 recipe_id: recipeId,
-                portions_by_member: [
-                    { user_id: alice, portions: 1 },
-                    { user_id: bob, portions: 1 },
-                ],
+                portions_by_member: [{ user_id: alice, portions: 2 }],
             });
             expect(cooked.isError).toBeFalsy();
             expect(textOf(cooked)).toContain("Shortfall");
-            expect(textOf(cooked)).toContain("Logged 2 meals");
-            expect(db.inserted).toHaveLength(2);
+            expect(textOf(cooked)).toContain("Logged 1 meal.");
+            expect(db.inserted).toHaveLength(1);
+            expect(db.inserted[0]!.user_id).toBe(alice);
             const leftover = await call("get_fridge");
             expect(textOf(leftover)).toContain("Fridge is empty.");
         });
@@ -6498,7 +6512,7 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
-    test("cook_recipe cooks total_portions but logs only the members' portions", async () => {
+    test("cook_recipe cooks total_portions but logs only the acting person's portions", async () => {
         db.barcodeFoods[cottage.barcode] = cottage;
         await withUser(alice, async (call) => {
             const loc = await call("add_fridge_location", { name: "Fridge" });
@@ -6521,10 +6535,7 @@ describe("phone-app domain MCP tools", () => {
             });
             const tooFew = await call("cook_recipe", {
                 recipe_id: recipeId,
-                portions_by_member: [
-                    { user_id: alice, portions: 1 },
-                    { user_id: bob, portions: 1 },
-                ],
+                portions_by_member: [{ user_id: alice, portions: 2 }],
                 total_portions: 1,
             });
             expect(tooFew.isError).toBe(true);
@@ -6533,15 +6544,12 @@ describe("phone-app domain MCP tools", () => {
             // Cook once, eat twice: the whole batch, two portions eaten now.
             const cooked = await call("cook_recipe", {
                 recipe_id: recipeId,
-                portions_by_member: [
-                    { user_id: alice, portions: 1 },
-                    { user_id: bob, portions: 1 },
-                ],
+                portions_by_member: [{ user_id: alice, portions: 2 }],
                 total_portions: 4,
             });
             expect(cooked.isError).toBeFalsy();
             expect(cooked.structuredContent?.total_portions).toBe(4);
-            expect(cooked.structuredContent?.meal_ids).toHaveLength(2);
+            expect(cooked.structuredContent?.meal_ids).toHaveLength(1);
             const items = await db.fridgeStore.listItems("hh-1");
             expect(items[0]?.quantity).toEqual({ amount: 600, unit: "g" });
         });
@@ -7448,7 +7456,7 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
-    test("OAuth log_meal with target_member writes the partner", async () => {
+    test("OAuth log_meal with target_member refuses the partner and accepts the caller", async () => {
         db.members = [
             {
                 householdId: "hh-1",
@@ -7473,10 +7481,26 @@ describe("phone-app domain MCP tools", () => {
                 fat_g: 1,
                 target_member: bob,
             });
-            expect(r.isError).toBeFalsy();
-            expect(db.inserted[0]!.user_id).toBe(bob);
-            const today = await call("get_meals", { user_id: bob });
-            expect(textOf(today)).toContain("toast");
+            expect(r.isError).toBe(true);
+            expect(textOf(r)).toContain(
+                "An agent can only add, change or delete the entries of the person it acts for. Nothing was changed. Ask Bob to do it, or their agent.",
+            );
+            expect(db.inserted).toHaveLength(0);
+
+            const own = await call("log_meal", {
+                description: "toast",
+                meal_type: "breakfast",
+                calories: 100,
+                protein_g: 4,
+                carbs_g: 18,
+                fat_g: 1,
+                target_member: "u1",
+            });
+            expect(own.isError).toBeFalsy();
+            expect(db.inserted[0]!.user_id).toBe("u1");
+            // Reading the partner's day is still allowed.
+            const theirs = await call("get_meals", { user_id: bob });
+            expect(theirs.isError).toBeFalsy();
         });
     });
 
@@ -10137,6 +10161,131 @@ describe("/mcp destructive tools are guarded", () => {
             },
         );
     });
+});
+
+describe("/mcp writes land only on the person the agent acts for", () => {
+    const REFUSAL =
+        "An agent can only add, change or delete the entries of the person it acts for. Nothing was changed. Ask U2 to do it, or their agent.";
+
+    beforeEach(() => {
+        db.members.push({
+            householdId: "hh-1",
+            userId: "u2",
+            role: "member",
+            displayName: "U2",
+        });
+    });
+
+    test.each(ERAS)(
+        "a write that names another member is refused and writes nothing; the caller's own goes through (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const write = async (
+                    name: string,
+                    args: Record<string, unknown>,
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                for (const [name, args] of [
+                    [
+                        "log_meal",
+                        {
+                            description: "toast",
+                            meal_type: "breakfast",
+                            calories: 100,
+                            target_member: "u2",
+                        },
+                    ],
+                    ["log_water", { amount_ml: 250, target_member: "u2" }],
+                    [
+                        "log_weight",
+                        { weight: 70, unit: "kg", target_member: "u2" },
+                    ],
+                    [
+                        "set_nutrition_goals",
+                        { daily_calories: 1800, target_member: "u2" },
+                    ],
+                    ["delete_water", { id: "any", target_member: "u2" }],
+                ] as const) {
+                    const refused = await write(name, args);
+                    expect(refused.isError).toBe(true);
+                    expect(textOf(refused)).toContain(REFUSAL);
+                }
+                expect(db.inserted).toHaveLength(0);
+                expect(db.waterInserted).toHaveLength(0);
+                expect(db.weightInserted).toHaveLength(0);
+                expect(db.goals).toBeNull();
+
+                for (const aim of [{}, { target_member: "u1" }]) {
+                    const own = await write("log_water", {
+                        amount_ml: 250,
+                        ...aim,
+                    });
+                    expect(own.isError).toBeFalsy();
+                }
+                expect(db.waterInserted).toHaveLength(2);
+                // Reading the other member's day is not a write.
+                const read = await write("get_water", { user_id: "u2" });
+                expect(read.isError).toBeFalsy();
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "the household token writes only the owner's entries (%p)",
+        async (era) => {
+            const app = new Hono();
+            app.all("/mcp", (c) => {
+                c.set("authContext", {
+                    kind: "household",
+                    householdId: "hh-1",
+                });
+                return handleMcp(c);
+            });
+            const transport = new StreamableHTTPClientTransport(
+                new URL("http://test.local/mcp"),
+                {
+                    fetch: async (url, init) =>
+                        app.request(new Request(String(url), init)),
+                },
+            );
+            const client = new Client(
+                { name: "t", version: "0" },
+                { versionNegotiation: { mode: era } },
+            );
+            await client.connect(transport);
+            try {
+                const call = async (
+                    name: string,
+                    args: Record<string, unknown>,
+                ) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const refused = await call("log_water", {
+                    amount_ml: 250,
+                    user_id: "u2",
+                });
+                expect(refused.isError).toBe(true);
+                expect(textOf(refused)).toContain(REFUSAL);
+                expect(textOf(refused)).toContain(
+                    "On the household's shared connection that person is the household owner.",
+                );
+                expect(db.waterInserted).toHaveLength(0);
+                const own = await call("log_water", {
+                    amount_ml: 250,
+                    user_id: "u1",
+                });
+                expect(own.isError).toBeFalsy();
+                expect(db.waterInserted).toHaveLength(1);
+            } finally {
+                await client.close();
+            }
+        },
+    );
 });
 
 describe("household config plurals_same_food over HTTP", () => {
