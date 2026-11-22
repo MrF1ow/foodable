@@ -426,8 +426,9 @@ export type AlcoholDisplay = DrinkUnit | null;
 
 // ---------- Numeric bounds for the write tools ----------
 //
-// Why these live in the Zod schema and not in the handler: CLAUDE.md's rule
-// ("bounds live in the handler, not in Zod") is specifically about
+// Why these live in the Zod schema and not in the handler: the rule in
+// docs/agents/meal-import.md ("bounds live in the handler, not in Zod") is
+// specifically about
 // bulk_import_meals, where a schema-level rejection fires BEFORE the handler and
 // throws away the structured per-row report, the warnings and the analytics row
 // — for what is that tool's single most common caller mistake. log_meal,

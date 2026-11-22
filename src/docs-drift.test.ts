@@ -18,8 +18,8 @@ function shippedCss(): string {
         .join("\n");
 }
 
-test("the CLAUDE.md vocabulary names only classes the shipped CSS still styles", () => {
-    const paragraph = read("CLAUDE.md")
+test("the app-styling vocabulary names only classes the shipped CSS still styles", () => {
+    const paragraph = read("docs/agents/app-styling.md")
         .split("\n")
         .find((line) => line.startsWith("- **The vocabulary.**"));
     expect(paragraph).toBeDefined();

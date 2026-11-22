@@ -142,10 +142,10 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             when: /^(CLAUDE\.md|AGENTS\.md|\.claude\/skills\/|\.agents\/skills)/,
             tests: /^scripts\/conventions\/skills\.test\.ts$/,
         },
-        // docs-drift.test.ts reads CLAUDE.md, the shipped app CSS, .env.example
+        // docs-drift.test.ts reads docs/agents/app-styling.md, the shipped app CSS, .env.example
         // and the flag table.
         {
-            when: /^(CLAUDE\.md|AGENTS\.md|\.env\.example|public\/app\/.+\.css|src\/flags\.ts)$/,
+            when: /^(docs\/agents\/app-styling\.md|\.env\.example|public\/app\/.+\.css|src\/flags\.ts)$/,
             tests: /^src\/docs-drift\.test\.ts$/,
         },
         {
