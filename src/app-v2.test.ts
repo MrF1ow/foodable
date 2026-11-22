@@ -283,7 +283,8 @@ describe("/app-v2.js", () => {
         // +~9.4 KB Menu: an anchored menu opens, closes on Escape and a tap outside, moves by arrow keys, confirms in place and returns focus; its panel flips or clamps to stay inside the screen.
         // +~7.5 KB Segmented and chip groups: arrow-key radio selection, toggles, and a change event, on the new markup only. Each script keeps its own roving-focus helper rather than a shared one, so the two stay independent.
         // +~0.8 KB Segmented and chip groups: a named Segmented is native radios, so its script only adds a change detail; a modifier on an arrow key is left to the browser.
-        expect(js.length).toBeLessThan(192_300);
+        // +~0.3 KB Select mode: Escape that an open menu took leaves the selection on.
+        expect(js.length).toBeLessThan(192_700);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

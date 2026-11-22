@@ -124,6 +124,14 @@ document.addEventListener(
         if (event.key === "Escape") {
             // An open sheet takes Escape first.
             if (document.querySelector("dialog[open]")) return;
+            // So does an anchored menu. Which listener runs first is up to
+            // registration order: either the menu already closed and prevented
+            // the event, or its panel is still showing.
+            if (event.defaultPrevented) return;
+            for (const menu of document.querySelectorAll("[data-fd-menu]")) {
+                const panel = menu.querySelector(".fd-menu__panel");
+                if (panel && !panel.hidden) return;
+            }
             document
                 .querySelectorAll("[data-fd-selecting]")
                 .forEach((root) => setSelecting(root, false));
