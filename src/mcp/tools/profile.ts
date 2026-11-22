@@ -20,7 +20,7 @@ export function registerProfilePreferenceTools(
     server: McpServer,
     ctx: ToolContext,
 ) {
-    const { alcohol, personSchema, actorUserId, analytics } = ctx;
+    const { alcohol, personSchema, writeUserId, analytics } = ctx;
     server.registerTool(
         "set_weight_unit",
         {
@@ -46,7 +46,7 @@ export function registerProfilePreferenceTools(
             return withAnalytics(
                 "set_weight_unit",
                 async () => {
-                    const userId = await actorUserId(user_id);
+                    const userId = await writeUserId(user_id, undefined);
                     if (unit !== null && !isWeightUnit(unit)) {
                         throw new Error(
                             `Invalid weight unit: ${unit}. Use 'kg', 'lb', or null to clear.`,
@@ -95,7 +95,7 @@ export function registerProfilePreferenceTools(
             return withAnalytics(
                 "set_widget_display",
                 async () => {
-                    const userId = await actorUserId(user_id);
+                    const userId = await writeUserId(user_id, undefined);
                     const profile = await upsertProfile(userId, {
                         widgets_enabled: enabled,
                     });
@@ -156,7 +156,7 @@ export function registerProfilePreferenceTools(
             return withAnalytics(
                 "set_alcohol_tracking",
                 async () => {
-                    const userId = await actorUserId(user_id);
+                    const userId = await writeUserId(user_id, undefined);
                     const profile = await upsertProfile(userId, {
                         alcohol_tracking_enabled: enabled,
                         // Left untouched when omitted, so toggling tracking off
@@ -186,8 +186,14 @@ export function registerProfilePreferenceTools(
 }
 
 export function registerProfileTools(server: McpServer, ctx: ToolContext) {
-    const { widgetsEnabled, alcohol, personSchema, actorUserId, analytics } =
-        ctx;
+    const {
+        widgetsEnabled,
+        alcohol,
+        personSchema,
+        actorUserId,
+        writeUserId,
+        analytics,
+    } = ctx;
     server.registerTool(
         "get_profile",
         {
@@ -269,7 +275,7 @@ export function registerProfileTools(server: McpServer, ctx: ToolContext) {
             return withAnalytics(
                 "set_timezone",
                 async () => {
-                    const userId = await actorUserId(user_id);
+                    const userId = await writeUserId(user_id, undefined);
                     if (!validateTz(timezone)) {
                         throw new Error(
                             `Invalid timezone: ${timezone}. Use an IANA identifier like 'America/Los_Angeles' or 'Europe/London'.`,

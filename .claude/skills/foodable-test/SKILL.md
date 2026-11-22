@@ -85,13 +85,13 @@ bun run db:dev status   # "stopped", exit 1
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
 - **Types, lint, format:** `bun run typecheck`, `lint`, `format:check` (`format` fixes). `bun fmt` needs Bun ≥ 1.4.4: put `$(mise where bun@1.4.4)/bin` first on PATH (`mise exec` misses the `bun` inside scripts).
 
-`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if that is the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
+`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if that is the user's server, stop and ask. The scenarios (one: no logging for another member) need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 
 ## Never touch
 
-- Production data: Railway Postgres is internal-only; `bun run db:rehearse` only when asked, no `railway ssh` queries of your own.
+- Production data: Railway Postgres is internal-only; `bun run db:rehearse` only when asked, no `railway ssh` of your own.
 - `.env`, and any value in it (never print, copy or commit). Not `docker-compose.yml` (loads `.env`).
-- The design file `Foodable Design.figcraft`: read-only, read it with the FigCraft tools, never edit or save it.
+- The design file `Foodable Design.figcraft`: read-only, never edit or save it.
 - The user's dev server, `foodable*.service` units, `foodable-db.service`, and anything on :8080 or :54330: never kill, restart or reuse.
 - `main` and the rulesets.
 

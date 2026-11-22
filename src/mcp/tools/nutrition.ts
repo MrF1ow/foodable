@@ -380,7 +380,6 @@ export function registerNutritionWriteTools(
         hiddenNutrients,
         personSchema,
         nutritionWriteSchema,
-        actorUserId,
         writeUserId,
         callerHouseholdId,
         analytics,
@@ -741,7 +740,9 @@ export function registerNutritionWriteTools(
             return withAnalytics(
                 "start_meal_import",
                 async () => {
-                    const userId = await actorUserId(args.user_id);
+                    // The importer saves as this person, so a member the agent
+                    // may not write for is refused here, not at the save.
+                    const userId = await writeUserId(args.user_id, undefined);
                     const profile = await getProfile(userId);
                     const tz = timezoneFromProfile(profile);
                     const structuredContent = startImportPayload({

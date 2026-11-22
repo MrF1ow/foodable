@@ -75,6 +75,7 @@ import {
 } from "../domain/agent-actions.js";
 import {
     can,
+    type Action,
     type GuardedTool,
     type PermissionRole,
 } from "../domain/permissions.js";
@@ -1564,11 +1565,29 @@ export type ToolContext = {
     ) => Promise<string>;
     callerHouseholdId: () => Promise<string>;
     callerManagerHouseholdId: () => Promise<string>;
+    /**
+     * The person a nutrition write lands on. It is always the person the agent
+     * acts for: naming anyone else, by `target_member` or `user_id`, is
+     * refused. Reads use `actorUserId(…, "read")`, which still reaches peers.
+     */
     writeUserId: (
         requested: string | undefined,
         targetMember: string | undefined,
     ) => Promise<string>;
+    /** A household member, for a read (a filter, a view as them). Any member passes. */
     requireHouseholdMemberId: (memberId: string) => Promise<string>;
+    /**
+     * A household member named by a write (a portion, a meal to log): the
+     * person the agent acts for, and nobody else. Another member is refused
+     * with nothing written, and a stranger is not a household member.
+     */
+    requireActingMemberId: (memberId: string) => Promise<string>;
+    /**
+     * Asks `can()` whether the person the agent acts for may take `action`,
+     * aimed at a household member when `memberId` is given. Throws the
+     * permission's own refusal text, so nothing is written.
+     */
+    requireCan: (action: Action, memberId?: string) => Promise<void>;
     callerActor: () => Promise<{
         userId: string;
         isOwner: boolean;
@@ -1635,16 +1654,23 @@ export function agentRefusalText(err: AgentActionsDisabledError): string {
 }
 
 /**
- * What a destructive call aimed at another person's entries is told. In the
- * app a person deletes only their own meals, water, weight and goals, so an
- * agent acting for one person may not delete another's, whoever's switch is On.
+ * What a write aimed at another person's entries is told, whether it adds,
+ * changes or deletes. A person writes only their own meals, water, weight and
+ * goals, so an agent acting for one person may not write another's, whoever's
+ * switch is On. On the household's shared connection the person it acts for is
+ * the owner, which is worth saying because that connection names nobody.
  */
-export function otherPersonRefusalText(name: string | undefined): string {
+export function otherPersonRefusalText(
+    name: string | undefined,
+    sharedConnection = false,
+): string {
     const who = name?.trim() ? name.trim() : "the other person";
     return (
-        "An agent can do no more than the person it acts for can in the app, " +
-        "and a person deletes only their own entries. " +
-        `Nothing was changed. Ask ${who} to do it, or their agent.`
+        "An agent can only add, change or delete the entries of the person it acts for. " +
+        `Nothing was changed. Ask ${who} to do it, or their agent.` +
+        (sharedConnection
+            ? " On the household's shared connection that person is the household owner."
+            : "")
     );
 }
 
@@ -1785,7 +1811,7 @@ export function createToolContext(
                   .string()
                   .min(1)
                   .describe(
-                      "Household member to act as. Required on a household bot token.",
+                      "Member to act as. Writes: owner only; reads: any member.",
                   )
             : z
                   .string()
@@ -1803,9 +1829,7 @@ export function createToolContext(
         .string()
         .min(1)
         .optional()
-        .describe(
-            "Household member to write this nutrition entry for. MCP only; the site has no log-as-them control.",
-        );
+        .describe("Only the person you act for; another member is refused.");
     const nutritionWriteSchema = (<T extends z.ZodRawShape>(shape: T) =>
         personSchema({
             ...shape,
@@ -1870,6 +1894,42 @@ export function createToolContext(
         }
         return check.member.householdId;
     }
+    // The one rule for a person-scoped write: it lands on the person the agent
+    // acts for, and on nobody else. A write names its person in different ways
+    // (user_id, target_member, a member_id on a portion), so each of them ends
+    // here. It reads nothing but `auth`, so calls sharing one context in a batch
+    // cannot change what each other is checked against.
+    async function ownPersonId(personId: string): Promise<string> {
+        // The common case, on a signed-in user: naming oneself, with no lookup.
+        // Ids reach here in whatever letter case the caller typed; Postgres
+        // compares uuids case-insensitively, so this does too.
+        if (
+            auth.kind === "user" &&
+            personId.toLowerCase() === auth.userId.toLowerCase()
+        ) {
+            return auth.userId;
+        }
+        const person = await actingPerson();
+        if (personId.toLowerCase() === person.userId.toLowerCase()) {
+            return person.userId;
+        }
+        const other = await getHouseholdMembership(
+            personId,
+            person.householdId,
+        );
+        if (!requireMemberOfHousehold(other, person.householdId).ok) {
+            throw new Error("not a household member");
+        }
+        // Postgres accepts other spellings of a uuid ({…}, no hyphens): the
+        // row it found is the acting person's own when the stored ids match.
+        if (other?.userId === person.userId) return person.userId;
+        throw new Error(
+            otherPersonRefusalText(
+                other?.displayName,
+                auth.kind === "household",
+            ),
+        );
+    }
     async function writeUserId(
         requested: string | undefined,
         targetMember: string | undefined,
@@ -1880,18 +1940,11 @@ export function createToolContext(
                     "target_member must match user_id when both are set",
                 );
             }
-            const householdId = await callerHouseholdId();
-            const member = await getHouseholdMembership(
-                targetMember,
-                householdId,
-            );
-            const check = requireMemberOfHousehold(member, householdId);
-            if (!check.ok) {
-                throw new Error("not a household member");
-            }
-            return targetMember;
+            return ownPersonId(targetMember);
         }
-        return actorUserId(requested, "write");
+        // A user token already refuses any user_id but its own here; the
+        // household token must name a member, and that member must be the owner.
+        return ownPersonId(await actorUserId(requested, "write"));
     }
     async function requireHouseholdMemberId(memberId: string): Promise<string> {
         const householdId = await callerHouseholdId();
@@ -1901,6 +1954,31 @@ export function createToolContext(
             throw new Error("not a household member");
         }
         return memberId;
+    }
+    async function requireActingMemberId(memberId: string): Promise<string> {
+        return ownPersonId(memberId);
+    }
+    async function requireCan(
+        action: Action,
+        memberId?: string,
+    ): Promise<void> {
+        const person = await actingPerson();
+        let target: { userId: string } | undefined;
+        if (memberId !== undefined) {
+            const member = await getHouseholdMembership(
+                memberId,
+                person.householdId,
+            );
+            const check = requireMemberOfHousehold(member, person.householdId);
+            if (!check.ok) {
+                throw new Error("not a household member");
+            }
+            target = { userId: check.member.userId };
+        }
+        const verdict = can(person, action, target);
+        if (!verdict.ok) {
+            throw new Error(verdict.reason);
+        }
     }
     // Who the agent acts for: the signed-in member, or the owner for the
     // household token. Their role caps what the agent may do.
@@ -1973,7 +2051,10 @@ export function createToolContext(
                     content: [
                         {
                             type: "text",
-                            text: otherPersonRefusalText(other?.displayName),
+                            text: otherPersonRefusalText(
+                                other?.displayName,
+                                auth.kind === "household",
+                            ),
                         },
                     ],
                     isError: true,
@@ -2071,6 +2152,8 @@ export function createToolContext(
         callerManagerHouseholdId,
         writeUserId,
         requireHouseholdMemberId,
+        requireActingMemberId,
+        requireCan,
         callerActor,
         analytics,
         uiMeta,

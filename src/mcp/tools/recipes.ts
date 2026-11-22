@@ -624,6 +624,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
     const {
         callerHouseholdId,
         requireHouseholdMemberId,
+        requireActingMemberId,
         callerActor,
         analytics,
         runDestructive,
@@ -1104,7 +1105,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Set Recipe Portion",
             description:
-                "Set how many portions a household member eats of a recipe.",
+                "Set how many portions you eat of a recipe: the person you act for (on a household token, the owner). Another member's portion is refused; they or their agent set it.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1122,11 +1123,13 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 "set_recipe_portion",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    await requireHouseholdMemberId(args.member_id);
+                    const memberId = await requireActingMemberId(
+                        args.member_id,
+                    );
                     const portion = await setPersonPortion(liveRecipesStore(), {
                         householdId,
                         recipeId: args.recipe_id,
-                        userId: args.member_id,
+                        userId: memberId,
                         portionCount: args.portion_count,
                     });
                     return {
@@ -1381,7 +1384,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Cook Recipe",
             description:
-                "Deduct scaled ingredients from the fridge (cook movements, oldest expiry first) and optionally log one recipe-portion meal per member through log_recipe_portion's meal-items path. Returns shortfalls instead of going negative. The amount cooked defaults to the sum of portions_by_member (one meal, nothing left over). For a whole batch pass total_portions = the recipe's yield_portions; for leftovers pass more than the members' sum. Only portions_by_member are logged as eaten; the rest is cooked but not logged. total_portions may not be less than the members' sum, and portions_by_member may be empty when nobody eats yet (baking ahead).",
+                "Deduct scaled ingredients from the fridge (cook movements, oldest expiry first) and optionally log a recipe-portion meal for the person you act for through log_recipe_portion's meal-items path (on a household token, the owner). Returns shortfalls instead of going negative. The amount cooked defaults to the sum of portions_by_member (one meal, nothing left over). For a whole batch pass total_portions = the recipe's yield_portions; for leftovers pass more than the members' sum. Only portions_by_member are logged as eaten; the rest is cooked but not logged. A meal is logged only for the person you act for, so a portion for another member is refused (nothing is cooked) unless log_meals is false, when it only sizes the batch. total_portions may not be less than the members' sum, and portions_by_member may be empty when nobody eats yet (baking ahead).",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1437,15 +1440,20 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             portions: number;
                         }[] = [];
                         for (const row of args.portions_by_member ?? []) {
-                            const userId = await requireHouseholdMemberId(
-                                row.user_id,
-                            );
                             if (
                                 !Number.isFinite(row.portions) ||
                                 row.portions <= 0
                             ) {
+                                await requireHouseholdMemberId(row.user_id);
                                 continue;
                             }
+                            // A meal is logged only for the person the agent
+                            // acts for, so another member's portion is refused
+                            // before anything is cooked. Without a meal it only
+                            // sizes the batch, as it does for the grocery list.
+                            const userId = logMeals
+                                ? await requireActingMemberId(row.user_id)
+                                : await requireHouseholdMemberId(row.user_id);
                             portions.push({
                                 userId,
                                 portions: row.portions,

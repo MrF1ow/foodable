@@ -175,6 +175,7 @@ const FINGERPRINT_TABLES = [
     "recipes",
     "recipe_ingredients",
     "recipe_plans",
+    "recipe_portions",
     "recipe_favourites",
     "meals",
     "meal_items",
@@ -1212,13 +1213,18 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             const keep = await food("Eggs", true);
             const drop = await food("Egg", true);
             const bee = await addMember();
-            for (const target_member of [bee, ownerId]) {
-                const logged = await call("log_meal", {
-                    description: "Eggs",
-                    meal_type: "breakfast",
-                    target_member,
-                    items: [{ food_id: drop, amount: 100, unit: "g" }],
-                });
+            // Each person's own agent logs their meal.
+            for (const userId of [bee, ownerId]) {
+                const logged = await call(
+                    "log_meal",
+                    {
+                        description: "Eggs",
+                        meal_type: "breakfast",
+                        items: [{ food_id: drop, amount: 100, unit: "g" }],
+                    },
+                    "legacy",
+                    { kind: "user", userId, client: "Claude" },
+                );
                 expect(logged.isError).toBeFalsy();
             }
             const before = await rows(
@@ -1796,8 +1802,8 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
 
     describe("an agent deletes only the entries of the person it acts for", () => {
         const OTHER_PERSON =
-            "An agent can do no more than the person it acts for can in the app, " +
-            "and a person deletes only their own entries. Nothing was changed. Ask Bea to do it, or their agent.";
+            "An agent can only add, change or delete the entries of the person it acts for. " +
+            "Nothing was changed. Ask Bea to do it, or their agent.";
         const text = (result: Result) =>
             result.content.map((c) => c.text).join("\n");
 
@@ -1814,17 +1820,16 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             const asA: Who = { kind: "user", userId: a, client: "Claude" };
             const asB: Who = { kind: "user", userId: b, client: "Claude" };
 
-            // A's agent may log for B: only deleting is limited.
+            // B's own agent logs B's entries.
             const logged = await call(
                 "log_meal",
                 {
                     description: "Bea's dinner",
                     calories: 500,
                     meal_type: "dinner",
-                    target_member: b,
                 },
                 "legacy",
-                asA,
+                asB,
             );
             expect(logged.isError).toBeFalsy();
             await call("log_water", { amount_ml: 250 }, "legacy", asB);
@@ -1957,6 +1962,46 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             expect((await actions()).length).toBe(1);
         });
 
+        test("an own id in another uuid spelling is still the same person", async () => {
+            const { sql } = getCtx();
+            const a = await seedMember(sql, householdId, {
+                agentsCanDelete: true,
+                displayName: "Ann",
+            });
+            const b = await seedMember(sql, householdId, {
+                agentsCanDelete: false,
+                displayName: "Bea",
+            });
+            const asA: Who = { kind: "user", userId: a, client: "Claude" };
+            for (const spelling of [`{${a}}`, a.replaceAll("-", "")]) {
+                const own = await call(
+                    "log_water",
+                    { amount_ml: 100, target_member: spelling },
+                    "legacy",
+                    asA,
+                );
+                expect([spelling, own.isError ?? false]).toEqual([
+                    spelling,
+                    false,
+                ]);
+            }
+            const refused = await call(
+                "log_water",
+                { amount_ml: 100, target_member: `{${b}}` },
+                "legacy",
+                asA,
+            );
+            expect(refused.isError).toBe(true);
+            expect(
+                (
+                    await rows(
+                        "select id from public.water_log where user_id = $1",
+                        b,
+                    )
+                ).length,
+            ).toBe(0);
+        });
+
         test("calls in one JSON-RPC batch cannot change whose entries a delete is checked against", async () => {
             const { sql } = getCtx();
             const a = await seedMember(sql, householdId, {
@@ -2056,7 +2101,9 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             expect(results.get(1)!.isError).toBe(true);
             expect(text(results.get(1)!)).toContain(OTHER_PERSON);
             expect(results.get(2)!.isError).toBeFalsy();
-            expect(results.get(3)!.isError).toBeFalsy();
+            // Adding to B's water is refused as well.
+            expect(results.get(3)!.isError).toBe(true);
+            expect(text(results.get(3)!)).toContain(OTHER_PERSON);
             expect(
                 (
                     await rows(
@@ -2064,8 +2111,8 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                         b,
                     )
                 ).length,
-            ).toBe(2);
-            expect(await count("water_log")).toBe(2);
+            ).toBe(1);
+            expect(await count("water_log")).toBe(1);
             const recorded = await actions();
             expect(recorded.length).toBe(1);
             expect(recorded[0]!.member_id).toBe(a);
@@ -2371,12 +2418,21 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             });
 
             test("setting a value, or clearing a target that was never set, stays an ordinary write", async () => {
-                // A's agent may still set B's goals: only clearing is limited.
-                const set = await call(
+                // A's agent may set A's goals, and not B's.
+                const refused = await call(
                     "set_nutrition_goals",
                     { ...GOALS, target_member: b },
                     "legacy",
                     asA,
+                );
+                expect(refused.isError).toBe(true);
+                expect(text(refused)).toContain(OTHER_PERSON);
+                expect(await goalRow(b)).toBeUndefined();
+                const set = await call(
+                    "set_nutrition_goals",
+                    GOALS,
+                    "legacy",
+                    asB,
                 );
                 expect(set.isError).toBeFalsy();
                 expect(text(set)).not.toContain(UNDO_SENTENCE);
@@ -2442,6 +2498,938 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 });
                 expect(out.status).toBe("undone");
                 expect(await dayRows(a)).toEqual(before);
+            });
+        });
+    });
+
+    describe("an agent adds and changes only the entries of the person it acts for", () => {
+        const refusalFor = (name: string) =>
+            "An agent can only add, change or delete the entries of the person it acts for. " +
+            `Nothing was changed. Ask ${name} to do it, or their agent.`;
+        const OTHER_PERSON = refusalFor("Bea");
+        const SHARED_CONNECTION =
+            "On the household's shared connection that person is the household owner.";
+        const text = (result: Result) =>
+            result.content.map((c) => c.text).join("\n");
+
+        let a: string;
+        let b: string;
+        let asA: Extract<Who, { kind: "user" }>;
+        let asB: Extract<Who, { kind: "user" }>;
+        let token: Who;
+        beforeEach(async () => {
+            const { sql } = getCtx();
+            a = await seedMember(sql, householdId, {
+                agentsCanDelete: true,
+                displayName: "Ann",
+            });
+            b = await seedMember(sql, householdId, {
+                agentsCanDelete: true,
+                displayName: "Bea",
+            });
+            asA = { kind: "user", userId: a, client: "Claude" };
+            asB = { kind: "user", userId: b, client: "Claude" };
+            token = { kind: "household", householdId };
+        });
+
+        /** B's own entries, written by B's own agent. */
+        async function seedBea() {
+            await call(
+                "log_meal",
+                {
+                    description: "Bea's lunch",
+                    calories: 400,
+                    meal_type: "lunch",
+                },
+                "legacy",
+                asB,
+            );
+            await call("log_water", { amount_ml: 250 }, "legacy", asB);
+            await call("log_weight", { weight: 70, unit: "kg" }, "legacy", asB);
+            await call(
+                "set_nutrition_goals",
+                { daily_calories: 2000 },
+                "legacy",
+                asB,
+            );
+            const [meal] = await rows(
+                "select id from public.meals where user_id = $1",
+                b,
+            );
+            const [water] = await rows(
+                "select id from public.water_log where user_id = $1",
+                b,
+            );
+            const [weight] = await rows(
+                "select id from public.weight_log where user_id = $1",
+                b,
+            );
+            expect(meal && water && weight).toBeTruthy();
+            return {
+                meal: meal!.id as string,
+                water: water!.id as string,
+                weight: weight!.id as string,
+            };
+        }
+
+        /** Every person-scoped nutrition write, aimed at `person` with `field`. */
+        function writesAimedAt(
+            ids: { meal: string; water: string; weight: string },
+            aim: Record<string, string>,
+        ): [string, Record<string, unknown>][] {
+            return [
+                [
+                    "log_meal",
+                    {
+                        description: "Dinner",
+                        calories: 600,
+                        meal_type: "dinner",
+                        ...aim,
+                    },
+                ],
+                ["update_meal", { id: ids.meal, calories: 999, ...aim }],
+                ["delete_meal", { id: ids.meal, ...aim }],
+                ["log_water", { amount_ml: 100, ...aim }],
+                ["delete_water", { id: ids.water, ...aim }],
+                ["log_weight", { weight: 80, unit: "kg", ...aim }],
+                [
+                    "update_weight",
+                    { id: ids.weight, weight: 75, unit: "kg", ...aim },
+                ],
+                ["delete_weight", { id: ids.weight, ...aim }],
+                ["set_nutrition_goals", { daily_calories: 1500, ...aim }],
+                [
+                    "bulk_import_meals",
+                    {
+                        meals: [
+                            {
+                                source_line: 1,
+                                logged_at: "2026-01-02",
+                                meal_type: "lunch",
+                                calories: 300,
+                            },
+                        ],
+                        expected_row_count: 1,
+                        ...aim,
+                    },
+                ],
+                [
+                    "log_recipe_portion",
+                    {
+                        recipe_id: crypto.randomUUID(),
+                        portions: 1,
+                        ...aim,
+                    },
+                ],
+            ];
+        }
+
+        test("A's agent cannot add, change or delete B's meals, water, weight or goals, in either era", async () => {
+            const ids = await seedBea();
+            const before = await fingerprint();
+            for (const era of ERAS) {
+                for (const [tool, args] of writesAimedAt(ids, {
+                    target_member: b,
+                })) {
+                    const refused = await call(tool, args, era, asA);
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain(OTHER_PERSON);
+                    expect(text(refused)).not.toContain(SHARED_CONNECTION);
+                    expect(await fingerprint()).toBe(before);
+                }
+            }
+            expect(await actions()).toEqual([]);
+        });
+
+        test("naming B by user_id is no way round it, and a stranger is not a household member", async () => {
+            const ids = await seedBea();
+            const before = await fingerprint();
+            for (const era of ERAS) {
+                for (const [tool, args] of writesAimedAt(ids, {
+                    user_id: b,
+                })) {
+                    const refused = await call(tool, args, era, asA);
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain(
+                        "user_id must match the signed-in user",
+                    );
+                }
+                for (const [tool, args] of writesAimedAt(ids, {
+                    target_member: crypto.randomUUID(),
+                })) {
+                    const refused = await call(tool, args, era, asA);
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain("not a household member");
+                }
+            }
+            expect(await fingerprint()).toBe(before);
+        });
+
+        test("A's own writes work, with no target, with user_id, and naming A in any letter case", async () => {
+            for (const era of ERAS) {
+                for (const aim of [
+                    {},
+                    { user_id: a },
+                    { target_member: a },
+                    { target_member: a.toUpperCase() },
+                    { user_id: a, target_member: a },
+                ]) {
+                    const water = await call(
+                        "log_water",
+                        { amount_ml: 100, ...aim },
+                        era,
+                        asA,
+                    );
+                    expect(water.isError).toBeFalsy();
+                    const meal = await call(
+                        "log_meal",
+                        {
+                            description: "Toast",
+                            calories: 200,
+                            meal_type: "breakfast",
+                            ...aim,
+                        },
+                        era,
+                        asA,
+                    );
+                    expect(meal.isError).toBeFalsy();
+                }
+            }
+            expect(
+                (
+                    await rows(
+                        "select id from public.water_log where user_id = $1",
+                        a,
+                    )
+                ).length,
+            ).toBe(10);
+            expect(
+                (
+                    await rows(
+                        "select id from public.meals where user_id = $1",
+                        a,
+                    )
+                ).length,
+            ).toBe(10);
+            expect(await count("water_log")).toBe(10);
+            const [mine] = await rows(
+                "select id from public.water_log where user_id = $1",
+                a,
+            );
+            const changed = await call(
+                "update_meal",
+                {
+                    id: (
+                        await rows(
+                            "select id from public.meals where user_id = $1",
+                            a,
+                        )
+                    )[0]!.id,
+                    calories: 250,
+                    target_member: a.toUpperCase(),
+                },
+                "legacy",
+                asA,
+            );
+            expect(changed.isError).toBeFalsy();
+            expect(
+                (
+                    await call(
+                        "set_nutrition_goals",
+                        { daily_calories: 1800, target_member: a },
+                        "legacy",
+                        asA,
+                    )
+                ).isError,
+            ).toBeFalsy();
+            const gone = await call(
+                "delete_water",
+                { id: mine!.id, target_member: a },
+                "legacy",
+                asA,
+            );
+            expect(gone.isError).toBeFalsy();
+        });
+
+        test("the household token acts as the owner: another member's entries are refused, the owner's work", async () => {
+            const ids = await seedBea();
+            const before = await fingerprint();
+            for (const era of ERAS) {
+                // The token names a member with user_id, and may add the same
+                // one as target_member.
+                for (const aim of [
+                    { user_id: b },
+                    { user_id: b, target_member: b },
+                ] as Record<string, string>[]) {
+                    for (const [tool, args] of writesAimedAt(ids, aim)) {
+                        const refused = await call(tool, args, era, token);
+                        expect(refused.isError).toBe(true);
+                        expect(text(refused)).toContain(OTHER_PERSON);
+                        expect(text(refused)).toContain(SHARED_CONNECTION);
+                        expect(await fingerprint()).toBe(before);
+                    }
+                }
+                // The token still has to say whose entries it writes.
+                const nobody = await call(
+                    "log_water",
+                    { amount_ml: 100 },
+                    era,
+                    token,
+                );
+                expect(nobody.isError).toBe(true);
+                expect(text(nobody)).toContain("user_id");
+            }
+            expect(await fingerprint()).toBe(before);
+
+            for (const era of ERAS) {
+                for (const aim of [
+                    { user_id: ownerId },
+                    { user_id: ownerId, target_member: ownerId },
+                    { user_id: ownerId.toUpperCase() },
+                ]) {
+                    const logged = await call(
+                        "log_water",
+                        { amount_ml: 100, ...aim },
+                        era,
+                        token,
+                    );
+                    expect(logged.isError).toBeFalsy();
+                }
+            }
+            expect(
+                (
+                    await rows(
+                        "select id from public.water_log where user_id = $1",
+                        ownerId,
+                    )
+                ).length,
+            ).toBe(6);
+            expect(
+                (
+                    await rows(
+                        "select id from public.water_log where user_id = $1",
+                        b,
+                    )
+                ).length,
+            ).toBe(1);
+        });
+
+        test("in one JSON-RPC batch, A's own write goes and the write for B beside it is refused", async () => {
+            await seedBea();
+            for (let round = 0; round < 4; round++) {
+                const before = (
+                    await rows(
+                        "select id from public.water_log where user_id = $1",
+                        b,
+                    )
+                ).length;
+                const results = await callBatch(asA, [
+                    ...[0, 1, 2].map((i) => ({
+                        id: 10 + i,
+                        name: "log_water",
+                        args: { amount_ml: 10 + i, target_member: b },
+                    })),
+                    ...[0, 1, 2].map((i) => ({
+                        id: 20 + i,
+                        name: "log_water",
+                        args: { amount_ml: 20 + i, target_member: a },
+                    })),
+                    {
+                        id: 30,
+                        name: "log_meal",
+                        args: {
+                            description: "Sneaked in",
+                            calories: 1,
+                            meal_type: "snack",
+                            target_member: b,
+                        },
+                    },
+                ]);
+                for (const id of [10, 11, 12, 30]) {
+                    expect(results.get(id)!.isError).toBe(true);
+                    expect(text(results.get(id)!)).toContain(OTHER_PERSON);
+                }
+                for (const id of [20, 21, 22]) {
+                    expect(results.get(id)!.isError).toBeFalsy();
+                }
+                expect(
+                    (
+                        await rows(
+                            "select id from public.water_log where user_id = $1",
+                            b,
+                        )
+                    ).length,
+                ).toBe(before);
+                expect(
+                    (
+                        await rows(
+                            "select id from public.meals where user_id = $1",
+                            b,
+                        )
+                    ).length,
+                ).toBe(1);
+            }
+            expect(
+                (
+                    await rows(
+                        "select id from public.water_log where user_id = $1",
+                        a,
+                    )
+                ).length,
+            ).toBe(12);
+        });
+
+        test("goals: B's standing and per-day goals are not A's to set, and A's own are", async () => {
+            await seedBea();
+            const { sql } = getCtx();
+            await sql`
+                insert into public.nutrition_goal_days (
+                    household_id, user_id, date, daily_calories
+                )
+                values (${householdId}, ${b}, '2099-01-01'::date, ${2000})
+            `;
+            const before = await fingerprint();
+            for (const era of ERAS) {
+                for (const args of [
+                    { daily_calories: 1800, target_member: b },
+                    { target_weight: 60, unit: "kg", target_member: b },
+                    { goal_name: "Mine now", target_member: b },
+                    { date: "2099-01-01", daily_calories: 1, target_member: b },
+                    {
+                        from: "2099-01-01",
+                        to: "2099-01-03",
+                        daily_protein_g: 90,
+                        target_member: b,
+                    },
+                ]) {
+                    const refused = await call(
+                        "set_nutrition_goals",
+                        args,
+                        era,
+                        asA,
+                    );
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain(OTHER_PERSON);
+                }
+            }
+            expect(await fingerprint()).toBe(before);
+            const own = await call(
+                "set_nutrition_goals",
+                { date: "2099-01-01", daily_calories: 1700 },
+                "legacy",
+                asA,
+            );
+            expect(own.isError).toBeFalsy();
+            expect(await fingerprint()).not.toBe(before);
+        });
+
+        test("personal settings are the acting person's alone: timezone, weight unit, widgets and alcohol tracking", async () => {
+            const profiles = () =>
+                rows(
+                    "select user_id, timezone, preferred_weight_unit, widgets_enabled, alcohol_tracking_enabled, preferred_drink_unit from public.profiles order by user_id",
+                );
+            const settingsFor = (aim: Record<string, string>) =>
+                [
+                    ["set_timezone", { timezone: "Europe/Kyiv", ...aim }],
+                    ["set_weight_unit", { unit: "lb", ...aim }],
+                    ["set_widget_display", { enabled: false, ...aim }],
+                    [
+                        "set_alcohol_tracking",
+                        { enabled: true, drink_unit: "uk", ...aim },
+                    ],
+                ] as [string, Record<string, unknown>][];
+            // B's own agent sets B's settings.
+            for (const [tool, args] of [
+                ["set_timezone", { timezone: "America/Chicago" }],
+                ["set_weight_unit", { unit: "kg" }],
+                ["set_widget_display", { enabled: true }],
+                ["set_alcohol_tracking", { enabled: false, drink_unit: "us" }],
+            ] as [string, Record<string, unknown>][]) {
+                const set = await call(tool, args, "legacy", asB);
+                expect(set.isError).toBeFalsy();
+            }
+            const before = await profiles();
+            expect(before.find((row) => row.user_id === b)).toMatchObject({
+                timezone: "America/Chicago",
+                preferred_weight_unit: "kg",
+                widgets_enabled: true,
+                alcohol_tracking_enabled: false,
+            });
+
+            for (const era of ERAS) {
+                // The household token acts as the owner: it may not set a
+                // member's settings, whichever member it names.
+                for (const aim of [{ user_id: a }, { user_id: b }]) {
+                    for (const [tool, args] of settingsFor(aim)) {
+                        const refused = await call(tool, args, era, token);
+                        expect(refused.isError).toBe(true);
+                        expect(text(refused)).toContain(
+                            "An agent can only add, change or delete the entries of the person it acts for.",
+                        );
+                        expect(text(refused)).toContain(SHARED_CONNECTION);
+                        expect(await profiles()).toEqual(before);
+                    }
+                }
+                // A user token naming another member was already refused.
+                for (const [tool, args] of settingsFor({ user_id: b })) {
+                    const refused = await call(tool, args, era, asA);
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain(
+                        "user_id must match the signed-in user",
+                    );
+                    expect(await profiles()).toEqual(before);
+                }
+            }
+
+            // A's own settings, with and without naming A.
+            for (const aim of [{}, { user_id: a }] as Record<
+                string,
+                string
+            >[]) {
+                for (const [tool, args] of settingsFor(aim)) {
+                    const set = await call(tool, args, "legacy", asA);
+                    expect(set.isError).toBeFalsy();
+                }
+            }
+            // And the owner's, through the household token.
+            for (const [tool, args] of settingsFor({ user_id: ownerId })) {
+                const set = await call(tool, args, "legacy", token);
+                expect(set.isError).toBeFalsy();
+            }
+            const after = await profiles();
+            expect(after.find((row) => row.user_id === b)).toEqual(
+                before.find((row) => row.user_id === b),
+            );
+            for (const user of [a, ownerId]) {
+                expect(after.find((row) => row.user_id === user)).toMatchObject(
+                    {
+                        timezone: "Europe/Kyiv",
+                        preferred_weight_unit: "lb",
+                        widgets_enabled: false,
+                        alcohol_tracking_enabled: true,
+                        preferred_drink_unit: "uk",
+                    },
+                );
+            }
+        });
+
+        describe("person rules follow the app: your own, or anyone's as an owner or admin", () => {
+            const MINE_ONLY = "You can only edit your own rules.";
+            const ruleCounts = async () =>
+                (
+                    await Promise.all(
+                        [
+                            "person_rules",
+                            "member_allergens",
+                            "member_dislikes",
+                        ].map(count),
+                    )
+                ).join(",");
+            const rulesFor = (userId: string) => ({
+                person: [
+                    {
+                        user_id: userId,
+                        rules: ["Quiet after nine"],
+                        allergens: [{ allergen: "peanut" }],
+                        dislikes: ["Olives"],
+                    },
+                ],
+            });
+
+            test("a member's agent edits their own, and is refused another member's with nothing written", async () => {
+                const own = await call(
+                    "set_household_rules",
+                    rulesFor(a),
+                    "legacy",
+                    asA,
+                );
+                expect(own.isError).toBeFalsy();
+                expect(await ruleCounts()).toBe("1,1,1");
+                const before = await ruleCounts();
+                for (const era of ERAS) {
+                    // The refused row comes second: the call writes nothing.
+                    const refused = await call(
+                        "set_household_rules",
+                        {
+                            person: [
+                                ...rulesFor(a).person,
+                                ...rulesFor(b).person,
+                            ],
+                        },
+                        era,
+                        asA,
+                    );
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain(MINE_ONLY);
+                    expect(await ruleCounts()).toBe(before);
+                }
+                expect(
+                    await rows(
+                        "select 1 from public.member_allergens where user_id = $1",
+                        b,
+                    ),
+                ).toHaveLength(0);
+            });
+
+            test("an admin's agent edits another member's, and the household token edits as the owner", async () => {
+                const { sql } = getCtx();
+                const admin = await seedMember(sql, householdId, {
+                    role: "admin",
+                    displayName: "Cy",
+                });
+                const asAdmin: Who = {
+                    kind: "user",
+                    userId: admin,
+                    client: "Claude",
+                };
+                const byAdmin = await call(
+                    "set_household_rules",
+                    rulesFor(b),
+                    "legacy",
+                    asAdmin,
+                );
+                expect(byAdmin.isError).toBeFalsy();
+                expect(await ruleCounts()).toBe("1,1,1");
+                const byToken = await call(
+                    "set_household_rules",
+                    rulesFor(a),
+                    "legacy",
+                    token,
+                );
+                expect(byToken.isError).toBeFalsy();
+                expect(await ruleCounts()).toBe("2,2,2");
+            });
+
+            test("store rules need an owner or admin, as in the app", async () => {
+                const body = {
+                    store_rules: [{ store_id: storeId, body: "x" }],
+                };
+                const refused = await call(
+                    "set_household_rules",
+                    body,
+                    "legacy",
+                    asA,
+                );
+                expect(refused.isError).toBe(true);
+                expect(await count("store_rules")).toBe(0);
+                const done = await call("set_household_rules", body);
+                expect(done.isError).toBeFalsy();
+                expect(await count("store_rules")).toBe(1);
+            });
+
+            test("start_meal_import on the household token refuses another member up front", async () => {
+                const refused = await call(
+                    "start_meal_import",
+                    { user_id: b },
+                    "legacy",
+                    token,
+                );
+                expect(refused.isError).toBe(true);
+                expect(text(refused)).toContain(OTHER_PERSON);
+                const own = await call(
+                    "start_meal_import",
+                    { user_id: ownerId },
+                    "legacy",
+                    token,
+                );
+                expect(own.isError).toBeFalsy();
+            });
+        });
+
+        describe("the fridge and the recipes", () => {
+            let oats: string;
+            let fridgeId: string;
+            let recipeId: string;
+            beforeEach(async () => {
+                oats = await food("Oats", true);
+                fridgeId = await fridgeItem(oats, 500);
+                const made = await call("create_recipe", {
+                    name: "Porridge",
+                    yield_portions: 2,
+                });
+                recipeId = made.structuredContent!.id as string;
+                const added = await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: oats,
+                    amount: 200,
+                    unit: "g",
+                });
+                expect(added.isError).toBeFalsy();
+            });
+
+            const fridgeAmount = async () =>
+                Number(
+                    (
+                        await rows(
+                            "select amount::float as amount from public.fridge_items where id = $1",
+                            fridgeId,
+                        )
+                    )[0]!.amount,
+                );
+            const mealsOf = async (user: string) =>
+                (
+                    await rows(
+                        "select id from public.meals where user_id = $1",
+                        user,
+                    )
+                ).length;
+
+            test("eat_fridge_item logs only for the person the agent acts for", async () => {
+                const before = await fingerprint();
+                for (const era of ERAS) {
+                    const refused = await call(
+                        "eat_fridge_item",
+                        { id: fridgeId, amount: 50, member_id: b },
+                        era,
+                        asA,
+                    );
+                    expect(refused.isError).toBe(true);
+                    expect(text(refused)).toContain(OTHER_PERSON);
+                    const viaToken = await call(
+                        "eat_fridge_item",
+                        { id: fridgeId, amount: 50, member_id: b },
+                        era,
+                        token,
+                    );
+                    expect(viaToken.isError).toBe(true);
+                    expect(text(viaToken)).toContain(OTHER_PERSON);
+                }
+                // Nothing deducted, no movement, no meal for anyone.
+                expect(await fingerprint()).toBe(before);
+                expect(await fridgeAmount()).toBe(500);
+
+                for (const memberId of [undefined, a, a.toUpperCase()]) {
+                    const ate = await call(
+                        "eat_fridge_item",
+                        {
+                            id: fridgeId,
+                            amount: 50,
+                            ...(memberId ? { member_id: memberId } : {}),
+                        },
+                        "legacy",
+                        asA,
+                    );
+                    expect(ate.isError).toBeFalsy();
+                }
+                expect(await fridgeAmount()).toBe(350);
+                expect(await mealsOf(a)).toBe(3);
+                expect(await mealsOf(b)).toBe(0);
+
+                const ownerAte = await call(
+                    "eat_fridge_item",
+                    { id: fridgeId, amount: 50, member_id: ownerId },
+                    "legacy",
+                    token,
+                );
+                expect(ownerAte.isError).toBeFalsy();
+                expect(await mealsOf(ownerId)).toBe(1);
+                expect(await mealsOf(b)).toBe(0);
+            });
+
+            test("set_recipe_portion sets only the portion of the person the agent acts for", async () => {
+                const before = await fingerprint();
+                for (const era of ERAS) {
+                    for (const who of [asA, token]) {
+                        const refused = await call(
+                            "set_recipe_portion",
+                            {
+                                recipe_id: recipeId,
+                                member_id: b,
+                                portion_count: 3,
+                            },
+                            era,
+                            who,
+                        );
+                        expect(refused.isError).toBe(true);
+                        expect(text(refused)).toContain(OTHER_PERSON);
+                    }
+                }
+                expect(await fingerprint()).toBe(before);
+                expect(await count("recipe_portions")).toBe(0);
+
+                for (const memberId of [a, a.toUpperCase()]) {
+                    const own = await call(
+                        "set_recipe_portion",
+                        {
+                            recipe_id: recipeId,
+                            member_id: memberId,
+                            portion_count: 2,
+                        },
+                        "legacy",
+                        asA,
+                    );
+                    expect(own.isError).toBeFalsy();
+                }
+                const viaToken = await call(
+                    "set_recipe_portion",
+                    {
+                        recipe_id: recipeId,
+                        member_id: ownerId,
+                        portion_count: 1,
+                    },
+                    "legacy",
+                    token,
+                );
+                expect(viaToken.isError).toBeFalsy();
+                const stored = await rows(
+                    "select user_id, portion_count::float as portion_count from public.recipe_portions order by portion_count",
+                );
+                expect(stored).toEqual([
+                    { user_id: ownerId, portion_count: 1 },
+                    { user_id: a, portion_count: 2 },
+                ]);
+            });
+
+            test("cook_recipe logs a meal only for the person the agent acts for, and cooks nothing otherwise", async () => {
+                const before = await fingerprint();
+                for (const era of ERAS) {
+                    for (const portions_by_member of [
+                        [{ user_id: b, portions: 1 }],
+                        [
+                            { user_id: a, portions: 1 },
+                            { user_id: b, portions: 1 },
+                        ],
+                    ]) {
+                        const refused = await call(
+                            "cook_recipe",
+                            { recipe_id: recipeId, portions_by_member },
+                            era,
+                            asA,
+                        );
+                        expect(refused.isError).toBe(true);
+                        expect(text(refused)).toContain(OTHER_PERSON);
+                    }
+                    const viaToken = await call(
+                        "cook_recipe",
+                        {
+                            recipe_id: recipeId,
+                            portions_by_member: [
+                                { user_id: ownerId, portions: 1 },
+                                { user_id: a, portions: 1 },
+                            ],
+                        },
+                        era,
+                        token,
+                    );
+                    expect(viaToken.isError).toBe(true);
+                    expect(text(viaToken)).toContain(refusalFor("Ann"));
+                }
+                // Nothing cooked, nothing logged, not even A's own meal.
+                expect(await fingerprint()).toBe(before);
+                expect(await fridgeAmount()).toBe(500);
+
+                const cooked = await call(
+                    "cook_recipe",
+                    {
+                        recipe_id: recipeId,
+                        portions_by_member: [{ user_id: a, portions: 1 }],
+                    },
+                    "legacy",
+                    asA,
+                );
+                expect(cooked.isError).toBeFalsy();
+                expect(await fridgeAmount()).toBe(400);
+                expect(await mealsOf(a)).toBe(1);
+                expect(await mealsOf(b)).toBe(0);
+
+                // Cooking with nobody eating yet is not logging for anyone.
+                const ahead = await call(
+                    "cook_recipe",
+                    { recipe_id: recipeId, total_portions: 1 },
+                    "legacy",
+                    asA,
+                );
+                expect(ahead.isError).toBeFalsy();
+                expect(await fridgeAmount()).toBe(300);
+
+                // B's portion only sizes the batch when no meal is logged for B.
+                const sized = await call(
+                    "cook_recipe",
+                    {
+                        recipe_id: recipeId,
+                        portions_by_member: [{ user_id: b, portions: 1 }],
+                        log_meals: false,
+                    },
+                    "legacy",
+                    asA,
+                );
+                expect(sized.isError).toBeFalsy();
+                expect(await fridgeAmount()).toBe(200);
+                expect(await mealsOf(b)).toBe(0);
+
+                const stranger = await call(
+                    "cook_recipe",
+                    {
+                        recipe_id: recipeId,
+                        portions_by_member: [
+                            { user_id: crypto.randomUUID(), portions: 1 },
+                        ],
+                    },
+                    "legacy",
+                    asA,
+                );
+                expect(stranger.isError).toBe(true);
+                expect(text(stranger)).toContain("not a household member");
+                expect(await fridgeAmount()).toBe(200);
+
+                const ownerCooked = await call(
+                    "cook_recipe",
+                    {
+                        recipe_id: recipeId,
+                        portions_by_member: [{ user_id: ownerId, portions: 1 }],
+                    },
+                    "legacy",
+                    token,
+                );
+                expect(ownerCooked.isError).toBeFalsy();
+                expect(await mealsOf(ownerId)).toBe(1);
+                expect(await fridgeAmount()).toBe(100);
+            });
+
+            test("reads are not limited: A's agent still reads B's entries and sizes a grocery list from B's portion", async () => {
+                const ids = await seedBea();
+                for (const era of ERAS) {
+                    const meals = await call(
+                        "get_meals",
+                        { user_id: b },
+                        era,
+                        asA,
+                    );
+                    expect(meals.isError).toBeFalsy();
+                    expect(text(meals)).toContain("Bea's lunch");
+                    const water = await call(
+                        "get_water",
+                        { user_id: b },
+                        era,
+                        asA,
+                    );
+                    expect(water.isError).toBeFalsy();
+                    const viaToken = await call(
+                        "get_meals",
+                        { user_id: b },
+                        era,
+                        token,
+                    );
+                    expect(viaToken.isError).toBeFalsy();
+                }
+                expect(ids.meal).toBeTruthy();
+                await call(
+                    "set_recipe_portion",
+                    { recipe_id: recipeId, member_id: b, portion_count: 1 },
+                    "legacy",
+                    asB,
+                );
+                const grocery = await call(
+                    "add_recipe_to_grocery",
+                    {
+                        recipe_id: recipeId,
+                        store_id: storeId,
+                        member_ids: [b],
+                    },
+                    "legacy",
+                    asA,
+                );
+                expect(grocery.isError).toBeFalsy();
             });
         });
     });

@@ -159,7 +159,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
         callerHouseholdId,
         analytics,
         actorUserId,
-        requireHouseholdMemberId,
+        requireActingMemberId,
         uiMeta,
         runDestructive,
     } = ctx;
@@ -878,7 +878,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Eat Fridge Item",
             description:
-                "Deduct a fridge item as eaten (oldest-lot item, never negative) and log a food-backed meal through the same meal-items path as log_meal. Household supplies (kind 'supply') are deducted as used and log no meal (meal_id null).",
+                "Deduct a fridge item as eaten (oldest-lot item, never negative) and log a food-backed meal through the same meal-items path as log_meal. Household supplies (kind 'supply') are deducted as used and log no meal (meal_id null). The meal is the caller's: member_id may only name the person you act for (on a household token, the owner); another member is refused.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -909,7 +909,7 @@ export function registerFridgeTools(server: McpServer, ctx: ToolContext) {
                 async () => {
                     const householdId = await callerHouseholdId();
                     const eaterId = args.member_id
-                        ? await requireHouseholdMemberId(args.member_id)
+                        ? await requireActingMemberId(args.member_id)
                         : await actorUserId(undefined);
                     try {
                         const eaten = await eatFridgeItem(

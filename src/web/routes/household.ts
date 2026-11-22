@@ -904,6 +904,8 @@ householdRoutes.post(
     async (c) => {
         const userId = c.get("userId");
         const manager = siteMember(c);
+        const target = await personRulesTarget(c);
+        if (!target.ok) return c.html(target.page.html, target.page.status);
         const body = await c.req.parseBody();
         try {
             await addAllergen(liveRulesStore(), {
@@ -934,6 +936,8 @@ householdRoutes.post(
     async (c) => {
         const userId = c.get("userId");
         const manager = siteMember(c);
+        const target = await personRulesTarget(c);
+        if (!target.ok) return c.html(target.page.html, target.page.status);
         const body = await c.req.parseBody();
         try {
             await addDislike(liveRulesStore(), {
@@ -963,6 +967,8 @@ householdRoutes.post(
     async (c) => {
         const userId = c.get("userId");
         const manager = siteMember(c);
+        const target = await personRulesTarget(c);
+        if (!target.ok) return c.html(target.page.html, target.page.status);
         const body = await c.req.parseBody();
         try {
             await addPersonRule(liveRulesStore(), {

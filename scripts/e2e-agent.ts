@@ -935,8 +935,8 @@ const SCENARIOS: Scenario[] = [
     },
     {
         id: "cook",
-        title: "Cook a recipe for two and log it for both",
-        covers: "cook_recipe → ingredient decrements + cook ledger + one meal per member",
+        title: "Cook a recipe for two; only my portion is logged",
+        covers: "cook_recipe → ingredient decrements + cook ledger + a meal for the acting person only (the other member's portion is refused)",
         async run(ctx) {
             const [recipe] =
                 await sql`select id from recipes where name = 'Chicken & broccoli stir-fry'`;
@@ -964,23 +964,47 @@ const SCENARIOS: Scenario[] = [
                         cook,
                     );
                     // Recipe yields 4; 2 portions use half: 250 g chicken,
-                    // 150 g broccoli. Cooking takes what the fridge holds and
-                    // never goes below zero; anything missing is a shortfall.
+                    // 150 g broccoli. Asked to log a meal for the other member
+                    // too, the agent is refused and may cook again with only
+                    // its own portion, sizing the batch at 2 or at 1. Cooking
+                    // takes what the fridge holds and never goes below zero;
+                    // anything missing is a shortfall.
                     const used = (
                         have: number | null | undefined,
                         need: number,
                     ) => Math.min(have ?? 0, need);
-                    c.near(
-                        (await stockOf(chicken)).g ?? 0,
-                        (chickenBefore.g ?? 0) - used(chickenBefore.g, 250),
-                        `${used(chickenBefore.g, 250)} g chicken used (of 250 g needed)`,
+                    const usedOneOf = (
+                        before: Record<string, number>,
+                        after: Record<string, number>,
+                        needs: number[],
+                    ) =>
+                        needs.some(
+                            (need) =>
+                                Math.abs(
+                                    (after.g ?? 0) -
+                                        ((before.g ?? 0) -
+                                            used(before.g, need)),
+                                ) <= 0.5,
+                        );
+                    c.check(
+                        usedOneOf(
+                            chickenBefore,
+                            await stockOf(chicken),
+                            [250, 125],
+                        ),
+                        "chicken used for the portions cooked (250 g for 2, 125 g for 1)",
+                        await stockOf(chicken),
                     );
-                    c.near(
-                        (await stockOf(broccoli)).g ?? 0,
-                        (broccoliBefore.g ?? 0) - used(broccoliBefore.g, 150),
-                        `${used(broccoliBefore.g, 150)} g broccoli used (of 150 g needed)`,
+                    c.check(
+                        usedOneOf(
+                            broccoliBefore,
+                            await stockOf(broccoli),
+                            [150, 75],
+                        ),
+                        "broccoli used for the portions cooked (150 g for 2, 75 g for 1)",
+                        await stockOf(broccoli),
                     );
-                    if ((chickenBefore.g ?? 0) < 250) {
+                    if ((chickenBefore.g ?? 0) < 125) {
                         c.check(
                             /chicken/i.test(t.text),
                             "the reply says the chicken was short",
@@ -988,21 +1012,25 @@ const SCENARIOS: Scenario[] = [
                     }
                     const fresh = await mealsSince(t);
                     c.check(
-                        fresh.filter((m) => m.user_id === ctx.me.userId)
-                            .length === 1,
-                        "one meal logged for me",
+                        fresh.filter((m) => m.user_id === ctx.other.userId)
+                            .length === 0,
+                        `no meal logged for ${ctx.other.name}`,
                         fresh,
                     );
                     c.check(
-                        fresh.filter((m) => m.user_id === ctx.other.userId)
-                            .length === 1,
-                        `one meal logged for ${ctx.other.name}`,
+                        fresh.filter((m) => m.user_id === ctx.me.userId)
+                            .length <= 1,
+                        "at most one meal logged for me",
                         fresh,
                     );
                     c.check(
                         fresh.every((m) => (m.calories ?? 0) > 0),
-                        "both meals have calories",
+                        "any meal logged has calories",
                         fresh,
+                    );
+                    c.check(
+                        new RegExp(ctx.other.name, "i").test(t.text),
+                        `reply says ${ctx.other.name}'s portion was not logged`,
                     );
                 },
             );
@@ -1010,26 +1038,32 @@ const SCENARIOS: Scenario[] = [
     },
     {
         id: "for-member",
-        title: "Log something for the other member",
-        covers: "log_meal with target_member / user_id",
+        title: "Asked to log for the other member, the agent is refused",
+        covers: "log_meal with target_member / user_id for another member is refused and writes nothing",
         async run(ctx) {
             await ctx.turn(
                 "Coffee for the other member",
                 `Log a black coffee for ${ctx.other.name}: 5 calories, 95 mg caffeine.`,
                 undefined,
                 async (t, c) => {
-                    c.check(called(t, "log_meal"), "log_meal was called");
+                    // An agent acts only for its own person: nothing is
+                    // written for the other member, and it is not logged as
+                    // mine either.
                     const fresh = await mealsSince(t);
                     c.check(
-                        fresh.length === 1 &&
-                            fresh[0]!.user_id === ctx.other.userId,
-                        `the meal is ${ctx.other.name}'s, not mine`,
+                        fresh.filter((m) => m.user_id === ctx.other.userId)
+                            .length === 0,
+                        `nothing logged for ${ctx.other.name}`,
                         fresh,
                     );
-                    c.near(
-                        fresh[0]?.caffeine_mg ?? null,
-                        95,
-                        "95 mg caffeine stored",
+                    c.check(
+                        fresh.length === 0,
+                        "the coffee was not logged as mine either",
+                        fresh,
+                    );
+                    c.check(
+                        new RegExp(ctx.other.name, "i").test(t.text),
+                        `reply says ${ctx.other.name} has to log it themselves, or their agent`,
                     );
                 },
             );
