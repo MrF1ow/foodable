@@ -746,7 +746,8 @@ logRoutes.post(FD_LOG_POST, requireMember, async (c) => {
             items: computed.items,
             item_digest: computed.item_digest,
         });
-        return redirectWithToast(c, returnTo, "nutrition.meal.logged");
+        // toast: none
+        return c.redirect(returnTo, 303);
     } catch (err) {
         const message =
             err instanceof MealItemsError
@@ -826,7 +827,8 @@ logRoutes.post(FD_LOG_QUICK_POST, requireMember, async (c) => {
             carbs_g,
             fat_g,
         });
-        return redirectWithToast(c, returnTo, "nutrition.meal.logged");
+        // toast: none
+        return c.redirect(returnTo, 303);
     } catch (err) {
         const message =
             err instanceof MealItemsError
@@ -865,7 +867,8 @@ logRoutes.post(FD_LOG_WATER_POST, requireMember, async (c) => {
         if (!result.ok) {
             throw new MealItemsError(result.error);
         }
-        return redirectWithToast(c, returnTo, "nutrition.water.logged");
+        // toast: none
+        return c.redirect(returnTo, 303);
     } catch (err) {
         const message =
             err instanceof MealItemsError
@@ -906,7 +909,8 @@ logRoutes.post(FD_LOG_WEIGHT_POST, requireMember, async (c) => {
             weight_g,
             logged_at: iso,
         });
-        return redirectWithToast(c, returnTo, "nutrition.weight.logged");
+        // toast: none
+        return c.redirect(returnTo, 303);
     } catch (err) {
         const message =
             err instanceof MealItemsError
@@ -973,15 +977,13 @@ logRoutes.post("/log/copy-yesterday", requireMember, async (c) => {
                 "nutrition.meal.copy-yesterday.none",
             );
         }
-        const result = await insertMeal(userId, {
+        await insertMeal(userId, {
             ...input,
             meal_type,
             idempotency_key,
         });
-        const msg = result.deduplicated
-            ? "nutrition.meal.copy-yesterday.noop"
-            : "nutrition.meal.logged";
-        return redirectWithToast(c, returnTo, msg);
+        // toast: none (the meal shows in its slot; a repeat is the same 303)
+        return c.redirect(returnTo, 303);
     } catch {
         return c.text("Could not copy yesterday's meal.", 400);
     }

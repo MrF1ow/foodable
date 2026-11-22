@@ -1553,7 +1553,9 @@ describe("kitchen usuals restock", () => {
         expect(r.headers.get("location")).toBe(
             `/kitchen/usuals?food=${eggs.id}`,
         );
-        expect(r.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+        expect(r.headers.get("set-cookie") ?? "").not.toContain(
+            "foodable_toast",
+        );
         const food = await db.foodsStore.getFood(HH, eggs.id);
         expect(food).toMatchObject({
             restockSchedule: "every_n_weeks",
@@ -1994,7 +1996,7 @@ describe("add a usual routes", () => {
         });
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/kitchen/usuals");
-        expect(toastOf(res)).toBe("usuals.added");
+        expect(toastOf(res)).toBeNull();
         expect(
             (await db.foodsStore.getFood(HH, product.id))?.genericFoodId,
         ).toBe(half.id);
@@ -2124,7 +2126,7 @@ describe("add a usual routes", () => {
             return_to: "/kitchen/usuals",
         });
         expect(res.status).toBe(303);
-        expect(toastOf(res)).toBe("usuals.added");
+        expect(toastOf(res)).toBeNull();
         expect(
             (await db.foodsStore.getFood(HH, flour.id))?.usualAddedAt,
         ).not.toBeNull();
@@ -2333,7 +2335,7 @@ describe("add a usual routes", () => {
         const res = await post("/kitchen/usuals/add/manual", handFields);
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/kitchen/usuals");
-        expect(toastOf(res)).toBe("usuals.added");
+        expect(toastOf(res)).toBeNull();
         const oat = (await db.foodsStore.listFoods(HH)).find(
             (f) => f.name === "Oat milk",
         )!;
@@ -2459,7 +2461,7 @@ describe("add a usual routes", () => {
         });
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/kitchen/usuals");
-        expect(toastOf(res)).toBe("usuals.removed");
+        expect(toastOf(res)).toBeNull();
         expect(
             (await db.foodsStore.getFood(HH, oat.id))?.usualAddedAt,
         ).toBeNull();

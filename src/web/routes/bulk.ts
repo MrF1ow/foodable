@@ -3,9 +3,9 @@
  * ticked rows as `ids[]` (Saved foods & recipes: `food_ids[]` and
  * `recipe_ids[]`) and running them as one transaction (`src/db/bulk.ts`).
  *
- * Success is a 303 back to the list with a toast. A batch with nothing left to
- * do (`already`: a double submit, or a page that was stale) is the same 303
- * without a toast, since nothing changed. A refusal (a row that is gone,
+ * Success is a 303 back to the list, with no toast: the list shows what
+ * changed. A batch with nothing left to do (`already`: a double submit, or a
+ * page that was stale) is the same 303. A refusal (a row that is gone,
  * nothing selected, a recipe the member may not delete) re-renders the list
  * with the reason at 400 and writes nothing, so Turbo shows it in place. The
  * list comes back with the filter it was on (`store`, `q` from `return_to`).
@@ -32,8 +32,6 @@ import {
     renderUsualProductsListPage,
 } from "../loaders.js";
 import { requireMember, siteMember } from "../middleware.js";
-import { redirectWithToast } from "../components/toast.js";
-import type { ToastKey } from "../../copy/toasts.js";
 import { safeReturnPath } from "../usual-products-path.js";
 
 export const bulkRoutes = new Hono();
@@ -116,30 +114,26 @@ async function act(
         fallback: string;
         /** How `return_to` becomes a path; the default is `safeReturnPath`. */
         resolve?: (raw: string, fallback: string) => string;
-        toast: ToastKey;
         run: (body: FormBody) => Promise<BulkResult>;
         render: (message: string, returnTo: string) => ReturnType<Render>;
     },
 ): Promise<Response> {
     const body = (await c.req.parseBody({ all: true })) as FormBody;
     const returnTo = returnPath(body, opts.fallback, opts.resolve);
-    let result: BulkResult;
     try {
-        result = await opts.run(body);
+        await opts.run(body);
     } catch (err) {
         const page = await opts.render(refusal(err), returnTo);
         return c.html(page.html, 400);
     }
-    // toast: none. Nothing changed, so there is nothing to announce.
-    if (result.status === "already") return c.redirect(returnTo, 303);
-    return redirectWithToast(c, returnTo, opts.toast);
+    // toast: none. The list shows what changed.
+    return c.redirect(returnTo, 303);
 }
 
 bulkRoutes.post("/kitchen/fridge/bulk/discard", requireMember, (c) => {
     const member = siteMember(c);
     return act(c, {
         fallback: "/kitchen/fridge",
-        toast: "fridge.items.discarded",
         run: (body) =>
             bulkDiscardFridgeItems({
                 householdId: member.householdId,
@@ -154,7 +148,6 @@ bulkRoutes.post("/kitchen/usuals/bulk/remove", requireMember, (c) => {
     const member = siteMember(c);
     return act(c, {
         fallback: "/kitchen/usuals",
-        toast: "usuals.removed",
         run: (body) =>
             bulkRemoveUsuals({
                 householdId: member.householdId,
@@ -174,7 +167,6 @@ bulkRoutes.post("/settings/saved/bulk/delete", requireMember, (c) => {
     return act(c, {
         fallback: SAVED_PATH,
         resolve: savedReturnPath,
-        toast: "settings.saved.deleted",
         run: (body) => {
             const foodIds = body["food_ids[]"] ?? body["food_ids"];
             const recipeIds = body["recipe_ids[]"] ?? body["recipe_ids"];

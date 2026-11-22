@@ -117,14 +117,12 @@ describeDb(pgAvailable !== null, "log copy-yesterday db", (getCtx) => {
         const second = await post();
         expect(first.status).toBe(303);
         expect(second.status).toBe(303);
-        const toastLine = second.headers
-            .getSetCookie()
-            .find((c) => c.startsWith(`${TOAST_COOKIE}=`));
-        expect(toastLine).toBeDefined();
-        const encoded = toastLine!.split(";")[0]!.split("=")[1]!;
-        expect(decodeToastFlash(decodeURIComponent(encoded))?.key).toBe(
-            "nutrition.meal.copy-yesterday.noop",
-        );
+        // A repeat is the same 303: no toast says it did nothing.
+        expect(
+            second.headers
+                .getSetCookie()
+                .some((c) => c.startsWith(`${TOAST_COOKIE}=`)),
+        ).toBe(false);
         const countAfter = await sql`
             select count(*)::int as n from public.meals where user_id = ${userId}
         `;

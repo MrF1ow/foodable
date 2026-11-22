@@ -7,7 +7,6 @@ import { getBaseUrl } from "../../url.js";
 import { formText } from "../form.js";
 import { renderSettingsAccountV2Route } from "../loaders.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
-import { redirectWithToast } from "../components/toast.js";
 import { settingsBackHref } from "../settings-back.js";
 
 export const avatarRoutes = new Hono();
@@ -127,11 +126,8 @@ avatarRoutes.post(
             return refuse(c, userId, backHref, check.message, 422);
         }
         await setAvatar(member.householdId, userId, check.contentType, bytes);
-        return redirectWithToast(
-            c,
-            accountUrl(backHref),
-            "settings.profile.saved",
-        );
+        // toast: none
+        return c.redirect(accountUrl(backHref), 303);
     },
 );
 
@@ -147,10 +143,7 @@ avatarRoutes.post(
         });
         const member = siteMember(c);
         await deleteAvatar(member.householdId, c.get("userId"));
-        return redirectWithToast(
-            c,
-            accountUrl(backHref),
-            "settings.profile.saved",
-        );
+        // toast: none
+        return c.redirect(accountUrl(backHref), 303);
     },
 );

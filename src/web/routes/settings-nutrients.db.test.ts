@@ -7,7 +7,6 @@ import { seedHousehold } from "../../db/testing/fixtures.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { resetFlagsForTests } from "../../flags.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
-import { decodeToastFlash, readToastCookie } from "../components/toast.js";
 import { nutritionRoutes } from "./nutrition.js";
 import { settingsRoutes } from "./settings.js";
 
@@ -355,17 +354,14 @@ describeDb(
             expect((await getProfile(userId))?.timezone).toBe("US/Pacific");
         });
 
-        test("saving the time zone toasts Time zone saved, not nutrition preferences", async () => {
+        test("saving the time zone saves it and sets no toast", async () => {
             const res = await post(userId, "/settings", {
                 group: "nutrition",
                 timezone: "Europe/Kyiv",
             });
             expect(res.status).toBe(303);
-            const flash = decodeToastFlash(
-                readToastCookie(res.headers.get("set-cookie") ?? undefined) ??
-                    undefined,
-            );
-            expect(flash?.key).toBe("settings.timezone.saved");
+            expect(res.headers.get("set-cookie")).toBeNull();
+            expect((await getProfile(userId))?.timezone).toBe("Europe/Kyiv");
         });
 
         test("every field the old account form posted is still writable through its new route", async () => {

@@ -2215,7 +2215,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "recipes-import-error": recipesListV2({
             week: previewWeekPlan(),
             sharedImport: {
-                error: "That share link doesn't work any more. It may have been revoked or expired, or it isn't a recipe link.",
+                error: "That share link doesn't work any more",
+                reason: "Revoked, expired, or not a recipe link",
                 input: "https://kitchen.example/s/q7Wm4xTz2LpR9vYb1KcN8dFhJ3sGaE5uOiXt6ZeBnVw",
             },
         }),

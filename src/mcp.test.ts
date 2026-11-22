@@ -16839,6 +16839,7 @@ describe("authenticated dashboard HTTP", () => {
             }).toString(),
         });
         expect(badLink.status).toBe(422);
+        expect(badLink.headers.get("set-cookie")).toBeNull();
         const badHtml = await badLink.text();
         expect(badHtml).toContain("Keep this caption");
         expect(badHtml).toContain('name="text_origin" value="shared"');
@@ -16867,6 +16868,8 @@ describe("authenticated dashboard HTTP", () => {
             body: "url=https%3A%2F%2Fwww.instagram.com%2Fp%2Fweb-import%2F",
         });
         expect(pasteNeeded.status).toBe(422);
+        // An import that did not work says why inline, never as a toast.
+        expect(pasteNeeded.headers.get("set-cookie")).toBeNull();
         const pasteHtml = await pasteNeeded.text();
         expect(pasteHtml).toContain("Paste the Instagram caption below.");
         expect(pasteHtml).toContain('name="text"');
@@ -16885,6 +16888,8 @@ describe("authenticated dashboard HTTP", () => {
             }).toString(),
         });
         expect(imported.status).toBe(303);
+        // The recipe page shows what came in: no toast.
+        expect(imported.headers.get("set-cookie")).toBeNull();
         const recipeId = (imported.headers.get("location") ?? "").slice(
             "/recipes/".length,
         );
@@ -17004,6 +17009,7 @@ describe("authenticated dashboard HTTP", () => {
             }).toString(),
         });
         expect(pinGone.status).toBe(422);
+        expect(pinGone.headers.get("set-cookie")).toBeNull();
         const pinGoneHtml = await pinGone.text();
         expect(pinGoneHtml).toContain("That page doesn't exist anymore.");
         expect(pinGoneHtml).toContain('value="Kept Chef"');

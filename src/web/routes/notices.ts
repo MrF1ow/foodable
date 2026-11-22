@@ -83,16 +83,16 @@ noticeActionRoutes.post("/notices/:code/act", requireMember, async (c) => {
             clock,
         );
         if (result.status === "gone") {
-            return redirectWithToast(c, back, "notice.gone");
+            // toast: none
+            return c.redirect(back, 303);
         }
         if (result.checkNames.length > 0) {
             return redirectWithToast(c, back, "notice.added.check", {
                 name: result.name,
             });
         }
-        return redirectWithToast(c, back, "notice.added", {
-            name: result.name,
-        });
+        // toast: none
+        return c.redirect(back, 303);
     } catch (err) {
         if (!(err instanceof GroceryInputError)) throw err;
         return redirectWithToast(c, back, "notice.error", {
@@ -111,7 +111,10 @@ noticeActionRoutes.post("/notices/dismiss", requireMember, async (c) => {
     const body = await c.req.parseBody();
     const back = parseNoticeBack(formText(body, "back"));
     const code = noticeCodeOf(formText(body, "code"));
-    if (!code) return redirectWithToast(c, back, "notice.gone");
+    if (!code) {
+        // toast: none (nothing to dismiss)
+        return c.redirect(back, 303);
+    }
     try {
         assertDismissibleCode(code);
     } catch (err) {
@@ -141,7 +144,8 @@ noticeActionRoutes.post("/notices/dismiss", requireMember, async (c) => {
         );
     } catch (err) {
         if (!(err instanceof NoticeDismissError)) throw err;
-        return redirectWithToast(c, back, "notice.gone");
+        // toast: none
+        return c.redirect(back, 303);
     }
     // toast: none
     return c.redirect(back, 303);

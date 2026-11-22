@@ -534,7 +534,9 @@ describe("settings goals field routes", () => {
         const res = await postField("daily_protein_g", "180");
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/settings/goals");
-        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+        expect(res.headers.get("set-cookie") ?? "").not.toContain(
+            "foodable_toast",
+        );
         expect(goalsState).toMatchObject({
             ...STORED_GOALS,
             daily_protein_g: 180,
@@ -712,7 +714,9 @@ describe("settings goals field routes", () => {
         const res = await postClearDay({ date: "2026-11-14" });
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/settings/goals");
-        expect(res.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+        expect(res.headers.get("set-cookie") ?? "").not.toContain(
+            "foodable_toast",
+        );
         expect(goalClears).toEqual([
             { userId: ALICE, householdId: "hh-1", dates: ["2026-11-14"] },
         ]);

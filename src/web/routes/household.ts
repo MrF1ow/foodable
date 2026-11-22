@@ -123,7 +123,6 @@ import {
 } from "../pages/v2/settings-household.js";
 import { RESTOCK_PATH } from "../pages/v2/settings-restock.js";
 import { READERS_PATH } from "../pages/v2/settings-readers.js";
-import { SOCIAL_READER_LABELS } from "../../copy/social-readers.js";
 import {
     FOODS_MERGE_MODAL_ID,
     savedFoodDeleteSheetId,
@@ -134,14 +133,11 @@ import {
     duplicatesBackFrom,
     type DuplicateMergePost,
 } from "../pages/v2/settings-duplicates.js";
-import { householdPersonRuleRemovedKey } from "../components/toast-flash.js";
-import { redirectWithToast } from "../components/toast.js";
 import {
     normalizeMemoryHost,
     type FetchMemoryStore,
 } from "../../domain/fetch-memory.js";
 import { recipeFetchMemory } from "../../db/fetch-memory.js";
-import { truncateToastParam } from "../truncate-toast-param.js";
 import { householdStoresRoutes } from "./household-stores.js";
 import {
     createHouseholdInvite,
@@ -269,7 +265,8 @@ householdRoutes.post(
             });
             return c.html(page.html, 400);
         }
-        return redirectWithToast(c, RESTOCK_PATH, "household.restock.saved");
+        // toast: none
+        return c.redirect(RESTOCK_PATH, 303);
     },
 );
 
@@ -300,11 +297,8 @@ householdRoutes.post(
             });
             return c.html(page.html, 400);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "household.timezone.saved",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -324,11 +318,8 @@ householdRoutes.post(
             for (const host of hosts) {
                 await memory.clearRefusal(member.householdId, host);
             }
-            return redirectWithToast(
-                c,
-                READERS_PATH,
-                "household.fetch-refusals.cleared-all",
-            );
+            // toast: none
+            return c.redirect(READERS_PATH, 303);
         }
         const host = normalizeMemoryHost(hostRaw);
         if (!host) {
@@ -336,12 +327,8 @@ householdRoutes.post(
             return c.html(page.html, page.status);
         }
         await memory.clearRefusal(member.householdId, host);
-        return redirectWithToast(
-            c,
-            READERS_PATH,
-            "household.fetch-refusal.cleared",
-            { host: truncateToastParam(host) },
-        );
+        // toast: none
+        return c.redirect(READERS_PATH, 303);
     },
 );
 
@@ -609,11 +596,8 @@ householdRoutes.post("/settings/household", requireManager, async (c) => {
         });
         return c.html(page.html, 400);
     }
-    return redirectWithToast(
-        c,
-        "/settings/household",
-        "settings.household.member.added",
-    );
+    // toast: none
+    return c.redirect("/settings/household", 303);
 });
 
 householdRoutes.post("/settings/household/name", requireManager, async (c) => {
@@ -630,11 +614,8 @@ householdRoutes.post("/settings/household/name", requireManager, async (c) => {
     }
     const config = await getHouseholdConfig(manager.householdId);
     await updateHouseholdConfig(manager.householdId, { ...config, name });
-    return redirectWithToast(
-        c,
-        "/settings/household",
-        "settings.household.name.saved",
-    );
+    // toast: none
+    return c.redirect("/settings/household", 303);
 });
 
 householdRoutes.post(
@@ -670,14 +651,8 @@ householdRoutes.post(
             return c.html(page.html, page.status);
         }
         await updateSocialReaderEnabled(owner.householdId, reader, enabled);
-        return redirectWithToast(
-            c,
-            READERS_PATH,
-            enabled
-                ? "household.social-reader.on"
-                : "household.social-reader.off",
-            { platform: SOCIAL_READER_LABELS[reader] },
-        );
+        // toast: none
+        return c.redirect(READERS_PATH, 303);
     },
 );
 
@@ -690,11 +665,8 @@ householdRoutes.post(
         const body = await c.req.parseBody();
         const enabled = formText(body, "plurals_same_food") === "true";
         await setPluralsSameFood(manager.householdId, enabled);
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "household.plurals-same-food.saved",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -717,11 +689,8 @@ householdRoutes.post(
             });
             return c.html(page.html, 400);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "household.recipe-settings.saved",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -746,11 +715,8 @@ householdRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.location.saved",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -804,11 +770,8 @@ householdRoutes.post(
             const page = await householdFormError(userId, err, makeOwnerModal);
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.ownership.transferred",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -856,11 +819,8 @@ householdRoutes.post(
             const page = await householdFormError(userId, err, removeModal);
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.member.removed",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -885,11 +845,8 @@ householdRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.store.added",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -917,11 +874,8 @@ householdRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.allergen.added",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -948,11 +902,8 @@ householdRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.dislike.added",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -979,11 +930,8 @@ householdRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.rule.added",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -1050,11 +998,8 @@ householdRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            householdPersonRuleRemovedKey(kind),
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -1094,11 +1039,8 @@ householdRoutes.post(
             const page = await householdFormError(userId, err, manageModal);
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.role.updated",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );
 
@@ -1164,7 +1106,8 @@ householdRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(c, "/settings/saved", "settings.foods.merged");
+        // toast: none
+        return c.redirect("/settings/saved", 303);
     },
 );
 
@@ -1188,11 +1131,8 @@ householdRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/saved",
-            "settings.foods.updated",
-        );
+        // toast: none
+        return c.redirect("/settings/saved", 303);
     },
 );
 
@@ -1300,11 +1240,8 @@ householdRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/settings/saved",
-            "settings.foods.updated",
-        );
+        // toast: none
+        return c.redirect("/settings/saved", 303);
     },
 );
 

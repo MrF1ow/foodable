@@ -108,7 +108,6 @@ import {
     parseGoalsForm,
     type GoalsFormDraft,
 } from "../pages/v2/settings-goals-form.js";
-import { redirectWithToast } from "../components/toast.js";
 import { getBaseUrl } from "../../url.js";
 import { settingsBackHref, settingsUrlWithBack } from "../settings-back.js";
 import { APP_PATHS } from "../route-map.js";
@@ -225,7 +224,8 @@ settingsRoutes.post("/settings/goals/field", requireMember, async (c) => {
         input.goals_set_on = todayInTz(timezoneFromProfile(profile) ?? "UTC");
     }
     await upsertNutritionGoals(userId, input);
-    return redirectWithToast(c, "/settings/goals", "settings.goals.saved");
+    // toast: none
+    return c.redirect("/settings/goals", 303);
 });
 
 settingsRoutes.post("/settings/goals/days/clear", requireMember, async (c) => {
@@ -242,11 +242,8 @@ settingsRoutes.post("/settings/goals/days/clear", requireMember, async (c) => {
     // Always the caller's own rows: the id comes from the session, never
     // the form.
     await clearGoalDays(userId, member.householdId, [date]);
-    return redirectWithToast(
-        c,
-        "/settings/goals",
-        "settings.goals.day-cleared",
-    );
+    // toast: none
+    return c.redirect("/settings/goals", 303);
 });
 
 settingsRoutes.get(SCORE_PATH, requireSiteUser, async (c) => {
@@ -268,7 +265,8 @@ settingsRoutes.post(SCORE_PATH, requireMember, async (c) => {
             await updateMemberScoreSettings(store, member.householdId, userId, {
                 choice: null,
             });
-            return redirectWithToast(c, SCORE_PATH, "settings.score.household");
+            // toast: none
+            return c.redirect(SCORE_PATH, 303);
         case "warn_traces":
         case "compare_goals": {
             await updateMemberScoreSettings(
@@ -279,7 +277,7 @@ settingsRoutes.post(SCORE_PATH, requireMember, async (c) => {
                     ? { warnTraces: formText(body, "value") === "1" }
                     : { compareGoals: formText(body, "value") === "1" },
             );
-            // toast: none the switch itself shows the new state
+            // toast: none — the switch itself shows the new state
             return c.redirect(SCORE_PATH, 303);
         }
         case "choice": {
@@ -290,7 +288,8 @@ settingsRoutes.post(SCORE_PATH, requireMember, async (c) => {
             await updateMemberScoreSettings(store, member.householdId, userId, {
                 choice: parsed.choice,
             });
-            return redirectWithToast(c, SCORE_PATH, "settings.score.saved");
+            // toast: none
+            return c.redirect(SCORE_PATH, 303);
         }
         default: {
             const page = await renderSettingsScoreV2Route(userId, {
@@ -338,11 +337,8 @@ settingsRoutes.post(
         const intent = formText(body, "intent");
         if (intent === "clear") {
             await updateHouseholdScoreDefault(store, member.householdId, null);
-            return redirectWithToast(
-                c,
-                SCORE_HOUSEHOLD_PATH,
-                "settings.score.household-cleared",
-            );
+            // toast: none
+            return c.redirect(SCORE_HOUSEHOLD_PATH, 303);
         }
         if (intent !== "choice") {
             const page = await renderSettingsScoreHouseholdV2Route(userId, {
@@ -364,11 +360,8 @@ settingsRoutes.post(
             parsed.choice,
         );
         // Back to the editor: the default saves as it changes.
-        return redirectWithToast(
-            c,
-            SCORE_HOUSEHOLD_PATH,
-            "settings.score.household-saved",
-        );
+        // toast: none
+        return c.redirect(SCORE_HOUSEHOLD_PATH, 303);
     },
 );
 
@@ -402,17 +395,12 @@ settingsRoutes.post(AI_DISCONNECT_PATH, requireMember, async (c) => {
     }
     // Always the caller's own tokens: the member comes from the session,
     // never the form. The marker stands for tokens with no recorded app.
-    const revoked = await revokeConnection(
+    await revokeConnection(
         userId,
         client === UNKNOWN_APP_MARKER ? null : client,
     );
-    return redirectWithToast(
-        c,
-        "/settings/ai-connections",
-        revoked > 0
-            ? "settings.ai.disconnected"
-            : "settings.ai.already-disconnected",
-    );
+    // toast: none
+    return c.redirect("/settings/ai-connections", 303);
 });
 
 // The household switch: only the owner flips it (403 for anyone else). The
@@ -436,13 +424,8 @@ settingsRoutes.post(
             member.householdId,
             allowed,
         );
-        return redirectWithToast(
-            c,
-            AI_PAGE_PATH,
-            allowed
-                ? "settings.ai.destructive-allowed"
-                : "settings.ai.destructive-off",
-        );
+        // toast: none — the switch shows the new state
+        return c.redirect(AI_PAGE_PATH, 303);
     },
 );
 
@@ -465,7 +448,7 @@ settingsRoutes.post(AI_AGENT_DELETE_PATH, requireMember, async (c) => {
         member.userId,
         value === "1",
     );
-    // toast: none the switch shows the new state
+    // toast: none — the switch shows the new state
     return c.redirect(AI_PAGE_PATH, 303);
 });
 
@@ -482,7 +465,7 @@ settingsRoutes.post(AI_WIDGETS_PATH, requireMember, async (c) => {
         return c.html(page.html, page.status === 200 ? 400 : page.status);
     }
     await upsertProfile(userId, { widgets_enabled: value === "1" });
-    // toast: none the switch shows the new state
+    // toast: none — the switch shows the new state
     return c.redirect(AI_PAGE_PATH, 303);
 });
 
@@ -522,7 +505,8 @@ settingsRoutes.post(
                   message: "That change was not found.",
               } as const);
         if (result.status === "undone") {
-            return redirectWithToast(c, back, "settings.ai.undone");
+            // toast: none
+            return c.redirect(back, 303);
         }
         const page = await renderSettingsAiV2Route(member.userId, {
             mcpUrl: `${getBaseUrl(c)}/mcp`,
@@ -610,7 +594,7 @@ settingsRoutes.post(UNITS_PATH, requireMember, async (c) => {
             preferred_drink_unit: prefs.preferred_drink_unit,
         });
     }
-    // toast: none the row shows the new value
+    // toast: none — the row shows the new value
     return c.redirect(UNITS_PATH, 303);
 });
 
@@ -634,7 +618,7 @@ settingsRoutes.post(NUTRIENTS_PATH, requireMember, async (c) => {
     } else if (isHideableNutrient(nutrient)) {
         await setNutrientHidden(userId, nutrient, shown === "0");
     }
-    // toast: none the switch shows the new state
+    // toast: none — the switch shows the new state
     return c.redirect(NUTRIENTS_PATH, 303);
 });
 
@@ -658,7 +642,7 @@ settingsRoutes.post("/settings/display", requireMember, async (c) => {
         formText(body, "return") === "/settings"
             ? "/settings"
             : "/settings/display";
-    // toast: none full reload refreshes theme chrome on this page
+    // toast: none — full reload refreshes theme chrome on this page
     return c.redirect(back, 303);
 });
 
@@ -724,9 +708,11 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
         await upsertProfile(userId, prefs);
         // The Account time zone sheet posts only the zone.
         if (typeof body.timezone === "string") {
-            return redirectWithToast(c, redirectTo, "settings.timezone.saved");
+            // toast: none
+            return c.redirect(redirectTo, 303);
         }
-        return redirectWithToast(c, redirectTo, "settings.nutrition.saved");
+        // toast: none
+        return c.redirect(redirectTo, 303);
     }
     if ("theme" in body) {
         const appearance = parseAppearanceInput({ theme: body.theme });
@@ -736,7 +722,8 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
     if (displayName) {
         await updateMemberDisplayName(member.householdId, userId, displayName);
     }
-    return redirectWithToast(c, redirectTo, "settings.profile.saved");
+    // toast: none
+    return c.redirect(redirectTo, 303);
 });
 
 settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
@@ -774,5 +761,6 @@ settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
                 : "Could not create the household.";
         return c.html(createHouseholdFormHtml(message), 400);
     }
-    return redirectWithToast(c, "/", "settings.household.created");
+    // toast: none
+    return c.redirect("/", 303);
 });

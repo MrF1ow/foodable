@@ -390,6 +390,16 @@ describe("renderRecipesListPage", () => {
         expect(on.html).toContain('action="/recipes/import-shared"');
     });
 
+    test("an import error reaches the page as a headline with its reason", async () => {
+        const page = await renderRecipesListPage(ALICE, {
+            importError: "This site asks apps not to read this page.",
+            importErrorReason: "Paste the recipe instead.",
+        });
+        expect(page.html).toContain(
+            '<p class="fd-recipes-import-error__headline">This site asks apps not to read this page.</p><p class="fd-recipes-import-error__reason">Paste the recipe instead.</p>',
+        );
+    });
+
     test("duplicate import surfaces open link", async () => {
         const page = await renderRecipesListPage(ALICE, {
             importDuplicateRecipeId: "11111111-1111-4111-8111-111111111112",
@@ -590,10 +600,8 @@ describe("POST /recipes/:id/cook/confirm", () => {
         expect(meal.input.calories).toBe(182);
         expect(meal.input.idempotency_key).toContain(db.recipeId);
 
-        expect(toastOf(res)).toEqual({
-            key: "recipes.cooked.logged",
-            params: { slot: "lunch" },
-        });
+        // A clean cook says nothing: the recipe page and Today show it.
+        expect(toastOf(res)).toBeNull();
     });
 
     test("a double submit cooks and logs once", async () => {
@@ -605,7 +613,7 @@ describe("POST /recipes/:id/cook/confirm", () => {
         expect(second.status).toBe(303);
         expect(await flourLeft()).toBe(400);
         expect(db.meals).toHaveLength(1);
-        expect(toastOf(second)).toEqual({ key: "recipes.cooked.already" });
+        expect(toastOf(second)).toBeNull();
     });
 
     test("a double submit with the switch off cooks once", async () => {
@@ -614,10 +622,10 @@ describe("POST /recipes/:id/cook/confirm", () => {
         body.delete("log_serving");
         const first = await postConfirm(body);
         expect(first.status).toBe(303);
-        expect(toastOf(first)).toEqual({ key: "recipes.cooked" });
+        expect(toastOf(first)).toBeNull();
         const second = await postConfirm(body);
         expect(second.status).toBe(303);
-        expect(toastOf(second)).toEqual({ key: "recipes.cooked.already" });
+        expect(toastOf(second)).toBeNull();
         expect(await flourLeft()).toBe(400);
         expect(
             (await db.stockStore.listMovements(HH)).filter(
@@ -635,7 +643,7 @@ describe("POST /recipes/:id/cook/confirm", () => {
         expect(res.status).toBe(303);
         expect(await flourLeft()).toBe(400);
         expect(db.meals).toHaveLength(0);
-        expect(toastOf(res)).toEqual({ key: "recipes.cooked" });
+        expect(toastOf(res)).toBeNull();
     });
 
     test("a shortfall is cooked anyway and the toast says so", async () => {
@@ -645,7 +653,10 @@ describe("POST /recipes/:id/cook/confirm", () => {
         body.delete("expected");
         const res = await postConfirm(body);
         expect(res.status).toBe(303);
-        expect(toastOf(res)?.key).toBe("recipes.cooked.shortfall.logged");
+        expect(toastOf(res)).toEqual({
+            key: "recipes.cooked.short",
+            params: { names: "Flour" },
+        });
         expect(await flourLeft()).toBe(0);
     });
 
@@ -661,7 +672,7 @@ describe("POST /recipes/:id/cook/confirm", () => {
         const res = await postConfirm(body);
         expect(res.status).toBe(303);
         const toast = toastOf(res);
-        expect(toast?.key).toBe("recipes.cooked.changed.logged");
+        expect(toast?.key).toBe("recipes.cooked.changed");
         expect(toast?.params?.names).toBe("Flour");
         expect(await flourLeft()).toBe(150);
         // It still did what was asked, meal included.
@@ -686,8 +697,8 @@ describe("POST /recipes/:id/cook/confirm", () => {
         expect(await cookMovements()).toHaveLength(1);
         expect(await flourLeft()).toBe(400);
         expect(db.meals).toHaveLength(1);
-        const keys = [toastOf(a)?.key, toastOf(b)?.key].sort();
-        expect(keys).toContain("recipes.cooked.already");
+        // The one that lost the race is a repeat: no toast says so.
+        expect([toastOf(a), toastOf(b)].filter((t) => t !== null)).toEqual([]);
     });
 
     test("a meal that cannot be saved cooks nothing and re-opens the sheet", async () => {
@@ -722,7 +733,7 @@ describe("POST /recipes/:id/cook/confirm", () => {
         // The sheet's own retry is not mistaken for a repeat.
         const retry = await postConfirm(body);
         expect(retry.status).toBe(303);
-        expect(toastOf(retry)?.key).not.toBe("recipes.cooked.already");
+        expect(await cookMovements()).toHaveLength(1);
         expect(db.meals).toHaveLength(1);
     });
 
@@ -964,10 +975,7 @@ describe("steps-mention warnings on the recipe page", () => {
         const res = await postMention("add", id, "egg");
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe(`/recipes/${id}`);
-        expect(toastOf(res)).toMatchObject({
-            key: "recipes.mention.added",
-            params: { name: "egg" },
-        });
+        expect(toastOf(res)).toBeNull();
         const ingredients = await db.recipesStore.listIngredients(HH, id);
         const egg = ingredients.find((i) => i.displayName === "egg");
         expect(egg?.quantity).toEqual({ amount: 2, unit: "each" });
@@ -1249,7 +1257,7 @@ describe("POST /recipes/:id/plan", () => {
                 createdBy: ALICE,
             },
         ]);
-        expect(toastOf(res)?.key).toBe("plan.added");
+        expect(toastOf(res)).toBeNull();
     });
 
     test("servings default to what the recipe yields", async () => {
@@ -1315,7 +1323,7 @@ describe("POST /recipes/:id/plan", () => {
             expect(past.status).toBe(400);
             const ok = await add({ date: hhToday, slot: "dinner" });
             expect(ok.status).toBe(303);
-            expect(toastOf(ok)?.key).toBe("plan.added");
+            expect(toastOf(ok)).toBeNull();
             await db.plansStore.removePlan(HH, (await planned())[0]!.id);
         }
     });
@@ -1337,7 +1345,7 @@ describe("POST /recipes/:id/plan", () => {
         await add(body);
         const again = await add(body);
         expect(again.status).toBe(303);
-        expect(toastOf(again)?.key).toBe("plan.already");
+        expect(toastOf(again)).toBeNull();
         expect(await planned()).toHaveLength(1);
     });
 
@@ -1377,7 +1385,7 @@ describe("moving and removing a plan", () => {
         );
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/");
-        expect(toastOf(res)?.key).toBe("plan.moved");
+        expect(toastOf(res)).toBeNull();
         expect(await planned()).toMatchObject([
             { id, date: day, slot: "lunch", servings: 4 },
         ]);
@@ -1403,8 +1411,7 @@ describe("moving and removing a plan", () => {
             }),
         );
         expect(res.status).toBe(303);
-        expect(toastOf(res)?.key).toBe("plan.merged");
-        expect(JSON.stringify(toastOf(res))).toContain("lunch");
+        expect(toastOf(res)).toBeNull();
         // One plan remains: the one already there, with both servings.
         expect(await planned()).toMatchObject([
             { id: there!.id, date: day, slot: "lunch", servings: 5 },
@@ -1505,7 +1512,7 @@ describe("moving and removing a plan", () => {
         );
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/");
-        expect(toastOf(res)?.key).toBe("plan.gone");
+        expect(toastOf(res)).toBeNull();
     });
 
     test("a plan outside the week cannot reopen a sheet, so the reason comes as a toast", async () => {
@@ -1576,13 +1583,13 @@ describe("moving and removing a plan", () => {
                 new URLSearchParams({ date: todayUtc(), slot: "lunch" }),
             );
             expect(moved.status).toBe(303);
-            expect(toastOf(moved)?.key).toBe("plan.gone");
+            expect(toastOf(moved)).toBeNull();
             const removed = await postPlanPath(
                 `/recipes/plan/${bad}/remove`,
                 new URLSearchParams({}),
             );
             expect(removed.status).toBe(303);
-            expect(toastOf(removed)?.key).toBe("plan.gone");
+            expect(toastOf(removed)).toBeNull();
         }
         expect(await planned()).toHaveLength(1);
     });
@@ -1594,12 +1601,12 @@ describe("moving and removing a plan", () => {
             `/recipes/plan/${other}/move`,
             new URLSearchParams({ date: todayUtc(), slot: "lunch" }),
         );
-        expect(toastOf(moved)?.key).toBe("plan.gone");
+        expect(toastOf(moved)).toBeNull();
         const removed = await postPlanPath(
             `/recipes/plan/${other}/remove`,
             new URLSearchParams({}),
         );
-        expect(toastOf(removed)?.key).toBe("plan.gone");
+        expect(toastOf(removed)).toBeNull();
         expect(await planned()).toHaveLength(1);
     });
 
@@ -1611,7 +1618,7 @@ describe("moving and removing a plan", () => {
         );
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/recipes");
-        expect(toastOf(res)?.key).toBe("plan.removed");
+        expect(toastOf(res)).toBeNull();
         expect(await planned()).toEqual([]);
     });
 
@@ -1655,10 +1662,7 @@ describe("POST /recipes/plan/add-missing", () => {
         const res = await addMissing("today");
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/");
-        expect(toastOf(res)).toMatchObject({
-            key: "plan.missing.added",
-            params: { count: 1 },
-        });
+        expect(toastOf(res)).toBeNull();
         const added = await lines();
         expect(added).toHaveLength(1);
         expect(added[0]).toMatchObject({
@@ -1673,7 +1677,7 @@ describe("POST /recipes/plan/add-missing", () => {
         await planPancakes(20);
         await addMissing();
         const again = await addMissing();
-        expect(toastOf(again)?.key).toBe("plan.missing.on-list");
+        expect(toastOf(again)?.key).toBe("fridge.item.already-on-grocery");
         expect(await lines()).toHaveLength(1);
     });
 

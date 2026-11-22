@@ -5,7 +5,6 @@ import { dateInTz, validateTz } from "../../domain/tz.js";
 import { resolveWriteTimestamp } from "../../meal-write.js";
 import { formText } from "../form.js";
 import { requireMember, siteMember } from "../middleware.js";
-import { redirectWithToast } from "../components/toast.js";
 import { safeReturnPath } from "../usual-products-path.js";
 import { parseTodayDateParam } from "../pages/v2/today.js";
 import { mealInputForRelog } from "./log-relog.js";
@@ -69,7 +68,8 @@ todayAgainRoutes.post("/meals/:id/again", requireMember, async (c) => {
                 ? { idempotency_key: `again:${id}:${submitKey}` }
                 : {}),
         });
-        return redirectWithToast(c, returnTo, "nutrition.meal.logged");
+        // toast: none
+        return c.redirect(returnTo, 303);
     } catch {
         return c.text("Could not log this meal again.", 400);
     }

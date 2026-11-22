@@ -1,6 +1,6 @@
 // Importing a recipe another Foodable shared, through the household app, against
 // real Postgres: paste a share link (the fetcher is injected) or the document's
-// JSON, land on the new recipe with a toast, or stay on Recipes with the reason.
+// JSON, land on the new recipe, or stay on Recipes with the reason.
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import { SQL } from "bun";
 import { Hono } from "hono";
@@ -20,11 +20,6 @@ import {
 } from "../../flags.js";
 import { setSharedRecipeFetcherForTests } from "../../sharing-import.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
-import {
-    decodeToastFlash,
-    formatToastText,
-    readToastCookie,
-} from "../components/toast.js";
 import { recipesRoutes } from "./recipes.js";
 import { sharedRecipeImportRoutes } from "./recipes-shared-import.js";
 
@@ -201,17 +196,13 @@ describeDb(
             );
         }
 
-        function toastOf(res: Response): string {
-            const set = res.headers
+        function toastCookies(res: Response): string[] {
+            return res.headers
                 .getSetCookie()
-                .find((c) => c.startsWith("foodable_toast="));
-            expect(set).toBeDefined();
-            const flash = decodeToastFlash(readToastCookie(set!)!);
-            expect(flash).not.toBeNull();
-            return formatToastText(flash!.key, flash!.params);
+                .filter((c) => c.startsWith("foodable_toast="));
         }
 
-        test("pasting the document's JSON creates the recipe and lands on it with a toast", async () => {
+        test("pasting the document's JSON creates the recipe and lands on it with no toast", async () => {
             const fetcher = serving("never read");
             setSharedRecipeFetcherForTests(fetcher);
             const res = await post("/recipes/import-shared", {
@@ -230,9 +221,7 @@ describeDb(
                 verification: "verified",
             });
             expect(await foodNamesOf()).toEqual(["Egg", "Red lentils"]);
-            expect(toastOf(res)).toBe(
-                "Imported Lentil soup. 0 matched your foods, 2 added.",
-            );
+            expect(toastCookies(res)).toEqual([]);
             // A pasted document never touches the network.
             expect(fetcher.calls).toEqual([]);
         });
@@ -317,9 +306,7 @@ describeDb(
             const [after] =
                 await sql`select * from public.foods where id = ${mine.id}`;
             expect(after).toEqual(before);
-            expect(toastOf(res)).toBe(
-                "Imported Lentil soup. 1 matched your foods, 1 added.",
-            );
+            expect(toastCookies(res)).toEqual([]);
             // Sorted here: the list order follows the database collation.
             expect((await foodNamesOf()).sort()).toEqual([
                 "Red lentils",
@@ -410,7 +397,7 @@ describeDb(
                     fetcher: failing("not_found", 404),
                     shared: SHARE_PAGE,
                 }),
-                /revoked or expired/,
+                /doesn't work any more Revoked, expired, or not a recipe link/,
             ],
             [
                 "a recipe that is too large",
@@ -535,11 +522,17 @@ describeDb(
                     /<details class="fd-recipes-import-link"[^>]*\sopen/,
                 );
                 const error =
-                    /<p class="fd-recipes-import-error fd-recipes-import-shared-error" role="alert">([^<]*)<\/p>/.exec(
+                    /<div class="fd-card fd-recipes-import-error fd-recipes-import-shared-error" role="alert">(.*?)<\/div>/.exec(
                         html,
                     );
                 expect(error).not.toBeNull();
-                expect(error![1]!.replaceAll("&#39;", "'")).toMatch(message);
+                // The card's headline and reason, as one line of text.
+                const text = error![1]!
+                    .replaceAll(/<[^>]+>/g, " ")
+                    .replaceAll(/\s+/g, " ")
+                    .replaceAll("&#39;", "'")
+                    .trim();
+                expect(text).toMatch(message);
                 // What was pasted is still in the box (escaped).
                 if (shared.trim() && shared.length < 1000) {
                     expect(html).toContain(

@@ -27,7 +27,6 @@ import {
 } from "../../domain/usual-add.js";
 import { lookupBarcode, normalizeBarcode } from "../../foods.js";
 import { formText } from "../form.js";
-import { redirectWithToast } from "../components/toast.js";
 import {
     renderUsualProductsListPage,
     type UsualAddRequest,
@@ -246,7 +245,8 @@ usualAddRoutes.post("/kitchen/usuals/add/product", requireMember, async (c) => {
             400,
         );
     }
-    return redirectWithToast(c, returnTo, "usuals.added");
+    // toast: none
+    return c.redirect(returnTo, 303);
 });
 
 const TYPE_FIELDS = [
@@ -303,7 +303,8 @@ usualAddRoutes.post("/kitchen/usuals/add/manual", requireMember, async (c) => {
             400,
         );
     }
-    return redirectWithToast(c, returnTo, "usuals.added");
+    // toast: none
+    return c.redirect(returnTo, 303);
 });
 
 /** Takes one usual off the list: its products, its stamp and its schedule. */
@@ -329,6 +330,7 @@ usualAddRoutes.post(
             });
             return c.html(page.html, 400);
         }
-        return redirectWithToast(c, returnTo, "usuals.removed");
+        // toast: none
+        return c.redirect(returnTo, 303);
     },
 );

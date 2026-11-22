@@ -2,23 +2,11 @@ import { Hono } from "hono";
 import {
     deleteMeal,
     getMealById,
-    insertMeal,
     updateMeal,
     type Meal,
     type MealInput,
-    type MealItemWrite,
 } from "../../db/nutrition.js";
-import { liveFoodsStore } from "../../db/foods.js";
 import { getProfile } from "../../db/profiles.js";
-import { liveRecipesStore } from "../../db/recipes.js";
-import {
-    decodeUndoSnapshotPayload,
-    dropMissingItemRefs,
-    mealUndoSnapshot,
-    mintUndoFlash,
-    parseUndoSnapshot,
-    verifyUndoToken,
-} from "../../domain/meal-undo.js";
 import { MealItemsError } from "../../domain/meals.js";
 import {
     itemSpecsFromStoredItems,
@@ -32,17 +20,9 @@ import {
 import { itemListDigest } from "../../domain/meals.js";
 import { dateInTz, validateTz } from "../../domain/tz.js";
 import { resolveWriteTimestamp } from "../../meal-write.js";
-import { resolveSessionSigningSecret } from "../../site-session.js";
 import { formAmount, formText } from "../form.js";
 import { renderDashboardPage } from "../loaders.js";
 import { requireMember, siteMember } from "../middleware.js";
-import { redirectWithToast, type ToastAction } from "../components/toast.js";
-import {
-    readUndoCookies,
-    undoClearCookieHeaders,
-    undoCookiesFit,
-    undoSetCookieHeaders,
-} from "../meal-undo-flash.js";
 import { safeReturnPath } from "../usual-products-path.js";
 import { parseTodayDateParam } from "../pages/v2/today.js";
 
@@ -178,7 +158,8 @@ todayMealsRoutes.post("/meals/:id/edit", requireMember, async (c) => {
                 // rows would move the key of a meal logged with an
                 // omitted unit or portions (the rows hold the defaults),
                 // so a replay of that call would stop deduping.
-                return redirectWithToast(c, returnTo, "nutrition.meal.updated");
+                // toast: none
+                return c.redirect(returnTo, 303);
             } else {
                 patch.item_digest = itemListDigest(digestSpecs);
             }
@@ -198,7 +179,8 @@ todayMealsRoutes.post("/meals/:id/edit", requireMember, async (c) => {
             };
         }
         await updateMeal(userId, id, patch);
-        return redirectWithToast(c, returnTo, "nutrition.meal.updated");
+        // toast: none
+        return c.redirect(returnTo, 303);
     } catch (err) {
         const message =
             err instanceof MealItemsError
@@ -223,115 +205,10 @@ todayMealsRoutes.post("/meals/:id/delete", requireMember, async (c) => {
     const id = c.req.param("id");
     const mealOrRes = await requireOwnedMeal(userId, id);
     if (mealOrRes instanceof Response) return mealOrRes;
-    const meal = mealOrRes;
     const body = await c.req.parseBody();
     const returnTo = safeReturnPath(formText(body, "return_to"), "/");
-    const day = formText(body, "date") || dateInTz(meal.logged_at, "UTC");
-    const snapshot = mealUndoSnapshot(meal, member.householdId);
-    const secure =
-        c.req.header("x-forwarded-proto") === "https" ||
-        new URL(c.req.url).protocol === "https:";
-    const flash = mintUndoFlash(
-        userId,
-        snapshot,
-        resolveSessionSigningSecret(),
-        Date.now(),
-    );
-    if (!undoCookiesFit(flash, secure)) {
-        const page = await todayEditError(
-            userId,
-            id,
-            "This meal is too large to undo — delete it from chat or export your data first.",
-            new URL(returnTo, "http://local").searchParams.get("member") ??
-                undefined,
-            day,
-        );
-        return c.html(page.html, page.status);
-    }
     const deleted = await deleteMeal(userId, id);
     if (!deleted) return c.text("Not found", 404);
-    for (const header of undoSetCookieHeaders(flash, secure)) {
-        c.header("Set-Cookie", header, { append: true });
-    }
-    const undoAction: ToastAction = {
-        label: "Undo",
-        action: "/meals/undo",
-        fields: { return_to: returnTo, date: day },
-    };
-    return redirectWithToast(c, returnTo, "nutrition.meal.deleted", undefined, {
-        dismissMs: 6000,
-        action: undoAction,
-    });
+    // toast: none
+    return c.redirect(returnTo, 303);
 });
-
-todayMealsRoutes.post("/meals/undo", requireMember, async (c) => {
-    const member = siteMember(c);
-    const userId = member.userId;
-    const body = await c.req.parseBody();
-    const returnTo = safeReturnPath(formText(body, "return_to"), "/");
-    const { token, snapshotPayload } = readUndoCookies(c.req.header("cookie"));
-    const secure =
-        c.req.header("x-forwarded-proto") === "https" ||
-        new URL(c.req.url).protocol === "https:";
-    for (const header of undoClearCookieHeaders(secure)) {
-        c.header("Set-Cookie", header, { append: true });
-    }
-    if (
-        !token ||
-        !snapshotPayload ||
-        !verifyUndoToken(
-            token,
-            snapshotPayload,
-            userId,
-            Date.now(),
-            resolveSessionSigningSecret(),
-        )
-    ) {
-        return c.text("Undo expired or invalid.", 400);
-    }
-    const snapshotJson = decodeUndoSnapshotPayload(snapshotPayload);
-    if (!snapshotJson) return c.text("Undo expired or invalid.", 400);
-    const snapshot = parseUndoSnapshot(snapshotJson);
-    if (!snapshot) return c.text("Undo expired or invalid.", 400);
-    const { input } = snapshot;
-    const key = snapshot.idempotency_key ?? input.idempotency_key;
-    const items = input.items
-        ? await withLiveItemRefs(member.householdId, input.items)
-        : undefined;
-    const result = await insertMeal(userId, {
-        ...input,
-        ...(items ? { items } : {}),
-        idempotency_key: key ?? undefined,
-    });
-    const msg = result.deduplicated
-        ? "nutrition.meal.undo.noop"
-        : "nutrition.meal.undo.restored";
-    return redirectWithToast(c, returnTo, msg);
-});
-
-/** The snapshot's items, minus references to foods or recipes deleted since. */
-async function withLiveItemRefs(
-    householdId: string,
-    items: MealItemWrite[],
-): Promise<MealItemWrite[]> {
-    const foodIds = [
-        ...new Set(
-            items.flatMap((item) => (item.food_id ? [item.food_id] : [])),
-        ),
-    ];
-    const recipeIds = [
-        ...new Set(
-            items.flatMap((item) => (item.recipe_id ? [item.recipe_id] : [])),
-        ),
-    ];
-    const foods =
-        foodIds.length > 0
-            ? await liveFoodsStore().getFoodsByIds(householdId, foodIds)
-            : new Map();
-    const recipes = liveRecipesStore();
-    const liveRecipeIds = new Set<string>();
-    for (const id of recipeIds) {
-        if (await recipes.getRecipe(householdId, id)) liveRecipeIds.add(id);
-    }
-    return dropMissingItemRefs(items, new Set(foods.keys()), liveRecipeIds);
-}

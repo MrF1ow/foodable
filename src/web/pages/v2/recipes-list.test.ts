@@ -266,7 +266,7 @@ describe("recipes list v2 page", () => {
             );
             const panel = linkPanel(html);
             expect(panel).toMatch(
-                /<p class="fd-recipes-import-error fd-recipes-import-shared-error" role="alert">That isn't a Foodable share link\.<\/p>/,
+                /<div class="fd-card fd-recipes-import-error fd-recipes-import-shared-error" role="alert"><p class="fd-recipes-import-error__headline">That isn't a Foodable share link\.<\/p><\/div>/,
             );
             expect(panel).toContain(
                 "https://kitchen.example/s/&lt;script&gt;alert(1)&lt;/script&gt;&quot;",
@@ -311,6 +311,51 @@ describe("recipes list v2 page", () => {
         });
         expect(html).toContain("No ingredients yet");
         expect(html).not.toContain("You have everything");
+    });
+
+    test("an import error is a card with the headline and, when there is one, the reason", () => {
+        const base = {
+            chrome,
+            query: "",
+            filters: [],
+            cards: [],
+            totalCount: 0,
+        };
+        const withReason = renderRecipesListBody({
+            ...base,
+            importError: "This site asks apps not to read this page.",
+            importErrorReason: "Paste the recipe instead.",
+        });
+        expect(withReason).toContain(
+            '<div class="fd-card fd-recipes-import-error" role="alert"><p class="fd-recipes-import-error__headline">This site asks apps not to read this page.</p><p class="fd-recipes-import-error__reason">Paste the recipe instead.</p></div>',
+        );
+        const headlineOnly = renderRecipesListBody({
+            ...base,
+            importError: "That page doesn't exist anymore.",
+        });
+        expect(headlineOnly).toContain(
+            `<div class="fd-card fd-recipes-import-error" role="alert"><p class="fd-recipes-import-error__headline">That page doesn't exist anymore.</p></div>`,
+        );
+        expect(headlineOnly).not.toContain("fd-recipes-import-error__reason");
+    });
+
+    test("a shared-link refusal shows its reason under the headline", () => {
+        const html = renderRecipesListBody({
+            chrome,
+            query: "",
+            filters: [],
+            cards: [],
+            totalCount: 0,
+            sharedImportEnabled: true,
+            sharedImport: {
+                error: "That share link doesn't work any more",
+                reason: "Revoked, expired, or not a recipe link",
+                input: "https://kitchen.example/s/x",
+            },
+        });
+        expect(html).toContain(
+            `<p class="fd-recipes-import-error__headline">That share link doesn't work any more</p><p class="fd-recipes-import-error__reason">Revoked, expired, or not a recipe link</p>`,
+        );
     });
 
     test("duplicate import shows open link", () => {

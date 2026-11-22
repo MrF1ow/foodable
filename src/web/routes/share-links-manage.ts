@@ -25,7 +25,6 @@ import {
 import { shareLinkUrl } from "../../mcp/tools/sharing.js";
 import { getBaseUrl } from "../../url.js";
 import { viewerChromeWithAttention } from "../attention.js";
-import { redirectWithToast } from "../components/toast.js";
 import { formText } from "../form.js";
 import { gatedRoute } from "../gated.js";
 import {
@@ -207,10 +206,7 @@ shareLinkManageRoutes.post(
             });
             return c.html(page.html, 404);
         }
-        return redirectWithToast(
-            c,
-            "/settings/household",
-            "settings.household.shared-link.revoked",
-        );
+        // toast: none
+        return c.redirect("/settings/household", 303);
     },
 );

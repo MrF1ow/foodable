@@ -1746,6 +1746,7 @@ export async function renderRecipesListPage(
         filter?: string;
         importUrl?: string;
         importError?: string;
+        importErrorReason?: string;
         importDuplicateRecipeId?: string;
         importPasteStep?: boolean;
         importPasteText?: string;
@@ -1759,7 +1760,7 @@ export async function renderRecipesListPage(
         importShowRetry?: boolean;
         importRetryDisabled?: boolean;
         /** v2: a recipe pasted from another Foodable that could not be imported. */
-        sharedImport?: { error?: string; input?: string };
+        sharedImport?: { error?: string; reason?: string; input?: string };
         /** v2: picking a recipe for this day (`?plan_date=`). */
         planDate?: string;
         /** v2: a plan move that failed its checks: its edit sheet opens with this. */
@@ -1861,6 +1862,7 @@ export async function renderRecipesListPage(
                     ? opts.planDate
                     : undefined,
             importError: opts.importError,
+            importErrorReason: opts.importErrorReason,
             importPasteStep: opts.importPasteStep,
             importUrl: opts.importUrl,
             importPasteText: opts.importPasteText,

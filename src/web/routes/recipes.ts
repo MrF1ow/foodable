@@ -42,11 +42,10 @@ import { safeReturnPath } from "../usual-products-path.js";
 import { truncateToastParam } from "../truncate-toast-param.js";
 import {
     importOutcomeMessage,
+    importOutcomeParts,
     importOutcomeShowsPasteStep,
-    importOutcomeToastKey,
     importRecipeFromUrl,
     importRecipeFromSharedText,
-    importReviewCount,
 } from "../../domain/recipe-import.js";
 import {
     cleanRecipeLink,
@@ -74,8 +73,6 @@ import {
     parsePlanBack,
     PLAN_SHEET_ID,
     planBackPath,
-    planDayLabel,
-    PLAN_SLOT_LABEL,
     type PlanEditDraft,
 } from "../pages/v2/recipes-plan.js";
 import {
@@ -100,6 +97,17 @@ import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
 import { loadWeekPlanInputs } from "../loaders-plan.js";
 
 export const recipesRoutes = new Hono();
+
+/** The import sheet's error card: the outcome's headline and, if it has one, its reason. */
+function importErrorOf(outcome: Parameters<typeof importOutcomeParts>[0]): {
+    importError: string;
+    importErrorReason?: string;
+} {
+    const { headline, reason } = importOutcomeParts(outcome);
+    return reason
+        ? { importError: headline, importErrorReason: reason }
+        : { importError: headline };
+}
 
 function importOriginPrefill(origin: "shared" | "pasted") {
     return origin === "shared"
@@ -265,28 +273,11 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             outcome.status === "imported" ||
             outcome.status === "unverified_needs_review"
         ) {
-            const key =
-                outcome.status === "imported"
-                    ? ("recipes.import.imported" as const)
-                    : importOutcomeToastKey(outcome);
-            const params: Record<string, string> = {
-                name: truncateToastParam(outcome.recipeName ?? "Recipe"),
-                site: truncateToastParam(
-                    outcome.source?.label ?? "Recipe text",
-                ),
-            };
-            if (outcome.status === "unverified_needs_review") {
-                params.count = importReviewCount(outcome.problems);
-            }
-            return redirectWithToast(
-                c,
-                `/recipes/${outcome.recipeId!}`,
-                key,
-                params,
-            );
+            // toast: none — the recipe page shows what came in
+            return c.redirect(`/recipes/${outcome.recipeId!}`, 303);
         }
         const page = await renderRecipesListPage(userId, {
-            importError: importOutcomeMessage(outcome),
+            ...importErrorOf(outcome),
             importPasteStep: true,
             importPasteText: text,
             importTextOnly: true,
@@ -371,10 +362,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
                 importCredit: credit,
                 importWebsiteError: websiteError,
                 importWebsiteUrl: websiteUrl,
-                importError:
-                    text.trim() !== ""
-                        ? importOutcomeMessage(outcome)
-                        : undefined,
+                ...(text.trim() !== "" ? importErrorOf(outcome) : {}),
                 importShowRetry: outcome.fromMemory,
                 importSourceKind: "pinterest",
                 importSourceLabel: "Pinterest",
@@ -387,23 +375,8 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         outcome.status === "imported" ||
         outcome.status === "unverified_needs_review"
     ) {
-        const key =
-            outcome.status === "imported"
-                ? ("recipes.import.imported" as const)
-                : importOutcomeToastKey(outcome);
-        const params: Record<string, string> = {
-            name: truncateToastParam(outcome.recipeName ?? "Recipe"),
-            site: truncateToastParam(outcome.source?.label ?? "the web"),
-        };
-        if (outcome.status === "unverified_needs_review") {
-            params.count = importReviewCount(outcome.problems);
-        }
-        return redirectWithToast(
-            c,
-            `/recipes/${outcome.recipeId!}`,
-            key,
-            params,
-        );
+        // toast: none — the recipe page shows what came in
+        return c.redirect(`/recipes/${outcome.recipeId!}`, 303);
     }
     if (outcome.status === "duplicate") {
         const page = await renderRecipesListPage(userId, {
@@ -421,7 +394,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     ) {
         const page = await renderRecipesListPage(userId, {
             importUrl: textOnly ? pinOrPageUrl : cleanedPinUrl,
-            importError: importOutcomeMessage(outcome),
+            ...importErrorOf(outcome),
             importPasteStep: true,
             importPasteText: text,
             importCredit: credit,
@@ -437,7 +410,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     const pasteLinkUrl = outcome.source?.url ?? cleanedPinUrl;
     const page = await renderRecipesListPage(userId, {
         importUrl: pasteRender ? pasteLinkUrl : pinOrPageUrl,
-        importError: importOutcomeMessage(outcome),
+        ...importErrorOf(outcome),
         importPasteStep: pasteRender,
         importPasteText: pasteRender ? text : undefined,
         importCredit: pasteRender ? credit : undefined,
@@ -587,11 +560,8 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
                     : undefined,
             });
             if (inserted.deduplicated) {
-                return redirectWithToast(
-                    c,
-                    `/recipes/${recipeId}`,
-                    "recipes.cooked.already",
-                );
+                // toast: none
+                return c.redirect(`/recipes/${recipeId}`, 303);
             }
             insertedMealId = inserted.meal.id;
         }
@@ -612,24 +582,24 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
             ),
         );
         if (cooked.alreadyCooked) {
-            return redirectWithToast(
-                c,
-                `/recipes/${recipeId}`,
-                "recipes.cooked.already",
-            );
+            // toast: none
+            return c.redirect(`/recipes/${recipeId}`, 303);
         }
         const flash = cookSheetToastFlash({
-            loggedSlot: meal ? slot : null,
-            shortfallCount: cooked.shortfalls.length,
+            shortNames: cooked.shortfalls.map((row) => row.displayName),
             unmeasuredNames: cooked.unmeasured.map((row) => row.displayName),
             changedNames,
         });
-        return redirectWithToast(
-            c,
-            `/recipes/${recipeId}`,
-            flash.key,
-            flash.params,
-        );
+        if (flash) {
+            return redirectWithToast(
+                c,
+                `/recipes/${recipeId}`,
+                flash.key,
+                flash.params,
+            );
+        }
+        // toast: none — the recipe page and Today show what was cooked
+        return c.redirect(`/recipes/${recipeId}`, 303);
     } catch (err) {
         // A request for the same sheet that got in first has cooked by now
         // (this one was rolled back against it): that is a repeat, not an
@@ -643,11 +613,8 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
                 )
                 .catch(() => false))
         ) {
-            return redirectWithToast(
-                c,
-                `/recipes/${recipeId}`,
-                "recipes.cooked.already",
-            );
+            // toast: none
+            return c.redirect(`/recipes/${recipeId}`, 303);
         }
         if (insertedMealId) {
             try {
@@ -719,18 +686,14 @@ recipesRoutes.post("/recipes/:id/mentions/add", requireMember, async (c) => {
     if (!recipe) return c.text("Not found", 404);
     const body = await c.req.parseBody();
     try {
-        const added = await addMentionedIngredient(
+        await addMentionedIngredient(
             { recipes: liveRecipesStore(), foods: liveFoodsStore() },
             member.householdId,
             recipeId,
             formText(body, "key"),
         );
-        return redirectWithToast(
-            c,
-            `/recipes/${recipeId}`,
-            "recipes.mention.added",
-            { name: truncateToastParam(added.foodName) },
-        );
+        // toast: none
+        return c.redirect(`/recipes/${recipeId}`, 303);
     } catch (err) {
         if (!(err instanceof RecipeInputError)) throw err;
         return redirectWithToast(
@@ -777,11 +740,6 @@ recipesRoutes.post(
     },
 );
 
-/** "Sat 14 Nov · dinner", the toast's words for where a plan landed. */
-function planWhen(date: string, slot: keyof typeof PLAN_SLOT_LABEL): string {
-    return `${planDayLabel(date)} · ${PLAN_SLOT_LABEL[slot].toLowerCase()}`;
-}
-
 /**
  * Add to plan, from the recipe page's sheet. Planning the same recipe on the
  * same day and slot twice is one plan, so a double submit changes nothing more.
@@ -821,18 +779,8 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
             },
         );
         if (!outcome) return c.text("Not found", 404);
-        const checkedSlot = outcome.plan.slot;
-        if (outcome.alreadyPlanned) {
-            return redirectWithToast(
-                c,
-                `/recipes/${recipeId}`,
-                "plan.already",
-                { when: planWhen(date, checkedSlot) },
-            );
-        }
-        return redirectWithToast(c, `/recipes/${recipeId}`, "plan.added", {
-            when: planWhen(date, checkedSlot),
-        });
+        // toast: none — the week shows the plan (a repeat is the same 303)
+        return c.redirect(`/recipes/${recipeId}`, 303);
     } catch (err) {
         if (!(err instanceof PlanInputError)) throw err;
         const page = await recipeFormError(userId, recipeId, err, {
@@ -861,11 +809,15 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
     const back = planBackPath(backKind);
     const planId = c.req.param("planId");
     if (!UUID_SHAPE.test(planId)) {
-        return redirectWithToast(c, back, "plan.gone");
+        // toast: none
+        return c.redirect(back, 303);
     }
     const plans = liveRecipePlansStore();
     const existing = await plans.getPlan(member.householdId, planId);
-    if (!existing) return redirectWithToast(c, back, "plan.gone");
+    if (!existing) {
+        // toast: none (the plan is already gone)
+        return c.redirect(back, 303);
+    }
     const dateInput = formText(body, "date").trim();
     const slotInput = formText(body, "slot");
     const servingsInput = formOptionalNumber(body, "servings");
@@ -880,7 +832,7 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
         );
         // The same recipe already on that day and slot absorbs this plan
         // (its servings are added), so the week never shows it twice.
-        const moved = await movePlannedRecipe(
+        await movePlannedRecipe(
             plans,
             member.householdId,
             existing,
@@ -890,14 +842,8 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
                 notify: liveNotifier(member.householdId, member.userId),
             },
         );
-        if (!moved) return redirectWithToast(c, back, "plan.gone");
-        // The row that comes back is not this plan's when it merged.
-        return redirectWithToast(
-            c,
-            back,
-            moved.id === existing.id ? "plan.moved" : "plan.merged",
-            { when: planWhen(moved.date, moved.slot) },
-        );
+        // toast: none — the week shows where the plan landed (or that it is gone)
+        return c.redirect(back, 303);
     } catch (err) {
         if (!(err instanceof PlanInputError)) throw err;
         const draft: PlanEditDraft = {
@@ -938,18 +884,14 @@ recipesRoutes.post("/recipes/plan/:planId/remove", requireMember, async (c) => {
     const body = await c.req.parseBody();
     const back = planBackPath(parsePlanBack(formText(body, "back")));
     const planId = c.req.param("planId");
-    const removed =
-        UUID_SHAPE.test(planId) &&
-        (await unplanRecipe(
-            liveRecipePlansStore(),
-            member.householdId,
-            planId,
-            {
-                recipes: liveRecipesStore(),
-                notify: liveNotifier(member.householdId, member.userId),
-            },
-        ));
-    return redirectWithToast(c, back, removed ? "plan.removed" : "plan.gone");
+    if (UUID_SHAPE.test(planId)) {
+        await unplanRecipe(liveRecipePlansStore(), member.householdId, planId, {
+            recipes: liveRecipesStore(),
+            notify: liveNotifier(member.householdId, member.userId),
+        });
+    }
+    // toast: none — the week shows it gone (a plan already gone is the same)
+    return c.redirect(back, 303);
 });
 
 /**
@@ -987,7 +929,7 @@ recipesRoutes.post("/recipes/plan/add-missing", requireMember, async (c) => {
             },
         );
         if (result.added.length === 0) {
-            return redirectWithToast(c, back, "plan.missing.on-list");
+            return redirectWithToast(c, back, "fridge.item.already-on-grocery");
         }
         if (result.unknown.length > 0) {
             return redirectWithToast(c, back, "plan.missing.added.unknown", {
@@ -999,9 +941,8 @@ recipesRoutes.post("/recipes/plan/add-missing", requireMember, async (c) => {
                 ),
             });
         }
-        return redirectWithToast(c, back, "plan.missing.added", {
-            count: result.added.length,
-        });
+        // toast: none
+        return c.redirect(back, 303);
     } catch (err) {
         if (!(err instanceof GroceryInputError)) throw err;
         return redirectWithToast(c, back, "plan.notice", {
@@ -1039,5 +980,6 @@ recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {
         });
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, returnTo, "recipes.deleted");
+    // toast: none
+    return c.redirect(returnTo, 303);
 });
