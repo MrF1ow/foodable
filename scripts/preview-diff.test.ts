@@ -1,14 +1,39 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+    mkdirSync,
+    mkdtempSync,
+    readdirSync,
+    readFileSync,
+    rmSync,
+    writeFileSync,
+} from "node:fs";
 import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+    baseStampProblem,
+    CACHE_FORMAT,
+    cacheDisabledReason,
+    cacheKey,
+    cacheRoot,
     classifyShots,
+    clearWorkSides,
     differs,
+    formatStamp,
+    headCacheable,
+    headStillCacheable,
     parseArgs,
+    placeCached,
     pngSize,
+    readStamp,
+    renderEnvFingerprint,
+    resolveCommit,
+    resolveSources,
+    STAMP_FILE,
+    storeSet,
     USAGE,
+    workingTreePorcelain,
+    writeStamp,
 } from "./preview-diff";
 
 const SHOTS = ["today.png", "kitchen.png", "dev-gallery.png"];
@@ -299,6 +324,7 @@ describe("parseArgs", () => {
                 reuseBase: false,
                 reuseHead: false,
                 keep: false,
+                noCache: false,
             },
         });
     });
@@ -313,6 +339,7 @@ describe("parseArgs", () => {
                 "--reuse-base",
                 "--reuse-head",
                 "--keep",
+                "--no-cache",
             ]),
         ).toEqual({
             kind: "run",
@@ -322,6 +349,7 @@ describe("parseArgs", () => {
                 reuseBase: true,
                 reuseHead: true,
                 keep: true,
+                noCache: true,
             },
         });
     });
@@ -336,9 +364,12 @@ describe("parseArgs", () => {
         [["--bogus"], "--bogus"],
         [["--base"], "--base"],
         [["--work"], "--work"],
+        [["--work", "-h"], "--work needs a value"],
+        [["--base", "-h"], "--base needs a value"],
+        [["--base", "-x"], "--base needs a value"],
         [["--base", "--keep"], "--base"],
         [["stray"], "stray"],
-        [["--keep", "--no-cache"], "--no-cache"],
+        [["--keep", "--no-caches"], "--no-caches"],
     ])("%p is refused, naming %p", (argv, bad) => {
         const r = parseArgs(argv);
         expect(r.kind).toBe("error");
@@ -370,5 +401,622 @@ describe("the command line", () => {
         expect(r.stdout).toBe("");
         expect(r.stderr).toContain("--bogus");
         expect(r.stderr).toContain(USAGE);
+    });
+});
+
+describe("cacheKey", () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+
+    test("joins the commit and the browser, safe as a directory name", () => {
+        expect(cacheKey(sha, "Chromium 155.0.8059.84 Arch Linux")).toBe(
+            `${sha}-${CACHE_FORMAT}-Chromium_155.0.8059.84_Arch_Linux`,
+        );
+    });
+
+    test("the cache format is part of the key, so bumping it misses every stored set", () => {
+        expect(CACHE_FORMAT).toMatch(/^v[0-9]+$/);
+        expect(cacheKey(sha, "Chromium 155")).toContain(`-${CACHE_FORMAT}-`);
+    });
+
+    test("another browser version is another key", () => {
+        expect(cacheKey(sha, "Chromium 155.0.1")).not.toBe(
+            cacheKey(sha, "Chromium 156.0.1"),
+        );
+    });
+
+    test("another commit is another key", () => {
+        const other = "f".repeat(40);
+        expect(cacheKey(sha, "Chromium 155")).not.toBe(
+            cacheKey(other, "Chromium 155"),
+        );
+    });
+
+    test("never holds a path separator or a dot-dot", () => {
+        const key = cacheKey(sha, "../../etc/x y\n");
+        expect(key).not.toContain("/");
+        expect(key).not.toContain("\\");
+        expect(key).not.toContain("..");
+    });
+
+    test.each(["origin/main", "abc123", "", `${sha}0`, sha.toUpperCase()])(
+        "a ref that is not a full commit sha (%p) is refused",
+        (bad) => {
+            expect(() => cacheKey(bad, "Chromium 155")).toThrow();
+        },
+    );
+
+    test("an empty browser version is refused", () => {
+        expect(() => cacheKey(sha, "  ")).toThrow();
+    });
+});
+
+describe("headCacheable", () => {
+    test("a clean tree is cacheable", () => {
+        expect(headCacheable("")).toBe(true);
+        expect(headCacheable("\n")).toBe(true);
+    });
+
+    test.each([
+        " M scripts/app-preview.ts\n",
+        "?? scripts/new.ts\n",
+        "A  src/a.ts\n M src/b.ts\n",
+    ])("a dirty tree (%p) is not", (porcelain) => {
+        expect(headCacheable(porcelain)).toBe(false);
+    });
+});
+
+describe("cacheDisabledReason", () => {
+    test("a plain environment may use the cache", () => {
+        expect(cacheDisabledReason({})).toBeNull();
+        expect(cacheDisabledReason({ FOODABLE_FLAGS: "a:all" })).toBeNull();
+        expect(cacheDisabledReason({ RAILWAY_TOKEN: "" })).toBeNull();
+    });
+
+    test.each(["RAILWAY_TOKEN", "RAILWAY_API_TOKEN"])(
+        "%s set means the render reads live flags, so no cache",
+        (name) => {
+            const reason = cacheDisabledReason({ [name]: "s3cret" });
+            expect(reason).toContain(name);
+            expect(reason).not.toContain("s3cret");
+        },
+    );
+});
+
+describe("cacheRoot", () => {
+    test("defaults to the user's cache folder", () => {
+        expect(cacheRoot({}, "/home/me")).toBe(
+            "/home/me/.cache/foodable/preview-diff",
+        );
+    });
+
+    test("FOODABLE_PREVIEW_CACHE overrides it", () => {
+        expect(
+            cacheRoot({ FOODABLE_PREVIEW_CACHE: "/tmp/c" }, "/home/me"),
+        ).toBe("/tmp/c");
+    });
+
+    test("an empty override is ignored", () => {
+        expect(cacheRoot({ FOODABLE_PREVIEW_CACHE: "" }, "/home/me")).toBe(
+            "/home/me/.cache/foodable/preview-diff",
+        );
+    });
+});
+
+describe("renderEnvFingerprint", () => {
+    test("no render-relevant variable is no fingerprint", () => {
+        expect(renderEnvFingerprint({})).toBe("");
+        expect(renderEnvFingerprint({ PATH: "/bin", HOME: "/home/me" })).toBe(
+            "",
+        );
+        expect(renderEnvFingerprint({ FOODABLE_FLAGS: "" })).toBe("");
+    });
+
+    test.each([
+        "FOODABLE_FLAGS",
+        "NODE_ENV",
+        "RAILWAY_ENVIRONMENT_NAME",
+        "RAILWAY_TOKEN",
+        "PUBLIC_ORIGIN",
+    ])("%s moves the fingerprint", (name) => {
+        const plain = renderEnvFingerprint({});
+        const set = renderEnvFingerprint({ [name]: "x" });
+        expect(set).not.toBe(plain);
+        expect(set).toMatch(/^[0-9a-f]{12}$/);
+        expect(renderEnvFingerprint({ [name]: "y" })).not.toBe(set);
+    });
+
+    test("flags on and flags off do not share a fingerprint", () => {
+        expect(
+            renderEnvFingerprint({ FOODABLE_FLAGS: "mcp-share-links:all" }),
+        ).not.toBe(renderEnvFingerprint({}));
+    });
+
+    test("the same values give the same fingerprint, in any order", () => {
+        expect(
+            renderEnvFingerprint({ NODE_ENV: "production", PATH: "/a" }),
+        ).toBe(renderEnvFingerprint({ PATH: "/b", NODE_ENV: "production" }));
+    });
+
+    test("a secret never appears in the fingerprint", () => {
+        expect(
+            renderEnvFingerprint({ RAILWAY_TOKEN: "s3cret-token" }),
+        ).not.toContain("s3cret");
+    });
+});
+
+describe("cacheKey with the render environment", () => {
+    const sha = "0123456789abcdef0123456789abcdef01234567";
+
+    test("a flags-on render has its own key", () => {
+        const on = renderEnvFingerprint({ FOODABLE_FLAGS: "a:all" });
+        expect(cacheKey(sha, "Chromium 155", on)).not.toBe(
+            cacheKey(sha, "Chromium 155", renderEnvFingerprint({})),
+        );
+    });
+
+    test("no fingerprint keeps the plain key", () => {
+        expect(cacheKey(sha, "Chromium 155", "")).toBe(
+            `${sha}-${CACHE_FORMAT}-Chromium_155`,
+        );
+    });
+});
+
+describe("resolveSources", () => {
+    const work = { base1: "/w/base-1", base2: "/w/base-2", head: "/w/head" };
+    const cache = {
+        base1: "/c/k/base-1",
+        base2: "/c/k/base-2",
+        head: "/c/k/head",
+    };
+    const none = { base1: false, base2: false, head: false };
+    const all = { base1: true, base2: true, head: true };
+    const opts = {
+        reuseBase: false,
+        reuseHead: false,
+        noCache: false,
+    };
+
+    test("a clean head and a base with nothing stored render and store", () => {
+        const r = resolveSources({
+            options: opts,
+            headClean: true,
+            work,
+            cache,
+            hit: none,
+        });
+        expect(r.base1).toEqual({
+            mode: "renderStored",
+            dir: work.base1,
+            cacheDir: cache.base1,
+        });
+        expect(r.base2.mode).toBe("renderStored");
+        expect(r.head).toEqual({
+            mode: "renderStored",
+            dir: work.head,
+            cacheDir: cache.head,
+        });
+    });
+
+    test("every side stored is cached, and renders nothing", () => {
+        const r = resolveSources({
+            options: opts,
+            headClean: true,
+            work,
+            cache,
+            hit: all,
+        });
+        expect([r.base1.mode, r.base2.mode, r.head.mode]).toEqual([
+            "cached",
+            "cached",
+            "cached",
+        ]);
+        expect(r.base1.cacheDir).toBe(cache.base1);
+        expect(r.base1.dir).toBe(work.base1);
+    });
+
+    test("a dirty head never reads or writes the cache", () => {
+        const r = resolveSources({
+            options: opts,
+            headClean: false,
+            work,
+            cache,
+            hit: all,
+        });
+        expect(r.head).toEqual({
+            mode: "render",
+            dir: work.head,
+            cacheDir: null,
+        });
+        expect(r.base1.mode).toBe("cached");
+    });
+
+    test("--no-cache never reads or writes it, on any side", () => {
+        const r = resolveSources({
+            options: { ...opts, noCache: true },
+            headClean: true,
+            work,
+            cache,
+            hit: all,
+        });
+        for (const side of [r.base1, r.base2, r.head]) {
+            expect(side.mode).toBe("render");
+            expect(side.cacheDir).toBeNull();
+        }
+    });
+
+    test("a partially cached base renders only the missing side", () => {
+        const r = resolveSources({
+            options: opts,
+            headClean: true,
+            work,
+            cache,
+            hit: { base1: true, base2: false, head: true },
+        });
+        expect(r.base1.mode).toBe("cached");
+        expect(r.base2.mode).toBe("renderStored");
+        expect(r.head.mode).toBe("cached");
+    });
+
+    test("--reuse-base and --reuse-head read --work, never the cache", () => {
+        const r = resolveSources({
+            options: { ...opts, reuseBase: true, reuseHead: true },
+            headClean: true,
+            work,
+            cache,
+            hit: all,
+        });
+        for (const [side, dir] of [
+            [r.base1, work.base1],
+            [r.base2, work.base2],
+            [r.head, work.head],
+        ] as const) {
+            expect(side).toEqual({ mode: "reuse", dir, cacheDir: null });
+        }
+    });
+
+    test("a side with no stored folder renders into --work only", () => {
+        const r = resolveSources({
+            options: { ...opts, reuseBase: true },
+            headClean: true,
+            work,
+            cache: { base1: null, base2: null, head: cache.head },
+            hit: all,
+        });
+        expect(r.base1).toEqual({
+            mode: "reuse",
+            dir: work.base1,
+            cacheDir: null,
+        });
+        const dirty = resolveSources({
+            options: opts,
+            headClean: true,
+            work,
+            cache: { base1: cache.base1, base2: null, head: null },
+            hit: all,
+        });
+        expect(dirty.base1.mode).toBe("cached");
+        expect(dirty.base2).toEqual({
+            mode: "render",
+            dir: work.base2,
+            cacheDir: null,
+        });
+        expect(dirty.head).toEqual({
+            mode: "render",
+            dir: work.head,
+            cacheDir: null,
+        });
+    });
+
+    test("--reuse-base alone leaves the head to the cache rules", () => {
+        const r = resolveSources({
+            options: { ...opts, reuseBase: true },
+            headClean: false,
+            work,
+            cache,
+            hit: all,
+        });
+        expect(r.base1.mode).toBe("reuse");
+        expect(r.head.mode).toBe("render");
+    });
+});
+
+describe("a run leaves its sets in --work", () => {
+    const made: string[] = [];
+    afterAll(() => {
+        for (const d of made) rmSync(d, { recursive: true, force: true });
+    });
+    const scratch = () => {
+        const d = mkdtempSync(join(tmpdir(), "pd-sets-"));
+        made.push(d);
+        return d;
+    };
+    const png = (dir: string, name: string, body: string) => {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, name), body);
+    };
+
+    test("a cached set is copied into --work, so --reuse-* reads exactly it", () => {
+        const root = scratch();
+        const cached = join(root, "cache/base-1");
+        const workDir = join(root, "work/base-1");
+        png(cached, "today.png", "cached-bytes");
+        // A set an older run (maybe another commit) left behind.
+        png(workDir, "today.png", "stale-bytes");
+        png(workDir, "gone.png", "stale-only");
+        placeCached(cached, workDir);
+        expect(readdirSync(workDir).sort()).toEqual(["today.png"]);
+        expect(readFileSync(join(workDir, "today.png"), "utf8")).toBe(
+            "cached-bytes",
+        );
+    });
+
+    test("a rendered set is stored as a copy, and --work keeps its own", () => {
+        const root = scratch();
+        const workDir = join(root, "work/head");
+        const final = join(root, "cache/head");
+        png(workDir, "a.png", "A");
+        expect(storeSet(workDir, final)).toBe("stored");
+        expect(readFileSync(join(final, "a.png"), "utf8")).toBe("A");
+        expect(readdirSync(workDir)).toEqual(["a.png"]);
+    });
+
+    test("the first writer wins: a set already stored is never replaced", () => {
+        const root = scratch();
+        const final = join(root, "cache/base-1");
+        png(final, "a.png", "FIRST");
+        const workDir = join(root, "work/base-1");
+        png(workDir, "a.png", "SECOND");
+        expect(storeSet(workDir, final)).toBe("kept");
+        expect(readFileSync(join(final, "a.png"), "utf8")).toBe("FIRST");
+    });
+
+    test("losing the rename race keeps the winner and leaves no temp folder", () => {
+        const root = scratch();
+        const final = join(root, "cache/base-1");
+        const workDir = join(root, "work/base-1");
+        png(workDir, "a.png", "SECOND");
+        // The other run lands between our check and our rename.
+        const result = storeSet(workDir, final, () =>
+            png(final, "a.png", "FIRST"),
+        );
+        expect(result).toBe("kept");
+        expect(readFileSync(join(final, "a.png"), "utf8")).toBe("FIRST");
+        expect(readdirSync(join(root, "cache"))).toEqual(["base-1"]);
+    });
+
+    test("base-1 and base-2 are stored independently", () => {
+        const root = scratch();
+        const b1 = join(root, "cache/k/base-1");
+        const b2 = join(root, "cache/k/base-2");
+        png(b1, "a.png", "ONE");
+        const w2 = join(root, "work/base-2");
+        png(w2, "a.png", "TWO");
+        expect(storeSet(w2, b2)).toBe("stored");
+        expect(readFileSync(join(b1, "a.png"), "utf8")).toBe("ONE");
+        expect(readFileSync(join(b2, "a.png"), "utf8")).toBe("TWO");
+    });
+});
+
+describe("stamps and a stale --work", () => {
+    const made: string[] = [];
+    afterAll(() => {
+        for (const d of made) rmSync(d, { recursive: true, force: true });
+    });
+    const scratch = () => {
+        const d = mkdtempSync(join(tmpdir(), "pd-stamp-"));
+        made.push(d);
+        return d;
+    };
+    const sha = "a".repeat(40);
+
+    test("a stamp names the commit, and marks a dirty tree", () => {
+        expect(formatStamp({ sha })).toBe(sha);
+        expect(formatStamp({ sha, dirty: true })).toContain(sha);
+        expect(formatStamp({ sha, dirty: true })).not.toBe(sha);
+    });
+
+    test("a stamp written into a side reads back; a side without one is null", () => {
+        const dir = join(scratch(), "base-1");
+        mkdirSync(dir);
+        expect(readStamp(dir)).toBeNull();
+        writeStamp(dir, sha);
+        expect(readStamp(dir)).toBe(sha);
+        expect(readdirSync(dir)).toEqual([STAMP_FILE]);
+    });
+
+    test("equal stamps (or two older runs with none) may be reused together", () => {
+        expect(baseStampProblem(sha, sha)).toBeNull();
+        expect(baseStampProblem(null, null)).toBeNull();
+    });
+
+    test("base-1 and base-2 from different commits are refused", () => {
+        const other = "b".repeat(40);
+        expect(baseStampProblem(sha, other)).toContain("same commit");
+        expect(baseStampProblem(sha, null)).toContain("no stamp");
+        expect(baseStampProblem(null, other)).toContain("no stamp");
+    });
+
+    test("a run clears every side it will not reuse, and only those", () => {
+        const root = scratch();
+        const work = {
+            base1: join(root, "base-1"),
+            base2: join(root, "base-2"),
+            head: join(root, "head"),
+        };
+        const fill = () => {
+            for (const d of Object.values(work)) {
+                mkdirSync(d, { recursive: true });
+                writeFileSync(join(d, "a.png"), "old");
+            }
+        };
+        fill();
+        clearWorkSides(work, { reuseBase: false, reuseHead: false });
+        expect(readdirSync(root)).toEqual([]);
+
+        fill();
+        clearWorkSides(work, { reuseBase: true, reuseHead: false });
+        expect(readdirSync(root).sort()).toEqual(["base-1", "base-2"]);
+
+        fill();
+        clearWorkSides(work, { reuseBase: false, reuseHead: true });
+        expect(readdirSync(root)).toEqual(["head"]);
+
+        fill();
+        clearWorkSides(work, { reuseBase: true, reuseHead: true });
+        expect(readdirSync(root).sort()).toEqual(["base-1", "base-2", "head"]);
+    });
+
+    test("clearing a --work that does not exist yet is fine", () => {
+        const root = scratch();
+        expect(() =>
+            clearWorkSides(
+                {
+                    base1: join(root, "x/base-1"),
+                    base2: join(root, "x/base-2"),
+                    head: join(root, "x/head"),
+                },
+                { reuseBase: false, reuseHead: false },
+            ),
+        ).not.toThrow();
+    });
+});
+
+describe("git helpers", () => {
+    const made: string[] = [];
+    afterAll(() => {
+        for (const d of made) rmSync(d, { recursive: true, force: true });
+    });
+    const git = (cwd: string, ...args: string[]) => {
+        const r = spawnSync(
+            "git",
+            [
+                "-c",
+                "user.email=t@t",
+                "-c",
+                "user.name=t",
+                "-c",
+                "commit.gpgsign=false",
+                "-c",
+                "tag.gpgsign=false",
+                ...args,
+            ],
+            { cwd, encoding: "utf8" },
+        );
+        if (r.status !== 0) throw new Error(r.stderr);
+        return r.stdout.trim();
+    };
+    const repo = () => {
+        const d = mkdtempSync(join(tmpdir(), "pd-git-"));
+        made.push(d);
+        git(d, "init", "-q");
+        writeFileSync(join(d, "a.txt"), "a");
+        git(d, "add", "-A");
+        git(d, "commit", "-qm", "one");
+        return d;
+    };
+
+    test("resolveCommit gives the full commit sha of a ref", async () => {
+        const d = repo();
+        const head = git(d, "rev-parse", "HEAD");
+        expect(await resolveCommit(d, "HEAD")).toBe(head);
+        expect(await resolveCommit(d, "HEAD")).toMatch(/^[0-9a-f]{40}$/);
+    });
+
+    test("resolveCommit peels an annotated tag to its commit, not the tag object", async () => {
+        const d = repo();
+        git(d, "tag", "-a", "v1", "-m", "release");
+        const tagObject = git(d, "rev-parse", "v1");
+        const commit = git(d, "rev-parse", "HEAD");
+        expect(tagObject).not.toBe(commit);
+        expect(await resolveCommit(d, "v1")).toBe(commit);
+    });
+
+    test("resolveCommit refuses a ref that is not a commit", async () => {
+        const d = repo();
+        await expect(resolveCommit(d, "no-such-ref")).rejects.toThrow();
+    });
+
+    test("a clean tree has an empty porcelain, so its head is cacheable", async () => {
+        const d = repo();
+        expect(headCacheable(await workingTreePorcelain(d))).toBe(true);
+    });
+
+    test("headStillCacheable holds while HEAD and the tree are as they were", async () => {
+        const d = repo();
+        const sha = git(d, "rev-parse", "HEAD");
+        expect(await headStillCacheable(d, sha)).toEqual({ ok: true });
+    });
+
+    test("an edit during the render means the head is not stored", async () => {
+        const d = repo();
+        const sha = git(d, "rev-parse", "HEAD");
+        writeFileSync(join(d, "a.txt"), "edited");
+        const r = await headStillCacheable(d, sha);
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.reason).toContain("working tree changed");
+    });
+
+    test("shots copied into an unignored --work inside the repo are named, not blamed on the user", async () => {
+        const d = repo();
+        const sha = git(d, "rev-parse", "HEAD");
+        mkdirSync(join(d, "shots/head"), { recursive: true });
+        writeFileSync(join(d, "shots/head/a.png"), "p");
+        const r = await headStillCacheable(d, sha, join(d, "shots"));
+        expect(r.ok).toBe(false);
+        if (!r.ok) {
+            expect(r.reason).toContain("--work");
+            expect(r.reason).toContain("inside the repo and not ignored");
+            expect(r.reason).not.toContain("working tree changed");
+        }
+    });
+
+    test("an edit outside --work is still reported as a changed tree", async () => {
+        const d = repo();
+        const sha = git(d, "rev-parse", "HEAD");
+        mkdirSync(join(d, "shots"), { recursive: true });
+        writeFileSync(join(d, "shots/a.png"), "p");
+        writeFileSync(join(d, "a.txt"), "edited");
+        const r = await headStillCacheable(d, sha, join(d, "shots"));
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.reason).toContain("working tree changed");
+    });
+
+    test("a new file during the render means the head is not stored", async () => {
+        const d = repo();
+        const sha = git(d, "rev-parse", "HEAD");
+        writeFileSync(join(d, "new.txt"), "n");
+        expect((await headStillCacheable(d, sha)).ok).toBe(false);
+    });
+
+    test("a commit during the render means the head is not stored under the old key", async () => {
+        const d = repo();
+        const sha = git(d, "rev-parse", "HEAD");
+        writeFileSync(join(d, "a.txt"), "two");
+        git(d, "commit", "-qam", "two");
+        // The tree is clean again, but it is another commit.
+        const r = await headStillCacheable(d, sha);
+        expect(r.ok).toBe(false);
+        if (!r.ok) expect(r.reason).toContain("HEAD moved");
+    });
+
+    test("a branch switch during the render means the head is not stored", async () => {
+        const d = repo();
+        const sha = git(d, "rev-parse", "HEAD");
+        git(d, "switch", "-qc", "other");
+        writeFileSync(join(d, "b.txt"), "b");
+        git(d, "add", "-A");
+        git(d, "commit", "-qm", "other");
+        expect((await headStillCacheable(d, sha)).ok).toBe(false);
+    });
+
+    test("an untracked file in a new folder makes the tree dirty even when status hides untracked files", async () => {
+        const d = repo();
+        git(d, "config", "status.showUntrackedFiles", "no");
+        mkdirSync(join(d, "newdir"));
+        writeFileSync(join(d, "newdir/b.txt"), "b");
+        expect(git(d, "status", "--porcelain")).toBe("");
+        const porcelain = await workingTreePorcelain(d);
+        expect(porcelain).toContain("newdir/");
+        expect(headCacheable(porcelain)).toBe(false);
     });
 });
