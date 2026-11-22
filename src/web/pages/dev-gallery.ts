@@ -1,7 +1,17 @@
 import type { AppChromeBase } from "../attention.js";
 import { pageHeader } from "../components/ui.js";
 import { renderAppShell } from "../shell.js";
+import { bell } from "../components/v2/bell.js";
 import { button, filterButton } from "../components/v2/button.js";
+import { chip, chipGroup } from "../components/v2/chip.js";
+import { detailBar } from "../components/v2/detail-bar.js";
+import { field } from "../components/v2/field.js";
+import { navBar, type NavBarActive } from "../components/v2/nav-bar.js";
+import { pageHeader as pageHeaderV2 } from "../components/v2/page-header.js";
+import { searchField } from "../components/v2/search-field.js";
+import { segment, segmented } from "../components/v2/segmented.js";
+import { tab, tabs } from "../components/v2/tabs.js";
+import { toggle } from "../components/v2/toggle.js";
 import { choiceGroup, chipLink, chipNav } from "../components/v2/chips.js";
 import { DOT_COLORS, dot } from "../components/v2/dot.js";
 import { ICON_NAMES, icon } from "../components/v2/icon.js";
@@ -1502,6 +1512,333 @@ function menuSection(): string {
     );
 }
 
+/** A caption, then the component on a panel-width stage. */
+function stage(note: string, html: string | Html, narrow = true): string {
+    return `${caption(note)}<div class="fd-gallery-row" style="display:block;${narrow ? "max-width:390px;" : ""}margin-top:var(--space-sm)">${html}</div>`;
+}
+
+function headerBarsSection(): string {
+    const avatar = { initials: "EF", label: "Ethan F" };
+    return block(
+        "Page header · Detail bar · Bell",
+        "Page header 171972 (title 28/34), Detail bar 171983, Bell 69107. The bell shows a green dot when something is new, never a number.",
+        [
+            stage(
+                "Page header: title, subtitle, bell with a dot, avatar",
+                pageHeaderV2({
+                    title: "Kitchen",
+                    subtitle: "24 items",
+                    bell: { unread: true },
+                    avatar,
+                }),
+            ),
+            stage(
+                "Page header: title only; bell without a dot",
+                pageHeaderV2({ title: "Recipes", bell: {}, avatar }),
+            ),
+            stage(
+                "Page header: Actions slot",
+                pageHeaderV2({
+                    title: "Groceries",
+                    subtitle: "8 lines",
+                    actions: button({
+                        label: "Add",
+                        icon: "plus",
+                        round: true,
+                        size: "md",
+                    }),
+                    bell: {},
+                    avatar,
+                }),
+            ),
+            stage(
+                "Detail bar: back, centred title, trailing more",
+                detailBar({
+                    title: "Settings",
+                    back: { href: "#" },
+                    trailing: { label: "More" },
+                }),
+            ),
+            stage(
+                "Detail bar: balance keeps the title centred",
+                detailBar({
+                    title: "Add a usual",
+                    back: { label: "Close" },
+                    balance: true,
+                }),
+            ),
+            caption("Bell: no dot, a dot (a link and a button)"),
+            `<div class="fd-gallery-row" style="margin-top:var(--space-sm)">${bell({})}${bell({ unread: true })}${bell({ unread: true, href: "#" })}</div>`,
+        ].join(""),
+    );
+}
+
+function tabsSection(): string {
+    const kitchen = [
+        { label: "Fridge", href: "#", active: true },
+        { label: "Groceries", href: "#", count: 8 },
+        { label: "Usuals", href: "#" },
+    ];
+    return block(
+        "Tab · Tabs",
+        "Tab 172205 (Active On, Off), Tabs 172206 with its trailing slot. The classes are fd-tab-row*: .fd-tab and .fd-tabs are the phone nav.",
+        [
+            stage(
+                "Tab: Active On, Active Off",
+                `<div class="fd-gallery-row">${tab({ label: "Fridge", href: "#", active: true })}${tab({ label: "Groceries", href: "#" })}</div>`,
+            ),
+            stage(
+                "Tabs with a Filter button and an Add button",
+                tabs({
+                    label: "Kitchen",
+                    tabs: kitchen,
+                    trailing: raw(
+                        `${filterButton({ label: "Filter", count: 2 })}${button({ label: "Add", icon: "plus", round: true, size: "md" })}`,
+                    ),
+                }),
+            ),
+            stage(
+                "Tabs without the trailing slot",
+                tabs({ label: "Kitchen", tabs: kitchen.slice(0, 2) }),
+            ),
+        ].join(""),
+    );
+}
+
+function searchFieldSection(): string {
+    const placeholder = "Search foods, recipes, barcodes";
+    const base = { label: "Search", placeholder } as const;
+    return block(
+        "Search field",
+        "Search field 172259: Boxed (48) and Line (41). Link detected is drawn from the option alone; nothing reads the text.",
+        [
+            stage(
+                "Boxed with the barcode button (the default)",
+                searchField({ ...base, barcode: true }),
+            ),
+            stage(
+                "Boxed with the shortcut hint (desktop)",
+                searchField({ ...base, shortcut: "⌘K" }),
+            ),
+            stage(
+                "Boxed: a value with Clear",
+                searchField({ ...base, value: "oat milk", clear: true }),
+            ),
+            stage(
+                "Boxed: Filter with a count and Go",
+                searchField({
+                    ...base,
+                    filter: { label: "Filter", count: 2 },
+                    go: true,
+                }),
+            ),
+            stage(
+                "Boxed: link detected (link icon, Go)",
+                searchField({
+                    ...base,
+                    value: "https://example.com/recipe",
+                    linkDetected: true,
+                }),
+            ),
+            stage(
+                "Line with Filter (the default)",
+                searchField({
+                    ...base,
+                    style: "line",
+                    filter: { label: "Filter" },
+                }),
+            ),
+            stage(
+                "Line with Barcode and Clear",
+                searchField({
+                    ...base,
+                    style: "line",
+                    value: "eggs",
+                    clear: true,
+                    barcode: true,
+                }),
+            ),
+        ].join(""),
+    );
+}
+
+function chipsSection(): string {
+    const meals = [
+        { label: "Breakfast", value: "breakfast" },
+        { label: "Lunch", value: "lunch" },
+        { label: "Dinner", value: "dinner", selected: true },
+        { label: "Snack", value: "snack" },
+    ];
+    return block(
+        "Chip · Chip group",
+        "Chip 172299 (On, Off, with a count). Classes fd-pill-chip*: .fd-chip is the live chip. Groups act by keyboard and click.",
+        [
+            stage(
+                "Chip: Off, On, with counts, disabled",
+                `<div class="fd-gallery-row">${chip({ label: "Lunch" })}${chip({ label: "Dinner", selected: true })}${chip({ label: "Dinner", count: 4 })}${chip({ label: "Dinner", count: 4, selected: true })}${chip({ label: "Snack", disabled: true })}</div>`,
+            ),
+            stage(
+                "Single: exactly one is on (radio group; arrow keys select)",
+                chipGroup({ label: "Meal", select: "single", chips: meals }),
+            ),
+            stage(
+                "Multiple: any number (pressed toggles)",
+                chipGroup({
+                    label: "Meals",
+                    select: "multiple",
+                    chips: meals.map((m, i) => ({ ...m, selected: i < 2 })),
+                }),
+            ),
+            stage(
+                "Links: a filter that navigates",
+                chipGroup({
+                    label: "Filter foods",
+                    select: "links",
+                    chips: [
+                        { label: "All", href: "#", count: 24, selected: true },
+                        { label: "Fridge", href: "#", count: 12 },
+                        { label: "Pantry", href: "#", count: 7 },
+                    ],
+                }),
+            ),
+        ].join(""),
+    );
+}
+
+function segmentedSection(): string {
+    const scope = (selected: number) =>
+        ["All", "Just me", "Household"].map((label, i) => ({
+            label,
+            value: label.toLowerCase().replace(" ", "-"),
+            selected: i === selected,
+        }));
+    return block(
+        "Segment · Segmented",
+        "Segment 172304 (Selected On, Off), Segmented 177891 (Regular 40, Small 32). A radio group: arrow keys select.",
+        [
+            stage(
+                "Segment: Selected On, Off",
+                `<div class="fd-gallery-row">${segment({ label: "All", selected: true })}${segment({ label: "Just me" })}</div>`,
+            ),
+            stage(
+                "Regular, three segments",
+                segmented({ label: "Whose", segments: scope(0) }),
+            ),
+            stage(
+                "Regular, two segments, a named group",
+                segmented({
+                    label: "Unit",
+                    name: "unit",
+                    segments: [
+                        { label: "g", value: "g", selected: true },
+                        { label: "ml", value: "ml" },
+                    ],
+                }),
+            ),
+            stage(
+                "Small, three segments",
+                segmented({
+                    label: "Whose",
+                    size: "small",
+                    segments: scope(1),
+                }),
+            ),
+            stage(
+                "Regular with a disabled segment",
+                segmented({
+                    label: "Whose",
+                    segments: scope(0).map((s, i) => ({
+                        ...s,
+                        disabled: i === 2,
+                    })),
+                }),
+            ),
+        ].join(""),
+    );
+}
+
+function toggleFieldSection(): string {
+    return block(
+        "Toggle · Field",
+        "Toggle 172376 (On, Off; 46 x 28), Field 172366 (48, trailing icon). The label above and the hint or error below are added around the design's box.",
+        [
+            stage(
+                "Toggle: Off, On, disabled Off, disabled On",
+                `<div class="fd-gallery-row">${toggle({ label: "Off" })}${toggle({ label: "On", on: true })}${toggle({ label: "Disabled off", disabled: true })}${toggle({ label: "Disabled on", on: true, disabled: true })}</div>`,
+            ),
+            stage(
+                "Field: the design's box",
+                field({
+                    id: "gallery-field-user",
+                    label: "Email or username",
+                    name: "user",
+                    placeholder: "Email or username",
+                }),
+            ),
+            stage(
+                "Field: a value and a trailing icon",
+                field({
+                    id: "gallery-field-pass",
+                    label: "Password",
+                    name: "pass",
+                    type: "password",
+                    value: "correct horse",
+                    trailingIcon: "eye",
+                }),
+            ),
+            stage(
+                "Field: hint",
+                field({
+                    id: "gallery-field-hint",
+                    label: "Household name",
+                    name: "household",
+                    value: "Flow household",
+                    hint: "Shown to everyone you invite.",
+                }),
+            ),
+            stage(
+                "Field: error",
+                field({
+                    id: "gallery-field-error",
+                    label: "Email",
+                    name: "email",
+                    value: "ethan@",
+                    error: "Enter a full email address.",
+                }),
+            ),
+            stage(
+                "Field: disabled",
+                field({
+                    id: "gallery-field-off",
+                    label: "Household id",
+                    name: "hid",
+                    value: "h-4821",
+                    disabled: true,
+                }),
+            ),
+        ].join(""),
+    );
+}
+
+function navBarSection(): string {
+    const active: [NavBarActive, string][] = [
+        ["today", "Active=Today"],
+        ["kitchen", "Active=Kitchen"],
+        ["recipes", "Active=Recipes"],
+        ["trends", "Active=Trends"],
+        ["none", "Active=None"],
+    ];
+    return block(
+        "Nav bar",
+        "Nav bar 294: today's .fd-tabs markup (phone). Shown in the page flow here; the live bar is fixed to the screen's foot. No notice dots.",
+        active
+            .map(([state, name]) =>
+                stage(name, navBar({ active: state, inline: true }), false),
+            )
+            .join(""),
+    );
+}
+
 function devGalleryBody(): string {
     const sections = [
         ...SECTIONS.map((s) => s.render()),
@@ -1515,6 +1852,13 @@ function devGalleryBody(): string {
         itemRowSwipeSection(),
         listGroupSection(),
         sectionHeaderSection(),
+        headerBarsSection(),
+        tabsSection(),
+        searchFieldSection(),
+        chipsSection(),
+        segmentedSection(),
+        toggleFieldSection(),
+        navBarSection(),
         iconsSection(),
     ].join("\n");
     return `<div class="fd-gallery">${pageHeader({ title: "v2 components" })}${sections}</div>`;

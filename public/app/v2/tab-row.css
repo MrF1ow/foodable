@@ -1,0 +1,67 @@
+/* Tabs (src/web/components/v2/tabs.ts): text tabs on a hairline, with a
+ * trailing slot. And the one addition the Nav bar needs: the live bar's
+ * `.fd-tabs` rules sit in shell.css and are fixed to the screen; `--inline`
+ * lets the same markup sit in the page flow (the gallery). */
+
+.fd-tab-row {
+    box-sizing: border-box;
+    display: flex;
+    /* A grid parent's track must not grow to the tabs' width. */
+    min-width: 0;
+    align-items: flex-end;
+    gap: var(--space-xl);
+    border-bottom: 1px solid var(--line);
+}
+.fd-tab-row__tabs {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-xl);
+    min-width: 0;
+    /* Too many tabs scroll; they never run under the trailing slot. The row's
+       own line is the underline, so no scrollbar is drawn. */
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+.fd-tab-row__tabs::-webkit-scrollbar {
+    display: none;
+}
+.fd-tab-row__tab {
+    --fd-tab-row-line: 20px;
+    box-sizing: border-box;
+    flex: none;
+    padding: var(--space-sm) 0;
+    color: var(--text-secondary);
+    font-size: var(--text-body-size);
+    font-weight: 400;
+    line-height: var(--fd-tab-row-line);
+    text-decoration: none;
+    white-space: nowrap;
+}
+.fd-tab-row__tab--active {
+    border-bottom: 1px solid var(--accent-fill);
+    color: var(--text-primary);
+    font-weight: 500;
+}
+.fd-tab-row__tab:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}
+.fd-tab-row__trailing {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: var(--space-sm);
+    margin-inline-start: auto;
+    padding-bottom: var(--control-sm-gap);
+}
+
+/* Nav bar in the page flow. */
+.fd-tabs.fd-tabs--inline {
+    /* shell.css hides .fd-tabs from 1024 px; the in-flow bar stays. */
+    display: flex;
+    position: static;
+    left: auto;
+    bottom: auto;
+    transform: none;
+    width: fit-content;
+}

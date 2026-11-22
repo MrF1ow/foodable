@@ -1,0 +1,74 @@
+/* Toggle (src/web/components/v2/toggle.ts): a 46 x 28 switch. The real
+ * checkbox sits over the track, invisible, so it takes the tap, the focus and
+ * the Space key; the track and knob are drawn from :checked. */
+
+.fd-toggle {
+    --fd-toggle-w: 46px;
+    --fd-toggle-h: 28px;
+    --fd-toggle-knob: 22px;
+    position: relative;
+    display: inline-flex;
+    flex: none;
+    vertical-align: top;
+    width: var(--fd-toggle-w);
+    height: var(--fd-toggle-h);
+    /* Inside .native a label that holds a checkbox gets a 36 px row; the
+       track is exactly the design's height. */
+    min-height: 0;
+    cursor: pointer;
+}
+.fd-toggle__input {
+    appearance: none;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    cursor: inherit;
+    opacity: 0;
+}
+.fd-toggle__track {
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-track);
+    transition: background 0.15s ease;
+}
+.fd-toggle__knob {
+    position: absolute;
+    top: calc((var(--fd-toggle-h) - var(--fd-toggle-knob)) / 2);
+    left: calc((var(--fd-toggle-h) - var(--fd-toggle-knob)) / 2);
+    width: var(--fd-toggle-knob);
+    height: var(--fd-toggle-knob);
+    border-radius: var(--radius-pill);
+    background: var(--text-secondary);
+    transition:
+        transform 0.15s ease,
+        background 0.15s ease;
+}
+.fd-toggle__input:checked + .fd-toggle__track {
+    background: var(--accent-fill);
+}
+.fd-toggle__input:checked + .fd-toggle__track .fd-toggle__knob {
+    background: var(--accent-on);
+    transform: translateX(calc(var(--fd-toggle-w) - var(--fd-toggle-h)));
+}
+.fd-toggle__input:focus-visible + .fd-toggle__track {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}
+.fd-toggle--disabled {
+    cursor: default;
+    opacity: 0.5;
+}
+@media (prefers-reduced-motion: reduce) {
+    .fd-toggle__track,
+    .fd-toggle__knob {
+        transition: none;
+    }
+}

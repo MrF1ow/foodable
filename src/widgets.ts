@@ -511,6 +511,8 @@ export const APP_V2_JS_SOURCES = [
     "./src/web/client/v2/sheet.js",
     "./src/web/client/v2/menu.js",
     "./src/web/client/v2/stepper.js",
+    "./src/web/client/v2/segmented.js",
+    "./src/web/client/v2/chips.js",
     "./src/web/client/v2/swipe-rows.js",
     "./src/web/client/v2/scanner-pick.js",
     "./src/web/client/v2/scanner.js",
