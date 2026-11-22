@@ -44,7 +44,7 @@ warmed in `src/index.ts`). Nothing generated is committed.
   height reporting, and the standalone preview fallback. A template supplies only
   `{ name, loading, coerce, render, sample }`. Handshake details (the
   `appInfo`/`appCapabilities` gotcha, `data-theme`, `size-changed`) live in
-  **`CLAUDE.md` → Custom UI Widgets (MCP Apps)** and the `mcp-apps-widgets` memory.
+  **`docs/agents/widgets.md`** and the `mcp-apps-widgets` memory.
 - `bun test src/widgets.test.ts` asserts every widget assembles with no unresolved
   markers, valid inline JS, and each partial inlined in full.
 - `bun test public/widgets/macros.test.ts` pins the macro strip's behaviour — the
@@ -249,7 +249,7 @@ height to the host by measuring content (`html { height: max-content }`, read th
 bounding rect, restore — see `shared/bridge.js`). A `min-height: 100vh` fights that
 measurement: it pins the reported height to the host's current iframe height, which
 is exactly the value the measurement exists to replace. Let the body size to its
-content. (CLAUDE.md carries the same warning.)
+content. (`docs/agents/widgets.md` carries the same warning.)
 
 `.wrap` is the roomy gutter; `.wrap.tight` (§3a) is what every in-chat widget uses.
 As of this redesign no template uses the plain `.wrap` — the one full-page widget,
@@ -1150,7 +1150,7 @@ Then, for the widget itself:
 
 **Start the harness iframe SHORT (~130px) and grow it on `ui/notifications/size-changed`.**
 The real host gives the widget a small default height and only expands it when the
-widget reports its own height (see CLAUDE.md → handshake). A fixed-tall test iframe
+widget reports its own height (see `docs/agents/widgets.md` → handshake). A fixed-tall test iframe
 hides clipping entirely — that is exactly how a clipped widget shipped once. Every
 widget must send `size-changed` and re-send it via a `ResizeObserver`, which is also
 what makes an opened breakdown grow the frame instead of being cut off.

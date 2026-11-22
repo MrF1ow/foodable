@@ -207,7 +207,7 @@ export function mealIdempotencyKey(
     // future write — a user re-logging or re-importing something they already
     // have would get a duplicate row instead of a clean no-op, and every
     // "auto:" key already stored would be orphaned. This repo has shipped
-    // that bug once already (see CLAUDE.md, "Bulk meal import"); the mirror
+    // that bug once already (see docs/agents/meal-import.md); the mirror
     // of this array is rowContentDigest in src/domain/import.ts, which carries the
     // same warning.
     //

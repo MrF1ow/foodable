@@ -57,7 +57,7 @@ When every required check is green, a PR merges without a review or a label (the
 
 ## How the code is laid out
 
-[`CLAUDE.md`](CLAUDE.md) is the detailed map of the codebase and its invariants. It's written for AI coding agents but works just as well for people. The short version:
+[`CLAUDE.md`](CLAUDE.md) is the map of the codebase and its invariants, with subsystem detail in [`docs/agents/`](docs/agents/). It's written for AI coding agents but works just as well for people. The short version:
 
 - `src/domain/` holds pure logic with in-memory stores and tests. New behaviour goes here first.
 - `src/db/` has one thin Postgres adapter per domain (`Bun.sql`, every query through `run()` in `src/db/sql.ts`).
