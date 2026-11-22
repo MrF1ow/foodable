@@ -1,11 +1,48 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
-import { confirmSheet, sheet, sheetTrigger } from "./sheet.js";
 import {
+    confirmSheet,
+    sheet,
+    sheetActions,
+    sheetHeader,
+    sheetSection,
+    sheetTrigger,
+    type SheetActionsOptions,
+    type SheetSectionOptions,
+} from "./sheet.js";
+import { raw } from "./html.js";
+import {
+    text,
     buttonLabels,
     DOLLAR_PAYLOADS,
     injectedAttributes,
+    XSS,
+    XSS_ESCAPED,
 } from "./test-helpers.js";
+
+const searchWith = (attrs: Record<string, string>, scan = false) =>
+    sheetHeader({
+        kind: "search",
+        title: "Add food",
+        sheetId: "s",
+        search: {
+            name: "q",
+            label: "Search",
+            placeholder: "Search",
+            ...(scan
+                ? { scan: { label: "Scan", attrs } }
+                : { clear: { label: "Clear", attrs } }),
+        },
+    });
+
+test("the search box refuses attributes it writes itself", () => {
+    for (const key of ["class", "type", "aria-label", "style", "href"]) {
+        expect(() => searchWith({ [key]: "x" })).toThrow("not allowed");
+        expect(() => searchWith({ [key]: "x" }, true)).toThrow("not allowed");
+    }
+    const ok = String(searchWith({ "data-x": "1" }));
+    expect(ok.match(/aria-label="Clear"/g)?.length).toBe(1);
+});
 
 const edit = () =>
     sheet({
@@ -326,4 +363,411 @@ test("sheet.css honours the one breakpoint, [hidden] and reduced motion", () => 
     );
     expect(stripped).toContain("::backdrop");
     expect(stripped).toContain("var(--overlay-scrim)");
+});
+
+// The old signature keeps its exact markup for every caller that has not
+// moved to the parts. These strings were taken from the code before the
+// placement option was added.
+const LEGACY_OUTPUT = {
+    editFull:
+        '<dialog class="fd-sheet fd-sheet--edit x-y" id="e1" data-fd-sheet-focus="panel" aria-labelledby="e1-title" aria-describedby="e1-sub" data-sheet-open-on-load>\n<div class="fd-sheet-panel" tabindex="-1">\n<div class="fd-sheet-handle" aria-hidden="true"></div>\n<header class="fd-sheet-head">\n<div class="fd-sheet-heading">\n<h2 class="fd-sheet-title" id="e1-title">Edit &lt;b&gt;</h2>\n<p class="fd-sheet-sub" id="e1-sub">Sub &amp; more</p>\n</div>\n<button type="button" class="fd-sheet-close" command="close" commandfor="e1" aria-label="Dismiss"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>\n</header>\n<div class="fd-sheet-body">\n<p>b</p>\n</div>\n<div class="fd-sheet-actions">\n<button type="submit">Save</button>\n</div>\n</div>\n</dialog>',
+    editBare:
+        '<dialog class="fd-sheet fd-sheet--edit" id="e2" aria-labelledby="e2-title">\n<div class="fd-sheet-panel" tabindex="-1">\n<div class="fd-sheet-handle" aria-hidden="true"></div>\n<header class="fd-sheet-head">\n<div class="fd-sheet-heading">\n<h2 class="fd-sheet-title" id="e2-title">T</h2>\n</div>\n<button type="button" class="fd-sheet-close" command="close" commandfor="e2" aria-label="Close"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>\n</header>\n<div class="fd-sheet-body">\n\n</div>\n</div>\n</dialog>',
+    confirmNoClose:
+        '<dialog class="fd-sheet fd-sheet--confirm" id="c1" aria-labelledby="c1-title">\n<div class="fd-sheet-panel" tabindex="-1">\n<div class="fd-sheet-handle" aria-hidden="true"></div>\n<header class="fd-sheet-head">\n<div class="fd-sheet-heading">\n<h2 class="fd-sheet-title" id="c1-title">T</h2>\n</div>\n\n</header>\n<div class="fd-sheet-body">\n<p>m</p>\n</div>\n</div>\n</dialog>',
+    confirmSheet:
+        '<dialog class="fd-sheet fd-sheet--confirm" id="cs" aria-labelledby="cs-title" aria-describedby="cs-sub" data-sheet-open-on-load>\n<div class="fd-sheet-panel" tabindex="-1">\n<div class="fd-sheet-handle" aria-hidden="true"></div>\n<header class="fd-sheet-head">\n<div class="fd-sheet-heading">\n<h2 class="fd-sheet-title" id="cs-title">Remove?</h2>\n<p class="fd-sheet-sub" id="cs-sub">s</p>\n</div>\n<button type="button" class="fd-sheet-close" command="close" commandfor="cs" aria-label="Close"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>\n</header>\n<div class="fd-sheet-body">\n<form id="cs-form" method="post" action="/x" data-turbo="false">\n<input type="hidden" name="a" value="1" />\n<p class="fd-sheet-message">Sure?</p>\n</form>\n</div>\n<div class="fd-sheet-actions">\n<button type="button" class="fd-btn" command="close" commandfor="cs">Cancel</button>\n<button type="submit" class="fd-btn fd-btn--danger" form="cs-form">Remove</button>\n</div>\n</div>\n</dialog>',
+    trigger:
+        '<button type="button" class="fd-btn" commandfor="e1" command="show-modal" aria-label="Open it" data-k="v">Open</button>',
+};
+
+test("the old sheet() signature renders exactly what it rendered before placement existed", () => {
+    expect(
+        sheet({
+            id: "e1",
+            kind: "edit",
+            title: "Edit <b>",
+            subtitle: "Sub & more",
+            body: "<p>b</p>",
+            actions: '<button type="submit">Save</button>',
+            openOnLoad: true,
+            closeLabel: "Dismiss",
+            className: "x-y",
+            focus: "panel",
+        }),
+    ).toBe(LEGACY_OUTPUT.editFull);
+    expect(sheet({ id: "e2", kind: "edit", title: "T", body: "" })).toBe(
+        LEGACY_OUTPUT.editBare,
+    );
+    expect(
+        sheet({
+            id: "c1",
+            kind: "confirm",
+            title: "T",
+            body: "<p>m</p>",
+            showClose: false,
+        }),
+    ).toBe(LEGACY_OUTPUT.confirmNoClose);
+});
+
+test("confirmSheet and sheetTrigger render exactly what they rendered before", () => {
+    expect(
+        confirmSheet({
+            id: "cs",
+            title: "Remove?",
+            subtitle: "s",
+            message: "Sure?",
+            action: "/x",
+            confirmLabel: "Remove",
+            hiddenFields: { a: "1" },
+            openOnLoad: true,
+            turboFalse: true,
+        }),
+    ).toBe(LEGACY_OUTPUT.confirmSheet);
+    expect(
+        sheetTrigger({
+            target: "e1",
+            label: "Open",
+            className: "fd-btn",
+            ariaLabel: "Open it",
+            data: { k: "v" },
+        }),
+    ).toBe(LEGACY_OUTPUT.trigger);
+});
+
+// ---- The sheet from parts ----
+
+/** The visible text of every button in `html`, in order. */
+const labels = (html: string): string[] =>
+    [...html.matchAll(/<span class="fd-btn__label">([^<]*)<\/span>/g)].map(
+        (m) => m[1] as string,
+    );
+
+const PLACEMENTS = ["bottom", "dialog", "side"] as const;
+
+const titleHeader = {
+    kind: "title" as const,
+    title: "Chicken thighs",
+    subtitle: "Fridge",
+};
+
+const searchHeader = {
+    kind: "search" as const,
+    title: "Log food",
+    search: {
+        name: "q",
+        label: "Search foods",
+        placeholder: "Search foods, recipes, barcodes",
+    },
+};
+
+test("sheet places by `placement`: one class each, and the sheet carries no old kind class", () => {
+    for (const placement of PLACEMENTS) {
+        const html = sheet({
+            id: "p",
+            placement,
+            header: titleHeader,
+            body: raw(""),
+        });
+        expect(html).toContain(
+            `<dialog class="fd-sheet fd-sheet--${placement}"`,
+        );
+        expect(html).not.toContain("fd-sheet--edit");
+        expect(html).not.toContain("fd-sheet--confirm");
+        expect(html).not.toContain("fd-sheet--search");
+    }
+});
+
+test("a search header marks the sheet as a search sheet, the dialog's wider form", () => {
+    const html = sheet({
+        id: "s",
+        placement: "dialog",
+        header: searchHeader,
+        body: raw(""),
+    });
+    expect(html).toContain(
+        'class="fd-sheet fd-sheet--dialog fd-sheet--search"',
+    );
+});
+
+test("a parts sheet is labelled by its title and described by its subtitle", () => {
+    const html = sheet({
+        id: "p",
+        placement: "side",
+        header: titleHeader,
+        body: raw("<p>b</p>"),
+        actions: { kind: "single", primary: { label: "Save" } },
+        openOnLoad: true,
+        className: "extra",
+        focus: "panel",
+    });
+    expect(html).toContain(
+        '<dialog class="fd-sheet fd-sheet--side extra" id="p" data-fd-sheet-focus="panel" aria-labelledby="p-title" aria-describedby="p-sub" data-sheet-open-on-load>',
+    );
+    expect(html).toContain('<div class="fd-sheet-panel" tabindex="-1">');
+    expect(html).toContain('<div class="fd-sheet-body">\n<p>b</p>\n</div>');
+    expect(html).toContain(
+        '<div class="fd-sheet__actions fd-sheet__actions--single">',
+    );
+    const plain = sheet({
+        id: "q",
+        placement: "bottom",
+        header: { kind: "title", title: "T" },
+        body: raw(""),
+    });
+    expect(plain).not.toContain("aria-describedby");
+    expect(plain).not.toContain("fd-sheet__actions");
+});
+
+test("the title header: grabber, title, subtitle and a close button that closes the sheet", () => {
+    const html = text(sheetHeader({ ...titleHeader, sheetId: "p" }));
+    expect(html).toContain(
+        '<header class="fd-sheet__header fd-sheet__header--title">',
+    );
+    expect(html).toContain(
+        '<div class="fd-sheet-handle" aria-hidden="true"></div>',
+    );
+    expect(html).toContain(
+        '<h2 class="fd-sheet__title" id="p-title">Chicken thighs</h2>',
+    );
+    expect(html).toContain(
+        '<p class="fd-sheet__subtitle" id="p-sub">Fridge</p>',
+    );
+    expect(html).toContain('command="close"');
+    expect(html).toContain('commandfor="p"');
+    expect(html).toContain('aria-label="Close"');
+    expect(html).toContain("fd-btn--icon");
+});
+
+test("the title header without a subtitle or a close button; a renamed close", () => {
+    const bare = text(
+        sheetHeader({ kind: "title", title: "T", close: false, sheetId: "p" }),
+    );
+    expect(bare).not.toContain("fd-sheet__subtitle");
+    expect(bare).not.toContain("command=");
+    const renamed = text(
+        sheetHeader({
+            kind: "title",
+            title: "T",
+            close: { label: "Fermer" },
+            sheetId: "p",
+        }),
+    );
+    expect(renamed).toContain('aria-label="Fermer"');
+});
+
+test("the search header: a labelled search field, optional clear and scan, and an unseen title", () => {
+    const plain = text(sheetHeader({ ...searchHeader, sheetId: "s" }));
+    expect(plain).toContain(
+        '<header class="fd-sheet__header fd-sheet__header--search">',
+    );
+    expect(plain).toContain('<h2 class="fd-sr" id="s-title">Log food</h2>');
+    expect(plain).toContain(
+        '<input class="fd-sheet__search-input" type="search" name="q" placeholder="Search foods, recipes, barcodes" aria-label="Search foods" autocomplete="off" enterkeyhint="search">',
+    );
+    expect(plain).not.toContain("fd-sheet__search-action");
+    expect(plain).not.toContain("command=");
+    const full = text(
+        sheetHeader({
+            kind: "search",
+            title: "Log food",
+            sheetId: "s",
+            search: {
+                ...searchHeader.search,
+                value: "chick",
+                clear: { label: "Clear search", attrs: { "data-x": "1" } },
+                scan: { label: "Scan a barcode", href: "/scan" },
+            },
+        }),
+    );
+    expect(full).toContain(' value="chick"');
+    expect(full).toContain('aria-label="Clear search" data-x="1"');
+    expect(full).toContain(
+        '<a class="fd-sheet__search-action" href="/scan" aria-label="Scan a barcode">',
+    );
+    expect(() =>
+        sheetHeader({ kind: "search", title: "T", sheetId: "s" }),
+    ).toThrow("search");
+});
+
+const SECTION_KINDS = [
+    "amount",
+    "fields",
+    "choice",
+    "rows",
+    "chips",
+    "tiles",
+    "results",
+    "custom",
+] as const;
+
+test("every section kind has its own container class, an optional label and the content", () => {
+    for (const kind of SECTION_KINDS) {
+        const html = text(
+            sheetSection({ kind, label: "Amount", content: raw("<i>c</i>") }),
+        );
+        expect(html).toContain(
+            `class="fd-sheet__section fd-sheet__section--${kind}"`,
+        );
+        expect(html).toContain('<h3 class="fd-sheet__label">Amount</h3>');
+        expect(html).toContain(
+            '<div class="fd-sheet__content">\n<i>c</i>\n</div>',
+        );
+        const unlabelled = text(sheetSection({ kind, content: raw("") }));
+        expect(unlabelled).not.toContain("fd-sheet__label");
+    }
+});
+
+test("message and empty sections hold escaped text", () => {
+    for (const kind of ["message", "empty"] as const) {
+        const html = text(sheetSection({ kind, text: `a ${XSS}` }));
+        expect(html).toContain(`fd-sheet__section--${kind}`);
+        expect(html).toContain(
+            `<p class="fd-sheet__text">a ${XSS_ESCAPED}</p>`,
+        );
+        expect(html).not.toContain("<script>");
+    }
+});
+
+test("every actions kind renders the design's buttons", () => {
+    const pair = text(
+        sheetActions({
+            kind: "pair",
+            primary: { label: "Save" },
+            sheetId: "p",
+        }),
+    );
+    expect(pair).toContain("fd-sheet__actions--pair");
+    expect(labels(pair)).toEqual(["Cancel", "Save"]);
+    // Cancel closes the sheet; the primary is the accent button.
+    expect(pair).toContain('commandfor="p"');
+    expect(pair).toContain("fd-btn--primary");
+
+    const single = text(
+        sheetActions({
+            kind: "single",
+            primary: { label: "Save" },
+            sheetId: "p",
+        }),
+    );
+    expect(single).toContain("fd-sheet__actions--single");
+    expect(labels(single)).toEqual(["Save"]);
+
+    const destructive = text(
+        sheetActions({
+            kind: "destructive",
+            danger: { label: "Remove", type: "submit", form: "f" },
+            sheetId: "p",
+        }),
+    );
+    expect(destructive).toContain("fd-sheet__actions--destructive");
+    expect(labels(destructive)).toEqual(["Cancel", "Remove"]);
+    expect(destructive).toContain("fd-btn--danger");
+    expect(destructive).toContain('type="submit"');
+    expect(destructive).toContain('form="f"');
+
+    const link = text(
+        sheetActions({
+            kind: "link",
+            link: { label: "Scan the barcode", href: "/scan" },
+            sheetId: "p",
+        }),
+    );
+    expect(link).toContain("fd-sheet__actions--link");
+    expect(link).toContain("fd-btn--link");
+    expect(link).toContain('href="/scan"');
+    expect(link).toContain("Scan the barcode");
+});
+
+test("a pair or destructive row takes the caller's own Cancel", () => {
+    const html = text(
+        sheetActions({
+            kind: "pair",
+            cancel: { label: "Back", attrs: { "data-back": "1" } },
+            primary: { label: "Next" },
+            sheetId: "p",
+        }),
+    );
+    expect(labels(html)).toEqual(["Back", "Next"]);
+    expect(html).toContain('data-back="1"');
+    expect(html).not.toContain("command=");
+});
+
+test("hostile text in every part is escaped and injects no attribute", async () => {
+    const actions: SheetActionsOptions[] = [
+        { kind: "single", primary: { label: XSS } },
+        { kind: "pair", primary: { label: XSS } },
+        { kind: "destructive", danger: { label: XSS, form: XSS } },
+        { kind: "link", link: { label: XSS, href: "/x" } },
+    ];
+    const sections: SheetSectionOptions[] = [
+        { kind: "message", label: XSS, text: XSS },
+        { kind: "empty", text: XSS },
+    ];
+    const html = [
+        sheet({
+            id: XSS,
+            placement: "dialog",
+            header: {
+                kind: "title",
+                title: XSS,
+                subtitle: XSS,
+                close: { label: XSS },
+            },
+            body: raw(sections.map((x) => sheetSection(x)).join("")),
+            actions: actions[0],
+        }),
+        sheetHeader({
+            kind: "search",
+            title: XSS,
+            sheetId: XSS,
+            search: {
+                name: XSS,
+                label: XSS,
+                placeholder: XSS,
+                value: XSS,
+                clear: { label: XSS },
+                scan: { label: XSS, href: XSS },
+            },
+        }),
+        ...actions.map((a) => sheetActions({ ...a, sheetId: XSS })),
+    ].join("\n");
+    expect(html).not.toContain("<script>");
+    expect(html).toContain(XSS_ESCAPED);
+    expect(await injectedAttributes(html)).toEqual([]);
+    for (const payload of DOLLAR_PAYLOADS) {
+        const out = sheet({
+            id: payload,
+            placement: "bottom",
+            header: { kind: "title", title: payload, subtitle: payload },
+            body: raw(sheetSection({ kind: "message", text: payload })),
+            actions: { kind: "pair", primary: { label: payload } },
+        });
+        expect(await injectedAttributes(out)).toEqual([]);
+    }
+});
+
+test("an attribute that is not a plain name is refused", () => {
+    expect(() =>
+        sheetHeader({
+            kind: "search",
+            title: "T",
+            sheetId: "s",
+            search: {
+                ...searchHeader.search,
+                clear: { label: "x", attrs: { onclick: "1" } },
+            },
+        }),
+    ).toThrow("not allowed");
+});
+
+test("touch-action none covers the grabber and title row, not the search box", () => {
+    const css = readFileSync("public/app/v2/sheet.css", "utf8");
+    const header = css.match(/\.fd-sheet__header \{[^}]*\}/)?.[0] ?? "";
+    expect(header).not.toBe("");
+    expect(header).not.toContain("touch-action");
+    const grip = css.match(
+        /\.fd-sheet__header \.fd-sheet-handle,\s*\.fd-sheet__row \{([^}]*)\}/,
+    );
+    expect(grip?.[1]).toContain("touch-action: none");
 });

@@ -38,6 +38,7 @@ import {
     buildPreviewTodayPageData,
     renderTodayV2Page,
 } from "../src/web/pages/v2/today.js";
+import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
@@ -201,6 +202,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             storedTheme: null,
         }),
         help: renderSettingsHelpV2Page({ chrome: chrome as never }),
+        "dev-gallery-v2": renderDevGalleryV2Page(chrome as never),
         household: householdPage(chrome),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
@@ -232,6 +234,7 @@ const ROUTE_BASE: Record<string, string> = {
     "/settings/account": "settings-account",
     "/settings/display": "settings-display",
     "/settings/help": "help",
+    "/dev/gallery-v2": "dev-gallery-v2",
     "/settings/household": "household",
     "/create-household": "create-household",
 };

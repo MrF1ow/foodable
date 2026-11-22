@@ -360,6 +360,56 @@ const isConnected = (el) => !!el && el.isConnected !== false;
 
 const sheetInit = new WeakSet();
 
+// Controls Tab can reach inside a sheet, in document order.
+const TABBABLE =
+    'a[href], button:not([disabled]), input:not([type="hidden"]):not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+// A control Tab can land on: rendered (not display: none, which a swipe bed or
+// a select box is when its mode is off), enabled, and not inside an inert or
+// hidden ancestor.
+function canTab(el) {
+    if (el.hidden || el.disabled || el.closest("[hidden], [inert]")) {
+        return false;
+    }
+    return typeof el.checkVisibility === "function"
+        ? el.checkVisibility({ visibilityProperty: true })
+        : el.getClientRects().length > 0;
+}
+
+// Tab and Shift+Tab wrap inside a dialog or side sheet, so focus never leaves
+// for the browser's own controls. Only the placements that float over the page
+// do this; the old edit and confirm sheets keep the browser's own handling.
+function trapTab(dialog, e) {
+    if (e.key !== "Tab" || e.defaultPrevented) return;
+    const cl = dialog.classList;
+    if (
+        !cl ||
+        !(cl.contains("fd-sheet--dialog") || cl.contains("fd-sheet--side"))
+    ) {
+        return;
+    }
+    const items = [...dialog.querySelectorAll(TABBABLE)].filter(canTab);
+    if (items.length === 0) {
+        e.preventDefault();
+        return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (
+        e.shiftKey &&
+        (active === first ||
+            !dialog.contains(active) ||
+            active === dialog.querySelector(".fd-sheet-panel"))
+    ) {
+        e.preventDefault();
+        last.focus();
+    } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+    }
+}
+
 function initSheet(dialog) {
     if (typeof dialog.showModal !== "function") return;
     if (sheetInit.has(dialog)) return;
@@ -424,6 +474,8 @@ function initSheet(dialog) {
     dialog.addEventListener("close", onClosed);
     // Esc: the browser closes the dialog itself; just drop any drag in flight.
     dialog.addEventListener("cancel", resetDrag);
+    // A dialog or side sheet keeps Tab inside itself.
+    dialog.addEventListener("keydown", (e) => trapTab(dialog, e));
 
     const onPointerMove = (e) => {
         if (!dragging || e.pointerId !== pointerId) return;
@@ -484,7 +536,9 @@ function initSheet(dialog) {
         if (!mq(MQ_COARSE) || mq(MQ_PANEL)) return;
         const t = e.target;
         if (!t || typeof t.closest !== "function") return;
-        const grip = t.closest(".fd-sheet-handle, .fd-sheet-head");
+        const grip = t.closest(
+            ".fd-sheet-handle, .fd-sheet-head, .fd-sheet__header",
+        );
         if (!grip || !dialog.contains(grip)) return;
         if (e.button !== undefined && e.button !== 0) return;
         if (t.closest("button, a, input, select, textarea, label")) return;

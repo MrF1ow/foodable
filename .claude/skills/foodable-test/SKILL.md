@@ -71,11 +71,11 @@ bun run db:dev status                  # "stopped", exit 1 is expected
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
 - **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped.
-- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" means another run holds them; wait until `ss -ltn` shows both free). No database.
-- **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow: long `timeout`). Clear tmp/app-preview first. Without `--shots`: serves :4787 (`PREVIEW_PORT`). Fixture data, `-390.png` and `-1440.png` per page.
-- **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`) diffs the non-gallery shots of base and branch; exit 1 on a difference. Renders must not overlap: one per tree, reuse the base.
+- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" = another run holds them; wait until `ss -ltn` shows both free). No database. It also serves `/dev/gallery-v2`, the sheet cases' page.
+- **App look:** `bun run preview:app --shots`, PNGs in tmp/app-preview (slow, long `timeout`); clear tmp/app-preview first. Without `--shots`: serves :4787 (`PREVIEW_PORT`). Per page: `-390.png`, `-1440.png`.
+- **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`) compares the non-gallery shots of base and branch; exit 1 on a diff. One render at a time per tree; reuse the base.
 - **WebKit (Safari-class):** Playwright's WPE `MiniBrowser` starts only through a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH` (`bin`, `lib`, `share`), `WEBKIT_FORCE_COMPLEX_TEXT=1` and an `LD_LIBRARY_PATH` with its `lib`, `sys/lib` and an ICU 74 libs dir.
-- **Barcode scans against a running server** hit live Open Food Facts (network needed); unit tests stub it.
+- **Barcode scans on a running server** hit live Open Food Facts; unit tests stub it.
 - **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
 - **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
 - **App-wide middleware (body limit, CORS):** import `app` from `src/index.ts`, as `src/index.test.ts` does.

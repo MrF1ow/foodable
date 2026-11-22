@@ -279,7 +279,8 @@ describe("/app-v2.js", () => {
         // +~11 KB Settings autosave: a marked form submits when a field is left; one save at a time, an edit in progress survives the response, a rejected or failed field keeps its text, leaving mid-save posts with keepalive.
         // +~5.2 KB Settings autosave: whole forms (Product score) save on any control's change, keep an unsaved edit through the refresh, and queue their reset buttons; a refreshed form forgets what it last sent.
         // +~0.7 KB Item row: the swipe client also drives the Item row's face and beds.
-        expect(js.length).toBeLessThan(172_000);
+        // +~2.0 KB Sheets: a dialog or side sheet keeps Tab inside it (rendered, enabled controls only), and its header is a drag grip.
+        expect(js.length).toBeLessThan(174_100);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
