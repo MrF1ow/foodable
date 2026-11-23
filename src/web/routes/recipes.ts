@@ -779,7 +779,7 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
             },
         );
         if (!outcome) return c.text("Not found", 404);
-        // toast: none — the week shows the plan (a repeat is the same 303)
+        // toast: none — the recipe page shows the plan ("Planned · day · meal")
         return c.redirect(`/recipes/${recipeId}`, 303);
     } catch (err) {
         if (!(err instanceof PlanInputError)) throw err;

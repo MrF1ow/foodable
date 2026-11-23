@@ -266,6 +266,7 @@ afterAll(() => {
 const { renderRecipesListPage, renderRecipeDetailRoute } =
     await import("../loaders.js");
 const { recipesRoutes } = await import("./recipes.js");
+const { planDayLabel } = await import("../pages/v2/recipes-plan.js");
 const { mintSiteSession, SITE_COOKIE } = await import("../../site-session.js");
 
 function cookieFor(userId: string): string {
@@ -1258,6 +1259,37 @@ describe("POST /recipes/:id/plan", () => {
             },
         ]);
         expect(toastOf(res)).toBeNull();
+    });
+
+    test("the recipe page the redirect lands on shows the planned day", async () => {
+        const before = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(before.html).not.toContain("fd-recipe-planned");
+        const day = addPlanDays(todayUtc(), 2);
+        const res = await add({ date: day, slot: "lunch", servings: "3" });
+        expect(res.status).toBe(303);
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(page.html).toContain("fd-recipe-planned");
+        expect(page.html).toContain(`Planned · ${planDayLabel(day)} · lunch`);
+    });
+
+    test("a plan further out than the week, and one for another recipe, are told apart", async () => {
+        const far = addPlanDays(todayUtc(), 20);
+        await add({ date: far, slot: "dinner" });
+        const other = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Soup",
+            yieldPortions: 2,
+        });
+        await db.plansStore.addPlan({
+            householdId: HH,
+            recipeId: other.id,
+            date: todayUtc(),
+            slot: "snack",
+        });
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(page.html).toContain(`Planned · ${planDayLabel(far)} · dinner`);
+        expect(page.html).not.toContain(`${planDayLabel(todayUtc())} · snack`);
     });
 
     test("servings default to what the recipe yields", async () => {

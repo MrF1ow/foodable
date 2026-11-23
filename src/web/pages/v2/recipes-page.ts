@@ -1,4 +1,5 @@
 import type { FridgeItem, FridgeLocation } from "../../../domain/fridge.js";
+import type { PlanSlot } from "../../../domain/plan.js";
 import {
     recipeSteps,
     recipeTimeLabel,
@@ -31,6 +32,8 @@ import {
     type CookSheetView,
 } from "./recipes-page-cook.js";
 import {
+    PLAN_SLOT_LABEL,
+    planDayLabel,
     renderPlanSheet,
     renderPlanTrigger,
     type PlanSheetView,
@@ -80,6 +83,12 @@ export type RecipeDetailV2View = {
     cook?: CookSheetView;
     /** The Add to plan sheet. */
     plan?: PlanSheetView;
+    /**
+     * This recipe's plans from the household's today on, in day then meal
+     * order. Absent or empty shows nothing; otherwise a "Planned" line under
+     * the title, so the redirect after Add to plan lands on the result.
+     */
+    planned?: { date: string; slot: PlanSlot }[];
     /**
      * The Share sheet; a refused post re-renders the page with it open. Absent
      * leaves the Share button and the sheet out (`mcp-share-links` is off).
@@ -327,6 +336,22 @@ function recipeSourceHint(sourceUrl: string | null): string {
     }
 }
 
+/** How many planned days the caption names before it counts the rest. */
+const PLANNED_SHOWN = 4;
+
+function plannedLine(planned: RecipeDetailV2View["planned"]): string {
+    if (!planned || planned.length === 0) return "";
+    const shown = planned
+        .slice(0, PLANNED_SHOWN)
+        .map(
+            (p) =>
+                `${planDayLabel(p.date)} · ${PLAN_SLOT_LABEL[p.slot].toLowerCase()}`,
+        );
+    const more = planned.length - shown.length;
+    const text = `Planned · ${shown.join(", ")}${more > 0 ? ` · +${more} more` : ""}`;
+    return `<p class="fd-recipe-meta fd-recipe-planned">${esc(text)}</p>\n`;
+}
+
 function servingsMeta(portions: number): string {
     return portions === 1 ? "1 serving" : `${portions} servings`;
 }
@@ -363,7 +388,7 @@ ${favouriteStarForm({
 <h1 class="fd-recipe-title">${esc(view.recipe.name)}</h1>
 ${metaRow ? `<p class="fd-recipe-meta">${metaRow}</p>` : ""}
 <p class="fd-recipe-meta fd-recipe-meta--you">${esc(portionNote)}</p>
-</header>
+${plannedLine(view.planned)}</header>
 <div class="fd-recipe-layout">
 <div class="fd-recipe-col fd-recipe-col--primary">
 <section class="fd-recipe-section fd-recipe-section--macros" aria-label="Per serving">

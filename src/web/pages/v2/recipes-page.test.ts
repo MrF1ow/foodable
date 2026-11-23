@@ -254,6 +254,56 @@ describe("renderRecipeDetailBody", () => {
         expect(cookAt).toBeGreaterThan(plan);
     });
 
+    test("a recipe with no upcoming plan shows no Planned line", () => {
+        const html = renderRecipeDetailBody({ ...viewBase });
+        expect(html).not.toContain("fd-recipe-planned");
+        expect(html).not.toContain("Planned");
+        expect(
+            renderRecipeDetailBody({ ...viewBase, planned: [] }),
+        ).not.toContain("fd-recipe-planned");
+    });
+
+    test("one upcoming plan reads Planned · day · meal under the title", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            planned: [{ date: "2026-11-26", slot: "dinner" }],
+        });
+        expect(html).toContain("Planned · Thu 26 Nov · dinner");
+        expect(html.indexOf("fd-recipe-planned")).toBeGreaterThan(
+            html.indexOf("fd-recipe-title"),
+        );
+        expect(html.indexOf("fd-recipe-planned")).toBeLessThan(
+            html.indexOf("fd-recipe-layout"),
+        );
+    });
+
+    test("two upcoming plans are listed compactly in order", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            planned: [
+                { date: "2026-11-26", slot: "dinner" },
+                { date: "2026-11-28", slot: "lunch" },
+            ],
+        });
+        expect(html).toContain(
+            "Planned · Thu 26 Nov · dinner, Sat 28 Nov · lunch",
+        );
+    });
+
+    test("more than four plans show the first four and a count", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            planned: ["01", "02", "03", "04", "05", "06"].map((d) => ({
+                date: `2026-12-${d}`,
+                slot: "dinner" as const,
+            })),
+        });
+        expect(html).toContain("Tue 1 Dec · dinner");
+        expect(html).toContain("Fri 4 Dec · dinner");
+        expect(html).not.toContain("Sat 5 Dec");
+        expect(html).toContain("+2 more");
+    });
+
     test("without a share view there is no Share button or sheet", () => {
         const html = renderRecipeDetailBody({ ...viewBase });
         expect(html).not.toContain("fd-recipe-share");
