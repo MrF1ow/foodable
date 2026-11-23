@@ -47,6 +47,8 @@ export type RecipesListV2View = {
     week?: WeekPlanView;
     /** The household's open notices; what the plan is missing shows under the week. */
     notices?: readonly Notice[];
+    /** Whether the viewer may dismiss a notice for the household. */
+    canDismissNotices?: boolean;
     /** Picking a recipe for this day (`?plan_date=`): each card's Plan goes to it. */
     planDate?: string;
     /** The headline of the inline import error card. */
@@ -376,7 +378,11 @@ ${sharedError}
                       ["plan.missing_ingredient"],
                       undefined,
                   ),
-                  { back: "/recipes", label: "Missing for the plan" },
+                  {
+                      back: "/recipes",
+                      label: "Missing for the plan",
+                      canDismiss: view.canDismissNotices === true,
+                  },
               ),
           )}`
         : "";

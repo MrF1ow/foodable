@@ -11731,6 +11731,56 @@ describe("the notification tools over HTTP", () => {
             (await client.callTool({ name, arguments: args })) as ToolResult;
 
     test.each(ERAS)(
+        "a row back from its snooze is unread in list_notices, as on the bell, and mark_notices_read clears it (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call = callOf(client);
+                await seed(call);
+                await call("mark_notices_read", { notification_ids: "all" });
+                expect((await inbox(call)).count).toBe(0);
+                // Read an hour ago, snoozed, and the snooze ended a minute ago.
+                const [row] = await db.notificationsStore.listForRecipient(
+                    "hh-1",
+                    "u1",
+                );
+                const now = Date.now();
+                await db.notificationsStore.update("hh-1", [row!.id], {
+                    readAt: new Date(now - 3_600_000).toISOString(),
+                    snoozedUntil: new Date(now - 60_000).toISOString(),
+                    snoozedBy: "u1",
+                });
+                const back = await inbox(call);
+                expect(back.count).toBe(1);
+                expect(
+                    back.notifications.find((n) => n.id === row!.id)!.read,
+                ).toBe(false);
+                expect(back.text).toContain("1 unread");
+
+                const byId = await call("mark_notices_read", {
+                    notification_ids: [row!.id],
+                });
+                expect(
+                    MARK_NOTICES_READ_OUTPUT_SCHEMA.parse(
+                        byId.structuredContent,
+                    ),
+                ).toEqual({ marked_read: 1 });
+                expect((await inbox(call)).count).toBe(0);
+
+                // And "all" clears it the same way.
+                await db.notificationsStore.update("hh-1", [row!.id], {
+                    readAt: new Date(now - 3_600_000).toISOString(),
+                });
+                expect((await inbox(call)).count).toBe(1);
+                const all = await call("mark_notices_read", {
+                    notification_ids: "all",
+                });
+                expect(all.structuredContent).toEqual({ marked_read: 1 });
+                expect((await inbox(call)).count).toBe(0);
+            });
+        },
+    );
+
+    test.each(ERAS)(
         "list_notices is the inbox: the three kinds, with their sentences and ids (%p)",
         async (era) => {
             await withHttpClient("u1", era, async (client) => {
@@ -11747,8 +11797,8 @@ describe("the notification tools over HTTP", () => {
                 expect(byKind.running_low).toMatchObject({
                     message: "Running low: Eggs (0 left, below 3)",
                     bucket: "household",
-                    // Its strip, with Add to list and Dismiss, is on Usuals.
-                    open: "/kitchen/usuals",
+                    // The same page the inbox's row opens.
+                    open: "/kitchen/groceries",
                 });
                 expect(byKind.weigh_in_due).toMatchObject({
                     message: "U1 hasn't weighed in for 9 days",

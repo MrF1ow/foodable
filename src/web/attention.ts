@@ -10,6 +10,7 @@ import { dismissedKeySet, isDismissedIn } from "../domain/notice-dismissals.js";
 import { NOTIFICATION_KINDS } from "../domain/notification-kinds.js";
 import {
     inboxFor,
+    isNewNotification,
     type Inbox,
     type NotificationRow,
     type NotificationsDeps,
@@ -191,25 +192,11 @@ export function liveInboxReadDeps(): InboxReadDeps {
     };
 }
 
-/** Whether a row counts as new to its person: never opened, or back from a
- * snooze that ended after they last opened it. The bell's dot and the inbox
- * both ask this, so they agree. */
-export function isNewInInbox(
-    row: Pick<NotificationRow, "readAt" | "snoozedUntil">,
-    now: Date,
-): boolean {
-    if (row.readAt === null) return true;
-    return (
-        row.snoozedUntil !== null &&
-        row.snoozedUntil <= now.toISOString() &&
-        row.readAt < row.snoozedUntil
-    );
-}
-
-/** The shown rows of an inbox that are new to its person. */
+/** The shown rows of an inbox that are new to its person (the domain's one
+ * rule, so the bell's dot, the inbox and the MCP agree). */
 export function newInboxRows(inbox: Inbox, now: Date): NotificationRow[] {
     return [...inbox.today, ...inbox.earlier].filter((row) =>
-        isNewInInbox(row, now),
+        isNewNotification(row, now),
     );
 }
 

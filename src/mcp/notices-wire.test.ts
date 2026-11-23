@@ -4,7 +4,7 @@ import { NOTICE_CODES, type NoticeCode } from "../domain/notices.js";
 import { noticeSentence } from "../copy/notices.js";
 import { eventSentence } from "../copy/notifications.js";
 import { noticeToWire, NOTICE_SCHEMA } from "./shared.js";
-import { kitchenUsualRowParts } from "../web/pages/v2/kitchen-usuals.js";
+import { notificationOpenHref } from "../web/pages/v2/notifications.js";
 import { APP_PATHS } from "../web/route-map.js";
 import { NOTIFICATION_SCHEMA, notificationToWire } from "./tools/notices.js";
 import {
@@ -800,7 +800,7 @@ test("an Allergens row names its item and opens that item's page, whichever kind
     expect(food.open).toBe("/foods/f-9");
 });
 
-test("a Running low row opens the page whose usual says low now", () => {
+test("a Running low row opens the same page from the MCP as from the inbox", () => {
     const notice: Notice = {
         code: "grocery.running_low",
         severity: "warn",
@@ -813,17 +813,6 @@ test("a Running low row opens the page whose usual says low now", () => {
             dismissScope: "",
         },
     };
-    // The page the row opens shows the usual in the warning colour, in place.
-    expect(
-        kitchenUsualRowParts({
-            productLabel: "",
-            storeId: null,
-            storeName: null,
-            amountLabel: null,
-            onList: false,
-            lowNow: true,
-        }),
-    ).toContainEqual({ text: "low now", tone: "warn" });
     const [row] = syncConditions({
         householdId: HH,
         notices: [notice],
@@ -832,8 +821,9 @@ test("a Running low row opens the page whose usual says low now", () => {
         now: INBOX_NOW,
     }).insert;
     expect(notificationToWire(row!, new Map(), true).open).toBe(
-        APP_PATHS.kitchenUsuals,
+        notificationOpenHref(row!),
     );
+    expect(notificationOpenHref(row!)).toBe(APP_PATHS.kitchenGroceries);
 });
 
 test("every notification kind opens the page that shows it", () => {
@@ -865,9 +855,8 @@ test("every notification kind opens the page that shows it", () => {
     expect(opens("food_expiring", "fridge_item", "fi-9")).toBe(
         "/kitchen/fridge",
     );
-    // The strip with Add to list and Dismiss is on the Usuals page (and the
-    // Fridge page); the Groceries page does not show a running-low usual.
-    expect(opens("running_low", "food", "f-9")).toBe("/kitchen/usuals");
+    // Where the inbox's own row opens.
+    expect(opens("running_low", "food", "f-9")).toBe("/kitchen/groceries");
     expect(opens("weigh_in_due", "member", "u-9")).toBe("/");
     expect(opens("recipe_changes", "recipe", "rec-9")).toBe("/recipes");
     // The week strip is on the Recipes page; a recipe's own page does not say
