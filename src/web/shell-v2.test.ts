@@ -17,6 +17,7 @@ import {
 import { FD_BARCODE_SCAN_SHEET_ID } from "./pages/v2/log-sheet.js";
 import {
     renderAppShell,
+    renderBarePage,
     type AppChrome,
     type AppTabId,
     type ShellIdentity,
@@ -90,7 +91,7 @@ describe("the shell", () => {
         expect(html).not.toContain("<aside");
         expect(html).toContain('<div class="fd-sidebar">');
         expect(html).toContain(
-            '<main class="app-main native fd-main"><a class="fd-account-chip"',
+            '<main class="app-main native fd-main"><div class="fd-cluster">',
         );
     });
 
@@ -129,6 +130,8 @@ describe("the shell", () => {
             "fd-side-dot",
             "fd-account",
             "fd-account-chip",
+            "fd-cluster",
+            "fd-bell",
             "fd-topbar",
             "fd-search",
             "fd-scan",
@@ -249,6 +252,78 @@ describe("the shell", () => {
         expect(v2Html({ active: "household", v2Active: "kitchen" })).toContain(
             "fd-account-chip",
         );
+    });
+
+    describe("the bell", () => {
+        const phoneBell = (html: string) =>
+            between(html, /<div class="fd-cluster">/, "</div>");
+        const topBar = (html: string) =>
+            between(html, /<header class="fd-topbar"/, "</header>");
+
+        test("a link to the inbox in the phone cluster, beside the account chip", () => {
+            const cluster = phoneBell(v2Html());
+            expect(cluster).toContain(
+                '<a class="fd-bell" href="/notifications" aria-label="Notifications" data-turbo-prefetch="false">',
+            );
+            expect(cluster.indexOf("fd-bell")).toBeLessThan(
+                cluster.indexOf("fd-account-chip"),
+            );
+        });
+
+        test("neither bell is prefetched on hover, since opening the inbox marks it read", () => {
+            const html = v2Html();
+            const bells = html.match(/<a class="fd-bell[^>]*>/g) ?? [];
+            expect(bells).toHaveLength(2);
+            for (const tag of bells) {
+                expect(tag).toContain('data-turbo-prefetch="false"');
+            }
+            // Prefetch stays on everywhere else.
+            expect(html).not.toContain('name="turbo-prefetch"');
+        });
+
+        test("in the desktop top bar, left of Log food", () => {
+            const top = topBar(v2Html());
+            expect(top).toContain('href="/notifications"');
+            expect(top.indexOf("fd-bell")).toBeLessThan(
+                top.indexOf("fd-logfood"),
+            );
+            // After the search field and the scan button.
+            expect(top.indexOf("fd-scan")).toBeLessThan(top.indexOf("fd-bell"));
+        });
+
+        test("no dot until something is new, then a dot and ', new' on both bells", () => {
+            const off = v2Html();
+            expect(off).not.toContain("fd-bell--unread");
+            expect(off).not.toContain("fd-bell__dot");
+            expect(v2Html({ notificationsUnread: false })).not.toContain(
+                "fd-bell--unread",
+            );
+            const on = v2Html({ notificationsUnread: true });
+            expect(on.match(/fd-bell--unread/g)).toHaveLength(2);
+            expect(on.match(/fd-bell__dot/g)).toHaveLength(2);
+            expect(phoneBell(on)).toContain('aria-label="Notifications, new"');
+            expect(topBar(on)).toContain('aria-label="Notifications, new"');
+            // A dot, never a number.
+            expect(on).not.toMatch(/fd-bell[^>]*>[^<]*\d/);
+        });
+
+        test("settings pages and Detail-bar pages have no phone cluster; the top bar keeps its bell", () => {
+            for (const over of [
+                { active: "household" } as const,
+                { active: "household", v2Active: "settings" } as const,
+                { active: "none", v2Detail: true } as const,
+            ]) {
+                const html = v2Html(over);
+                expect(html, JSON.stringify(over)).not.toContain("fd-cluster");
+                expect(topBar(html)).toContain("fd-bell");
+            }
+        });
+
+        test("never on a bare page", () => {
+            const html = renderBarePage("Not found", "<p>x</p>");
+            expect(html).not.toContain("fd-bell");
+            expect(html).not.toContain("/notifications");
+        });
     });
 
     test("account chip links to Settings, with the viewer's initials", () => {
@@ -472,9 +547,7 @@ describe("the shell", () => {
             );
             expect(bareH1).toContain("</nav><section>x</section></main>");
             const none = v2Html({ active: "fridge", body: "<p>x</p>" });
-            expect(none).toContain(
-                '"><a class="fd-account-chip" href="/settings" data-turbo="false" aria-label="Settings, signed in as Ethan Flow" title="Settings">EF</a><nav class="fd-kitchen-tabs"',
-            );
+            expect(none).toContain('</a></div><nav class="fd-kitchen-tabs"');
         });
     });
 

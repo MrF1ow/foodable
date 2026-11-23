@@ -124,3 +124,82 @@ export function notificationSentence(
         ? eventSentence(row, actorName)
         : conditionSentence(row);
 }
+
+/** The part of the app a kind is about: the first words of a row's subtitle. */
+export const NOTIFICATION_KIND_AREAS: Record<NotificationKind, string> = {
+    allergens: "Allergens",
+    food_expiring: "Fridge",
+    running_low: "Groceries",
+    weigh_in_due: "Weigh-in",
+    recipe_changes: "Recipes",
+    week_plan_changes: "Week plan",
+    new_usuals: "Usuals",
+};
+
+/** The second half of a row's subtitle: who else gets it. */
+export const NOTIFICATION_BUCKET_LABELS = {
+    household: "Household",
+    personal: "Just you",
+} as const;
+
+export const NOTIFICATIONS_PAGE = {
+    title: "Notifications",
+    back: "Back",
+    bellLabel: "Notifications",
+    filterLabel: "Whose notifications",
+    filterAll: "All",
+    filterPersonal: "Just me",
+    filterHousehold: "Household",
+    today: "Today",
+    earlier: "Earlier",
+    snoozed: "Snoozed",
+    emptyTitle: "Nothing to look at",
+    emptyBody: "New notifications show up here.",
+    open: "Open",
+    snoozeTomorrow: "Snooze until tomorrow",
+    snoozeWeek: "Snooze 1 week",
+    dismiss: "Dismiss",
+    dismissForMe: "Dismiss for me",
+    dismissForEveryone: "Dismiss for everyone",
+    turnOff: (kindLabel: string) => `Turn off “${kindLabel}”`,
+    actionsFor: (title: string) => `Actions for ${title}`,
+} as const;
+
+/** How the inbox words a row's title, shorter than the notice sentences: the
+ * name, then when. `daysLeft` is counted from today in the household's zone. */
+export const NOTIFICATION_TITLES = {
+    expires: (name: string, daysLeft: number): string => {
+        if (daysLeft < 0) return `${name} expired`;
+        if (daysLeft === 0) return `${name} expires today`;
+        if (daysLeft === 1) return `${name} expires tomorrow`;
+        return `${name} expires in ${daysLeft} days`;
+    },
+    expired: (name: string): string => `${name} expired`,
+    runningLow: (name: string): string => `${name} is running low`,
+    weighInDue: "Weigh-in due",
+} as const;
+
+/** The event rows, worded as the design words them: who, what they did, then
+ * (for the week plan) which day. `who` is a member's name, or "Someone". */
+export const NOTIFICATION_EVENT_TITLES = {
+    someone: "Someone",
+    recipeRemoved: (who: string, recipe: string): string =>
+        `${who} removed ${recipe}`,
+    planned: (who: string, recipe: string, day: string): string =>
+        `${who} planned ${recipe} for ${day}`,
+    unplanned: (who: string, recipe: string): string =>
+        `${who} took ${recipe} off the plan`,
+    moved: (who: string, recipe: string, day: string): string =>
+        `${who} moved ${recipe} to ${day}`,
+    newUsual: (who: string, food: string): string =>
+        `${who} added ${food} to the usuals`,
+} as const;
+
+/** How long ago an event row happened, the first words of its subtitle. */
+export const NOTIFICATION_AGO = {
+    justNow: "just now",
+    minutes: (n: number): string => `${n} min ago`,
+    hours: (n: number): string => `${n} h ago`,
+    yesterday: "yesterday",
+    days: (n: number): string => `${n} days ago`,
+} as const;

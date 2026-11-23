@@ -6,6 +6,7 @@ export const APP_PATHS = {
     settings: "/settings",
     settingsHelp: "/settings/help",
     needsAttention: "/needs-attention",
+    notifications: "/notifications",
     createHousehold: "/create-household",
     share: "/share",
     kitchenFridge: "/kitchen/fridge",

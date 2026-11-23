@@ -43,6 +43,8 @@ import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
 import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
+import { renderNotificationsPage } from "../src/web/pages/v2/notifications.js";
+import type { NotificationRow } from "../src/domain/notifications.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
@@ -109,11 +111,12 @@ function previewTrendsPage(chrome: ReturnType<typeof fixtureChrome>) {
     return renderTrendsV2Page(data);
 }
 
-function fixtureChrome(theme: "light" | "dark") {
+function fixtureChrome(theme: "light" | "dark", unread: boolean) {
     return {
         ...viewerChromeFromProfile({ theme }),
         attention: { count: 0, tabs: {} },
         flags: defaultViewerFlags(),
+        notificationsUnread: unread,
         identity: {
             viewerName: "Ethan Flow",
             viewerRole: "owner",
@@ -121,6 +124,102 @@ function fixtureChrome(theme: "light" | "dark") {
             memberCount: 2,
         },
     };
+}
+
+function notificationRow(
+    over: Partial<NotificationRow> & Pick<NotificationRow, "id">,
+): NotificationRow {
+    return {
+        householdId: H,
+        recipientUserId: ME.userId,
+        kind: "food_expiring",
+        bucket: "household",
+        source: "condition",
+        noticeKey: over.id,
+        subjectKind: "fridge_item",
+        subjectId: "fi-1",
+        actorUserId: null,
+        payload: {},
+        createdAt: "2026-11-10T08:00:00.000Z",
+        readAt: null,
+        snoozedUntil: null,
+        snoozedBy: null,
+        dismissedAt: null,
+        dismissedBy: null,
+        resolvedAt: null,
+        ...over,
+    };
+}
+
+/** The inbox as its owner sees it: an expiring row (every menu item), a
+ * personal weigh-in, an Allergens row (Open only) and a snoozed row. */
+function notificationsPage(chrome: ReturnType<typeof fixtureChrome>) {
+    const today = [
+        notificationRow({
+            id: "n-yogurt",
+            payload: {
+                code: "fridge.expiring",
+                params: {
+                    name: "Greek yogurt",
+                    amount: 1,
+                    unit: "each",
+                    expiresOn: "2026-11-11",
+                    daysLeft: 1,
+                    onGroceryList: "no",
+                },
+                related: [],
+            },
+        }),
+        notificationRow({
+            id: "n-weigh",
+            kind: "weigh_in_due",
+            bucket: "personal",
+            subjectKind: "member",
+            subjectId: ME.userId,
+            payload: {
+                code: "nutrition.weigh_in_due",
+                params: { name: "Ethan", days: 8 },
+                related: [],
+            },
+        }),
+        notificationRow({
+            id: "n-allergen",
+            kind: "allergens",
+            subjectKind: "recipe",
+            subjectId: "r1",
+            payload: {
+                code: "recipe.allergen",
+                params: { name: "Peanut noodles", allergens: ["peanut"] },
+                related: [],
+            },
+        }),
+    ];
+    const snoozed = [
+        notificationRow({
+            id: "n-spinach",
+            snoozedUntil: "2026-11-11T09:00:00.000Z",
+            payload: {
+                code: "fridge.expiring",
+                params: {
+                    name: "Spinach",
+                    amount: 1,
+                    unit: "bag",
+                    expiresOn: "2026-11-12",
+                    daysLeft: 2,
+                    onGroceryList: "no",
+                },
+                related: [],
+            },
+        }),
+    ];
+    return renderNotificationsPage({
+        chrome: chrome as never,
+        inbox: { unread: 0, today, earlier: [], snoozed },
+        bucket: "all",
+        canDismissEveryone: true,
+        timezone: "UTC",
+        now: new Date("2026-11-10T12:00:00.000Z"),
+    });
 }
 
 function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
@@ -165,8 +264,11 @@ function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
     } as never);
 }
 
-async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
-    const chrome = fixtureChrome(theme);
+async function pages(
+    theme: "light" | "dark",
+    unread: boolean,
+): Promise<Record<string, string>> {
+    const chrome = fixtureChrome(theme, unread);
     return {
         nutrition: renderTodayV2Page(
             buildPreviewTodayPageData(chrome as never, "2026-11-10"),
@@ -204,6 +306,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         help: renderSettingsHelpV2Page({ chrome: chrome as never }),
         "dev-gallery-v2": renderDevGalleryV2Page(chrome as never),
         household: householdPage(chrome),
+        notifications: notificationsPage(chrome),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
     };
@@ -218,9 +321,16 @@ await getAppJs();
 await getAppV2Css();
 await getAppV2Js();
 
+// Two renders of every page: with the bell's dot (something unread) and
+// without it (the inbox was opened), as the server answers before and after.
 for (const theme of ["light", "dark"] as const) {
-    for (const [name, html] of Object.entries(await pages(theme))) {
-        await Bun.write(`${OUT}/${name}-${theme}.html`, html);
+    for (const unread of [true, false]) {
+        for (const [name, html] of Object.entries(await pages(theme, unread))) {
+            await Bun.write(
+                `${OUT}/${name}-${theme}${unread ? "" : "-read"}.html`,
+                html,
+            );
+        }
     }
 }
 
@@ -236,6 +346,7 @@ const ROUTE_BASE: Record<string, string> = {
     "/settings/help": "help",
     "/dev/gallery-v2": "dev-gallery-v2",
     "/settings/household": "household",
+    "/notifications": "notifications",
     "/create-household": "create-household",
 };
 
@@ -246,9 +357,14 @@ function themeFileSuffix(): "light" | "dark" {
     return accountTheme ?? "light";
 }
 
+/** The bell's dot is on until the inbox is opened, as on the server, where
+ * opening it marks what it shows as read. */
+let inboxUnread = true;
+
 function routeHtmlFile(pathname: string): string {
     const base = ROUTE_BASE[pathname] || "fridge";
-    return `${base}-${themeFileSuffix()}.html`;
+    if (pathname === "/notifications") inboxUnread = false;
+    return `${base}-${themeFileSuffix()}${inboxUnread ? "" : "-read"}.html`;
 }
 
 function applyAccountTheme(html: string): string {
@@ -337,6 +453,8 @@ const server = Bun.serve({
                 loginPath = url.searchParams.get("loginpath") || "";
             if (url.searchParams.has("delay"))
                 postDelay = Number(url.searchParams.get("delay"));
+            if (url.searchParams.has("unread"))
+                inboxUnread = url.searchParams.get("unread") !== "0";
             if (url.searchParams.get("reset") === "posts") posts.length = 0;
             if (url.searchParams.get("reset") === "search")
                 searchHits.length = 0;
@@ -362,6 +480,7 @@ const server = Bun.serve({
                 postDelay,
                 sessionMode,
                 accountTheme,
+                inboxUnread,
             });
         }
         if (
