@@ -1863,6 +1863,8 @@ export async function renderRecipesListPage(
             totalCount: recipes.length,
             week,
             notices: noticeResult.notices,
+            canDismissNotices: can(gate.viewer, "notification.dismiss_everyone")
+                .ok,
             planDate:
                 opts.planDate && isPlanDate(opts.planDate)
                     ? opts.planDate

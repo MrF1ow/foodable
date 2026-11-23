@@ -534,8 +534,25 @@ export function fanOutEvent(input: {
         }));
 }
 
+/** Whether a row counts as new to its person: never opened, or back from a
+ * snooze that ended after they last opened it. The one rule for "unread": the
+ * bell's dot, the inbox, `list_notices` and `markRead` all ask it, so marking
+ * read clears whatever made a row new. */
+export function isNewNotification(
+    row: Pick<NotificationRow, "readAt" | "snoozedUntil">,
+    now: Date,
+): boolean {
+    if (row.readAt === null) return true;
+    return (
+        row.snoozedUntil !== null &&
+        row.snoozedUntil <= now.toISOString() &&
+        row.readAt < row.snoozedUntil
+    );
+}
+
 export type Inbox = {
-    /** Visible rows nobody has read yet, snoozed ones not counted. */
+    /** Visible rows that are new (`isNewNotification`), snoozed ones not
+     * counted. */
     unread: number;
     today: NotificationRow[];
     earlier: NotificationRow[];
@@ -596,7 +613,7 @@ export function inboxFor(input: {
         row.snoozedUntil !== null && row.snoozedUntil > nowIso;
     const shown = visible.filter((r) => !waiting(r)).sort(newestFirst);
     return {
-        unread: shown.filter((r) => r.readAt === null).length,
+        unread: shown.filter((r) => isNewNotification(r, input.now)).length,
         today: shown.filter((r) => dateInTz(r.createdAt, tz) === today),
         earlier: shown.filter((r) => dateInTz(r.createdAt, tz) !== today),
         snoozed: visible
@@ -886,9 +903,10 @@ export async function snooze(
     return [...others, ...own];
 }
 
-/** Mark the actor's own rows read: the named ids, or `"all"`, every unread row
+/** Mark the actor's own rows read: the named ids, or `"all"`, every new row
  * the inbox shows (not snoozed, not a kind they turned off, not dismissed). A
- * row already read keeps its first read time. Returns the rows it changed. */
+ * row that is not new keeps its read time; one back from a snooze is stamped
+ * again, so it stops counting as new. Returns the rows it changed. */
 export async function markRead(
     deps: NotificationsDeps,
     input: {
@@ -935,7 +953,7 @@ export async function markRead(
         }
     }
     const unread = rows
-        .filter((r) => r.readAt === null && r.resolvedAt === null)
+        .filter((r) => r.resolvedAt === null && isNewNotification(r, input.now))
         .map((r) => r.id);
     if (unread.length === 0) return [];
     return deps.store.update(input.householdId, unread, {

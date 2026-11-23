@@ -11,6 +11,7 @@ import {
     dismiss,
     fanOutEvent,
     inboxFor,
+    isNewNotification,
     inboxKindForNotice,
     kindEnabled,
     markRead,
@@ -1876,6 +1877,67 @@ describe("markRead", () => {
         expect((await store.get(HOUSEHOLD, miaRows[0]!.id))!.readAt).toBe(
             NOW.toISOString(),
         );
+    });
+});
+
+describe("a row back from its snooze", () => {
+    const readAt = "2026-11-20T09:00:00.000Z";
+    const snoozedUntil = "2026-11-21T09:00:00.000Z";
+
+    test("is new: the inbox counts it unread and isNewNotification agrees", () => {
+        const back = openRow({
+            noticeKey: "event:back",
+            readAt,
+            snoozedUntil,
+        });
+        const plainRead = openRow({ noticeKey: "event:read", readAt });
+        expect(isNewNotification(back, NOW)).toBe(true);
+        expect(isNewNotification(plainRead, NOW)).toBe(false);
+        // Still waiting: not back yet, so not new.
+        expect(
+            isNewNotification(back, new Date("2026-11-21T08:00:00.000Z")),
+        ).toBe(false);
+        const inbox = inboxFor({
+            rows: [back, plainRead],
+            prefs: [],
+            now: NOW,
+            householdDismissals: [],
+            timezone: "UTC",
+        });
+        expect(inbox.unread).toBe(1);
+    });
+
+    test("markRead stamps it again, by id and by all, so it stops counting", async () => {
+        for (const ids of ["byId", "all"] as const) {
+            const store = createMemoryNotificationsStore();
+            const dismissals = createMemoryNoticeDismissalsStore();
+            const deps = { store, dismissals };
+            const row = openRow({
+                noticeKey: "event:back",
+                source: "event",
+                readAt,
+                snoozedUntil,
+            });
+            await store.insertMany([row]);
+            const changed = await markRead(deps, {
+                householdId: HOUSEHOLD,
+                actor: { userId: MIA, role: "member" },
+                ids: ids === "all" ? "all" : [row.id],
+                now: NOW,
+            });
+            expect(changed.map((r) => r.id)).toEqual([row.id]);
+            const after = (await store.get(HOUSEHOLD, row.id))!;
+            expect(after.readAt).toBe(NOW.toISOString());
+            expect(isNewNotification(after, NOW)).toBe(false);
+            const inbox = inboxFor({
+                rows: [after],
+                prefs: [],
+                now: NOW,
+                householdDismissals: [],
+                timezone: "UTC",
+            });
+            expect(inbox.unread).toBe(0);
+        }
     });
 });
 

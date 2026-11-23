@@ -81,6 +81,7 @@ describe("noticeStrip", () => {
     test("a row shows the short sentence and keeps the full one as the dismiss label", () => {
         const html = String(
             noticeStrip([low, missing, weighIn(ME, "Alex")], {
+                canDismiss: true,
                 back: "/",
                 viewerUserId: ME,
                 label: "Notices",
@@ -112,20 +113,31 @@ describe("noticeStrip", () => {
             },
         };
         const html = String(
-            noticeStrip([expiring], { back: "/", label: "Soon" }),
+            noticeStrip([expiring], {
+                canDismiss: true,
+                back: "/",
+                label: "Soon",
+            }),
         );
         expect(rowTexts(html)).toEqual([noticeSentence(expiring)]);
     });
 
     test("nothing to say renders nothing", () => {
         expect(
-            String(noticeStrip([], { back: "/", label: "Running low" })),
+            String(
+                noticeStrip([], {
+                    canDismiss: true,
+                    back: "/",
+                    label: "Running low",
+                }),
+            ),
         ).toBe("");
     });
 
     test("a row has the registry sentence, an Add to list form and a dismiss with the notice's own key", () => {
         const html = String(
             noticeStrip([low], {
+                canDismiss: true,
                 back: "/kitchen/usuals",
                 label: "Running low",
             }),
@@ -142,9 +154,25 @@ describe("noticeStrip", () => {
         expect(html).toContain('name="related_id" value="2026-11-01"');
     });
 
+    test("a viewer who can't dismiss for the household gets no Dismiss", () => {
+        const html = String(
+            noticeStrip([missing], {
+                back: "/recipes",
+                label: "Missing",
+                canDismiss: false,
+            }),
+        );
+        expect(html).toContain('action="/notices/plan.missing_ingredient/act"');
+        expect(html).not.toContain('action="/notices/dismiss"');
+    });
+
     test("the plan row's Add posts the food only: no amount travels in the form", () => {
         const html = String(
-            noticeStrip([missing], { back: "/recipes", label: "Missing" }),
+            noticeStrip([missing], {
+                canDismiss: true,
+                back: "/recipes",
+                label: "Missing",
+            }),
         );
         expect(html).toContain('action="/notices/plan.missing_ingredient/act"');
         expect(html).toContain(">Add</button>");
@@ -155,6 +183,7 @@ describe("noticeStrip", () => {
     test("the weigh-in row opens the weigh-in sheet, and only for the viewer", () => {
         const own = String(
             noticeStrip([weighIn(ME, "Alex")], {
+                canDismiss: true,
                 back: "/",
                 viewerUserId: ME,
                 label: "Weigh-in",
@@ -169,6 +198,7 @@ describe("noticeStrip", () => {
         // Someone else's reminder has no sheet to open: the sentence stands alone.
         const other = String(
             noticeStrip([weighIn(SAM, "Sam")], {
+                canDismiss: true,
                 back: "/",
                 viewerUserId: ME,
                 label: "Weigh-in",
@@ -259,6 +289,7 @@ describe("where the one-tap notices show", () => {
             totalCount: 0,
             week,
             notices: [low, missing],
+            canDismissNotices: true,
         } as never);
         expect(html).toContain("Flour, 250 g, missing for Pancakes");
         expect(html).toContain('name="back" value="/recipes"');
@@ -266,6 +297,20 @@ describe("where the one-tap notices show", () => {
         expect(html.indexOf("fd-plan-strip")).toBeLessThan(
             html.indexOf("Flour, 250 g"),
         );
+        // A plain member keeps Add but gets no Dismiss: it is for everyone.
+        const memberHtml = renderRecipesListBody({
+            chrome,
+            query: "",
+            filter: "all",
+            cards: [],
+            totalCount: 0,
+            week,
+            notices: [missing],
+        } as never);
+        expect(memberHtml).toContain(
+            'action="/notices/plan.missing_ingredient/act"',
+        );
+        expect(memberHtml).not.toContain('action="/notices/dismiss"');
     });
 
     test("Today draws no notice card, strip or action, on the desktop or the phone", () => {

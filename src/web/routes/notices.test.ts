@@ -38,6 +38,11 @@ import { createMemoryRulesStore } from "../../domain/rules.js";
 import { createMemoryStockStore } from "../../domain/stock.js";
 import { utcTodayFromDate } from "../../domain/stock.js";
 import { noticesFor } from "../../domain/notices-for.js";
+import {
+    dismissalKey,
+    dismissalKeyString,
+} from "../../domain/notice-dismissals.js";
+import { inboxFor, type NotificationRow } from "../../domain/notifications.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
@@ -56,6 +61,7 @@ const realDbWeighIns = { ...actualDbWeighIns };
 const realFoods = { ...actualFoods };
 
 const ALICE = "11111111-1111-4111-8111-111111111111";
+const MIA = "22222222-2222-4222-8222-222222222222";
 const HH = "hh-1";
 const HH_OTHER = "hh-other";
 
@@ -77,10 +83,10 @@ const db = {
         {
             householdId: HH,
             userId: ALICE,
-            role: "owner" as const,
+            role: "owner",
             displayName: "Alice",
         },
-    ],
+    ] as actualDbHousehold.HouseholdMembership[],
     household: {
         name: "Home",
         recipeSearchPlaces: [] as string[],
@@ -270,11 +276,15 @@ beforeEach(() => {
 });
 
 describe("one-tap notice routes", () => {
-    function post(path: string, fields: Record<string, string>) {
+    function post(
+        path: string,
+        fields: Record<string, string>,
+        as: string = ALICE,
+    ) {
         return app().request(`http://x${path}`, {
             method: "POST",
             headers: {
-                cookie: cookieFor(ALICE),
+                cookie: cookieFor(as),
                 "content-type": "application/x-www-form-urlencoded",
             },
             body: new URLSearchParams(fields).toString(),
@@ -464,10 +474,10 @@ describe("one-tap notice routes", () => {
         expect(await db.groceryStore.listLines(HH)).toEqual([]);
         expect(await db.groceryStore.listLines(HH_OTHER)).toEqual([]);
         const dismissed = await post("/notices/dismiss", {
-            code: "grocery.running_low",
+            code: "plan.missing_ingredient",
             subject_kind: "food",
             subject_id: theirs.id,
-            related_id: "",
+            related_id: crypto.randomUUID(),
             back: "/",
         });
         expect(dismissed.status).toBe(303);
@@ -506,7 +516,7 @@ describe("one-tap notice routes", () => {
         expect(res.status).toBe(404);
     });
 
-    test("dismiss: each of the three goes away until its scope changes", async () => {
+    test("dismiss: what the plan is missing goes away; the inbox's codes are refused here", async () => {
         const eggs = await seed();
         const { flour, plan } = await planFlour();
         const lastWeighedOn = weighedLongAgo();
@@ -516,44 +526,146 @@ describe("one-tap notice routes", () => {
             "nutrition.weigh_in_due",
             "plan.missing_ingredient",
         ]);
-        const cases = [
+        const res = await post("/notices/dismiss", {
+            code: "plan.missing_ingredient",
+            subject_kind: "food",
+            subject_id: flour.id,
+            related_id: plan.id,
+            back: "/recipes",
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/recipes");
+        expect(toastOf(res)).toBeNull();
+        // The inbox carries these two: it is where they are dismissed.
+        for (const [code, kind, id, related] of [
             ["grocery.running_low", "food", eggs.id, ""],
-            ["plan.missing_ingredient", "food", flour.id, plan.id],
             ["nutrition.weigh_in_due", "member", ALICE, lastWeighedOn],
-        ] as const;
-        for (const [code, kind, id, related] of cases) {
-            const res = await post("/notices/dismiss", {
+        ] as const) {
+            const refused = await post("/notices/dismiss", {
                 code,
                 subject_kind: kind,
                 subject_id: id,
                 related_id: related,
                 back: "/recipes",
             });
-            expect(res.status).toBe(303);
-            expect(res.headers.get("location")).toBe("/recipes");
-            expect(toastOf(res)).toBeNull();
+            expect(refused.status).toBe(303);
+            expect(toastOf(refused)?.key).toBe("notice.error");
         }
-        expect(await open()).toEqual([]);
-        // A newer weigh-in brings the reminder back once it is due again.
-        db.weighInStore = createMemoryWeighInStore([
-            {
-                userId: ALICE,
-                displayName: "Alice",
-                lastLoggedAt: `${addDaysUtc(utcTodayFromDate(), -8)}T12:00:00Z`,
-            },
-        ]);
-        expect((await open()).map((n) => n.code)).toEqual([
+        expect((await open()).map((n) => n.code).sort()).toEqual([
+            "grocery.running_low",
             "nutrition.weigh_in_due",
         ]);
+        expect(await db.dismissalsStore.listForHousehold(HH)).toHaveLength(1);
+    });
+
+    test("dismiss: a member's hand-made POST with an inbox code is refused, and the household's inbox is unchanged", async () => {
+        db.members.push({
+            householdId: HH,
+            userId: MIA,
+            role: "member",
+            displayName: "Mia",
+        });
+        const eggs = await seed();
+        const [low] = (await open()).filter(
+            (n) => n.code === "grocery.running_low",
+        );
+        // Alice's inbox row for the same condition the POST names.
+        const row: NotificationRow = {
+            id: "n-low",
+            householdId: HH,
+            recipientUserId: ALICE,
+            kind: "running_low",
+            bucket: "household",
+            source: "condition",
+            noticeKey: dismissalKeyString(dismissalKey(low!)),
+            subjectKind: "food",
+            subjectId: eggs.id,
+            actorUserId: null,
+            payload: {},
+            createdAt: new Date().toISOString(),
+            readAt: null,
+            snoozedUntil: null,
+            snoozedBy: null,
+            dismissedAt: null,
+            dismissedBy: null,
+            resolvedAt: null,
+        };
+        const inbox = async () =>
+            inboxFor({
+                rows: [row],
+                prefs: [],
+                now: new Date(),
+                householdDismissals:
+                    await db.dismissalsStore.listForHousehold(HH),
+                timezone: "UTC",
+            });
+        const before = await inbox();
+        expect(before.today.map((r) => r.id)).toEqual(["n-low"]);
+        const res = await post(
+            "/notices/dismiss",
+            {
+                code: "grocery.running_low",
+                subject_kind: "food",
+                subject_id: eggs.id,
+                related_id: low!.params.dismissScope as string,
+                back: "/",
+            },
+            MIA,
+        );
+        expect(res.status).toBe(303);
+        expect(toastOf(res)?.key).toBe("notice.error");
+        expect(await db.dismissalsStore.listForHousehold(HH)).toEqual([]);
+        expect(await inbox()).toEqual(before);
+    });
+
+    test("dismiss: a member can't dismiss what the plan is missing for the household", async () => {
+        db.members.push({
+            householdId: HH,
+            userId: MIA,
+            role: "member",
+            displayName: "Mia",
+        });
+        const { flour, plan } = await planFlour();
+        const res = await post(
+            "/notices/dismiss",
+            {
+                code: "plan.missing_ingredient",
+                subject_kind: "food",
+                subject_id: flour.id,
+                related_id: plan.id,
+                back: "/recipes",
+            },
+            MIA,
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/recipes");
+        const toast = toastOf(res);
+        expect(toast?.key).toBe("notice.error");
+        expect(toast?.params?.message).toBe(
+            "Only the household owner or an admin can do that.",
+        );
+        expect(await db.dismissalsStore.listForHousehold(HH)).toEqual([]);
+        expect((await open()).map((n) => n.code)).toEqual([
+            "plan.missing_ingredient",
+        ]);
+        // Add still works for a member.
+        await createGroceryStore(db.settingsStore, HH, "Safeway");
+        const add = await post(
+            "/notices/plan.missing_ingredient/act",
+            { subject_id: flour.id, back: "/recipes" },
+            MIA,
+        );
+        expect(add.status).toBe(303);
+        expect((await open()).map((n) => n.code)).toEqual([]);
     });
 
     test("dismiss: a second tap is idempotent, and one that is not open says so", async () => {
-        const eggs = await seed();
+        const { flour, plan } = await planFlour();
         const fields = {
-            code: "grocery.running_low",
+            code: "plan.missing_ingredient",
             subject_kind: "food",
-            subject_id: eggs.id,
-            related_id: "",
+            subject_id: flour.id,
+            related_id: plan.id,
             back: "/",
         };
         await post("/notices/dismiss", fields);
@@ -604,20 +716,21 @@ describe("one-tap notice routes", () => {
             back: "/?date=2026-11-03",
         });
         expect(res.headers.get("location")).toBe("/?date=2026-11-03");
+        const { flour, plan } = await planFlour();
         const dismissed = await post("/notices/dismiss", {
-            code: "grocery.running_low",
+            code: "plan.missing_ingredient",
             subject_kind: "food",
-            subject_id: eggs.id,
-            related_id: "",
+            subject_id: flour.id,
+            related_id: plan.id,
             back: "/?date=2026-11-03",
         });
         expect(dismissed.headers.get("location")).toBe("/?date=2026-11-03");
         for (const back of ["/?date=nope", "/?date=2026-11-03&x=1", "/?x=1"]) {
             const bad = await post("/notices/dismiss", {
-                code: "grocery.running_low",
+                code: "plan.missing_ingredient",
                 subject_kind: "food",
-                subject_id: eggs.id,
-                related_id: "",
+                subject_id: flour.id,
+                related_id: plan.id,
                 back,
             });
             expect(bad.headers.get("location")).toBe("/");
@@ -625,12 +738,12 @@ describe("one-tap notice routes", () => {
     });
 
     test("POST /notices/dismiss works from Recipes: it dismisses and goes back to Recipes", async () => {
-        const eggs = await seed();
+        const { flour, plan } = await planFlour();
         const res = await post("/notices/dismiss", {
-            code: "grocery.running_low",
+            code: "plan.missing_ingredient",
             subject_kind: "food",
-            subject_id: eggs.id,
-            related_id: "",
+            subject_id: flour.id,
+            related_id: plan.id,
             back: "/recipes",
         });
         expect(res.status).toBe(303);
@@ -647,11 +760,12 @@ describe("one-tap notice routes", () => {
             back: "/needs-attention",
         });
         expect(res.headers.get("location")).toBe("/");
+        const { flour, plan } = await planFlour();
         const dismissed = await post("/notices/dismiss", {
-            code: "grocery.running_low",
+            code: "plan.missing_ingredient",
             subject_kind: "food",
-            subject_id: eggs.id,
-            related_id: "",
+            subject_id: flour.id,
+            related_id: plan.id,
             back: "/needs-attention",
         });
         expect(dismissed.headers.get("location")).toBe("/");

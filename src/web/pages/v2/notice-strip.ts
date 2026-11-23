@@ -124,6 +124,9 @@ export function noticeStrip(
         viewerUserId?: string;
         label: string;
         className?: string;
+        /** Whether the viewer may dismiss for the household (the strip's
+         * Dismiss is for everyone); without it the row has no Dismiss. */
+        canDismiss: boolean;
     },
 ): Html {
     if (notices.length === 0) return raw("");
@@ -138,7 +141,7 @@ export function noticeStrip(
                 button: "fd-notice-strip__action",
                 form: "fd-notice-strip__action-form",
             });
-            return `<li class="fd-notice-strip__row" data-notice="${esc(notice.code)}"><span class="${dotClass(notice)}" aria-hidden="true"></span><span class="fd-notice-strip__text">${esc(noticeShortSentence(notice, { viewerUserId: opts.viewerUserId }) ?? noticeSentence(notice))}</span>${action}${noticeDismissControl(notice, opts.back)}</li>`;
+            return `<li class="fd-notice-strip__row" data-notice="${esc(notice.code)}"><span class="${dotClass(notice)}" aria-hidden="true"></span><span class="fd-notice-strip__text">${esc(noticeShortSentence(notice, { viewerUserId: opts.viewerUserId }) ?? noticeSentence(notice))}</span>${action}${opts.canDismiss ? noticeDismissControl(notice, opts.back) : ""}</li>`;
         })
         .join("");
     const extra = opts.className ? ` ${esc(opts.className)}` : "";

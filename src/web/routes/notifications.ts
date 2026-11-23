@@ -166,33 +166,19 @@ export function createNotificationsRoutes(
         // A HEAD or a speculative fetch has not shown the page to anyone, so
         // it must not clear the dot.
         if (outcome.error === undefined && !outcome.unseen) {
-            const fresh = newInboxRows(inbox, now);
-            // A row back from its snooze already carries a read time, which
-            // the domain's markRead keeps: stamp it again so the dot clears
-            // until the next snooze ends.
-            const returned = fresh
-                .filter((row) => row.readAt !== null)
-                .map((row) => row.id);
-            const unread = fresh
-                .filter((row) => row.readAt === null)
-                .map((row) => row.id);
+            // markRead stamps every new row, one back from its snooze too,
+            // so the dot clears until the next snooze ends.
+            const fresh = newInboxRows(inbox, now).map((row) => row.id);
             // Marking read is a courtesy to the dot: a row gone since the
             // list, or a store error, must not take the inbox down.
             try {
-                if (unread.length > 0) {
+                if (fresh.length > 0) {
                     await markRead(deps.notifications, {
                         householdId: viewer.householdId,
                         actor: actorOf(viewer),
-                        ids: unread,
+                        ids: fresh,
                         now,
                     });
-                }
-                if (returned.length > 0) {
-                    await deps.notifications.store.update(
-                        viewer.householdId,
-                        returned,
-                        { readAt: now.toISOString() },
-                    );
                 }
             } catch (err) {
                 const message =

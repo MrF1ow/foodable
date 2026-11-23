@@ -37,6 +37,7 @@ import {
 import {
     dismiss,
     inboxFor,
+    isNewNotification,
     markRead,
     NotificationActionError,
     resolveSnoozeUntil,
@@ -134,9 +135,8 @@ function openPath(row: NotificationRow): string {
         case "food_expiring":
             return APP_PATHS.kitchenFridge;
         case "running_low":
-            // The strip with Add to list and Dismiss is on the Usuals and
-            // Fridge pages; the Groceries page does not show it.
-            return APP_PATHS.kitchenUsuals;
+            // Where the inbox's own row opens.
+            return APP_PATHS.kitchenGroceries;
         case "weigh_in_due":
             return APP_PATHS.nutrition;
         case "allergens":
@@ -191,7 +191,7 @@ export function notificationToWire(
         bucket: row.bucket,
         message: notificationSentence(row, actorName),
         created_at: row.createdAt,
-        read: row.readAt !== null,
+        read: !isNewNotification(row, now),
         snoozed_until: snoozedUntil,
         can_dismiss_for_everyone:
             row.bucket === "household" &&

@@ -1,7 +1,7 @@
 /**
  * The one-tap notices of the new app: acting on a usual running low or on what
- * a planned recipe is missing, and dismissing any of the three (those and the
- * weigh-in reminder). Both routes only adapt: the write is `actOnNotice` /
+ * a planned recipe is missing, and dismissing for the household a notice the
+ * inbox does not carry (what the plan is missing). Both routes only adapt: the write is `actOnNotice` /
  * `dismissNotice`, which look the notice up again for this household and do
  * nothing for one that is no longer open. Opening the weigh-in sheet needs no
  * route (the sheet is on the page).
@@ -27,8 +27,10 @@ import {
     isActionableNoticeCode,
     type NoticeActionDeps,
 } from "../../domain/notice-actions.js";
+import { kindForNoticeCode } from "../../domain/notification-kinds.js";
 import { dismissNotice } from "../../domain/notices-for.js";
 import { NOTICE_CODES, type NoticeCode } from "../../domain/notices.js";
+import { can } from "../../domain/permissions.js";
 import { redirectWithToast } from "../components/toast.js";
 import { formText } from "../form.js";
 import { requireMember, siteMember } from "../middleware.js";
@@ -105,6 +107,10 @@ noticeActionRoutes.post("/notices/:code/act", requireMember, async (c) => {
  * Dismisses an open notice in place, with the key the notice itself carries
  * (code, subject, and the plan or day the dismissal is held for), and returns
  * to the page it was on. Nothing else about the notice changes.
+ *
+ * The dismissal is for the whole household, so it takes the same permission
+ * as the inbox's "dismiss for everyone". A code the inbox carries is refused:
+ * the inbox is where it is dismissed, per person or for everyone.
  */
 noticeActionRoutes.post("/notices/dismiss", requireMember, async (c) => {
     const member = siteMember(c);
@@ -123,6 +129,20 @@ noticeActionRoutes.post("/notices/dismiss", requireMember, async (c) => {
         if (!(err instanceof NoticeDismissError)) throw err;
         return redirectWithToast(c, back, "notice.error", {
             message: err.message,
+        });
+    }
+    if (kindForNoticeCode(code) !== null) {
+        return redirectWithToast(c, back, "notice.error", {
+            message: "Dismiss that one from Notifications.",
+        });
+    }
+    const allowed = can(
+        { userId: member.userId, role: member.role },
+        "notification.dismiss_everyone",
+    );
+    if (!allowed.ok) {
+        return redirectWithToast(c, back, "notice.error", {
+            message: allowed.reason,
         });
     }
     const clock = await householdClock(member.householdId);
