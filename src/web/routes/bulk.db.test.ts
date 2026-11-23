@@ -164,7 +164,7 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
                 ["return_to", "/kitchen/fridge"],
             ]);
             expect(res.status).toBe(303);
-            expect(toastKey(res)).toBe("fridge.items.discarded");
+            expect(toastKey(res)).toBeNull();
             const left = await sql`
                 select id from public.fridge_items where household_id = ${householdId}
             `;
@@ -212,7 +212,7 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
                 ["return_to", "/kitchen/usuals"],
             ]);
             expect(res.status).toBe(303);
-            expect(toastKey(res)).toBe("usuals.removed");
+            expect(toastKey(res)).toBeNull();
             const [row] = await sql`
                 select generic_food_id from public.foods where id = ${product.id}
             `;
@@ -234,7 +234,7 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
                 ["return_to", "/kitchen/usuals"],
             ]);
             expect(res.status).toBe(303);
-            expect(toastKey(res)).toBe("usuals.removed");
+            expect(toastKey(res)).toBeNull();
             const [row] = await sql`
                 select usual_added_at from public.foods where id = ${typed.id}
             `;
@@ -292,7 +292,7 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
             ]);
             expect(res.status).toBe(303);
             expect(res.headers.get("location")).toBe("/settings/saved");
-            expect(toastKey(res)).toBe("settings.saved.deleted");
+            expect(toastKey(res)).toBeNull();
             const [food] = await sql`
                 select archived_at from public.foods where id = ${oats}
             `;

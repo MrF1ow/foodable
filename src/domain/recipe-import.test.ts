@@ -1,11 +1,13 @@
 import { join } from "node:path";
 import { test, expect, describe } from "bun:test";
+import { IMPORT_MESSAGES } from "../copy/recipe-import.js";
 import { TOASTS } from "../copy/toasts.js";
 import type { FetchFailure, SafeFetcher } from "../fetch-safe.js";
 import { createMemoryFoodsStore, findOrCreateManualFood } from "./foods.js";
 import {
     importOutcomeMessage,
-    importOutcomeToastKey,
+    importOutcomeMessageKey,
+    importOutcomeParts,
     importRecipeFromUrl,
     importRecipeFromSharedText,
     importRecipeFromUrlAnalyticsOutcome,
@@ -410,42 +412,193 @@ const ALL_IMPORT_STATUSES: RecipeImportStatus[] = [
     "invalid_link",
 ];
 
-test("importOutcomeToastKey uses paste_needed_reader when reader failed", () => {
-    const key = importOutcomeToastKey({
-        status: "paste_needed",
-        recipeId: null,
-        recipeName: null,
-        verification: "unverified",
+function importOutcome(
+    status: RecipeImportStatus,
+    over: Partial<RecipeImportOutcome> = {},
+): RecipeImportOutcome {
+    return {
+        status,
+        recipeId: status === "duplicate" ? "r-dup" : "r1",
+        recipeName: "Test Soup",
+        verification: status === "imported" ? "verified" : "unverified",
         problems: [],
         source: {
-            kind: "instagram",
-            url: "https://www.instagram.com/p/x/",
-            label: "Instagram",
+            kind: "website",
+            url: "https://example.com/r",
+            label: "example.com",
         },
         unresolvedLines: [],
-        readerFailure: "Could not read caption.",
+        readerFailure: null,
         fromMemory: false,
         rememberedUntil: null,
+        ...over,
+    };
+}
+
+const twoProblems: RecipeImportOutcome["problems"] = [
+    {
+        code: "ingredient_no_amount",
+        message: "x",
+        ingredientId: "i1",
+        line: null,
+    },
+    {
+        code: "ingredient_no_amount",
+        message: "y",
+        ingredientId: "i2",
+        line: null,
+    },
+];
+const oneProblem = twoProblems.slice(0, 1);
+const instagram = {
+    kind: "instagram",
+    url: "https://www.instagram.com/p/x/",
+    label: "Instagram",
+} as const;
+
+// The text of every outcome, word for word: the web import sheet shows it
+// inline and the MCP import tools return it as `message`, and neither may
+// drift when the copy moves between files.
+const OUTCOME_MESSAGES: [string, RecipeImportOutcome, string][] = [
+    [
+        "imported",
+        importOutcome("imported"),
+        "Imported Test Soup from example.com.",
+    ],
+    [
+        "unverified, two ingredients",
+        importOutcome("unverified_needs_review", { problems: twoProblems }),
+        "Imported as unverified: 2 ingredients need checking.",
+    ],
+    [
+        "unverified, one ingredient",
+        importOutcome("unverified_needs_review", { problems: oneProblem }),
+        "Imported as unverified: 1 ingredient needs checking.",
+    ],
+    [
+        "paste needed, social",
+        importOutcome("paste_needed", { source: instagram }),
+        "Paste the Instagram caption below.",
+    ],
+    [
+        "paste needed, website",
+        importOutcome("paste_needed"),
+        "Paste the recipe from example.com below.",
+    ],
+    [
+        "paste needed, reader failed",
+        importOutcome("paste_needed", {
+            source: instagram,
+            readerFailure: "Could not read caption.",
+        }),
+        "Paste the Instagram caption below. Could not read caption.",
+    ],
+    [
+        "no recipe in text",
+        importOutcome("no_recipe_in_text"),
+        "This caption doesn't contain a recipe. If it's in the photos, type it in or send a screenshot to your agent.",
+    ],
+    [
+        "no recipe on page",
+        importOutcome("no_recipe_on_page"),
+        "This page doesn't publish its recipe in a form we can read. Paste the recipe instead.",
+    ],
+    [
+        "robots disallowed",
+        importOutcome("robots_disallowed"),
+        "This site asks apps not to read this page. Paste the recipe instead.",
+    ],
+    [
+        "site refused",
+        importOutcome("site_refused"),
+        "The site refused the request. Paste the recipe instead.",
+    ],
+    [
+        "site refused, remembered",
+        importOutcome("site_refused", { fromMemory: true }),
+        "This site refused Foodable recently. Paste the recipe instead.",
+    ],
+    [
+        "not found",
+        importOutcome("not_found"),
+        "That page doesn't exist anymore.",
+    ],
+    [
+        "not found, remembered",
+        importOutcome("not_found", { fromMemory: true }),
+        "That page doesn't exist anymore.",
+    ],
+    ["timeout", importOutcome("timeout"), "The page took too long to respond."],
+    ["duplicate", importOutcome("duplicate"), "You already imported this."],
+    [
+        "invalid link",
+        importOutcome("invalid_link"),
+        "That doesn't look like a web link.",
+    ],
+];
+
+test("importOutcomeMessage keeps its exact text for every outcome", () => {
+    for (const [name, outcome, expected] of OUTCOME_MESSAGES) {
+        expect(importOutcomeMessage(outcome), name).toBe(expected);
+    }
+});
+
+test("importOutcomeParts splits each outcome into a headline and an optional reason that join back into its message", () => {
+    for (const [name, outcome, expected] of OUTCOME_MESSAGES) {
+        const { headline, reason } = importOutcomeParts(outcome);
+        expect(headline, name).not.toBe("");
+        expect(reason === undefined || reason !== "", name).toBe(true);
+        expect(reason ? `${headline} ${reason}` : headline, name).toBe(
+            expected,
+        );
+    }
+    expect(importOutcomeParts(importOutcome("robots_disallowed"))).toEqual({
+        headline: "This site asks apps not to read this page.",
+        reason: "Paste the recipe instead.",
     });
-    expect(key).toBe("recipes.import.paste_needed_reader");
-    const msg = importOutcomeMessage({
-        status: "paste_needed",
-        recipeId: null,
-        recipeName: null,
-        verification: "unverified",
-        problems: [],
-        source: {
-            kind: "instagram",
-            url: "https://www.instagram.com/p/x/",
-            label: "Instagram",
-        },
-        unresolvedLines: [],
-        readerFailure: "Could not read caption.",
-        fromMemory: false,
-        rememberedUntil: null,
+    expect(importOutcomeParts(importOutcome("not_found"))).toEqual({
+        headline: "That page doesn't exist anymore.",
     });
-    expect(msg).toContain("Could not read caption.");
-    expect(msg).not.toMatch(/\{reason\}/);
+    expect(
+        importOutcomeParts(
+            importOutcome("paste_needed", {
+                source: instagram,
+                readerFailure: "Could not read caption.",
+            }),
+        ),
+    ).toEqual({
+        headline: "Paste the Instagram caption below.",
+        reason: "Could not read caption.",
+    });
+});
+
+test("importOutcomeMessageKey reads duplicate from TOASTS and the rest from IMPORT_MESSAGES", () => {
+    expect(importOutcomeMessageKey(importOutcome("duplicate"))).toBe(
+        "duplicate",
+    );
+    expect(importOutcomeMessage(importOutcome("duplicate"))).toBe(
+        TOASTS["recipes.import.duplicate"].text,
+    );
+    expect(
+        importOutcomeMessageKey(
+            importOutcome("paste_needed", {
+                source: instagram,
+                readerFailure: "Could not read caption.",
+            }),
+        ),
+    ).toBe("paste_needed_reader");
+    for (const [, outcome] of OUTCOME_MESSAGES) {
+        const key = importOutcomeMessageKey(outcome);
+        if (key !== "duplicate") {
+            expect(IMPORT_MESSAGES[key].headline).toBeString();
+        }
+    }
+    // The import outcomes are not toasts any more.
+    for (const key of Object.keys(TOASTS)) {
+        if (key.startsWith("recipes.import.")) {
+            expect(key).toBe("recipes.import.duplicate");
+        }
+    }
 });
 
 test("importRecipeFromUrlAnalyticsOutcome treats paste_needed and no_recipe_in_text as success", () => {
@@ -465,50 +618,14 @@ test("importRecipeFromUrlAnalyticsOutcome treats paste_needed and no_recipe_in_t
     });
 });
 
-test("every import status has toast copy and importOutcomeMessage", () => {
+test("every import status has a message with no placeholder left unfilled", () => {
     for (const status of ALL_IMPORT_STATUSES) {
-        const outcome: RecipeImportOutcome = {
-            status,
-            recipeId: status === "duplicate" ? "r-dup" : "r1",
-            recipeName: "Test Soup",
-            verification: status === "imported" ? "verified" : "unverified",
-            problems:
-                status === "unverified_needs_review"
-                    ? [
-                          {
-                              code: "ingredient_no_amount",
-                              message: "x",
-                              ingredientId: "i1",
-                              line: null,
-                          },
-                          {
-                              code: "ingredient_no_amount",
-                              message: "y",
-                              ingredientId: "i2",
-                              line: null,
-                          },
-                      ]
-                    : [],
-            source: {
-                kind: status === "paste_needed" ? "instagram" : "website",
-                url: "https://example.com/r",
-                label: "example.com",
-            },
-            unresolvedLines: [],
-            readerFailure: status === "paste_needed" ? null : null,
-            fromMemory: false,
-            rememberedUntil: null,
-        };
+        const outcome = importOutcome(status, {
+            problems: status === "unverified_needs_review" ? twoProblems : [],
+        });
         const msg = importOutcomeMessage(outcome);
         expect(msg.length).toBeGreaterThan(0);
         expect(msg).not.toMatch(/\{[a-z_]+\}/);
-    }
-    for (const key of Object.keys(TOASTS)) {
-        if (key.startsWith("recipes.import.")) {
-            expect(
-                TOASTS[key as keyof typeof TOASTS].text.length,
-            ).toBeGreaterThan(0);
-        }
     }
 });
 

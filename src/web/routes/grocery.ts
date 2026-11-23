@@ -33,8 +33,6 @@ import {
     findOrCreateFoodByBarcodeResult,
 } from "../../domain/foods.js";
 import { bulkRoutes } from "./bulk.js";
-import { groceryLineCheckToastKey } from "../components/toast-flash.js";
-import { redirectWithToast } from "../components/toast.js";
 import { buildDidYouMeanModal } from "../components/did-you-mean.js";
 import {
     groceryLineRetryFields,
@@ -258,7 +256,8 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/kitchen/groceries", "grocery.line.added");
+    // toast: none
+    return c.redirect("/kitchen/groceries", 303);
 });
 
 groceryRoutes.post(
@@ -292,11 +291,8 @@ groceryRoutes.post(
             });
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            groceryReturnTo(body),
-            groceryLineCheckToastKey(checked),
-        );
+        // toast: none
+        return c.redirect(groceryReturnTo(body), 303);
     },
 );
 
@@ -317,11 +313,8 @@ groceryRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            groceryReturnTo(body),
-            "grocery.checked.cleared",
-        );
+        // toast: none
+        return c.redirect(groceryReturnTo(body), 303);
     },
 );
 
@@ -393,7 +386,8 @@ groceryRoutes.post("/kitchen/groceries/put-away", requireMember, async (c) => {
         });
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, groceryReturnTo(body), "grocery.line.put-away");
+    // toast: none
+    return c.redirect(groceryReturnTo(body), 303);
 });
 
 groceryRoutes.post(
@@ -433,10 +427,7 @@ groceryRoutes.post(
             const page = await groceryFormError(userId, err);
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(
-            c,
-            "/kitchen/groceries",
-            "grocery.line.put-away",
-        );
+        // toast: none
+        return c.redirect("/kitchen/groceries", 303);
     },
 );

@@ -378,7 +378,7 @@ describe("one-tap notice routes", () => {
         });
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/kitchen/usuals");
-        expect(toastOf(res)?.key).toBe("notice.added");
+        expect(toastOf(res)).toBeNull();
         const lines = await db.groceryStore.listLines(HH);
         expect(lines.map((l) => [l.foodId, l.source])).toEqual([
             [eggs.id, "restock"],
@@ -386,14 +386,14 @@ describe("one-tap notice routes", () => {
         expect(await open()).toEqual([]);
     });
 
-    test("running low: a second tap is idempotent and says it is done", async () => {
+    test("running low: a second tap is idempotent and says nothing", async () => {
         const eggs = await seed();
         const fields = { subject_id: eggs.id, back: "/kitchen/fridge" };
         await post("/notices/grocery.running_low/act", fields);
         const again = await post("/notices/grocery.running_low/act", fields);
         expect(again.status).toBe(303);
         expect(again.headers.get("location")).toBe("/kitchen/fridge");
-        expect(toastOf(again)?.key).toBe("notice.gone");
+        expect(toastOf(again)).toBeNull();
         expect(await db.groceryStore.listLines(HH)).toHaveLength(1);
     });
 
@@ -413,7 +413,7 @@ describe("one-tap notice routes", () => {
             back: "/",
         });
         expect(res.status).toBe(303);
-        expect(toastOf(res)?.key).toBe("notice.gone");
+        expect(toastOf(res)).toBeNull();
         expect(await db.groceryStore.listLines(HH)).toEqual([]);
     });
 
@@ -427,7 +427,7 @@ describe("one-tap notice routes", () => {
         });
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/recipes");
-        expect(toastOf(res)?.key).toBe("notice.added");
+        expect(toastOf(res)).toBeNull();
         const lines = await db.groceryStore.listLines(HH);
         expect(lines.map((l) => [l.foodId, l.quantity, l.source])).toEqual([
             [flour.id, { amount: 250, unit: "g" }, "plan"],
@@ -436,7 +436,7 @@ describe("one-tap notice routes", () => {
             subject_id: flour.id,
             back: "/recipes",
         });
-        expect(toastOf(again)?.key).toBe("notice.gone");
+        expect(toastOf(again)).toBeNull();
         expect(await db.groceryStore.listLines(HH)).toHaveLength(1);
     });
 
@@ -448,7 +448,7 @@ describe("one-tap notice routes", () => {
             subject_id: flour.id,
             back: "/recipes",
         });
-        expect(toastOf(res)?.key).toBe("notice.gone");
+        expect(toastOf(res)).toBeNull();
         expect(await db.groceryStore.listLines(HH)).toEqual([]);
     });
 
@@ -460,7 +460,7 @@ describe("one-tap notice routes", () => {
             back: "/",
         });
         expect(res.status).toBe(303);
-        expect(toastOf(res)?.key).toBe("notice.gone");
+        expect(toastOf(res)).toBeNull();
         expect(await db.groceryStore.listLines(HH)).toEqual([]);
         expect(await db.groceryStore.listLines(HH_OTHER)).toEqual([]);
         const dismissed = await post("/notices/dismiss", {
@@ -471,7 +471,7 @@ describe("one-tap notice routes", () => {
             back: "/",
         });
         expect(dismissed.status).toBe(303);
-        expect(toastOf(dismissed)?.key).toBe("notice.gone");
+        expect(toastOf(dismissed)).toBeNull();
         expect(await db.dismissalsStore.listForHousehold(HH_OTHER)).toEqual([]);
         expect(await db.dismissalsStore.listForHousehold(HH)).toEqual([]);
     });
@@ -565,7 +565,7 @@ describe("one-tap notice routes", () => {
             subject_id: crypto.randomUUID(),
         });
         expect(unknown.status).toBe(303);
-        expect(toastOf(unknown)?.key).toBe("notice.gone");
+        expect(toastOf(unknown)).toBeNull();
         expect(await db.dismissalsStore.listForHousehold(HH)).toHaveLength(1);
     });
 

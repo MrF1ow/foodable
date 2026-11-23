@@ -142,7 +142,7 @@ describe("today again route", () => {
         expect(insertCount).toBe(0);
     });
 
-    test("again redirects with toast", async () => {
+    test("again redirects with no toast", async () => {
         mealStore.set("m-src", {
             id: "m-src",
             user_id: ALICE,
@@ -177,6 +177,6 @@ describe("today again route", () => {
             res.headers
                 .getSetCookie()
                 .some((c) => c.startsWith(`${TOAST_COOKIE}=`)),
-        ).toBe(true);
+        ).toBe(false);
     });
 });

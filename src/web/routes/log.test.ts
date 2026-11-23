@@ -22,7 +22,6 @@ import * as actualMealsDb from "../../db/meals.js";
 import * as actualScoreSettingsDb from "../../db/score-settings.js";
 import * as actualNutritionDb from "../../db/nutrition.js";
 import * as actualFoodSearch from "../../food-search.js";
-import { TOASTS } from "../../copy/toasts.js";
 import type { FoodResult } from "../../foods.js";
 import * as actualFoods from "../../foods.js";
 import {
@@ -1492,15 +1491,6 @@ describe("POST /log/weight", () => {
         expect(res.status).toBe(400);
         expect(html).toMatch(/Last: 183\.0 lb/);
     });
-});
-
-test("copy-yesterday noop toast differs from undo noop", () => {
-    expect(TOASTS["nutrition.meal.copy-yesterday.noop"].text).toBe(
-        "Already copied from yesterday",
-    );
-    expect(TOASTS["nutrition.meal.copy-yesterday.noop"].text).not.toBe(
-        TOASTS["nutrition.meal.undo.noop"].text,
-    );
 });
 
 describe("weighInPrefillForUser", () => {

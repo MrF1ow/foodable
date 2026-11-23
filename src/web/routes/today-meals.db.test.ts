@@ -3,7 +3,6 @@ import type { SQL } from "bun";
 import { Hono } from "hono";
 import { resetFlagsForTests } from "../../flags.js";
 import {
-    deleteMeal,
     getMealById,
     insertMeal,
     mealIdempotencyKey,
@@ -16,12 +15,6 @@ import { seedHousehold } from "../../db/testing/fixtures.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { setSqlForTests } from "../../db/sql.js";
 import {
-    mealUndoSnapshot,
-    mintUndoFlash,
-    parseUndoSnapshot,
-    verifyUndoToken,
-} from "../../domain/meal-undo.js";
-import {
     mealLoggedAtFromLocalTime,
     scaleMealTotals,
 } from "../../domain/today-edit.js";
@@ -31,9 +24,6 @@ import { mealWriteFromItems, resolveWriteTimestamp } from "../../meal-write.js";
 import { nutritionRoutes } from "./nutrition.js";
 import { logRoutes } from "./log.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
-import { TOAST_COOKIE } from "../components/toast.js";
-import { UNDO_COOKIE } from "../../domain/meal-undo.js";
-import { UNDO_SNAPSHOT_COOKIE } from "../meal-undo-flash.js";
 
 const SESSION = "01234567890123456789012345678901";
 process.env.SESSION_SECRET ||= SESSION;
@@ -593,45 +583,6 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
         expect(loaded?.protein_g).toBe(40);
     });
 
-    test("delete undo restores idempotency key and double undo is noop", async () => {
-        const key = "test:undo-key";
-        const { meal } = await insertMeal(userId, {
-            description: "Undo me",
-            meal_type: "snack",
-            logged_at: "2026-03-01T15:00:00.000Z",
-            idempotency_key: key,
-            calories: 100,
-        });
-        const full = await getMealById(userId, meal.id);
-        expect(full).not.toBeNull();
-        const snapshot = mealUndoSnapshot(full!, householdId);
-        const flash = mintUndoFlash(userId, snapshot, SESSION, Date.now());
-        expect(
-            verifyUndoToken(
-                flash.token,
-                flash.snapshotPayload,
-                userId,
-                Date.now(),
-                SESSION,
-            ),
-        ).toBe(true);
-        await deleteMeal(userId, meal.id);
-        expect(await getMealById(userId, meal.id)).toBeNull();
-        const parsed = parseUndoSnapshot(flash.snapshotJson)!;
-        const first = await insertMeal(userId, {
-            ...parsed.input,
-            idempotency_key: parsed.idempotency_key ?? key,
-        });
-        expect(first.deduplicated).toBe(false);
-        expect(first.meal.idempotency_key).toBe(key);
-        const second = await insertMeal(userId, {
-            ...parsed.input,
-            idempotency_key: parsed.idempotency_key ?? key,
-        });
-        expect(second.deduplicated).toBe(true);
-        expect(second.meal.id).toBe(first.meal.id);
-    });
-
     test("POST recipe edit time-only keeps portions and totals", async () => {
         const { sql } = getCtx();
         const [recipe] = await sql`
@@ -729,14 +680,13 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
         expect(after?.meal_type).toBe("lunch");
     });
 
-    test("delete then undo through HTTP on real Postgres", async () => {
-        const key = "test:http-undo";
+    test("delete through HTTP on real Postgres removes the meal and sets no cookie", async () => {
         const { meal } = await insertMeal(userId, {
-            description: "Db undo",
+            description: "Db delete",
             meal_type: "dinner",
             logged_at: "2026-03-01T18:00:00.000Z",
             calories: 250,
-            idempotency_key: key,
+            idempotency_key: "test:http-delete",
         });
         const app = new Hono();
         app.route("/", nutritionRoutes);
@@ -749,132 +699,9 @@ describeDb(pgAvailable !== null, "today meal writes db", (getCtx) => {
             body: "return_to=/?date=2026-03-01&date=2026-03-01",
         });
         expect(del.status).toBe(303);
-        const setCookies = del.headers.getSetCookie();
-        expect(setCookies.some((c) => c.startsWith(`${TOAST_COOKIE}=`))).toBe(
-            true,
-        );
-        expect(setCookies.some((c) => c.startsWith(`${UNDO_COOKIE}=`))).toBe(
-            true,
-        );
-        expect(
-            setCookies.some((c) => c.startsWith(`${UNDO_SNAPSHOT_COOKIE}=`)),
-        ).toBe(true);
+        expect(del.headers.getSetCookie()).toEqual([]);
         expect(await getMealById(userId, meal.id)).toBeNull();
-        const cookiePairs = setCookies
-            .map((line) => line.split(";")[0]!)
-            .join("; ");
-        const undo = await app.request("http://test/meals/undo", {
-            method: "POST",
-            headers: {
-                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}; ${cookiePairs}`,
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "return_to=/?date=2026-03-01&date=2026-03-01",
-        });
-        expect(undo.status).toBe(303);
-        const { sql } = getCtx();
-        const [restored] = await sql`
-            select idempotency_key, calories
-            from meals
-            where user_id = ${userId} and idempotency_key = ${key}
-        `;
-        expect(restored?.idempotency_key).toBe(key);
-        expect(Number(restored?.calories)).toBe(250);
         resetFlagsForTests();
-    });
-
-    test("undo restores a recipe meal whose recipe was deleted meanwhile", async () => {
-        const { sql } = getCtx();
-        const [recipe] = await sql`
-            insert into recipes (household_id, creator_id, name, yield_portions)
-            values (${householdId}, ${userId}, ${"Chili"}, ${4})
-            returning id
-        `;
-        const key = "test:undo-deleted-recipe";
-        const { meal } = await insertMeal(userId, {
-            description: "2 portions Chili",
-            meal_type: "dinner",
-            logged_at: "2026-03-01T18:00:00.000Z",
-            calories: 500,
-            idempotency_key: key,
-            items: [
-                {
-                    household_id: householdId,
-                    food_id: null,
-                    recipe_id: recipe!.id,
-                    label: "Chili",
-                    amount: null,
-                    unit: null,
-                    grams: null,
-                    portions: 2,
-                    calories: 500,
-                    protein_g: null,
-                    carbs_g: null,
-                    fat_g: null,
-                    fiber_g: null,
-                    sugar_g: null,
-                    alcohol_g: null,
-                    caffeine_mg: null,
-                    sort_order: 0,
-                },
-            ],
-        });
-        const app = new Hono();
-        app.route("/", nutritionRoutes);
-        const del = await app.request(`http://test/meals/${meal.id}/delete`, {
-            method: "POST",
-            headers: {
-                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "return_to=/?date=2026-03-01&date=2026-03-01",
-        });
-        expect(del.status).toBe(303);
-        await sql`delete from recipes where id = ${recipe!.id}`;
-        const cookiePairs = del.headers
-            .getSetCookie()
-            .map((line) => line.split(";")[0]!)
-            .join("; ");
-        const undo = await app.request("http://test/meals/undo", {
-            method: "POST",
-            headers: {
-                cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}; ${cookiePairs}`,
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: "return_to=/?date=2026-03-01&date=2026-03-01",
-        });
-        expect(undo.status).toBe(303);
-        const [restored] = await sql`
-            select m.calories, i.recipe_id, i.label, i.calories as item_calories
-            from meals m join meal_items i on i.meal_id = m.id
-            where m.user_id = ${userId} and m.idempotency_key = ${key}
-        `;
-        expect(Number(restored?.calories)).toBe(500);
-        expect(restored?.recipe_id).toBeNull();
-        expect(restored?.label).toBe("Chili");
-        expect(Number(restored?.item_calories)).toBe(500);
-        resetFlagsForTests();
-    });
-
-    test("tampered undo token fails verification", async () => {
-        const { meal } = await insertMeal(userId, {
-            description: "Tamper",
-            meal_type: "snack",
-            logged_at: "2026-03-01T15:00:00.000Z",
-            idempotency_key: "test:tamper",
-        });
-        const full = await getMealById(userId, meal.id);
-        const snapshot = mealUndoSnapshot(full!, householdId);
-        const flash = mintUndoFlash(userId, snapshot, SESSION, Date.now());
-        expect(
-            verifyUndoToken(
-                flash.token,
-                `${flash.snapshotPayload}x`,
-                userId,
-                Date.now(),
-                SESSION,
-            ),
-        ).toBe(false);
     });
 });
 

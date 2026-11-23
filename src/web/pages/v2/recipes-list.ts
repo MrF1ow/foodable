@@ -49,7 +49,10 @@ export type RecipesListV2View = {
     notices?: readonly Notice[];
     /** Picking a recipe for this day (`?plan_date=`): each card's Plan goes to it. */
     planDate?: string;
+    /** The headline of the inline import error card. */
     importError?: string;
+    /** Under the headline: why, or what to do next. */
+    importErrorReason?: string;
     importPasteStep?: boolean;
     importUrl?: string;
     importPasteText?: string;
@@ -67,7 +70,7 @@ export type RecipesListV2View = {
      * A recipe pasted from another Foodable (its share link or its JSON) that
      * could not be imported: what was pasted, and why. Reopens the import panel.
      */
-    sharedImport?: { error?: string; input?: string };
+    sharedImport?: { error?: string; reason?: string; input?: string };
     /**
      * Whether the import panel offers pasting a recipe from another Foodable
      * (the `mcp-share-links` flag). Absent or false leaves that form out.
@@ -263,6 +266,18 @@ function searchFieldValue(view: RecipesListV2View): string {
     return "";
 }
 
+/** The inline import error: a card with the headline and, when there is one, the reason under it. */
+function importErrorCard(parts: {
+    headline: string;
+    reason?: string;
+    /** A reason that is already markup (the duplicate's Open link). */
+    reasonHtml?: string;
+    className?: string;
+}): string {
+    const reason = parts.reasonHtml ?? (parts.reason ? esc(parts.reason) : "");
+    return `<div class="fd-card fd-recipes-import-error${parts.className ? ` ${parts.className}` : ""}" role="alert"><p class="fd-recipes-import-error__headline">${esc(parts.headline)}</p>${reason ? `<p class="fd-recipes-import-error__reason">${reason}</p>` : ""}</div>`;
+}
+
 export function renderRecipesListBody(view: RecipesListV2View): string {
     const q = esc(searchFieldValue(view));
     const filters = activeFilters(view);
@@ -272,11 +287,17 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
         : "";
     const importDuplicate =
         view.importDuplicateRecipeId != null
-            ? `<p class="fd-recipes-import-error" role="alert">You already have this recipe. <a href="/recipes/${esc(view.importDuplicateRecipeId)}">Open it</a></p>`
+            ? importErrorCard({
+                  headline: "You already have this recipe.",
+                  reasonHtml: `<a href="/recipes/${esc(view.importDuplicateRecipeId)}">Open it</a>`,
+              })
             : "";
     const importErr =
         view.importError && view.importDuplicateRecipeId == null
-            ? `<p class="fd-recipes-import-error" role="alert">${esc(view.importError)}</p>`
+            ? importErrorCard({
+                  headline: view.importError,
+                  reason: view.importErrorReason,
+              })
             : "";
     const chips = String(
         chipNav(
@@ -321,7 +342,11 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
             : "";
     const shared = view.sharedImportEnabled ? view.sharedImport : undefined;
     const sharedError = shared?.error
-        ? `<p class="fd-recipes-import-error fd-recipes-import-shared-error" role="alert">${esc(shared.error)}</p>`
+        ? importErrorCard({
+              headline: shared.error,
+              reason: shared.reason,
+              className: "fd-recipes-import-shared-error",
+          })
         : "";
     const importLinkBlock = `<details class="fd-recipes-import-link"${shared ? " open" : ""}>
 <summary class="fd-recipes-import-link__summary">Import a link</summary>

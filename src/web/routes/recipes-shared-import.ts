@@ -11,7 +11,6 @@
 
 import { Hono, type Context } from "hono";
 import { gatedRoute } from "../gated.js";
-import { redirectWithToast } from "../components/toast.js";
 import { formText } from "../form.js";
 import { renderRecipesListPage } from "../loaders.js";
 import { requireMember, siteMember } from "../middleware.js";
@@ -19,7 +18,6 @@ import {
     importSharedRecipeForHousehold,
     sharedImportFailure,
 } from "../../sharing-import.js";
-import { truncateToastParam } from "../truncate-toast-param.js";
 
 export const sharedRecipeImportRoutes = new Hono();
 
@@ -29,6 +27,24 @@ export const sharedRecipeImportRoutes = new Hono();
  * is not worth sending back to the browser, so the box comes back empty.
  */
 export const SHARED_IMPORT_ECHO_LIMIT = 4096;
+
+/**
+ * The refusal as the error card shows it. The one the person can act on, a
+ * link that no longer resolves, gets the design's headline and reason; every
+ * other refusal is its message as the headline.
+ */
+function sharedImportErrorParts(failure: { code: string; message: string }): {
+    error: string;
+    reason?: string;
+} {
+    if (failure.code === "not_found") {
+        return {
+            error: "That share link doesn't work any more",
+            reason: "Revoked, expired, or not a recipe link",
+        };
+    }
+    return { error: failure.message };
+}
 
 /**
  * Imports `input` for the signed-in member and answers the request: a 303 to
@@ -47,22 +63,14 @@ export async function answerSharedRecipeImport(
             creatorId: userId,
             input,
         });
-        return redirectWithToast(
-            c,
-            `/recipes/${result.recipe.id}`,
-            "recipes.import.shared",
-            {
-                name: truncateToastParam(result.recipe.name),
-                matched: result.matched,
-                created: result.created,
-            },
-        );
+        // toast: none
+        return c.redirect(`/recipes/${result.recipe.id}`, 303);
     } catch (err) {
         const failure = sharedImportFailure(err);
         if (!failure) throw err;
         const page = await renderRecipesListPage(userId, {
             sharedImport: {
-                error: failure.message,
+                ...sharedImportErrorParts(failure),
                 input: input.length <= SHARED_IMPORT_ECHO_LIMIT ? input : "",
             },
         });

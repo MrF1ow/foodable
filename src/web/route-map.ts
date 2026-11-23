@@ -30,7 +30,18 @@ export type LegacyPathMove = {
 
 export const LEGACY_PATH_MOVES: readonly LegacyPathMove[] = [
     // The Dismissed notices list is gone: dismissing a notice has nothing to show.
-    { from: "/settings/household/dismissed", to: APP_PATHS.settingsHousehold },
+    {
+        from: "/settings/household/dismissed",
+        to: APP_PATHS.settingsHousehold,
+        exact: true,
+    },
+    // The old URL of the same list. Before `/household`, which would carry it
+    // onto `/settings/household/dismissed`, itself legacy.
+    {
+        from: "/household/dismissed",
+        to: APP_PATHS.settingsHousehold,
+        exact: true,
+    },
     // The Needs attention page is the inbox now. Its own POST (/dismiss) went
     // with it and answers 404 rather than moving, so only this path matches.
     { from: "/needs-attention", to: APP_PATHS.notifications, exact: true },

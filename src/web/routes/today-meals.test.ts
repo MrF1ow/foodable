@@ -1,8 +1,6 @@
 import { afterAll, afterEach, describe, expect, mock, test } from "bun:test";
 import { Hono } from "hono";
 import { TOAST_COOKIE } from "../components/toast.js";
-import { UNDO_COOKIE } from "../../domain/meal-undo.js";
-import { UNDO_SNAPSHOT_COOKIE } from "../meal-undo-flash.js";
 import { resetFlagsForTests } from "../../flags.js";
 import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
@@ -167,9 +165,10 @@ describe("today meal routes", () => {
         }
     });
 
-    test("delete keeps toast and both undo cookies", async () => {
-        mealStore.set("00000000-0000-4000-8000-0000000000d1", {
-            id: "00000000-0000-4000-8000-0000000000d1",
+    test("delete removes the meal and sets no cookie at all", async () => {
+        const id = "00000000-0000-4000-8000-0000000000d1";
+        mealStore.set(id, {
+            id,
             user_id: ALICE,
             description: "Eggs",
             meal_type: "breakfast",
@@ -186,53 +185,7 @@ describe("today meal routes", () => {
             idempotency_key: "auto:del",
             items: [],
         });
-        const res = await hono.request(
-            "http://test/meals/00000000-0000-4000-8000-0000000000d1/delete",
-            {
-                method: "POST",
-                headers: {
-                    cookie: cookie(ALICE),
-                    "content-type": "application/x-www-form-urlencoded",
-                },
-                body: "return_to=/?date=2026-03-01&date=2026-03-01",
-            },
-        );
-        expect(res.status).toBe(303);
-        const setCookies = res.headers.getSetCookie();
-        expect(setCookies.some((c) => c.startsWith(`${TOAST_COOKIE}=`))).toBe(
-            true,
-        );
-        expect(setCookies.some((c) => c.startsWith(`${UNDO_COOKIE}=`))).toBe(
-            true,
-        );
-        expect(
-            setCookies.some((c) => c.startsWith(`${UNDO_SNAPSHOT_COOKIE}=`)),
-        ).toBe(true);
-        expect(setCookies.length).toBeGreaterThanOrEqual(3);
-    });
-
-    test("undo POST restores meal from delete cookies", async () => {
-        const id = "00000000-0000-4000-8000-0000000000e2";
-        const key = "auto:undo-http";
-        mealStore.set(id, {
-            id,
-            user_id: ALICE,
-            description: "Restore",
-            meal_type: "lunch",
-            logged_at: "2026-03-01T12:00:00.000Z",
-            calories: 100,
-            protein_g: 5,
-            carbs_g: 10,
-            fat_g: 3,
-            fiber_g: null,
-            sugar_g: null,
-            alcohol_g: null,
-            caffeine_mg: null,
-            notes: null,
-            idempotency_key: key,
-            items: [],
-        });
-        const del = await hono.request(`http://test/meals/${id}/delete`, {
+        const res = await hono.request(`http://test/meals/${id}/delete`, {
             method: "POST",
             headers: {
                 cookie: cookie(ALICE),
@@ -240,23 +193,23 @@ describe("today meal routes", () => {
             },
             body: "return_to=/?date=2026-03-01&date=2026-03-01",
         });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/?date=2026-03-01");
         expect(mealStore.has(id)).toBe(false);
-        const pairs = del.headers
-            .getSetCookie()
-            .map((line) => line.split(";")[0]!)
-            .join("; ");
-        const undo = await hono.request("http://test/meals/undo", {
+        // No toast and no undo cookies: adding the meal again is the way back.
+        expect(res.headers.getSetCookie()).toEqual([]);
+        expect(TOAST_COOKIE).toBe("foodable_toast");
+    });
+
+    test("there is no meal undo route", async () => {
+        const res = await hono.request("http://test/meals/undo", {
             method: "POST",
             headers: {
-                cookie: `${cookie(ALICE)}; ${pairs}`,
+                cookie: cookie(ALICE),
                 "content-type": "application/x-www-form-urlencoded",
             },
-            body: "return_to=/?date=2026-03-01&date=2026-03-01",
+            body: "return_to=/",
         });
-        expect(undo.status).toBe(303);
-        const restored = [...mealStore.values()].find(
-            (m) => m.idempotency_key === key,
-        );
-        expect(restored?.description).toBe("Restore");
+        expect(res.status).toBe(404);
     });
 });

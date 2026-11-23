@@ -151,7 +151,12 @@ import {
     type SharedLinkRow,
 } from "./pages/v2/settings-household-shared-links.js";
 import { liveShareLinkStore } from "../db/share-links.js";
-import { guessMealType, todayInTz, validateTz } from "../domain/tz.js";
+import {
+    guessMealType,
+    shiftLocalDate,
+    todayInTz,
+    validateTz,
+} from "../domain/tz.js";
 import { fromGrams } from "../domain/units.js";
 import { getLatestWeight } from "../db/nutrition.js";
 import type { WeighInPrefill } from "./pages/v2/log-sheet.js";
@@ -172,7 +177,8 @@ import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
 import { renderBarePage, type ThemePref } from "./shell.js";
 import { householdToday } from "../db/restock.js";
 import { loadWeekPlanView } from "./loaders-plan.js";
-import { isPlanDate } from "../domain/plan.js";
+import { isPlanDate, type PlanSlot } from "../domain/plan.js";
+import { liveRecipePlansStore } from "../db/plans.js";
 import {
     PLAN_SHEET_ID,
     withPlanEditDraft,
@@ -1746,6 +1752,7 @@ export async function renderRecipesListPage(
         filter?: string;
         importUrl?: string;
         importError?: string;
+        importErrorReason?: string;
         importDuplicateRecipeId?: string;
         importPasteStep?: boolean;
         importPasteText?: string;
@@ -1759,7 +1766,7 @@ export async function renderRecipesListPage(
         importShowRetry?: boolean;
         importRetryDisabled?: boolean;
         /** v2: a recipe pasted from another Foodable that could not be imported. */
-        sharedImport?: { error?: string; input?: string };
+        sharedImport?: { error?: string; reason?: string; input?: string };
         /** v2: picking a recipe for this day (`?plan_date=`). */
         planDate?: string;
         /** v2: a plan move that failed its checks: its edit sheet opens with this. */
@@ -1861,6 +1868,7 @@ export async function renderRecipesListPage(
                     ? opts.planDate
                     : undefined,
             importError: opts.importError,
+            importErrorReason: opts.importErrorReason,
             importPasteStep: opts.importPasteStep,
             importUrl: opts.importUrl,
             importPasteText: opts.importPasteText,
@@ -1937,6 +1945,32 @@ async function planSheetView(
         open: values.open === true || failed,
         error,
     };
+}
+
+/**
+ * This recipe's plans from the household's today on, for the "Planned" line.
+ * The Add to plan sheet takes any day, so this reads every upcoming plan, not
+ * only the week the Recipes strip shows; the page names the first few.
+ */
+/** How far ahead the recipe page looks for this recipe's plan entries. */
+const UPCOMING_PLAN_DAYS = 56;
+
+async function upcomingPlansOf(
+    householdId: string,
+    recipeId: string,
+): Promise<{ date: string; slot: PlanSlot }[]> {
+    const today = await householdToday(householdId);
+    // A bounded read: plan entries further out than this are rare, and an
+    // open-ended range would make every page load walk a repeating plan's
+    // whole future.
+    const plans = await liveRecipePlansStore().listPlans(
+        householdId,
+        today,
+        shiftLocalDate(today, UPCOMING_PLAN_DAYS),
+    );
+    return plans
+        .filter((p) => p.recipeId === recipeId)
+        .map((p) => ({ date: p.date, slot: p.slot }));
 }
 
 /**
@@ -2128,6 +2162,7 @@ export async function renderRecipeDetailRoute(
             share: chrome.flags.mcpShareLinks
                 ? { open: opts.openModalId === RECIPE_SHARE_SHEET_ID }
                 : undefined,
+            planned: await upcomingPlansOf(householdId, recipeId),
             plan: await planSheetView(
                 householdId,
                 recipeId,

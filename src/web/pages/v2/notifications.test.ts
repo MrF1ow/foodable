@@ -243,6 +243,33 @@ describe("the ⋯ menu", () => {
             ),
         ).toBe("/recipes/r1");
     });
+
+    test("an allergen row opens a page that exists, whatever its subject", () => {
+        const allergen = (
+            subjectKind: string,
+            subjectId: string,
+            code: string,
+        ) =>
+            notificationOpenHref(
+                row({
+                    kind: "allergens",
+                    subjectKind,
+                    subjectId,
+                    payload: { code },
+                }),
+            );
+        // A fridge item's id is not a food's: /foods/<item id> is a 404.
+        expect(allergen("fridge_item", "item-1", "food.product_allergen")).toBe(
+            "/kitchen/fridge",
+        );
+        expect(allergen("food", "f1", "food.product_allergen")).toBe(
+            "/foods/f1",
+        );
+        expect(allergen("grocery_line", "l1", "food.product_allergen")).toBe(
+            "/kitchen/groceries",
+        );
+        expect(allergen("recipe", "r1", "recipe.allergen")).toBe("/recipes/r1");
+    });
 });
 
 describe("the page", () => {

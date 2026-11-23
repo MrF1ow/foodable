@@ -15,7 +15,6 @@ import {
     type FoodResult,
 } from "../../foods.js";
 import { formText } from "../form.js";
-import { redirectWithToast } from "../components/toast.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { addGroceryFoodById, GroceryInputError } from "../../domain/grocery.js";
@@ -125,7 +124,8 @@ foodsRoutes.post("/foods/:id/add-to-grocery", requireMember, async (c) => {
         if (!page) return c.text("Not Found", 404);
         return c.html(renderProductV2Page({ ...page, error: message }), 400);
     }
-    return redirectWithToast(c, productPagePath(food.id), "grocery.line.added");
+    // toast: none (the product page now reads "On your list")
+    return c.redirect(productPagePath(food.id), 303);
 });
 
 foodsRoutes.get("/foods/by-barcode/:code", requireMember, async (c) => {
@@ -294,10 +294,7 @@ foodsRoutes.post(
         // Back to the usual's edit sheet, which the Restock sheet sits in.
         const url = new URL(returnTo, "http://local");
         url.searchParams.set("food", foodId);
-        return redirectWithToast(
-            c,
-            `${url.pathname}${url.search}`,
-            "usuals.schedule.saved",
-        );
+        // toast: none
+        return c.redirect(`${url.pathname}${url.search}`, 303);
     },
 );

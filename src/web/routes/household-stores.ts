@@ -30,7 +30,6 @@ import {
     renderSettingsStoresV2Route,
 } from "../loaders.js";
 import { requireManager, requireMember, siteMember } from "../middleware.js";
-import { redirectWithToast } from "../components/toast.js";
 import {
     STORES_ADD_SHEET_ID,
     STORES_DEFAULT_SHEET_ID,
@@ -167,11 +166,8 @@ householdStoresRoutes.post(
         } catch (err) {
             return listError(c, err, STORES_ADD_SHEET_ID);
         }
-        return redirectWithToast(
-            c,
-            STORES_PATH,
-            "settings.household.store.added",
-        );
+        // toast: none
+        return c.redirect(STORES_PATH, 303);
     },
 );
 
@@ -202,10 +198,10 @@ householdStoresRoutes.post(
             return listError(c, err, STORES_REORDER_SHEET_ID);
         }
         const focus = focusParam(move);
-        return redirectWithToast(
-            c,
+        // toast: none
+        return c.redirect(
             `${STORES_PATH}?reorder=1${focus ? `&${focus}` : ""}`,
-            "stores.reordered",
+            303,
         );
     },
 );
@@ -234,7 +230,8 @@ householdStoresRoutes.post(
         } catch (err) {
             return listError(c, err, STORES_DEFAULT_SHEET_ID);
         }
-        return redirectWithToast(c, STORES_PATH, "stores.preferences.saved");
+        // toast: none
+        return c.redirect(STORES_PATH, 303);
     },
 );
 
@@ -256,7 +253,8 @@ householdStoresRoutes.post(
         } catch (err) {
             return storeError(c, storeId, err);
         }
-        return redirectWithToast(c, storePath(storeId), "stores.renamed");
+        // toast: none
+        return c.redirect(storePath(storeId), 303);
     },
 );
 
@@ -299,7 +297,7 @@ householdStoresRoutes.post(
                     "Pick a store to move the lines to.",
                 );
             }
-            const result = await deleteStore(
+            await deleteStore(
                 {
                     management: liveStoreManagement(),
                     settings: liveSettingsStore(),
@@ -309,22 +307,11 @@ householdStoresRoutes.post(
                 storeId,
                 { moveTo: mode === "move" ? moveTo : null },
             );
-            if (result.movedLines > 0) {
-                const target = stores.find((row) => row.id === moveTo);
-                return redirectWithToast(
-                    c,
-                    STORES_PATH,
-                    "stores.deleted-moved",
-                    {
-                        lines: `${result.movedLines} ${result.movedLines === 1 ? "line" : "lines"}`,
-                        store: target?.name ?? "the other store",
-                    },
-                );
-            }
         } catch (err) {
             return storeError(c, storeId, err, STORE_DELETE_SHEET_ID);
         }
-        return redirectWithToast(c, STORES_PATH, "stores.deleted");
+        // toast: none
+        return c.redirect(STORES_PATH, 303);
     },
 );
 
@@ -346,7 +333,8 @@ householdStoresRoutes.post(
         } catch (err) {
             return storeError(c, storeId, err, STORE_ADD_SECTION_SHEET_ID);
         }
-        return redirectWithToast(c, storePath(storeId), "stores.section.added");
+        // toast: none
+        return c.redirect(storePath(storeId), 303);
     },
 );
 
@@ -373,10 +361,10 @@ householdStoresRoutes.post(
             return storeError(c, storeId, err);
         }
         const focus = focusParam(move);
-        return redirectWithToast(
-            c,
+        // toast: none
+        return c.redirect(
             `${storePath(storeId)}${focus ? `?${focus}` : ""}`,
-            "stores.section.reordered",
+            303,
         );
     },
 );
@@ -401,11 +389,8 @@ householdStoresRoutes.post(
         } catch (err) {
             return storeError(c, storeId, err, storeSectionSheetId(sectionId));
         }
-        return redirectWithToast(
-            c,
-            storePath(storeId),
-            "settings.household.section.renamed",
-        );
+        // toast: none
+        return c.redirect(storePath(storeId), 303);
     },
 );
 
@@ -430,11 +415,8 @@ householdStoresRoutes.post(
         } catch (err) {
             return storeError(c, storeId, err, storeSectionSheetId(sectionId));
         }
-        return redirectWithToast(
-            c,
-            storePath(storeId),
-            hide ? "stores.section.hidden" : "stores.section.shown",
-        );
+        // toast: none
+        return c.redirect(storePath(storeId), 303);
     },
 );
 
@@ -458,10 +440,7 @@ householdStoresRoutes.post(
         } catch (err) {
             return storeError(c, storeId, err, STORE_ADD_RULE_SHEET_ID);
         }
-        return redirectWithToast(
-            c,
-            storePath(storeId),
-            "settings.household.store-rule.added",
-        );
+        // toast: none
+        return c.redirect(storePath(storeId), 303);
     },
 );

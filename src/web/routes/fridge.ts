@@ -215,7 +215,8 @@ fridgeRoutes.post("/kitchen/fridge/items", requireMember, async (c) => {
         const page = await fridgeFormError(userId, err, openModalId);
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, "/kitchen/fridge", "fridge.item.added");
+    // toast: none
+    return c.redirect("/kitchen/fridge", 303);
 });
 
 fridgeRoutes.post(
@@ -248,7 +249,8 @@ fridgeRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(c, "/kitchen/fridge", "fridge.item.removed");
+        // toast: none
+        return c.redirect("/kitchen/fridge", 303);
     },
 );
 
@@ -300,7 +302,8 @@ fridgeRoutes.post("/kitchen/fridge/items/:id", requireMember, async (c) => {
         );
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, returnTo, "fridge.item.updated");
+    // toast: none
+    return c.redirect(returnTo, 303);
 });
 
 fridgeRoutes.post("/kitchen/fridge/items/:id/eat", requireMember, async (c) => {
@@ -333,7 +336,8 @@ fridgeRoutes.post("/kitchen/fridge/items/:id/eat", requireMember, async (c) => {
                 foodId,
             );
             if (!fridgeEatLogsMeal(food)) {
-                return redirectWithToast(c, returnTo, "fridge.item.eaten");
+                // toast: none
+                return c.redirect(returnTo, 303);
             }
             const { built, specs } = await resolveAndBuildMeal({
                 householdId: member.householdId,
@@ -385,7 +389,8 @@ fridgeRoutes.post("/kitchen/fridge/items/:id/eat", requireMember, async (c) => {
         });
         return c.html(page.html, page.status);
     }
-    return redirectWithToast(c, returnTo, "fridge.item.eaten");
+    // toast: none
+    return c.redirect(returnTo, 303);
 });
 
 fridgeRoutes.post(
@@ -408,13 +413,15 @@ fridgeRoutes.post(
                     itemId: c.req.param("id"),
                 },
             );
-            return redirectWithToast(
-                c,
-                target,
-                result.added
-                    ? "fridge.item.added-to-grocery"
-                    : "fridge.item.already-on-grocery",
-            );
+            if (!result.added) {
+                return redirectWithToast(
+                    c,
+                    target,
+                    "fridge.item.already-on-grocery",
+                );
+            }
+            // toast: none — the grocery list shows the new line
+            return c.redirect(target, 303);
         } catch (err) {
             const page = await fridgeFormError(
                 userId,
@@ -460,7 +467,8 @@ fridgeRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(c, returnTo, "fridge.item.discarded");
+        // toast: none
+        return c.redirect(returnTo, 303);
     },
 );
 
@@ -492,6 +500,7 @@ fridgeRoutes.post(
             );
             return c.html(page.html, page.status);
         }
-        return redirectWithToast(c, returnTo, "fridge.item.updated");
+        // toast: none
+        return c.redirect(returnTo, 303);
     },
 );

@@ -7,6 +7,7 @@ import type { AppChromeBase } from "../../attention.js";
 import {
     buildPreviewProductPageView,
     productLogPickPayload,
+    productOnGroceryList,
     productStockForFood,
     renderProductBody,
     renderProductBarcodeUnknownPage,
@@ -529,6 +530,25 @@ describe("renderProductV2Page", () => {
         expect(html).toContain(`/foods/${f.id}/add-to-grocery`);
     });
 
+    test("Add to groceries becomes On your list once the food is on the list", () => {
+        const f = food({ name: "Milk" });
+        const off = renderProductV2Page(buildPreviewProductPageView(chrome, f));
+        expect(off).toContain("<span>Add to groceries</span>");
+        expect(off).toContain(`action="/foods/${f.id}/add-to-grocery"`);
+        expect(off).not.toContain("On your list");
+        const on = renderProductV2Page({
+            ...buildPreviewProductPageView(chrome, f),
+            onGroceryList: true,
+        });
+        expect(on).toContain("On your list");
+        expect(on).not.toContain("<span>Add to groceries</span>");
+        expect(on).not.toContain("/add-to-grocery");
+        // The control opens the list; it is not a second way to add.
+        expect(on).toMatch(
+            /<a class="fd-btn [^"]*fd-product-actions__add[^"]*" href="\/kitchen\/groceries">/,
+        );
+    });
+
     test("log pick opens on one portion when the food has a pack serving", () => {
         const half = food(HALF_AND_HALF);
         const pick = productLogPickPayload(half, undefined);
@@ -600,5 +620,69 @@ describe("renderProductBarcodeUnknownPage", () => {
         });
         expect(html).toContain("Could not look up this barcode");
         expect(html).not.toContain("Open Food Facts does not know");
+    });
+});
+
+describe("productOnGroceryList", () => {
+    const line = (foodId: string | null, checked = false) => ({
+        foodId,
+        checked,
+    });
+    const eggs = {
+        id: "eggs",
+        genericFoodId: null,
+        usualProductId: "egglands",
+    };
+    const egglands = {
+        id: "egglands",
+        genericFoodId: "eggs",
+        usualProductId: null,
+    };
+    const kirkland = {
+        id: "kirkland",
+        genericFoodId: "eggs",
+        usualProductId: null,
+    };
+    const catalog = [eggs, egglands, kirkland];
+
+    test("a sibling product's line does not count", () => {
+        expect(
+            productOnGroceryList(kirkland, catalog, [line("egglands")]),
+        ).toBe(false);
+    });
+
+    test("a line for the same product counts", () => {
+        expect(
+            productOnGroceryList(kirkland, catalog, [line("kirkland")]),
+        ).toBe(true);
+    });
+
+    test("a plain food counts a line for itself or its usual product, not another product", () => {
+        expect(productOnGroceryList(eggs, catalog, [line("eggs")])).toBe(true);
+        expect(productOnGroceryList(eggs, catalog, [line("egglands")])).toBe(
+            true,
+        );
+        expect(productOnGroceryList(eggs, catalog, [line("kirkland")])).toBe(
+            false,
+        );
+    });
+
+    test("the usual product counts a line for its plain food, another product does not", () => {
+        expect(productOnGroceryList(egglands, catalog, [line("eggs")])).toBe(
+            true,
+        );
+        expect(productOnGroceryList(kirkland, catalog, [line("eggs")])).toBe(
+            false,
+        );
+    });
+
+    test("ticked and food-less lines never count", () => {
+        expect(
+            productOnGroceryList(eggs, catalog, [
+                line("eggs", true),
+                line("egglands", true),
+                line(null),
+            ]),
+        ).toBe(false);
     });
 });

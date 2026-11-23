@@ -294,13 +294,21 @@
     padding: var(--space-section) var(--fd-s-12);
 }
 
+/* The inline import error: a `.fd-card` (surface, radius, padding and gap come
+ * from it) holding a headline in the over colour and a reason caption. */
 .fd-recipes-import-error {
     margin: 0;
-    padding: var(--fd-s-12);
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--status-over) 12%, transparent);
+}
+.fd-recipes-import-error__headline {
+    margin: 0;
     color: var(--status-over);
-    font: 400 14px/20px var(--font-body);
+    font: 500 var(--text-label-size) / var(--text-label-line) var(--font-body);
+}
+.fd-recipes-import-error__reason {
+    margin: 0;
+    color: var(--text-secondary);
+    font: 400 var(--text-caption-size) / var(--text-caption-line)
+        var(--font-body);
 }
 
 .fd-recipes-import-paste {

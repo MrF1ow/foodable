@@ -1553,7 +1553,9 @@ describe("kitchen usuals restock", () => {
         expect(r.headers.get("location")).toBe(
             `/kitchen/usuals?food=${eggs.id}`,
         );
-        expect(r.headers.get("set-cookie") ?? "").toContain("foodable_toast");
+        expect(r.headers.get("set-cookie") ?? "").not.toContain(
+            "foodable_toast",
+        );
         const food = await db.foodsStore.getFood(HH, eggs.id);
         expect(food).toMatchObject({
             restockSchedule: "every_n_weeks",
@@ -1994,7 +1996,7 @@ describe("add a usual routes", () => {
         });
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/kitchen/usuals");
-        expect(toastOf(res)).toBe("usuals.added");
+        expect(toastOf(res)).toBeNull();
         expect(
             (await db.foodsStore.getFood(HH, product.id))?.genericFoodId,
         ).toBe(half.id);
@@ -2124,7 +2126,7 @@ describe("add a usual routes", () => {
             return_to: "/kitchen/usuals",
         });
         expect(res.status).toBe(303);
-        expect(toastOf(res)).toBe("usuals.added");
+        expect(toastOf(res)).toBeNull();
         expect(
             (await db.foodsStore.getFood(HH, flour.id))?.usualAddedAt,
         ).not.toBeNull();
@@ -2333,7 +2335,7 @@ describe("add a usual routes", () => {
         const res = await post("/kitchen/usuals/add/manual", handFields);
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/kitchen/usuals");
-        expect(toastOf(res)).toBe("usuals.added");
+        expect(toastOf(res)).toBeNull();
         const oat = (await db.foodsStore.listFoods(HH)).find(
             (f) => f.name === "Oat milk",
         )!;
@@ -2459,7 +2461,7 @@ describe("add a usual routes", () => {
         });
         expect(res.status).toBe(303);
         expect(res.headers.get("location")).toBe("/kitchen/usuals");
-        expect(toastOf(res)).toBe("usuals.removed");
+        expect(toastOf(res)).toBeNull();
         expect(
             (await db.foodsStore.getFood(HH, oat.id))?.usualAddedAt,
         ).toBeNull();
@@ -2554,6 +2556,88 @@ describe("product routes (v2 foods)", () => {
             PRODUCT_DEFAULT_BACK,
         );
         expect(await backFor("http://x/recipes")).toBe("/recipes");
+        resetFlagsForTests();
+    });
+
+    test("after Add to groceries the product page reads On your list", async () => {
+        const food = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        );
+        const page = async () =>
+            (
+                await productApp().request(`http://x/foods/${food.id}`, {
+                    headers: { cookie: cookieFor(ALICE) },
+                })
+            ).text();
+        const before = await page();
+        expect(before).toContain("<span>Add to groceries</span>");
+        expect(before).not.toContain("On your list");
+        const res = await productApp().request(
+            `http://x/foods/${food.id}/add-to-grocery`,
+            { method: "POST", headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/foods/${food.id}`);
+        const after = await page();
+        expect(after).toContain("On your list");
+        expect(after).not.toContain("<span>Add to groceries</span>");
+        resetFlagsForTests();
+    });
+
+    test("a ticked grocery line does not count as on the list", async () => {
+        const food = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+        );
+        await productApp().request(`http://x/foods/${food.id}/add-to-grocery`, {
+            method: "POST",
+            headers: { cookie: cookieFor(ALICE) },
+        });
+        const [line] = await db.groceryStore.listLines(HH);
+        await db.groceryStore.updateLine({ ...line!, checked: true });
+        const html = await (
+            await productApp().request(`http://x/foods/${food.id}`, {
+                headers: { cookie: cookieFor(ALICE) },
+            })
+        ).text();
+        expect(html).toContain("<span>Add to groceries</span>");
+        resetFlagsForTests();
+    });
+
+    test("a sibling product on the list leaves this product addable", async () => {
+        const eggs = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+        );
+        const egglands = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Eggland's Eggs",
+                genericFoodId: eggs.id,
+            }),
+        );
+        const kirkland = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Kirkland Eggs",
+                genericFoodId: eggs.id,
+            }),
+        );
+        await productApp().request(
+            `http://x/foods/${egglands.id}/add-to-grocery`,
+            { method: "POST", headers: { cookie: cookieFor(ALICE) } },
+        );
+        const page = async (id: string) =>
+            (
+                await productApp().request(`http://x/foods/${id}`, {
+                    headers: { cookie: cookieFor(ALICE) },
+                })
+            ).text();
+        const sibling = await page(kirkland.id);
+        expect(sibling).toContain("<span>Add to groceries</span>");
+        expect(sibling).toContain(`/foods/${kirkland.id}/add-to-grocery`);
+        expect(sibling).not.toContain("On your list");
+        expect(await page(egglands.id)).toContain("On your list");
         resetFlagsForTests();
     });
 

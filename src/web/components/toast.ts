@@ -4,8 +4,6 @@ import { escapeHtml } from "../../html.js";
 import { TOASTS, type ToastKey, type ToastKind } from "../../copy/toasts.js";
 
 export const TOAST_COOKIE = "foodable_toast";
-/** POST targets allowed from an unsigned flash action cookie. */
-export const TOAST_ACTION_PATH_ALLOWLIST = new Set(["/meals/undo"]);
 const FLASH_MAX_AGE = 60;
 const MAX_PARAMS = 4;
 const MAX_PARAM_KEY_LEN = 16;
@@ -14,17 +12,10 @@ const MAX_ENCODED_LEN = 512;
 
 export type ToastParams = Record<string, string | number>;
 
-export type ToastAction = {
-    label: string;
-    action: string;
-    fields?: Record<string, string>;
-};
-
 export type ToastFlash = {
     key: ToastKey;
     params?: ToastParams;
     dismissMs?: number;
-    action?: ToastAction;
 };
 
 function placeholderNames(text: string): Set<string> {
@@ -68,7 +59,6 @@ export function encodeToastFlash(flash: ToastFlash): string | null {
     const payload: Record<string, unknown> = { k: flash.key };
     if (params) payload.p = params;
     if (flash.dismissMs != null) payload.d = flash.dismissMs;
-    if (flash.action) payload.a = flash.action;
     const json = JSON.stringify(payload);
     if (json.length > MAX_ENCODED_LEN) return null;
     return Buffer.from(json, "utf8").toString("base64url");
@@ -107,38 +97,6 @@ export function decodeToastFlash(
         typeof dismissRaw === "number" && Number.isFinite(dismissRaw)
             ? dismissRaw
             : undefined;
-    const actionRaw = (parsed as { a?: unknown }).a;
-    let action: ToastAction | undefined;
-    if (
-        actionRaw &&
-        typeof actionRaw === "object" &&
-        !Array.isArray(actionRaw)
-    ) {
-        const label = (actionRaw as { label?: unknown }).label;
-        const actionPath = (actionRaw as { action?: unknown }).action;
-        if (
-            typeof label === "string" &&
-            typeof actionPath === "string" &&
-            TOAST_ACTION_PATH_ALLOWLIST.has(actionPath)
-        ) {
-            const fieldsRaw = (actionRaw as { fields?: unknown }).fields;
-            const fields: Record<string, string> = {};
-            if (
-                fieldsRaw &&
-                typeof fieldsRaw === "object" &&
-                !Array.isArray(fieldsRaw)
-            ) {
-                for (const [k, v] of Object.entries(fieldsRaw)) {
-                    if (typeof v === "string") fields[k] = v;
-                }
-            }
-            action = {
-                label,
-                action: actionPath,
-                fields: Object.keys(fields).length > 0 ? fields : undefined,
-            };
-        }
-    }
     const base =
         sanitized != null
             ? { key: toastKey, params: sanitized }
@@ -146,7 +104,6 @@ export function decodeToastFlash(
     return {
         ...base,
         ...(dismissMs != null ? { dismissMs } : {}),
-        ...(action ? { action } : {}),
     };
 }
 
@@ -220,13 +177,12 @@ export function redirectWithToast(
     path: string,
     key: ToastKey,
     params?: ToastParams,
-    opts?: { dismissMs?: number; action?: ToastAction },
+    opts?: { dismissMs?: number },
 ): Response {
     const encoded = encodeToastFlash({
         key,
         params,
         dismissMs: opts?.dismissMs,
-        action: opts?.action,
     });
     if (encoded) {
         c.header(
@@ -240,30 +196,16 @@ export function redirectWithToast(
     return c.redirect(path, 303);
 }
 
-function encodeToastAction(action: ToastAction | undefined): string {
-    if (!action) return "";
-    const fields = action.fields
-        ? Object.entries(action.fields)
-              .map(
-                  ([k, v]) =>
-                      `<input type="hidden" name="${escapeHtml(k)}" value="${escapeHtml(v)}" />`,
-              )
-              .join("")
-        : "";
-    return `<form class="toast-action" method="post" action="${escapeHtml(action.action)}">${fields}<button type="submit" class="toast-action__btn">${escapeHtml(action.label)}</button></form>`;
-}
-
 export function toastSeedElement(
     kind: ToastKind,
     text: string,
-    opts?: { dismissMs?: number; action?: ToastAction },
+    opts?: { dismissMs?: number },
 ): string {
     const dismiss =
         opts?.dismissMs != null
             ? ` data-toast-dismiss-ms="${opts.dismissMs}"`
             : "";
-    const action = opts?.action ? ` data-toast-has-action="1"` : "";
-    return `<div id="toast-seed" hidden data-turbo-temporary data-toast-kind="${kind}" data-toast-text="${escapeHtml(text)}"${dismiss}${action}>${encodeToastAction(opts?.action)}</div>`;
+    return `<div id="toast-seed" hidden data-turbo-temporary data-toast-kind="${kind}" data-toast-text="${escapeHtml(text)}"${dismiss}></div>`;
 }
 
 export const flashToastMiddleware = createMiddleware(async (c, next) => {
@@ -307,7 +249,6 @@ export const flashToastMiddleware = createMiddleware(async (c, next) => {
     const text = formatToastText(flash.key, flash.params);
     const seed = toastSeedElement(kind, text, {
         dismissMs: flash.dismissMs,
-        action: flash.action,
     });
     const injected = body.includes("</body>")
         ? // A function replacement: the seed carries the toast text, and a

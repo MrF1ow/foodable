@@ -1,4 +1,9 @@
-import { TOASTS, type ToastKey } from "../copy/toasts.js";
+import {
+    IMPORT_MESSAGES,
+    type ImportMessage,
+    type ImportMessageKey,
+} from "../copy/recipe-import.js";
+import { TOASTS } from "../copy/toasts.js";
 import type { FetchFailure } from "../fetch-safe.js";
 import type { SafeFetcher } from "../fetch-safe.js";
 import {
@@ -481,7 +486,7 @@ function importReviewUsesSingularVerb(countPhrase: string): boolean {
     );
 }
 
-function fillToastTemplate(
+function fillMessageTemplate(
     template: string,
     params: Record<string, string>,
 ): string {
@@ -491,28 +496,34 @@ function fillToastTemplate(
     );
 }
 
-export function importOutcomeToastKey(outcome: RecipeImportOutcome): ToastKey {
+/**
+ * Which message an outcome reads: a key of `IMPORT_MESSAGES`, or `duplicate`,
+ * the one outcome whose text is a toast (`recipes.import.duplicate`).
+ */
+export function importOutcomeMessageKey(
+    outcome: RecipeImportOutcome,
+): ImportMessageKey | "duplicate" {
     if (outcome.fromMemory && outcome.status === "site_refused") {
-        return "recipes.import.site_refused_recent";
+        return "site_refused_recent";
     }
     if (outcome.fromMemory && outcome.status === "not_found") {
-        return "recipes.import.not_found_recent";
+        return "not_found_recent";
     }
     if (outcome.status === "unverified_needs_review") {
         const count = importReviewCount(outcome.problems);
         return importReviewUsesSingularVerb(count)
-            ? "recipes.import.unverified_needs_review_one"
-            : "recipes.import.unverified_needs_review";
+            ? "unverified_needs_review_one"
+            : "unverified_needs_review";
     }
     if (outcome.status === "paste_needed") {
         if (outcome.readerFailure) {
-            return "recipes.import.paste_needed_reader";
+            return "paste_needed_reader";
         }
         if (outcome.source?.kind === "website") {
-            return "recipes.import.paste_needed_site";
+            return "paste_needed_site";
         }
     }
-    return `recipes.import.${outcome.status}` as ToastKey;
+    return outcome.status;
 }
 
 export function importRecipeFromUrlAnalyticsOutcome(
@@ -529,9 +540,20 @@ export function importRecipeFromUrlAnalyticsOutcome(
         : { success: false, errorCategory: "recipe_import" };
 }
 
-export function importOutcomeMessage(outcome: RecipeImportOutcome): string {
-    const key = importOutcomeToastKey(outcome);
-    const template = TOASTS[key].text;
+/**
+ * An outcome's text in two parts: the headline, and the reason or next step
+ * when it has one. The web import sheet shows them as two lines; the MCP
+ * `message` is `importOutcomeMessage`, the same two parts as one sentence.
+ */
+export function importOutcomeParts(outcome: RecipeImportOutcome): {
+    headline: string;
+    reason?: string;
+} {
+    const key = importOutcomeMessageKey(outcome);
+    const template: ImportMessage =
+        key === "duplicate"
+            ? { headline: TOASTS["recipes.import.duplicate"].text }
+            : IMPORT_MESSAGES[key];
     const params: Record<string, string> = {};
     if (outcome.recipeName) params.name = outcome.recipeName;
     if (outcome.source?.label) {
@@ -542,7 +564,16 @@ export function importOutcomeMessage(outcome: RecipeImportOutcome): string {
         params.count = importReviewCount(outcome.problems);
     }
     if (outcome.readerFailure) params.reason = outcome.readerFailure;
-    return fillToastTemplate(template, params);
+    const headline = fillMessageTemplate(template.headline, params);
+    const reason = template.reason
+        ? fillMessageTemplate(template.reason, params)
+        : "";
+    return reason ? { headline, reason } : { headline };
+}
+
+export function importOutcomeMessage(outcome: RecipeImportOutcome): string {
+    const { headline, reason } = importOutcomeParts(outcome);
+    return reason ? `${headline} ${reason}` : headline;
 }
 
 const SOCIAL_KINDS = new Set<RecipeSourceKind>([

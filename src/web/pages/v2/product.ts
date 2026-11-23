@@ -12,8 +12,10 @@ import { getHouseholdMembership } from "../../../db/household.js";
 import { getProfile } from "../../../db/profiles.js";
 import { liveFoodsStore } from "../../../db/foods.js";
 import { liveFridgeStore } from "../../../db/fridge.js";
+import { liveGroceryStore } from "../../../db/grocery.js";
+import type { GroceryLine } from "../../../domain/grocery.js";
 import { esc } from "../../components/v2/html.js";
-import { iconCart } from "../../components/v2/icons.js";
+import { iconCart, iconCheck } from "../../components/v2/icons.js";
 import { foodRow, rowList, sectionHeader } from "../../components/v2/rows.js";
 import { renderAppShell } from "../../shell.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
@@ -46,6 +48,8 @@ export type ProductPageView = {
     nutritionHead: ProductNutritionHead;
     score: ProductScoreSection | null;
     backHref: string;
+    /** The food (or its usual product) has an unchecked grocery line. */
+    onGroceryList?: boolean;
     error?: string;
 };
 
@@ -75,6 +79,30 @@ export function productGroceryPostPath(foodId: string): string {
 
 export function productBarcodeUnknownPostPath(barcode: string): string {
     return `/foods/by-barcode/${encodeURIComponent(barcode)}`;
+}
+
+/**
+ * Whether Add to groceries on this page has nothing left to add: an unticked
+ * line for this food itself, or for the plain food and its usual product when
+ * this page is one of the two. A sibling product's line does not count, so
+ * that product stays addable from its own page (`onGroceryList` matches the
+ * whole family and is for notices and restock, not for this).
+ */
+export function productOnGroceryList(
+    food: Pick<Food, "id" | "genericFoodId" | "usualProductId">,
+    catalog: readonly Pick<Food, "id" | "usualProductId">[],
+    lines: readonly Pick<GroceryLine, "foodId" | "checked">[],
+): boolean {
+    const same = new Set<string>([food.id]);
+    if (food.genericFoodId == null) {
+        if (food.usualProductId) same.add(food.usualProductId);
+    } else {
+        const plain = catalog.find((row) => row.id === food.genericFoodId);
+        if (plain?.usualProductId === food.id) same.add(plain.id);
+    }
+    return lines.some(
+        (line) => !line.checked && line.foodId != null && same.has(line.foodId),
+    );
 }
 
 export function productStockForFood(
@@ -212,10 +240,15 @@ function productActions(view: ProductPageView): string {
     );
     const grocery = productGroceryPostPath(view.food.id);
     const cart = String(iconCart());
-    return `<div class="fd-product-actions">
-<form class="fd-product-actions__grocery" method="post" action="${esc(grocery)}">
+    // On the list already: the control says so and opens the list, so a second
+    // press cannot add a duplicate line.
+    const add = view.onGroceryList
+        ? `<a class="fd-btn fd-product-actions__add fd-product-actions__add--listed" href="${esc(APP_PATHS.kitchenGroceries)}">${String(iconCheck())}<span>On your list</span></a>`
+        : `<form class="fd-product-actions__grocery" method="post" action="${esc(grocery)}">
 <button type="submit" class="fd-btn fd-product-actions__add">${cart}<span>Add to groceries</span></button>
-</form>
+</form>`;
+    return `<div class="fd-product-actions">
+${add}
 <button type="button" class="fd-btn fd-btn--primary fd-product-actions__log" data-fd-log-pick="${pick}">Log it</button>
 </div>`;
 }
@@ -318,6 +351,11 @@ export async function loadProductPageData(
     const barcodes = await foods.listBarcodes(member.householdId, foodId);
     const fridge = await listFridge(liveFridgeStore(), member.householdId);
     const stock = productStockForFood(fridge, foodId);
+    const [catalog, lines] = await Promise.all([
+        foods.listFoods(member.householdId),
+        liveGroceryStore().listLines(member.householdId),
+    ]);
+    const onList = productOnGroceryList(food, catalog, lines);
     const score = await loadProductScoreSection(
         member.householdId,
         food,
@@ -333,6 +371,7 @@ export async function loadProductPageData(
         ...productNutritionView(food),
         score,
         backHref,
+        onGroceryList: onList,
     };
 }
 
