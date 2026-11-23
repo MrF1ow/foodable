@@ -2603,6 +2603,44 @@ describe("product routes (v2 foods)", () => {
         resetFlagsForTests();
     });
 
+    test("a sibling product on the list leaves this product addable", async () => {
+        const eggs = await db.foodsStore.insertFood(
+            newFood({ householdId: HH, kind: "food", name: "Eggs" }),
+        );
+        const egglands = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Eggland's Eggs",
+                genericFoodId: eggs.id,
+            }),
+        );
+        const kirkland = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Kirkland Eggs",
+                genericFoodId: eggs.id,
+            }),
+        );
+        await productApp().request(
+            `http://x/foods/${egglands.id}/add-to-grocery`,
+            { method: "POST", headers: { cookie: cookieFor(ALICE) } },
+        );
+        const page = async (id: string) =>
+            (
+                await productApp().request(`http://x/foods/${id}`, {
+                    headers: { cookie: cookieFor(ALICE) },
+                })
+            ).text();
+        const sibling = await page(kirkland.id);
+        expect(sibling).toContain("<span>Add to groceries</span>");
+        expect(sibling).toContain(`/foods/${kirkland.id}/add-to-grocery`);
+        expect(sibling).not.toContain("On your list");
+        expect(await page(egglands.id)).toContain("On your list");
+        resetFlagsForTests();
+    });
+
     test("POST add-to-grocery returns 400 when no store", async () => {
         db.settingsStore = createMemorySettingsStore();
         const food = await db.foodsStore.insertFood(

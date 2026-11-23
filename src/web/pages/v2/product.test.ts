@@ -7,6 +7,7 @@ import type { AppChromeBase } from "../../attention.js";
 import {
     buildPreviewProductPageView,
     productLogPickPayload,
+    productOnGroceryList,
     productStockForFood,
     renderProductBody,
     renderProductBarcodeUnknownPage,
@@ -619,5 +620,69 @@ describe("renderProductBarcodeUnknownPage", () => {
         });
         expect(html).toContain("Could not look up this barcode");
         expect(html).not.toContain("Open Food Facts does not know");
+    });
+});
+
+describe("productOnGroceryList", () => {
+    const line = (foodId: string | null, checked = false) => ({
+        foodId,
+        checked,
+    });
+    const eggs = {
+        id: "eggs",
+        genericFoodId: null,
+        usualProductId: "egglands",
+    };
+    const egglands = {
+        id: "egglands",
+        genericFoodId: "eggs",
+        usualProductId: null,
+    };
+    const kirkland = {
+        id: "kirkland",
+        genericFoodId: "eggs",
+        usualProductId: null,
+    };
+    const catalog = [eggs, egglands, kirkland];
+
+    test("a sibling product's line does not count", () => {
+        expect(
+            productOnGroceryList(kirkland, catalog, [line("egglands")]),
+        ).toBe(false);
+    });
+
+    test("a line for the same product counts", () => {
+        expect(
+            productOnGroceryList(kirkland, catalog, [line("kirkland")]),
+        ).toBe(true);
+    });
+
+    test("a plain food counts a line for itself or its usual product, not another product", () => {
+        expect(productOnGroceryList(eggs, catalog, [line("eggs")])).toBe(true);
+        expect(productOnGroceryList(eggs, catalog, [line("egglands")])).toBe(
+            true,
+        );
+        expect(productOnGroceryList(eggs, catalog, [line("kirkland")])).toBe(
+            false,
+        );
+    });
+
+    test("the usual product counts a line for its plain food, another product does not", () => {
+        expect(productOnGroceryList(egglands, catalog, [line("eggs")])).toBe(
+            true,
+        );
+        expect(productOnGroceryList(kirkland, catalog, [line("eggs")])).toBe(
+            false,
+        );
+    });
+
+    test("ticked and food-less lines never count", () => {
+        expect(
+            productOnGroceryList(eggs, catalog, [
+                line("eggs", true),
+                line("egglands", true),
+                line(null),
+            ]),
+        ).toBe(false);
     });
 });

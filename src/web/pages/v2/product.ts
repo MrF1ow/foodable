@@ -13,7 +13,7 @@ import { getProfile } from "../../../db/profiles.js";
 import { liveFoodsStore } from "../../../db/foods.js";
 import { liveFridgeStore } from "../../../db/fridge.js";
 import { liveGroceryStore } from "../../../db/grocery.js";
-import { onGroceryList } from "../../../domain/grocery.js";
+import type { GroceryLine } from "../../../domain/grocery.js";
 import { esc } from "../../components/v2/html.js";
 import { iconCart, iconCheck } from "../../components/v2/icons.js";
 import { foodRow, rowList, sectionHeader } from "../../components/v2/rows.js";
@@ -79,6 +79,30 @@ export function productGroceryPostPath(foodId: string): string {
 
 export function productBarcodeUnknownPostPath(barcode: string): string {
     return `/foods/by-barcode/${encodeURIComponent(barcode)}`;
+}
+
+/**
+ * Whether Add to groceries on this page has nothing left to add: an unticked
+ * line for this food itself, or for the plain food and its usual product when
+ * this page is one of the two. A sibling product's line does not count, so
+ * that product stays addable from its own page (`onGroceryList` matches the
+ * whole family and is for notices and restock, not for this).
+ */
+export function productOnGroceryList(
+    food: Pick<Food, "id" | "genericFoodId" | "usualProductId">,
+    catalog: readonly Pick<Food, "id" | "usualProductId">[],
+    lines: readonly Pick<GroceryLine, "foodId" | "checked">[],
+): boolean {
+    const same = new Set<string>([food.id]);
+    if (food.genericFoodId == null) {
+        if (food.usualProductId) same.add(food.usualProductId);
+    } else {
+        const plain = catalog.find((row) => row.id === food.genericFoodId);
+        if (plain?.usualProductId === food.id) same.add(plain.id);
+    }
+    return lines.some(
+        (line) => !line.checked && line.foodId != null && same.has(line.foodId),
+    );
 }
 
 export function productStockForFood(
@@ -331,16 +355,7 @@ export async function loadProductPageData(
         foods.listFoods(member.householdId),
         liveGroceryStore().listLines(member.householdId),
     ]);
-    const onList = onGroceryList(
-        { foodId },
-        lines,
-        new Map(
-            catalog.map((row) => [
-                row.id,
-                { id: row.id, genericFoodId: row.genericFoodId },
-            ]),
-        ),
-    );
+    const onList = productOnGroceryList(food, catalog, lines);
     const score = await loadProductScoreSection(
         member.householdId,
         food,
