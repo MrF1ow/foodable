@@ -495,7 +495,7 @@ describe("needs-attention routes", () => {
         expect(r.status).toBe(400);
     });
 
-    test("show dismissed lists dismissal; undo brings notice back", async () => {
+    test("a dismissal has no undo: no Show dismissed link, no Undo form, no undo route", async () => {
         const { yogurt } = await seedGroupedNotices();
         await app().request("http://x/needs-attention/dismiss", {
             method: "POST",
@@ -509,15 +509,18 @@ describe("needs-attention routes", () => {
                 subject_id: yogurt.id,
             }).toString(),
         });
-        const dismissed = await app().request(
-            "http://x/needs-attention?show=dismissed",
-            { headers: { cookie: cookieFor(ALICE) } },
-        );
-        const dismissedHtml = await dismissed.text();
         const rows = await db.dismissalsStore.listForHousehold(HH);
         const row = rows.find((d) => d.subjectId === yogurt.id);
         expect(row).toBeTruthy();
-        expect(dismissedHtml).toContain(row!.id);
+        // The old address of the dismissed list is the plain page now.
+        const page = await app().request(
+            "http://x/needs-attention?show=dismissed",
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        const html = await page.text();
+        expect(html).not.toContain("Show dismissed");
+        expect(html).not.toContain("/needs-attention/undo");
+        expect(html).not.toContain(row!.id);
 
         const undo = await app().request("http://x/needs-attention/undo", {
             method: "POST",
@@ -527,101 +530,9 @@ describe("needs-attention routes", () => {
             },
             body: new URLSearchParams({ dismissal_id: row!.id }).toString(),
         });
-        expect(undo.status).toBe(303);
-        expect(undo.headers.get("location")).toBe(
-            "/needs-attention?show=dismissed",
-        );
-        const open = await noticesFor(noticeDeps(), HH, {
-            today: utcTodayFromDate(),
-        });
-        expect(
-            open.notices.some(
-                (n) =>
-                    n.subject.id === yogurt.id && n.code === "fridge.expiring",
-            ),
-        ).toBe(true);
-    });
-
-    test("POST undo with return_to=/settings/household redirects there", async () => {
-        const { yogurt } = await seedGroupedNotices();
-        await app().request("http://x/needs-attention/dismiss", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: new URLSearchParams({
-                code: "fridge.expiring",
-                subject_kind: "fridge_item",
-                subject_id: yogurt.id,
-            }).toString(),
-        });
-        const rows = await db.dismissalsStore.listForHousehold(HH);
-        const row = rows.find((d) => d.subjectId === yogurt.id);
-        expect(row).toBeTruthy();
-        const undo = await app().request("http://x/needs-attention/undo", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: new URLSearchParams({
-                dismissal_id: row!.id,
-                return_to: "/settings/household",
-            }).toString(),
-        });
-        expect(undo.status).toBe(303);
-        expect(undo.headers.get("location")).toBe("/settings/household");
-    });
-
-    test("POST undo rejects open-redirect return_to", async () => {
-        const row = await db.dismissalsStore.insert({
-            householdId: HH,
-            code: "fridge.expiring",
-            subjectKind: "fridge_item",
-            subjectId: crypto.randomUUID(),
-            relatedKey: "",
-            dismissedBy: ALICE,
-        });
-        const undo = await app().request("http://x/needs-attention/undo", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: new URLSearchParams({
-                dismissal_id: row.id,
-                return_to: "//evil.example",
-            }).toString(),
-        });
-        expect(undo.status).toBe(303);
-        expect(undo.headers.get("location")).toBe(
-            "/needs-attention?show=dismissed",
-        );
-    });
-
-    test("POST undo with another household dismissal id is rejected", async () => {
-        const foreign = await db.dismissalsStore.insert({
-            householdId: HH_OTHER,
-            code: "fridge.expiring",
-            subjectKind: "fridge_item",
-            subjectId: crypto.randomUUID(),
-            relatedKey: "",
-            dismissedBy: ALICE,
-        });
-        const r = await app().request("http://x/needs-attention/undo", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: new URLSearchParams({
-                dismissal_id: foreign.id,
-            }).toString(),
-        });
-        expect(r.status).toBe(400);
-        const still = await db.dismissalsStore.listForHousehold(HH_OTHER);
-        expect(still.some((d) => d.id === foreign.id)).toBe(true);
+        expect(undo.status).toBe(404);
+        const still = await db.dismissalsStore.listForHousehold(HH);
+        expect(still.some((d) => d.id === row!.id)).toBe(true);
     });
 
     test("the Settings link lights up only when something needs attention, and keeps data-turbo", async () => {
@@ -719,30 +630,7 @@ describe("needs-attention routes", () => {
         });
         const html = await r.text();
         expect(html).toContain("Pick usual product");
-        expect(html).toContain("/needs-attention");
-    });
-
-    test("show dismissed names an existing fridge item", async () => {
-        const { yogurt } = await seedGroupedNotices();
-        await app().request("http://x/needs-attention/dismiss", {
-            method: "POST",
-            headers: {
-                cookie: cookieFor(ALICE),
-                "content-type": "application/x-www-form-urlencoded",
-            },
-            body: new URLSearchParams({
-                code: "fridge.expiring",
-                subject_kind: "fridge_item",
-                subject_id: yogurt.id,
-            }).toString(),
-        });
-        const dismissed = await app().request(
-            "http://x/needs-attention?show=dismissed",
-            { headers: { cookie: cookieFor(ALICE) } },
-        );
-        const html = await dismissed.text();
-        expect(html).toContain("Soon yogurt");
-        expect(html).not.toContain("Removed item");
+        expect(html).toContain("?from=%2Fneeds-attention");
     });
 
     test("an expiring item offers Add to grocery list, returning here", async () => {
@@ -757,17 +645,6 @@ describe("needs-attention routes", () => {
         expect(html).toContain(
             '<input type="hidden" name="from" value="/needs-attention" />',
         );
-    });
-
-    test("show dismissed opens the disclosure", async () => {
-        const r = await app().request(
-            "http://x/needs-attention?show=dismissed",
-            {
-                headers: { cookie: cookieFor(ALICE) },
-            },
-        );
-        const html = await r.text();
-        expect(html).toContain('<details class="more" open>');
     });
 
     test("panels sort newest activity first", async () => {

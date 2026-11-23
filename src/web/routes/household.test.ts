@@ -3579,37 +3579,29 @@ describe("household settings sub-pages", () => {
     });
 
     describe("dismissed notices", () => {
-        test("lists dismissals grouped by kind with Undo back to the page", async () => {
-            const food = await db.foodsStore.insertFood(
-                newFood({ householdId: HH, kind: "food", name: "Milk" }),
+        test("the list is gone: its address redirects to Household and nothing undoes a dismissal", async () => {
+            const legacy = new Hono();
+            legacy.use("*", legacyRedirects());
+            const moved = await legacy.request(
+                "http://x/settings/household/dismissed?x=1",
             );
-            await db.dismissalsStore.insert({
-                householdId: HH,
-                code: "recipe.no_food",
-                subjectKind: "food",
-                subjectId: food.id,
-                relatedKey: "",
-                dismissedBy: ALICE,
-            });
-            const r = await get("/settings/household/dismissed", BOB);
-            expect(r.status).toBe(200);
-            const html = await r.text();
-            expect(html).toContain("data-fd-dismissed");
-            expect(html).toContain('action="/needs-attention/undo"');
-            expect(html).toContain(
-                'name="return_to" value="/settings/household/dismissed"',
+            expect(moved.status).toBe(301);
+            expect(moved.headers.get("location")).toBe(
+                "/settings/household?x=1",
             );
-        });
-
-        test("an empty list says so", async () => {
-            const html = await (
-                await get("/settings/household/dismissed", ALICE)
-            ).text();
-            expect(html).toContain("No dismissed notices.");
+            const post = await legacy.request(
+                "http://x/settings/household/dismissed",
+                { method: "POST" },
+            );
+            expect(post.status).toBe(308);
+            expect(post.headers.get("location")).toBe("/settings/household");
+            // Without the middleware nothing serves the old page either.
+            const bare = await get("/settings/household/dismissed", ALICE);
+            expect(bare.status).toBe(404);
         });
     });
 
-    test("Household shows the nine rows and no longer the store list, plurals or readers", async () => {
+    test("Household shows the eight rows and no longer the store list, plurals or readers", async () => {
         const html = await (await get("/settings/household", ALICE)).text();
         for (const label of [
             "Household name",
@@ -3619,13 +3611,13 @@ describe("household settings sub-pages", () => {
             "Restock day",
             "Recipe link readers",
             "Unverified recipes",
-            "Dismissed notices",
             "Rotate join token",
         ]) {
             expect(html).toContain(
                 `<span class="fd-row__title">${label}</span>`,
             );
         }
+        expect(html).not.toContain("Dismissed notices");
         expect(html).not.toContain("plurals-same-food");
         expect(html).not.toContain("Social post readers");
     });

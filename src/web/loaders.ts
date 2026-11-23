@@ -122,10 +122,6 @@ import {
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
 import { renderSettingsRestockV2Page } from "./pages/v2/settings-restock.js";
 import { renderSettingsReadersV2Page } from "./pages/v2/settings-readers.js";
-import {
-    dismissedNotices,
-    renderSettingsDismissedV2Page,
-} from "./pages/v2/settings-dismissed.js";
 import { recipeFetchMemory } from "../db/fetch-memory.js";
 import type { FetchMemoryStore } from "../domain/fetch-memory.js";
 import { renderSettingsStoresV2Page } from "./pages/v2/settings-stores.js";
@@ -185,11 +181,7 @@ import {
 import { liveNoticeDismissalsStore } from "../db/notice-dismissals.js";
 import { dismissedKeySet, isDismissedIn } from "../domain/notice-dismissals.js";
 import { groceryRestockNotices } from "../domain/restock.js";
-import {
-    dismissNotice,
-    undoDismissal,
-    type NoticesForDeps,
-} from "../domain/notices-for.js";
+import { dismissNotice, type NoticesForDeps } from "../domain/notices-for.js";
 import { NoticeDismissError } from "../domain/notice-dismissals.js";
 import type { NoticeCode } from "../domain/notices.js";
 import type { NoticeSubjectKind } from "../domain/notice-dismissals.js";
@@ -1561,7 +1553,6 @@ export async function renderHouseholdSettingsRoute(
             restock: config.preferences.restock,
             unverifiedRecipeExpiryDays:
                 config.preferences.unverifiedRecipeExpiryDays,
-            dismissedCount: dismissedNotices(noticeResult).length,
             timezone: profile?.timezone ?? "UTC",
             noticeResult,
             sharedLinks,
@@ -1641,27 +1632,6 @@ export async function renderHouseholdReadersRoute(
             canManage: canManageHousehold(gate.viewer),
             error: opts.error,
             openModalId: opts.openModalId,
-        }),
-    };
-}
-
-export async function renderHouseholdDismissedRoute(
-    viewerUserId: string,
-): Promise<{ status: 200 | 403; html: string }> {
-    const gate = await memberGate(viewerUserId);
-    if ("html" in gate) return { status: gate.status, html: gate.html };
-    const profile = await getProfile(viewerUserId);
-    const noticeResult = await loadViewerNotices(gate.viewer);
-    return {
-        status: 200,
-        html: renderSettingsDismissedV2Page({
-            chrome: await viewerChromeWithAttention(
-                profile,
-                gate.viewer,
-                noticeResult,
-            ),
-            dismissals: dismissedNotices(noticeResult),
-            subjectNames: noticeResult.subjectNames,
         }),
     };
 }
@@ -2225,13 +2195,11 @@ function noticeDeps(): NoticesForDeps {
 export async function renderNeedsAttentionInventoryPage(
     viewerUserId: string,
     error?: string,
-    showDismissed?: boolean,
     post?: {
         code?: string;
         subjectKind?: string;
         subjectId?: string;
         relatedId?: string;
-        undoDismissalId?: string;
         member?: HouseholdMember;
     },
 ): Promise<{ status: 200 | 303 | 400 | 403; html: string }> {
@@ -2246,10 +2214,7 @@ export async function renderNeedsAttentionInventoryPage(
     if (post?.member) {
         const deps = noticeDeps();
         try {
-            if (post.undoDismissalId) {
-                await undoDismissal(deps, householdId, post.undoDismissalId);
-                redirect = true;
-            } else if (post.code && post.subjectKind && post.subjectId) {
+            if (post.code && post.subjectKind && post.subjectId) {
                 today = await householdToday(householdId);
                 await dismissNotice(
                     deps,
@@ -2287,7 +2252,6 @@ export async function renderNeedsAttentionInventoryPage(
         chrome,
         viewerUserId: gate.viewer.userId,
         result,
-        showDismissed,
         error: pageError,
     });
     if (redirect && !pageError) {

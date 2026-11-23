@@ -1812,23 +1812,38 @@ try {
         '#notification-n-yogurt form[action$="/dismiss"]:has(input[value="everyone"]) button',
     );
     await sleep(700);
+    // Turn off the weigh-in kind from its row: the post carries the kind and
+    // answers 303 back to the inbox.
+    await mouseClick("#notification-n-weigh [data-fd-menu-trigger]");
+    await sleep(150);
+    await mouseClick(
+        '#notification-n-weigh form[action="/settings/notifications"] button',
+    );
+    await sleep(700);
+    const afterTurnOff = await snap();
     const menuPosts = (await stats()).posts.map((p) => [
         p.path,
         Object.fromEntries(p.entries),
     ]);
     record(
-        "inbox ⋯ menu: owner and allergens menus, and Snooze 1 week and Dismiss for everyone post their forms over Turbo",
+        "inbox ⋯ menu: owner and allergens menus, and Snooze 1 week, Dismiss for everyone and Turn off post their forms over Turbo",
         yogurtItems.join("|") ===
-            "Open|Snooze until tomorrow|Snooze 1 week|Dismiss for me|Dismiss for everyone" &&
+            "Open|Snooze until tomorrow|Snooze 1 week|Dismiss for me|Dismiss for everyone|Turn off “Food expiring”" &&
             weighItems.join("|") ===
-                "Open|Snooze until tomorrow|Snooze 1 week|Dismiss" &&
+                "Open|Snooze until tomorrow|Snooze 1 week|Dismiss|Turn off “Weigh-in due”" &&
             allergenItems.join("|") === "Open" &&
             menuOpened &&
             afterSnooze.marker === "stay" &&
+            afterTurnOff.marker === "stay" &&
+            afterTurnOff.h1 === "Notifications" &&
             JSON.stringify(menuPosts) ===
                 JSON.stringify([
                     ["/notifications/n-yogurt/snooze", { until: "week" }],
                     ["/notifications/n-yogurt/dismiss", { scope: "everyone" }],
+                    [
+                        "/settings/notifications",
+                        { kind: "weigh_in_due", enabled: "false" },
+                    ],
                 ]),
         {
             yogurtItems,
@@ -1836,7 +1851,82 @@ try {
             allergenItems,
             menuOpened,
             afterSnooze,
+            afterTurnOff,
             menuPosts,
+            ex: drain(),
+        },
+    );
+
+    // Settings › Notifications: a toggle saves itself over Turbo, with no
+    // toast, and two clicks in a row (the first still in flight) both go.
+    await control("reset=posts&delay=250");
+    await goto("/settings/notifications");
+    await setMarker();
+    const notifBefore = await ev<{
+        rows: string[];
+        sections: string[];
+        allergens: boolean;
+        checked: Record<string, string | null>;
+    }>(`({
+        rows: [...document.querySelectorAll(".fd-notification-settings .fd-item-row__title")].map((e) => e.textContent.trim()),
+        sections: [...document.querySelectorAll(".fd-notification-settings .fd-section-header__label")].map((e) => e.textContent.trim()),
+        allergens: !!document.querySelector("#notification-kind-allergens"),
+        checked: Object.fromEntries([...document.querySelectorAll(".fd-notification-settings [role=switch]")].map((e) => [e.closest("li").id, e.getAttribute("aria-checked")])),
+    })`);
+    await clickSel("#notification-kind-running_low [role=switch]");
+    await sleep(40);
+    await clickSel("#notification-kind-recipe_changes [role=switch]");
+    await sleep(1200);
+    const notifAfter = await snap();
+    const notifState = await ev<{
+        toast: boolean;
+        done: boolean;
+    }>(`({
+        toast: !!document.querySelector("[data-fd-toast], .fd-toast"),
+        done: !!document.querySelector("#done"),
+    })`);
+    const notifPosts = (await stats()).posts.map((p) => [
+        p.path,
+        Object.fromEntries(p.entries),
+    ]);
+    await control("delay=0");
+    record(
+        "Settings › Notifications: base then extras, no Allergens row, and two quick toggles each save over Turbo with no toast",
+        notifBefore.sections.join("|") ===
+            "Base · on unless you turn them off|Extras · off unless you turn them on" &&
+            notifBefore.rows.join("|") ===
+                "Food expiring|Running low|Weigh-in due|Recipe changes by others|Week plan changes|New usual products" &&
+            !notifBefore.allergens &&
+            notifBefore.checked["notification-kind-running_low"] === "true" &&
+            notifBefore.checked["notification-kind-recipe_changes"] ===
+                "false" &&
+            notifAfter.marker === "stay" &&
+            notifAfter.href.endsWith("/settings/notifications") &&
+            !notifState.toast &&
+            JSON.stringify(notifPosts) ===
+                JSON.stringify([
+                    [
+                        "/settings/notifications",
+                        {
+                            kind: "running_low",
+                            enabled: "false",
+                            return: "/settings/notifications",
+                        },
+                    ],
+                    [
+                        "/settings/notifications",
+                        {
+                            kind: "recipe_changes",
+                            enabled: "true",
+                            return: "/settings/notifications",
+                        },
+                    ],
+                ]),
+        {
+            notifBefore,
+            notifAfter,
+            notifState,
+            notifPosts,
             ex: drain(),
         },
     );

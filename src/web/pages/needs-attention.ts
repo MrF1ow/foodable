@@ -1,21 +1,17 @@
 import type { Notice } from "../../domain/notices.js";
 import {
-    dismissalSubjectLabel,
     panelGroupKey,
     type NoticesForResult,
 } from "../../domain/notices-for.js";
 import { dismissalKey } from "../../domain/notice-dismissals.js";
-import { NOTICE_COPY } from "../../copy/notices.js";
 import { noticeCodeDismissible } from "../../copy/notices.js";
 import type { AppChromeBase } from "../attention.js";
 import { escapeHtml, renderAppShell } from "../shell.js";
 import {
-    disclosure,
     emptyState,
     errorBanner,
     pageHeader,
     panel,
-    row,
 } from "../components/ui.js";
 import {
     noticeList,
@@ -29,7 +25,6 @@ export type NeedsAttentionView = {
     /** The viewer, for a weigh-in reminder that is theirs (new app only). */
     viewerUserId?: string;
     result: NoticesForResult;
-    showDismissed?: boolean;
     error?: string;
 };
 
@@ -162,51 +157,12 @@ export function renderNeedsAttentionPage(view: NeedsAttentionView): string {
         );
     }
 
-    const dismissedNames = view.result.subjectNames;
-    const dismissedBody =
-        view.showDismissed === true
-            ? (() => {
-                  const openKeys = new Set(
-                      view.result.notices.map((n) => {
-                          const k = dismissalKey(n);
-                          return `${k.code}|${k.subjectKind}|${k.subjectId}|${k.relatedKey}`;
-                      }),
-                  );
-                  const rows = view.result.dismissals
-                      .filter((d) => {
-                          const key = `${d.code}|${d.subjectKind}|${d.subjectId}|${d.relatedKey}`;
-                          return !openKeys.has(key);
-                      })
-                      .map((d) => {
-                          const badge = NOTICE_COPY[d.code]?.badge ?? d.code;
-                          const label = dismissalSubjectLabel(
-                              d,
-                              dismissedNames,
-                          );
-                          return `<li>${row({
-                              title: `${badge} — ${label}`,
-                              meta: "",
-                              actions: `<form method="post" action="/needs-attention/undo" class="row-action"><input type="hidden" name="dismissal_id" value="${escapeHtml(d.id)}" /><button type="submit" class="btn-sm">Undo</button></form>`,
-                          })}</li>`;
-                      });
-                  if (rows.length === 0) {
-                      return emptyState("No dismissed notices.");
-                  }
-                  return `<ul class="list">${rows.join("")}</ul>`;
-              })()
-            : `<p><a href="/needs-attention?show=dismissed">Show dismissed notices</a></p>`;
-
     const body = [
         pageHeader({ title: "Needs attention" }),
         errorBanner(view.error),
         panels.length > 0
             ? panels.join("")
             : emptyState("Nothing needs attention"),
-        disclosure({
-            summary: "Show dismissed",
-            body: dismissedBody,
-            open: view.showDismissed === true,
-        }),
     ].join("");
 
     return renderAppShell({

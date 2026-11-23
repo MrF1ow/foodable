@@ -69,6 +69,15 @@ describe("legacyRedirectTarget", () => {
         { in: "/groceryx", want: null },
         { in: "/settings/household-settings", want: null },
         { in: "/settings/household", want: null },
+        {
+            in: "/settings/household/dismissed",
+            want: APP_PATHS.settingsHousehold,
+        },
+        {
+            in: "/settings/household/dismissed?x=1",
+            want: `${APP_PATHS.settingsHousehold}?x=1`,
+        },
+        { in: "/settings/household/dismissedx", want: null },
         { in: APP_PATHS.kitchenFridge, want: null },
         { in: "/recipes", want: null },
     ];

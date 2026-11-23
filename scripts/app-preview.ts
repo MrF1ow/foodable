@@ -62,6 +62,7 @@ import {
     type NotificationsPageView,
 } from "../src/web/pages/v2/notifications.js";
 import type { NotificationRow } from "../src/domain/notifications.js";
+import { renderSettingsNotificationsV2Page } from "../src/web/pages/v2/settings-notifications.js";
 import { renderHouseholdInvitesPage } from "../src/web/pages/v2/settings-household-invites.js";
 import { EMPTY_HOUSEHOLD_PREFERENCES } from "../src/household.js";
 import {
@@ -114,7 +115,6 @@ import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
 import { renderSettingsRestockV2Page } from "../src/web/pages/v2/settings-restock.js";
 import { renderSettingsReadersV2Page } from "../src/web/pages/v2/settings-readers.js";
-import { renderSettingsDismissedV2Page } from "../src/web/pages/v2/settings-dismissed.js";
 import type { SharedLinkRow } from "../src/web/pages/v2/settings-household-shared-links.js";
 import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
@@ -1746,7 +1746,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 lastRunAdded: 3,
             },
             unverifiedRecipeExpiryDays: 30,
-            dismissedCount: 2,
             timezone: "America/Los_Angeles",
             noticeResult: {
                 notices: previewNotices(),
@@ -2477,35 +2476,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             isOwner: true,
             canManage: true,
         }),
-        "settings-dismissed": renderSettingsDismissedV2Page({
-            chrome,
-            dismissals: [
-                {
-                    id: "d1",
-                    householdId: H,
-                    code: "fridge.expiring",
-                    subjectKind: "fridge_item",
-                    subjectId: "fi-1",
-                    relatedKey: "",
-                    dismissedBy: ME.userId,
-                    createdAt: "2026-11-10T12:00:00Z",
-                },
-                {
-                    id: "d2",
-                    householdId: H,
-                    code: "fridge.expiring",
-                    subjectKind: "fridge_item",
-                    subjectId: "fi-2",
-                    relatedKey: "",
-                    dismissedBy: ME.userId,
-                    createdAt: "2026-11-10T12:05:00Z",
-                },
-            ],
-            subjectNames: new Map([
-                ["fridge_item:fi-1", "Greek yogurt"],
-                ["fridge_item:fi-2", "Spinach"],
-            ]),
-        }),
         "settings-stores": renderSettingsStoresV2Page({
             chrome,
             stores: PREVIEW_STORE_SUMMARIES,
@@ -2596,6 +2566,21 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             } as never);
         })(),
+        // FigCraft Screens › Settings › Notifications (413107, desktop 601988):
+        // the extras in their default (off) state, and a mix of choices.
+        "settings-notifications": renderSettingsNotificationsV2Page({
+            chrome,
+            prefs: [],
+        }),
+        "settings-notifications-chosen": renderSettingsNotificationsV2Page({
+            chrome,
+            prefs: [
+                { kind: "running_low", enabled: false },
+                { kind: "recipe_changes", enabled: true },
+                { kind: "week_plan_changes", enabled: true },
+                { kind: "new_usuals", enabled: true },
+            ],
+        }),
         // FigCraft Screens › Notifications (387713), its ⋯ menus for a member
         // (387797) and an admin or owner (387895), and the empty inbox.
         notifications: renderNotificationsPage(

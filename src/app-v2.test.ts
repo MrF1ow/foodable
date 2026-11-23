@@ -863,8 +863,12 @@ async function wholeSetup() {
         defaultChecked: checked,
         hasAttribute: () => false,
     });
-    function makeForm(intent: string): WholeForm {
-        const hidden = control("intent", "hidden", intent);
+    function makeForm(
+        intent: string,
+        field = "intent",
+        action = "/settings/product-score",
+    ): WholeForm {
+        const hidden = control(field, "hidden", intent);
         const form: WholeForm = {
             elements: [hidden],
             hasAttribute: (n) => n === "data-fd-autosave",
@@ -872,10 +876,10 @@ async function wholeSetup() {
                 n === "data-fd-autosave"
                     ? "form"
                     : n === "action"
-                      ? "/settings/product-score"
+                      ? action
                       : null,
             querySelector: (sel) =>
-                sel === 'input[name="intent"]' ? hidden : null,
+                sel.includes(`input[name="${field}"]`) ? hidden : null,
             requestSubmit() {
                 if (fire("submit", { target: form })) {
                     reached += 1;
@@ -893,7 +897,11 @@ async function wholeSetup() {
     choice.elements.push(...preset, slider);
     const sw = makeForm("warn_traces");
     const reset = makeForm("household");
-    const forms = [choice, sw, reset];
+    // Two rows of one list of switches (Settings › Notifications): one action,
+    // told apart by the kind each posts.
+    const kindA = makeForm("food_expiring", "kind", "/settings/notifications");
+    const kindB = makeForm("running_low", "kind", "/settings/notifications");
+    const forms = [choice, sw, reset, kindA, kindB];
     const src = await Bun.file("./src/web/client/v2/autosave.js").text();
     new Function("document", "setTimeout", "clearTimeout", "WeakMap", src)(
         doc,
@@ -908,6 +916,8 @@ async function wholeSetup() {
         choice,
         sw,
         reset,
+        kindA,
+        kindB,
         preset,
         slider,
         reached: () => reached,
@@ -1070,6 +1080,21 @@ describe("autosave.js whole forms", () => {
         t.fire("turbo:render", {});
         t.flush();
         expect(t.last()).toBe(t.choice);
+    });
+
+    test("two switches of one list share an action and are told apart by their kind", async () => {
+        const t = await wholeSetup();
+        t.kindA.requestSubmit();
+        expect(t.reached()).toBe(1);
+        // The second switch is clicked while the first saves: held, not
+        // taken for the first (same action) and dropped.
+        t.kindB.requestSubmit();
+        expect(t.reached()).toBe(1);
+        t.end(t.kindA);
+        t.fire("turbo:render", {});
+        t.flush();
+        expect(t.reached()).toBe(2);
+        expect(t.last()).toBe(t.kindB);
     });
 
     test("a refresh of a saved form goes ahead", async () => {

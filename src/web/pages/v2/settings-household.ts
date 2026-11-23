@@ -38,7 +38,6 @@ import {
 } from "./settings-household-rows.js";
 import { RESTOCK_PATH, restockSummary } from "./settings-restock.js";
 import { READERS_PATH, readersSummary } from "./settings-readers.js";
-import { DISMISSED_PATH } from "./settings-dismissed.js";
 import { settingsField } from "./settings-shared.js";
 
 export const HOUSEHOLD_NAME_SHEET_ID = "fd-household-name";
@@ -69,8 +68,6 @@ export type SettingsHouseholdV2View = {
     effectiveTimezoneDefaulted?: boolean;
     restock: RestockPreferences;
     unverifiedRecipeExpiryDays: number | null;
-    /** Dismissed notices (not counting ones that are open again). */
-    dismissedCount: number;
     timezone?: string;
     /** When each member was last active, by user id; null = never. Without it the column is left out. */
     lastSeen?: ReadonlyMap<string, Date | null>;
@@ -244,12 +241,6 @@ function householdGroup(view: SettingsHouseholdV2View): Html {
             label: "Unverified recipes",
             value: expiryLabel(view.unverifiedRecipeExpiryDays),
             sheetId: edit ? HOUSEHOLD_EXPIRY_SHEET_ID : undefined,
-        }),
-        householdRow({
-            icon: ROW_ICONS.bell,
-            label: "Dismissed notices",
-            value: String(view.dismissedCount),
-            href: DISMISSED_PATH,
         }),
     ];
     // Owner only: the one fix for a leaked household bot token.

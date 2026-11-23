@@ -161,6 +161,7 @@ describe("settings menu groups", () => {
             "Units",
             "Nutrients shown",
             "Product score",
+            "Notifications",
         ]);
         expect(rowsOf(lists[2]!)).toEqual([
             "AI connections",
@@ -175,6 +176,7 @@ describe("settings menu groups", () => {
             "/settings/units",
             "/settings/nutrients",
             "/settings/product-score",
+            "/settings/notifications",
             "/settings/ai-connections",
             "/settings/export",
             "/settings/help",
@@ -201,6 +203,7 @@ describe("settings menu groups", () => {
             "Product score",
             "Display",
             "Units & nutrients",
+            "Notifications",
             "AI connections",
             "Export data",
             "Help",
@@ -214,6 +217,7 @@ describe("settings menu groups", () => {
             "/settings/product-score",
             "/settings/display",
             "/settings/units",
+            "/settings/notifications",
             "/settings/ai-connections",
             "/settings/export",
             "/settings/help",
@@ -238,6 +242,23 @@ describe("settings menu groups", () => {
                 "Units & nutrients",
             ]);
         }
+    });
+
+    test("Notifications is current on its own page, in the phone menu and the desktop nav", async () => {
+        const html = renderSettingsV2Page({
+            chrome,
+            page: "notifications",
+            title: "Notifications",
+            body: "<p>body</p>",
+        });
+        const rows = await navRows(html, "fd-settings-menu--desktop");
+        expect(rows.filter((r) => r.current).map((r) => r.label)).toEqual([
+            "Notifications",
+        ]);
+        const phone = await navRows(html, "fd-settings-menu--phone");
+        expect(phone.filter((r) => r.current).map((r) => r.label)).toEqual([
+            "Notifications",
+        ]);
     });
 
     test("Stores is current on the stores section, Household is not", async () => {

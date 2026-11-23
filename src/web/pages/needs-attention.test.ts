@@ -25,11 +25,9 @@ function render(
     names: [string, string][],
     times: [string, number][],
     dismissals: NoticeDismissal[] = [],
-    showDismissed = false,
 ): string {
     return renderNeedsAttentionPage({
         chrome,
-        showDismissed,
         result: {
             notices,
             dismissals,
@@ -73,7 +71,7 @@ test("groups are newest first, whatever their severity, and undated groups go la
     expect(old).toBeLessThan(undatedAt);
 });
 
-test("show dismissed escapes a subject name once", () => {
+test("a dismissed notice leaves nothing to show or undo", () => {
     const html = render(
         [],
         [["fridge_item:ice", "Ben & Jerry's"]],
@@ -90,11 +88,11 @@ test("show dismissed escapes a subject name once", () => {
                 createdAt: "2026-11-07T00:00:00Z",
             },
         ],
-        true,
     );
-    expect(html).toContain("Ben &amp; Jerry's");
-    expect(html).toContain('<ul class="list"><li><div class="row">');
-    expect(html).not.toContain("&amp;amp;");
+    expect(html).not.toContain("Ben &amp; Jerry's");
+    expect(html).not.toContain("Show dismissed");
+    expect(html).not.toContain("Undo");
+    expect(html).not.toContain("/needs-attention/undo");
 });
 
 test("a food group links to the household items page", () => {

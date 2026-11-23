@@ -83,7 +83,7 @@ const labels = (items: ReturnType<typeof notificationMenuItems>) =>
     items.flatMap((i) => ("label" in i ? [i.label] : []));
 
 describe("the ⋯ menu", () => {
-    test("a member: Open, both Snoozes and Dismiss, with no Turn off", () => {
+    test("a member: Open, both Snoozes, Dismiss and Turn off the kind", () => {
         expect(
             labels(
                 notificationMenuItems(row(), {
@@ -96,6 +96,7 @@ describe("the ⋯ menu", () => {
             "Snooze until tomorrow",
             "Snooze 1 week",
             "Dismiss",
+            "Turn off “Food expiring”",
         ]);
     });
 
@@ -113,6 +114,7 @@ describe("the ⋯ menu", () => {
             "Snooze 1 week",
             "Dismiss for me",
             "Dismiss for everyone",
+            "Turn off “Food expiring”",
         ]);
     });
 
@@ -130,6 +132,7 @@ describe("the ⋯ menu", () => {
             "Snooze until tomorrow",
             "Snooze 1 week",
             "Dismiss",
+            "Turn off “Weigh-in due”",
         ]);
     });
 
@@ -172,30 +175,56 @@ describe("the ⋯ menu", () => {
                 `/notifications/${id}/dismiss`,
                 { scope: "everyone", bucket: "household" },
             ],
+            [
+                "/settings/notifications",
+                {
+                    kind: "food_expiring",
+                    enabled: "false",
+                    bucket: "household",
+                },
+            ],
         ]);
     });
 
-    test("no menu posts to Settings › Notifications: a kind turned off here has no way back yet", () => {
+    test("Turn off posts the row's own kind, for every kind but Allergens, and comes back to the inbox", () => {
         for (const canDismissEveryone of [false, true]) {
-            for (const kind of ["food_expiring", "weigh_in_due"] as const) {
-                const items = notificationMenuItems(row({ kind }), {
+            for (const kind of [
+                "food_expiring",
+                "running_low",
+                "weigh_in_due",
+                "recipe_changes",
+                "week_plan_changes",
+                "new_usuals",
+            ] as const) {
+                const turnOff = notificationMenuItems(row({ kind }), {
                     canDismissEveryone,
                     bucket: "all",
+                }).find((i) => i.kind === "post" && i.fields?.kind === kind);
+                expect(turnOff).toMatchObject({
+                    kind: "post",
+                    action: "/settings/notifications",
+                    fields: { kind, enabled: "false" },
                 });
+                // No `return` field: the post answers 303 to the inbox.
                 expect(
-                    items.some(
-                        (i) =>
-                            i.kind === "post" &&
-                            i.action === "/settings/notifications",
-                    ),
-                ).toBe(false);
+                    (turnOff as { fields: Record<string, string> }).fields,
+                ).not.toHaveProperty("return");
             }
         }
+        const allergen = notificationMenuItems(row({ kind: "allergens" }), {
+            canDismissEveryone: true,
+            bucket: "all",
+        });
+        expect(JSON.stringify(allergen)).not.toContain(
+            "/settings/notifications",
+        );
         const html = renderNotificationsBody(
             view({ today: [row()], unread: 1 }, { canDismissEveryone: true }),
         );
-        expect(html).not.toContain("/settings/notifications");
-        expect(html).not.toContain("Turn off");
+        expect(html).toContain("Turn off “Food expiring”");
+        expect(html).toContain(
+            '<input type="hidden" name="enabled" value="false">',
+        );
     });
 
     test("Open goes to the part of the app the row is about", () => {

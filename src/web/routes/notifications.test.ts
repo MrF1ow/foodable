@@ -707,6 +707,162 @@ describe("POST /settings/notifications", () => {
     });
 });
 
+describe("GET /settings/notifications", () => {
+    const switchOf = (html: string, kind: string) => {
+        const row = html.slice(html.indexOf(`id="notification-kind-${kind}"`));
+        return row.slice(0, row.indexOf("</li>"));
+    };
+
+    test("answers 200 for a member: the base kinds on, the extras off, no Allergens row", async () => {
+        const { get } = setup();
+        const res = await get("/settings/notifications");
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        for (const kind of ["food_expiring", "running_low", "weigh_in_due"]) {
+            expect(switchOf(html, kind)).toContain('aria-checked="true"');
+        }
+        for (const kind of [
+            "recipe_changes",
+            "week_plan_changes",
+            "new_usuals",
+        ]) {
+            expect(switchOf(html, kind)).toContain('aria-checked="false"');
+        }
+        expect(html).not.toContain('id="notification-kind-allergens"');
+        expect(html).not.toContain(">Allergens<");
+    });
+
+    test("shows the viewer's own choices, not another member's", async () => {
+        const { get, post } = setup();
+        await post("/settings/notifications", {
+            kind: "running_low",
+            enabled: "false",
+        });
+        await post("/settings/notifications", {
+            kind: "recipe_changes",
+            enabled: "true",
+        });
+        const mine = await (await get("/settings/notifications")).text();
+        expect(switchOf(mine, "running_low")).toContain('aria-checked="false"');
+        expect(switchOf(mine, "recipe_changes")).toContain(
+            'aria-checked="true"',
+        );
+        const theirs = await (
+            await get("/settings/notifications", "admin")
+        ).text();
+        expect(switchOf(theirs, "running_low")).toContain(
+            'aria-checked="true"',
+        );
+        expect(switchOf(theirs, "recipe_changes")).toContain(
+            'aria-checked="false"',
+        );
+    });
+
+    test("a request without a session is refused", async () => {
+        const { app } = setup();
+        expect((await app.request("/settings/notifications")).status).toBe(401);
+    });
+});
+
+describe("POST /settings/notifications from the Settings page", () => {
+    test("a toggle saves and goes back to Settings › Notifications, with no toast", async () => {
+        const { post, store, get } = setup();
+        const res = await post("/settings/notifications", {
+            kind: "recipe_changes",
+            enabled: "true",
+            return: "/settings/notifications",
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/settings/notifications");
+        expect(res.headers.get("set-cookie")).toBeNull();
+        expect(
+            (await store.listPrefs(HH, MEMBERS.member!.userId)).map((p) => [
+                p.kind,
+                p.enabled,
+            ]),
+        ).toEqual([["recipe_changes", true]]);
+        const html = await (await get("/settings/notifications")).text();
+        expect(html).toContain('id="notification-kind-recipe_changes"');
+    });
+
+    test("a kind turned on again brings its rows back to the inbox", async () => {
+        const { post, seed, inboxOf } = setup();
+        await seed(
+            row({
+                kind: "running_low",
+                noticeKey: "low",
+                payload: {
+                    code: "grocery.running_low",
+                    params: { name: "Milk", reason: "usually bought weekly" },
+                    related: [],
+                },
+            }),
+        );
+        await post("/settings/notifications", {
+            kind: "running_low",
+            enabled: "false",
+            return: "/settings/notifications",
+        });
+        expect((await inboxOf("member")).today).toHaveLength(0);
+        await post("/settings/notifications", {
+            kind: "running_low",
+            enabled: "true",
+            return: "/settings/notifications",
+        });
+        expect((await inboxOf("member")).today).toHaveLength(1);
+    });
+
+    test("turning Allergens off is refused in place, on the Settings page", async () => {
+        const { post, store } = setup();
+        const res = await post("/settings/notifications", {
+            kind: "allergens",
+            enabled: "false",
+            return: "/settings/notifications",
+        });
+        expect(res.status).toBe(422);
+        const html = await res.text();
+        expect(html).toMatch(
+            /role="alert">Allergen notifications can(&#39;|&#x27;|&#039;|')t be turned off\./,
+        );
+        expect(html).toContain('id="notification-kind-food_expiring"');
+        expect(html).not.toContain("fd-notifications__filter");
+        expect(await store.listPrefs(HH, MEMBERS.member!.userId)).toHaveLength(
+            0,
+        );
+    });
+
+    test("the return field cannot send anyone off-site or to another page", async () => {
+        const { post } = setup();
+        for (const bad of [
+            "https://evil.example/",
+            "//evil.example",
+            "/settings/notifications/../x",
+            "/settings/notifications?x=1",
+            "/settings",
+            "javascript:alert(1)",
+            "",
+        ]) {
+            const res = await post("/settings/notifications", {
+                kind: "running_low",
+                enabled: "false",
+                return: bad,
+            });
+            expect(res.status).toBe(303);
+            expect(res.headers.get("location")).toBe("/notifications");
+        }
+    });
+
+    test("an Allergens refusal from the inbox's menu still renders the inbox", async () => {
+        const { post } = setup();
+        const res = await post("/settings/notifications", {
+            kind: "allergens",
+            enabled: "false",
+        });
+        expect(res.status).toBe(422);
+        expect(await res.text()).toContain("fd-notifications");
+    });
+});
+
 describe("who may call", () => {
     test("a request without a session never reaches the handlers", async () => {
         const { app } = setup();

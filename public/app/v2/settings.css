@@ -2142,3 +2142,18 @@
         border-left: 1px solid var(--line);
     }
 }
+
+/* ---- Settings › Notifications (src/web/pages/v2/settings-notifications.ts)
+ * A section's header, 12 px, then its rows. The header brings 20 px above it;
+ * the second section starts 12 px lower, so 40 px (phone) and 50 px (desktop)
+ * separate the last row of one section from the next header's label, as the
+ * frames draw it. */
+.fd-notification-settings__section {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    min-width: 0;
+}
+.fd-notification-settings__section + .fd-notification-settings__section {
+    margin-top: var(--space-md);
+}

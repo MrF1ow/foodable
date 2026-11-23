@@ -2,7 +2,6 @@ import { Hono, type Context } from "hono";
 
 import {
     listAllRefusalHosts,
-    renderHouseholdDismissedRoute,
     renderHouseholdMemberRoute,
     renderHouseholdReadersRoute,
     renderHouseholdRestockRoute,
@@ -279,15 +278,6 @@ householdRoutes.get(
     requireSiteUser,
     async (c) => {
         const page = await renderHouseholdReadersRoute(c.get("userId"));
-        return c.html(page.html, page.status);
-    },
-);
-
-householdRoutes.get(
-    "/settings/household/dismissed",
-    requireSiteUser,
-    async (c) => {
-        const page = await renderHouseholdDismissedRoute(c.get("userId"));
         return c.html(page.html, page.status);
     },
 );
