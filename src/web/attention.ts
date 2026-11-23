@@ -15,28 +15,18 @@ import {
     type NotificationsDeps,
 } from "../domain/notifications.js";
 import type { NotificationBucket } from "../domain/notification-kinds.js";
-import {
-    needsAttentionCount,
-    tabDotsFromNotices,
-    type Notice,
-} from "../domain/notices.js";
+import type { Notice } from "../domain/notices.js";
 import { noticesFor, type NoticesForResult } from "../domain/notices-for.js";
 import { buildFlagContext } from "../flags.js";
 import type { HouseholdMember } from "../household.js";
 import { getAvatarVersions } from "../db/avatars.js";
 import { getHouseholdConfig, listHouseholdMembers } from "../db/household.js";
 import { loadViewerFlags, type ViewerFlags } from "../viewer-flags.js";
-import type { AppTabId, ShellIdentity, ViewerChrome } from "./shell.js";
+import type { ShellIdentity, ViewerChrome } from "./shell.js";
 import { validateTz } from "../domain/tz.js";
 import { resolveTheme } from "./shell.js";
 
-export type AttentionChrome = {
-    count: number;
-    tabs: Partial<Record<AppTabId, boolean>>;
-};
-
 export type AppChromeBase = ViewerChrome & {
-    attention: AttentionChrome;
     flags: ViewerFlags;
     /** The shell's sidebar and account chip. */
     identity?: ShellIdentity;
@@ -55,50 +45,6 @@ export function householdPossibleDuplicateCount(
     notices: readonly Notice[],
 ): number {
     return notices.filter((n) => n.code === "food.possible_duplicate").length;
-}
-
-/**
- * The tab dots of the notices that come with a one-tap action, which the
- * prefixes do not cover. Kitchen lights for a usual running low, Today and
- * Recipes for what a planned recipe is missing (both show This week), and Today
- * for the viewer's own weigh-in (a reminder about someone else has nothing to
- * tap here).
- */
-export function actionableTabDots(
-    notices: readonly Notice[],
-    viewerUserId: string,
-): Partial<Record<AppTabId, boolean>> {
-    const tabs: Partial<Record<AppTabId, boolean>> = {};
-    for (const notice of notices) {
-        if (notice.code === "grocery.running_low") tabs.grocery = true;
-        if (notice.code === "plan.missing_ingredient") {
-            tabs.nutrition = true;
-            tabs.recipes = true;
-        }
-        if (
-            notice.code === "nutrition.weigh_in_due" &&
-            notice.subject.id === viewerUserId
-        ) {
-            tabs.nutrition = true;
-        }
-    }
-    return tabs;
-}
-
-export function attentionFromNotices(
-    result: Pick<NoticesForResult, "notices">,
-    /** The viewer: its one-tap notices light their tabs too. */
-    viewerUserId?: string,
-): AttentionChrome {
-    return {
-        count: needsAttentionCount(result.notices),
-        tabs: {
-            ...tabDotsFromNotices(result.notices),
-            ...(viewerUserId
-                ? actionableTabDots(result.notices, viewerUserId)
-                : {}),
-        },
-    };
 }
 
 const ALLERGEN_CODES: ReadonlySet<string> = new Set(
@@ -364,7 +310,6 @@ export async function viewerChromeWithAttention(
             : "UTC";
     return {
         theme: resolveTheme(profile?.theme),
-        attention: attentionFromNotices(noticeResult, viewer.userId),
         householdPossibleDuplicates: householdPossibleDuplicateCount(
             noticeResult.notices,
         ),

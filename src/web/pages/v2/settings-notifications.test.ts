@@ -10,7 +10,6 @@ import {
 
 const CHROME: AppChromeBase = {
     theme: "light",
-    attention: { count: 0, tabs: {} },
     flags: FIXTURE_APP_CHROME_FLAGS,
     identity: {
         viewerName: "Ethan Flow",

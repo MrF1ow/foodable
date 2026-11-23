@@ -20,7 +20,6 @@ import {
 
 const PAGE_CHROME = {
     theme: "light" as const,
-    attention: { count: 0, tabs: {} },
     flags: FIXTURE_APP_CHROME_FLAGS,
     identity: {
         viewerName: "Alice",
@@ -41,7 +40,6 @@ function shellPage(
         active,
         theme,
         body: `<h1>${title}</h1>`,
-        attention: { count: 0, tabs: {} },
         flags: FIXTURE_APP_CHROME_FLAGS,
     });
 }

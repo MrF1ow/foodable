@@ -308,7 +308,7 @@ describe("viewerChromeWithAttention flags", () => {
         expect(failed.identity?.avatarVersions?.size).toBe(0);
     });
 
-    test("the one-tap notices light Kitchen, Today and Recipes", async () => {
+    test("the one-tap notices light no tab: the chrome carries no notice dots", async () => {
         const withNotices = (): NoticesForResult => ({
             ...emptyNotices,
             notices: [
@@ -347,29 +347,8 @@ describe("viewerChromeWithAttention flags", () => {
                 memberCount: 1,
             }),
         );
-        expect(on.attention.tabs).toEqual({
-            grocery: true,
-            nutrition: true,
-            recipes: true,
-        });
-        // Another member's weigh-in is not Alice's to act on: Today stays quiet.
-        const other = withNotices();
-        other.notices = other.notices.filter(
-            (n) => n.code === "nutrition.weigh_in_due",
-        );
-        other.notices[0]!.subject = { kind: "member", id: "someone-else" };
-        const quiet = await viewerChromeWithAttention(
-            { theme: "light" },
-            member,
-            other,
-            async () => ({
-                viewerName: "Alice",
-                viewerRole: "owner",
-                householdName: "Home",
-                memberCount: 2,
-            }),
-        );
-        expect(quiet.attention.tabs).toEqual({});
+        // Notices reach a person through the bell, never a tab dot or a count.
+        expect("attention" in on).toBe(false);
     });
 
     test("a viewer always loads the one-tap notices", async () => {

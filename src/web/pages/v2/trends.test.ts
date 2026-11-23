@@ -73,7 +73,6 @@ describe("renderTrendsV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             fixtureDays(today),
             goalsResolver(baseGoals, [
@@ -128,7 +127,6 @@ describe("renderTrendsV2Page", () => {
                 {
                     theme: "light",
                     flags: FIXTURE_APP_CHROME_FLAGS,
-                    attention: { count: 0, tabs: {} },
                 },
                 fixtureDays(today),
                 goalsResolver(baseGoals, []),
@@ -182,7 +180,6 @@ describe("renderTrendsV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             fixtureDays(today),
             goalsResolver(baseGoals, []),
@@ -203,7 +200,6 @@ describe("renderTrendsV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             fixtureDays(today).map((d) => ({
                 ...d,
@@ -227,7 +223,6 @@ describe("renderTrendsV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             fixtureDays(today).map((d) => ({
                 ...d,
@@ -261,7 +256,6 @@ describe("renderTrendsV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             days,
             goalsResolver(baseGoals, []),
@@ -297,7 +291,6 @@ describe("renderTrendsV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             fixtureDays(today),
             goalsResolver(baseGoals, []),
@@ -318,7 +311,6 @@ describe("renderTrendsV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             fixtureDays(today),
             goalsResolver(baseGoals, []),

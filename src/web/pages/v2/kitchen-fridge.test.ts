@@ -8,9 +8,13 @@ import {
     DOLLAR_PAYLOADS,
     injectedAttributes,
 } from "../../components/v2/test-helpers.js";
+import { newFood } from "../../../domain/foods.js";
+import type { Notice } from "../../../domain/notices.js";
 import {
     buildPreviewKitchenFridgeView,
     eatPortionAmount,
+    fridgeLowSubtitle,
+    lowStockLevels,
     fridgeItemSheetId,
     formatFridgeExpiryLabel,
     formatSheetExpiryLine,
@@ -105,7 +109,6 @@ describe("renderKitchenFridgeV2Page", () => {
     const chrome = {
         theme: "dark" as const,
         flags: FIXTURE_APP_CHROME_FLAGS,
-        attention: { count: 0, tabs: {} },
         displayName: "Alex",
     };
 
@@ -455,5 +458,136 @@ describe("renderKitchenFridgeV2Page", () => {
         expect(body).toContain("fd-kitchen-sheet-row__icon");
         expect(body).toContain('name="expires_on"');
         expect(body).toContain('name="location_id"');
+    });
+});
+
+describe("a usual running low shows on its fridge row", () => {
+    const chrome = {
+        theme: "dark" as const,
+        flags: FIXTURE_APP_CHROME_FLAGS,
+        displayName: "Alex",
+    };
+    const locations = [
+        { id: "loc-fridge", householdId: "hh", name: "Fridge", sortOrder: 0 },
+    ];
+    const eggs = item({
+        id: "it-eggs",
+        displayName: "Eggs",
+        foodId: "f-eggs",
+        quantity: { amount: 2, unit: "each" },
+        expiresOn: "2026-11-11",
+    });
+    const view = (extra = {}) =>
+        buildPreviewKitchenFridgeView(chrome, today, {
+            items: [
+                eggs,
+                item({ id: "it-milk", displayName: "Milk", foodId: "f-milk" }),
+            ],
+            locations,
+            ...extra,
+        });
+
+    test("'<expiry> · low, below <level>' in the warning tone, with no strip", () => {
+        const html = renderKitchenFridgeBody(
+            view({ lowStock: new Map([["f-eggs", "6"]]) }),
+        );
+        expect(html).toContain(
+            '<span class="fd-row__sub fd-tone fd-tone--warn">Tomorrow · low, below 6</span>',
+        );
+        expect(html).not.toContain("fd-notice-strip");
+        expect(html).not.toContain('aria-label="Running low"');
+        // Only the low item: the other row keeps its date and has no subtitle.
+        expect(html.match(/low, below/g)).toHaveLength(1);
+        expect(html.match(/fd-row__sub/g)).toHaveLength(1);
+        expect(html).toContain('class="fd-row__date');
+    });
+
+    test("an item with no expiry says only that it is low", () => {
+        const html = renderKitchenFridgeBody(
+            view({
+                items: [{ ...eggs, expiresOn: null }],
+                lowStock: new Map([["f-eggs", "6"]]),
+            }),
+        );
+        expect(html).toContain(
+            '<span class="fd-row__sub fd-tone fd-tone--warn">low, below 6</span>',
+        );
+        // The row itself carries no date cell: its line says all it has to.
+        expect(html).not.toContain("fd-row__date");
+    });
+
+    test("a product in the usual's family is low with it", () => {
+        const html = renderKitchenFridgeBody(
+            view({
+                items: [{ ...eggs, foodId: "f-kirkland-eggs" }],
+                foodsById: new Map([
+                    [
+                        "f-kirkland-eggs",
+                        {
+                            id: "f-kirkland-eggs",
+                            genericFoodId: "f-eggs",
+                            usualAmount: null,
+                        },
+                    ],
+                ]),
+                lowStock: new Map([["f-eggs", "6"]]),
+            }),
+        );
+        expect(html).toContain("low, below 6");
+    });
+
+    test("nothing low: no subtitle on any row", () => {
+        const html = renderKitchenFridgeBody(view());
+        expect(html).not.toContain("fd-row__sub");
+        expect(html).not.toContain("low, below");
+    });
+
+    test("fridgeLowSubtitle words the line", () => {
+        expect(fridgeLowSubtitle("Nov 23", "6")).toBe("Nov 23 · low, below 6");
+        expect(fridgeLowSubtitle(null, "2.5")).toBe("low, below 2.5");
+    });
+});
+
+describe("lowStockLevels", () => {
+    const low = (foodId: string): Notice => ({
+        code: "grocery.running_low",
+        severity: "warn",
+        subject: { kind: "food", id: foodId },
+        related: [],
+        params: { name: "x", foodId, reason: "", dismissScope: "" },
+    });
+    const usual = (
+        id: string,
+        extra: Parameters<typeof newFood>[0] extends infer P
+            ? Partial<P>
+            : never,
+    ) => ({
+        ...newFood({ householdId: "hh", kind: "food", name: id }),
+        id,
+        ...extra,
+    });
+
+    test("the level is the one the notice compares with: its own, else a quarter of the usual amount", () => {
+        const foods = [
+            usual("f-own", { restockLowLevel: 6.5 }),
+            usual("f-quarter", { usualAmount: { amount: 10, unit: "each" } }),
+            usual("f-none", {}),
+        ];
+        const levels = lowStockLevels(
+            [low("f-own"), low("f-quarter"), low("f-none"), low("f-unknown")],
+            foods,
+        );
+        expect([...levels]).toEqual([
+            ["f-own", "6.5"],
+            ["f-quarter", "2.5"],
+        ]);
+    });
+
+    test("only running-low notices count", () => {
+        const other: Notice = { ...low("f-own"), code: "fridge.expiring" };
+        expect(
+            lowStockLevels([other], [usual("f-own", { restockLowLevel: 6 })])
+                .size,
+        ).toBe(0);
     });
 });

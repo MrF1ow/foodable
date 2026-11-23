@@ -4,7 +4,8 @@ import {
     type FridgeLocation,
     type FridgeSnapshot,
 } from "../../../domain/fridge.js";
-import type { Food } from "../../../domain/foods.js";
+import { usualLowLevel, type Food } from "../../../domain/foods.js";
+import type { Notice } from "../../../domain/notices.js";
 import type { GroceryLine } from "../../../domain/grocery.js";
 import type { ExpiringUse } from "../../../domain/suggestions.js";
 import {
@@ -13,8 +14,6 @@ import {
     listExpiring,
 } from "../../../domain/stock.js";
 import type { AppChromeBase } from "../../attention.js";
-import type { Notice } from "../../../domain/notices.js";
-import { noticeStrip, stripNotices } from "./notice-strip.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
 import { sheet } from "../../components/v2/sheet.js";
@@ -64,8 +63,11 @@ export type KitchenFridgeV2View = FridgeSnapshot & {
     freezeDefaultExpiry: string;
     groceryLines?: readonly GroceryLine[];
     groceryOverview?: KitchenFridgeGroceryOverview;
-    /** The household's open notices; the usuals running low show in place. */
-    notices?: readonly Notice[];
+    /**
+     * The usuals running low, by the usual's food id, with the level they are
+     * below ("6"): their rows in the fridge say so in the warning colour.
+     */
+    lowStock?: ReadonlyMap<string, string>;
 };
 
 export type FridgeLocationGroup = {
@@ -232,6 +234,47 @@ function useSoonStrip(view: KitchenFridgeV2View): string {
     )}<div class="fd-kitchen-use-soon__scroll">${cards}</div></section>`;
 }
 
+/**
+ * The usuals running low and the level each is below, for the fridge rows. The
+ * level is the one the running-low notice compares with (`usualLowLevel`),
+ * written the way its "3 left, below 6" reason writes it.
+ */
+export function lowStockLevels(
+    notices: readonly Notice[],
+    foods: readonly Pick<Food, "id" | "restockLowLevel" | "usualAmount">[],
+): Map<string, string> {
+    const byId = new Map(foods.map((food) => [food.id, food]));
+    const out = new Map<string, string>();
+    for (const notice of notices) {
+        if (notice.code !== "grocery.running_low") continue;
+        const food = byId.get(notice.subject.id);
+        const level = food ? usualLowLevel(food) : null;
+        if (food && level != null) {
+            out.set(food.id, String(Math.round(level * 100) / 100));
+        }
+    }
+    return out;
+}
+
+/** What a low row says: "<expiry> · low, below <level>", the expiry left out when it has none. */
+export function fridgeLowSubtitle(
+    expiry: string | null,
+    below: string,
+): string {
+    const low = `low, below ${below}`;
+    return expiry ? `${expiry} · ${low}` : low;
+}
+
+/** The level a fridge item's usual is below, when that usual is running low. */
+function lowStockLevel(
+    item: FridgeItem,
+    food: KitchenFridgeFoodMeta | undefined,
+    view: KitchenFridgeV2View,
+): string | null {
+    if (!item.foodId || !view.lowStock) return null;
+    return view.lowStock.get(food?.genericFoodId ?? item.foodId) ?? null;
+}
+
 function fridgeItemRowMarkup(
     item: FridgeItem,
     view: KitchenFridgeV2View,
@@ -264,6 +307,7 @@ function fridgeItemRowMarkup(
         },
         sheetId,
     };
+    const lowBelow = lowStockLevel(item, food, view);
     const rowHtml = String(
         fridgeRow({
             title: item.displayName,
@@ -271,6 +315,15 @@ function fridgeItemRowMarkup(
             date: date.label,
             dateTime: date.dateTime,
             dateClass: date.className || undefined,
+            ...(lowBelow == null
+                ? {}
+                : {
+                      subtitle: fridgeLowSubtitle(
+                          item.expiresOn?.trim() ? date.label : null,
+                          lowBelow,
+                      ),
+                      subtitleTone: "warn" as const,
+                  }),
             swipe,
             select: {
                 name: "ids[]",
@@ -572,7 +625,6 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
 <div class="fd-kitchen-fridge-page"${select.rootAttrs}>
 ${kitchenTopTools(addBtn)}
 ${view.error && !view.openItemId && !view.openAdd ? String(settingsErrorBanner(view.error)) : ""}
-${String(noticeStrip(stripNotices(view.notices ?? [], ["grocery.running_low"], undefined), { back: "/kitchen/fridge", label: "Running low" }))}
 ${useSoonStrip(view)}
 ${selectable ? select.tools + select.bar : ""}
 ${columns}

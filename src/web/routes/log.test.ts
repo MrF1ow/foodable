@@ -406,7 +406,6 @@ mock.module("../attention.js", () => ({
                 : "America/Los_Angeles";
         return {
             theme: "light" as const,
-            attention: { count: 0, tabs: {} },
             householdPossibleDuplicates: 0,
             flags,
             v2Timezone: tz,

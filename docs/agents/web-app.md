@@ -37,7 +37,7 @@ Flows that opt out of Turbo:
 - the Share sheet form (`share-sheet.ts`, the one-time link on a 200 page);
 - the links into Settings (sidebar item, account row, account chip), the Settings back links, and the Settings forms (account, display, invites, export), because iOS Safari re-tints its toolbar only on a full page load.
 
-Goals and Product score autosave (`client/v2/autosave.js`), so they keep Turbo. The logout link, on the Account page and the gate app bar, keeps `data-turbo="false"`.
+Goals, Product score and Settings › Notifications autosave (`client/v2/autosave.js`), so they keep Turbo. The logout link, on the Account page and the gate app bar, keeps `data-turbo="false"`.
 
 The login template adds `<meta name="turbo-visit-control" content="reload">`, and `shell.js` forces a full reload if login HTML would morph into app chrome.
 

@@ -316,8 +316,14 @@ describe("loadToday", () => {
         expect(view.streak).toBe(3);
     });
 
-    test("keeps noticeFoods and profile display flags on the view", async () => {
-        const foods = new Map([["f1", { genericFoodId: "g1" }]]);
+    test("keeps the household's notices and profile display flags on the view", async () => {
+        const notice = {
+            code: "grocery.running_low" as const,
+            severity: "warn" as const,
+            subject: { kind: "food" as const, id: "f1" },
+            related: [],
+            params: { name: "Eggs" },
+        };
         const deps = fakeDeps({
             getProfile: async () => ({
                 user_id: viewer.userId,
@@ -332,11 +338,11 @@ describe("loadToday", () => {
             }),
             loadHouseholdNotices: async () => ({
                 ...emptyNotices(),
-                noticeFoods: foods,
+                notices: [notice],
             }),
         });
         const view = await loadToday(viewer, "2026-03-03", deps);
-        expect(view.attention.noticeFoods).toBe(foods);
+        expect(view.notices).toEqual([notice]);
         expect(view.preferredWeightUnit).toBe("lb");
         expect(view.alcoholTrackingEnabled).toBe(true);
     });

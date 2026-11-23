@@ -275,6 +275,42 @@ try {
         },
     );
 
+    // The Needs attention page is the inbox now: the exact path moves (301 GET,
+    // 308 otherwise, query kept) and its old POST does not.
+    const needsGet = await fetch(`${BASE}/needs-attention?x=1`, {
+        redirect: "manual",
+    });
+    const needsPost = await fetch(`${BASE}/needs-attention`, {
+        method: "POST",
+        redirect: "manual",
+    });
+    // The redirect table does not look at the method, so a GET is as good as
+    // the page's old POST for seeing that nothing under the exact path moves.
+    const needsDismiss = await fetch(`${BASE}/needs-attention/dismiss`, {
+        redirect: "manual",
+    });
+    const needsGetTo = new URL(needsGet.headers.get("location") ?? "", BASE);
+    const needsPostTo = new URL(needsPost.headers.get("location") ?? "", BASE);
+    record(
+        "legacy /needs-attention (exact path): 301 to /notifications (query kept, POST 308); /needs-attention/dismiss is not redirected (404)",
+        needsGet.status === 301 &&
+            needsGetTo.pathname === "/notifications" &&
+            needsGetTo.search === "?x=1" &&
+            needsPost.status === 308 &&
+            needsPostTo.pathname === "/notifications" &&
+            needsDismiss.headers.get("location") === null &&
+            needsDismiss.status === 404,
+        {
+            get: [needsGet.status, needsGetTo.pathname + needsGetTo.search],
+            post: [needsPost.status, needsPostTo.pathname],
+            dismiss: [
+                needsDismiss.status,
+                needsDismiss.headers.get("location"),
+            ],
+            ex: drain(),
+        },
+    );
+
     await control("reset=approve");
     await goto("/login-test");
     await ev(`window.__marker = "stay"`);
@@ -1622,6 +1658,14 @@ try {
             };
         })()`);
 
+    // Everything the old notice surfaces drew: a dot or "has notices" on a tab
+    // or sidebar link, a Needs attention card, a notice strip. The bell is the
+    // one place a notification shows.
+    const noticeSurfaces = () =>
+        ev<number>(`document.querySelectorAll(
+            '[class*="fd-tab-dot-"], [class*="fd-side-dot-"], [aria-label*="has notices"], .fd-notice-strip, [aria-label="Needs attention"], a[href="/needs-attention"]'
+        ).length`);
+
     await control("session=app&theme=dark&reset=posts&post=ok&unread=1");
     await send("Emulation.setDeviceMetricsOverride", {
         width: 430,
@@ -1630,6 +1674,7 @@ try {
         mobile: true,
     });
     await goto("/");
+    const phoneNoticeSurfaces = await noticeSurfaces();
     const phoneBell = await bellState();
     await send("Emulation.setDeviceMetricsOverride", {
         width: 1440,
@@ -1638,6 +1683,7 @@ try {
         mobile: false,
     });
     await goto("/");
+    const desktopNoticeSurfaces = await noticeSurfaces();
     const desktopBell = await bellState();
     record(
         "bell: a green dot on the phone (top-right cluster) and on the desktop (top bar, left of Log food), one bell each, linking to /notifications",
@@ -1654,6 +1700,14 @@ try {
             desktopBell.leftOfLogFood &&
             desktopBell.href === "/notifications",
         { phoneBell, desktopBell, ex: drain() },
+    );
+    record(
+        "no notice dots: no tab or sidebar dot, no Needs attention card and no notice strip on Today, on the phone and the desktop, while the bell shows the dot",
+        phoneNoticeSurfaces === 0 &&
+            desktopNoticeSurfaces === 0 &&
+            phoneBell.unread === 1 &&
+            desktopBell.unread === 1,
+        { phoneNoticeSurfaces, desktopNoticeSurfaces, ex: drain() },
     );
 
     // A pointer resting on the bell must not open the inbox for it: Turbo

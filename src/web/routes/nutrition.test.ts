@@ -130,7 +130,7 @@ mock.module("../attention.js", () => ({
     ) => {
         chromeSeen.push({
             prefetched,
-            todayNotices: lastTodayView?.attention.notices,
+            todayNotices: lastTodayView?.notices,
         });
         const flags = await realAttention.viewerFlagsFor(viewer);
         return {
@@ -138,7 +138,6 @@ mock.module("../attention.js", () => ({
                 profile?.theme === "light" || profile?.theme === "dark"
                     ? profile.theme
                     : "light",
-            attention: { count: 0, tabs: {} },
             flags,
             identity: {
                 viewerName: viewer.displayName,

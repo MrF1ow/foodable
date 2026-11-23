@@ -57,8 +57,6 @@ type FdTab = {
     label: string;
     href: string;
     icon: FdIconName;
-    /** Old tab ids whose attention dot shows on this tab. */
-    attention: readonly AppTabId[];
 };
 
 export const FD_TABS: readonly FdTab[] = [
@@ -67,28 +65,24 @@ export const FD_TABS: readonly FdTab[] = [
         label: "Today",
         href: APP_PATHS.nutrition,
         icon: "cal",
-        attention: ["nutrition"],
     },
     {
         id: "kitchen",
         label: "Kitchen",
         href: APP_PATHS.kitchenFridge,
         icon: "fridge",
-        attention: ["fridge", "grocery"],
     },
     {
         id: "recipes",
         label: "Recipes",
         href: APP_PATHS.recipes,
         icon: "book",
-        attention: ["recipes"],
     },
     {
         id: "trends",
         label: "Trends",
         href: FD_TRENDS_HREF,
         icon: "trend",
-        attention: [],
     },
 ];
 
@@ -196,27 +190,10 @@ function memberCountLabel(count: number): string {
     return count === 1 ? "1 member" : `${count} members`;
 }
 
-function attentionOn(chrome: AppChrome, tab: FdTab): boolean {
-    return tab.attention.some((id) => chrome.attention.tabs[id] === true);
-}
-
-function settingsAttention(chrome: AppChrome): boolean {
-    return chrome.attention.tabs.household === true;
-}
-
-function dotClass(base: string, attention: boolean): string {
-    return attention ? `${base} ${base}-attention` : base;
-}
-
-function ariaLabel(label: string, attention: boolean): string {
-    return escapeHtml(attention ? `${label}, has notices` : label);
-}
-
 function phoneTabs(chrome: AppChrome, active: V2NavId): string {
     const tab = (t: FdTab) => {
-        const attention = attentionOn(chrome, t);
         const current = t.id === active ? ' aria-current="page"' : "";
-        return `<a class="fd-tab" href="${escapeHtml(t.href)}"${current} aria-label="${ariaLabel(t.label, attention)}">${fdIcon(t.icon)}<span class="${dotClass("fd-tab-dot", attention)}" aria-hidden="true"></span></a>`;
+        return `<a class="fd-tab" href="${escapeHtml(t.href)}"${current} aria-label="${escapeHtml(t.label)}">${fdIcon(t.icon)}<span class="fd-tab-dot" aria-hidden="true"></span></a>`;
     };
     const [today, kitchen, recipes, trends] = FD_TABS;
     const log = `<a class="fd-log" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Search" title="Search">${fdIcon("search", 2)}</a>`;
@@ -233,7 +210,6 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
     }</span></a>`;
 
     const link = (t: FdTab) => {
-        const attention = attentionOn(chrome, t);
         // With Kitchen's sections listed, the section link below is the page
         // and Kitchen is the current group ("true", not "page").
         const current =
@@ -242,10 +218,9 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
                 : t.id === "kitchen"
                   ? ' aria-current="true"'
                   : ' aria-current="page"';
-        return `<a class="fd-sidelink" href="${escapeHtml(t.href)}"${current}${attention ? ` aria-label="${ariaLabel(t.label, true)}"` : ""}>${fdIcon(t.icon)}<span class="fd-sidelink-label">${escapeHtml(t.label)}</span><span class="${dotClass("fd-side-dot", attention)}" aria-hidden="true"></span></a>`;
+        return `<a class="fd-sidelink" href="${escapeHtml(t.href)}"${current}>${fdIcon(t.icon)}<span class="fd-sidelink-label">${escapeHtml(t.label)}</span><span class="fd-side-dot" aria-hidden="true"></span></a>`;
     };
-    const settingsAttn = settingsAttention(chrome);
-    const settings = `<a class="fd-sidelink fd-sidelink-settings" href="${APP_PATHS.settings}" data-turbo="false"${active === "settings" ? ' aria-current="page"' : ""}${settingsAttn ? ` aria-label="${ariaLabel(SETTINGS_LABEL, true)}"` : ""}>${fdIcon("sun")}<span class="fd-sidelink-label">${SETTINGS_LABEL}</span><span class="${dotClass("fd-side-dot", settingsAttn)}" aria-hidden="true"></span></a>`;
+    const settings = `<a class="fd-sidelink fd-sidelink-settings" href="${APP_PATHS.settings}" data-turbo="false"${active === "settings" ? ' aria-current="page"' : ""}>${fdIcon("sun")}<span class="fd-sidelink-label">${SETTINGS_LABEL}</span><span class="fd-side-dot" aria-hidden="true"></span></a>`;
     const links = FD_TABS.map((t) =>
         t.id === "kitchen" && active === "kitchen"
             ? `${link(t)}${sidebarKitchenSubs(chrome)}`

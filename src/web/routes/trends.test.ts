@@ -95,7 +95,6 @@ mock.module("../attention.js", () => ({
                 profile?.theme === "light" || profile?.theme === "dark"
                     ? profile.theme
                     : "light",
-            attention: { count: 0, tabs: {} },
             flags,
             identity: {
                 viewerName: viewer.displayName,

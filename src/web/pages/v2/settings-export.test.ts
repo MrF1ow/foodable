@@ -4,7 +4,6 @@ import { renderSettingsExportV2Page } from "./settings-export.js";
 
 const chrome = {
     theme: "light" as const,
-    attention: { count: 0, tabs: {} },
     flags: FIXTURE_APP_CHROME_FLAGS,
     identity: {
         viewerName: "Ethan Flow",

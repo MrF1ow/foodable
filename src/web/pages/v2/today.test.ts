@@ -75,7 +75,6 @@ describe("Today header goal name", () => {
         {
             theme: "light",
             flags: FIXTURE_APP_CHROME_FLAGS,
-            attention: { count: 0, tabs: {} },
         },
         today,
     );
@@ -145,7 +144,6 @@ describe("renderTodayV2Page", () => {
         {
             theme: "light",
             flags: FIXTURE_APP_CHROME_FLAGS,
-            attention: { count: 0, tabs: {} },
         },
         today,
     );
@@ -321,7 +319,6 @@ describe("renderTodayV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
         );
@@ -338,7 +335,6 @@ describe("renderTodayV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
         );
@@ -361,7 +357,6 @@ describe("renderTodayV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
         );
@@ -372,7 +367,7 @@ describe("renderTodayV2Page", () => {
         expect(rail).toContain('href="/kitchen/fridge"');
     });
 
-    test("notice action href matches needs-attention routes", () => {
+    test("a notice with an action is not drawn in the rail", () => {
         const notice: Notice = {
             code: "fridge.expiring",
             severity: "info",
@@ -389,22 +384,19 @@ describe("renderTodayV2Page", () => {
         };
         const href = noticeHref(notice, { from: "/", foods: new Map() });
         const view = buildPreviewTodayView("2026-11-10");
-        view.attention = {
-            count: 1,
-            notices: [notice],
-            noticeFoods: new Map(),
-        };
+        view.notices = [notice];
         const data = buildPreviewTodayPageData(
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 1, tabs: {} },
             },
             "2026-11-10",
         );
         const rail = String(renderTodayRail({ ...data, view }));
         expect(href).toBe("/kitchen/fridge/items/fr-eggs/add-to-grocery");
-        expect(rail).toContain("/kitchen/fridge/items/fr-eggs/add-to-grocery");
+        expect(rail).not.toContain(
+            "/kitchen/fridge/items/fr-eggs/add-to-grocery",
+        );
     });
 
     test("weight card uses lb and includes sparkline", () => {
@@ -414,7 +406,6 @@ describe("renderTodayV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
         );
@@ -431,13 +422,12 @@ describe("renderTodayV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
         );
         const rail = String(renderTodayRail({ ...data, view }));
         expect(rail).toContain("Nothing expiring soon");
-        expect(rail).toContain("Nothing needs attention");
+        expect(rail).not.toContain("Needs attention");
         expect(rail).toContain("Nothing planned");
         expect(rail).toContain("No weigh-ins yet");
     });
@@ -448,7 +438,6 @@ describe("renderTodayV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
                 subjectLabel: "Sam",
             },
             "2026-11-10",
@@ -484,7 +473,6 @@ describe("renderTodayV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             "2026-11-10",
         );
@@ -564,7 +552,6 @@ describe("renderTodayV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
                 subjectLabel: "Sam",
             },
             today,
@@ -595,7 +582,6 @@ describe("renderTodayV2Page", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
                 subjectLabel: "Sam",
             },
             today,
@@ -630,7 +616,6 @@ describe("empty slot suggestions", () => {
         {
             theme: "light",
             flags: FIXTURE_APP_CHROME_FLAGS,
-            attention: { count: 0, tabs: {} },
         },
         today,
     );
@@ -723,7 +708,6 @@ describe("empty slot suggestions", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
                 subjectLabel: "Sam",
             },
             today,
@@ -739,7 +723,6 @@ describe("Use soon recipe lines", () => {
     const chrome = {
         theme: "light" as const,
         flags: FIXTURE_APP_CHROME_FLAGS,
-        attention: { count: 0, tabs: {} },
     };
 
     test("each expiring item with a recipe shows Use in", () => {
@@ -831,7 +814,6 @@ describe("today edit sheet Again", () => {
             {
                 theme: "light",
                 flags: FIXTURE_APP_CHROME_FLAGS,
-                attention: { count: 0, tabs: {} },
             },
             today,
         );
@@ -856,7 +838,6 @@ describe("This week on Today", () => {
     const chrome = {
         theme: "light" as const,
         flags: FIXTURE_APP_CHROME_FLAGS,
-        attention: { count: 0, tabs: {} },
     };
     const week = buildWeekPlanView({
         today,

@@ -50,13 +50,6 @@ import type { TodayView } from "../../loaders-today.js";
 import { renderAppShell } from "../../shell.js";
 import { renderTodayEditSheets } from "./today-edit-sheet.js";
 import { todayEditSheetId } from "../../../domain/today-edit.js";
-import type { AgentActionNotice } from "../../../domain/notices-agent.js";
-import {
-    agentActionStrip,
-    noticeStrip,
-    stripNotices,
-    todayNoticeBack,
-} from "./notice-strip.js";
 import { renderTodayRail } from "./today-rail.js";
 import {
     renderMissingSheet,
@@ -82,8 +75,6 @@ export type TodayPageData = {
     editError?: string;
     /** The household's week plan: the rail card, the phone section, their sheets. */
     plan?: WeekPlanView;
-    /** What an agent changed in the last 24 hours that this viewer can still undo. */
-    agentNotices?: readonly AgentActionNotice[];
 };
 
 const WEEKDAY_LETTERS = ["S", "M", "T", "W", "T", "F", "S"] as const;
@@ -722,48 +713,10 @@ export function renderTodayBody(data: TodayPageData): Html {
     // The week plan is the household's, not the day's: a peer's day has none.
     const plan = isReadOnlyPeer(data) ? undefined : data.plan;
     const planPhone = plan ? renderWeekPhoneSection(plan) : "";
-    // The desktop Needs attention card carries these; the phone has no card, so
-    // the weigh-in and what the plan is missing show in place. A peer's day is
-    // read-only, and the plan is the household's, not theirs.
-    const phoneNotices = (
-        codes: Parameters<typeof stripNotices>[1],
-        label: string,
-    ) =>
-        isReadOnlyPeer(data)
-            ? ""
-            : String(
-                  noticeStrip(
-                      stripNotices(
-                          view.attention.notices,
-                          codes,
-                          view.attention.viewerUserId,
-                      ),
-                      {
-                          back: todayNoticeBack(view),
-                          viewerUserId: view.attention.viewerUserId,
-                          label,
-                          className: "fd-today-notices",
-                      },
-                  ),
-              );
-    const weighInPhone = phoneNotices(["nutrition.weigh_in_due"], "Weigh-in");
-    const planMissingPhone = phoneNotices(
-        ["plan.missing_ingredient"],
-        "Missing for the plan",
-    );
     const planSheets = plan
         ? `${renderPlanEditSheets(plan, "today")}\n${renderMissingSheet(plan, "today")}`
         : "";
-    // A peer's day is read-only, and the changes are the viewer's to undo.
-    const agentStrip = isReadOnlyPeer(data)
-        ? ""
-        : String(
-              agentActionStrip(data.agentNotices ?? [], {
-                  label: "Agent changes",
-                  className: "fd-today-agent",
-              }),
-          );
-    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}${agentStrip}</div>${summary}${weighInPhone}<div class="fd-today-meals">${mealsMarkup(data)}</div>${planPhone}${planMissingPhone}`;
+    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}<div class="fd-today-meals">${mealsMarkup(data)}</div>${planPhone}`;
     const rail = renderTodayRail(data);
     return raw(
         `<div class="fd-today-page"><div class="fd-today-main">${main}</div>${rail}${sheets}${planSheets}</div>`,
@@ -1031,7 +984,7 @@ export function buildPreviewTodayView(today: string): TodayView {
         week,
         streak: 4,
         expiringFridge: [],
-        attention: { count: 0, notices: [], noticeFoods: new Map() },
+        notices: [],
         weight: { latest: null, series30d: [] },
         yesterdayCopy: {},
         slotSuggestions: {},
@@ -1077,45 +1030,6 @@ const PREVIEW_FRIDGE: FridgeItem[] = [
     },
 ];
 
-function previewAttentionNotices(today: string): {
-    count: number;
-    notices: Notice[];
-    noticeFoods: Map<string, { genericFoodId: string | null }>;
-} {
-    const notices: Notice[] = [
-        {
-            code: "fridge.expiring",
-            severity: "info",
-            subject: { kind: "fridge_item", id: "fr-eggs" },
-            related: [],
-            params: {
-                name: "Eggs",
-                amount: 6,
-                unit: "each",
-                expiresOn: today,
-                daysLeft: 0,
-                onGroceryList: "no",
-            },
-        },
-        {
-            code: "recipe.no_nutrition",
-            severity: "warn",
-            subject: {
-                kind: "recipe_ingredient",
-                id: "ing-lemon",
-                recipeId: "r1",
-            },
-            related: [],
-            params: { name: "Lemon", foodId: "f-lemon" },
-        },
-    ];
-    return {
-        count: notices.length,
-        notices,
-        noticeFoods: new Map([["f-lemon", { genericFoodId: null }]]),
-    };
-}
-
 function previewWeightSeries(): TodayView["weight"] {
     const series30d = [
         { date: "2026-10-12", weight_g: 83_000 },
@@ -1137,7 +1051,7 @@ function previewWeightSeries(): TodayView["weight"] {
     };
 }
 
-/** App-preview fixture with rail cards populated (expiring, notices, weight). */
+/** App-preview fixture with rail cards populated (expiring, weight). */
 export function buildPreviewTodayViewWithRail(today: string): TodayView {
     return {
         ...buildPreviewTodayView(today),
@@ -1149,7 +1063,6 @@ export function buildPreviewTodayViewWithRail(today: string): TodayView {
                     ? shiftLocalDate(today, 1)
                     : shiftLocalDate(today, 2),
         })),
-        attention: previewAttentionNotices(today),
         weight: previewWeightSeries(),
     };
 }

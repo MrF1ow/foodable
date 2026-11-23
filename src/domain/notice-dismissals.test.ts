@@ -10,7 +10,6 @@ import {
     type NoticeSubjectKind,
 } from "./notice-dismissals.js";
 import type { Notice } from "./notices.js";
-import { needsAttentionCount } from "./notices.js";
 import { dismissNotice, noticesFor, undoDismissal } from "./notices-for.js";
 import {
     createMemoryFoodsStore,
@@ -152,12 +151,11 @@ async function seedOpenNotices(
     return { fridge, foods, recipes, item, recipe, ingredientId, today };
 }
 
-test("needsAttentionCount matches noticesFor list length and excludes dismissed", async () => {
+test("a dismissed notice leaves the noticesFor list and nothing else does", async () => {
     const dismissals = createMemoryNoticeDismissalsStore();
     const { fridge, foods, recipes, item, today } = await seedOpenNotices();
     const deps = { foods, fridge, recipes, dismissals };
     const open = await noticesFor(deps, HH, { today });
-    expect(needsAttentionCount(open.notices)).toBe(open.notices.length);
     expect(open.notices.length).toBeGreaterThanOrEqual(2);
 
     await dismissNotice(
@@ -173,7 +171,7 @@ test("needsAttentionCount matches noticesFor list length and excludes dismissed"
     );
     const after = await noticesFor(deps, HH, { today });
     expect(after.notices.some((n) => n.subject.id === item.id)).toBe(false);
-    expect(needsAttentionCount(after.notices)).toBe(after.notices.length);
+    expect(after.notices.length).toBe(open.notices.length - 1);
 });
 
 async function seedSubjectDismissals(

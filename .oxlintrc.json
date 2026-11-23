@@ -82,7 +82,7 @@
                                 "src/db/stock",
                                 "src/db/weigh-ins"
                             ],
-                            "src/web/routes/needs-attention.test.ts": [
+                            "src/web/routes/notices.test.ts": [
                                 "src/db/foods",
                                 "src/db/fridge",
                                 "src/db/grocery",
