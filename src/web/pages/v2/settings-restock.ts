@@ -1,23 +1,24 @@
+/**
+ * Settings › Household › Restock (FigCraft 411959): one list of rows, Weekly
+ * restock (a switch), Day (a pull-down on the row) and Time (a time field on
+ * the row that saves itself), then when it last ran. An owner or admin changes
+ * them, each change posting on its own and coming back here with no toast;
+ * everyone else reads the values.
+ */
 import type { AppChromeBase } from "../../attention.js";
 import type { RestockPreferences } from "../../../household.js";
 import { WEEKDAY_NAMES } from "../../../domain/weekdays.js";
-import { esc, raw, type Html } from "../../components/v2/html.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
+import { icon } from "../../components/v2/icon.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu } from "../../components/v2/menu.js";
 import {
     renderSettingsV2Page,
     settingsErrorBanner,
-    settingsField,
-    settingsPrimarySubmit,
 } from "./settings-shared.js";
-import {
-    householdRow,
-    householdRowCard,
-    ROW_ICONS,
-    switchForm,
-} from "./settings-household-rows.js";
 
 export const RESTOCK_PATH = "/settings/household/restock";
-export const RESTOCK_INTRO =
-    "On the restock day Foodable adds food that is about to expire and the usuals that are due to the grocery list.";
 
 export type SettingsRestockV2View = {
     chrome: AppChromeBase;
@@ -36,10 +37,9 @@ export function restockTimeLabel(time: string): string {
     return `${twelve}:${m} ${suffix}`;
 }
 
-/** The value of the Household row: `Sunday, 9:00 AM`, or Off. */
-export function restockSummary(restock: RestockPreferences): string {
-    if (!restock.enabled) return "Off";
-    return `${WEEKDAY_NAMES[restock.weekday]}, ${restockTimeLabel(restock.time)}`;
+/** The value of the Household page's Restock day row: `Sunday`, or Off. */
+export function restockDayLabel(restock: RestockPreferences): string {
+    return restock.enabled ? WEEKDAY_NAMES[restock.weekday] : "Off";
 }
 
 function dateLabel(localDate: string): string {
@@ -61,53 +61,78 @@ export function restockLastRunLabel(restock: RestockPreferences): string {
     return `${when} · added ${added} ${added === 1 ? "usual" : "usuals"}`;
 }
 
-function scheduleForm(restock: RestockPreferences): string {
-    const days = WEEKDAY_NAMES.map(
-        (name, index) =>
-            `<option value="${index}"${index === restock.weekday ? " selected" : ""}>${esc(name)}</option>`,
-    ).join("");
-    const day = settingsField({
-        id: "restock_weekday",
-        label: "Day",
-        control: `<select class="fd-settings-input" id="restock_weekday" name="restock_weekday">${days}</select>`,
+const WEEKDAY_KEYS = WEEKDAY_NAMES.map((_name, index) => index);
+
+/** Day: the pull-down on the row; each day posts its number. */
+function dayRow(restock: RestockPreferences): Html {
+    return raw(
+        `<li class="fd-item-row fd-restock__day">${menu({
+            label: "Restock day",
+            anchor: "row",
+            row: { title: "Day", value: WEEKDAY_NAMES[restock.weekday] },
+            items: WEEKDAY_KEYS.map((index) => ({
+                kind: "checked" as const,
+                label: WEEKDAY_NAMES[index]!,
+                checked: index === restock.weekday,
+                action: RESTOCK_PATH,
+                fields: { restock_weekday: String(index) },
+            })),
+        })}</li>`,
+    );
+}
+
+/** Time: a time field at the end of the row; leaving it with a new time saves. */
+function timeRow(restock: RestockPreferences): Html {
+    const control = raw(
+        `<form class="fd-inline-form fd-restock__time" method="post" action="${RESTOCK_PATH}" data-fd-autosave><input class="fd-restock__time-input" type="time" name="restock_time" value="${esc(restock.time)}" required aria-label="Restock time" data-fd-autosave-input><span class="fd-item-row__chevron" aria-hidden="true">${icon("chevron-right")}</span></form>`,
+    );
+    return itemRow({
+        title: "Time",
+        trailing: { kind: "control", html: control },
     });
-    const time = settingsField({
-        id: "restock_time",
-        label: "Time",
-        control: `<input class="fd-settings-input" id="restock_time" name="restock_time" type="time" value="${esc(restock.time)}" required />`,
-    });
-    return `<form method="post" action="${RESTOCK_PATH}" class="fd-restock-form">${String(day)}${String(time)}${settingsPrimarySubmit("Save")}</form>`;
 }
 
 export function renderSettingsRestockV2Body(
     view: SettingsRestockV2View,
 ): string {
     const { restock } = view;
-    const label = "Weekly restock";
-    const switchRow = view.canManage
-        ? raw(
-              `<li class="fd-row fd-row--stores-pref"><div class="fd-row__body fd-stores-pref"><span class="fd-stores-pref__icon" aria-hidden="true">${ROW_ICONS.refresh}</span><span class="fd-stores-pref__main"><span class="fd-row__title">${esc(label)}</span><span class="fd-row__sub">${esc(restock.enabled ? "On" : "Off")}</span></span>${switchForm({ action: RESTOCK_PATH, name: "restock_enabled", on: restock.enabled, label })}</div></li>`,
-          )
-        : householdRow({
-              icon: ROW_ICONS.refresh,
-              label,
-              value: restock.enabled ? "On" : "Off",
-          });
-    const rows: Html[] = [switchRow];
-    if (!view.canManage) {
-        rows.push(
-            householdRow({
-                icon: ROW_ICONS.calendar,
-                label: "Restock day",
-                value: restockSummary({ ...restock, enabled: true }),
-            }),
-        );
-    }
-    const schedule = view.canManage ? scheduleForm(restock) : "";
-    const note = view.canManage
-        ? ""
-        : `<p class="fd-stores-hint">Only the owner or an admin can change this.</p>`;
-    return `<div class="fd-restock fd-stores" data-fd-restock>${String(settingsErrorBanner(view.error))}<p class="fd-stores-intro">${esc(RESTOCK_INTRO)}</p>${String(householdRowCard(rows, "Restock"))}${schedule}<p class="fd-stores-hint" data-fd-restock-last-run>${esc(restockLastRunLabel(restock))}</p>${note}</div>`;
+    const title = "Weekly restock";
+    const rows: Html[] = view.canManage
+        ? [
+              itemRow({
+                  title,
+                  trailing: {
+                      kind: "toggle",
+                      on: restock.enabled,
+                      label: title,
+                      form: {
+                          action: RESTOCK_PATH,
+                          fields: {
+                              restock_enabled: restock.enabled ? "off" : "on",
+                          },
+                      },
+                  },
+              }),
+              dayRow(restock),
+              timeRow(restock),
+          ]
+        : [
+              itemRow({ title, value: restock.enabled ? "On" : "Off" }),
+              itemRow({ title: "Day", value: WEEKDAY_NAMES[restock.weekday] }),
+              itemRow({
+                  title: "Time",
+                  value: restockTimeLabel(restock.time),
+              }),
+          ];
+    return String(
+        join([
+            settingsErrorBanner(view.error),
+            listGroup({ rows, label: "Restock" }),
+            raw(
+                `<p class="fd-restock__last-run" data-fd-restock-last-run>${esc(restockLastRunLabel(restock))}</p>`,
+            ),
+        ]),
+    );
 }
 
 export function renderSettingsRestockV2Page(
@@ -119,8 +144,9 @@ export function renderSettingsRestockV2Page(
         title: "Restock",
         backHref: "/settings/household",
         backLabel: "Household",
+        className: "fd-restock",
         body: renderSettingsRestockV2Body(view),
     });
 }
 
-export const SETTINGS_RESTOCK_V2_MARKER = "data-fd-restock";
+export const SETTINGS_RESTOCK_V2_MARKER = "data-fd-restock-last-run";

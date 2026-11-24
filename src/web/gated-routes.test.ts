@@ -116,6 +116,12 @@ describe("gated route harness on composed app", () => {
                 notFound: true,
             },
             {
+                method: "GET",
+                path: "/settings/household/shared-links",
+                flag: "mcp-share-links",
+                notFound: true,
+            },
+            {
                 method: "POST",
                 path: "/settings/household/shared-links/:id/revoke",
                 flag: "mcp-share-links",

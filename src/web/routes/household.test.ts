@@ -1249,9 +1249,11 @@ describe("social reader settings", () => {
             },
         );
         expect(r.status).toBe(400);
-        // The error re-renders the readers page, with the terms dialog open.
+        // The error re-renders the readers page, with that reader's terms open.
         const html = await r.text();
-        expect(html).toContain("data-fd-readers");
+        expect(html).toContain("fd-readers");
+        // The terms are open in place for that reader, with the reason.
+        expect(html).toContain('data-fd-reader-terms="tiktok"');
         expect(html).toContain("Confirm you understand the terms");
         expect(db.household.preferences.socialReaders.tiktok).toBe(false);
     });
@@ -3669,7 +3671,7 @@ describe("household settings sub-pages", () => {
             const some = await (
                 await get("/settings/household/readers", ALICE)
             ).text();
-            expect(some).toContain("2 links");
+            expect(some).toContain('fd-item-row__value">2<');
             expect(some).toContain(
                 'action="/settings/household/fetch-refusals/clear"',
             );
@@ -3683,18 +3685,34 @@ describe("household settings sub-pages", () => {
             );
         });
 
-        test("only the owner gets the switches and the terms dialogs", async () => {
+        test("only the owner gets the switches and the terms; the terms open in place", async () => {
             const owner = await (
                 await get("/settings/household/readers", ALICE)
             ).text();
-            expect(owner).toContain("household-social-reader-tiktok");
-            const admin = await (
-                await get("/settings/household/readers", ADMIN)
-            ).text();
-            expect(admin).not.toContain("household-social-reader-tiktok");
-            expect(admin).toContain(
-                "Only the household owner can change this.",
+            expect(owner).toContain('role="switch"');
+            expect(owner).toMatch(
+                /<form[^>]*method="get"[^>]*action="\/settings\/household\/readers"[^>]*><input type="hidden" name="turn_on" value="tiktok">/,
             );
+            expect(owner).not.toContain("household-social-reader");
+            expect(owner).not.toContain("goes against that platform");
+            const asking = await (
+                await get("/settings/household/readers?turn_on=tiktok", ALICE)
+            ).text();
+            expect(asking).toContain('data-fd-reader-terms="tiktok"');
+            expect(asking).toContain("goes against that platform");
+            // An unknown reader opens nothing.
+            expect(
+                await (
+                    await get("/settings/household/readers?turn_on=x", ALICE)
+                ).text(),
+            ).not.toContain("data-fd-reader-terms");
+            // An admin reads the page but gets neither the switches nor the terms.
+            const admin = await (
+                await get("/settings/household/readers?turn_on=tiktok", ADMIN)
+            ).text();
+            expect(admin).not.toContain('role="switch"');
+            expect(admin).not.toContain("data-fd-reader-terms");
+            expect(admin).not.toContain("social-readers");
         });
     });
 
@@ -3752,14 +3770,27 @@ describe("household settings sub-pages", () => {
             ]);
             expect(items(html)).toEqual([
                 "Rename household",
-                "Rotate join token",
+                "Rotate household token",
                 "Rename household",
-                "Rotate join token",
+                "Rotate household token",
             ]);
             expect(html).toContain('action="/settings/household/rotate-token"');
             expect(html).not.toContain("Dismissed notices");
             expect(html).not.toContain("plurals-same-food");
             expect(html).not.toContain("Social post readers");
+        });
+
+        test("a refresh or Back to the token page (a GET) goes to the Household page for the owner and is refused for everyone else", async () => {
+            const owner = await get("/settings/household/rotate-token", ALICE);
+            expect(owner.status).toBe(303);
+            expect(owner.headers.get("location")).toBe("/settings/household");
+            expect((await owner.text()).includes("fdh_")).toBe(false);
+            expect(
+                (await get("/settings/household/rotate-token", ADMIN)).status,
+            ).toBe(403);
+            expect(
+                (await get("/settings/household/rotate-token", BOB)).status,
+            ).toBe(403);
         });
 
         test("an admin adds members and edits the rows, but never sees the owner's controls", async () => {
@@ -3771,8 +3802,8 @@ describe("household settings sub-pages", () => {
                 "Rename household",
             ]);
             expect(html).toContain('action="/settings/household/location"');
-            expect(html).not.toContain("Rotate join token");
-            expect(html).not.toContain("household-rotate-token");
+            expect(html).not.toContain("Rotate household token");
+            expect(html).not.toContain("fd-household-rotate-token");
             expect(html).not.toContain("/settings/household/invites");
         });
 
@@ -3782,7 +3813,7 @@ describe("household settings sub-pages", () => {
             expect(html).not.toContain("data-fd-menu");
             expect(html).not.toContain("Add a member");
             expect(html).not.toContain("/settings/household/invites");
-            expect(html).not.toContain("household-rotate-token");
+            expect(html).not.toContain("fd-household-rotate-token");
             expect(html).not.toContain('action="/settings/household/');
             expect(html).toContain("Not set");
         });

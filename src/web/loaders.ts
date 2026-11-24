@@ -124,6 +124,7 @@ import {
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
 import { renderSettingsRestockV2Page } from "./pages/v2/settings-restock.js";
 import { renderSettingsReadersV2Page } from "./pages/v2/settings-readers.js";
+import type { SocialReaderId } from "../copy/social-readers.js";
 import { recipeFetchMemory } from "../db/fetch-memory.js";
 import type { FetchMemoryStore } from "../domain/fetch-memory.js";
 import { renderSettingsStoresV2Page } from "./pages/v2/settings-stores.js";
@@ -149,8 +150,10 @@ import {
 } from "./pages/v2/share-sheet.js";
 import {
     buildSharedLinkRows,
+    renderSharedLinksPage,
     type SharedLinkRow,
 } from "./pages/v2/settings-household-shared-links.js";
+import { renderHouseholdTokenPage } from "./pages/v2/settings-household-token.js";
 import { liveShareLinkStore } from "../db/share-links.js";
 import {
     guessMealType,
@@ -176,7 +179,7 @@ import {
 } from "./attention.js";
 import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
 import { renderBarePage, type ThemePref } from "./shell.js";
-import { householdToday } from "../db/restock.js";
+import { householdClock, householdToday } from "../db/restock.js";
 import { loadWeekPlanView } from "./loaders-plan.js";
 import { isPlanDate, type PlanSlot } from "../domain/plan.js";
 import { liveRecipePlansStore } from "../db/plans.js";
@@ -1435,7 +1438,7 @@ export async function renderUsualProductsListPage(
     };
 }
 
-/** Settings › Household's Shared links: the active links with the names they show. */
+/** Settings › Household › Shared links: the active links with the names they show. */
 async function loadSharedLinkRows(
     householdId: string,
     members: readonly { userId: string; displayName: string }[],
@@ -1465,7 +1468,6 @@ export async function renderHouseholdSettingsRoute(
     viewerUserId: string,
     opts: {
         error?: string;
-        issuedToken?: string;
         openModalId?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
@@ -1506,9 +1508,10 @@ export async function renderHouseholdSettingsRoute(
         gate.viewer,
         noticeResult,
     );
-    // No catch: this section is the only place on the web to revoke a
-    // public link, so a failed read must fail the page, not hide it. With
-    // `mcp-share-links` off there are no links to list and no section.
+    // No catch: the Shared links row counts them, and the page behind it is the
+    // only place on the web to revoke a public link, so a failed read must fail
+    // the page, not hide it. With `mcp-share-links` off there are no links to
+    // list and no row.
     const sharedLinks = chrome.flags.mcpShareLinks
         ? await loadSharedLinkRows(householdId, members)
         : undefined;
@@ -1524,7 +1527,6 @@ export async function renderHouseholdSettingsRoute(
             canInvite: can(gate.viewer, "member.manage").ok,
             viewerUserId: gate.viewer.userId,
             error: opts.error,
-            issuedToken: opts.issuedToken,
             openModalId: opts.openModalId,
             socialReaders: config.preferences.socialReaders,
             location,
@@ -1535,6 +1537,62 @@ export async function renderHouseholdSettingsRoute(
             unverifiedRecipeExpiryDays:
                 config.preferences.unverifiedRecipeExpiryDays,
             sharedLinks,
+        }),
+    };
+}
+
+/** The page that shows a freshly rotated household token (owner only, once). */
+export async function renderHouseholdTokenRoute(
+    viewerUserId: string,
+    token: string,
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        noticeResult,
+    );
+    return { status: 200, html: renderHouseholdTokenPage({ chrome, token }) };
+}
+
+/**
+ * Settings › Household › Shared links. With `mcp-share-links` off the page is
+ * not there (a 404), as are the links it would list.
+ */
+export async function renderSharedLinksRoute(
+    viewerUserId: string,
+    opts: { error?: string } = {},
+): Promise<{ status: 200 | 403 | 404; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const profile = await getProfile(viewerUserId);
+    const householdId = gate.viewer.householdId;
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        noticeResult,
+    );
+    if (!chrome.flags.mcpShareLinks) {
+        return {
+            status: 404,
+            html: renderBarePage("Not found", emptyState("Page not found.")),
+        };
+    }
+    const [{ timezone }, members] = await Promise.all([
+        householdClock(householdId),
+        listHouseholdMembers(householdId),
+    ]);
+    return {
+        status: 200,
+        html: renderSharedLinksPage({
+            chrome,
+            links: await loadSharedLinkRows(householdId, members),
+            timezone,
+            error: opts.error,
         }),
     };
 }
@@ -1586,7 +1644,7 @@ export async function renderHouseholdRestockRoute(
 
 export async function renderHouseholdReadersRoute(
     viewerUserId: string,
-    opts: { error?: string; openModalId?: string } = {},
+    opts: { error?: string; confirmReader?: SocialReaderId } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -1610,7 +1668,7 @@ export async function renderHouseholdReadersRoute(
             isOwner: can(gate.viewer, "household.recipe_link_readers").ok,
             canManage: canManageHousehold(gate.viewer),
             error: opts.error,
-            openModalId: opts.openModalId,
+            confirmReader: opts.confirmReader,
         }),
     };
 }

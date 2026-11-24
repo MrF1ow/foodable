@@ -181,8 +181,8 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             incidental: true,
         },
         // field.test.ts globs src/web/**/*.ts for hand-written labels;
-        // turbo-forms.test.ts reads pages/v2/settings-household-modals.ts,
-        // components/ui.ts and shell.ts.
+        // turbo-forms.test.ts reads pages/v2/settings-household-token.ts
+        // and shell.ts.
         {
             when: /^src\/web\/.+\.ts$/,
             tests: /^src\/web\/(components\/field|turbo-forms)\.test\.ts$/,

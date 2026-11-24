@@ -195,3 +195,10 @@
     width: auto;
     justify-content: center;
 }
+
+/* A row menu (menu({ anchor: "row" })): the trigger is a whole Item row, so
+ * the root takes the row's width; the panel hangs under it, right-aligned. */
+.fd-menu--row {
+    display: block;
+    width: 100%;
+}

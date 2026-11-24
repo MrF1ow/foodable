@@ -20,16 +20,16 @@ import {
 } from "./settings-household-add-member.js";
 import { renderHouseholdLayout } from "./settings-household-layout.js";
 import {
-    HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
-    renderRotateTokenModal,
-} from "./settings-household-modals.js";
-import {
-    renderSharedLinksSection,
+    SHARED_LINKS_PATH,
     type SharedLinkRow,
 } from "./settings-household-shared-links.js";
+import {
+    HOUSEHOLD_ROTATE_TOKEN_SHEET_ID,
+    rotateTokenSheet,
+} from "./settings-household-token.js";
 import { HOUSEHOLD_TIMEZONE_PATH } from "./settings-account-timezone.js";
 import { READERS_PATH, readersSummary } from "./settings-readers.js";
-import { RESTOCK_PATH, restockSummary } from "./settings-restock.js";
+import { RESTOCK_PATH, restockDayLabel } from "./settings-restock.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 
 export const HOUSEHOLD_NAME_SHEET_ID = "fd-household-name";
@@ -51,9 +51,8 @@ export type SettingsHouseholdV2View = {
     canInvite: boolean;
     viewerUserId: string;
     error?: string;
-    /** The sheet or dialog `error` belongs to; it reopens on load. */
+    /** The sheet `error` belongs to; it reopens on load. */
     openModalId?: string;
-    issuedToken?: string;
     socialReaders?: SocialReadersPreferences;
     /** Where the household shops, free text; null = not set. */
     location: string | null;
@@ -65,7 +64,7 @@ export type SettingsHouseholdV2View = {
     effectiveTimezoneDefaulted?: boolean;
     restock: RestockPreferences;
     unverifiedRecipeExpiryDays: number | null;
-    /** The household's active share links; absent leaves the section out. */
+    /** The household's active share links; absent (the flag is off) leaves the row out. */
     sharedLinks?: readonly SharedLinkRow[];
 };
 
@@ -77,10 +76,9 @@ export function roleLabel(role: HouseholdMember["role"]): string {
     return "Member";
 }
 
-/** The sheets and dialogs an error can belong to; any other error is a banner. */
+/** The sheets an error can belong to; any other error is a banner. */
 const SHEET_IDS: readonly string[] = [
     HOUSEHOLD_ADD_MEMBER_SHEET_ID,
-    HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
     HOUSEHOLD_NAME_SHEET_ID,
     HOUSEHOLD_LOCATION_SHEET_ID,
     HOUSEHOLD_EXPIRY_SHEET_ID,
@@ -149,7 +147,7 @@ function householdRows(view: SettingsHouseholdV2View): Html[] {
         }),
         itemRow({
             title: "Restock day",
-            value: restockSummary(view.restock),
+            value: restockDayLabel(view.restock),
             trailing: { kind: "chevron" },
             href: RESTOCK_PATH,
         }),
@@ -160,6 +158,16 @@ function householdRows(view: SettingsHouseholdV2View): Html[] {
                 title: "Invite codes",
                 trailing: { kind: "chevron" },
                 href: HOUSEHOLD_INVITES_PATH,
+            }),
+        );
+    }
+    if (view.sharedLinks) {
+        rows.push(
+            itemRow({
+                title: "Shared links",
+                value: String(view.sharedLinks.length),
+                trailing: { kind: "chevron" },
+                href: SHARED_LINKS_PATH,
             }),
         );
     }
@@ -284,8 +292,8 @@ function moreMenu(view: SettingsHouseholdV2View): Html | undefined {
     if (view.isOwner) {
         items.push({
             kind: "opens",
-            label: "Rotate join token",
-            sheetId: HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
+            label: "Rotate household token",
+            sheetId: HOUSEHOLD_ROTATE_TOKEN_SHEET_ID,
         });
     }
     return items.length > 0
@@ -297,9 +305,6 @@ export function renderSettingsHouseholdV2Body(
     view: SettingsHouseholdV2View,
 ): string {
     const count = view.members.length;
-    const token = view.issuedToken
-        ? `<p class="fd-settings-token">Household bot token (shown once): <code>${esc(view.issuedToken)}</code></p>`
-        : "";
     // A sheet's own error sits inside it; any other is a banner.
     const banner =
         view.openModalId && SHEET_IDS.includes(view.openModalId)
@@ -316,7 +321,6 @@ export function renderSettingsHouseholdV2Body(
         );
     }
     const parts = join([
-        raw(token),
         raw(banner),
         card({
             children: raw(
@@ -328,7 +332,6 @@ export function renderSettingsHouseholdV2Body(
         listGroup({ rows: memberRows, label: "Members" }),
         sectionHeader({ label: "Household", rule: false }),
         listGroup({ rows: householdRows(view), label: "Household" }),
-        view.sharedLinks ? raw(renderSharedLinksSection(view.sharedLinks)) : "",
     ]);
     const sheets = view.canManage
         ? addMemberSheet({
@@ -338,11 +341,11 @@ export function renderSettingsHouseholdV2Body(
           })
         : "";
     const rotate = view.isOwner
-        ? renderRotateTokenModal({
-              open: view.openModalId === HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
+        ? rotateTokenSheet({
+              open: view.openModalId === HOUSEHOLD_ROTATE_TOKEN_SHEET_ID,
           })
         : "";
-    return `${String(parts)}${sheets}${editSheets(view)}<div class="native">${rotate}</div>`;
+    return `${String(parts)}${sheets}${editSheets(view)}${rotate}`;
 }
 
 export function renderSettingsHouseholdV2Page(

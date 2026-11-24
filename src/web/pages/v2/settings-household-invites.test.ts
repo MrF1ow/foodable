@@ -135,3 +135,18 @@ test("a failed create shows its reason as a banner", () => {
         '<p class="fd-settings-error" role="alert">Nope</p>',
     );
 });
+
+test("an invite's day is counted in the household's zone, not UTC", () => {
+    const invites = [
+        // 02:30 UTC on Nov 17 is still Nov 16 in Los Angeles.
+        invite({ id: "a", expiresAt: "2026-11-17T02:30:00Z" }),
+    ];
+    expect(renderHouseholdInvitesPage(view({ invites }))).toContain(
+        "Expires Nov 17",
+    );
+    const la = renderHouseholdInvitesPage(
+        view({ invites, timezone: "America/Los_Angeles" }),
+    );
+    expect(la).toContain("Expires Nov 16");
+    expect(la).not.toContain("Expires Nov 17");
+});

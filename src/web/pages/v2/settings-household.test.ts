@@ -293,16 +293,19 @@ describe("settings household v2", () => {
         ]);
         expect(html).toContain('fd-item-row__value">Denver, CO<');
         expect(html).toContain('fd-item-row__value">America/Denver<');
-        expect(html).toContain("Sunday, 9:00 AM");
+        expect(html).toContain('fd-item-row__value">Sunday<');
+        expect(html).not.toContain("Sunday, 9:00 AM");
         expect(html).toContain("TikTok on");
         expect(html).toContain("30 days");
         expect(html).toContain('href="/settings/household/stores"');
         expect(html).toContain('href="/settings/household/restock"');
         expect(html).toContain('href="/settings/household/invites"');
         expect(html).toContain('href="/settings/household/readers"');
-        // Name and Rotate join token moved into the ⋯ menu.
+        // Name and Rotate household token live in the ⋯ menu.
         expect(rowTitles(html, "Household")).not.toContain("Household name");
-        expect(rowTitles(html, "Household")).not.toContain("Rotate join token");
+        expect(rowTitles(html, "Household")).not.toContain(
+            "Rotate household token",
+        );
         expect(html).not.toContain("/settings/household/dismissed");
     });
 
@@ -348,14 +351,14 @@ describe("settings household v2", () => {
         );
         expect(menus).not.toBeNull();
         expect(menus![0]).toContain("Rename household");
-        expect(menus![0]).toContain("Rotate join token");
+        expect(menus![0]).toContain("Rotate household token");
         expect(menus![0]).toContain('commandfor="fd-household-name"');
-        expect(menus![0]).toContain('commandfor="household-rotate-token"');
+        expect(menus![0]).toContain('commandfor="fd-household-rotate-token"');
 
         const admin = renderSettingsHouseholdV2Page(asAdmin());
         expect(admin).toContain("Rename household");
-        expect(admin).not.toContain("Rotate join token");
-        expect(admin).not.toContain("household-rotate-token");
+        expect(admin).not.toContain("Rotate household token");
+        expect(admin).not.toContain("fd-household-rotate-token");
 
         const member = renderSettingsHouseholdV2Page(asMember());
         expect(member).not.toContain("data-fd-menu");
@@ -376,33 +379,26 @@ describe("settings household v2", () => {
         expect(form).toContain('data-turbo="false"');
     });
 
-    test("the only old modal left on the page is the owner's rotate-token confirm", () => {
-        expect(
-            renderSettingsHouseholdV2Page(baseView()).match(
-                /<dialog class="modal"/g,
-            ),
-        ).toHaveLength(1);
-        expect(
-            renderSettingsHouseholdV2Page(asAdmin()).match(
-                /<dialog class="modal"/g,
-            ),
-        ).toBeNull();
+    test("no old modal on the page: the owner's rotate confirm is a sheet, an admin has none", () => {
+        const owner = renderSettingsHouseholdV2Page(baseView());
+        expect(owner).not.toContain('<dialog class="modal"');
+        expect(owner).toContain('id="fd-household-rotate-token"');
+        expect(owner).toContain("Rotate household token?");
+        const admin = renderSettingsHouseholdV2Page(asAdmin());
+        expect(admin).not.toContain('<dialog class="modal"');
+        expect(admin).not.toContain("rotate-token");
     });
 
-    test("the one-time token shows only on the page that was just issued one", () => {
-        expect(
-            renderSettingsHouseholdV2Page(baseView({ issuedToken: "fdh_abc" })),
-        ).toContain("Household bot token (shown once): <code>fdh_abc</code>");
-        expect(renderSettingsHouseholdV2Page(baseView())).not.toContain(
-            "shown once",
-        );
+    test("the one-time token is not shown here any more: it has a page of its own", () => {
+        const html = renderSettingsHouseholdV2Page(baseView());
+        expect(html).not.toContain("shown once");
+        expect(html).not.toContain("fd-settings-token");
     });
 
     test("the store list, plurals block and readers section are gone", () => {
         const html = renderSettingsHouseholdV2Page(baseView());
         expect(html).not.toContain(">Grocery stores</");
         expect(html).not.toContain("Manage stores");
-        expect(html).not.toContain('commandfor="household-add-store"');
         expect(html).not.toContain("plurals-same-food");
         expect(html).not.toContain(">Social post readers</");
         expect(html).not.toContain("/settings/household/social-readers");
@@ -410,16 +406,43 @@ describe("settings household v2", () => {
         expect(html).not.toContain("Possible duplicates");
     });
 
-    test("Shared links sits below the Household group, only when the page has links", () => {
-        const withLinks = renderSettingsHouseholdV2Page(
-            baseView({ sharedLinks: [] }),
+    test("Shared links is a row with its count that opens its page, only when the flag gave the page links", () => {
+        const rows = (n: number) =>
+            Array.from({ length: n }, (_v, i) => ({
+                id: `l${i}`,
+                kind: "grocery_list" as const,
+                recipeName: null,
+                createdByName: null,
+                createdAt: "2026-11-01T10:00:00.000Z",
+                expiresAt: null,
+            }));
+        const on = renderSettingsHouseholdV2Page(
+            baseView({ sharedLinks: rows(2) }),
         );
-        const groupIdx = withLinks.indexOf('aria-label="Household"><li');
-        const linksIdx = withLinks.indexOf("Shared links");
-        expect(linksIdx).toBeGreaterThan(groupIdx);
-        expect(renderSettingsHouseholdV2Page(baseView())).not.toContain(
+        expect(rowTitles(on, "Household")).toEqual([
+            "Location",
+            "Time zone",
+            "Stores",
+            "Restock day",
+            "Invite codes",
             "Shared links",
+            "Recipe link readers",
+            "Unverified recipes",
+        ]);
+        expect(on).toContain('href="/settings/household/shared-links"');
+        expect(on).toMatch(
+            /title="Shared links">Shared links<\/span><\/span><\/span><span class="fd-item-row__value">2</,
         );
+        // The links and their Revoke are on the page behind the row.
+        expect(on).not.toContain("/revoke");
+        // None yet: the row still shows, with 0.
+        expect(
+            renderSettingsHouseholdV2Page(baseView({ sharedLinks: [] })),
+        ).toContain('href="/settings/household/shared-links"');
+        // Flag off: the loader leaves sharedLinks out and the row goes.
+        const off = renderSettingsHouseholdV2Page(baseView());
+        expect(off).not.toContain("Shared links");
+        expect(off).not.toContain("shared-links");
     });
 
     test("the Time zone row opens a page for a manager and is a plain value for a member", () => {

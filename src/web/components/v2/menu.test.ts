@@ -372,3 +372,76 @@ test("an opens item escapes its label and dialog id", async () => {
     const html = anchored([{ kind: "opens", label: XSS, sheetId: XSS }]);
     expect(await injectedAttributes(html)).toEqual([]);
 });
+
+test("a checked item with an action posts its fields and keeps its tick", () => {
+    const html = anchored([
+        {
+            kind: "checked",
+            label: "Sunday",
+            checked: true,
+            action: "/settings/household/restock",
+            fields: { restock_weekday: "0" },
+        },
+        {
+            kind: "checked",
+            label: "Monday",
+            checked: false,
+            action: "/settings/household/restock",
+            fields: { restock_weekday: "1" },
+        },
+    ]);
+    expect(html).toContain(
+        '<form class="fd-menu__form" method="post" action="/settings/household/restock"><input type="hidden" name="restock_weekday" value="0"><button type="submit" class="fd-menu__item" role="menuitemcheckbox" aria-checked="true">',
+    );
+    expect(html).toContain('role="menuitemcheckbox" aria-checked="false"');
+    expect(html.match(/<form /g)?.length).toBe(2);
+});
+
+test("a row menu is a whole-row pull-down: the trigger reads title, value and a chevron", () => {
+    const html = String(
+        menu({
+            label: "Day",
+            anchor: "row",
+            row: { title: "Day", value: "Sunday" },
+            items: [
+                {
+                    kind: "checked",
+                    label: "Sunday",
+                    checked: true,
+                    action: "/p",
+                    fields: { d: "0" },
+                },
+            ],
+        }),
+    );
+    expect(html).toContain("fd-menu--row");
+    expect(html).toContain('data-anchor="row"');
+    expect(html).toContain(
+        '<button type="button" class="fd-item-row__face fd-item-row__face--link fd-menu__row" data-fd-menu-trigger aria-haspopup="menu" aria-expanded="false">',
+    );
+    expect(html).toContain('<span class="fd-item-row__title"');
+    expect(html).toContain('<span class="fd-item-row__value">Sunday</span>');
+    expect(html).toContain("fd-item-row__chevron");
+    expect(html).toContain('role="menu" aria-label="Day" hidden');
+});
+
+test("a row menu needs its row, and escapes it", async () => {
+    expect(() => menu({ label: "x", anchor: "row", items: [] })).toThrow(/row/);
+    const html = String(
+        menu({
+            label: XSS,
+            anchor: "row",
+            row: { title: XSS, value: XSS },
+            items: [
+                {
+                    kind: "checked",
+                    label: XSS,
+                    checked: false,
+                    action: XSS,
+                    fields: { [XSS]: XSS },
+                },
+            ],
+        }),
+    );
+    expect(await injectedAttributes(html)).toEqual([]);
+});

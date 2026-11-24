@@ -16922,20 +16922,26 @@ describe("authenticated dashboard HTTP", () => {
             },
         );
         expect(r.status).toBe(200);
+        // The token is for this response only.
+        expect(r.headers.get("cache-control")).toBe("no-store");
         const html = await r.text();
         expect(html).toContain('data-fd-settings-page="household"');
-        expect(html).toContain("Household bot token (shown once):");
+        expect(html).toContain(
+            '<h1 class="fd-detail-bar__title">Household token</h1>',
+        );
+        expect(html).toContain("Shown only now");
         expect(html).toContain(HOUSEHOLD_TOKEN_PREFIX);
         const shown = html.match(
-            new RegExp(`<code>(${HOUSEHOLD_TOKEN_PREFIX}[^<]+)</code>`),
+            new RegExp(`<code[^>]*>(${HOUSEHOLD_TOKEN_PREFIX}[^<]+)</code>`),
         )?.[1];
         expect(shown).toBeDefined();
+        expect(html.split(shown!)).toHaveLength(2);
         // Shown once: the next visit to the page does not carry it.
         const again = await siteApp.request("http://x/settings/household", {
             headers: { cookie: cookieFor(alice) },
         });
         const againHtml = await again.text();
-        expect(againHtml).not.toContain("Household bot token (shown once):");
+        expect(againHtml).not.toContain("Shown only now");
         expect(againHtml).not.toContain(shown!);
         expect(db.tokenRotations).toHaveLength(1);
         expect(db.tokenRotations[0]!.householdId).toBe("hh-1");
@@ -18109,15 +18115,14 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toContain('commandfor="household-rotate-token"');
+        expect(html).toContain('commandfor="fd-household-rotate-token"');
         expect(html).toContain("Rotate household token");
-        expect(html).toContain(
-            "Issue a new household bot token? The old token stops working immediately.",
-        );
+        expect(html).toContain("Rotate household token?");
+        expect(html).toContain("Agents using the old token stop working.");
         expect(html).toMatch(
             /<form[^>]*method="post"[^>]*action="\/settings\/household\/rotate-token"[^>]*data-turbo="false"/,
         );
-        expect(html).not.toContain("Household bot token (shown once):");
+        expect(html).not.toContain("Shown only now");
     });
 
     test("GET /settings/household does not offer a member the token rotation", async () => {
@@ -18127,7 +18132,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).not.toContain("household-rotate-token");
+        expect(html).not.toContain("fd-household-rotate-token");
         expect(html).not.toContain("/settings/household/rotate-token");
         expect(html).not.toContain("Rotate household token");
     });

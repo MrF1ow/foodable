@@ -202,9 +202,11 @@ function bindMenu(root) {
             disarm(root, box);
             return;
         }
+        // A tick that posts a form (a pull-down that saves its value) just submits.
         if (
             item.getAttribute("role") === "menuitemcheckbox" &&
-            item.tagName === "BUTTON"
+            item.tagName === "BUTTON" &&
+            item.type !== "submit"
         ) {
             const checked = item.getAttribute("aria-checked") !== "true";
             item.setAttribute("aria-checked", checked ? "true" : "false");

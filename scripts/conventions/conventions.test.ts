@@ -60,9 +60,9 @@ describe("blastFloor", () => {
 });
 
 describe("classifyPath mapped", () => {
-    test("the household modals page is a settings path", () => {
+    test("the household token page is a settings path", () => {
         expect(
-            classifyPath("src/web/pages/v2/settings-household-modals.ts"),
+            classifyPath("src/web/pages/v2/settings-household-token.ts"),
         ).toMatchObject({ area: "settings", mapped: true });
     });
 

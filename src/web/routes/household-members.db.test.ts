@@ -8,6 +8,7 @@ import { seedHousehold, seedMember } from "../../db/testing/fixtures.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { resetFlagsForTests } from "../../flags.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
+import { HOUSEHOLD_TOKEN_PREFIX } from "../../household-token.js";
 import { householdRoutes } from "./household.js";
 
 process.env.SESSION_SECRET ||= "01234567890123456789012345678901";
@@ -30,6 +31,18 @@ function request(userId: string, path: string, form?: Record<string, string>) {
                 : {}),
         },
         body: form ? new URLSearchParams(form).toString() : undefined,
+    });
+}
+
+/** A form post with the body written out, for repeated or bracketed keys. */
+function requestRaw(userId: string, path: string, body: string) {
+    return app.request(`http://test${path}`, {
+        method: "POST",
+        headers: {
+            cookie: `${SITE_COOKIE}=${mintSiteSession(userId)}`,
+            "content-type": "application/x-www-form-urlencoded",
+        },
+        body,
     });
 }
 
@@ -81,6 +94,47 @@ describeDb(
                 // One menu, on the active code.
                 expect(html.match(/data-fd-menu-trigger/g)).toHaveLength(1);
                 expect(html).not.toContain("New invite code");
+            });
+
+            test("an expiry is the day in the household's zone, not UTC", async () => {
+                const { sql } = getCtx();
+                await sql`
+                    update public.households
+                    set household_preferences = jsonb_set(
+                        coalesce(household_preferences, '{}'::jsonb),
+                        '{timezone}',
+                        '"Pacific/Kiritimati"'
+                    )
+                    where id = ${householdId}
+                `;
+                // 20:00 UTC is already the next morning in Kiritimati (UTC+14).
+                const now = new Date();
+                const expires = new Date(
+                    Date.UTC(
+                        now.getUTCFullYear(),
+                        now.getUTCMonth(),
+                        now.getUTCDate() + 3,
+                        20,
+                    ),
+                );
+                await sql`
+                    insert into public.household_invites (household_id, code_hash, created_by, expires_at)
+                    values (${householdId}, ${"c".repeat(64)}, ${owner}, ${expires.toISOString()})
+                `;
+                const html = await (
+                    await request(owner, "/settings/household/invites")
+                ).text();
+                const label = (zone: string) =>
+                    new Intl.DateTimeFormat("en-US", {
+                        timeZone: zone,
+                        month: "short",
+                        day: "numeric",
+                    }).format(expires);
+                expect(label("Pacific/Kiritimati")).not.toBe(label("UTC"));
+                expect(html).toContain(
+                    `Expires ${label("Pacific/Kiritimati")}`,
+                );
+                expect(html).not.toContain(`Expires ${label("UTC")}`);
             });
 
             test("+ answers 200 with the one-time code and a form that opts out of Turbo; the next visit does not show it", async () => {
@@ -188,7 +242,7 @@ describeDb(
                 ]);
                 expect(labels(html, "Household")).toContain("Invite codes");
                 expect(html).toContain("Rename household");
-                expect(html).toContain("Rotate join token");
+                expect(html).toContain("Rotate household token");
             });
 
             test("an admin adds members and renames, but has no Invite codes and no token rotation", async () => {
@@ -198,7 +252,7 @@ describeDb(
                 expect(labels(html, "Members")).toContain("Add a member");
                 expect(labels(html, "Household")).not.toContain("Invite codes");
                 expect(html).toContain("Rename household");
-                expect(html).not.toContain("Rotate join token");
+                expect(html).not.toContain("Rotate household token");
                 expect(html).not.toContain("/settings/household/invites");
             });
 
@@ -213,7 +267,7 @@ describeDb(
                 ]);
                 expect(html).not.toContain("data-fd-menu");
                 expect(html).not.toContain("Invite codes");
-                expect(html).not.toContain("Rotate join token");
+                expect(html).not.toContain("Rotate household token");
                 expect(html).not.toContain('action="/settings/household/');
             });
         });
@@ -293,6 +347,96 @@ describeDb(
                 expect(await count()).toBe(before);
             });
 
+            test("a forged repeat of role cannot slip an admin past the owner-only rule", async () => {
+                const base = `display_name=Zed&login=zed%40example.com&password=${PASSWORD}`;
+                const before = await count();
+                for (const forged of [
+                    "role=admin&role=",
+                    "role=&role=admin",
+                    "role%5B%5D=admin",
+                    "role=member&role=admin",
+                ]) {
+                    const res = await requestRaw(
+                        admin,
+                        "/settings/household",
+                        `${base}&${forged}`,
+                    );
+                    expect([forged, res.status]).toEqual([forged, 400]);
+                    expect(await res.text()).toContain(
+                        "Only the owner can choose a role.",
+                    );
+                }
+                expect(await roleOf("Zed")).toBeNull();
+                expect(await count()).toBe(before);
+                // An empty role alone is no role: an admin adds a plain member.
+                expect(
+                    (
+                        await requestRaw(
+                            admin,
+                            "/settings/household",
+                            `${base}&role=`,
+                        )
+                    ).status,
+                ).toBe(303);
+                expect(await roleOf("Zed")).toBe("member");
+            });
+
+            test("the owner's repeated or conflicting roles are refused; one role, plain or bracketed, is taken", async () => {
+                const base = `login=amy%40example.com&password=${PASSWORD}`;
+                const before = await count();
+                const conflict = await requestRaw(
+                    owner,
+                    "/settings/household",
+                    `display_name=Amy&${base}&role=admin&role=member`,
+                );
+                expect(conflict.status).toBe(400);
+                expect(await conflict.text()).toContain(
+                    "Choose admin or member.",
+                );
+                expect(await count()).toBe(before);
+                expect(
+                    (
+                        await requestRaw(
+                            owner,
+                            "/settings/household",
+                            `display_name=Amy&${base}&role%5B%5D=admin`,
+                        )
+                    ).status,
+                ).toBe(303);
+                expect(await roleOf("Amy")).toBe("admin");
+            });
+
+            test("when the role step fails the person is still added as a member, and the answer says so", async () => {
+                const { sql } = getCtx();
+                await sql.unsafe(`
+                    create or replace function public.p4_refuse_role() returns trigger
+                    language plpgsql as $$ begin
+                        raise exception 'boom from the database';
+                    end $$;
+                    create trigger p4_refuse_role before update of role
+                        on public.household_members
+                        for each row execute function public.p4_refuse_role();
+                `);
+                try {
+                    const res = await add(owner, "Kit", { role: "admin" });
+                    expect(res.status).toBe(400);
+                    const html = await res.text();
+                    expect(html).toContain(
+                        "Kit was added as a member, but making them an admin didn't work.",
+                    );
+                    expect(html).toContain("Make admin");
+                    // Not the database's own words.
+                    expect(html).not.toContain("boom from the database");
+                    expect(html).not.toContain("Failed to change role");
+                    expect(await roleOf("Kit")).toBe("member");
+                } finally {
+                    await sql.unsafe(`
+                        drop trigger if exists p4_refuse_role on public.household_members;
+                        drop function if exists public.p4_refuse_role();
+                    `);
+                }
+            });
+
             test("a member cannot add anyone", async () => {
                 const before = await count();
                 expect((await add(member, "Ivy")).status).toBe(403);
@@ -308,6 +452,60 @@ describeDb(
                 );
                 expect(await count()).toBe(before);
                 expect((await add(owner, "K".repeat(80))).status).toBe(303);
+            });
+        });
+
+        describe("rotating the household token", () => {
+            const tokenRows = async () => {
+                const { sql } = getCtx();
+                const rows = await sql`
+                    select count(*)::int as n from public.household_mcp_tokens
+                    where household_id = ${householdId}
+                `;
+                return Number(rows[0].n);
+            };
+
+            test("the owner gets the token on a page of its own, once, never cached", async () => {
+                const res = await request(
+                    owner,
+                    "/settings/household/rotate-token",
+                    {},
+                );
+                expect(res.status).toBe(200);
+                expect(res.headers.get("cache-control")).toBe("no-store");
+                expect(res.headers.get("set-cookie") ?? "").not.toContain(
+                    "toast",
+                );
+                const html = await res.text();
+                expect(html).toContain(
+                    '<h1 class="fd-detail-bar__title">Household token</h1>',
+                );
+                expect(html).toContain("Shown only now");
+                const token = html.match(
+                    /<code id="household-token" data-fd-copy-source>([^<]+)<\/code>/,
+                )?.[1];
+                expect(token).toMatch(new RegExp(`^${HOUSEHOLD_TOKEN_PREFIX}`));
+                expect(await tokenRows()).toBe(1);
+                const again = await (
+                    await request(owner, "/settings/household")
+                ).text();
+                expect(again).not.toContain(token!);
+                expect(again).not.toContain("Shown only now");
+            });
+
+            test("an admin and a member are refused and nothing is rotated", async () => {
+                for (const who of [admin, member]) {
+                    const res = await request(
+                        who,
+                        "/settings/household/rotate-token",
+                        {},
+                    );
+                    expect(res.status).toBe(403);
+                    expect(await res.text()).not.toContain(
+                        HOUSEHOLD_TOKEN_PREFIX,
+                    );
+                }
+                expect(await tokenRows()).toBe(0);
             });
         });
 

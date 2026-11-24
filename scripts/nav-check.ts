@@ -1101,7 +1101,7 @@ try {
         makeOwner.open &&
             makeOwner.width === makeOwner.viewport &&
             makeOwner.bottomGap === 0 &&
-            /Sam becomes the owner/.test(makeOwner.text),
+            /Only Sam can undo this/.test(makeOwner.text),
         { makeOwner, ex: drain() },
     );
     record(
@@ -1234,6 +1234,381 @@ try {
         { invitePost, invitePosts, ex: drain() },
     );
 
+    // Settings › Household › Restock: the row opens the page over Turbo; Day is
+    // a pull-down on the row and Time saves itself, both over Turbo, with no text
+    // under the list but when it last ran.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/household");
+    await setMarker();
+    await clickSel('.fd-settings a[href="/settings/household/restock"]');
+    await sleep(500);
+    const restockPage = await ev<{
+        path: string;
+        marker: string | null;
+        page: string | null;
+        title: string | null;
+        rows: string[];
+        intro: boolean;
+        lastRun: string | null;
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        page: document.querySelector(".fd-settings")?.getAttribute("data-fd-settings-page") ?? null,
+        title: document.querySelector(".fd-settings-detail .fd-detail-bar__title")?.textContent ?? null,
+        rows: [...document.querySelectorAll(".fd-settings .fd-item-row__title")].map((e) => e.textContent),
+        intro: document.body.innerText.includes("On the restock day"),
+        lastRun: document.querySelector("[data-fd-restock-last-run]")?.textContent ?? null,
+    })`);
+    await clickSel(".fd-restock__day [data-fd-menu-trigger]");
+    await sleep(200);
+    const dayMenu = await ev<{
+        open: boolean;
+        items: string[];
+        checked: string | null;
+        inView: boolean;
+    }>(`(() => {
+        const panel = document.querySelector(".fd-restock__day .fd-menu__panel");
+        const r = panel.getBoundingClientRect();
+        return {
+            open: !panel.hidden,
+            items: [...panel.querySelectorAll(".fd-menu__label")].map((e) => e.textContent),
+            checked: panel.querySelector('[aria-checked="true"] .fd-menu__label')?.textContent ?? null,
+            inView: r.left >= 0 && r.right <= window.innerWidth,
+        };
+    })()`);
+    await control("reset=posts");
+    await clickSel(
+        '.fd-restock__day .fd-menu__panel form:has(input[value="1"]) button',
+    );
+    await sleep(600);
+    const dayPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/restock",
+    );
+    const afterDay = await ev<{ marker: string | null; toasts: number }>(`({
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    await control("reset=posts");
+    await ev(`(() => {
+        const input = document.querySelector(".fd-restock__time-input");
+        input.focus();
+        input.value = "18:30";
+        input.dispatchEvent(new Event("change", { bubbles: true }));
+    })()`);
+    await sleep(700);
+    const timePosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/restock",
+    );
+    const afterTime = await ev<{ marker: string | null }>(`({
+        marker: window.__marker ?? null,
+    })`);
+    record(
+        "Settings › Household › Restock: a Turbo page with Weekly restock, Day and Time and no intro; Day is a pull-down on the row and Time saves itself, both over Turbo",
+        restockPage.path === "/settings/household/restock" &&
+            restockPage.marker === "stay" &&
+            restockPage.page === "household" &&
+            restockPage.title === "Restock" &&
+            restockPage.rows.join() === "Weekly restock,Day,Time" &&
+            !restockPage.intro &&
+            restockPage.lastRun === "Last ran Nov 8 · added 3 usuals" &&
+            dayMenu.open &&
+            dayMenu.inView &&
+            dayMenu.items.length === 7 &&
+            dayMenu.items[0] === "Sunday" &&
+            dayMenu.checked === "Sunday" &&
+            dayPosts.length === 1 &&
+            dayPosts[0]!.entries.some(
+                ([k, v]) => k === "restock_weekday" && v === "1",
+            ) &&
+            afterDay.marker === "stay" &&
+            afterDay.toasts === 0 &&
+            timePosts.length === 1 &&
+            timePosts[0]!.entries.some(
+                ([k, v]) => k === "restock_time" && v === "18:30",
+            ) &&
+            afterTime.marker === "stay",
+        {
+            restockPage,
+            dayMenu,
+            dayPosts,
+            afterDay,
+            timePosts,
+            afterTime,
+            ex: drain(),
+        },
+    );
+
+    // Settings › Household › Recipe link readers: Turbo page; an off reader's
+    // switch opens its terms in place (no dialog) and the confirm posts over
+    // Turbo; Blocked links has a ⋯ that clears in place.
+    await control("reset=posts");
+    await goto("/settings/household");
+    await setMarker();
+    await clickSel('.fd-settings a[href="/settings/household/readers"]');
+    await sleep(500);
+    const readersPage = await ev<{
+        path: string;
+        marker: string | null;
+        rows: string[];
+        switches: number;
+        terms: boolean;
+        intro: boolean;
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        rows: [...document.querySelectorAll(".fd-settings .fd-item-row__title")].map((e) => e.textContent),
+        switches: document.querySelectorAll(".fd-readers [role=switch]").length,
+        terms: !!document.querySelector("[data-fd-reader-terms]"),
+        intro: document.body.innerText.includes("When someone shares a TikTok"),
+    })`);
+    await clickSel('.fd-readers form[method="get"] button[role="switch"]');
+    await sleep(600);
+    const readerTerms = await ev<{
+        url: string;
+        marker: string | null;
+        terms: boolean;
+        dialogs: number;
+        confirmBox: boolean;
+    }>(`({
+        url: location.pathname + location.search,
+        marker: window.__marker ?? null,
+        terms: !!document.querySelector('[data-fd-reader-terms="facebook"]'),
+        dialogs: document.querySelectorAll("dialog[open]").length,
+        confirmBox: !!document.querySelector('[data-fd-reader-terms] input[name="confirm"]'),
+    })`);
+    await control("reset=posts");
+    await ev(`(() => {
+        const form = document.querySelector("[data-fd-reader-terms] form");
+        form.querySelector('input[name="confirm"]').checked = true;
+        form.requestSubmit();
+    })()`);
+    await sleep(600);
+    const readerPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/social-readers",
+    );
+    const afterReader = await ev<{ marker: string | null }>(`({
+        marker: window.__marker ?? null,
+    })`);
+    await goto("/settings/household/readers");
+    await setMarker();
+    await clickSel(".fd-readers [data-fd-menu-trigger]");
+    await sleep(200);
+    await clickSel(".fd-readers [data-fd-menu-arm]");
+    await sleep(150);
+    const blockedArmed = await ev<{ confirm: string[]; dialogs: number }>(`({
+        confirm: [...document.querySelectorAll(".fd-readers .fd-menu__confirm-row:not([hidden]) .fd-menu__label")].map((e) => e.textContent),
+        dialogs: document.querySelectorAll("dialog[open]").length,
+    })`);
+    await control("reset=posts");
+    await clickSel(
+        ".fd-readers .fd-menu__confirm-row:not([hidden]) button[type=submit]",
+    );
+    await sleep(600);
+    const blockedPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/fetch-refusals/clear",
+    );
+    const afterBlocked = await ev<{ marker: string | null }>(`({
+        marker: window.__marker ?? null,
+    })`);
+    record(
+        "Settings › Household › Recipe link readers: a Turbo page; an off reader's switch opens its terms in place and the confirm posts; Blocked links clears from its ⋯, confirming in the menu",
+        readersPage.path === "/settings/household/readers" &&
+            readersPage.marker === "stay" &&
+            readersPage.rows.join() === "TikTok,Facebook,Blocked links" &&
+            readersPage.switches === 2 &&
+            !readersPage.terms &&
+            !readersPage.intro &&
+            readerTerms.url ===
+                "/settings/household/readers?turn_on=facebook" &&
+            readerTerms.marker === "stay" &&
+            readerTerms.terms &&
+            readerTerms.confirmBox &&
+            readerTerms.dialogs === 0 &&
+            readerPosts.length === 1 &&
+            ["reader=facebook", "enabled=1", "confirm=1"].every((pair) =>
+                readerPosts[0]!.entries.some(([k, v]) => `${k}=${v}` === pair),
+            ) &&
+            afterReader.marker === "stay" &&
+            blockedArmed.confirm.join() === "Cancel,Clear blocked links" &&
+            blockedArmed.dialogs === 0 &&
+            blockedPosts.length === 1 &&
+            afterBlocked.marker === "stay",
+        {
+            readersPage,
+            readerTerms,
+            readerPosts,
+            afterReader,
+            blockedArmed,
+            blockedPosts,
+            afterBlocked,
+            ex: drain(),
+        },
+    );
+
+    // Settings › Household › Shared links: the row opens the page over Turbo;
+    // each link has a ⋯ whose Revoke confirms in the menu and posts over Turbo.
+    await control("reset=posts");
+    await goto("/settings/household");
+    await setMarker();
+    await clickSel('.fd-settings a[href="/settings/household/shared-links"]');
+    await sleep(500);
+    const linksPage = await ev<{
+        path: string;
+        marker: string | null;
+        title: string | null;
+        rows: string[];
+        subs: string[];
+        menus: number;
+        back: string | null;
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        title: document.querySelector(".fd-settings-detail .fd-detail-bar__title")?.textContent ?? null,
+        rows: [...document.querySelectorAll(".fd-settings .fd-item-row__title")].map((e) => e.textContent),
+        subs: [...document.querySelectorAll(".fd-settings .fd-item-row__subtitle")].map((e) => e.textContent),
+        menus: document.querySelectorAll(".fd-settings [data-fd-menu-trigger]").length,
+        back: document.querySelector(".fd-settings-detail a[aria-label='Back']")?.getAttribute("href") ?? null,
+    })`);
+    await clickSel(".fd-settings [data-fd-menu-trigger]");
+    await sleep(200);
+    await clickSel(".fd-settings [data-fd-menu-arm]");
+    await sleep(150);
+    const revokeArmed = await ev<{ confirm: string[]; dialogs: number }>(`({
+        confirm: [...document.querySelectorAll(".fd-settings .fd-menu__confirm-row:not([hidden]) .fd-menu__label")].map((e) => e.textContent),
+        dialogs: document.querySelectorAll("dialog[open]").length,
+    })`);
+    await control("reset=posts");
+    await clickSel(
+        ".fd-settings .fd-menu__confirm-row:not([hidden]) button[type=submit]",
+    );
+    await sleep(600);
+    const revokePosts = (await stats()).posts.filter((p) =>
+        p.path.endsWith("/revoke"),
+    );
+    const afterRevoke = await ev<{ marker: string | null; toasts: number }>(`({
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    record(
+        "Settings › Household › Shared links: a Turbo page of links, each with a ⋯ whose Revoke confirms in the menu and posts over Turbo with no toast",
+        linksPage.path === "/settings/household/shared-links" &&
+            linksPage.marker === "stay" &&
+            linksPage.title === "Shared links" &&
+            linksPage.rows.join() === "Chicken alfredo,Grocery list" &&
+            linksPage.subs.join() === "Recipe · expires 12 Dec,Never expires" &&
+            linksPage.menus === 2 &&
+            linksPage.back === "/settings/household" &&
+            revokeArmed.confirm.join() === "Cancel,Revoke link" &&
+            revokeArmed.dialogs === 0 &&
+            revokePosts.length === 1 &&
+            revokePosts[0]!.path ===
+                "/settings/household/shared-links/11111111-1111-4111-8111-111111111111/revoke" &&
+            afterRevoke.marker === "stay" &&
+            afterRevoke.toasts === 0,
+        { linksPage, revokeArmed, revokePosts, afterRevoke, ex: drain() },
+    );
+
+    // Rotate household token: a confirm sheet (bottom sheet on the phone) whose
+    // form is a full page load, because its answer carries the one-time token.
+    await control("reset=posts");
+    await goto("/settings/household");
+    await setMarker();
+    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
+    await sleep(200);
+    await clickSel(
+        '.fd-settings-detail button[commandfor="fd-household-rotate-token"]',
+    );
+    await sleep(500);
+    const rotateSheet = await ev<{
+        open: boolean;
+        width: number;
+        bottomGap: number;
+        viewport: number;
+        title: string;
+        text: string;
+        turbo: string | null;
+        modals: number;
+    }>(`(() => {
+        const d = document.getElementById("fd-household-rotate-token");
+        const r = d.getBoundingClientRect();
+        return {
+            open: d.open,
+            width: Math.round(r.width),
+            bottomGap: Math.round(window.innerHeight - r.bottom),
+            viewport: window.innerWidth,
+            title: d.querySelector(".fd-sheet__title")?.textContent ?? "",
+            text: d.querySelector(".fd-sheet__text")?.textContent ?? "",
+            turbo: d.querySelector("form")?.getAttribute("data-turbo") ?? null,
+            modals: document.querySelectorAll("dialog.modal").length,
+        };
+    })()`);
+    await clickSel("#fd-household-rotate-token .fd-btn--danger");
+    await sleep(700);
+    const rotated = await ev<{ marker: string | null; path: string }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+    })`);
+    const rotatePosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/rotate-token",
+    );
+    record(
+        "Settings › Household › Rotate household token: a confirm sheet at the bottom of the phone; confirming is a full page load (no Turbo), the token response cannot be a Turbo visit",
+        rotateSheet.open &&
+            rotateSheet.width === rotateSheet.viewport &&
+            rotateSheet.bottomGap === 0 &&
+            rotateSheet.title === "Rotate household token?" &&
+            rotateSheet.text === "Agents using the old token stop working." &&
+            rotateSheet.turbo === "false" &&
+            rotateSheet.modals === 0 &&
+            rotated.marker == null &&
+            rotatePosts.length === 1,
+        { rotateSheet, rotated, rotatePosts, ex: drain() },
+    );
+
+    // The token page is the one place the token is shown. Leaving it by a Turbo
+    // visit (Done) and pressing Back must not bring the token back from
+    // Turbo's snapshot cache: the page is fetched again and lands on Household.
+    const tokenShown = await ev<{
+        path: string;
+        token: string;
+        noCache: string | null;
+    }>(`({
+        path: location.pathname,
+        token: document.getElementById("household-token")?.textContent ?? "",
+        noCache: document.querySelector('meta[name="turbo-cache-control"][content="no-cache"]')?.getAttribute("content") ?? null,
+    })`);
+    await setMarker();
+    await clickSel(
+        '.fd-settings-main a.fd-btn--primary[href="/settings/household"]',
+    );
+    await sleep(700);
+    const tokenDone = await ev<{ marker: string | null; path: string }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+    })`);
+    await ev(`history.back()`);
+    await sleep(900);
+    const tokenBack = await ev<{
+        path: string;
+        token: boolean;
+        field: boolean;
+    }>(`({
+        path: location.pathname,
+        token: document.body.innerText.includes(${JSON.stringify("nt_hh_")}),
+        field: !!document.getElementById("household-token"),
+    })`);
+    record(
+        "Settings › Household › token page: shown once; Done (a Turbo visit) then Back does not restore the token from the snapshot cache",
+        tokenShown.path === "/settings/household/rotate-token" &&
+            tokenShown.token.startsWith("nt_hh_") &&
+            tokenShown.noCache === "no-cache" &&
+            tokenDone.marker === "stay" &&
+            tokenDone.path === "/settings/household" &&
+            !tokenBack.token &&
+            !tokenBack.field,
+        { tokenShown, tokenDone, tokenBack, ex: drain() },
+    );
+
     // From 1024 px the Detail bar is gone and the same ⋯ menu ends the page
     // header, in line with the title: it opens on top of the page, in view.
     await send("Emulation.setDeviceMetricsOverride", {
@@ -1312,12 +1687,28 @@ try {
         ],
         "fd-member-make-owner",
     );
+    const sideRotate = await sidePanel(
+        "/settings/household",
+        [
+            headMenu,
+            '.fd-settings-page-head__actions button[commandfor="fd-household-rotate-token"]',
+        ],
+        "fd-household-rotate-token",
+    );
     const isSide = (p: Panel) =>
         p.open && p.width === 480 && p.right === p.viewport;
+    // The two confirms are a centred 480 px card, as the design draws them.
+    const isCentred = (p: Panel) =>
+        p.open &&
+        p.width === 480 &&
+        Math.abs(p.right - p.width / 2 - p.viewport / 2) <= 2;
     record(
-        "Settings › Household: at 1440 Add member, Rename household and Transfer ownership open as the 480 px side panel",
-        isSide(sideAdd) && isSide(sideName) && isSide(sideOwner),
-        { sideAdd, sideName, sideOwner, ex: drain() },
+        "Settings › Household: at 1440 Add member and Rename household open as the 480 px side panel, Make owner and Rotate household token as a centred 480 px dialog",
+        isSide(sideAdd) &&
+            isSide(sideName) &&
+            isCentred(sideOwner) &&
+            isCentred(sideRotate),
+        { sideAdd, sideName, sideOwner, sideRotate, ex: drain() },
     );
     await send("Emulation.setDeviceMetricsOverride", {
         width: 430,
