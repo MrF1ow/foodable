@@ -64,3 +64,32 @@ test("the title is escaped", () => {
     });
     expect(html).not.toContain("<img src=x");
 });
+
+test("another Settings section marks its own menu link current and goes back to Settings", () => {
+    const html = renderHouseholdLayout({
+        chrome,
+        page: "goals",
+        title: "Goals",
+        body: "",
+    });
+    expect(html).toContain('data-fd-settings-page="goals"');
+    expect(html).toContain('aria-label="Back" href="/settings"');
+    expect(html).toContain('href="/settings/goals" aria-current="page"');
+    expect(html).not.toContain(
+        'href="/settings/household" aria-current="page"',
+    );
+});
+
+test("backHref and backLabel set where the arrow goes and what it is called", () => {
+    const html = renderHouseholdLayout({
+        chrome,
+        page: "saved",
+        title: "Possible duplicates",
+        backHref: "/settings/saved",
+        backLabel: "Saved foods & recipes",
+        body: "",
+    });
+    expect(html).toContain(
+        'aria-label="Saved foods &amp; recipes" href="/settings/saved"',
+    );
+});

@@ -466,6 +466,37 @@ const NAVS: readonly Nav[] = [
         lands: "/settings/household",
     },
     {
+        name: "inside Settings: Goals autosave a number",
+        start: "/settings/goals",
+        click: ["#goals-daily-protein-g"],
+        lands: "/settings/goals",
+        prepare: async (page) => {
+            const input = page.locator("#goals-daily-calories");
+            await input.waitFor({ state: "visible", timeout: 5000 });
+            await input.fill(String(2000 + (Date.now() % 400)));
+        },
+    },
+    {
+        // Needs per-day goal overrides from today on (one per run is cleared).
+        name: "inside Settings: Goals clear a day",
+        start: "/settings/goals",
+        click: [".fd-menu__confirm-row button[type=submit]"],
+        lands: "/settings/goals",
+        prepare: async (page) => {
+            const list = page.locator(
+                'ul[aria-label="Days with their own goals"]',
+            );
+            await list
+                .locator("[data-fd-menu-trigger]")
+                .first()
+                .click({ timeout: 5000 });
+            await list
+                .locator("[data-fd-menu-arm]")
+                .first()
+                .click({ timeout: 5000 });
+        },
+    },
+    {
         name: "inside Settings: home -> Notifications",
         start: "/settings",
         click: ['main a[href="/settings/notifications"]'],

@@ -51,6 +51,12 @@
     line-height: var(--text-body-line);
     outline: none;
 }
+/* A several-line box (rows): the box grows with the lines, not the 48 px. */
+.fd-field__input--multi {
+    height: auto;
+    padding: var(--space-md) 0;
+    resize: vertical;
+}
 /* type="search": the browser's own clear button is hidden. */
 .fd-field__input::-webkit-search-cancel-button {
     -webkit-appearance: none;

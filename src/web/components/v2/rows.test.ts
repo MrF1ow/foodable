@@ -8,7 +8,6 @@ import {
     macroLine,
     manageRow,
     partRow,
-    rowDeleteTrigger,
     rowList,
     searchResultRow,
     sectionHeader,
@@ -386,31 +385,15 @@ test("usualRow refuses a script href", () => {
     ).toThrow("unsafe href");
 });
 
-test("rowDeleteTrigger: an icon-only red trash that names the item and opens its sheet", () => {
-    const html = rowDeleteTrigger({ target: "del-eggs", name: "Eggs" });
-    expect(html).toContain(`class="fd-icon-btn fd-icon-btn--danger"`);
-    expect(html).toContain(`commandfor="del-eggs" command="show-modal"`);
-    expect(html).toContain(`aria-label="Delete Eggs"`);
-    expect(html).toContain("<svg");
-    expect(html).not.toContain(">Delete<");
-    expect(
-        rowDeleteTrigger({ target: "t", name: "the link", verb: "Revoke" }),
-    ).toContain(`aria-label="Revoke the link"`);
-});
-
-test("rowDeleteTrigger escapes the item name", () => {
-    expect(rowDeleteTrigger({ target: "t", name: XSS })).toContain(
-        `aria-label="Delete ${XSS_ESCAPED}"`,
-    );
-});
-
 test("manageRow: a one-line title with the full name in `title`, a meta line and the actions in one li", () => {
     const long =
         "Member's Mark Colombian Single Serve Cups (100 count, Medium-Dark Roast)";
     const html = manageRow({
         title: long,
         meta: "kcal unknown",
-        actions: rowDeleteTrigger({ target: "t", name: long }),
+        actions: raw(
+            `<button type="button" aria-label="Delete ${esc(long)}"></button>`,
+        ),
     });
     expect(html).toStartWith(`<li class="fd-row fd-row--manage">`);
     // The whole name is in the markup (CSS ends it in "…"; nothing is cut).

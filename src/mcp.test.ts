@@ -2154,6 +2154,35 @@ describe("set_nutrition_goals per-day overrides", () => {
         });
     });
 
+    test("clear with no date, from or to removes every override on any day and keeps the defaults", async () => {
+        db.goals = goals({ daily_calories: 2000, goal_name: "Recomp" });
+        await withTools(null, async (call) => {
+            for (const date of ["2020-03-01", "2026-07-04", "2099-01-01"]) {
+                await call("set_nutrition_goals", {
+                    date,
+                    daily_calories: 2800,
+                });
+            }
+            expect(db.goalDays).toHaveLength(3);
+            const r = await call("set_nutrition_goals", { clear: true });
+            expect(r.isError).toBeFalsy();
+            expect(textOf(r)).toContain(
+                "Cleared 3 per-day goal overrides on every day.",
+            );
+            expect(db.goalDays).toHaveLength(0);
+            const sc = SET_NUTRITION_GOALS_OUTPUT_SCHEMA.parse(
+                r.structuredContent,
+            );
+            expect(sc.scope).toBe("days");
+            expect(sc.goals?.calories).toBe(2000);
+            const again = await call("get_goal_progress", {
+                date: "2026-07-04",
+            });
+            expect(textOf(again)).toContain("2000");
+            expect(db.goals?.goal_name).toBe("Recomp");
+        });
+    });
+
     test("null on one field clears only that override field", async () => {
         db.goals = goals({ daily_calories: 2000, daily_protein_g: 150 });
         await withTools(null, async (call) => {

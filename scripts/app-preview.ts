@@ -292,7 +292,7 @@ const PREVIEW_NAMED_GOALS: NutritionGoals = {
 
 // The apps the AI connections page lists: a named one used today, a named one
 // last used days ago, one that was never used, and the tokens with no app.
-/** The Product score page: an owner who picked Balanced, as in the design. */
+/** The Product score page: an owner on the household's Balanced, as in the design. */
 function previewScoreView(
     chrome: SettingsScoreV2View["chrome"],
     over: Partial<SettingsScoreV2View> = {},
@@ -301,7 +301,7 @@ function previewScoreView(
         chrome,
         preset: "balanced",
         weights: SCORE_PRESETS.balanced,
-        followsHousehold: false,
+        followsHousehold: true,
         householdPresetLabel: "Balanced",
         canEditHousehold: true,
         warnTraces: true,
@@ -1541,6 +1541,25 @@ function withEveryMenuOpen(html: string): string {
         );
 }
 
+/** Only the nth ⋯ menu on a Settings page open (0 is the first, the Detail bar's when it has one). */
+function withMenuOpen(html: string, nth: number): string {
+    let at = html.indexOf("data-fd-settings-page");
+    for (let i = 0; i <= nth; i++) {
+        at = html.indexOf('data-fd-menu-trigger=""', at + 1);
+        if (at < 0) return html;
+    }
+    const hidden = html.indexOf(" hidden>", at);
+    if (hidden < 0) return html;
+    return (
+        html.slice(0, at) +
+        html
+            .slice(at, hidden)
+            .replace('aria-expanded="false"', 'aria-expanded="true"') +
+        ">" +
+        html.slice(hidden + " hidden>".length)
+    );
+}
+
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     const chrome = previewChrome(theme);
     const { catalog, usual } = previewFoodCatalog();
@@ -2356,6 +2375,21 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             duplicateCount: 2,
             searchQuery: "",
         }),
+        // A food row's ⋯ open: Edit, Merge, Delete.
+        // (the Detail bar's ⋯ and its desktop twin come first)
+        "settings-saved-menu": withMenuOpen(
+            renderSettingsSavedV2Page({
+                chrome,
+                foods: catalog.map((f) => ({
+                    ...f,
+                    aliases: [] as string[],
+                })),
+                recipes: [RECIPE, RECIPE_TWO],
+                duplicateCount: 2,
+                searchQuery: "",
+            }),
+            2,
+        ),
         "settings-ai": renderSettingsAiV2Page({
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
@@ -2422,6 +2456,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "settings-score-custom": renderSettingsScoreV2Page(
             previewScoreView(chrome, {
                 preset: "custom",
+                followsHousehold: false,
                 weights: {
                     nutrition: 10,
                     processing: 70,
@@ -2445,6 +2480,22 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 },
             }),
         ),
+        // A weight's pull-down open.
+        "settings-score-weight-menu": (() => {
+            const html = renderSettingsScoreV2Page(previewScoreView(chrome));
+            const row = html.indexOf('aria-label="Nutrition weight"');
+            const at = html.lastIndexOf('<div class="fd-menu', row);
+            return (
+                html.slice(0, at) +
+                html
+                    .slice(at)
+                    .replace('aria-expanded="false"', 'aria-expanded="true"')
+                    .replace(
+                        'role="menu" aria-label="Nutrition weight" hidden',
+                        'role="menu" aria-label="Nutrition weight"',
+                    )
+            );
+        })(),
         "settings-score-household": renderSettingsScoreHouseholdV2Page({
             chrome,
             preset: "planet",
@@ -2606,14 +2657,14 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         // FigCraft 62847 / 63301 (the list, its first menu open) and 63177.
         "settings-duplicates": (() => {
             const { pairs, refCounts } = duplicatesFixture();
-            return renderSettingsDuplicatesV2Page({
-                chrome,
-                pairs,
-                refCounts,
-            }).replace(
-                '<details class="fd-menu',
-                '<details open class="fd-menu',
+            return withMenuOpen(
+                renderSettingsDuplicatesV2Page({ chrome, pairs, refCounts }),
+                0,
             );
+        })(),
+        "settings-duplicates-closed": (() => {
+            const { pairs, refCounts } = duplicatesFixture();
+            return renderSettingsDuplicatesV2Page({ chrome, pairs, refCounts });
         })(),
         "settings-duplicates-compare": (() => {
             const { pairs, refCounts } = duplicatesFixture();

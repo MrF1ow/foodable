@@ -213,3 +213,13 @@ describe("select.css", () => {
         expect(app).toContain("/*@include select.css@*/");
     });
 });
+
+test("the Select item of a page's ⋯ finds its list by the same scope as the button", () => {
+    const mode = selectMode({ scope: "saved", returnTo: "/x", actions: [] });
+    expect(mode.menuItem).toEqual({
+        kind: "button",
+        label: "Select",
+        data: { "fd-select-toggle": "saved" },
+    });
+    expect(mode.toggle).toContain('data-fd-select-toggle="saved"');
+});

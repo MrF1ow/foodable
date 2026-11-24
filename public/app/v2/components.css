@@ -406,30 +406,7 @@
     color: var(--text-primary);
 }
 
-/* Row delete: the same round icon button, 32px like the sheet close, in red. */
-.fd-icon-btn--danger {
-    position: relative;
-    width: 32px;
-    height: 32px;
-    color: var(--status-over);
-}
-.fd-icon-btn--danger .fd-icon {
-    width: 18px;
-    height: 18px;
-}
-/* 44px touch target around the 32px circle; the visual size is unchanged. */
-.fd-icon-btn--danger::before {
-    content: "";
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 44px;
-    height: 44px;
-    transform: translate(-50%, -50%);
-    border-radius: var(--radius-pill);
-}
-
-/* Manage row (saved foods, shared links): name, meta and the actions, one line each. */
+/* Manage row: name, meta and the actions, one line each. */
 .fd-row--manage .fd-row__main {
     flex: 1 1 0;
 }

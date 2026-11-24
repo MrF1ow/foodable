@@ -1,10 +1,15 @@
+/**
+ * Settings › Product score (FigCraft 417521) and its household default
+ * (420618): the preset chips and the four weights. The chips are one form that
+ * saves when a chip is picked (`autosave.js`). Each weight is a pull-down on
+ * its row (the share it has now, a chevron) whose choices save the whole
+ * choice as Custom with that one weight changed. Every save answers 303 back
+ * to the page, or 4xx in place with the refusal on top.
+ */
 import type { AppChromeBase } from "../../attention.js";
 import {
     SCORE_PARTS,
     SCORE_PRESET_LABELS,
-    SCORE_PRESETS,
-    SCORE_WEIGHT_MAX,
-    SCORE_WEIGHT_MIN,
     validateScoreChoice,
     type ScoreChoice,
     type ScoreChoicePreset,
@@ -12,14 +17,13 @@ import {
     type ScoreWeights,
 } from "../../../domain/product-score.js";
 import { choiceGroup } from "../../components/v2/chips.js";
-import { esc } from "../../components/v2/html.js";
-import { iconChevronRight } from "../../components/v2/icons.js";
-import {
-    renderSettingsV2Page,
-    settingsErrorBanner,
-    settingsMenuIcon,
-    settingsPageHeader,
-} from "./settings-shared.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
+import { renderHouseholdLayout } from "./settings-household-layout.js";
+import { settingsErrorBanner } from "./settings-shared.js";
 
 export const SCORE_PATH = "/settings/product-score";
 export const SCORE_HOUSEHOLD_PATH = "/settings/product-score/household";
@@ -148,54 +152,145 @@ export function weightShares(weights: ScoreWeights): ScoreWeights {
     };
 }
 
-function presetsJson(): string {
-    return JSON.stringify(SCORE_PRESETS);
-}
-
-function weightRow(
+/**
+ * The weights that make `part` show `share` percent of the total while the
+ * other parts keep their proportions to each other: the weights become whole
+ * percents summing to 100 (largest remainders), so the row shows the share the
+ * person picked and the other rows move only as far as that needs. Null when
+ * the other parts are all zero (the part is then the whole total).
+ */
+export function weightsForShare(
+    weights: ScoreWeights,
     part: ScorePart,
-    value: string,
     share: number,
-    idPrefix: string,
-): string {
-    const id = `${idPrefix}-${part}`;
-    const label = PART_LABEL[part];
-    const numeric = Number(value);
-    const fill = Number.isFinite(numeric)
-        ? Math.min(SCORE_WEIGHT_MAX, Math.max(SCORE_WEIGHT_MIN, numeric))
-        : 0;
-    return `<div class="fd-scoreset__weight" data-fd-score-part="${esc(part)}"><div class="fd-scoreset__weight-head"><span class="fd-scoreset__weight-label" id="${esc(id)}-label"><span class="fd-scoreset__weight-title">${esc(label.title)}</span><span class="fd-scoreset__weight-source">${esc(label.source)}</span></span><output class="fd-scoreset__weight-value" for="${esc(id)}" data-fd-score-share>${esc(share)}%</output></div><input class="fd-scoreset__range" type="range" id="${esc(id)}" aria-labelledby="${esc(id)}-label" name="${esc(weightField(part))}" min="${SCORE_WEIGHT_MIN}" max="${SCORE_WEIGHT_MAX}" step="1" value="${esc(value)}" style="--fd-fill:${fill}%"></div>`;
+): ScoreWeights | null {
+    const others = SCORE_PARTS.filter((p) => p !== part);
+    const rest = others.reduce((sum, p) => sum + weights[p], 0);
+    if (rest <= 0) return share === 100 ? { ...weights, [part]: 100 } : null;
+    const room = 100 - share;
+    const exact = others.map((p) => (weights[p] / rest) * room);
+    const whole = exact.map(Math.floor);
+    let spare = room - whole.reduce((sum, n) => sum + n, 0);
+    exact
+        .map((value, i) => ({ i, left: value - whole[i]! }))
+        .sort((x, y) => y.left - x.left)
+        .forEach(({ i }) => {
+            if (spare > 0) {
+                whole[i]! += 1;
+                spare -= 1;
+            }
+        });
+    const next = { ...weights, [part]: share } as ScoreWeights;
+    others.forEach((p, i) => {
+        next[p] = whole[i]!;
+    });
+    return next;
 }
 
-/** The preset chips and four sliders: one form body, shared by member and household. */
-function choiceFields(opts: {
+/** The shares a row pull-down offers: every ten that can be reached, and the current one if it is between. */
+function shareChoices(current: number, reachable: boolean): number[] {
+    if (!reachable) return [current];
+    const grid = Array.from({ length: 11 }, (_, i) => i * 10);
+    return grid.includes(current)
+        ? grid
+        : [...grid, current].sort((a, b) => a - b);
+}
+
+/** The preset chips and the weights they carry as hidden fields (a preset ignores them). */
+function presetForm(opts: {
+    action: string;
     selected: ScoreChoicePreset;
     weights: Record<ScorePart, string>;
-    idPrefix: string;
-}): string {
-    const numeric = Object.fromEntries(
-        SCORE_PARTS.map((part) => [part, Number(opts.weights[part]) || 0]),
-    ) as ScoreWeights;
-    const shares = weightShares(numeric);
-    const shareTotal = SCORE_PARTS.some((part) => numeric[part] > 0) ? 100 : 0;
-    const chips = String(
-        choiceGroup({
-            name: "preset",
-            legend: "Preset",
-            showLegend: true,
-            required: true,
-            className: "fd-scoreset__presets",
-            options: PRESET_ORDER.map((preset) => ({
-                value: preset,
-                label: SCORE_PRESET_LABELS[preset],
-                selected: preset === opts.selected,
-            })),
-        }),
+    refused: boolean;
+}): Html {
+    const hidden = [
+        `<input type="hidden" name="intent" value="choice">`,
+        ...SCORE_PARTS.map(
+            (part) =>
+                `<input type="hidden" name="${weightField(part)}" value="${esc(opts.weights[part])}">`,
+        ),
+    ].join("");
+    const chips = choiceGroup({
+        name: "preset",
+        legend: "Preset",
+        showLegend: false,
+        required: true,
+        className: "fd-score-presets",
+        options: PRESET_ORDER.map((preset) => ({
+            value: preset,
+            label: SCORE_PRESET_LABELS[preset],
+            selected: preset === opts.selected,
+        })),
+    });
+    return raw(
+        `<form method="post" action="${esc(opts.action)}" class="fd-score-form" data-fd-autosave="form"${opts.refused ? " data-fd-invalid" : ""}>${hidden}${chips}<button type="submit" class="fd-visually-hidden">Save</button></form>`,
     );
-    const rows = SCORE_PARTS.map((part) =>
-        weightRow(part, opts.weights[part], shares[part], opts.idPrefix),
-    ).join("");
-    return `<div class="fd-scoreset__choice" data-fd-score-form data-fd-score-presets="${esc(presetsJson())}">${chips}<div class="fd-scoreset__weights-head"><h2 class="fd-scoreset__label">Weights</h2><span class="fd-scoreset__total" data-fd-score-total>${esc(shareTotal)}%</span></div><div class="fd-scoreset__weights">${rows}</div></div>`;
+}
+
+/** One weight: its source, the share it has now, and a pull-down of weights. */
+function weightRow(opts: {
+    action: string;
+    part: ScorePart;
+    weights: Record<ScorePart, string>;
+    share: number;
+}): Html {
+    const { part, weights } = opts;
+    const label = PART_LABEL[part];
+    const numeric = Object.fromEntries(
+        SCORE_PARTS.map((p) => [p, Number(weights[p]) || 0]),
+    ) as ScoreWeights;
+    const others = SCORE_PARTS.some((p) => p !== part && numeric[p] > 0);
+    // Each choice is the share the row will show, and picking it sets the
+    // weights so it does (see weightsForShare).
+    const items: MenuItem[] = shareChoices(opts.share, others).flatMap(
+        (share): MenuItem[] => {
+            // The share already shown is the current tick: choosing it again
+            // posts nothing, so it can't turn the household default off or
+            // make the preset Custom by itself.
+            if (share === opts.share) {
+                return [
+                    {
+                        kind: "checked" as const,
+                        label: `${share}%`,
+                        checked: true,
+                        current: true,
+                    },
+                ];
+            }
+            const next = weightsForShare(numeric, part, share);
+            if (!next) return [];
+            return [
+                {
+                    kind: "checked" as const,
+                    label: `${share}%`,
+                    checked: false,
+                    action: opts.action,
+                    fields: {
+                        intent: "choice",
+                        preset: "custom",
+                        ...Object.fromEntries(
+                            SCORE_PARTS.map((p) => [
+                                weightField(p),
+                                String(next[p]),
+                            ]),
+                        ),
+                    },
+                },
+            ];
+        },
+    );
+    return raw(
+        `<li class="fd-item-row">${menu({
+            label: `${label.title} weight`,
+            anchor: "row",
+            row: {
+                title: label.title,
+                subtitle: label.source,
+                value: `${opts.share}%`,
+            },
+            items,
+        })}</li>`,
+    );
 }
 
 function stringWeights(weights: ScoreWeights): Record<ScorePart, string> {
@@ -213,66 +308,142 @@ function draftPreset(
         : fallback;
 }
 
-/**
- * The choice form saves itself when the preset or a slider changes
- * (`autosave.js`). The submit is off-screen: Enter in a control still posts it.
- * A refused draft marks the form so a later save's refresh keeps it.
- */
-function choiceForm(opts: {
+/** The choice: preset chips, then the Weights header with its total and the four rows. */
+function choiceSection(opts: {
     action: string;
-    refused: boolean;
-    fields: string;
-}): string {
-    const invalid = opts.refused ? " data-fd-invalid" : "";
-    return `<form method="post" action="${opts.action}" class="fd-scoreset__form" data-fd-autosave="form"${invalid}><input type="hidden" name="intent" value="choice">${opts.fields}<button type="submit" class="fd-visually-hidden">Save</button></form>`;
-}
-
-function switchForm(opts: {
-    intent: "warn_traces" | "compare_goals";
-    on: boolean;
-    title: string;
-    sub: string;
-}): string {
-    return `<li class="fd-scoreset__row"><form method="post" action="${SCORE_PATH}" class="fd-scoreset__switch-form" data-fd-autosave="form"><input type="hidden" name="intent" value="${esc(opts.intent)}"><input type="hidden" name="value" value="${opts.on ? "0" : "1"}"><span class="fd-scoreset__row-text"><span class="fd-scoreset__row-title">${esc(opts.title)}</span><span class="fd-scoreset__row-sub">${esc(opts.sub)}</span></span><button type="submit" class="fd-switch" role="switch" aria-checked="${opts.on ? "true" : "false"}" aria-label="${esc(opts.title)}"><span class="fd-switch__knob" aria-hidden="true"></span></button></form></li>`;
-}
-
-function chevron(): string {
-    return `<span class="fd-scoreset__chev" aria-hidden="true">${String(iconChevronRight())}</span>`;
-}
-
-function allergiesRow(view: SettingsScoreV2View): string {
-    return `<li class="fd-scoreset__row fd-scoreset__row--link"><a class="fd-scoreset__link" href="${esc(view.allergensHref)}"><span class="fd-scoreset__row-text"><span class="fd-scoreset__row-title">Allergies</span><span class="fd-scoreset__row-sub">${esc(view.allergensText)} · from your person rules</span></span>${chevron()}</a></li>`;
-}
-
-function householdRow(view: SettingsScoreV2View): string {
-    const inner = `<span class="fd-scoreset__household-icon">${settingsMenuIcon("users", "fd-scoreset__household-svg")}</span><span class="fd-scoreset__household-title">Household default</span><span class="fd-scoreset__household-value">${esc(view.householdPresetLabel)}</span>`;
-    if (view.canEditHousehold) {
-        return `<a class="fd-scoreset__household" href="${SCORE_HOUSEHOLD_PATH}">${inner}${chevron()}</a>`;
-    }
-    return `<div class="fd-scoreset__household fd-scoreset__household--static">${inner}</div>`;
+    selected: ScoreChoicePreset;
+    weights: Record<ScorePart, string>;
+    draft: ScoreFormDraft | undefined;
+}): Html {
+    const numeric = Object.fromEntries(
+        SCORE_PARTS.map((part) => [part, Number(opts.weights[part]) || 0]),
+    ) as ScoreWeights;
+    const shares = weightShares(numeric);
+    const total = SCORE_PARTS.some((part) => numeric[part] > 0) ? 100 : 0;
+    return join([
+        sectionHeader({ label: "Preset", rule: false }),
+        presetForm({
+            action: opts.action,
+            selected: opts.selected,
+            weights: opts.weights,
+            refused: opts.draft != null,
+        }),
+        sectionHeader({ label: "Weights", count: `${total}%`, rule: false }),
+        listGroup({
+            label: "Weights",
+            rows: SCORE_PARTS.map((part) =>
+                weightRow({
+                    action: opts.action,
+                    part,
+                    weights: opts.weights,
+                    share: shares[part],
+                }),
+            ),
+        }),
+    ]);
 }
 
 export function renderSettingsScoreV2Body(view: SettingsScoreV2View): string {
     const draft = view.draft;
     const selected = draftPreset(draft, view.preset);
     const weights = draft ? draft.weights : stringWeights(view.weights);
-    const following = view.followsHousehold
-        ? `<p class="fd-scoreset__note">You are using the household default (${esc(view.householdPresetLabel)}). Change a weight to use your own.</p>`
-        : `<form method="post" action="${SCORE_PATH}" class="fd-scoreset__reset" data-fd-autosave="form"><input type="hidden" name="intent" value="household"><button type="submit" class="fd-scoreset__use-default">Use household default (${esc(view.householdPresetLabel)})</button></form>`;
-    const choice = choiceForm({
-        action: SCORE_PATH,
-        refused: !!draft,
-        fields: choiceFields({ selected, weights, idPrefix: "fd-score-w" }),
+    // Off makes the household's choice the person's own; On drops their own.
+    const follow = itemRow({
+        title: "Use household default",
+        subtitle: view.householdPresetLabel,
+        trailing: {
+            kind: "toggle",
+            on: view.followsHousehold,
+            label: "Use household default",
+            form: {
+                action: SCORE_PATH,
+                fields: view.followsHousehold
+                    ? {
+                          intent: "choice",
+                          preset: selected,
+                          ...Object.fromEntries(
+                              SCORE_PARTS.map((part) => [
+                                  weightField(part),
+                                  weights[part],
+                              ]),
+                          ),
+                      }
+                    : { intent: "household" },
+            },
+        },
     });
-    const checks = `<h2 class="fd-scoreset__label">Checks for you</h2><ul class="fd-scoreset__rows">${allergiesRow(view)}${switchForm({ intent: "warn_traces", on: view.warnTraces, title: "Warn on “may contain”", sub: "Traces of your allergens" })}${switchForm({ intent: "compare_goals", on: view.compareGoals, title: "Compare with today's goals", sub: "Protein, sugar, saturated fat" })}</ul>`;
-    return `${String(settingsPageHeader("Product score"))}${String(settingsErrorBanner(view.error))}<div class="fd-scoreset"><p class="fd-scoreset__lead">How much each part counts when Foodable scores a packaged food. Yours applies to your scans; members without their own use the household default.</p>${choice}${following}${checks}<h2 class="fd-scoreset__label">Household</h2>${householdRow(view)}</div>`;
+    const checks = [
+        itemRow({
+            title: "Allergies",
+            value: view.allergensText,
+            href: view.allergensHref,
+            trailing: { kind: "chevron" },
+        }),
+        itemRow({
+            title: "Warn on “may contain”",
+            trailing: {
+                kind: "toggle",
+                on: view.warnTraces,
+                label: "Warn on “may contain”",
+                form: {
+                    action: SCORE_PATH,
+                    fields: {
+                        intent: "warn_traces",
+                        value: view.warnTraces ? "0" : "1",
+                    },
+                },
+            },
+        }),
+        itemRow({
+            title: "Compare with today's goals",
+            trailing: {
+                kind: "toggle",
+                on: view.compareGoals,
+                label: "Compare with today's goals",
+                form: {
+                    action: SCORE_PATH,
+                    fields: {
+                        intent: "compare_goals",
+                        value: view.compareGoals ? "0" : "1",
+                    },
+                },
+            },
+        }),
+    ];
+    const household = view.canEditHousehold
+        ? join([
+              sectionHeader({ label: "Household", rule: false }),
+              listGroup({
+                  label: "Household",
+                  rows: [
+                      itemRow({
+                          title: "Household default",
+                          value: view.householdPresetLabel,
+                          href: SCORE_HOUSEHOLD_PATH,
+                          trailing: { kind: "chevron" },
+                      }),
+                  ],
+              }),
+          ])
+        : raw("");
+    return String(
+        join([
+            settingsErrorBanner(view.error),
+            listGroup({ label: "Score source", rows: [follow] }),
+            choiceSection({ action: SCORE_PATH, selected, weights, draft }),
+            sectionHeader({ label: "Checks for you", rule: false }),
+            listGroup({ label: "Checks for you", rows: checks }),
+            household,
+        ]),
+    );
 }
 
 export function renderSettingsScoreV2Page(view: SettingsScoreV2View): string {
-    return renderSettingsV2Page({
+    return renderHouseholdLayout({
         chrome: view.chrome,
         page: "score",
         title: "Product score",
+        className: "fd-score-page",
         body: renderSettingsScoreV2Body(view),
     });
 }
@@ -283,20 +454,45 @@ export function renderSettingsScoreHouseholdV2Body(
     const draft = view.draft;
     const selected = draftPreset(draft, view.preset);
     const weights = draft ? draft.weights : stringWeights(view.weights);
-    const clear = view.isSet
-        ? `<form method="post" action="${SCORE_HOUSEHOLD_PATH}" class="fd-scoreset__reset" data-fd-autosave="form"><input type="hidden" name="intent" value="clear"><button type="submit" class="fd-scoreset__use-default">Clear the household default</button></form>`
-        : "";
-    return `${String(settingsPageHeader("Household default"))}${String(settingsErrorBanner(view.error))}<div class="fd-scoreset"><p class="fd-scoreset__lead">Members who have not chosen their own weights use this. Only owners and admins can change it.</p>${choiceForm({ action: SCORE_HOUSEHOLD_PATH, refused: !!draft, fields: choiceFields({ selected, weights, idPrefix: "fd-score-hw" }) })}${clear}</div>`;
+    return String(
+        join([
+            settingsErrorBanner(view.error),
+            choiceSection({
+                action: SCORE_HOUSEHOLD_PATH,
+                selected,
+                weights,
+                draft,
+            }),
+        ]),
+    );
 }
 
 export function renderSettingsScoreHouseholdV2Page(
     view: SettingsScoreHouseholdV2View,
 ): string {
-    return renderSettingsV2Page({
+    // Clearing the default is the ⋯: it confirms in the menu.
+    const actions = view.isSet
+        ? menu({
+              label: "Household default actions",
+              anchor: "more",
+              items: [
+                  {
+                      kind: "destructive",
+                      label: "Clear the household default",
+                      confirmLabel: "Clear",
+                      action: SCORE_HOUSEHOLD_PATH,
+                      fields: { intent: "clear" },
+                  },
+              ],
+          })
+        : undefined;
+    return renderHouseholdLayout({
         chrome: view.chrome,
         page: "score",
         title: "Household default",
         backHref: SCORE_PATH,
+        className: "fd-score-page",
+        actions,
         body: renderSettingsScoreHouseholdV2Body(view),
     });
 }

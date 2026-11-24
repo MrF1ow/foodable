@@ -293,7 +293,9 @@ describe("/app-v2.js", () => {
         // +~1.4 KB Settings: a menu item that opens a sheet closes the menu and the sheet hands focus back to the ⋯; choosing a photo sends it and Change photo opens the picker.
         // +~0.1 KB Menu: a tick that posts a form (a pull-down on a row) just submits.
         // +~0.2 KB Stores: after a section's ⋯ Move up or down, focus goes back to that section's ⋯.
-        expect(js.length).toBeLessThan(201_500);
+        // +~1.4 KB Menu: a shared sheet filled for the item that opens it (Edit and Merge on Saved foods), and a button item that closes the menu (Select).
+        // +~3.5 KB Menu and Select: a refusal a shared sheet showed goes when another row opens it, the food going in is left out of Keep, a menu panel that is longer than the screen scrolls inside it, and a Select in a ⋯ reads Cancel selection while picking (focus to the ⋯ that shows); a confirm words itself for the kind of row picked.
+        expect(js.length).toBeLessThan(207_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

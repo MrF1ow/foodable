@@ -59,6 +59,12 @@ import { renderSettingsNotificationsV2Page } from "../src/web/pages/v2/settings-
 import type { NotificationRow } from "../src/domain/notifications.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
+import { newFood } from "../src/domain/foods.js";
+import { SCORE_PRESETS } from "../src/domain/product-score.js";
+import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
+import { goalsDraftFrom } from "../src/web/pages/v2/settings-goals-form.js";
+import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
+import { renderSettingsScoreV2Page } from "../src/web/pages/v2/settings-score.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
 import { viewerChromeFromProfile } from "../src/web/shell.js";
 
@@ -336,6 +342,81 @@ function storeFixture(
     } as never);
 }
 
+/** The named goals the autosave case edits, with one day of its own. */
+const FIXTURE_GOALS: NutritionGoals = {
+    ...FIXTURE_TRENDS_GOALS,
+    daily_alcohol_g: 28,
+    goal_name: "Recomp",
+    goal_note: "maintenance minus 5%",
+    goals_set_on: "2026-10-02",
+};
+
+function goalsFixture(
+    chrome: ReturnType<typeof fixtureChrome>,
+    over: { refused?: boolean } = {},
+) {
+    return renderSettingsGoalsV2Page({
+        chrome: chrome as never,
+        goals: FIXTURE_GOALS,
+        today: "2026-11-10",
+        weightUnit: "kg",
+        alcohol: "us",
+        days: [
+            {
+                user_id: ME.userId,
+                date: "2026-11-14",
+                daily_calories: 1800,
+                daily_protein_g: 170,
+                daily_carbs_g: null,
+                daily_fat_g: null,
+                daily_fiber_g: null,
+                daily_sugar_g: null,
+                daily_alcohol_g: null,
+                daily_caffeine_mg: null,
+                daily_water_ml: null,
+                updated_at: "2026-11-01T00:00:00.000Z",
+            },
+        ],
+        // A refused save: what the route answers with a 422.
+        ...(over.refused
+            ? {
+                  draft: {
+                      ...goalsDraftFrom(FIXTURE_GOALS, "us"),
+                      daily_calories: "30000",
+                  },
+                  error: "Calories must be at most 20000.",
+                  invalid: ["daily_calories" as const],
+              }
+            : {}),
+    });
+}
+
+function savedFixture(chrome: ReturnType<typeof fixtureChrome>) {
+    const food = (name: string, id: string, allergens: string[] = []) => ({
+        ...newFood({
+            householdId: H,
+            kind: "food",
+            name,
+            defaultUnit: "each",
+            gramsPerEach: 50,
+            calories: 155,
+            allergens,
+        }),
+        id,
+        aliases: [] as string[],
+    });
+    return renderSettingsSavedV2Page({
+        chrome: chrome as never,
+        foods: [
+            food("Eggs", "f-eggs", ["egg"]),
+            food("Milk", "f-milk", ["milk"]),
+        ],
+        recipes: [],
+        duplicateCount: 2,
+        searchQuery: "",
+    });
+}
+
 function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
     return renderSettingsHouseholdV2Page({
         chrome,
@@ -475,6 +556,21 @@ async function pages(
             timezone: "America/Los_Angeles",
             now: new Date("2026-11-10T12:00:00Z"),
         }),
+        "settings-goals": goalsFixture(chrome),
+        "settings-goals-refused": goalsFixture(chrome, { refused: true }),
+        "settings-saved": savedFixture(chrome),
+        "settings-score": renderSettingsScoreV2Page({
+            chrome: chrome as never,
+            preset: "balanced",
+            weights: SCORE_PRESETS.balanced,
+            followsHousehold: false,
+            householdPresetLabel: "Balanced",
+            canEditHousehold: false,
+            warnTraces: true,
+            compareGoals: true,
+            allergensText: "Milk",
+            allergensHref: `/settings/household/members/${ME.userId}`,
+        }),
         notifications: notificationsPage(chrome),
         "settings-notifications": renderSettingsNotificationsV2Page({
             chrome: chrome as never,
@@ -532,6 +628,9 @@ const ROUTE_BASE: Record<string, string> = {
     "/settings/household/shared-links": "household-shared-links",
     "/notifications": "notifications",
     "/settings/notifications": "settings-notifications",
+    "/settings/goals": "settings-goals",
+    "/settings/saved": "settings-saved",
+    "/settings/product-score": "settings-score",
     "/create-household": "create-household",
 };
 
@@ -815,6 +914,23 @@ const server = Bun.serve({
                         "content-type": "text/html; charset=utf-8",
                         "cache-control": "no-store",
                     },
+                });
+            }
+            if (
+                path === "/settings/goals/field" &&
+                entries.some(([k, v]) => k === "value" && v === "30000")
+            ) {
+                // Like the route: a value out of bounds is a 422 with the page
+                // in place, the typed text and the refusal under that field.
+                const html = applyAccountTheme(
+                    await fileHtml(
+                        `settings-goals-refused-${themeFileSuffix()}${inboxUnread ? "" : "-read"}.html`,
+                        path + "#refused",
+                    ),
+                );
+                return new Response(html, {
+                    status: 422,
+                    headers: { "content-type": "text/html; charset=utf-8" },
                 });
             }
             if (postDelay) await sleep(postDelay);

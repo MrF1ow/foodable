@@ -37,6 +37,24 @@ function countMessage(n, one, many) {
     return n === 1 ? one : many.replace("{n}", () => String(n));
 }
 
+// A message may carry a second wording for when a box of one field is among the
+// picks (`data-if-name`, `data-if-one`, `data-if-many`).
+function messageFor(root, el, n) {
+    const name = el.getAttribute("data-if-name");
+    const extra = name != null && picked(root).some((box) => box.name === name);
+    return extra
+        ? countMessage(
+              n,
+              el.getAttribute("data-if-one") || "",
+              el.getAttribute("data-if-many") || "",
+          )
+        : countMessage(
+              n,
+              el.getAttribute("data-one") || "",
+              el.getAttribute("data-many") || "",
+          );
+}
+
 function sync(root) {
     const n = picked(root).length;
     root.querySelectorAll("[data-fd-select-count]").forEach((el) => {
@@ -46,12 +64,49 @@ function sync(root) {
         el.disabled = n === 0;
     });
     root.querySelectorAll("[data-fd-select-message]").forEach((el) => {
-        el.textContent = countMessage(
-            n,
-            el.getAttribute("data-one") || "",
-            el.getAttribute("data-many") || "",
-        );
+        el.textContent = messageFor(root, el, n);
     });
+}
+
+// A Select that lives in a menu (the Detail bar's ⋯) stays in it while picking,
+// reading "Cancel selection", so the menu is never empty; any other Select
+// button is hidden while the list is picking (the bar has Cancel).
+const CANCEL_LABEL = "Cancel selection";
+
+function labelOf(el) {
+    return el.querySelector(".fd-menu__label");
+}
+
+function setToggle(el, on) {
+    if (!el.closest("[data-fd-menu]")) {
+        el.hidden = on;
+        return;
+    }
+    const label = labelOf(el);
+    if (!label) return;
+    if (on && !el.hasAttribute("data-fd-select-label")) {
+        el.setAttribute("data-fd-select-label", label.textContent || "");
+    }
+    label.textContent = on
+        ? CANCEL_LABEL
+        : el.getAttribute("data-fd-select-label") || label.textContent;
+}
+
+// Where focus goes when picking ends: the Select button, or the ⋯ that holds
+// it. A page draws its ⋯ for the phone bar and for the desktop header and CSS
+// shows one, so the one that is showing is the one that takes focus.
+function focusToggle(scope) {
+    const spots = togglesFor(scope).map((el) => {
+        const menu = el.closest("[data-fd-menu]");
+        return (menu && menu.querySelector("[data-fd-menu-trigger]")) || el;
+    });
+    const showing = spots.find(
+        (el) =>
+            typeof el.getClientRects !== "function" ||
+            el.getClientRects().length > 0,
+    );
+    const spot = showing || spots[0];
+    if (spot) spot.focus();
 }
 
 function setSelecting(root, on) {
@@ -59,9 +114,9 @@ function setSelecting(root, on) {
     else root.removeAttribute("data-fd-selecting");
     const bar = root.querySelector("[data-fd-select-bar]");
     if (bar) bar.hidden = !on;
-    togglesFor(root.getAttribute("data-fd-select")).forEach((el) => {
-        el.hidden = on;
-    });
+    togglesFor(root.getAttribute("data-fd-select")).forEach((el) =>
+        setToggle(el, on),
+    );
     if (!on) boxes(root).forEach((box) => (box.checked = false));
     sync(root);
 }
@@ -82,6 +137,12 @@ document.addEventListener(
         if (toggle) {
             const root = rootFor(toggle.getAttribute("data-fd-select-toggle"));
             if (!root) return;
+            // A Select in a menu is Cancel selection while picking.
+            if (root.hasAttribute("data-fd-selecting")) {
+                setSelecting(root, false);
+                focusToggle(root.getAttribute("data-fd-select"));
+                return;
+            }
             setSelecting(root, true);
             const first = boxes(root).find((box) => !box.disabled);
             if (first) first.focus();
@@ -92,8 +153,7 @@ document.addEventListener(
             const root = cancel.closest(ROOT);
             if (!root) return;
             setSelecting(root, false);
-            const back = togglesFor(root.getAttribute("data-fd-select"))[0];
-            if (back) back.focus();
+            focusToggle(root.getAttribute("data-fd-select"));
             return;
         }
         const row = target.closest("[data-fd-select-row]");

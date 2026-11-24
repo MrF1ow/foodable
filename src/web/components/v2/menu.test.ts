@@ -1,4 +1,6 @@
 import { expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { injectedAttributes, XSS, XSS_ESCAPED } from "./test-helpers.js";
 import { menu, type MenuItem } from "./menu.js";
 
@@ -373,6 +375,23 @@ test("an opens item escapes its label and dialog id", async () => {
     expect(await injectedAttributes(html)).toEqual([]);
 });
 
+test("the current tick of a pull-down only closes the menu: no form, nothing posted", () => {
+    const html = anchored([
+        { kind: "checked", label: "40%", checked: true, current: true },
+        {
+            kind: "checked",
+            label: "50%",
+            checked: false,
+            action: "/settings/product-score",
+            fields: { preset: "custom" },
+        },
+    ]);
+    expect(html).toContain(
+        'class="fd-menu__item" role="menuitemcheckbox" aria-checked="true" data-fd-menu-close>',
+    );
+    expect(html.match(/<form /g)?.length).toBe(1);
+});
+
 test("a checked item with an action posts its fields and keeps its tick", () => {
     const html = anchored([
         {
@@ -460,4 +479,81 @@ test("an opens item can be marked danger: red label, the sheet is the confirm st
     expect(html).toContain(
         `<button type="button" class="fd-menu__item" role="menuitem" command="show-modal" commandfor="fd-other">`,
     );
+});
+
+test("a button item is a plain button the page script reads, and closes the menu", () => {
+    const html = anchored([
+        {
+            kind: "button",
+            label: "Select",
+            data: { "fd-select-toggle": "saved" },
+        },
+    ]);
+    expect(html).toContain("fd-menu--anchored");
+    expect(html).toContain(
+        '<button type="button" class="fd-menu__item" role="menuitem" data-fd-menu-close data-fd-select-toggle="saved"><span class="fd-menu__text"><span class="fd-menu__label">Select</span></span></button>',
+    );
+    expect(html).not.toContain("<form");
+});
+
+test("an opens item can say what the shared sheet holds when it opens", () => {
+    const html = anchored([
+        {
+            kind: "opens",
+            label: "Edit",
+            sheetId: "fd-saved-edit",
+            set: {
+                "@action": "/items/1",
+                name: 'Eggs "large"',
+                allergens: ["egg", "milk"],
+            },
+        },
+    ]);
+    expect(html).toContain(
+        `command="show-modal" commandfor="fd-saved-edit" data-fd-menu-set="{&quot;@action&quot;:&quot;/items/1&quot;,&quot;name&quot;:&quot;Eggs \\&quot;large\\&quot;&quot;,&quot;allergens&quot;:[&quot;egg&quot;,&quot;milk&quot;]}"`,
+    );
+    // Without it the markup is what it was.
+    expect(
+        anchored([{ kind: "opens", label: "Edit", sheetId: "x" }]),
+    ).not.toContain("data-fd-menu-set");
+});
+
+test("a row menu's trigger can carry a subtitle under the title", () => {
+    const html = String(
+        menu({
+            label: "Nutrition weight",
+            anchor: "row",
+            row: { title: "Nutrition", subtitle: "Nutri-Score", value: "40%" },
+            items: [
+                { kind: "checked", label: "40", checked: true, action: "/p" },
+            ],
+        }),
+    );
+    expect(html).toContain(
+        '<span class="fd-item-row__subtitle">Nutri-Score</span>',
+    );
+    expect(html).toContain('<span class="fd-item-row__value">40%</span>');
+    expect(
+        String(
+            menu({
+                label: "x",
+                anchor: "row",
+                row: { title: "T", value: "V" },
+                items: [],
+            }),
+        ),
+    ).not.toContain("fd-item-row__subtitle");
+});
+
+test("an anchored menu panel paints above the phone Nav bar and scrolls inside when it is long", () => {
+    const css = readFileSync(
+        join(import.meta.dir, "../../../../public/app/v2/menu.css"),
+        "utf8",
+    );
+    const panel = css.match(
+        /\.fd-menu--anchored \.fd-menu__panel \{[^}]*\}/,
+    )![0];
+    // The Nav bar is z-index 50.
+    expect(Number(panel.match(/z-index:\s*(\d+)/)![1])).toBeGreaterThan(50);
+    expect(panel).toContain("overflow-y: auto");
 });

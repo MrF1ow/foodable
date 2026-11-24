@@ -470,3 +470,75 @@ describe("select mode", () => {
         expect(t.a.box.checked).toBe(false);
     });
 });
+
+describe("select mode from a menu and a conditional confirm", () => {
+    test("a Select in a page's ⋯ becomes Cancel selection, so the menu is never empty, and ends the mode with focus on the ⋯ that shows", async () => {
+        const t = await setup();
+        // This page has no plain Select button, only the two menus'.
+        t.toggle.removeAttribute("data-fd-select-toggle");
+        // The Detail bar's ⋯ (phone, not showing on desktop) and the header's (showing).
+        const menuItem = (showing: boolean) => {
+            const label = new El("span", { class: "fd-menu__label" });
+            label.textContent = "Select";
+            const item = new El("button", {
+                "data-fd-select-toggle": "groceries",
+            }).add(label);
+            const trigger = new El("button", { "data-fd-menu-trigger": "" });
+            Object.assign(trigger, {
+                getClientRects: () => (showing ? [1] : []),
+            });
+            const menu = new El("div", { "data-fd-menu": "" }).add(
+                trigger,
+                item,
+            );
+            return { label, item, trigger, menu };
+        };
+        const phone = menuItem(false);
+        const desktop = menuItem(true);
+        t.root.parent!.add(phone.menu, desktop.menu);
+        t.click(phone.item);
+        expect(t.root.hasAttribute("data-fd-selecting")).toBe(true);
+        expect(phone.label.textContent).toBe("Cancel selection");
+        expect(desktop.label.textContent).toBe("Cancel selection");
+        expect(phone.item.hidden).toBe(false);
+        // The same item ends the mode and the visible ⋯ takes focus.
+        t.click(desktop.item);
+        expect(t.root.hasAttribute("data-fd-selecting")).toBe(false);
+        expect(desktop.label.textContent).toBe("Select");
+        expect(phone.label.textContent).toBe("Select");
+        expect(desktop.trigger.focused).toBe(true);
+        expect(phone.trigger.focused).toBe(false);
+        // Cancel in the bar does the same.
+        t.click(desktop.item);
+        t.click(t.cancel);
+        expect(desktop.trigger.focused).toBe(true);
+        expect(phone.trigger.focused).toBe(false);
+    });
+
+    test("a confirm can word itself for the kind of row picked", async () => {
+        const t = await setup();
+        t.message.setAttribute("data-if-name", "recipe_ids[]");
+        t.message.setAttribute(
+            "data-if-one",
+            "Delete 1 item? A recipe cannot be brought back.",
+        );
+        t.message.setAttribute(
+            "data-if-many",
+            "Delete {n} items? Recipes cannot be brought back.",
+        );
+        t.c.box.props.name = "recipe_ids[]";
+        t.click(t.toggle);
+        t.tick(t.a.box, true);
+        t.tick(t.b.box, true);
+        expect(t.message.textContent).toBe("Delete 2 items?");
+        t.tick(t.c.box, true);
+        expect(t.message.textContent).toBe(
+            "Delete 3 items? Recipes cannot be brought back.",
+        );
+        t.tick(t.a.box, false);
+        t.tick(t.b.box, false);
+        expect(t.message.textContent).toBe(
+            "Delete 1 item? A recipe cannot be brought back.",
+        );
+    });
+});

@@ -57,22 +57,24 @@ function checkedPreset(html: string): string | null {
     return match?.[1] ?? null;
 }
 
-/** The slider values in a rendered page, in order. */
+/** The weights the preset chips' form carries, in order (a preset ignores them). */
 function sliderValues(html: string): number[] {
+    const form = html.match(
+        /<form[^>]*fd-score-form[^>]*>[\s\S]*?<\/form>/,
+    )?.[0];
     return [
-        ...html.matchAll(
-            /<input class="fd-scoreset__range"[^>]* value="(\d+)"/g,
+        ...(form ?? "").matchAll(
+            /<input type="hidden" name="weight_[a-z]+" value="(\d+)">/g,
         ),
     ].map((m) => Number(m[1]));
 }
 
+/** A switch row's state by its name, whichever order its attributes are in. */
 function switchState(html: string, title: string): string | null {
-    const match = html.match(
-        new RegExp(
-            `role="switch" aria-checked="(true|false)" aria-label="${title}"`,
-        ),
-    );
-    return match?.[1] ?? null;
+    const button = [
+        ...html.matchAll(/<button\b[^>]*role="switch"[^>]*>/g),
+    ].find((m) => m[0].includes(`aria-label="${title}"`));
+    return button?.[0].match(/aria-checked="(true|false)"/)?.[1] ?? null;
 }
 
 describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
@@ -128,8 +130,8 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
         ]);
         expect(switchState(html, "Warn on “may contain”")).toBe("true");
         expect(switchState(html, "Compare with today's goals")).toBe("true");
-        expect(html).toContain("Household default");
-        expect(html).toContain("You are using the household default");
+        expect(html).toContain("Use household default");
+        expect(switchState(html, "Use household default")).toBe("true");
     });
 
     test("the settings menu lists Product score", async () => {
@@ -157,12 +159,12 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
             p.additives,
             p.environment,
         ]);
-        expect(html).not.toContain("You are using the household default");
+        expect(switchState(html, "Use household default")).toBe("false");
     });
 
     test("the autosave form posts a preset change and it reads back", async () => {
         const html = await (await get(memberId)).text();
-        const form = html.match(/<form[^>]*fd-scoreset__form[^>]*>/)?.[0];
+        const form = html.match(/<form[^>]*fd-score-form[^>]*>/)?.[0];
         expect(form).toBeDefined();
         expect(form).toContain('data-fd-autosave="form"');
         expect(form).not.toContain("data-turbo");
@@ -198,7 +200,7 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
         expect(checkedPreset(html)).toBe("custom");
         expect(sliderValues(html)).toEqual([10, 70, 20, 0]);
         // Shares of the total: 10 / 70 / 20 / 0 of 100.
-        expect(html).toContain("data-fd-score-share>70%</output>");
+        expect(html).toMatch(/>Processing<[\s\S]*?fd-item-row__value">70%</);
     });
 
     test("a switch keeps the choice and the other switch; a choice keeps the switches", async () => {
@@ -240,7 +242,7 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
         const row = await store().getMember(householdId, memberId);
         expect(row?.preset).toBe("household");
         const html = await (await get(memberId)).text();
-        expect(html).toContain("You are using the household default");
+        expect(switchState(html, "Use household default")).toBe("true");
     });
 
     for (const [name, fields, error] of [
@@ -332,7 +334,35 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
         );
         expect(res.status).toBe(403);
         expect(await store().getHouseholdDefault(householdId)).toBeNull();
-        expect((await get(memberId, HOUSEHOLD_PATH)).status).toBe(403);
+        const page = await get(memberId, HOUSEHOLD_PATH);
+        expect(page.status).toBe(403);
+        // The refusal says what the member cannot do, not that they need a membership.
+        const text = await page.text();
+        expect(text).toContain(
+            "Only an owner or admin can change the household default.",
+        );
+        expect(text).not.toContain("household membership");
+    });
+
+    test("picking a share in a weight's pull-down saves weights that show that share", async () => {
+        // What the Nutrition pull-down posts for 60% from 40/25/20/15.
+        const res = await post(ownerId, {
+            intent: "choice",
+            preset: "custom",
+            weight_nutrition: "60",
+            weight_processing: "17",
+            weight_additives: "13",
+            weight_environment: "10",
+        });
+        expect(res.status).toBe(303);
+        const html = await (await get(ownerId)).text();
+        expect(html).toMatch(
+            /Nutrition<\/span>[\s\S]*?fd-item-row__value">60%</,
+        );
+        expect(html).toMatch(
+            /Processing<\/span>[\s\S]*?fd-item-row__value">17%</,
+        );
+        expect(html).toContain(">100%</");
     });
 
     test("an owner and an admin set the household default", async () => {
@@ -386,7 +416,8 @@ describeDb(pgAvailable !== null, "settings product score", (getCtx) => {
             HOUSEHOLD_PATH,
         );
         const memberHtml = await (await get(memberId)).text();
-        expect(memberHtml).toContain('fd-scoreset__household-value">Planet<');
+        expect(memberHtml).toMatch(/>Use household default<[\s\S]*?>Planet</);
+        expect(switchState(memberHtml, "Use household default")).toBe("true");
         expect(checkedPreset(memberHtml)).toBe("planet");
         expect(memberHtml).not.toContain(
             'href="/settings/product-score/household"',

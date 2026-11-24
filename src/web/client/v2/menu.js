@@ -46,6 +46,7 @@ function place(root) {
     delete panel.dataset.side;
     panel.style.left = "";
     panel.style.right = "";
+    panel.style.maxHeight = "";
     // Measured before any flip: a panel hanging off an edge would widen the
     // layout viewport and hide its own overflow.
     const vw = document.documentElement.clientWidth;
@@ -71,10 +72,17 @@ function place(root) {
             panel.style.left = left - box.left + "px";
         }
     }
+    // Below the trigger by default; above it when it would leave the bottom and
+    // there is more room there. A panel taller than the room scrolls inside
+    // itself, so it never runs off the screen.
     const now = panel.getBoundingClientRect();
-    const room = trigger.getBoundingClientRect().top - EDGE;
-    if (now.bottom > window.innerHeight - EDGE && room >= now.height) {
-        panel.dataset.side = "top";
+    if (now.bottom > window.innerHeight - EDGE) {
+        const above = trigger.getBoundingClientRect().top - EDGE;
+        const below = window.innerHeight - EDGE - now.top;
+        const top = above >= now.height || above > below;
+        if (top) panel.dataset.side = "top";
+        const room = top ? above : below;
+        if (now.height > room) panel.style.maxHeight = Math.floor(room) + "px";
     }
 }
 
@@ -137,6 +145,63 @@ function disarm(root, box) {
     resetConfirms(root);
     const armButton = box.querySelector("[data-fd-menu-arm]");
     if (armButton) armButton.focus();
+}
+
+// A shared sheet serves every row of a long list: the item that opens it says
+// what the sheet holds (`data-fd-menu-set`, JSON): control name → value, an
+// array ticking a checkbox group, and `@action` for the form's action. A
+// refusal the sheet was showing was for the row that opened it before, so it
+// goes; a group marked `data-fd-menu-not="<name>"` leaves out the choice that
+// is the value of that control (the food being merged in cannot be kept).
+function clearRefusals(dialog) {
+    dialog
+        .querySelectorAll(".fd-settings-error, .fd-field__error")
+        .forEach((el) => el.remove());
+    dialog.querySelectorAll(".fd-field--invalid").forEach((el) => {
+        el.classList.remove("fd-field--invalid");
+        const input = el.querySelector("[aria-invalid]");
+        if (input) {
+            input.removeAttribute("aria-invalid");
+            input.removeAttribute("aria-describedby");
+        }
+    });
+}
+
+function fillSheet(dialog, spec) {
+    let values;
+    try {
+        values = JSON.parse(spec);
+    } catch (_e) {
+        return;
+    }
+    if (!values || typeof values !== "object") return;
+    clearRefusals(dialog);
+    for (const [name, value] of Object.entries(values)) {
+        if (name === "@action") {
+            const form = dialog.querySelector("form");
+            if (form) form.setAttribute("action", String(value));
+            continue;
+        }
+        dialog.querySelectorAll("[name]").forEach((control) => {
+            if (control.getAttribute("name") !== name) return;
+            if (control.type === "checkbox" || control.type === "radio") {
+                control.checked = Array.isArray(value)
+                    ? value.includes(control.value)
+                    : control.value === String(value);
+            } else {
+                control.value = value == null ? "" : String(value);
+            }
+        });
+    }
+    dialog.querySelectorAll("[data-fd-menu-not]").forEach((group) => {
+        const source = group.getAttribute("data-fd-menu-not");
+        const excluded = values[source];
+        group.querySelectorAll("li").forEach((row) => {
+            const input = row.querySelector("input");
+            row.hidden =
+                !!input && excluded != null && input.value === String(excluded);
+        });
+    });
 }
 
 function bindMenu(root) {
@@ -202,6 +267,15 @@ function bindMenu(root) {
             disarm(root, box);
             return;
         }
+        // The value already chosen (a pull-down's current tick) only closes
+        // the menu: picking it again changes nothing, so nothing is posted.
+        if (
+            item.getAttribute("role") === "menuitemcheckbox" &&
+            item.hasAttribute("data-fd-menu-close")
+        ) {
+            close(root, true);
+            return;
+        }
         // A tick that posts a form (a pull-down that saves its value) just submits.
         if (
             item.getAttribute("role") === "menuitemcheckbox" &&
@@ -226,6 +300,8 @@ function bindMenu(root) {
                 item.getAttribute("commandfor") || "",
             );
             close(root, false);
+            const set = item.getAttribute("data-fd-menu-set");
+            if (dialog && set) fillSheet(dialog, set);
             if (dialog) {
                 dialog.addEventListener(
                     "close",
@@ -235,6 +311,12 @@ function bindMenu(root) {
                     { once: true },
                 );
             }
+            return;
+        }
+        // A button the page's script reads (Select) closes the menu; the
+        // script acts on the same click.
+        if (item.hasAttribute("data-fd-menu-close")) {
+            close(root, false);
             return;
         }
         // A link or a submit leaves the page; the menu is closed as it goes.
@@ -283,6 +365,9 @@ function initMenus(scope) {
 }
 
 if (typeof window !== "undefined") {
+    if (window.FOODABLE_EXPOSE_MENU) {
+        window.FOODABLE_EXPOSE_MENU({ fillSheet });
+    }
     if (window.FoodableApp && typeof window.FoodableApp.onLoad === "function") {
         window.FoodableApp.onLoad(initMenus);
     } else if (typeof document !== "undefined") {

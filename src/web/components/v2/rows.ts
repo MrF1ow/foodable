@@ -20,9 +20,8 @@ import {
     type ActionForm,
     type Html,
 } from "./html.js";
-import { iconCheck, iconChevronRight, iconPlus, iconTrash } from "./icons.js";
+import { iconCheck, iconChevronRight, iconPlus } from "./icons.js";
 import { scoreBadge } from "./score-badge.js";
-import { sheetTrigger } from "./sheet.js";
 
 /** A value the caller already formatted. Only escaped here. */
 export type Text = string | number;
@@ -186,32 +185,9 @@ function metaSpan(meta: Text | undefined, className = "fd-row__meta"): string {
 }
 
 /**
- * The red trash button that ends a list row's action line: icon only, a 32px
- * circle, named after the item ("Delete Eggs"). It opens the item's confirm
- * sheet (`target`), so it never deletes on its own tap. `verb` swaps the word
- * for the same gesture ("Revoke").
- */
-export function rowDeleteTrigger(opts: {
-    /** `id` of the confirm sheet it opens. */
-    target: string;
-    /** What is deleted; goes into the accessible name. */
-    name: Text;
-    verb?: string;
-}): Html {
-    return raw(
-        sheetTrigger({
-            target: opts.target,
-            label: `${opts.verb ?? "Delete"} ${opts.name}`,
-            className: "fd-icon-btn fd-icon-btn--danger",
-            icon: String(iconTrash()),
-        }),
-    );
-}
-
-/**
  * Manage row: a one-line name that ends in "…" when it does not fit (the full
  * name stays in the markup and in the `title` attribute), an optional meta
- * line, and the row's action buttons (`actions`, e.g. `rowDeleteTrigger`) at
+ * line, and the row's action buttons (`actions`) at
  * the end, always on the row's own line. `after` is a nested list that belongs
  * to the row (products under a food).
  */
