@@ -715,6 +715,64 @@ begin
         end if;
     end;
 
+    -- Plan repeats: the table, its checks, row level security, the
+    -- service_role grants, the household policy and the lookup indexes.
+    declare
+        p text;
+        idx text;
+        col text;
+    begin
+        if to_regclass('public.plan_rules') is null then
+            raise exception 'plan_rules table missing';
+        end if;
+        if not exists (
+            select 1 from pg_tables
+            where schemaname = 'public' and tablename = 'plan_rules' and rowsecurity
+        ) then
+            raise exception 'plan_rules RLS not enabled';
+        end if;
+        foreach p in array array['select', 'insert', 'update', 'delete'] loop
+            if not has_table_privilege('service_role', 'public.plan_rules', p) then
+                raise exception 'service_role lacks % on plan_rules', p;
+            end if;
+        end loop;
+        foreach col in array array[
+            'household_id', 'recipe_id', 'meal', 'servings', 'starts_on',
+            'rule', 'days', 'ends_on', 'skipped_on', 'created_by',
+            'created_at', 'updated_at'
+        ] loop
+            if not exists (
+                select 1 from information_schema.columns
+                where table_schema = 'public'
+                  and table_name = 'plan_rules'
+                  and column_name = col
+            ) then
+                raise exception 'plan_rules.% missing', col;
+            end if;
+        end loop;
+        foreach idx in array array[
+            'plan_rules_household_starts_idx',
+            'plan_rules_recipe_id_idx'
+        ] loop
+            if not exists (
+                select 1 from pg_indexes
+                where schemaname = 'public'
+                  and tablename = 'plan_rules'
+                  and indexname = idx
+            ) then
+                raise exception '% index missing', idx;
+            end if;
+        end loop;
+        if not exists (
+            select 1 from pg_policies
+            where schemaname = 'public'
+              and tablename = 'plan_rules'
+              and 'foodable_app' = any (roles)
+        ) then
+            raise exception 'plan_rules has no foodable_app policy';
+        end if;
+    end;
+
     if exists (
         select 1
         from information_schema.columns

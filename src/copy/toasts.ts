@@ -32,6 +32,10 @@ export const TOASTS = {
     },
     "recipes.mention.error": { kind: "error", text: "{message}" },
     "plan.notice": { kind: "warning", text: "{message}" },
+    "plan.already": {
+        kind: "info",
+        text: "Already planned for {when}. Nothing changed: edit that plan to change its servings",
+    },
     "plan.missing.added.unknown": {
         kind: "warning",
         text: "Added to the grocery list ({count}). Check what you have of: {names}",

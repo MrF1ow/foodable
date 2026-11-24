@@ -13,6 +13,7 @@ import { createMemoryGroceryStore, type GroceryLine } from "./grocery.js";
 import {
     createMemoryNoticeDismissalsStore,
     dismissalKey,
+    dismissalKeyString,
 } from "./notice-dismissals.js";
 import {
     createMemoryWeighInStore,
@@ -27,6 +28,7 @@ import { dismissNotice, noticesFor } from "./notices-for.js";
 import { NOTICE_CODES, NOTICE_SEVERITY } from "./notices.js";
 import {
     createMemoryPlansStore,
+    shiftPlanDate,
     type PlanSlot,
     type RecipePlan,
 } from "./plan.js";
@@ -286,6 +288,76 @@ describe("planMissingNotices", () => {
             "Eggs, 4 each, missing for Omelette, tomorrow",
         );
         expect(noticeActionFor(notice!)?.label).toBe("Add");
+    });
+
+    test("a repeat's notice is dismissed for the repeat, not for the day it shows first", async () => {
+        const plans = createMemoryPlansStore();
+        const rule = await plans.addRule({
+            householdId: HH,
+            recipeId: "r-omelette",
+            slot: "dinner",
+            servings: 2,
+            startsOn: "2026-11-01",
+            repeat: "daily",
+        });
+        const keyOn = async (today: string) => {
+            const days = await plans.listPlans(HH, today, "2026-11-30");
+            const [notice] = planMissingNotices({
+                plans: days,
+                recipes: [omelette],
+                stock: [],
+                lines: [],
+                foodsById: effective(eggs),
+                today,
+            });
+            return dismissalKey(notice!).relatedKey;
+        };
+        // The first day in the window moves on every day; the repeat and its
+        // week (Monday 2026-11-09) do not.
+        expect(await keyOn("2026-11-12")).toBe(`${rule!.id}:2026-11-09`);
+        expect(await keyOn("2026-11-13")).toBe(`${rule!.id}:2026-11-09`);
+        // A one-off is still named by its own plan.
+        const stored = planned("r-omelette", "2026-11-13");
+        const [oneOff] = missing({ plans: [stored] });
+        expect(dismissalKey(oneOff!).relatedKey).toBe(stored.id);
+    });
+
+    test("a repeat's dismissal lasts for the week of the entry, then the notice comes back", async () => {
+        const plans = createMemoryPlansStore();
+        await plans.addRule({
+            householdId: HH,
+            recipeId: "r-omelette",
+            slot: "dinner",
+            servings: 2,
+            startsOn: "2026-11-02",
+            repeat: "weekly",
+        });
+        const keyOn = async (today: string) => {
+            const days = await plans.listPlans(
+                HH,
+                today,
+                shiftPlanDate(today, 13),
+            );
+            const [notice] = planMissingNotices({
+                plans: days,
+                recipes: [omelette],
+                stock: [],
+                lines: [],
+                foodsById: effective(eggs),
+                today,
+            });
+            return notice ? dismissalKeyString(dismissalKey(notice)) : null;
+        };
+        // Sunday 2026-11-01: the next Monday entry is 2026-11-02.
+        const weekOne = await keyOn("2026-11-01");
+        expect(weekOne).toContain(":2026-11-02");
+        // A year later the same repeat is a different week, so a dismissal of
+        // week one does not hide it.
+        const later = await keyOn("2027-11-01");
+        expect(later).toContain(":2027-11-01");
+        expect(later).not.toBe(weekOne);
+        // The next week of the same repeat is a new key too.
+        expect(await keyOn("2026-11-03")).not.toBe(weekOne);
     });
 
     test("only what is short is named", () => {

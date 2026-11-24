@@ -1423,7 +1423,7 @@ describe("moving and removing a plan", () => {
         ]);
     });
 
-    test("move onto a day and slot that holds the same recipe merges into one plan", async () => {
+    test("move onto a day and slot that holds the same recipe is already planned: nothing moves and nothing is added", async () => {
         const id = await seed();
         const day = addPlanDays(todayUtc(), 2);
         const there = await db.plansStore.addPlan({
@@ -1443,10 +1443,15 @@ describe("moving and removing a plan", () => {
             }),
         );
         expect(res.status).toBe(303);
-        expect(toastOf(res)).toBeNull();
-        // One plan remains: the one already there, with both servings.
+        expect(res.headers.get("location")).toBe("/");
+        expect(toastOf(res)).toMatchObject({
+            key: "plan.already",
+            params: { when: `${planDayLabel(day)} · lunch` },
+        });
+        // Both plans stay as they were.
         expect(await planned()).toMatchObject([
-            { id: there!.id, date: day, slot: "lunch", servings: 5 },
+            { id, date: todayUtc(), slot: "dinner", servings: 2 },
+            { id: there!.id, date: day, slot: "lunch", servings: 3 },
         ]);
     });
 
@@ -1664,6 +1669,415 @@ describe("moving and removing a plan", () => {
     });
 });
 
+describe("a repeating plan: add, remove and move", () => {
+    async function seedRepeat(
+        repeat: "daily" | "weekly" = "daily",
+    ): Promise<{ ruleId: string; dayId: (n: number) => string }> {
+        const rule = await db.plansStore.addRule({
+            householdId: HH,
+            recipeId: db.recipeId,
+            slot: "dinner",
+            servings: 2,
+            startsOn: todayUtc(),
+            repeat,
+            createdBy: ALICE,
+        });
+        return {
+            ruleId: rule!.id,
+            dayId: (n) => `rule:${rule!.id}:${addPlanDays(todayUtc(), n)}`,
+        };
+    }
+
+    // A repeat has no end: look at the next fortnight only.
+    const fortnight = () =>
+        db.plansStore.listPlans(HH, todayUtc(), addPlanDays(todayUtc(), 13));
+    const dates = async () => (await fortnight()).map((p) => p.date);
+
+    test("the add sheet's repeat and weekdays plan the recipe on a repeat", async () => {
+        const res = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            new URLSearchParams([
+                ["date", todayUtc()],
+                ["slot", "dinner"],
+                ["servings", "2"],
+                ["repeat", "days"],
+                ["days", "1"],
+                ["days", "3"],
+            ]),
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+        expect(toastOf(res)).toBeNull();
+        const [rule] = await db.plansStore.listRules(HH);
+        expect(rule).toMatchObject({
+            recipeId: db.recipeId,
+            repeat: "days",
+            days: [1, 3],
+            startsOn: todayUtc(),
+        });
+        // No one-off was stored: the days come from the repeat.
+        const week = await fortnight();
+        expect(week.length).toBeGreaterThan(0);
+        expect(week.every((p) => p.ruleId === rule!.id)).toBe(true);
+        expect(
+            week.every((p) =>
+                [1, 3].includes(new Date(`${p.date}T00:00:00Z`).getUTCDay()),
+            ),
+        ).toBe(true);
+
+        const bad = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            new URLSearchParams({
+                date: todayUtc(),
+                slot: "lunch",
+                repeat: "days",
+            }),
+        );
+        expect(bad.status).toBe(400);
+        expect(await db.plansStore.listRules(HH)).toHaveLength(1);
+    });
+
+    test("a blank weekday value is dropped, not read as Sunday", async () => {
+        const mixed = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            new URLSearchParams([
+                ["date", todayUtc()],
+                ["slot", "dinner"],
+                ["repeat", "days"],
+                ["days", ""],
+                ["days", "  "],
+                ["days", "3"],
+            ]),
+        );
+        expect(mixed.status).toBe(303);
+        const [rule] = await db.plansStore.listRules(HH);
+        expect(rule?.days).toEqual([3]);
+
+        const blank = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            new URLSearchParams([
+                ["date", todayUtc()],
+                ["slot", "lunch"],
+                ["repeat", "days"],
+                ["days", ""],
+            ]),
+        );
+        expect(blank.status).toBe(400);
+        expect(await blank.text()).toContain("Pick at least one weekday");
+        expect(await db.plansStore.listRules(HH)).toHaveLength(1);
+    });
+
+    test("remove asks for a day by default: that day is skipped and the others stay", async () => {
+        const { dayId } = await seedRepeat();
+        const res = await postPlanPath(
+            `/recipes/plan/${dayId(2)}/remove`,
+            new URLSearchParams({ back: "recipes" }),
+        );
+        expect(res.status).toBe(303);
+        expect(toastOf(res)).toBeNull();
+        const days = await dates();
+        expect(days).not.toContain(addPlanDays(todayUtc(), 2));
+        expect(days).toContain(addPlanDays(todayUtc(), 1));
+        expect(days).toContain(addPlanDays(todayUtc(), 3));
+        // Taking the same day off twice finds nothing.
+        const again = await postPlanPath(
+            `/recipes/plan/${dayId(2)}/remove`,
+            new URLSearchParams({ scope: "day" }),
+        );
+        expect(again.status).toBe(303);
+        expect(toastOf(again)).toBeNull();
+        expect(await dates()).toEqual(days);
+    });
+
+    test("remove with scope series ends the repeat from that day and keeps the days before", async () => {
+        const { ruleId, dayId } = await seedRepeat();
+        const res = await postPlanPath(
+            `/recipes/plan/${dayId(3)}/remove`,
+            new URLSearchParams({ scope: "series", back: "today" }),
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/");
+        expect(toastOf(res)).toBeNull();
+        expect(await dates()).toEqual(
+            [0, 1, 2].map((n) => addPlanDays(todayUtc(), n)),
+        );
+        expect((await db.plansStore.getRule(HH, ruleId))?.endsOn).toBe(
+            addPlanDays(todayUtc(), 2),
+        );
+    });
+
+    test("scope series on a plan that does not repeat is refused with a toast and removes nothing", async () => {
+        const one = await db.plansStore.addPlan({
+            householdId: HH,
+            recipeId: db.recipeId,
+            date: todayUtc(),
+            slot: "dinner",
+            servings: 2,
+        });
+        const res = await postPlanPath(
+            `/recipes/plan/${one!.id}/remove`,
+            new URLSearchParams({ scope: "series" }),
+        );
+        expect(res.status).toBe(303);
+        expect(toastOf(res)?.key).toBe("plan.notice");
+        expect(await fortnight()).toHaveLength(1);
+    });
+
+    test("move takes one day out of the series and puts a plan of its own on the new day", async () => {
+        const { dayId } = await seedRepeat("weekly");
+        const target = addPlanDays(todayUtc(), 2);
+        const res = await postPlanPath(
+            `/recipes/plan/${dayId(0)}/move`,
+            new URLSearchParams({
+                date: target,
+                slot: "lunch",
+                servings: "5",
+                back: "recipes",
+            }),
+        );
+        expect(res.status).toBe(303);
+        expect(toastOf(res)).toBeNull();
+        const week = await fortnight();
+        expect(
+            week.map((p) => [
+                p.date,
+                p.slot,
+                p.servings,
+                p.ruleId === undefined,
+            ]),
+        ).toEqual([
+            [target, "lunch", 5, true],
+            [addPlanDays(todayUtc(), 7), "dinner", 2, false],
+        ]);
+    });
+
+    test("planning a repeat again with other servings says it is already planned, naming the day it starts on rather than the day asked for", async () => {
+        // The next Saturday: weekdays from it start on the Monday after.
+        let saturday = todayUtc();
+        while (new Date(`${saturday}T00:00:00Z`).getUTCDay() !== 6) {
+            saturday = addPlanDays(saturday, 1);
+        }
+        const monday = addPlanDays(saturday, 2);
+        const form = (servings: string) =>
+            new URLSearchParams({
+                date: saturday,
+                slot: "dinner",
+                repeat: "weekdays",
+                servings,
+            });
+        const added = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            form("2"),
+        );
+        expect(added.status).toBe(303);
+        expect(toastOf(added)).toBeNull();
+        expect((await db.plansStore.listRules(HH))[0]?.startsOn).toBe(saturday);
+        // The same again is the repeat the page shows.
+        const double = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            form("2"),
+        );
+        expect(toastOf(double)).toBeNull();
+        const again = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            form("5"),
+        );
+        expect(toastOf(again)).toMatchObject({
+            key: "plan.already",
+            params: { when: `${planDayLabel(monday)} · dinner` },
+        });
+        const [rule] = await db.plansStore.listRules(HH);
+        expect(await db.plansStore.listRules(HH)).toHaveLength(1);
+        expect(rule?.servings).toBe(2);
+    });
+
+    test("planning the recipe again on a day and meal it already holds changes nothing, whatever the servings", async () => {
+        const plan = (date: string, slot: string, servings: string) =>
+            postPlanPath(
+                `/recipes/${db.recipeId}/plan`,
+                new URLSearchParams({ date, slot, servings }),
+            );
+        const day = addPlanDays(todayUtc(), 1);
+        expect((await plan(day, "dinner", "2")).status).toBe(303);
+        const again = await plan(day, "dinner", "7");
+        expect(toastOf(again)).toMatchObject({
+            key: "plan.already",
+            params: { when: `${planDayLabel(day)} · dinner` },
+        });
+        expect(await planned()).toMatchObject([
+            { date: day, slot: "dinner", servings: 2 },
+        ]);
+        // Another meal on the same day is planned as usual.
+        expect(toastOf(await plan(day, "lunch", "7"))).toBeNull();
+        expect(await planned()).toMatchObject([
+            { date: day, slot: "lunch", servings: 7 },
+            { date: day, slot: "dinner", servings: 2 },
+        ]);
+    });
+
+    test("planning once on a day a repeat holds is already planned: the repeat keeps the day and its servings", async () => {
+        const { ruleId } = await seedRepeat("daily");
+        const day = addPlanDays(todayUtc(), 3);
+        const res = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            new URLSearchParams({ date: day, slot: "dinner", servings: "9" }),
+        );
+        expect(toastOf(res)).toMatchObject({
+            key: "plan.already",
+            params: { when: `${planDayLabel(day)} · dinner` },
+        });
+        expect((await db.plansStore.getRule(HH, ruleId))?.skippedOn).toEqual(
+            [],
+        );
+        const week = await fortnight();
+        expect(week).toHaveLength(14);
+        expect(week.every((p) => p.ruleId === ruleId && p.servings === 2)).toBe(
+            true,
+        );
+    });
+
+    test("a one-off moved onto a day a repeat holds is already planned: nothing moves", async () => {
+        const { ruleId } = await seedRepeat("daily");
+        const one = await db.plansStore.addPlan({
+            householdId: HH,
+            recipeId: db.recipeId,
+            date: todayUtc(),
+            slot: "lunch",
+            servings: 4,
+        });
+        const day = addPlanDays(todayUtc(), 2);
+        const res = await postPlanPath(
+            `/recipes/plan/${one!.id}/move`,
+            new URLSearchParams({ date: day, slot: "dinner", back: "recipes" }),
+        );
+        expect(toastOf(res)).toMatchObject({
+            key: "plan.already",
+            params: { when: `${planDayLabel(day)} · dinner` },
+        });
+        expect(await db.plansStore.getPlan(HH, one!.id)).toMatchObject({
+            date: todayUtc(),
+            slot: "lunch",
+            servings: 4,
+        });
+        expect((await db.plansStore.getRule(HH, ruleId))?.skippedOn).toEqual(
+            [],
+        );
+    });
+
+    test("a day of a repeat moved onto a day another of its days holds is already planned: the repeat is left as it is", async () => {
+        const { ruleId, dayId } = await seedRepeat("daily");
+        const day = addPlanDays(todayUtc(), 4);
+        const res = await postPlanPath(
+            `/recipes/plan/${dayId(1)}/move`,
+            new URLSearchParams({
+                date: day,
+                slot: "dinner",
+                servings: "5",
+                back: "recipes",
+            }),
+        );
+        expect(toastOf(res)).toMatchObject({
+            key: "plan.already",
+            params: { when: `${planDayLabel(day)} · dinner` },
+        });
+        expect((await db.plansStore.getRule(HH, ruleId))?.skippedOn).toEqual(
+            [],
+        );
+        const week = await fortnight();
+        expect(week).toHaveLength(14);
+        expect(week.every((p) => p.ruleId === ruleId && p.servings === 2)).toBe(
+            true,
+        );
+    });
+
+    test("a repeat over days that already hold the recipe's one-offs skips them and leaves them as they are", async () => {
+        const one = await db.plansStore.addPlan({
+            householdId: HH,
+            recipeId: db.recipeId,
+            date: addPlanDays(todayUtc(), 2),
+            slot: "dinner",
+            servings: 4,
+        });
+        const res = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            new URLSearchParams({
+                date: todayUtc(),
+                slot: "dinner",
+                servings: "2",
+                repeat: "daily",
+            }),
+        );
+        expect(res.status).toBe(303);
+        const week = await fortnight();
+        expect(week).toHaveLength(14);
+        const held = week.filter((p) => p.date === addPlanDays(todayUtc(), 2));
+        expect(held).toHaveLength(1);
+        expect(held[0]).toMatchObject({ id: one!.id, servings: 4 });
+        expect(held[0]?.ruleId).toBeUndefined();
+    });
+
+    test("a repeat over days another repeat of the recipe and meal shows is refused in the sheet, naming the clash, and nothing is saved", async () => {
+        await seedRepeat("daily");
+        const res = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            new URLSearchParams({
+                date: todayUtc(),
+                slot: "dinner",
+                repeat: "weekly",
+            }),
+        );
+        expect(res.status).toBe(400);
+        const weekday = new Date(`${todayUtc()}T00:00:00Z`).toLocaleDateString(
+            "en-US",
+            { weekday: "short", timeZone: "UTC" },
+        );
+        expect(await res.text()).toContain(
+            `Pancakes is already planned at dinner on ${weekday} by the repeat every day. End that series first, or pick other days.`,
+        );
+        expect(await db.plansStore.listRules(HH)).toHaveLength(1);
+    });
+
+    test("saving the edit sheet with nothing changed leaves the day on its series", async () => {
+        const { ruleId, dayId } = await seedRepeat("daily");
+        const day = addPlanDays(todayUtc(), 2);
+        const res = await postPlanPath(
+            `/recipes/plan/${dayId(2)}/move`,
+            new URLSearchParams({
+                date: day,
+                slot: "dinner",
+                servings: "2",
+                back: "recipes",
+            }),
+        );
+        expect(res.status).toBe(303);
+        expect((await db.plansStore.getRule(HH, ruleId))?.skippedOn).toEqual(
+            [],
+        );
+        const week = await fortnight();
+        expect(week.every((p) => p.ruleId === ruleId)).toBe(true);
+        expect(week).toHaveLength(14);
+    });
+
+    test("a day that is not on the series is gone, for both routes", async () => {
+        const { ruleId } = await seedRepeat("weekly");
+        const off = `rule:${ruleId}:${addPlanDays(todayUtc(), 1)}`;
+        const moved = await postPlanPath(
+            `/recipes/plan/${off}/move`,
+            new URLSearchParams({ date: todayUtc(), slot: "lunch" }),
+        );
+        expect(moved.status).toBe(303);
+        expect(toastOf(moved)).toBeNull();
+        const removed = await postPlanPath(
+            `/recipes/plan/${off}/remove`,
+            new URLSearchParams({}),
+        );
+        expect(removed.status).toBe(303);
+        expect(toastOf(removed)).toBeNull();
+        // Nothing of the series changed.
+        expect(await fortnight()).toHaveLength(2);
+    });
+});
+
 describe("POST /recipes/plan/add-missing", () => {
     function addMissing(back = "recipes") {
         return postPlanPath(
@@ -1814,6 +2228,38 @@ describe("This week on the pages", () => {
         )![0];
         expect(strip).toContain("Pancakes");
         expect(page.html).toContain(`id="fd-plan-edit-`);
+    });
+
+    test("a repeating plan shows on each of its days, with the ids the remove and move routes take", async () => {
+        const today = todayUtc();
+        const rule = await db.plansStore.addRule({
+            householdId: HH,
+            recipeId: db.recipeId,
+            slot: "dinner",
+            servings: 2,
+            startsOn: today,
+            repeat: "weekdays",
+            createdBy: ALICE,
+        });
+        const page = await renderRecipesListPage(ALICE, {});
+        const strip = page.html.match(
+            /<ul class="fd-plan-tiles">[\s\S]*?<\/ul>\s*<\/section>/,
+        )![0];
+        const weekdays = [0, 1, 2, 3, 4, 5, 6].filter((n) => {
+            const day = new Date(
+                `${addPlanDays(today, n)}T00:00:00Z`,
+            ).getUTCDay();
+            return day >= 1 && day <= 5;
+        });
+        for (const n of weekdays) {
+            const id = `rule:${rule!.id}:${addPlanDays(today, n)}`;
+            expect(strip).toContain(`commandfor="fd-plan-edit-${id}"`);
+            expect(page.html).toContain(`/recipes/plan/${id}/remove`);
+            expect(page.html).toContain(`/recipes/plan/${id}/move`);
+        }
+        expect(strip.match(/class="fd-plan-item"/g)).toHaveLength(
+            weekdays.length,
+        );
     });
 
     test("the week starts on the household's calendar day, not UTC's", async () => {

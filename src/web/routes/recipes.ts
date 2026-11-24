@@ -73,6 +73,8 @@ import {
     parsePlanBack,
     PLAN_SHEET_ID,
     planBackPath,
+    planDayLabel,
+    PLAN_SLOT_LABEL,
     type PlanEditDraft,
 } from "../pages/v2/recipes-plan.js";
 import {
@@ -82,6 +84,7 @@ import {
     planRecipe,
     PlanInputError,
     movePlannedRecipe,
+    parseRuleEntryId,
     unplanRecipe,
 } from "../../domain/plan.js";
 import {
@@ -741,6 +744,39 @@ recipesRoutes.post(
 );
 
 /**
+ * Every value of a repeated form field as numbers; junk stays NaN for the
+ * caller to refuse. A blank value is not a number (`Number("")` is 0), so it is
+ * dropped.
+ */
+function formNumberList(
+    body: Record<string, string | File | (string | File)[]>,
+    key: string,
+): number[] {
+    const value = body[key];
+    const all = Array.isArray(value)
+        ? value
+        : value === undefined
+          ? []
+          : [value];
+    return all
+        .filter(
+            (item): item is string =>
+                typeof item === "string" && item.trim() !== "",
+        )
+        .map((item) => Number(item));
+}
+
+/** A stored plan's id, or one day of a repeat (`rule:<id>:<day>`). */
+function isPlanEntryId(id: string): boolean {
+    return UUID_SHAPE.test(id) || parseRuleEntryId(id) !== null;
+}
+
+/** "Sat 14 Nov · dinner", the toast's words for where a plan landed. */
+function planWhen(date: string, slot: keyof typeof PLAN_SLOT_LABEL): string {
+    return `${planDayLabel(date)} · ${PLAN_SLOT_LABEL[slot].toLowerCase()}`;
+}
+
+/**
  * Add to plan, from the recipe page's sheet. Planning the same recipe on the
  * same day and slot twice is one plan, so a double submit changes nothing more.
  * A bad day, meal or servings re-renders the recipe page with the sheet open.
@@ -755,10 +791,14 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
         recipeId,
     );
     if (!recipe) return c.text("Not found", 404);
-    const body = await c.req.parseBody();
+    const body = await c.req.parseBody({ all: true });
     const date = formText(body, "date").trim();
     const slot = formText(body, "slot");
     const servingsInput = formOptionalNumber(body, "servings");
+    // Once unless the sheet says it repeats; "days" brings its weekdays
+    // (0 = Sunday), one `days` value each.
+    const repeat = formText(body, "repeat") || "once";
+    const days = formNumberList(body, "days");
     try {
         const outcome = await planRecipe(
             liveRecipePlansStore(),
@@ -770,6 +810,8 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
                 date,
                 slot,
                 servings: servingsInput,
+                repeat,
+                days,
                 today: await householdToday(member.householdId),
                 createdBy: userId,
             },
@@ -779,6 +821,20 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
             },
         );
         if (!outcome) return c.text("Not found", 404);
+        if (
+            outcome.alreadyPlanned &&
+            outcome.plan.servings !== (servingsInput ?? recipe.yieldPortions)
+        ) {
+            // Nothing was written and the servings asked for are not the ones
+            // planned: say so, and where it already is. The same servings
+            // again (a double submit) is the plan the page shows.
+            return redirectWithToast(
+                c,
+                `/recipes/${recipeId}`,
+                "plan.already",
+                { when: planWhen(outcome.plan.date, outcome.plan.slot) },
+            );
+        }
         // toast: none — the recipe page shows the plan ("Planned · day · meal")
         return c.redirect(`/recipes/${recipeId}`, 303);
     } catch (err) {
@@ -808,7 +864,7 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
     const backKind = parsePlanBack(formText(body, "back"));
     const back = planBackPath(backKind);
     const planId = c.req.param("planId");
-    if (!UUID_SHAPE.test(planId)) {
+    if (!isPlanEntryId(planId)) {
         // toast: none
         return c.redirect(back, 303);
     }
@@ -830,9 +886,9 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
         const servings = checkPlanServingsCapped(
             servingsInput ?? existing.servings,
         );
-        // The same recipe already on that day and slot absorbs this plan
-        // (its servings are added), so the week never shows it twice.
-        await movePlannedRecipe(
+        // The same recipe already on that day and meal is "already planned":
+        // nothing moves and nothing is added to it.
+        const moved = await movePlannedRecipe(
             plans,
             member.householdId,
             existing,
@@ -842,6 +898,11 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
                 notify: liveNotifier(member.householdId, member.userId),
             },
         );
+        if (moved?.alreadyPlanned) {
+            return redirectWithToast(c, back, "plan.already", {
+                when: planWhen(moved.plan.date, moved.plan.slot),
+            });
+        }
         // toast: none — the week shows where the plan landed (or that it is gone)
         return c.redirect(back, 303);
     } catch (err) {
@@ -879,15 +940,34 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
     }
 });
 
+/**
+ * Takes a plan off the week. A day of a repeating plan (`rule:<id>:<day>`)
+ * goes alone by default, or with `scope=series` the repeat ends from that
+ * day on and the days before it stay.
+ */
 recipesRoutes.post("/recipes/plan/:planId/remove", requireMember, async (c) => {
     const member = siteMember(c);
     const body = await c.req.parseBody();
     const back = planBackPath(parsePlanBack(formText(body, "back")));
     const planId = c.req.param("planId");
-    if (UUID_SHAPE.test(planId)) {
-        await unplanRecipe(liveRecipePlansStore(), member.householdId, planId, {
-            recipes: liveRecipesStore(),
-            notify: liveNotifier(member.householdId, member.userId),
+    const scope = formText(body, "scope") === "series" ? "series" : "day";
+    try {
+        if (isPlanEntryId(planId)) {
+            await unplanRecipe(
+                liveRecipePlansStore(),
+                member.householdId,
+                planId,
+                {
+                    recipes: liveRecipesStore(),
+                    notify: liveNotifier(member.householdId, member.userId),
+                },
+                scope,
+            );
+        }
+    } catch (err) {
+        if (!(err instanceof PlanInputError)) throw err;
+        return redirectWithToast(c, back, "plan.notice", {
+            message: err.message,
         });
     }
     // toast: none — the week shows it gone (a plan already gone is the same)

@@ -109,6 +109,8 @@ insert into public.share_links (household_id, kind, target_id, token_hash, creat
     values ('${HH_B}', 'recipe', '${RECIPE_B}', 'hash-b', '${USER_B}');
 insert into public.recipe_plans (household_id, recipe_id, date, slot, created_by)
     values ('${HH_B}', '${RECIPE_B}', '2026-11-12', 'dinner', '${USER_B}');
+insert into public.plan_rules (household_id, recipe_id, meal, starts_on, rule, created_by)
+    values ('${HH_B}', '${RECIPE_B}', 'dinner', '2026-11-12', 'daily', '${USER_B}');
 insert into public.agent_actions (household_id, member_id, connection, tool, summary, snapshot, undo_expires_at)
     values ('${HH_B}', '${USER_B}', 'household token', 'delete_grocery_line', 'Deleted Milk',
         '{"v":1,"changes":[]}'::jsonb, now() + interval '24 hours');

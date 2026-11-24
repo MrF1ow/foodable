@@ -16,6 +16,7 @@ import { noticesFor } from "../../domain/notices-for.js";
 import {
     checkPlanDate,
     checkPlanDay,
+    PLAN_REPEATS,
     PLAN_SLOTS,
     planRecipe,
     unplanRecipe,
@@ -51,6 +52,8 @@ const PLAN_ENTRY_SCHEMA = z.object({
     recipe_name: z.string(),
     slot: z.enum(PLAN_SLOTS),
     servings: z.number(),
+    /** True on a day of a repeating plan (plan_id is rule:<id>:<date>); absent on a one-off. */
+    repeats: z.boolean().optional(),
     /** Calories in one portion of the recipe; null when the recipe's macros are unknown or incomplete. */
     kcal_per_portion: z.number().nullable(),
 });
@@ -124,6 +127,8 @@ export const PLAN_RECIPE_OUTPUT_SCHEMA = z.object({
         date: z.string(),
         slot: z.enum(PLAN_SLOTS),
         servings: z.number(),
+        /** True when the plan repeats (plan_id is its first day); absent on a one-off. */
+        repeats: z.boolean().optional(),
     }),
     /** The recipe was already planned on that day and meal, so nothing new was made. */
     already_planned: z.boolean(),
@@ -198,11 +203,12 @@ function planWire(plan: RecipePlan, recipeName: string) {
         date: plan.date,
         slot: plan.slot,
         servings: plan.servings,
+        ...(plan.ruleId !== undefined ? { repeats: true } : {}),
     };
 }
 
 function planLine(plan: ReturnType<typeof planWire>): string {
-    return `${plan.recipe_name} · ${weekdayName(plan.date)} ${plan.date} · ${plan.slot} · ${plan.servings} servings`;
+    return `${plan.recipe_name} · ${weekdayName(plan.date)} ${plan.date} · ${plan.slot} · ${plan.servings} servings${plan.repeats ? " · repeats" : ""}`;
 }
 
 /** Calories in one portion of each planned recipe, by recipe id. Null when unknown or incomplete. */
@@ -245,7 +251,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Get Week Plan",
             description:
-                "Read the household's week plan: seven days from `from` (default the household's today), each with the recipes planned on it by meal slot, what the planned recipes still need that the kitchen does not hold (`missing`), and the plan's open `notices` (dismiss_notice takes each one's `dismiss` fields). Each plan has a plan_id for unplan_recipe. To put the missing foods on the grocery list call add_plan_missing_to_groceries.",
+                "Read the household's week plan: seven days from `from` (default the household's today), each with the recipes planned on it by meal slot, what the planned recipes still need that the kitchen does not hold (`missing`), and the plan's open `notices` (dismiss_notice takes each one's `dismiss` fields). Each plan has a plan_id for unplan_recipe (`repeats: true` on a repeating plan's day). To put the missing foods on the grocery list call add_plan_missing_to_groceries.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -290,6 +296,9 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                                 recipe_name: nameById.get(plan.recipeId) ?? "",
                                 slot: plan.slot,
                                 servings: plan.servings,
+                                ...(plan.ruleId !== undefined
+                                    ? { repeats: true }
+                                    : {}),
                                 kcal_per_portion:
                                     kcal.get(plan.recipeId) ?? null,
                             })),
@@ -331,7 +340,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     const lines = days.flatMap((day) =>
                         day.plans.map(
                             (plan) =>
-                                `- ${day.weekday} ${day.date} · ${plan.slot}: ${plan.recipe_name} (${plan.servings} servings)${idTag(plan.plan_id, "plan_id")}${idTag(plan.recipe_id, "recipe_id")}`,
+                                `- ${day.weekday} ${day.date} · ${plan.slot}: ${plan.recipe_name} (${plan.servings} servings${plan.repeats ? ", repeats" : ""})${idTag(plan.plan_id, "plan_id")}${idTag(plan.recipe_id, "recipe_id")}`,
                         ),
                     );
                     const missingLines = missing.map(
@@ -376,7 +385,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Plan Recipe",
             description:
-                "Put a recipe on the household's week plan for a day and meal slot. `date` is YYYY-MM-DD in the household's calendar and must be today or later; `slot` is breakfast, lunch, dinner or snack; `servings` defaults to the recipe's yield. Planning the same recipe on the same day and slot twice returns the existing plan (already_planned true).",
+                "Put a recipe on the household's week plan for a day and meal slot. `date` is YYYY-MM-DD in the household's calendar and must be today or later; `slot` is breakfast, lunch, dinner or snack; `servings` defaults to the recipe's yield. A recipe already on that day and slot (once or by a repeat) comes back unchanged (already_planned true), whatever servings; servings change in the app. Repeats of one recipe and slot may not overlap. `repeat` (default once) plans it from `date` weekly, daily, on weekdays (Mon-Fri) or on `days` (0 = Sunday to 6); plan_id is its first day.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -388,6 +397,22 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                 date: z.string().describe("The day, YYYY-MM-DD."),
                 slot: z.enum(PLAN_SLOTS),
                 servings: z.coerce.number().optional(),
+                repeat: z.enum(PLAN_REPEATS).optional(),
+                // A blank, null or true/false weekday is refused, not read as
+                // Sunday (or Monday) by the number coercion.
+                days: z
+                    .array(
+                        z.preprocess(
+                            (v) =>
+                                v === null ||
+                                typeof v === "boolean" ||
+                                (typeof v === "string" && v.trim() === "")
+                                    ? Number.NaN
+                                    : v,
+                            z.coerce.number(),
+                        ),
+                    )
+                    .optional(),
             }),
             outputSchema: PLAN_RECIPE_OUTPUT_SCHEMA,
         },
@@ -418,6 +443,8 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             date: args.date.trim(),
                             slot: args.slot,
                             servings: args.servings,
+                            repeat: args.repeat,
+                            days: args.days,
                             today: await householdToday(householdId),
                             createdBy: actor.userId,
                         },
@@ -437,7 +464,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             {
                                 type: "text" as const,
                                 text: alreadyPlanned
-                                    ? `Already planned: ${planLine(wire)}${idTag(wire.plan_id, "plan_id")}`
+                                    ? `Already planned, nothing changed: ${planLine(wire)}${idTag(wire.plan_id, "plan_id")}. To change its servings, edit that plan in the app.`
                                     : `Planned: ${planLine(wire)}${idTag(wire.plan_id, "plan_id")}`,
                             },
                         ],
@@ -456,14 +483,17 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Unplan Recipe",
             description:
-                "Remove one entry from the household's week plan by its plan_id (from get_week_plan or plan_recipe). The recipe itself is untouched.",
+                "Remove one entry from the household's week plan by its plan_id (from get_week_plan or plan_recipe). A repeating plan's day (`repeats: true`) goes alone (scope day, default) or with its whole series from that day on (scope series): ask the person which, never choose. The recipe is untouched.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: true,
                 idempotentHint: false,
                 openWorldHint: false,
             },
-            inputSchema: z.object({ plan_id: z.string() }),
+            inputSchema: z.object({
+                plan_id: z.string(),
+                scope: z.enum(["day", "series"]).optional(),
+            }),
             outputSchema: UNPLAN_RECIPE_OUTPUT_SCHEMA,
         },
         async (args) =>
@@ -479,15 +509,32 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                                 args.plan_id,
                             );
                             if (!plan) throw new Error("Plan not found.");
+                            const scope = args.scope ?? "day";
+                            if (scope === "series" && !plan.ruleId) {
+                                throw new Error(
+                                    "That plan does not repeat, so there is no series to remove. Remove the day instead.",
+                                );
+                            }
                             const recipe = await liveRecipesStore().getRecipe(
                                 householdId,
                                 plan.recipeId,
                             );
-                            await rec.captureByIds(
-                                "recipe_plans",
-                                [args.plan_id],
-                                "deleted",
-                            );
+                            // A day of a repeat changes its repeat's row (an
+                            // end day for the series, a skipped day for the
+                            // day); a one-off is deleted.
+                            if (plan.ruleId) {
+                                await rec.captureByIds(
+                                    "plan_rules",
+                                    [plan.ruleId],
+                                    "updated",
+                                );
+                            } else {
+                                await rec.captureByIds(
+                                    "recipe_plans",
+                                    [args.plan_id],
+                                    "deleted",
+                                );
+                            }
                             const removed = await unplanRecipe(
                                 plans,
                                 householdId,
@@ -499,11 +546,18 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                                     // the guard's transaction could abort it.
                                     recipeName: recipe?.name ?? null,
                                 },
+                                scope,
                             );
                             if (!removed) throw new Error("Plan not found.");
+                            const name = recipe?.name ?? "a recipe";
                             return {
-                                value: null,
-                                summary: `Removed ${recipe?.name ?? "a recipe"} from the plan for ${plan.date} (${plan.slot})`,
+                                value: scope,
+                                summary:
+                                    scope === "series"
+                                        ? `Ended the repeating plan of ${name} from ${plan.date} (${plan.slot}); earlier days stay`
+                                        : plan.ruleId
+                                          ? `Removed ${name} from the plan for ${plan.date} (${plan.slot}); the rest of the repeat stays`
+                                          : `Removed ${name} from the plan for ${plan.date} (${plan.slot})`,
                             };
                         },
                     );
@@ -513,7 +567,9 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             {
                                 type: "text" as const,
                                 text: withUndo(
-                                    `Removed plan ${args.plan_id}.`,
+                                    run.value === "series"
+                                        ? `Ended the repeating plan from ${args.plan_id}.`
+                                        : `Removed plan ${args.plan_id}.`,
                                     run.undo,
                                 ),
                             },

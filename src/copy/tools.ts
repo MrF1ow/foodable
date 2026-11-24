@@ -974,6 +974,8 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "date", required: true },
             { name: "slot", required: true },
             { name: "servings", required: false },
+            { name: "repeat", required: false },
+            { name: "days", required: false },
         ],
         hasPhotoHint: false,
     },
@@ -981,7 +983,10 @@ const TOOLS_BASE: ToolIdentity[] = [
         name: "unplan_recipe",
         category: "recipes",
         badges: ["remove"],
-        params: [{ name: "plan_id", required: true }],
+        params: [
+            { name: "plan_id", required: true },
+            { name: "scope", required: false },
+        ],
         hasPhotoHint: false,
     },
     {

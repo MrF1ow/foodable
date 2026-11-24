@@ -16,7 +16,7 @@ import {
     type PlanNeed,
     type PlanRecipe,
 } from "./plan-week.js";
-import type { RecipePlan } from "./plan.js";
+import { parseRuleEntryId, planWeekStart, type RecipePlan } from "./plan.js";
 import { runningLowNotice, usualsDue } from "./restock.js";
 import { daysUntilExpiry } from "./stock.js";
 import { dateInTz } from "./tz.js";
@@ -143,8 +143,11 @@ export function planMissingNotices(input: {
             recipeCount: recipes.length,
             plannedOn: first.date,
             daysLeft: daysUntilExpiry(input.today, first.date),
-            // A dismissal holds while that plan stands.
-            dismissScope: first.planId,
+            // A dismissal holds while that plan stands. A day of a repeat is
+            // named after its day, which moves on every day, so it is the
+            // repeat and the week of that day that hold it: a repeat's
+            // dismissal ends with its week, as a one-off's ends with its day.
+            dismissScope: planDismissScope(first),
         };
         if (entry.parts.length > 0) {
             params.amounts = entry.parts
@@ -160,6 +163,11 @@ export function planMissingNotices(input: {
         });
     }
     return out;
+}
+
+function planDismissScope(plan: { planId: string; date: string }): string {
+    const entry = parseRuleEntryId(plan.planId);
+    return entry ? `${entry.ruleId}:${planWeekStart(plan.date)}` : plan.planId;
 }
 
 /** A member's latest weigh-in, for members with at least one ever. */

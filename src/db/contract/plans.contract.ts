@@ -188,11 +188,12 @@ export function runPlansStoreContract(
                 "lunch",
             );
             expect(moved).toEqual({
-                ...plan!,
-                date: "2026-11-14",
-                slot: "lunch",
+                plan: { ...plan!, date: "2026-11-14", slot: "lunch" },
+                alreadyPlanned: false,
             });
-            expect(await store.getPlan(c.householdId, plan!.id)).toEqual(moved);
+            expect(await store.getPlan(c.householdId, plan!.id)).toEqual(
+                moved!.plan,
+            );
             expect(
                 await store.movePlan(
                     c.householdId,
@@ -203,7 +204,7 @@ export function runPlansStoreContract(
             ).toBeNull();
         });
 
-        test("moving onto the same recipe's day and slot merges the two plans", async () => {
+        test("moving onto the same recipe's day and slot is already planned: both plans stay as they were", async () => {
             await reset();
             const c = ctx();
             const { store, newRecipe } = createHarness();
@@ -224,25 +225,26 @@ export function runPlansStoreContract(
                 servings: 3,
             });
 
-            const merged = await store.movePlan(
+            const refused = await store.movePlan(
                 c.householdId,
                 moving!.id,
                 "2026-11-14",
                 "lunch",
             );
-            // The plan already there stays and takes the moved plan's servings.
-            expect(merged).toEqual({ ...there!, servings: 5 });
-            expect(await store.getPlan(c.householdId, moving!.id)).toBeNull();
+            expect(refused).toEqual({ plan: there!, alreadyPlanned: true });
+            expect(await store.getPlan(c.householdId, moving!.id)).toEqual(
+                moving!,
+            );
             expect(
                 await store.listPlans(
                     c.householdId,
                     "2026-11-01",
                     "2026-11-30",
                 ),
-            ).toEqual([merged!]);
+            ).toEqual([moving!, there!]);
         });
 
-        test("a move that sets servings merges those servings, and the sum is capped", async () => {
+        test("a move that sets servings onto an occupied slot still changes nothing", async () => {
             await reset();
             const c = ctx();
             const { store, newRecipe } = createHarness();
@@ -261,15 +263,18 @@ export function runPlansStoreContract(
                 slot: "lunch",
                 servings: 1,
             });
-            const merged = await store.movePlan(
+            const refused = await store.movePlan(
                 c.householdId,
                 moving!.id,
                 "2026-11-14",
                 "lunch",
                 20,
             );
-            expect(merged?.id).toBe(there!.id);
-            expect(merged?.servings).toBe(999);
+            expect(refused?.alreadyPlanned).toBe(true);
+            expect(refused?.plan).toEqual(there!);
+            expect(await store.getPlan(c.householdId, moving!.id)).toEqual(
+                moving!,
+            );
         });
 
         test("a move onto another recipe's slot, or with servings, stays two plans", async () => {
@@ -299,10 +304,13 @@ export function runPlansStoreContract(
                 6,
             );
             expect(moved).toEqual({
-                ...moving!,
-                date: "2026-11-14",
-                slot: "lunch",
-                servings: 6,
+                plan: {
+                    ...moving!,
+                    date: "2026-11-14",
+                    slot: "lunch",
+                    servings: 6,
+                },
+                alreadyPlanned: false,
             });
             expect(
                 await store.listPlans(
