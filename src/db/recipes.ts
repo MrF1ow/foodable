@@ -16,6 +16,12 @@ import {
     recipeImportToRow,
 } from "../domain/recipe-import.js";
 import {
+    mergeWithEarlier,
+    overrideFromRow,
+    type RecipeVariantsStore,
+} from "../domain/recipe-variants.js";
+import { RecipeInputError } from "../domain/recipes.js";
+import {
     definedColumns,
     insertReturning,
     maybeOne,
@@ -31,6 +37,9 @@ const RECIPE_INGREDIENTS = "recipe_ingredients";
 const RECIPE_PORTIONS = "recipe_portions";
 const RECIPE_IMPORTS = "recipe_imports";
 const RECIPE_FAVOURITES = "recipe_favourites";
+const RECIPE_VARIANT_OVERRIDES = "recipe_variant_overrides";
+const OVERRIDE_COLS =
+    "id, household_id, recipe_id, user_id, ingredient_id, action, amount, unit, food_id, display_name, created_at, updated_at";
 const RECIPE_COLS =
     "id, household_id, creator_id, name, yield_portions, instructions, source_url, tags, notes, prep_minutes, cook_minutes, verification, updated_at";
 const RECIPE_INGREDIENT_COLS =
@@ -101,6 +110,7 @@ export function liveRecipesStore(): RecipesStore {
             });
         },
         async getRecipe(householdId, id) {
+            if (!UUID_SHAPE.test(id)) return null;
             return run(async (tx) => {
                 try {
                     const data = await maybeOne<Record<string, unknown>>(
@@ -632,3 +642,217 @@ export function liveRecipesStore(): RecipesStore {
         },
     };
 }
+
+/** Each person's version of a recipe: their overrides of its base ingredients. */
+export function liveRecipeVariantsStore(): RecipeVariantsStore {
+    return {
+        async listOverrides(householdId, recipeId) {
+            if (!UUID_SHAPE.test(recipeId)) return [];
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(OVERRIDE_COLS)}
+                            from ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)}
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}
+                            order by created_at asc, id asc
+                        `,
+                    );
+                    return data.map((row) => overrideFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list recipe versions", err);
+                }
+            });
+        },
+        async listOverridesForRecipes(householdId, recipeIds) {
+            if (recipeIds.length === 0) return [];
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(OVERRIDE_COLS)}
+                            from ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)}
+                            where household_id = ${householdId}
+                              and recipe_id = any(${tx.array([...recipeIds], "uuid")})
+                            order by created_at asc, id asc
+                        `,
+                    );
+                    return data.map((row) => overrideFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list recipe versions", err);
+                }
+            });
+        },
+        async listOverridesByFood(householdId, foodId) {
+            if (!UUID_SHAPE.test(foodId)) return [];
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(OVERRIDE_COLS)}
+                            from ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)}
+                            where household_id = ${householdId}
+                              and food_id = ${foodId}::uuid
+                            order by created_at asc, id asc
+                        `,
+                    );
+                    return data.map((row) => overrideFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list recipe versions", err);
+                }
+            });
+        },
+        async saveOverride(given) {
+            return run(async (tx) => {
+                try {
+                    // The person's earlier row for a base ingredient is read
+                    // and merged under a lock on that ingredient, so a swap
+                    // and an amount saved at once both land: the second
+                    // waits for the first and merges with it.
+                    let row = given;
+                    if (given.ingredientId != null) {
+                        await tx`select pg_advisory_xact_lock(hashtextextended(${`recipe-version:${given.recipeId}:${given.userId}:${given.ingredientId}`}, 0))`;
+                        const earlier = await maybeOne<Record<string, unknown>>(
+                            tx,
+                            tx`
+                                select ${tx.unsafe(OVERRIDE_COLS)}
+                                from ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)}
+                                where household_id = ${given.householdId}::uuid
+                                  and recipe_id = ${given.recipeId}::uuid
+                                  and user_id = ${given.userId}::uuid
+                                  and ingredient_id = ${given.ingredientId}::uuid
+                            `,
+                            "read recipe version",
+                        );
+                        row = mergeWithEarlier(
+                            earlier
+                                ? overrideFromRow(earlier as never)
+                                : undefined,
+                            given,
+                        );
+                    }
+                    // The recipe must be this household's: no row, no insert.
+                    // A row on a base ingredient replaces the person's earlier
+                    // one for it; an add replaces their earlier add of the
+                    // same food, so a retried add is one row.
+                    const saved = await one<Record<string, unknown>>(
+                        tx,
+                        row.ingredientId == null
+                            ? tx`
+                            insert into ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)} (
+                                id, household_id, recipe_id, user_id,
+                                ingredient_id, action, amount, unit, food_id,
+                                display_name
+                            )
+                            select
+                                ${row.id ?? crypto.randomUUID()}::uuid,
+                                r.household_id,
+                                r.id,
+                                ${row.userId}::uuid,
+                                ${row.ingredientId}::uuid,
+                                ${row.action}::text,
+                                ${row.amount ?? null}::numeric,
+                                ${row.unit ?? null}::text,
+                                ${row.foodId ?? null}::uuid,
+                                ${row.displayName ?? null}::text
+                            from ${tx.unsafe(RECIPES)} r
+                            where r.id = ${row.recipeId}::uuid
+                              and r.household_id = ${row.householdId}::uuid
+                            on conflict (recipe_id, user_id, food_id)
+                                where action = 'add'
+                            do update set
+                                amount = excluded.amount,
+                                unit = excluded.unit,
+                                display_name = excluded.display_name,
+                                updated_at = now()
+                            returning ${tx.unsafe(OVERRIDE_COLS)}
+                        `
+                            : tx`
+                            insert into ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)} (
+                                id, household_id, recipe_id, user_id,
+                                ingredient_id, action, amount, unit, food_id,
+                                display_name
+                            )
+                            select
+                                ${row.id ?? crypto.randomUUID()}::uuid,
+                                r.household_id,
+                                r.id,
+                                ${row.userId}::uuid,
+                                ${row.ingredientId}::uuid,
+                                ${row.action}::text,
+                                ${row.amount ?? null}::numeric,
+                                ${row.unit ?? null}::text,
+                                ${row.foodId ?? null}::uuid,
+                                ${row.displayName ?? null}::text
+                            from ${tx.unsafe(RECIPES)} r
+                            where r.id = ${row.recipeId}::uuid
+                              and r.household_id = ${row.householdId}::uuid
+                            on conflict (recipe_id, user_id, ingredient_id)
+                                where ingredient_id is not null
+                            do update set
+                                action = excluded.action,
+                                amount = excluded.amount,
+                                unit = excluded.unit,
+                                food_id = excluded.food_id,
+                                display_name = excluded.display_name,
+                                updated_at = now()
+                            returning ${tx.unsafe(OVERRIDE_COLS)}
+                        `,
+                        "save recipe version",
+                    );
+                    return overrideFromRow(saved as never);
+                } catch (err) {
+                    if (err instanceof RecipeInputError) throw err;
+                    throw pgError("save recipe version", err);
+                }
+            });
+        },
+        async deleteOverride(householdId, recipeId, userId, ref) {
+            if (!UUID_SHAPE.test(ref)) return false;
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)}
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}::uuid
+                              and user_id = ${userId}::uuid
+                              and (id = ${ref}::uuid or ingredient_id = ${ref}::uuid)
+                            returning id
+                        `,
+                    );
+                    return data.length > 0;
+                } catch (err) {
+                    throw pgError("delete recipe version", err);
+                }
+            });
+        },
+        async clearVariant(householdId, recipeId, userId) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)}
+                            where household_id = ${householdId}
+                              and recipe_id = ${recipeId}::uuid
+                              and user_id = ${userId}::uuid
+                            returning id
+                        `,
+                    );
+                    return data.length;
+                } catch (err) {
+                    throw pgError("clear recipe version", err);
+                }
+            });
+        },
+    };
+}
+
+const UUID_SHAPE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

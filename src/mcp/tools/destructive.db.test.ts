@@ -180,6 +180,7 @@ const FINGERPRINT_TABLES = [
     "recipe_plans",
     "plan_rules",
     "recipe_portions",
+    "recipe_variant_overrides",
     "recipe_favourites",
     "meals",
     "meal_items",
@@ -556,18 +557,76 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         },
         remove_recipe_ingredient: async () => {
             const soup = await recipe();
+            // A member's version of the ingredient goes with it, and comes
+            // back with it.
+            const set = await call("set_recipe_variant", {
+                recipe_id: soup.id,
+                member_id: ownerId,
+                action: "amount",
+                ingredient_id: soup.ingredient,
+                amount: 50,
+                unit: "g",
+            });
+            expect(set.isError).toBeFalsy();
+            const [version] = await rows(
+                "select id from public.recipe_variant_overrides",
+            );
             return {
                 tool: "remove_recipe_ingredient",
                 args: { recipe_id: soup.id, ingredient_id: soup.ingredient },
                 summary: "Removed Flour from recipe Soup",
-                changed: async () =>
-                    expect(await count("recipe_ingredients")).toBe(0),
+                changed: async () => {
+                    expect(await count("recipe_ingredients")).toBe(0);
+                    expect(await count("recipe_variant_overrides")).toBe(0);
+                },
                 restored: async () => {
                     const back = await rows(
                         "select id from public.recipe_ingredients",
                     );
                     expect(back.map((row) => row.id)).toEqual([
                         soup.ingredient,
+                    ]);
+                    expect(
+                        await rows(
+                            "select id, ingredient_id, amount::float as amount, unit from public.recipe_variant_overrides",
+                        ),
+                    ).toEqual([
+                        {
+                            id: version!.id,
+                            ingredient_id: soup.ingredient,
+                            amount: 50,
+                            unit: "g",
+                        },
+                    ]);
+                },
+            };
+        },
+        clear_recipe_variant: async () => {
+            const soup = await recipe();
+            const set = await call("set_recipe_variant", {
+                recipe_id: soup.id,
+                member_id: ownerId,
+                action: "amount",
+                ingredient_id: soup.ingredient,
+                amount: 50,
+                unit: "g",
+            });
+            expect(set.isError).toBeFalsy();
+            const [version] = await rows(
+                "select id from public.recipe_variant_overrides",
+            );
+            return {
+                tool: "clear_recipe_variant",
+                args: { recipe_id: soup.id, member_id: ownerId },
+                summary: "Cleared 1 change to a recipe version",
+                changed: async () =>
+                    expect(await count("recipe_variant_overrides")).toBe(0),
+                restored: async () => {
+                    const back = await rows(
+                        "select id, amount::float as amount, unit from public.recipe_variant_overrides",
+                    );
+                    expect(back).toEqual([
+                        { id: version!.id, amount: 50, unit: "g" },
                     ]);
                 },
             };
@@ -667,6 +726,16 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 amount: 2,
                 unit: "each",
             });
+            // The owner's own version adds the dropped food as well.
+            const versioned = await call("set_recipe_variant", {
+                recipe_id: soup.id,
+                member_id: ownerId,
+                action: "add",
+                food_id: drop,
+                amount: 3,
+                unit: "each",
+            });
+            expect(versioned.isError).toBeFalsy();
             const refsTo = async (id: string) => ({
                 barcode: (
                     await rows(
@@ -702,6 +771,12 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                         id,
                     )
                 )[0]!.n,
+                version: (
+                    await rows(
+                        "select count(*)::int as n from public.recipe_variant_overrides where food_id = $1",
+                        id,
+                    )
+                )[0]!.n,
             });
             const before = await fingerprint();
             return {
@@ -717,6 +792,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                         line: keep,
                         ingredient: 1,
                         movements: 1,
+                        version: 1,
                     });
                     const [dropped] = await rows(
                         "select archived_at from public.foods where id = $1",
@@ -732,6 +808,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                         line: drop,
                         ingredient: 1,
                         movements: 1,
+                        version: 1,
                     });
                     expect(await ledgerBalanced(drop)).toBe(true);
                     // Every column is as it was; updated_at is bookkeeping that
@@ -762,6 +839,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 "remove_recipe_ingredient",
                 "set_nutrition_goals",
                 "unplan_recipe",
+                "clear_recipe_variant",
             ].sort(),
         );
     });
@@ -999,6 +1077,328 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         });
     });
 
+    // ---------- recipe versions: every reader agrees on what a person needs ----------
+
+    describe("recipe versions across the tools", () => {
+        const text = (result: Result) =>
+            result.content.map((part) => part.text).join("\n");
+        const tomorrow = (from?: string) =>
+            new Date(
+                (from ? Date.parse(`${from}T00:00:00Z`) : Date.now()) +
+                    86400000,
+            )
+                .toISOString()
+                .slice(0, 10);
+
+        test("a recipe that lists one food twice is netted once, whoever has a version", async () => {
+            const made = await call("create_recipe", {
+                name: "Bread",
+                yield_portions: 2,
+            });
+            const recipeId = made.structuredContent!.id as string;
+            const flour = await food("Flour");
+            const salt = await food("Salt");
+            for (const [foodId, amount, unit] of [
+                [flour, 300, "g"],
+                [flour, 0.2, "kg"],
+                [salt, 10, "g"],
+            ] as const) {
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: foodId,
+                    amount,
+                    unit,
+                });
+            }
+            await call("verify_recipe", { id: recipeId });
+            await fridgeItem(flour, 200);
+            const bee = await addMember();
+            const shop = async () => {
+                const result = await call("add_recipe_to_grocery", {
+                    recipe_id: recipeId,
+                    store_id: storeId,
+                    member_ids: [ownerId],
+                });
+                expect(result.isError).toBeFalsy();
+                const lines = await rows(
+                    "select display_name, amount::float as amount, unit from public.grocery_lines order by display_name",
+                );
+                await getCtx().sql`delete from public.grocery_lines`;
+                return lines;
+            };
+            const alone = await shop();
+            // One portion of a yield of 2 needs 250 g of the 500 g; 200 g are in the
+            // fridge, so one line of 50 g.
+            expect(
+                alone.filter((line) => line.display_name === "Flour"),
+            ).toEqual([{ display_name: "Flour", amount: 50, unit: "g" }]);
+            const [saltIngredient] = await rows(
+                "select id from public.recipe_ingredients where food_id = $1",
+                salt,
+            );
+            await getCtx().sql`
+                insert into public.recipe_variant_overrides (
+                    household_id, recipe_id, user_id, ingredient_id, action
+                )
+                values (${householdId}, ${recipeId}, ${bee}, ${saltIngredient!.id}, 'remove')
+            `;
+            // Someone else's unrelated version changes nothing for the owner.
+            expect(await shop()).toEqual(alone);
+        });
+
+        for (const era of ERAS) {
+            test(`a notice only a person's version creates can be dismissed (${JSON.stringify(era)})`, async () => {
+                const made = await call("create_recipe", {
+                    name: "Soup",
+                    yield_portions: 1,
+                });
+                const recipeId = made.structuredContent!.id as string;
+                const pasta = await food("Pasta");
+                const rice = await food("Rice");
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: pasta,
+                    amount: 200,
+                    unit: "g",
+                });
+                const [ingredient] = await rows(
+                    "select id from public.recipe_ingredients where recipe_id = $1",
+                    recipeId,
+                );
+                await call("verify_recipe", { id: recipeId });
+                await fridgeItem(pasta, 1000);
+                const swapped = await call("set_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: ownerId,
+                    action: "food",
+                    ingredient_id: ingredient!.id,
+                    food_id: rice,
+                });
+                expect(swapped.isError).toBeFalsy();
+                const today = (await call("get_week_plan", {}, era))
+                    .structuredContent!.today as string;
+                const planned = await call(
+                    "plan_recipe",
+                    {
+                        recipe_id: recipeId,
+                        date: tomorrow(today),
+                        slot: "dinner",
+                        member_ids: [ownerId],
+                    },
+                    era,
+                );
+                expect(planned.isError).toBeFalsy();
+                const week = await call("get_week_plan", {}, era);
+                const notices = week.structuredContent!.notices as any[];
+                expect(notices).toHaveLength(1);
+                const { dismiss } = notices[0];
+                const out = await call(
+                    "dismiss_notice",
+                    {
+                        code: dismiss.code,
+                        subject_kind: dismiss.subject_kind,
+                        subject_id: dismiss.subject_id,
+                        related_id: dismiss.related_id ?? undefined,
+                    },
+                    era,
+                );
+                expect(out.isError).toBeFalsy();
+            });
+        }
+
+        test("a plan naming a person whose version leaves the allergen out raises no allergen notice; a plan naming nobody does", async () => {
+            const { sql } = getCtx();
+            await sql`
+                insert into public.member_allergens (household_id, user_id, allergen)
+                values (${householdId}, ${ownerId}, 'peanut')
+            `;
+            const made = await call("create_recipe", {
+                name: "Satay",
+                yield_portions: 1,
+            });
+            const recipeId = made.structuredContent!.id as string;
+            const butter = await food("Peanut butter");
+            await sql`update public.foods set allergens = ${sql.array(["peanut"], "text")} where id = ${butter}::uuid`;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: butter,
+                amount: 20,
+                unit: "g",
+            });
+            const [ingredient] = await rows(
+                "select id from public.recipe_ingredients where recipe_id = $1",
+                recipeId,
+            );
+            await call("verify_recipe", { id: recipeId });
+            const left = await call("set_recipe_variant", {
+                recipe_id: recipeId,
+                member_id: ownerId,
+                action: "remove",
+                ingredient_id: ingredient!.id,
+            });
+            expect(left.isError).toBeFalsy();
+            const allergenNotices = async () =>
+                (
+                    (await call("list_notices", {})).structuredContent!
+                        .notifications as { kind: string }[]
+                ).filter((row) => row.kind === "allergens").length;
+            const today = (await call("get_week_plan")).structuredContent!
+                .today as string;
+            const date = tomorrow(today);
+            const named = await call("plan_recipe", {
+                recipe_id: recipeId,
+                date,
+                slot: "dinner",
+                member_ids: [ownerId],
+            });
+            expect(named.isError).toBeFalsy();
+            expect(await allergenNotices()).toBe(0);
+            // The same recipe planned for nobody in particular is the base.
+            const open = await call("plan_recipe", {
+                recipe_id: recipeId,
+                date,
+                slot: "lunch",
+            });
+            expect(open.isError).toBeFalsy();
+            expect(await allergenNotices()).toBe(1);
+        });
+
+        test("an upper-case member id reads the same version as the stored one", async () => {
+            const soup = await recipe();
+            const set = await call("set_recipe_variant", {
+                recipe_id: soup.id,
+                member_id: ownerId,
+                action: "amount",
+                ingredient_id: soup.ingredient,
+                amount: 50,
+                unit: "g",
+            });
+            expect(set.isError).toBeFalsy();
+            const lower = await call("get_recipe", {
+                id: soup.id,
+                member_id: ownerId,
+            });
+            const upper = await call("get_recipe", {
+                id: soup.id,
+                member_id: ownerId.toUpperCase(),
+            });
+            expect(lower.structuredContent!.variant).not.toBeNull();
+            expect(upper.structuredContent!.variant).toEqual(
+                lower.structuredContent!.variant,
+            );
+            const first = await call("add_recipe_to_grocery", {
+                recipe_id: soup.id,
+                member_ids: [ownerId],
+                store_id: storeId,
+            });
+            await getCtx().sql`delete from public.grocery_lines`;
+            const second = await call("add_recipe_to_grocery", {
+                recipe_id: soup.id,
+                member_ids: [ownerId.toUpperCase()],
+                store_id: storeId,
+            });
+            expect(second.structuredContent!.remainder).toEqual(
+                first.structuredContent!.remainder,
+            );
+            const need = (second.structuredContent!.remainder as any[])[0];
+            // 50 g is the amount for the whole yield of 2: one portion is 25 g.
+            expect(need.need).toEqual({ amount: 25, unit: "g" });
+        });
+
+        test("planning for one person sizes the plan from their portions, so what their version leaves out is not missing", async () => {
+            const soup = await recipe();
+            const set = await call("set_recipe_variant", {
+                recipe_id: soup.id,
+                member_id: ownerId,
+                action: "remove",
+                ingredient_id: soup.ingredient,
+            });
+            expect(set.isError).toBeFalsy();
+            const planned = await call("plan_recipe", {
+                recipe_id: soup.id,
+                date: tomorrow(),
+                slot: "dinner",
+                member_ids: [ownerId],
+            });
+            expect(planned.isError).toBeFalsy();
+            const [plan] = await rows(
+                "select servings::float as servings from public.recipe_plans",
+            );
+            expect(plan!.servings).toBe(1);
+            const week = await call("get_week_plan", {});
+            expect(week.structuredContent!.missing).toEqual([]);
+            const grocery = await call("add_recipe_to_grocery", {
+                recipe_id: soup.id,
+                member_ids: [ownerId],
+                store_id: storeId,
+            });
+            expect(grocery.isError).toBeFalsy();
+            expect(await count("grocery_lines")).toBe(0);
+        });
+
+        test("clear_recipe_variant refuses a blank ingredient_id and clears nothing", async () => {
+            const soup = await recipe();
+            const set = await call("set_recipe_variant", {
+                recipe_id: soup.id,
+                member_id: ownerId,
+                action: "remove",
+                ingredient_id: soup.ingredient,
+            });
+            expect(set.isError).toBeFalsy();
+            for (const blank of ["", "   "]) {
+                const refused = await call("clear_recipe_variant", {
+                    recipe_id: soup.id,
+                    member_id: ownerId,
+                    ingredient_id: blank,
+                });
+                expect(refused.isError).toBe(true);
+                expect(text(refused)).toContain(
+                    "Name the change to clear, or leave ingredient_id out to clear the whole version.",
+                );
+            }
+            expect(await count("recipe_variant_overrides")).toBe(1);
+            expect(await actions()).toEqual([]);
+        });
+
+        test("two versions of one food in g and kg are netted against the stock once", async () => {
+            const soup = await recipe();
+            const bee = await seedMember(getCtx().sql, householdId, {
+                role: "member",
+                displayName: "Bee",
+            });
+            // Soup yields 2 on 200 g flour: one portion is 100 g. Bee's version
+            // writes 0.2 kg for the yield, so her portion is 100 g too: 200 g
+            // are needed and 150 g are in stock.
+            const set = await callTool(
+                { kind: "user", userId: bee, client: "Claude" },
+                "legacy",
+                "set_recipe_variant",
+                {
+                    recipe_id: soup.id,
+                    member_id: bee,
+                    action: "amount",
+                    ingredient_id: soup.ingredient,
+                    amount: 0.2,
+                    unit: "kg",
+                },
+            );
+            expect(set.isError).toBeFalsy();
+            await fridgeItem(await food("Flour"), 150);
+            const result = await call("add_recipe_to_grocery", {
+                recipe_id: soup.id,
+                member_ids: [ownerId, bee],
+                store_id: storeId,
+            });
+            expect(result.isError).toBeFalsy();
+            const lines = await rows(
+                "select amount::float as amount, unit from public.grocery_lines",
+            );
+            expect(lines).toHaveLength(1);
+            expect(lines[0]!.unit).toBe("g");
+            expect(lines[0]!.amount).toBeCloseTo(50, 6);
+        });
+    });
+
     // ---------- who may delete: household off, own switch, role ----------
 
     describe("the person's own switch, the household's off and the role", () => {
@@ -1167,6 +1567,67 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             expect(refusedHousehold.isError).toBe(true);
             expect(text(refusedHousehold)).toContain(REFUSAL);
             expect(await count("grocery_lines")).toBe(1);
+        });
+
+        test("clear_recipe_variant is refused while the person's own switch is Off, and recorded and undoable once it is On", async () => {
+            const bee = await personFor("member", false);
+            const beeId = (bee as { userId: string }).userId;
+            const soup = await recipe();
+            const set = await call(
+                "set_recipe_variant",
+                {
+                    recipe_id: soup.id,
+                    member_id: beeId,
+                    action: "remove",
+                    ingredient_id: soup.ingredient,
+                },
+                "legacy",
+                bee,
+            );
+            // Changing one's own version is not a deletion: the switch does not stop it.
+            expect(set.isError).toBeFalsy();
+            const args = { recipe_id: soup.id, member_id: beeId };
+            const before = await fingerprint();
+            for (const era of ERAS) {
+                const refused = await call(
+                    "clear_recipe_variant",
+                    args,
+                    era,
+                    bee,
+                );
+                expect(refused.isError).toBe(true);
+                expect(text(refused)).toContain(PERSON_REFUSAL);
+            }
+            expect(await fingerprint()).toBe(before);
+            expect(await actions()).toEqual([]);
+
+            await setOwn(bee, true);
+            const done = await call(
+                "clear_recipe_variant",
+                args,
+                "legacy",
+                bee,
+            );
+            expect(done.isError).toBeFalsy();
+            expect(text(done)).toContain(UNDO_SENTENCE);
+            expect(await count("recipe_variant_overrides")).toBe(0);
+            const [entry] = await actions();
+            expect(entry).toMatchObject({
+                member_id: beeId,
+                tool: "clear_recipe_variant",
+            });
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await count("recipe_variant_overrides")).toBe(1);
+        });
+
+        test("clear_recipe_variant on an id that is not a recipe says so", async () => {
+            const refused = await call("clear_recipe_variant", {
+                recipe_id: "not-a-uuid",
+                member_id: ownerId,
+            });
+            expect(refused.isError).toBe(true);
+            expect(text(refused)).toContain("Unknown recipe.");
+            expect(text(refused)).not.toContain("invalid input syntax");
         });
 
         test("the bulk tier follows the same switches: clearing and deleting many", async () => {
@@ -1590,6 +2051,38 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 dislike!.id,
             ),
         ).toEqual([{ food_id: drop }]);
+    });
+
+    test("merging two foods one person added to a recipe folds them into one row, and undo brings both back", async () => {
+        const keep = await food("Peas", true);
+        const drop = await food("Green peas", true);
+        const soup = await recipe();
+        const { sql } = getCtx();
+        for (const [foodId, name, amount, unit] of [
+            [keep, "Peas", 40, "g"],
+            [drop, "Green peas", 0.06, "kg"],
+        ] as const) {
+            await sql`
+                insert into public.recipe_variant_overrides (
+                    household_id, recipe_id, user_id, action, food_id, display_name, amount, unit
+                )
+                values (${householdId}, ${soup.id}, ${ownerId}, 'add', ${foodId}, ${name}, ${amount}, ${unit})
+            `;
+        }
+        const before = await fingerprint();
+        const merged = await call("merge_foods", {
+            keep_id: keep,
+            drop_id: drop,
+        });
+        expect(merged.isError).toBeFalsy();
+        expect(
+            await rows(
+                "select food_id, amount::float as amount, unit from public.recipe_variant_overrides",
+            ),
+        ).toEqual([{ food_id: keep, amount: 100, unit: "g" }]);
+        const [entry] = await actions();
+        expect((await undo(entry!.id)).status).toBe("undone");
+        expect(await fingerprint()).toBe(before);
     });
 
     test("clearing the checked lines deletes exactly the lines it recorded", async () => {
@@ -3458,6 +3951,165 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                     { user_id: ownerId, portion_count: 1 },
                     { user_id: a, portion_count: 2 },
                 ]);
+            });
+
+            test("set_recipe_variant and clear_recipe_variant touch only the version of the person the agent acts for", async () => {
+                const [line] = await rows(
+                    "select id from public.recipe_ingredients where recipe_id = $1",
+                    recipeId,
+                );
+                const ingredient = line!.id as string;
+                // Bea's own version, made by her own agent.
+                const bea = await call(
+                    "set_recipe_variant",
+                    {
+                        recipe_id: recipeId,
+                        member_id: b,
+                        action: "remove",
+                        ingredient_id: ingredient,
+                    },
+                    "legacy",
+                    asB,
+                );
+                expect(bea.isError).toBeFalsy();
+                const before = await fingerprint();
+                for (const era of ERAS) {
+                    for (const who of [asA, token]) {
+                        for (const [tool, args] of [
+                            [
+                                "set_recipe_variant",
+                                {
+                                    recipe_id: recipeId,
+                                    member_id: b,
+                                    action: "remove",
+                                    ingredient_id: ingredient,
+                                },
+                            ],
+                            [
+                                "clear_recipe_variant",
+                                { recipe_id: recipeId, member_id: b },
+                            ],
+                        ] as const) {
+                            const refused = await call(tool, args, era, who);
+                            expect(refused.isError).toBe(true);
+                            expect(text(refused)).toContain(OTHER_PERSON);
+                        }
+                    }
+                }
+                expect(await fingerprint()).toBe(before);
+                expect(await actions()).toEqual([]);
+
+                // Ann's own: set, then clear, which leaves Bea's alone.
+                const own = await call(
+                    "set_recipe_variant",
+                    {
+                        recipe_id: recipeId,
+                        member_id: a,
+                        action: "amount",
+                        ingredient_id: ingredient,
+                        amount: 20,
+                        unit: "g",
+                    },
+                    "legacy",
+                    asA,
+                );
+                expect(own.isError).toBeFalsy();
+                expect(await count("recipe_variant_overrides")).toBe(2);
+                const cleared = await call(
+                    "clear_recipe_variant",
+                    { recipe_id: recipeId, member_id: a },
+                    "legacy",
+                    asA,
+                );
+                expect(cleared.isError).toBeFalsy();
+                expect(text(cleared)).toContain(UNDO_SENTENCE);
+                expect(
+                    (
+                        await rows(
+                            "select user_id from public.recipe_variant_overrides",
+                        )
+                    ).map((row) => row.user_id),
+                ).toEqual([b]);
+                const [entry] = await actions();
+                expect(entry).toMatchObject({
+                    member_id: a,
+                    tool: "clear_recipe_variant",
+                });
+                expect((await undo(entry!.id)).status).toBe("undone");
+                expect(await count("recipe_variant_overrides")).toBe(2);
+            });
+
+            test("a cook sizes the stock by every listed member's version and logs only the acting person's meal", async () => {
+                const [line] = await rows(
+                    "select id from public.recipe_ingredients where recipe_id = $1",
+                    recipeId,
+                );
+                const ingredient = line!.id as string;
+                // Yield 2, 200 g of oats: Ann halves hers, Bea doubles hers.
+                for (const [who, member, amount] of [
+                    [asA, a, 100],
+                    [asB, b, 400],
+                ] as const) {
+                    const set = await call(
+                        "set_recipe_variant",
+                        {
+                            recipe_id: recipeId,
+                            member_id: member,
+                            action: "amount",
+                            ingredient_id: ingredient,
+                            amount,
+                            unit: "g",
+                        },
+                        "legacy",
+                        who,
+                    );
+                    expect(set.isError).toBeFalsy();
+                }
+                for (const era of ERAS) {
+                    const sized = await call(
+                        "cook_recipe",
+                        {
+                            recipe_id: recipeId,
+                            portions_by_member: [
+                                { user_id: a, portions: 1 },
+                                { user_id: b, portions: 1 },
+                            ],
+                            log_meals: false,
+                        },
+                        era,
+                        asA,
+                    );
+                    expect(sized.isError).toBeFalsy();
+                    // Of 200 g's yield 2: 100 g halved for Ann, 400 g halved for Bea.
+                    expect(await fridgeAmount()).toBe(500 - 50 - 200);
+                    await getCtx().sql`
+                        update public.fridge_items set amount = 500 where id = ${fridgeId}
+                    `;
+                }
+                expect(await mealsOf(a)).toBe(0);
+                expect(await mealsOf(b)).toBe(0);
+
+                const cooked = await call(
+                    "cook_recipe",
+                    {
+                        recipe_id: recipeId,
+                        portions_by_member: [{ user_id: a, portions: 1 }],
+                        total_portions: 2,
+                    },
+                    "legacy",
+                    asA,
+                );
+                expect(cooked.isError).toBeFalsy();
+                // Ann's portion from her version (50 g), the other at the base (100 g).
+                expect(await fridgeAmount()).toBe(350);
+                expect(await mealsOf(a)).toBe(1);
+                expect(await mealsOf(b)).toBe(0);
+                const [meal] = await rows(
+                    "select calories::float as calories from public.meals where user_id = $1",
+                    a,
+                );
+                // 100 kcal per 100 g of oats: half of Ann's 100 g batch is 50 g.
+                expect(meal!.calories).toBe(50);
             });
 
             test("cook_recipe logs a meal only for the person the agent acts for, and cooks nothing otherwise", async () => {

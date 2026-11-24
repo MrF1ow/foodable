@@ -182,6 +182,7 @@ export function can(
 export const TOOL_ACTIONS = {
     clear_checked_grocery_lines: "grocery.edit",
     clear_grocery_list: "grocery.edit",
+    clear_recipe_variant: "recipe.edit",
     delete_fridge_item: "fridge.edit",
     delete_fridge_items: "fridge.edit",
     delete_fridge_location: "fridge.edit",

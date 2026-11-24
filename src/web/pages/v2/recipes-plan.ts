@@ -23,6 +23,7 @@ import {
     type RecipePlan,
 } from "../../../domain/plan.js";
 import {
+    countedServings,
     missingForPlan,
     WEEK_PLAN_DAYS,
     weekPlan,
@@ -70,9 +71,12 @@ export type WeekPlanEntry = {
     recipeId: string;
     recipeName: string;
     slot: PlanSlot;
+    /** What the plan counts: a named plan's people's portions as saved now. */
     servings: number;
     yieldPortions: number;
     date: string;
+    /** The plan is for named people: it has no servings of its own to edit. */
+    named: boolean;
 };
 
 export type WeekPlanDayView = {
@@ -186,9 +190,10 @@ export function buildWeekPlanView(input: {
                         recipeId: p.recipeId,
                         recipeName: recipe.name,
                         slot: p.slot,
-                        servings: p.servings,
+                        servings: countedServings(p, recipe.versions),
                         yieldPortions: recipe.yieldPortions,
                         date: p.date,
+                        named: (p.memberIds?.length ?? 0) > 0,
                     },
                 ];
             }),
@@ -243,10 +248,13 @@ function planFields(opts: {
     slot: string;
     servings: number;
     yieldPortions: number;
+    /** A plan for named people has no servings to set: it follows their portions. */
+    named?: boolean;
 }): string {
-    return `<label class="fd-plan-field"><span class="fd-plan-field__label">Day</span><input type="date" name="date" value="${esc(opts.date)}" min="${esc(opts.today)}" required /></label>
-<label class="fd-plan-field"><span class="fd-plan-field__label">Meal</span><span class="fd-plan-select"><select name="slot">${slotOptions(opts.slot)}</select></span></label>
-<p class="fd-plan-field__label">Servings</p>
+    const servingsField = opts.named
+        ? `<p class="fd-plan-field__label">Servings</p>
+<p class="fd-plan-named">${esc(`${opts.servings} ${servingsUnit(opts.servings)}: the portions of the people it is for. Change their portions to change it.`)}</p>`
+        : `<p class="fd-plan-field__label">Servings</p>
 ${String(
     stepper({
         name: "servings",
@@ -260,6 +268,9 @@ ${String(
         className: "fd-plan-stepper",
     }),
 )}`;
+    return `<label class="fd-plan-field"><span class="fd-plan-field__label">Day</span><input type="date" name="date" value="${esc(opts.date)}" min="${esc(opts.today)}" required /></label>
+<label class="fd-plan-field"><span class="fd-plan-field__label">Meal</span><span class="fd-plan-select"><select name="slot">${slotOptions(opts.slot)}</select></span></label>
+${servingsField}`;
 }
 
 export type PlanSheetView = {
@@ -351,6 +362,7 @@ ${hidden("back", back)}${err}${planFields({
                         ? draftServings
                         : plan.servings,
                 yieldPortions: plan.yieldPortions,
+                named: plan.named,
             })}
 </form>
 <form id="${esc(removeId)}" method="post" action="/recipes/plan/${esc(plan.id)}/remove">${hidden("back", back)}</form>`;

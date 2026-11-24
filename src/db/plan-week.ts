@@ -8,6 +8,8 @@ import { listFridge } from "../domain/fridge.js";
 import type { RecipePlan } from "../domain/plan.js";
 import {
     addPlanDays,
+    loadPlanVersionSources,
+    versionFoodIds,
     planRecipesOf,
     WEEK_PLAN_DAYS,
     type PlanRecipe,
@@ -16,7 +18,7 @@ import type { RecipeIngredient } from "../domain/recipes.js";
 import { liveFoodsStore } from "./foods.js";
 import { liveFridgeStore } from "./fridge.js";
 import { liveRecipePlansStore } from "./plans.js";
-import { liveRecipesStore } from "./recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "./recipes.js";
 import { householdToday } from "./restock.js";
 
 /** What the week's plan is worked out from; the missing-to-groceries route reads it too. */
@@ -64,13 +66,20 @@ export async function loadWeekPlanInputs(
         recipesStore.listIngredientsForHousehold(householdId),
         listFridge(liveFridgeStore(), householdId),
     ]);
-    const recipes = planRecipesOf(plans, allRecipes, allIngredients);
+    const versions = await loadPlanVersionSources(
+        { recipes: recipesStore, variants: liveRecipeVariantsStore() },
+        householdId,
+        plans,
+        allIngredients,
+    );
+    const recipes = planRecipesOf(plans, allRecipes, allIngredients, versions);
     const planned = new Set(plans.map((p) => p.recipeId));
     const plannedIngredients = allIngredients.filter((row) =>
         planned.has(row.recipeId),
     );
     const foodsById = await effectiveFoodsByIds(liveFoodsStore(), householdId, [
         ...plannedIngredients.map((row) => row.foodId),
+        ...versionFoodIds(versions),
         ...fridge.items.map((item) => item.foodId),
     ]);
     return {

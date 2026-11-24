@@ -162,6 +162,103 @@ describe("planRecipe", () => {
         });
     });
 
+    test("a plan keeps the people it is for, and the plan already there keeps its own", async () => {
+        const store = createMemoryPlansStore();
+        const out = await planRecipe(store, {
+            ...base,
+            memberIds: ["alice", "bob", "alice"],
+        });
+        expect(out?.plan.memberIds).toEqual(["alice", "bob"]);
+        const again = await planRecipe(store, {
+            ...base,
+            memberIds: ["carol"],
+        });
+        expect(again?.alreadyPlanned).toBe(true);
+        expect(again?.plan.memberIds).toEqual(["alice", "bob"]);
+        const none = await planRecipe(store, { ...base, slot: "lunch" });
+        expect(none?.plan.memberIds).toEqual([]);
+    });
+
+    test("named people plan exactly their saved portions, one when they have none, whatever servings are given", async () => {
+        const store = createMemoryPlansStore();
+        const out = await planRecipe(store, {
+            ...base,
+            memberIds: ["alice", "bob"],
+            memberPortions: { alice: 2 },
+        });
+        // Alice eats 2, Bob has no saved portion and counts 1: 3, not the yield of 4.
+        expect(out?.plan.servings).toBe(3);
+        const one = await planRecipe(store, {
+            ...base,
+            slot: "lunch",
+            memberIds: ["bob"],
+        });
+        expect(one?.plan.servings).toBe(1);
+        // Servings given with people are ignored: the plan is exactly their
+        // portions (Alice 2, not 6).
+        const asked = await planRecipe(store, {
+            ...base,
+            slot: "snack",
+            servings: 6,
+            memberIds: ["alice"],
+            memberPortions: { alice: 2 },
+        });
+        expect(asked?.plan.servings).toBe(2);
+        // A plan that names nobody keeps the servings asked for, or the yield.
+        const sixes = await planRecipe(store, {
+            ...base,
+            slot: "dinner",
+            date: "2026-11-14",
+            servings: 6,
+        });
+        expect(sixes?.plan.servings).toBe(6);
+        const nobody = await planRecipe(store, { ...base, slot: "breakfast" });
+        expect(nobody?.plan.servings).toBe(4);
+    });
+
+    test("an upper-case member id is stored and sized as its lower-case form", async () => {
+        const store = createMemoryPlansStore();
+        const out = await planRecipe(store, {
+            ...base,
+            memberIds: ["ALICE"],
+            memberPortions: { alice: 2 },
+        });
+        expect(out?.plan.memberIds).toEqual(["alice"]);
+        expect(out?.plan.servings).toBe(2);
+    });
+
+    test("a repeat keeps its people, and one day moved off it takes them along", async () => {
+        const store = createMemoryPlansStore();
+        const out = await planRecipe(store, {
+            ...base,
+            repeat: "daily",
+            memberIds: ["alice"],
+        });
+        expect(out?.plan.memberIds).toEqual(["alice"]);
+        const moved = await store.movePlan(
+            HH,
+            out!.plan.id,
+            "2026-11-20",
+            "lunch",
+        );
+        expect(moved?.alreadyPlanned).toBe(false);
+        expect(moved?.plan.memberIds).toEqual(["alice"]);
+        expect(moved?.plan.id.startsWith("rule:")).toBe(false);
+    });
+
+    test("members must be a list of ids", async () => {
+        const store = createMemoryPlansStore();
+        await expect(
+            planRecipe(store, { ...base, memberIds: [""] }),
+        ).rejects.toBeInstanceOf(PlanInputError);
+        await expect(
+            planRecipe(store, {
+                ...base,
+                memberIds: "alice" as unknown as string[],
+            }),
+        ).rejects.toBeInstanceOf(PlanInputError);
+    });
+
     test("the same recipe, day and slot twice is one plan", async () => {
         const store = createMemoryPlansStore();
         const first = await planRecipe(store, base);
@@ -431,6 +528,45 @@ describe("week plan notifications", () => {
         );
         expect(moved?.plan.servings).toBe(6);
         expect(await notifications.listForHousehold(HH)).toEqual([]);
+    });
+
+    test("movePlannedRecipe refuses servings on a plan for named people, and still moves it", async () => {
+        const { notify } = await household([ALICE, BOB]);
+        const { recipes, plans, input } = await setup();
+        const planned = await planRecipe(plans, {
+            ...input,
+            memberIds: [ALICE],
+            memberPortions: { [ALICE]: 2 },
+        });
+        expect(planned!.plan.servings).toBe(2);
+        await expect(
+            movePlannedRecipe(
+                plans,
+                HH,
+                planned!.plan,
+                {
+                    date: planned!.plan.date,
+                    slot: planned!.plan.slot,
+                    servings: 5,
+                },
+                { recipes, notify },
+            ),
+        ).rejects.toThrow(
+            "This plan is for named people; change their portions instead.",
+        );
+        expect((await plans.getPlan(HH, planned!.plan.id))?.servings).toBe(2);
+        const moved = await movePlannedRecipe(
+            plans,
+            HH,
+            planned!.plan,
+            { date: "2026-11-14", slot: "lunch" },
+            { recipes, notify },
+        );
+        expect(moved?.plan).toMatchObject({
+            date: "2026-11-14",
+            memberIds: [ALICE],
+            servings: 2,
+        });
     });
 
     test("movePlannedRecipe onto the same recipe already planned there is already planned: nothing moves and nothing is sent", async () => {
@@ -1539,9 +1675,22 @@ describe("expandRules", () => {
             date: "2026-11-03",
             slot: "dinner",
             servings: 2,
+            memberIds: [],
             createdBy: null,
             createdAt: "2026-11-01T10:00:00+00:00",
         });
+    });
+
+    test("an entry carries the people its repeat is for", () => {
+        const entries = expandRules(
+            [rule({ memberIds: ["alice", "bob"] })],
+            "2026-11-03",
+            "2026-11-04",
+        );
+        expect(entries.map((e) => e.memberIds)).toEqual([
+            ["alice", "bob"],
+            ["alice", "bob"],
+        ]);
     });
 
     test("every day fills the range, starting on the start day", () => {

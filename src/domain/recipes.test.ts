@@ -9,6 +9,10 @@ import {
 import { createMemoryGroceryStore, listGrocery } from "./grocery.js";
 import { recipeToGroceryRemainder } from "./linking.js";
 import { RecipeUnverifiedError } from "./recipe-import.js";
+import {
+    createMemoryVariantsStore,
+    setRecipeVariant,
+} from "./recipe-variants.js";
 import { cookRecipe, createMemoryStockStore } from "./stock.js";
 import {
     addRecipeIngredientByBarcode,
@@ -2218,4 +2222,188 @@ describe("deleteRecipe notifications", () => {
             }),
         ).toBe(true);
     });
+});
+
+test("addRecipeToGrocery totals each member's version at their portion count", async () => {
+    const recipes = createMemoryRecipesStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const foods = createMemoryFoodsStore();
+    const variants = createMemoryVariantsStore();
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Mac",
+        yieldPortions: 4,
+    });
+    const pasta = await addRecipeManualIngredient(recipes, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Pasta",
+        amount: 400,
+        unit: "g",
+    });
+    const cheese = await addRecipeManualIngredient(recipes, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Cheese",
+        amount: 200,
+        unit: "g",
+    });
+    const store = await createGroceryStore(settings, HH, "Shop");
+    await setRecipeVariant(recipes, foods, variants, {
+        householdId: HH,
+        recipeId: recipe.id,
+        userId: ALICE,
+        action: "remove",
+        ingredientId: cheese.id,
+    });
+    await setRecipeVariant(recipes, foods, variants, {
+        householdId: HH,
+        recipeId: recipe.id,
+        userId: BOB,
+        action: "amount",
+        ingredientId: pasta.id,
+        amount: 800,
+        unit: "g",
+    });
+    const result = await addRecipeToGrocery({
+        recipes,
+        grocery,
+        settings,
+        foods,
+        fridgeItems: [],
+        householdId: HH,
+        recipeId: recipe.id,
+        storeId: store.id,
+        portionCounts: [1, 2],
+        members: [
+            { userId: ALICE, portions: 1 },
+            { userId: BOB, portions: 2 },
+        ],
+        variants,
+    });
+    expect(result.totalPortions).toBe(3);
+    const amounts = Object.fromEntries(
+        result.added.map((line) => [line.displayName, line.quantity]),
+    );
+    // Alice 1/4 x 400 + Bob 2/4 x 800; cheese only for Bob, 2/4 x 200.
+    expect(amounts).toEqual({
+        Pasta: { amount: 500, unit: "g" },
+        Cheese: { amount: 100, unit: "g" },
+    });
+});
+
+test("addRecipeToGrocery without members shops the base even when versions exist", async () => {
+    const recipes = createMemoryRecipesStore();
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const foods = createMemoryFoodsStore();
+    const variants = createMemoryVariantsStore();
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Mac",
+        yieldPortions: 4,
+    });
+    const cheese = await addRecipeManualIngredient(recipes, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Cheese",
+        amount: 200,
+        unit: "g",
+    });
+    const store = await createGroceryStore(settings, HH, "Shop");
+    await setRecipeVariant(recipes, foods, variants, {
+        householdId: HH,
+        recipeId: recipe.id,
+        userId: ALICE,
+        action: "remove",
+        ingredientId: cheese.id,
+    });
+    const result = await addRecipeToGrocery({
+        recipes,
+        grocery,
+        settings,
+        foods,
+        fridgeItems: [],
+        householdId: HH,
+        recipeId: recipe.id,
+        storeId: store.id,
+        portionCounts: [],
+        totalPortions: 2,
+        variants,
+    });
+    expect(result.added.map((line) => line.quantity)).toEqual([
+        { amount: 100, unit: "g" },
+    ]);
+});
+
+test("getRecipeView shows the member's own version, and the base to anyone without one", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const variants = createMemoryVariantsStore();
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: ALICE,
+        name: "Mac",
+        yieldPortions: 4,
+    });
+    const pasta = await addRecipeManualIngredient(recipes, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Pasta",
+        amount: 400,
+        unit: "g",
+    });
+    const cheese = await addRecipeManualIngredient(recipes, foods, {
+        householdId: HH,
+        recipeId: recipe.id,
+        name: "Cheese",
+        amount: 200,
+        unit: "g",
+    });
+    await setPersonPortion(recipes, {
+        householdId: HH,
+        recipeId: recipe.id,
+        userId: ALICE,
+        portionCount: 2,
+    });
+    await setRecipeVariant(recipes, foods, variants, {
+        householdId: HH,
+        recipeId: recipe.id,
+        userId: ALICE,
+        action: "amount",
+        ingredientId: pasta.id,
+        amount: 800,
+        unit: "g",
+    });
+    await setRecipeVariant(recipes, foods, variants, {
+        householdId: HH,
+        recipeId: recipe.id,
+        userId: ALICE,
+        action: "remove",
+        ingredientId: cheese.id,
+    });
+    const alice = await getRecipeView(recipes, HH, recipe.id, ALICE, variants);
+    expect(alice.ingredients.map((row) => row.displayName)).toEqual(["Pasta"]);
+    expect(alice.ingredients[0]).toMatchObject({
+        perPortionAmount: 200,
+        personAmount: 400,
+        change: "amount",
+    });
+    expect(alice.variant).toMatchObject({ overrideCount: 2 });
+    expect(alice.variant?.removed.map((row) => row.displayName)).toEqual([
+        "Cheese",
+    ]);
+    const bob = await getRecipeView(recipes, HH, recipe.id, BOB, variants);
+    expect(bob.ingredients.map((row) => row.displayName)).toEqual([
+        "Pasta",
+        "Cheese",
+    ]);
+    expect(bob.ingredients[0]?.personAmount).toBe(100);
+    expect(bob.variant).toBeNull();
+    const base = await getRecipeView(recipes, HH, recipe.id, ALICE);
+    expect(base.ingredients).toHaveLength(2);
+    expect(base.variant).toBeNull();
 });

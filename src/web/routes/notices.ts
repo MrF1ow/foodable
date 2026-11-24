@@ -12,7 +12,7 @@ import { liveFridgeStore } from "../../db/fridge.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
 import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
-import { liveRecipesStore } from "../../db/recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "../../db/recipes.js";
 import { householdClock } from "../../db/restock.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveWeighInStore } from "../../db/weigh-ins.js";
@@ -46,6 +46,7 @@ function noticeActionDeps(): NoticeActionDeps {
         dismissals: liveNoticeDismissalsStore(),
         grocery: liveGroceryStore(),
         plans: liveRecipePlansStore(),
+        variants: liveRecipeVariantsStore(),
         weighIns: liveWeighInStore(),
         settings: liveSettingsStore(),
     };

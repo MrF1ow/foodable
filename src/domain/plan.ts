@@ -16,7 +16,19 @@ export type RecipePlan = {
     /** The calendar day as `YYYY-MM-DD`, with no time zone. */
     date: string;
     slot: PlanSlot;
+    /**
+     * With people named, the sum of their saved portions when the plan was
+     * written; readers count their portions as saved now (`countedServings`),
+     * never this number.
+     */
     servings: number;
+    /**
+     * The people eating it, whose versions of the recipe the plan's needs are
+     * totalled from (each at their saved portion count, and nobody else eats
+     * it); empty or absent when nobody is named and the servings count at the
+     * base recipe. The stores always fill it in.
+     */
+    memberIds?: string[];
     /** Who planned it; null once that login is gone. */
     createdBy: string | null;
     createdAt: string;
@@ -57,6 +69,8 @@ export type PlanRule = {
     days: number[];
     endsOn: string | null;
     skippedOn: string[];
+    /** The people eating it; see `RecipePlan.memberIds`. */
+    memberIds?: string[];
     createdBy: string | null;
     createdAt: string;
 };
@@ -71,6 +85,8 @@ export type NewPlanRule = {
     startsOn: string;
     repeat: PlanRepeat;
     days?: number[];
+    /** The people eating it; default none. */
+    memberIds?: readonly string[];
     createdBy?: string | null;
 };
 
@@ -82,6 +98,8 @@ export type NewRecipePlan = {
     slot: PlanSlot;
     /** Defaults to 1. */
     servings?: number;
+    /** The people eating it; default none. */
+    memberIds?: readonly string[];
     createdBy?: string | null;
 };
 
@@ -374,6 +392,46 @@ export function checkPlanServingsCapped(value: unknown): number {
     return servings;
 }
 
+/**
+ * The people a plan is for: each a non-empty id, once, in the order given;
+ * none when nothing is given. Whether each is a household member is the
+ * caller's to check (the store only keeps the ids).
+ */
+export function checkPlanMembers(value: unknown): string[] {
+    if (value == null) return [];
+    if (
+        !Array.isArray(value) ||
+        !value.every((id) => typeof id === "string" && id.trim() !== "")
+    ) {
+        throw new PlanInputError("Members must be a list of member ids.");
+    }
+    return [...new Set(value.map((id: string) => id.trim().toLowerCase()))];
+}
+
+/** What editing the servings of a plan that names people is refused with. */
+export const PLAN_NAMED_SERVINGS_REFUSAL =
+    "This plan is for named people; change their portions instead.";
+
+/**
+ * The servings a plan holds when none are given: the recipe's yield, or when
+ * people are named the sum of their saved portions (a person with none counts
+ * one), so no servings are left over to count at the base recipe.
+ */
+export function defaultPlanServings(
+    recipeYield: number,
+    memberIds: readonly string[],
+    memberPortions?: Readonly<Record<string, number>> | null,
+): number {
+    if (memberIds.length === 0) return recipeYield;
+    const saved = new Map(
+        Object.entries(memberPortions ?? {}).map(([id, count]) => [
+            id.toLowerCase(),
+            count,
+        ]),
+    );
+    return memberIds.reduce((sum, id) => sum + (saved.get(id) ?? 1), 0);
+}
+
 export function isPlanRepeat(value: unknown): value is PlanRepeat {
     return (PLAN_REPEATS as readonly unknown[]).includes(value);
 }
@@ -537,6 +595,7 @@ export function expandRules(
                 date,
                 slot: rule.slot,
                 servings: rule.servings,
+                memberIds: [...(rule.memberIds ?? [])],
                 createdBy: rule.createdBy,
                 createdAt: rule.createdAt,
             });
@@ -642,11 +701,23 @@ export async function planRecipe(
         recipeYield: number;
         date: string;
         slot: string;
+        /**
+         * Ignored when people are named: the plan then holds the sum of their
+         * portions.
+         */
         servings?: number | null;
         /** How it repeats from `date`; default `once`, one plan on that day. */
         repeat?: string | null;
         /** The weekdays of `repeat: "days"`, 0 = Sunday. */
         days?: number[] | null;
+        /** The people eating it; see `RecipePlan.memberIds`. Default none. */
+        memberIds?: readonly string[] | null;
+        /**
+         * The named people's saved portions of this recipe, by member id. With
+         * people named the plan is sized from them (a person with none counts
+         * 1), not from the recipe's yield.
+         */
+        memberPortions?: Readonly<Record<string, number>> | null;
         today: string;
         createdBy: string | null;
     },
@@ -654,8 +725,18 @@ export async function planRecipe(
 ): Promise<{ plan: RecipePlan; alreadyPlanned: boolean } | null> {
     const date = checkPlanDay(input.date, input.today);
     const slot = checkPlanSlot(input.slot);
+    const memberIds = checkPlanMembers(input.memberIds);
+    // A plan that names people is exactly those people's portions: a servings
+    // given with them is ignored, so the plan never holds a number of its own.
     const servings = checkPlanServingsCapped(
-        input.servings ?? input.recipeYield,
+        memberIds.length > 0
+            ? defaultPlanServings(
+                  input.recipeYield,
+                  memberIds,
+                  input.memberPortions,
+              )
+            : (input.servings ??
+                  defaultPlanServings(input.recipeYield, memberIds)),
     );
     const repeat = checkPlanRepeat(input.repeat ?? "once");
     const days = repeat === "days" ? checkPlanDays(input.days) : [];
@@ -695,6 +776,7 @@ export async function planRecipe(
                     days,
                     endsOn: null,
                     skippedOn: [],
+                    memberIds,
                     createdBy: input.createdBy,
                     createdAt: "",
                 });
@@ -721,6 +803,10 @@ export async function planRecipe(
                         date,
                         slot,
                         servings: servings ?? same.servings,
+                        memberIds:
+                            memberIds.length > 0
+                                ? memberIds
+                                : (same.memberIds ?? []),
                         createdBy: input.createdBy,
                     });
                     plannedOnce = plan !== null;
@@ -737,6 +823,7 @@ export async function planRecipe(
                         startsOn: date,
                         repeat,
                         days,
+                        memberIds,
                         createdBy: input.createdBy,
                     });
                 } catch (err) {
@@ -785,6 +872,7 @@ export async function planRecipe(
             date,
             slot,
             servings,
+            memberIds,
             createdBy: input.createdBy,
         });
         return plan ? { plan, alreadyPlanned: false } : null;
@@ -870,7 +958,8 @@ export async function unplanRecipe(
 }
 
 /**
- * Moves one entry to another day or meal (and sets its servings). The same
+ * Moves one entry to another day or meal (and sets its servings; a plan that
+ * names people has none of its own, so setting them is refused). The same
  * recipe already planned there is "already planned": nothing moves and the
  * entry that is there comes back (`PlansStore.movePlan`). A move to another
  * day or meal tells the household through `deps.notify`, with where it was
@@ -880,10 +969,13 @@ export async function unplanRecipe(
 export async function movePlannedRecipe(
     store: PlansStore,
     householdId: string,
-    plan: Pick<RecipePlan, "id" | "recipeId" | "date" | "slot">,
+    plan: Pick<RecipePlan, "id" | "recipeId" | "date" | "slot" | "memberIds">,
     to: { date: string; slot: PlanSlot; servings?: number },
     deps: { recipes: Pick<RecipesStore, "getRecipe">; notify?: Notify },
 ): Promise<PlanMove | null> {
+    if (to.servings !== undefined && (plan.memberIds?.length ?? 0) > 0) {
+        throw new PlanInputError(PLAN_NAMED_SERVINGS_REFUSAL);
+    }
     const relocates = to.date !== plan.date || to.slot !== plan.slot;
     // Read before the write, as in unplanRecipe: a failed name read never
     // fails a move that already happened.
@@ -949,6 +1041,7 @@ export function createMemoryPlansStore(
         ...rule,
         days: [...rule.days],
         skippedOn: [...rule.skippedOn],
+        memberIds: [...(rule.memberIds ?? [])],
     });
 
     function householdRules(householdId: string): PlanRule[] {
@@ -1046,6 +1139,7 @@ export function createMemoryPlansStore(
             date,
             slot,
             servings: servings ?? entry.servings,
+            memberIds: [...(rule.memberIds ?? [])],
             createdBy: rule.createdBy,
             createdAt: new Date().toISOString().replace("Z", "+00:00"),
         };
@@ -1084,11 +1178,12 @@ export function createMemoryPlansStore(
                 date,
                 slot,
                 servings,
+                memberIds: checkPlanMembers(input.memberIds),
                 createdBy: input.createdBy ?? null,
                 createdAt: new Date().toISOString().replace("Z", "+00:00"),
             };
             plans.push(saved);
-            return { ...saved };
+            return { ...saved, memberIds: [...(saved.memberIds ?? [])] };
         },
         async getPlan(householdId, id) {
             const row = find(householdId, id);
@@ -1211,6 +1306,7 @@ export function createMemoryPlansStore(
                 days,
                 endsOn: null,
                 skippedOn: [],
+                memberIds: checkPlanMembers(input.memberIds),
                 createdBy: input.createdBy ?? null,
                 createdAt: new Date().toISOString().replace("Z", "+00:00"),
             };

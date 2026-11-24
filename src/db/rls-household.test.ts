@@ -101,6 +101,9 @@ insert into public.recipe_portions (recipe_id, household_id, user_id, portion_co
     values ('${RECIPE_B}', '${HH_B}', '${USER_B}', 1);
 insert into public.recipe_favourites (household_id, user_id, recipe_id)
     values ('${HH_B}', '${USER_B}', '${RECIPE_B}');
+insert into public.recipe_variant_overrides (household_id, recipe_id, user_id, ingredient_id, action)
+    select '${HH_B}', '${RECIPE_B}', '${USER_B}', id, 'remove'
+    from public.recipe_ingredients where recipe_id = '${RECIPE_B}';
 insert into public.member_avatars (household_id, user_id, content_type, bytes)
     values ('${HH_B}', '${USER_B}', 'image/png', '\\x89504e47'::bytea);
 insert into public.member_score_settings (user_id, household_id, preset)

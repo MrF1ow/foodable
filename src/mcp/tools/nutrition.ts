@@ -362,11 +362,14 @@ export async function mealWriteFromItems(
     householdId: string,
     items: z.infer<typeof MEAL_ITEM_INPUT_SCHEMA>[],
     onSimilar?: OnSimilar,
+    /** Whose meal it is: a recipe portion is worked out from their version. */
+    forUserId?: string,
 ): Promise<Awaited<ReturnType<typeof mealWriteFromItemsCore>>> {
     return mealWriteFromItemsCore(
         householdId,
         specsFromToolItems(items),
         onSimilar,
+        forUserId,
     );
 }
 
@@ -528,6 +531,7 @@ export function registerNutritionWriteTools(
                                 householdId,
                                 items,
                                 onSimilar,
+                                userId,
                             );
                             if (callerSentTotals(mealArgs)) {
                                 extra += `\n\n${COMPUTED_TOTALS_WARNING}`;
@@ -665,9 +669,12 @@ export function registerNutritionWriteTools(
                     );
                     let computed;
                     try {
-                        computed = await mealWriteFromItems(householdId, [
-                            { recipe_id, portions },
-                        ]);
+                        computed = await mealWriteFromItems(
+                            householdId,
+                            [{ recipe_id, portions }],
+                            undefined,
+                            userId,
+                        );
                     } catch (err) {
                         if (err instanceof MealItemsError) {
                             throw new Error(err.message);
@@ -1131,6 +1138,8 @@ export function registerNutritionEditTools(
                             const computed = await mealWriteFromItems(
                                 householdId,
                                 items,
+                                undefined,
+                                userId,
                             );
                             if (callerSentTotals(fields)) {
                                 extra += `\n\n${COMPUTED_TOTALS_WARNING}`;

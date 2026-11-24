@@ -26,7 +26,17 @@ import {
     type RecipePlan,
 } from "./plan.js";
 import { dimensionOf, isQuantityUnit } from "./quantity.js";
-import type { Recipe, RecipeIngredient } from "./recipes.js";
+import {
+    recipeNeeds,
+    type RecipeVariantOverride,
+    type RecipeVariantsStore,
+} from "./recipe-variants.js";
+import type {
+    Recipe,
+    RecipeIngredient,
+    RecipePortion,
+    RecipesStore,
+} from "./recipes.js";
 import type { SettingsStore } from "./settings.js";
 
 /** Days the week view covers. */
@@ -86,7 +96,84 @@ export type PlanRecipe = {
     name: string;
     yieldPortions: number;
     ingredients: RecipeGroceryIngredient[];
+    /**
+     * What a plan that names people is totalled from: the base's ingredients,
+     * every member's overrides and the portions each member eats. Only set on
+     * a recipe some plan names members for.
+     */
+    versions?: {
+        ingredients: RecipeIngredient[];
+        overrides: RecipeVariantOverride[];
+        /** Saved portions by member; a member with none eats one. */
+        portions: Record<string, number>;
+    };
 };
+
+/** Where plans' people's versions come from. */
+export type PlanVersionSources = {
+    /** Every ingredient of the household, as `planRecipesOf`'s own `ingredients`. */
+    ingredients: readonly RecipeIngredient[];
+    overrides: readonly RecipeVariantOverride[];
+    portions: readonly Pick<
+        RecipePortion,
+        "recipeId" | "userId" | "portionCount"
+    >[];
+};
+
+/**
+ * The foods a person's version names that the base may not: swapped and added
+ * foods. A foods map built for the plan's totals has to hold them too, or a
+ * version's food loses its family and unit factors.
+ */
+export function versionFoodIds(
+    sources: Pick<PlanVersionSources, "overrides"> | undefined,
+): string[] {
+    return (sources?.overrides ?? []).flatMap((row) =>
+        row.foodId ? [row.foodId] : [],
+    );
+}
+
+/**
+ * What the plans that name people are totalled from: those recipes' overrides
+ * and each named member's saved portions. Nothing is read when no plan names
+ * anybody. The one loader behind the week view, the plan notices and the
+ * notice action, so all of them total a plan from the same versions.
+ */
+export async function loadPlanVersionSources(
+    stores: {
+        recipes: Pick<RecipesStore, "getPortion">;
+        variants: Pick<RecipeVariantsStore, "listOverridesForRecipes">;
+    },
+    householdId: string,
+    plans: readonly Pick<RecipePlan, "recipeId" | "memberIds">[],
+    ingredients: readonly RecipeIngredient[],
+): Promise<PlanVersionSources | undefined> {
+    const named = plans.filter((plan) => (plan.memberIds?.length ?? 0) > 0);
+    if (named.length === 0) return undefined;
+    const recipeIds = [...new Set(named.map((plan) => plan.recipeId))];
+    const pairs = new Map<string, { recipeId: string; userId: string }>();
+    for (const plan of named) {
+        for (const userId of plan.memberIds ?? []) {
+            pairs.set(`${plan.recipeId}\0${userId}`, {
+                recipeId: plan.recipeId,
+                userId,
+            });
+        }
+    }
+    const [overrides, portions] = await Promise.all([
+        stores.variants.listOverridesForRecipes(householdId, recipeIds),
+        Promise.all(
+            [...pairs.values()].map(({ recipeId, userId }) =>
+                stores.recipes.getPortion(householdId, recipeId, userId),
+            ),
+        ),
+    ]);
+    return {
+        ingredients,
+        overrides,
+        portions: portions.flatMap((row) => (row ? [row] : [])),
+    };
+}
 
 /**
  * The recipes the given plans name, with their ingredients, in the shape
@@ -94,28 +181,75 @@ export type PlanRecipe = {
  * the notice action, so they cannot disagree about what a recipe needs.
  */
 export function planRecipesOf(
-    plans: readonly Pick<RecipePlan, "recipeId">[],
+    plans: readonly Pick<RecipePlan, "recipeId" | "memberIds">[],
     recipes: readonly Pick<Recipe, "id" | "name" | "yieldPortions">[],
     ingredients: readonly Pick<
         RecipeIngredient,
         "recipeId" | "displayName" | "quantity" | "foodId"
     >[],
+    /**
+     * With it, a recipe some plan names members for also carries what their
+     * versions are totalled from; without it every plan counts at the base.
+     */
+    versions?: PlanVersionSources,
 ): PlanRecipe[] {
     const planned = new Set(plans.map((plan) => plan.recipeId));
+    const named = new Set(
+        plans
+            .filter((plan) => (plan.memberIds?.length ?? 0) > 0)
+            .map((plan) => plan.recipeId),
+    );
     return recipes
         .filter((recipe) => planned.has(recipe.id))
-        .map((recipe): PlanRecipe => ({
-            id: recipe.id,
-            name: recipe.name,
-            yieldPortions: recipe.yieldPortions,
-            ingredients: ingredients
-                .filter((row) => row.recipeId === recipe.id)
-                .map((row) => ({
-                    displayName: row.displayName,
-                    quantity: row.quantity,
-                    foodId: row.foodId,
-                })),
-        }));
+        .map((recipe): PlanRecipe => {
+            const out: PlanRecipe = {
+                id: recipe.id,
+                name: recipe.name,
+                yieldPortions: recipe.yieldPortions,
+                ingredients: ingredients
+                    .filter((row) => row.recipeId === recipe.id)
+                    .map((row) => ({
+                        displayName: row.displayName,
+                        quantity: row.quantity,
+                        foodId: row.foodId,
+                    })),
+            };
+            if (versions && named.has(recipe.id)) {
+                out.versions = {
+                    ingredients: versions.ingredients.filter(
+                        (row) => row.recipeId === recipe.id,
+                    ),
+                    overrides: versions.overrides.filter(
+                        (row) => row.recipeId === recipe.id,
+                    ),
+                    portions: Object.fromEntries(
+                        versions.portions
+                            .filter((row) => row.recipeId === recipe.id)
+                            .map((row) => [row.userId, row.portionCount]),
+                    ),
+                };
+            }
+            return out;
+        });
+}
+
+/**
+ * How many portions a plan counts. A plan that names people counts exactly
+ * theirs, as they are saved now (a person with none eats one), so lowering a
+ * person's portions lowers the plan with no stored number to go stale; the
+ * stored servings stand only when nobody is named, or when the recipe's
+ * versions were not loaded.
+ */
+export function countedServings(
+    plan: Pick<RecipePlan, "servings" | "memberIds">,
+    versions?: Pick<NonNullable<PlanRecipe["versions"]>, "portions">,
+): number {
+    const members = plan.memberIds ?? [];
+    if (members.length === 0 || !versions) return plan.servings;
+    return members.reduce(
+        (sum, userId) => sum + (versions.portions[userId] ?? 1),
+        0,
+    );
 }
 
 /** One planned recipe that needs a missing food. */
@@ -280,16 +414,38 @@ export function missingForPlan(
     for (const plan of inWindow) {
         const recipe = recipeById.get(plan.recipeId);
         if (!recipe || !(recipe.yieldPortions > 0)) continue;
-        const scale = plan.servings / recipe.yieldPortions;
+        // A plan that names people is totalled from their versions, each at
+        // their saved portions, and nobody else eats it: the count is those
+        // portions, never a stored number. The lines then hold the plan's
+        // total, so they are scaled by one.
+        const members = plan.memberIds ?? [];
+        const counted = countedServings(plan, recipe.versions);
+        const lines =
+            recipe.versions && members.length > 0
+                ? recipeNeeds({
+                      ingredients: recipe.versions.ingredients,
+                      yieldPortions: recipe.yieldPortions,
+                      overrides: recipe.versions.overrides,
+                      members: members.map((userId) => ({
+                          userId,
+                          portions: recipe.versions!.portions[userId] ?? 1,
+                      })),
+                      totalPortions: counted,
+                      recipeId: recipe.id,
+                      foodsById,
+                  })
+                : recipe.ingredients;
+        const scale =
+            lines === recipe.ingredients ? counted / recipe.yieldPortions : 1;
         const info = {
             planId: plan.id,
             recipeId: recipe.id,
             recipeName: recipe.name,
             date: plan.date,
             slot: plan.slot,
-            servings: plan.servings,
+            servings: counted,
         };
-        for (const ingredient of recipe.ingredients) {
+        for (const ingredient of lines) {
             const key = ingredient.foodId
                 ? familyIdOf(ingredient.foodId, foodsById)
                 : `name:${ingredient.displayName.trim().toLowerCase()}`;

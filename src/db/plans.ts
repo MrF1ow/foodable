@@ -4,6 +4,7 @@ import {
     repeatOverlapError,
     checkPlanDate,
     checkPlanDays,
+    checkPlanMembers,
     checkPlanRepeat,
     checkPlanServings,
     checkPlanSlot,
@@ -30,11 +31,11 @@ const PLAN_RULES = "plan_rules";
 const RECIPES = "recipes";
 // date::text keeps the calendar day as written, whatever the session zone.
 export const PLAN_COLS =
-    "id, household_id, recipe_id, date::text as date, slot, servings, created_by, created_at";
+    "id, household_id, recipe_id, date::text as date, slot, servings, member_ids::text[] as member_ids, created_by, created_at";
 // date columns as text, so a day stays as written whatever the session zone;
 // skipped_on and days come back as plain arrays.
 export const PLAN_RULE_COLS =
-    "id, household_id, recipe_id, meal, servings, starts_on::text as starts_on, rule, days::int[] as days, ends_on::text as ends_on, skipped_on::text[] as skipped_on, created_by, created_at";
+    "id, household_id, recipe_id, meal, servings, starts_on::text as starts_on, rule, days::int[] as days, ends_on::text as ends_on, skipped_on::text[] as skipped_on, member_ids::text[] as member_ids, created_by, created_at";
 // Day, then breakfast to snack, then the order they were planned in.
 export const PLAN_ORDER = `date, case slot
     when 'breakfast' then 0
@@ -68,6 +69,7 @@ export function recipePlanFromRow(row: Record<string, unknown>): RecipePlan {
         date: String(row.date),
         slot,
         servings: Number(row.servings),
+        memberIds: ((row.member_ids as unknown[] | null) ?? []).map(String),
         createdBy: row.created_by != null ? String(row.created_by) : null,
         createdAt: String(row.created_at),
     };
@@ -93,6 +95,7 @@ export function planRuleFromRow(row: Record<string, unknown>): PlanRule {
         days: ((row.days as unknown[] | null) ?? []).map(Number),
         endsOn: row.ends_on != null ? String(row.ends_on) : null,
         skippedOn: ((row.skipped_on as unknown[] | null) ?? []).map(String),
+        memberIds: ((row.member_ids as unknown[] | null) ?? []).map(String),
         createdBy: row.created_by != null ? String(row.created_by) : null,
         createdAt: String(row.created_at),
     };
@@ -290,7 +293,8 @@ async function moveRuleDay(
         tx,
         tx`
             insert into ${tx.unsafe(RECIPE_PLANS)} (
-                household_id, recipe_id, date, slot, servings, created_by
+                household_id, recipe_id, date, slot, servings, member_ids,
+                created_by
             )
             values (
                 ${householdId}::uuid,
@@ -298,6 +302,7 @@ async function moveRuleDay(
                 ${date}::date,
                 ${slot}::text,
                 ${servings ?? entry.servings}::numeric,
+                ${tx.array(rule.memberIds ?? [], "uuid")},
                 ${rule.createdBy}::uuid
             )
             returning ${tx.unsafe(PLAN_COLS)}
@@ -315,6 +320,7 @@ export function liveRecipePlansStore(): PlansStore {
             const date = checkPlanDate(plan.date);
             const slot = checkPlanSlot(plan.slot);
             const servings = checkPlanServings(plan.servings ?? 1);
+            const memberIds = checkPlanMembers(plan.memberIds);
             // A malformed id names no recipe; sending it would fail the uuid cast.
             if (!UUID_RE.test(plan.recipeId)) return null;
             return run(async (tx) => {
@@ -341,7 +347,7 @@ export function liveRecipePlansStore(): PlansStore {
                             sp`
                             insert into ${sp.unsafe(RECIPE_PLANS)} (
                                 id, household_id, recipe_id, date, slot,
-                                servings, created_by
+                                servings, member_ids, created_by
                             )
                             select
                                 ${plan.id ?? crypto.randomUUID()}::uuid,
@@ -350,6 +356,7 @@ export function liveRecipePlansStore(): PlansStore {
                                 ${date}::date,
                                 ${slot}::text,
                                 ${servings}::numeric,
+                                ${sp.array(memberIds, "uuid")},
                                 ${plan.createdBy ?? null}::uuid
                             from ${sp.unsafe(RECIPES)} r
                             where r.id = ${plan.recipeId}::uuid
@@ -586,6 +593,7 @@ export function liveRecipePlansStore(): PlansStore {
             const servings = checkPlanServings(rule.servings ?? 1);
             const repeat = checkPlanRepeat(rule.repeat);
             const days = repeat === "days" ? checkPlanDays(rule.days) : [];
+            const memberIds = checkPlanMembers(rule.memberIds);
             if (!UUID_RE.test(rule.recipeId)) return null;
             return run(async (tx) => {
                 try {
@@ -624,7 +632,7 @@ export function liveRecipePlansStore(): PlansStore {
                             sp`
                             insert into ${sp.unsafe(PLAN_RULES)} (
                                 id, household_id, recipe_id, meal, servings,
-                                starts_on, rule, days, created_by
+                                starts_on, rule, days, member_ids, created_by
                             )
                             select
                                 ${rule.id ?? crypto.randomUUID()}::uuid,
@@ -635,6 +643,7 @@ export function liveRecipePlansStore(): PlansStore {
                                 ${startsOn}::date,
                                 ${repeat}::text,
                                 ${days}::int[]::smallint[],
+                                ${sp.array(memberIds, "uuid")},
                                 ${rule.createdBy ?? null}::uuid
                             from ${sp.unsafe(RECIPES)} r
                             where r.id = ${rule.recipeId}::uuid

@@ -15,7 +15,7 @@ import {
     trySyncHouseholdNotifications,
 } from "../../db/notifications.js";
 import { liveRecipePlansStore } from "../../db/plans.js";
-import { liveRecipesStore } from "../../db/recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "../../db/recipes.js";
 import { householdClock } from "../../db/restock.js";
 import { liveWeighInStore } from "../../db/weigh-ins.js";
 import { AGENT_UNDO_HINT } from "../../domain/agent-actions.js";
@@ -124,6 +124,7 @@ function noticeDeps(): NoticesForDeps {
         dismissals: liveNoticeDismissalsStore(),
         grocery: liveGroceryStore(),
         plans: liveRecipePlansStore(),
+        variants: liveRecipeVariantsStore(),
         weighIns: liveWeighInStore(),
     };
 }

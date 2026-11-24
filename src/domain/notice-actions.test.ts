@@ -8,6 +8,12 @@ import { actOnNotice, NoticeActionError } from "./notice-actions.js";
 import { createMemoryWeighInStore } from "./notices-actionable.js";
 import { dismissNotice, noticesFor } from "./notices-for.js";
 import { createMemoryPlansStore } from "./plan.js";
+import {
+    loadPlanVersionSources,
+    missingForPlan,
+    planRecipesOf,
+} from "./plan-week.js";
+import { createMemoryVariantsStore } from "./recipe-variants.js";
 import { createMemoryRecipesStore } from "./recipes.js";
 import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
 
@@ -424,6 +430,189 @@ describe("actOnNotice: plan.missing_ingredient", () => {
             { amount: 4, unit: "each" },
             PLAN_UNKNOWN_LINE_NOTE,
         ]);
+    });
+});
+
+describe("a plan that names people", () => {
+    const ALICE = "alice-user";
+    test("the notice, its Add action and the week plan total it from the same versions", async () => {
+        const world = await setup();
+        const variants = createMemoryVariantsStore();
+        const deps = { ...world.deps, variants };
+        const plain = (name: string) =>
+            world.foods.insertFood(
+                newFood({
+                    householdId: HH,
+                    kind: "food",
+                    name,
+                    defaultUnit: "g",
+                }),
+            );
+        const chicken = await plain("Chicken");
+        const tofu = await plain("Tofu");
+        const recipe = await plannedRecipe(world, [
+            { food: chicken, amount: 400, unit: "g" },
+        ]);
+        // Replace the plain plan with one for Alice.
+        for (const plan of await world.plans.listPlans(
+            HH,
+            "2026-11-12",
+            "2026-11-19",
+        )) {
+            await world.plans.removePlan(HH, plan.id);
+        }
+        await world.plans.addPlan({
+            householdId: HH,
+            recipeId: recipe.id,
+            date: "2026-11-13",
+            slot: "dinner",
+            servings: 2,
+            memberIds: [ALICE],
+        });
+        const [base] = await world.recipes.listIngredients(HH, recipe.id);
+        await variants.saveOverride({
+            householdId: HH,
+            recipeId: recipe.id,
+            userId: ALICE,
+            ingredientId: base!.id,
+            action: "food",
+            foodId: tofu.id,
+            displayName: "Tofu",
+        });
+
+        // The week plan's own reading of the plan.
+        const plans = await world.plans.listPlans(
+            HH,
+            "2026-11-12",
+            "2026-11-19",
+        );
+        const allIngredients =
+            await world.recipes.listIngredientsForHousehold(HH);
+        const weekLines = missingForPlan(
+            plans,
+            planRecipesOf(
+                plans,
+                await world.recipes.listRecipes(HH),
+                allIngredients,
+                await loadPlanVersionSources(
+                    { recipes: world.recipes, variants },
+                    HH,
+                    plans,
+                    allIngredients,
+                ),
+            ),
+            [],
+            { from: TODAY, days: 7 },
+        );
+        // The plan stores 2 servings, but it is for Alice alone: her one
+        // portion is Tofu, and nothing of it is left to cook at the base.
+        const need = (name: string) =>
+            weekLines.find((l) => l.displayName === name)?.need;
+        expect(need("Tofu")).toEqual({ amount: 200, unit: "g" });
+        expect(need("Chicken")).toBeUndefined();
+
+        const noticeFoods = await noticesFor(deps, HH, {
+            ...OPTS,
+            actionable: true,
+        }).then((r) =>
+            r.notices
+                .filter((n) => n.code === "plan.missing_ingredient")
+                .map((n) => n.subject.id)
+                .sort(),
+        );
+        expect(noticeFoods).toEqual([tofu.id]);
+
+        // The Add action puts on the list what the week plan says is short.
+        const added = await actOnNotice(
+            deps,
+            HH,
+            { code: "plan.missing_ingredient", subjectId: tofu.id },
+            OPTS,
+        );
+        expect(added.status).toBe("added");
+        expect(
+            (
+                await actOnNotice(
+                    deps,
+                    HH,
+                    { code: "plan.missing_ingredient", subjectId: chicken.id },
+                    OPTS,
+                )
+            ).status,
+        ).toBe("gone");
+        const lines = await world.grocery.listLines(HH);
+        expect(
+            Object.fromEntries(lines.map((l) => [l.foodId, l.quantity])),
+        ).toEqual({
+            [tofu.id]: { amount: 200, unit: "g" },
+        });
+    });
+});
+
+describe("the allergen notice for a plan that names people", () => {
+    const ANA = {
+        userId: "ana",
+        displayName: "Ana",
+        allergens: [
+            {
+                id: "a1",
+                householdId: HH,
+                userId: "ana",
+                allergen: "peanut" as const,
+                otherLabel: null,
+            },
+        ],
+    };
+    const CAL = { userId: "cal", displayName: "Cal", allergens: [] };
+
+    async function allergenNoticeCount(memberIds: string[], servings: number) {
+        const world = await setup();
+        const butter = await world.foods.insertFood({
+            ...newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Peanut butter",
+                defaultUnit: "g",
+            }),
+            allergens: ["peanut"],
+        });
+        const recipe = await plannedRecipe(world, [
+            { food: butter, amount: 100, unit: "g" },
+        ]);
+        for (const plan of await world.plans.listPlans(
+            HH,
+            "2026-11-12",
+            "2026-11-19",
+        )) {
+            await world.plans.removePlan(HH, plan.id);
+        }
+        await world.plans.addPlan({
+            householdId: HH,
+            recipeId: recipe.id,
+            date: "2026-11-13",
+            slot: "dinner",
+            servings,
+            memberIds,
+        });
+        const { notices } = await noticesFor(
+            {
+                ...world.deps,
+                variants: createMemoryVariantsStore(),
+                allergenMembers: async () => [ANA, CAL],
+            },
+            HH,
+            { ...OPTS, actionable: true, allergens: true },
+        );
+        return notices.filter((n) => n.code === "recipe.allergen").length;
+    }
+
+    test("a plan for Cal alone warns nobody: Ana does not eat it, whatever servings it stores", async () => {
+        expect(await allergenNoticeCount(["cal"], 4)).toBe(0);
+    });
+
+    test("a plan for Ana warns, and a plan for nobody warns for the whole household", async () => {
+        expect(await allergenNoticeCount(["ana"], 1)).toBe(1);
+        expect(await allergenNoticeCount([], 4)).toBe(1);
     });
 });
 

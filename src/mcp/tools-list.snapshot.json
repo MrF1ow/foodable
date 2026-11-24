@@ -63,6 +63,8 @@
     "create_recipe",
     "add_recipe_ingredient",
     "set_recipe_portion",
+    "set_recipe_variant",
+    "clear_recipe_variant",
     "delete_recipe",
     "add_recipe_to_grocery",
     "cook_recipe",

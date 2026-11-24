@@ -14,6 +14,11 @@ import { setFallbackActorForTests, withActor } from "./actor.js";
 import type { StoreContractCtx } from "./contract/helpers.js";
 import type { PlansHarness } from "./contract/plans.contract.js";
 import { loadWeekPlanInputs } from "./plan-week.js";
+import { missingForPlan } from "../domain/plan-week.js";
+import { addRecipeManualIngredient } from "../domain/recipes.js";
+import { setRecipeVariant } from "../domain/recipe-variants.js";
+import { liveFoodsStore } from "./foods.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "./recipes.js";
 import { liveRecipePlansStore } from "./plans.js";
 import { setSqlForTests } from "./sql.js";
 import { asUser, seedHousehold } from "./testing/fixtures.js";
@@ -784,6 +789,161 @@ describeDb(pgAvailable !== null, "recipe plans db", (getCtx) => {
         ]);
         expect(inputs.recipes.map((r) => r.id)).toEqual([recipeId]);
         expect(await planCount()).toBe(0);
+    });
+
+    test("a plan and a repeat keep the people they are for, and a moved day takes them along", async () => {
+        const store = liveRecipePlansStore();
+        const plan = await store.addPlan({
+            householdId,
+            recipeId,
+            date: "2026-11-12",
+            slot: "dinner",
+            memberIds: [ownerId, memberId],
+        });
+        expect(plan?.memberIds).toEqual([ownerId, memberId]);
+        expect((await store.getPlan(householdId, plan!.id))?.memberIds).toEqual(
+            [ownerId, memberId],
+        );
+        const none = await store.addPlan({
+            householdId,
+            recipeId,
+            date: "2026-11-12",
+            slot: "lunch",
+        });
+        expect(none?.memberIds).toEqual([]);
+        const rule = await store.addRule({
+            householdId,
+            recipeId,
+            slot: "snack",
+            startsOn: "2026-11-12",
+            repeat: "daily",
+            memberIds: [memberId],
+        });
+        expect(rule?.memberIds).toEqual([memberId]);
+        const listed = await store.listPlans(
+            householdId,
+            "2026-11-13",
+            "2026-11-13",
+        );
+        expect(listed.map((p) => p.memberIds)).toEqual([[memberId]]);
+        const moved = await store.movePlan(
+            householdId,
+            `rule:${rule!.id}:2026-11-13`,
+            "2026-11-20",
+            "breakfast",
+        );
+        expect(moved?.plan.memberIds).toEqual([memberId]);
+        expect(moved?.plan.id.startsWith("rule:")).toBe(false);
+    });
+
+    test("the table refuses members that are not ids", async () => {
+        const { sql } = getCtx();
+        await expect(
+            sql`
+                insert into public.recipe_plans (
+                    household_id, recipe_id, date, slot, member_ids
+                )
+                values (
+                    ${householdId}, ${recipeId}, ${"2026-11-12"}, ${"dinner"},
+                    ${"{not-a-uuid}"}
+                )
+            `,
+        ).rejects.toThrow();
+        expect(await planCount()).toBe(0);
+    });
+
+    test("the week's missing foods total the named members' versions at their portions", async () => {
+        const { sql } = getCtx();
+        const recipes = liveRecipesStore();
+        const foods = liveFoodsStore();
+        const variants = liveRecipeVariantsStore();
+        const pasta = await addRecipeManualIngredient(recipes, foods, {
+            householdId,
+            recipeId,
+            name: "Pasta",
+            amount: 400,
+            unit: "g",
+        });
+        const cheese = await addRecipeManualIngredient(recipes, foods, {
+            householdId,
+            recipeId,
+            name: "Cheese",
+            amount: 200,
+            unit: "g",
+        });
+        await sql`
+            update public.recipes set yield_portions = 4 where id = ${recipeId}
+        `;
+        await recipes.upsertPortion({
+            recipeId,
+            householdId,
+            userId: ownerId,
+            portionCount: 1,
+        });
+        await recipes.upsertPortion({
+            recipeId,
+            householdId,
+            userId: memberId,
+            portionCount: 2,
+        });
+        await setRecipeVariant(recipes, foods, variants, {
+            householdId,
+            recipeId,
+            userId: ownerId,
+            action: "remove",
+            ingredientId: cheese.id,
+        });
+        await setRecipeVariant(recipes, foods, variants, {
+            householdId,
+            recipeId,
+            userId: memberId,
+            action: "amount",
+            ingredientId: pasta.id,
+            amount: 800,
+            unit: "g",
+        });
+        const plans = liveRecipePlansStore();
+        await plans.addPlan({
+            householdId,
+            recipeId,
+            date: "2026-11-12",
+            slot: "dinner",
+            servings: 3,
+            memberIds: [ownerId, memberId],
+        });
+        // Planned for nobody in particular: the base.
+        await plans.addPlan({
+            householdId,
+            recipeId,
+            date: "2026-11-13",
+            slot: "dinner",
+            servings: 2,
+        });
+        const inputs = await asUser(
+            ownerId,
+            () => loadWeekPlanInputs(householdId, "2026-11-12"),
+            householdId,
+        );
+        const lines = missingForPlan(inputs.plans, inputs.recipes, [], {
+            from: "2026-11-12",
+            days: 7,
+        });
+        const need = Object.fromEntries(
+            lines.map((line) => [
+                line.displayName,
+                line.neededBy.map((n) => [n.date, n.need]),
+            ]),
+        );
+        expect(need).toEqual({
+            Pasta: [
+                ["2026-11-12", { amount: 500, unit: "g" }],
+                ["2026-11-13", { amount: 200, unit: "g" }],
+            ],
+            Cheese: [
+                ["2026-11-12", { amount: 100, unit: "g" }],
+                ["2026-11-13", { amount: 100, unit: "g" }],
+            ],
+        });
     });
 });
 

@@ -55,6 +55,12 @@ import {
     type RecipeVerification,
 } from "./recipe-import.js";
 import { assertRecipeVerified } from "./recipe-import.js";
+import {
+    recipeNeeds,
+    variantFor,
+    type MemberPortion,
+    type RecipeVariantsStore,
+} from "./recipe-variants.js";
 
 export type { RecipeVerification, RecipeImport, RecipeProblem };
 export {
@@ -113,11 +119,19 @@ export type RecipePortion = {
 export type RecipeIngredientView = RecipeIngredient & {
     perPortionAmount: number | null;
     personAmount: number | null;
+    /** How the viewer's version differs from the base here; null otherwise. */
+    change: "amount" | "food" | "add" | null;
 };
 
 export type RecipeView = Recipe & {
     portionCount: number;
     ingredients: RecipeIngredientView[];
+    /**
+     * Set when the viewer has a version of the recipe: `ingredients` are then
+     * that version's, and `removed` are the base ingredients it leaves out.
+     * Null when the ingredients are the base's.
+     */
+    variant: { overrideCount: number; removed: RecipeIngredient[] } | null;
 };
 
 export type RecipeGapReason =
@@ -1636,34 +1650,68 @@ export async function getRecipeView(
     householdId: string,
     recipeId: string,
     userId: string,
+    /** When given, the viewer's own version of the recipe is shown. */
+    variants?: RecipeVariantsStore,
 ): Promise<RecipeView> {
     const recipe = await requireRecipe(store, householdId, recipeId);
-    const [ingredients, portion] = await Promise.all([
+    const [base, portion, overrides] = await Promise.all([
         store.listIngredients(householdId, recipeId),
         store.getPortion(householdId, recipeId, userId),
+        variants
+            ? variants.listOverrides(householdId, recipeId)
+            : Promise.resolve([]),
     ]);
     const portionCount = portion?.portionCount ?? 1;
+    const version = variantFor(
+        { id: recipeId, ingredients: base },
+        overrides,
+        userId,
+    );
+    const hasVersion = version.overrideCount > 0;
+    const lines = hasVersion
+        ? version.ingredients
+        : base.map((row) => ({ ...row, change: null }));
     return {
         ...recipe,
         portionCount,
-        ingredients: ingredients.map((ingredient) => ({
-            ...ingredient,
-            perPortionAmount:
-                ingredient.quantity == null
-                    ? null
-                    : perPortionAmount(
-                          ingredient.quantity.amount,
-                          recipe.yieldPortions,
-                      ),
-            personAmount:
-                ingredient.quantity == null
-                    ? null
-                    : amountForPortion(
-                          ingredient.quantity.amount,
-                          recipe.yieldPortions,
-                          portionCount,
-                      ),
-        })),
+        variant: hasVersion
+            ? {
+                  overrideCount: version.overrideCount,
+                  removed: version.removed,
+              }
+            : null,
+        ingredients: lines.map(({ change, ...ingredient }) => {
+            const line: RecipeIngredient = {
+                id: ingredient.id,
+                householdId: ingredient.householdId,
+                recipeId: ingredient.recipeId,
+                kind: ingredient.kind,
+                displayName: ingredient.displayName,
+                quantity: ingredient.quantity,
+                foodId: ingredient.foodId,
+                sortOrder: ingredient.sortOrder,
+                note: ingredient.note,
+            };
+            return {
+                ...line,
+                change,
+                perPortionAmount:
+                    line.quantity == null
+                        ? null
+                        : perPortionAmount(
+                              line.quantity.amount,
+                              recipe.yieldPortions,
+                          ),
+                personAmount:
+                    line.quantity == null
+                        ? null
+                        : amountForPortion(
+                              line.quantity.amount,
+                              recipe.yieldPortions,
+                              portionCount,
+                          ),
+            };
+        }),
     };
 }
 
@@ -1708,6 +1756,13 @@ export async function addRecipeToGrocery(opts: {
     portionCounts: number[];
     /** See resolveTotalPortions. */
     totalPortions?: number | null;
+    /**
+     * Who the portions are for. With `variants`, each member's portions are
+     * shopped from that member's version of the recipe, and the portions
+     * nobody is named for from the base.
+     */
+    members?: readonly MemberPortion[];
+    variants?: RecipeVariantsStore;
     foodsById?: ReadonlyMap<string, Food>;
     foods?: FoodsStore;
 }): Promise<{
@@ -1737,13 +1792,30 @@ export async function addRecipeToGrocery(opts: {
     if (ingredients.length === 0) {
         throw new RecipeInputError("Add an ingredient first.");
     }
+    const overrides =
+        opts.variants && (opts.members?.length ?? 0) > 0
+            ? await opts.variants.listOverrides(opts.householdId, recipe.id)
+            : [];
+    // Always totalled through recipeNeeds, with versions or without: the lines
+    // already hold the total each person's version needs, so they are scaled
+    // by one (yield and total are the same number), and an ingredient the
+    // recipe lists twice (flour 300 g and 0.2 kg) is one need, netted against
+    // the stock once whoever has a version.
     const plan = recipeToGroceryRemainder({
-        ingredients: ingredients.map((ingredient) => ({
+        ingredients: recipeNeeds({
+            ingredients,
+            yieldPortions: recipe.yieldPortions,
+            overrides,
+            members: opts.members ?? [],
+            totalPortions,
+            recipeId: recipe.id,
+            foodsById: opts.foodsById,
+        }).map((ingredient) => ({
             displayName: ingredient.displayName,
             quantity: ingredient.quantity,
             foodId: ingredient.foodId,
         })),
-        yieldPortions: recipe.yieldPortions,
+        yieldPortions: totalPortions,
         portionCounts: opts.portionCounts,
         totalPortions,
         stock: opts.fridgeItems,

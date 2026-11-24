@@ -44,6 +44,11 @@ import {
     assertRecipeVerified,
     RecipeUnverifiedError,
 } from "./recipe-import.js";
+import {
+    recipeNeeds,
+    type MemberPortion,
+    type RecipeVariantsStore,
+} from "./recipe-variants.js";
 import { isCalendarDate } from "./insights.js";
 
 export type StockReason = "purchase" | "cook" | "eat" | "discard" | "adjust";
@@ -1334,10 +1339,78 @@ export function planCookSteps(
     return { steps, unmeasured };
 }
 
+/**
+ * Who a cook is for, when it is for people with their own versions of the
+ * recipe: each member's portions use that member's version, and the rest of
+ * `totalPortions` is the base. Without members (or without the store that
+ * holds versions) the base recipe is cooked, as it always was.
+ */
+export type CookVersions = {
+    /** The members whose portions are cooked, with how many each. */
+    memberPortions?: readonly MemberPortion[];
+    variants?: RecipeVariantsStore;
+};
+
+/** What a cook draws from, and the yield it scales by. */
+async function cookBasis(
+    input: CookVersions & {
+        householdId: string;
+        totalPortions: number;
+    },
+    recipe: Recipe,
+    ingredients: RecipeIngredient[],
+    foods: FoodsStore,
+): Promise<{
+    ingredients: readonly Pick<
+        RecipeIngredient,
+        "displayName" | "foodId" | "quantity"
+    >[];
+    yieldPortions: number;
+}> {
+    const members = input.memberPortions ?? [];
+    const overrides =
+        input.variants && members.length > 0
+            ? await input.variants.listOverrides(input.householdId, recipe.id)
+            : [];
+    // Always totalled through recipeNeeds, with versions or without: the
+    // lines already hold the total each person's version needs, so the scale
+    // is one (yield and total are the same number), and an ingredient the
+    // recipe lists twice is one need.
+    return {
+        ingredients: recipeNeeds({
+            ingredients,
+            yieldPortions: recipe.yieldPortions,
+            overrides,
+            members,
+            totalPortions: input.totalPortions,
+            recipeId: recipe.id,
+            foodsById: new Map(
+                (await foods.listFoods(input.householdId)).map((food) => [
+                    food.id,
+                    food,
+                ]),
+            ),
+        }),
+        yieldPortions: input.totalPortions,
+    };
+}
+
 async function loadCookableRecipe(
     recipes: RecipesStore,
-    input: { householdId: string; recipeId: string; totalPortions: number },
-): Promise<{ recipe: Recipe; ingredients: RecipeIngredient[] }> {
+    foods: FoodsStore,
+    input: CookVersions & {
+        householdId: string;
+        recipeId: string;
+        totalPortions: number;
+    },
+): Promise<{
+    recipe: Recipe;
+    ingredients: readonly Pick<
+        RecipeIngredient,
+        "displayName" | "foodId" | "quantity"
+    >[];
+    yieldPortions: number;
+}> {
     const recipe = await recipes.getRecipe(input.householdId, input.recipeId);
     if (!recipe) throw new StockInputError("Unknown recipe.");
     if (recipe.verification === "unverified") {
@@ -1346,11 +1419,8 @@ async function loadCookableRecipe(
     if (!Number.isFinite(input.totalPortions) || input.totalPortions <= 0) {
         throw new StockInputError("Enter portions greater than zero.");
     }
-    const ingredients = await recipes.listIngredients(
-        input.householdId,
-        recipe.id,
-    );
-    return { recipe, ingredients };
+    const base = await recipes.listIngredients(input.householdId, recipe.id);
+    return { recipe, ...(await cookBasis(input, recipe, base, foods)) };
 }
 
 export async function cookRecipe(
@@ -1358,7 +1428,7 @@ export async function cookRecipe(
     fridge: FridgeStore,
     stock: StockStore,
     foods: FoodsStore,
-    input: {
+    input: CookVersions & {
         householdId: string;
         recipeId: string;
         totalPortions: number;
@@ -1374,11 +1444,15 @@ export async function cookRecipe(
         submitKey?: string | null;
     },
 ): Promise<CookRecipeResult> {
-    const { recipe, ingredients } = await loadCookableRecipe(recipes, input);
+    const { recipe, ingredients, yieldPortions } = await loadCookableRecipe(
+        recipes,
+        foods,
+        input,
+    );
     const totalPortions = input.totalPortions;
     const { steps, unmeasured } = planCookSteps(
         ingredients,
-        recipe.yieldPortions,
+        yieldPortions,
         totalPortions,
         input.deductStock !== false,
     );
@@ -1580,9 +1654,17 @@ export async function previewCookRecipe(
     recipes: RecipesStore,
     fridge: FridgeStore,
     foods: FoodsStore,
-    input: { householdId: string; recipeId: string; totalPortions: number },
+    input: CookVersions & {
+        householdId: string;
+        recipeId: string;
+        totalPortions: number;
+    },
 ): Promise<CookPreview> {
-    const { recipe, ingredients } = await loadCookableRecipe(recipes, input);
+    const { ingredients, yieldPortions } = await loadCookableRecipe(
+        recipes,
+        foods,
+        input,
+    );
     const items = await fridge.listItems(input.householdId);
     const ids = [
         ...items.map((item) => item.foodId),
@@ -1592,11 +1674,11 @@ export async function previewCookRecipe(
         foodsByIds(foods, input.householdId, ids),
         effectiveFoodsByIds(foods, input.householdId, ids),
     ]);
-    return cookPreview(
-        { yieldPortions: recipe.yieldPortions, ingredients },
-        input.totalPortions,
-        { items, foods: catalog, effective },
-    );
+    return cookPreview({ yieldPortions, ingredients }, input.totalPortions, {
+        items,
+        foods: catalog,
+        effective,
+    });
 }
 
 /** Meal logging after an eat movement applies only to catalog foods, not supplies. */

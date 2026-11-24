@@ -14,13 +14,22 @@ import {
     RecipeInputError,
     RecipeUnverifiedError,
 } from "../../domain/recipes.js";
-import { getHouseholdConfig } from "../../db/household.js";
+import {
+    getHouseholdConfig,
+    getHouseholdMembership,
+} from "../../db/household.js";
 import { can } from "../../domain/permissions.js";
 import { liveSocialReaderStatusStore } from "../../db/social-readers.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveGroceryStore } from "../../db/grocery.js";
-import { liveRecipesStore } from "../../db/recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "../../db/recipes.js";
+import {
+    clearRecipeVariant,
+    setRecipeVariant,
+    VARIANT_ACTIONS,
+    type VariantAction,
+} from "../../domain/recipe-variants.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { inStockTransaction, liveStockStore } from "../../db/stock.js";
 import { deleteMeal, insertMeal } from "../../db/nutrition.js";
@@ -81,6 +90,7 @@ import {
     checkPlanDay,
     checkPlanServingsCapped,
     checkPlanSlot,
+    defaultPlanServings,
     planRecipe,
     PlanInputError,
     movePlannedRecipe,
@@ -766,6 +776,25 @@ function formNumberList(
         .map((item) => Number(item));
 }
 
+/** Every non-blank value of a repeated form field. */
+function formTextList(
+    body: Record<string, string | File | (string | File)[]>,
+    key: string,
+): string[] {
+    const value = body[key];
+    const all = Array.isArray(value)
+        ? value
+        : value === undefined
+          ? []
+          : [value];
+    return all
+        .filter(
+            (item): item is string =>
+                typeof item === "string" && item.trim() !== "",
+        )
+        .map((item) => item.trim());
+}
+
 /** A stored plan's id, or one day of a repeat (`rule:<id>:<day>`). */
 function isPlanEntryId(id: string): boolean {
     return UUID_SHAPE.test(id) || parseRuleEntryId(id) !== null;
@@ -799,7 +828,29 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
     // (0 = Sunday), one `days` value each.
     const repeat = formText(body, "repeat") || "once";
     const days = formNumberList(body, "days");
+    const memberIds = formTextList(body, "member_ids");
     try {
+        // Naming people is a read of their versions: any member of the
+        // household may be named.
+        for (const id of memberIds) {
+            if (
+                !UUID_SHAPE.test(id) ||
+                !(await getHouseholdMembership(id, member.householdId))
+            ) {
+                throw new PlanInputError(
+                    "Pick people who are in the household.",
+                );
+            }
+        }
+        const memberPortions: Record<string, number> = {};
+        for (const id of memberIds) {
+            const saved = await liveRecipesStore().getPortion(
+                member.householdId,
+                recipeId,
+                id.toLowerCase(),
+            );
+            if (saved) memberPortions[id.toLowerCase()] = saved.portionCount;
+        }
         const outcome = await planRecipe(
             liveRecipePlansStore(),
             {
@@ -812,6 +863,8 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
                 servings: servingsInput,
                 repeat,
                 days,
+                memberIds,
+                memberPortions,
                 today: await householdToday(member.householdId),
                 createdBy: userId,
             },
@@ -823,7 +876,14 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
         if (!outcome) return c.text("Not found", 404);
         if (
             outcome.alreadyPlanned &&
-            outcome.plan.servings !== (servingsInput ?? recipe.yieldPortions)
+            outcome.plan.servings !==
+                (memberIds.length > 0
+                    ? defaultPlanServings(
+                          recipe.yieldPortions,
+                          memberIds.map((id) => id.toLowerCase()),
+                          memberPortions,
+                      )
+                    : (servingsInput ?? recipe.yieldPortions))
         ) {
             // Nothing was written and the servings asked for are not the ones
             // planned: say so, and where it already is. The same servings
@@ -883,9 +943,15 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
             await householdToday(member.householdId),
         );
         const slot = checkPlanSlot(slotInput);
-        const servings = checkPlanServingsCapped(
-            servingsInput ?? existing.servings,
-        );
+        // A plan for named people has no servings of its own. The sheet
+        // posts the number it showed, so an unchanged one is no edit; any
+        // other is refused by `movePlannedRecipe`.
+        const named = (existing.memberIds?.length ?? 0) > 0;
+        const servings =
+            named &&
+            (servingsInput === undefined || servingsInput === existing.servings)
+                ? undefined
+                : checkPlanServingsCapped(servingsInput ?? existing.servings);
         // The same recipe already on that day and meal is "already planned":
         // nothing moves and nothing is added to it.
         const moved = await movePlannedRecipe(
@@ -972,6 +1038,86 @@ recipesRoutes.post("/recipes/plan/:planId/remove", requireMember, async (c) => {
     }
     // toast: none — the week shows it gone (a plan already gone is the same)
     return c.redirect(back, 303);
+});
+
+/**
+ * Change the signed-in person's own version of a recipe, one ingredient at a
+ * time (`action`: remove, amount, food or add). It is always their own: the
+ * form names no person. The base recipe is not touched. A change that does not
+ * check re-renders the recipe page with the reason.
+ */
+recipesRoutes.post("/recipes/:id/variant", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+    const body = await c.req.parseBody();
+    const action = formText(body, "action");
+    try {
+        if (!(VARIANT_ACTIONS as readonly string[]).includes(action)) {
+            throw new RecipeInputError(
+                `Pick what to change: ${VARIANT_ACTIONS.join(", ")}.`,
+            );
+        }
+        await setRecipeVariant(
+            liveRecipesStore(),
+            liveFoodsStore(),
+            liveRecipeVariantsStore(),
+            {
+                householdId: member.householdId,
+                recipeId,
+                userId,
+                action: action as VariantAction,
+                ingredientId: formText(body, "ingredient_id") || null,
+                amount: formOptionalNumber(body, "amount"),
+                unit: formText(body, "unit") || undefined,
+                foodId: formText(body, "food_id") || undefined,
+            },
+        );
+    } catch (err) {
+        if (!(err instanceof RecipeInputError)) throw err;
+        const page = await recipeFormError(userId, recipeId, err);
+        return c.html(page.html, page.status);
+    }
+    // toast: none — the page reloads on the recipe, now with the change saved
+    return c.redirect(`/recipes/${recipeId}`, 303);
+});
+
+/**
+ * Take back the signed-in person's own changes to a recipe: all of them, or
+ * one ingredient's (`ingredient_id`). Another person's version is never
+ * reached from here.
+ */
+recipesRoutes.post("/recipes/:id/variant/clear", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+    const body = await c.req.parseBody();
+    try {
+        await clearRecipeVariant(
+            liveRecipesStore(),
+            liveRecipeVariantsStore(),
+            {
+                householdId: member.householdId,
+                recipeId,
+                userId,
+                // Left out clears the whole version; present but blank is an
+                // ingredient that names nothing, which is refused, as it is
+                // over MCP.
+                ingredientId:
+                    "ingredient_id" in body
+                        ? formText(body, "ingredient_id")
+                        : null,
+            },
+        );
+    } catch (err) {
+        if (!(err instanceof RecipeInputError)) throw err;
+        const page = await recipeFormError(userId, recipeId, err);
+        return c.html(page.html, page.status);
+    }
+    // toast: none — the page reloads on the recipe, the changes taken back
+    return c.redirect(`/recipes/${recipeId}`, 303);
 });
 
 /**

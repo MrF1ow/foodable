@@ -1540,6 +1540,7 @@ describe("tables keyed by more than an id", () => {
         for (const table of [
             "stock_movements",
             "recipe_portions",
+            "recipe_variant_overrides",
             "notice_dismissals",
             "nutrition_goal_days",
             "households",
@@ -1943,6 +1944,7 @@ describe("which tables undo covers", () => {
             );
         expect(scopes("member")).toEqual([
             "recipe_portions",
+            "recipe_variant_overrides",
             "meals",
             "meal_items",
             "water_log",
