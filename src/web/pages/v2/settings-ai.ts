@@ -7,15 +7,15 @@ import {
 } from "../../../domain/agent-actions.js";
 import { mayUndoAgentAction } from "../../../domain/notices-agent.js";
 import { dateInTz } from "../../../domain/tz.js";
-import { esc } from "../../components/v2/html.js";
-import { iconCopy } from "../../components/v2/icons.js";
-import { confirmSheet, sheetTrigger } from "../../components/v2/sheet.js";
-import {
-    renderSettingsV2Page,
-    settingsErrorBanner,
-    settingsMenuIcon,
-    settingsPageHeader,
-} from "./settings-shared.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
+import { icon } from "../../components/v2/icon.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
+import { emptyState } from "../../components/v2/empty-state.js";
+import { renderHouseholdLayout } from "./settings-household-layout.js";
+import { settingsErrorBanner } from "./settings-shared.js";
 import { formatGoalSince } from "./settings-goals-label.js";
 
 /**
@@ -39,8 +39,8 @@ export function aiUndoPath(actionId: string): string {
     return `${AI_PAGE_PATH}/actions/${actionId}/undo`;
 }
 
-/** The pages an Undo may send the person back to. */
-export const AI_UNDO_BACK_PATHS = [AI_PAGE_PATH, "/"] as const;
+/** The one page an Undo sends the person back to. */
+export const AI_UNDO_BACK_PATHS = [AI_PAGE_PATH] as const;
 export type AiUndoBack = (typeof AI_UNDO_BACK_PATHS)[number];
 
 /** A path from a form, if it is one of ours; never an address taken from the request. */
@@ -48,25 +48,30 @@ export function parseAiUndoBack(value: string | undefined): AiUndoBack {
     return AI_UNDO_BACK_PATHS.find((path) => path === value) ?? AI_PAGE_PATH;
 }
 
-/** Said under the list of recent agent changes. */
-export const AI_UNDO_FOOTER = "Agent changes can be undone for 24 hours.";
-
 /** One line of the activity list, ready to render. */
 export type AgentActivityRow = {
     id: string;
     summary: string;
     connection: string;
-    /** "as Alice", or "" for the household token. */
-    actingAs: string;
-    /** When it happened: "2 hours ago · Nov 12, 1:04 PM". */
+    /** The user the agent acted as; null for the household token. */
+    memberId: string | null;
+    /**
+     * Whose agent it was, as this viewer reads it: their own, the household
+     * token's, or another member's (`name` null once that member has left).
+     */
+    actor:
+        | { kind: "viewer" }
+        | { kind: "household" }
+        | { kind: "member"; name: string | null };
+    /** How long ago it happened: "2 hours ago", "Yesterday", "3 days ago". */
     when: string;
     createdAt: string;
     state:
         | { kind: "undo" }
         | { kind: "undone" }
         | { kind: "expired" }
-        /** Undoable, but not by this viewer. */
-        | { kind: "other"; who: string };
+        /** Undoable, but not by this viewer: `who` is the one member who also may, or null when only the owner may. */
+        | { kind: "other"; who: string | null };
 };
 
 export type SettingsAiV2View = {
@@ -85,17 +90,17 @@ export type SettingsAiV2View = {
     showCards: boolean;
     /** Newest first. */
     activity: readonly AgentActivityRow[];
+    /**
+     * Narrows Recent changes to one app: the name its changes are recorded
+     * under (`appFilterKey`). Null or missing shows every change.
+     */
+    appFilter?: string | null;
     now: Date;
     /** The member's timezone: "today" and the dates are theirs. */
     timezone: string;
     /** The address an agent adds as its remote MCP server. */
     mcpUrl: string;
     error?: string;
-    /**
-     * Open this app's Disconnect sheet on load: the id the form posts (the
-     * app's client id, or `UNKNOWN_APP_MARKER`).
-     */
-    openClient?: string;
 };
 
 const MS_PER_DAY = 86_400_000;
@@ -140,16 +145,9 @@ function ago(from: Date, now: Date, timezone: string): string {
     return days === 1 ? "Yesterday" : `${days} days ago`;
 }
 
-/** "2 hours ago · Nov 12, 1:04 PM", the clock in the member's timezone. */
+/** "2 hours ago", "Yesterday", "3 days ago": the days counted in the member's timezone. */
 export function activityWhen(at: Date, now: Date, timezone: string): string {
-    const absolute = new Intl.DateTimeFormat("en-US", {
-        timeZone: timezone,
-        month: "short",
-        day: "numeric",
-        hour: "numeric",
-        minute: "2-digit",
-    }).format(at);
-    return `${ago(at, now, timezone)} · ${absolute}`;
+    return ago(at, now, timezone);
 }
 
 /**
@@ -164,26 +162,41 @@ export function agentActivityRows(
         isOwner: boolean;
         /** Display names by user id. */
         names: ReadonlyMap<string, string>;
+        /** Who may undo anyone's change (the owner): a change made as one of them is the owner's, named once. */
+        undoAnyIds?: ReadonlySet<string>;
         now: Date;
         timezone: string;
     },
 ): AgentActivityRow[] {
     const viewer = { userId: opts.viewerUserId, isOwner: opts.isOwner };
+    const viewerId = opts.viewerUserId.toLowerCase();
     return entries.map((entry) => {
+        // The household token and a member who is the owner act as the owner,
+        // and a member who has left cannot undo anything: each is the owner's.
         const name =
-            entry.memberId == null
-                ? null
-                : (opts.names.get(entry.memberId) ?? "a former member");
+            entry.memberId == null || opts.undoAnyIds?.has(entry.memberId)
+                ? undefined
+                : opts.names.get(entry.memberId);
         let state: AgentActivityRow["state"];
         if (entry.undoneAt) state = { kind: "undone" };
         else if (!entry.canUndo) state = { kind: "expired" };
         else if (mayUndoAgentAction(entry, viewer)) state = { kind: "undo" };
-        else state = { kind: "other", who: name ?? "the owner" };
+        else state = { kind: "other", who: name ?? null };
+        const actor: AgentActivityRow["actor"] =
+            entry.memberId == null
+                ? { kind: "household" }
+                : entry.memberId.toLowerCase() === viewerId
+                  ? { kind: "viewer" }
+                  : {
+                        kind: "member",
+                        name: opts.names.get(entry.memberId) ?? null,
+                    };
         return {
             id: entry.id,
             summary: entry.summary,
             connection: entry.connection,
-            actingAs: name ? `as ${name}` : "",
+            memberId: entry.memberId,
+            actor,
             when: activityWhen(
                 new Date(entry.createdAt),
                 opts.now,
@@ -195,17 +208,81 @@ export function agentActivityRows(
     });
 }
 
-function connectedText(first: Date, now: Date, timezone: string): string {
+function sinceText(first: Date, now: Date, timezone: string): string {
     const today = dateInTz(now, timezone);
-    return `Connected ${formatGoalSince(dateInTz(first, timezone), today)}`;
+    return `since ${formatGoalSince(dateInTz(first, timezone), today)}`;
 }
 
 function appName(connection: AiConnection): string {
     return connection.clientName?.trim() || "Unknown app";
 }
 
-function sheetId(index: number): string {
-    return `fd-ai-disconnect-${index}`;
+/** A lone UTF-16 surrogate (half an emoji, as an 80-unit cut can leave). */
+const LONE_SURROGATE =
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g;
+
+/** The longest app name the MCP actor records. */
+const RECORDED_APP_NAME_MAX = 80;
+
+/**
+ * The name an app's changes are recorded under, as the MCP actor records it
+ * for its connection: its client name, else its client id, cut to 80
+ * characters; "OAuth app" when it has neither (an empty name counts as none).
+ */
+export function appFilterKey(connection: AiConnection): string {
+    const client = connection.clientName ?? connection.clientId;
+    // Postgres stores half an emoji left by the cut as U+FFFD, so the key does too.
+    return client
+        ? client
+              .slice(0, RECORDED_APP_NAME_MAX)
+              .replace(LONE_SURROGATE, "\uFFFD")
+        : "OAuth app";
+}
+
+const APP_FILTER_MAX = 200;
+/** Control and invisible format characters (bidi overrides, zero-width): none of them is a name. */
+const UNPRINTABLE_CHARACTER = /[\p{Cc}\p{Cf}]/u;
+
+/**
+ * The app a `?app=` filter names, as the key its changes are recorded under:
+ * an app of the viewer's own, given by client id, resolves to its key; any
+ * other text stays as typed (no change then matches it). Empty, overlong or
+ * control-character text is no filter at all.
+ */
+export function resolveAppFilter(
+    value: string | undefined,
+    connections: readonly AiConnection[],
+): string | null {
+    // An app of the viewer's own, linked by its client id, resolves first,
+    // whatever its recorded name holds (spaces, emoji, format characters).
+    const byId = value
+        ? connections.find((c) => c.clientId === value)
+        : undefined;
+    if (byId) return appFilterKey(byId);
+    const text = value?.trim() ?? "";
+    if (
+        text === "" ||
+        text.length > APP_FILTER_MAX ||
+        UNPRINTABLE_CHARACTER.test(text)
+    ) {
+        return null;
+    }
+    return text;
+}
+
+const RECENT_CHANGES_ID = "recent-changes";
+
+/**
+ * The page's own address, narrowed to one app's changes and landing on them.
+ * An app is named by its client id when it has one (`resolveAppFilter` maps it
+ * back to the recorded name); a name never makes the link throw.
+ */
+function changesHref(connection: AiConnection): string {
+    const value = (connection.clientId ?? appFilterKey(connection)).replace(
+        LONE_SURROGATE,
+        "\uFFFD",
+    );
+    return `${AI_PAGE_PATH}?app=${encodeURIComponent(value)}#${RECENT_CHANGES_ID}`;
 }
 
 /** What the Disconnect form posts for this app. */
@@ -213,61 +290,76 @@ function postedClient(connection: AiConnection): string {
     return connection.clientId ?? UNKNOWN_APP_MARKER;
 }
 
-function connectionRow(
-    connection: AiConnection,
-    index: number,
-    view: SettingsAiV2View,
-): string {
+/** One connected app: its use, and a ⋯ whose Disconnect confirms in place. */
+function connectionRow(connection: AiConnection, view: SettingsAiV2View): Html {
     const name = appName(connection);
-    const trigger = sheetTrigger({
-        target: sheetId(index),
-        label: "Disconnect",
-        className: "fd-settings-ai__disconnect",
-        ariaLabel: `Disconnect ${name}`,
-    });
-    return `<li class="fd-settings-ai__row"><span class="fd-settings-ai__logo" aria-hidden="true">${settingsMenuIcon("code", "fd-settings-ai__icon")}</span><div class="fd-settings-ai__text"><p class="fd-settings-ai__name">${esc(name)}</p><p class="fd-settings-ai__meta">${esc(lastUsedText(connection.lastUsedAt, view.now, view.timezone))}</p><p class="fd-settings-ai__meta">${esc(connectedText(connection.firstConnectedAt, view.now, view.timezone))}</p></div>${trigger}</li>`;
-}
-
-function disconnectSheet(
-    connection: AiConnection,
-    index: number,
-    view: SettingsAiV2View,
-): string {
-    const name = appName(connection);
-    return confirmSheet({
-        id: sheetId(index),
-        title: `Disconnect ${name}?`,
-        message: `${name} will stop working with your account right away. You can connect it again later.`,
-        action: AI_DISCONNECT_PATH,
-        confirmLabel: "Disconnect",
-        hiddenFields: { client: postedClient(connection) },
-        openOnLoad: view.openClient === postedClient(connection),
-        turboFalse: true,
+    return itemRow({
+        title: name,
+        subtitle: `${lastUsedText(connection.lastUsedAt, view.now, view.timezone)} · ${sinceText(connection.firstConnectedAt, view.now, view.timezone)}`,
+        lead: { kind: "icon", name: "code" },
+        trailing: {
+            kind: "control",
+            html: menu({
+                label: `Actions for ${name}`,
+                anchor: "more",
+                items: [
+                    {
+                        kind: "link",
+                        label: "Changes",
+                        href: changesHref(connection),
+                    },
+                    {
+                        kind: "destructive",
+                        label: "Disconnect",
+                        action: AI_DISCONNECT_PATH,
+                        fields: { client: postedClient(connection) },
+                    },
+                ],
+            }),
+        },
     });
 }
 
-/** One switch row of the Agents group; the form posts the opposite value. */
+/** A switch row of the Agents group; the form posts the opposite value. */
 function agentSwitchRow(opts: {
     action: string;
     field: string;
     on: boolean;
     title: string;
     sub: string;
-    turboFalse?: boolean;
-}): string {
-    const text = `<span class="fd-settings-ai__text"><span class="fd-settings-ai__name">${esc(opts.title)}</span><span class="fd-settings-ai__meta">${esc(opts.sub)}</span></span>`;
-    const turbo = opts.turboFalse ? ' data-turbo="false"' : "";
-    return `<li class="fd-settings-ai__row"><form method="post" action="${esc(opts.action)}" class="fd-settings-ai__switch-form"${turbo}><input type="hidden" name="${esc(opts.field)}" value="${opts.on ? "0" : "1"}" />${text}<button type="submit" class="fd-switch" role="switch" aria-checked="${opts.on ? "true" : "false"}" aria-label="${esc(opts.title)}"><span class="fd-switch__knob" aria-hidden="true"></span></button></form></li>`;
+}): Html {
+    return itemRow({
+        title: opts.title,
+        subtitle: opts.sub,
+        trailing: {
+            kind: "toggle",
+            on: opts.on,
+            label: opts.title,
+            form: {
+                action: opts.action,
+                fields: { [opts.field]: opts.on ? "0" : "1" },
+            },
+        },
+    });
 }
 
-/** A row with no control: the value as text, nothing to press or post. */
-function agentValueRow(opts: {
-    value: string;
+/** The switch the household's Off holds in place: shown, switched off, nothing to press. */
+function agentLockedRow(opts: {
+    id: string;
     title: string;
     sub: string;
-}): string {
-    const text = `<span class="fd-settings-ai__text"><span class="fd-settings-ai__name">${esc(opts.title)}</span><span class="fd-settings-ai__meta">${esc(opts.sub)}</span></span>`;
-    return `<li class="fd-settings-ai__row">${text}<span class="fd-settings-ai__status">${esc(opts.value)}</span></li>`;
+}): Html {
+    return itemRow({
+        id: opts.id,
+        title: opts.title,
+        subtitle: opts.sub,
+        trailing: {
+            kind: "toggle",
+            on: false,
+            label: opts.title,
+            disabled: true,
+        },
+    });
 }
 
 export const AI_SHOW_CARDS_TITLE = "Show cards in chat";
@@ -275,9 +367,16 @@ export const AI_SHOW_CARDS_TITLE = "Show cards in chat";
 export const AI_DESTRUCTIVE_TITLE = AGENT_DESTRUCTIVE_SETTING;
 /** Each person's own switch. */
 export const AI_PERSONAL_TITLE = AGENT_PERSONAL_SETTING;
-export const AI_HOUSEHOLD_LABEL = "HOUSEHOLD · OWNER ONLY";
+export const AI_HOUSEHOLD_LABEL = "Household · owner only";
 
-function agentsSection(view: SettingsAiV2View): string {
+/** What a person's own switch says under its title. */
+export function personalSwitchSub(on: boolean): string {
+    return on
+        ? "Only what you can delete yourself"
+        : "Off by default · only what you can delete";
+}
+
+function agentsSection(view: SettingsAiV2View): Html {
     const { allowed, canChange } = view.destructive;
     const { canDelete, householdOffBy } = view.personal ?? {
         canDelete: false,
@@ -288,14 +387,14 @@ function agentsSection(view: SettingsAiV2View): string {
         field: "enabled",
         on: view.showCards,
         title: AI_SHOW_CARDS_TITLE,
-        sub: "Your goals and meals as widgets",
+        sub: "Goals and meals as widgets",
     });
     // Whose switch is whose: this one is the person's own; the owner's
     // household switch under it can turn every person's off at once.
     const own =
         householdOffBy != null
-            ? agentValueRow({
-                  value: "Off",
+            ? agentLockedRow({
+                  id: "agent-own-switch",
                   title: AI_PERSONAL_TITLE,
                   sub: `Turned off for the household by ${householdOffBy.trim() || "the owner"}`,
               })
@@ -304,64 +403,193 @@ function agentsSection(view: SettingsAiV2View): string {
                   field: "allowed",
                   on: canDelete,
                   title: AI_PERSONAL_TITLE,
-                  sub: "Off by default · only what you can delete",
+                  sub: personalSwitchSub(canDelete),
               });
     const household = canChange
-        ? `<li class="fd-settings-ai__row"><span class="fd-settings-ai__meta">${esc(AI_HOUSEHOLD_LABEL)}</span></li>${agentSwitchRow(
-              {
-                  action: AI_DESTRUCTIVE_PATH,
-                  field: "allowed",
-                  on: allowed,
-                  title: AI_DESTRUCTIVE_TITLE,
-                  sub: "Off stops every member's agents",
-                  turboFalse: true,
-              },
-          )}`
+        ? join([
+              sectionHeader({ label: AI_HOUSEHOLD_LABEL, rule: false }),
+              listGroup({
+                  label: "Household",
+                  data: { "fd-ai-household": "" },
+                  rows: [
+                      agentSwitchRow({
+                          action: AI_DESTRUCTIVE_PATH,
+                          field: "allowed",
+                          on: allowed,
+                          title: AI_DESTRUCTIVE_TITLE,
+                          sub: "Off stops every member's agents",
+                      }),
+                  ],
+              }),
+          ])
         : "";
-    return `<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Agents</h2><ul class="fd-settings-ai__list" data-fd-ai-agents>${cards}${own}${household}</ul>`;
+    return join([
+        sectionHeader({ label: "Agents", rule: false }),
+        listGroup({
+            label: "Agents",
+            data: { "fd-ai-agents": "" },
+            rows: [cards, own],
+        }),
+        household,
+    ]);
 }
 
-function activityControl(row: AgentActivityRow, back: AiUndoBack): string {
+/** What a row's ⋯ holds: Undo where the viewer may use it, else the reason there is none. */
+function activityMenuItems(row: AgentActivityRow): MenuItem[] {
     switch (row.state.kind) {
         case "undo":
-            return `<form method="post" action="${esc(aiUndoPath(row.id))}" class="fd-settings-ai__undo-form" data-turbo="false"><input type="hidden" name="back" value="${esc(back)}" /><button type="submit" class="fd-settings-ai__undo" aria-label="Undo: ${esc(row.summary)}">Undo</button></form>`;
+            return [
+                { kind: "post", label: "Undo", action: aiUndoPath(row.id) },
+            ];
         case "undone":
-            return `<span class="fd-settings-ai__status">Undone</span>`;
-        case "other":
-            return `<span class="fd-settings-ai__status">${esc(row.state.who === "the owner" ? "The owner can undo" : `${row.state.who} or the owner can undo`)}</span>`;
+            return [{ kind: "note", label: "Undone" }];
         case "expired":
-            return `<span class="fd-settings-ai__status">Can no longer be undone</span>`;
+            return [{ kind: "note", label: "Can no longer be undone" }];
+        case "other":
+            return [
+                {
+                    kind: "note",
+                    label:
+                        row.state.who === null
+                            ? "The owner can undo"
+                            : `${row.state.who} or the owner can undo`,
+                },
+            ];
     }
 }
 
-function activityRow(row: AgentActivityRow): string {
-    const who = row.actingAs
-        ? `${row.connection} · ${row.actingAs}`
-        : row.connection;
-    return `<li class="fd-settings-ai__row fd-settings-ai__activity-row" data-agent-action="${esc(row.id)}"><div class="fd-settings-ai__text"><p class="fd-settings-ai__name">${esc(row.summary)}</p><p class="fd-settings-ai__meta">${esc(who)}</p><p class="fd-settings-ai__meta"><time datetime="${esc(row.createdAt)}">${esc(row.when)}</time></p></div>${activityControl(row, AI_PAGE_PATH)}</li>`;
+/** The longest member name the line under a change spells out. */
+const ACTED_FOR_NAME_MAX = 16;
+
+/** `text` cut to `max` characters, with an ellipsis where it was cut. */
+function cutText(text: string, max: number): string {
+    const chars = Array.from(text.trim());
+    return chars.length <= max
+        ? chars.join("")
+        : `${chars.slice(0, max - 1).join("")}…`;
 }
 
-function activitySection(view: SettingsAiV2View): string {
-    const list =
-        view.activity.length === 0
-            ? `<p class="fd-settings-ai__empty">Nothing yet. When an agent deletes, clears or overwrites something, it shows here and you can undo it for 24 hours.</p>`
-            : `<ul class="fd-settings-ai__list" data-fd-ai-activity>${view.activity.map(activityRow).join("")}</ul><p class="fd-settings-ai__help" data-fd-ai-undo-footer>${esc(AI_UNDO_FOOTER)}</p>`;
-    return `<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Recent agent changes</h2>${list}`;
+/**
+ * The line under a change: the app and when, naming whose agent it was when
+ * that is not the viewer's own: "Claude for Sam · 2 hours ago", or
+ * "Claude · household token · 2 hours ago" for the shared token.
+ */
+function activitySubtitle(row: AgentActivityRow): string {
+    switch (row.actor.kind) {
+        case "viewer":
+            return `${row.connection} · ${row.when}`;
+        case "household":
+            // The shared token's own label is already "household token".
+            return row.connection.toLowerCase() === "household token"
+                ? `Household token · ${row.when}`
+                : `${row.connection} · household token · ${row.when}`;
+        case "member":
+            return `${row.connection} for ${
+                row.actor.name === null
+                    ? "a former member"
+                    : cutText(row.actor.name, ACTED_FOR_NAME_MAX)
+            } · ${row.when}`;
+    }
+}
+
+/** A change: what, then the app and when. Every row has a ⋯, which says why when there is no Undo. */
+function activityRow(row: AgentActivityRow): Html {
+    return itemRow({
+        title: row.summary,
+        subtitle: activitySubtitle(row),
+        trailing: {
+            kind: "control",
+            html: menu({
+                label: `Actions for ${row.summary}`,
+                anchor: "more",
+                items: activityMenuItems(row),
+            }),
+        },
+        id: `agent-action-${row.id}`,
+    });
+}
+
+/** The longest app name the filtered view spells out. */
+const APP_NAME_SHOWN_MAX = 32;
+
+function activitySection(view: SettingsAiV2View): Html {
+    const app = view.appFilter ?? null;
+    // An app's changes are the viewer's own agent's under that name: another
+    // member's app can share it.
+    const shown =
+        app === null
+            ? view.activity
+            : view.activity.filter(
+                  (row) =>
+                      row.actor.kind === "viewer" && row.connection === app,
+              );
+    return join([
+        sectionHeader({
+            label: "Recent changes",
+            rule: false,
+            id: RECENT_CHANGES_ID,
+            // A filtered list says whose, and has the way back to every change.
+            count: app ?? undefined,
+            action:
+                app === null
+                    ? undefined
+                    : {
+                          label: "Show all",
+                          href: `${AI_PAGE_PATH}#${RECENT_CHANGES_ID}`,
+                      },
+        }),
+        // The list is the latest 50 changes of everyone's; a filter narrows
+        // those, so it never claims the app has no others.
+        app === null || shown.length === 0
+            ? ""
+            : raw(
+                  `<p class="fd-settings-ai__scope">${esc(`Changes by ${cutText(app, APP_NAME_SHOWN_MAX)} among the latest ${AI_ACTIVITY_LIMIT}`)}</p>`,
+              ),
+        shown.length === 0
+            ? emptyState({
+                  title:
+                      app === null
+                          ? "No changes yet"
+                          : `No changes by ${cutText(app, APP_NAME_SHOWN_MAX)} among the latest ${AI_ACTIVITY_LIMIT}`,
+              })
+            : listGroup({
+                  label: "Recent agent changes",
+                  data: { "fd-ai-activity": "" },
+                  rows: shown.map(activityRow),
+              }),
+    ]);
+}
+
+/** The address an agent adds, with its copy button (client/v2/copy-address.js). */
+function connectAddress(view: SettingsAiV2View): Html {
+    return raw(
+        `<div class="fd-settings-ai__address" data-fd-copy-address><code id="fd-ai-mcp-url" data-fd-copy-source>${esc(view.mcpUrl)}</code><button type="button" class="fd-settings-ai__copy" data-fd-copy-trigger aria-label="Copy address">${icon("copy")}</button></div><p class="fd-visually-hidden" role="status" aria-live="polite" data-fd-copy-status></p>`,
+    );
 }
 
 export function renderSettingsAiV2Body(view: SettingsAiV2View): string {
-    const list =
+    const connections =
         view.connections.length === 0
-            ? `<p class="fd-settings-ai__empty">No AI apps connected yet.</p>`
-            : `<ul class="fd-settings-ai__list">${view.connections.map((c, i) => connectionRow(c, i, view)).join("")}</ul>`;
-    const sheets = view.connections
-        .map((c, i) => disconnectSheet(c, i, view))
-        .join("");
-    return `${settingsPageHeader("AI connections")}${String(settingsErrorBanner(view.error))}<p class="fd-settings-ai__lead">Agents you connect can log meals, read your fridge and plan groceries for this household.</p>${list}<h2 class="fd-settings-goals-card__title fd-settings-ai__connect-title">Connect a new agent</h2><div class="fd-settings-ai__address" data-fd-copy-address><code id="fd-ai-mcp-url" data-fd-copy-source>${esc(view.mcpUrl)}</code><button type="button" class="fd-settings-ai__copy" data-fd-copy-trigger aria-label="Copy address">${String(iconCopy())}</button></div><p class="fd-visually-hidden" role="status" aria-live="polite" data-fd-copy-status></p><p class="fd-settings-ai__help">Add this address as a remote MCP server in your agent, then sign in when it asks.</p>${agentsSection(view)}${activitySection(view)}${sheets}`;
+            ? emptyState({ title: "No AI apps connected yet" })
+            : listGroup({
+                  label: "Connected apps",
+                  rows: view.connections.map((c) => connectionRow(c, view)),
+              });
+    return String(
+        join([
+            settingsErrorBanner(view.error),
+            connections,
+            agentsSection(view),
+            sectionHeader({ label: "Connect a new agent", rule: false }),
+            connectAddress(view),
+            activitySection(view),
+        ]),
+    );
 }
 
 export function renderSettingsAiV2Page(view: SettingsAiV2View): string {
-    return renderSettingsV2Page({
+    // The household layout draws a row's ⋯ as the bare glyph, as the frames do.
+    return renderHouseholdLayout({
         chrome: view.chrome,
         page: "ai",
         title: "AI connections",

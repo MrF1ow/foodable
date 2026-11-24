@@ -557,3 +557,36 @@ test("an anchored menu panel paints above the phone Nav bar and scrolls inside w
     expect(Number(panel.match(/z-index:\s*(\d+)/)![1])).toBeGreaterThan(50);
     expect(panel).toContain("overflow-y: auto");
 });
+
+test("a note is a dimmed, disabled item that says why, and not a button or a form", () => {
+    const html = String(
+        menu({
+            label: "Actions for Cleared 20 grocery lines",
+            items: [{ kind: "note", label: "Sam or the owner can undo" }],
+        }),
+    );
+    // A note alone still makes the anchored form (it needs the script's keys).
+    expect(html).toContain("fd-menu--anchored");
+    expect(html).toContain('role="menu"');
+    expect(html).toContain(
+        `<div class="fd-menu__item fd-menu__note" role="menuitem" aria-disabled="true" tabindex="-1"><span class="fd-menu__text"><span class="fd-menu__label">Sam or the owner can undo</span></span></div>`,
+    );
+    expect(html).not.toContain("<form");
+    expect(html).not.toContain('type="submit"');
+    const escaped = String(
+        menu({ label: "x", items: [{ kind: "note", label: XSS }] }),
+    );
+    expect(escaped).toContain(XSS_ESCAPED);
+    expect(injectedAttributes(escaped)).resolves.toEqual([]);
+});
+
+test("the tick column is a flex box, so the 24 px tick centres on the label's line", () => {
+    const css = readFileSync(
+        join(import.meta.dir, "../../../../public/app/v2/menu.css"),
+        "utf8",
+    );
+    const check = css.match(/\.fd-menu__check \{[^}]*\}/)![0];
+    expect(check).toContain("display: flex");
+    expect(check).toContain("align-items: center");
+    expect(check).not.toContain("display: grid");
+});

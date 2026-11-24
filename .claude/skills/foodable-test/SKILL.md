@@ -70,9 +70,9 @@ bun run db:dev status   # "stopped", exit 1
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
 - **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off). Page loads sync `notifications`; db-less route tests log `sync failed`.
-- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791, :9223, one run at a time ("harness crashed" = one holds them). No DB: `scripts/nav-check-fixture.ts` keys pages by query, flags on, POSTs 303.
+- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Ports :4791, :9223, one run at a time ("harness crashed" = port held). No DB: `scripts/nav-check-fixture.ts` keys pages by query, flags on, POSTs 303 to the referer.
 - **Flicker:** `bun scripts/flicker-check.ts --base http://<tailscale ip -4>:$APP_PORT` on an isolated stack: remote browserless Chromium, 390 px, both themes.
-- **App look:** `bun run preview:app --shots`: `-390.png`/`-1440.png` per page in tmp/app-preview (slow; clear it first). Without `--shots`: serves :4787 (`PREVIEW_PORT`), pages `/<name>-<light|dark>.html`; clock, caret pinned.
+- **App look:** `bun run preview:app --shots`: `-390.png`/`-1440.png` per page in tmp/app-preview (slow; clear first). Without `--shots`: serves :4787 (`PREVIEW_PORT`), pages `/<name>-<light|dark>.html`; clock, caret pinned.
 - **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`) compares base and branch; exit 1 on a diff. Clean commits are cached in `~/.cache/foodable/preview-diff`: `rm -rf` old.
 - **WebKit (Safari-class):** WPE `MiniBrowser` needs a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH`, `WEBKIT_FORCE_COMPLEX_TEXT=1` and `LD_LIBRARY_PATH` (its `lib`, `sys/lib`, ICU 74).
 - **Barcode scans** hit live Open Food Facts; unit tests stub it.

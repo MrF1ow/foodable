@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { getProfile, upsertProfile } from "../../db/profiles.js";
 import { setSqlForTests } from "../../db/sql.js";
 import { describeDb } from "../../db/testing/pg.js";
-import { seedHousehold } from "../../db/testing/fixtures.js";
+import { seedHousehold, seedMember } from "../../db/testing/fixtures.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { resetFlagsForTests } from "../../flags.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
@@ -90,8 +90,8 @@ describeDb(
                 await get(userId, "/settings/nutrients")
             ).text();
             expect(page).toContain('data-fd-settings-page="nutrients"');
-            expect(page).toMatch(/aria-checked="false"[^>]*aria-label="Sugar"/);
-            expect(page).toMatch(/aria-checked="true"[^>]*aria-label="Fiber"/);
+            expect(page).toMatch(/aria-label="Sugar"[^>]*aria-checked="false"/);
+            expect(page).toMatch(/aria-label="Fiber"[^>]*aria-checked="true"/);
 
             const back = await post(userId, "/settings/nutrients", {
                 nutrient: "sugar",
@@ -213,14 +213,15 @@ describeDb(
             expect(page).toContain("Drinks");
         });
 
-        test("units: an unknown unit is a 400 that reopens its sheet", async () => {
+        test("units: an unknown unit is a 400 that shows its error on the page", async () => {
             const res = await post(userId, "/settings/units", {
                 preferred_weight_unit: "stone",
             });
             expect(res.status).toBe(400);
             const html = await res.text();
             expect(html).toContain("Choose kg or lb.");
-            expect(html).toContain("data-sheet-open-on-load");
+            expect(html).toContain("data-fd-units");
+            expect(html).not.toContain("data-sheet-open-on-load");
             expect(
                 (await getProfile(userId))?.preferred_weight_unit ?? null,
             ).toBe(null);
@@ -248,7 +249,7 @@ describeDb(
             ).text();
             expect(page).toContain("Show cards in chat");
             expect(page).toMatch(
-                /aria-checked="false"[^>]*aria-label="Show cards in chat"/,
+                /aria-label="Show cards in chat"[^>]*aria-checked="false"/,
             );
 
             const on = await post(userId, "/settings/ai-connections/widgets", {
@@ -262,6 +263,79 @@ describeDb(
             });
             expect(bad.status).toBe(400);
             expect((await getProfile(userId))?.widgets_enabled).toBe(true);
+        });
+
+        test("an owner, an admin and a member each change only their own units, nutrients and cards", async () => {
+            const { sql } = getCtx();
+            const [row] = (await sql`
+                select household_id from public.household_members
+                where user_id = ${userId}
+            `) as { household_id: string }[];
+            const admin = await seedMember(sql, row!.household_id, {
+                role: "admin",
+            });
+            const member = await seedMember(sql, row!.household_id);
+            const people = [
+                { id: userId, weight: "kg", drink: "uk", nutrient: "sugar" },
+                { id: admin, weight: "lb", drink: "us", nutrient: "fiber" },
+                { id: member, weight: "kg", drink: "us", nutrient: "caffeine" },
+            ] as const;
+            for (const p of people) {
+                for (const res of [
+                    await post(p.id, "/settings/units", {
+                        preferred_weight_unit: p.weight,
+                        preferred_drink_unit: p.drink,
+                    }),
+                    await post(p.id, "/settings/nutrients", {
+                        nutrient: p.nutrient,
+                        shown: "0",
+                    }),
+                    await post(p.id, "/settings/ai-connections/widgets", {
+                        enabled: "0",
+                    }),
+                ]) {
+                    expect(res.status).toBe(303);
+                }
+            }
+            // Each person's own profile moved, and nobody else's.
+            for (const p of people) {
+                const profile = await getProfile(p.id);
+                expect(profile?.preferred_weight_unit).toBe(p.weight);
+                expect(profile?.preferred_drink_unit).toBe(p.drink);
+                expect(profile?.hidden_nutrients).toEqual([p.nutrient]);
+                expect(profile?.widgets_enabled).toBe(false);
+            }
+            // The form names no person: a posted user id is ignored.
+            await post(member, "/settings/units", {
+                preferred_weight_unit: "lb",
+                user_id: userId,
+            });
+            expect((await getProfile(userId))?.preferred_weight_unit).toBe(
+                "kg",
+            );
+            expect((await getProfile(member))?.preferred_weight_unit).toBe(
+                "lb",
+            );
+        });
+
+        test("signed out, units, nutrients and cards change nothing", async () => {
+            for (const [path, form] of [
+                ["/settings/units", { preferred_weight_unit: "kg" }],
+                ["/settings/nutrients", { nutrient: "sugar", shown: "0" }],
+                ["/settings/ai-connections/widgets", { enabled: "0" }],
+            ] as const) {
+                const res = await app.request(`http://test${path}`, {
+                    method: "POST",
+                    headers: {
+                        "content-type": "application/x-www-form-urlencoded",
+                    },
+                    body: new URLSearchParams(form).toString(),
+                });
+                expect(res.status).not.toBe(303);
+            }
+            const profile = await getProfile(userId);
+            expect(profile?.preferred_weight_unit ?? null).toBeNull();
+            expect(profile?.hidden_nutrients ?? []).toEqual([]);
         });
 
         test("a partial Account save leaves the checkboxes it does not carry alone", async () => {

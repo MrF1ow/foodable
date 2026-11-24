@@ -6,7 +6,9 @@
  *             trailing control)
  *   lead      checkbox, radio, avatar, icon, dot
  *   extras    score (on the title line), macros (under the subtitle)
- *   trailing  chevron, more, add, toggle (on / off), control (a slot)
+ *   trailing  chevron, more, add, toggle (on / off, or disabled: shown, nothing
+ *             to press, and described by the row's subtitle when the row has
+ *             an `id`, which is where its reason goes), control (a slot)
  *   state     default, disabled (greyed, still there), warning (the words are
  *             in the subtitle or value; colour never carries it alone)
  *   swipe     left reveals Delete (trash, red bed), right reveals Again
@@ -20,6 +22,9 @@
  *   input     the row as a value that saves itself: the title beside an input
  *             (and a unit), one autosaving form (`autosave-input.ts`), with the
  *             refusal under it
+ *   disclosure the row opens in place to its answer: a native `<details>`
+ *             whose summary is the face (title, chevron turning down) and
+ *             whose body is `answer`; the row's `id` is on the `<details>`
  *   select    the pick box of a list in select mode: always in the markup of a
  *             selectable row, shown only while the list root carries
  *             `[data-fd-selecting]` (`client/v2/select-mode.js`); it combines
@@ -90,7 +95,13 @@ export type ItemRowTrailing =
     | { kind: "chevron" }
     | ({ kind: "more"; label: string } & Pick<ButtonHooks, "data">)
     | ({ kind: "add"; label: string } & ButtonHooks)
-    | ({ kind: "toggle"; on: boolean; label: string } & ButtonHooks)
+    | ({
+          kind: "toggle";
+          on: boolean;
+          label: string;
+          /** Held in place: drawn, but nothing to press. */
+          disabled?: boolean;
+      } & ButtonHooks)
     | { kind: "control"; html: Html };
 
 export type ItemRowState = "default" | "disabled" | "warning";
@@ -148,6 +159,12 @@ export type ItemRowInput = Omit<
     chevron?: boolean;
 };
 
+/** The row as a disclosure: the face opens its answer beneath it. */
+export type ItemRowDisclosure = {
+    /** Ready-to-render HTML: the answer, escaped by whoever built it. */
+    answer: Html;
+};
+
 export type ItemRowOptions = {
     title: Text;
     meta?: Text;
@@ -174,6 +191,7 @@ export type ItemRowOptions = {
     reorder?: ItemRowReorder;
     edit?: ItemRowEdit;
     input?: ItemRowInput;
+    disclosure?: ItemRowDisclosure;
     /** The pick box of a list in select mode. */
     select?: boolean | ItemRowSelect;
     id?: string;
@@ -240,7 +258,11 @@ function leadSlot(lead: ItemRowLead, disabled: boolean): Html {
     }
 }
 
-function trailingSlot(trailing: ItemRowTrailing, disabled: boolean): Html {
+function trailingSlot(
+    trailing: ItemRowTrailing,
+    disabled: boolean,
+    describedBy?: string,
+): Html {
     switch (trailing.kind) {
         case "chevron":
             return raw(
@@ -282,8 +304,8 @@ function trailingSlot(trailing: ItemRowTrailing, disabled: boolean): Html {
                 name: trailing.name,
                 value: trailing.value,
                 data: trailing.data,
-                disabled,
-                extraAttrs: ` role="switch" aria-checked="${trailing.on ? "true" : "false"}"`,
+                disabled: disabled || trailing.disabled === true,
+                extraAttrs: ` role="switch" aria-checked="${trailing.on ? "true" : "false"}"${describedBy != null ? ` aria-describedby="${esc(describedBy)}"` : ""}`,
             });
     }
 }
@@ -388,7 +410,41 @@ function inputRow(opts: ItemRowOptions, input: ItemRowInput): Html {
     );
 }
 
+function disclosureRow(
+    opts: ItemRowOptions,
+    disclosure: ItemRowDisclosure,
+): Html {
+    if (
+        opts.href != null ||
+        opts.submit != null ||
+        opts.opens != null ||
+        opts.lead != null ||
+        opts.trailing != null ||
+        opts.swipe != null ||
+        opts.select != null ||
+        opts.value != null ||
+        opts.reorder != null ||
+        opts.edit != null ||
+        opts.input != null
+    ) {
+        throw new Error(
+            "itemRow: a disclosure row is only a title (and a subtitle) and its answer",
+        );
+    }
+    const subtitle = present(opts.subtitle)
+        ? `<span class="fd-item-row__subtitle">${esc(opts.subtitle)}</span>`
+        : "";
+    const id = opts.id != null ? ` id="${esc(opts.id)}"` : "";
+    return raw(
+        `<li class="${cls("fd-item-row fd-item-row--disclosure", opts.className)}"><details class="fd-item-row__disclosure"${id}>
+<summary class="fd-item-row__face fd-item-row__face--link"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="${esc(opts.title)}">${esc(opts.title)}</span></span>${subtitle}</span>${trailingSlot({ kind: "chevron" }, false)}</summary>
+<div class="fd-item-row__answer">${disclosure.answer}</div>
+</details></li>`,
+    );
+}
+
 export function itemRow(opts: ItemRowOptions): Html {
+    if (opts.disclosure != null) return disclosureRow(opts, opts.disclosure);
     if (opts.input != null) return inputRow(opts, opts.input);
     if (opts.reorder != null || opts.edit != null) {
         const mode = opts.reorder != null ? "reorder" : "edit";
@@ -457,10 +513,18 @@ export function itemRow(opts: ItemRowOptions): Html {
             : "",
         opts.score != null ? scoreBadge(opts.score) : "",
     ]);
+    // A held switch is described by the reason under the title.
+    const reasonId =
+        opts.trailing?.kind === "toggle" &&
+        opts.trailing.disabled === true &&
+        opts.id != null &&
+        present(opts.subtitle)
+            ? `${opts.id}-reason`
+            : undefined;
     const main = join([
         `<span class="fd-item-row__line">${titleLine}</span>`,
         present(opts.subtitle)
-            ? `<span class="fd-item-row__subtitle">${esc(opts.subtitle)}</span>`
+            ? `<span class="fd-item-row__subtitle"${reasonId != null ? ` id="${esc(reasonId)}"` : ""}>${esc(opts.subtitle)}</span>`
             : "",
         opts.macros ? macroLine(opts.macros) : "",
     ]);
@@ -470,7 +534,7 @@ export function itemRow(opts: ItemRowOptions): Html {
         present(opts.value)
             ? `<span class="fd-item-row__value">${esc(opts.value)}</span>`
             : "",
-        opts.trailing ? trailingSlot(opts.trailing, disabled) : "",
+        opts.trailing ? trailingSlot(opts.trailing, disabled, reasonId) : "",
     ]);
     const pick = selectBox(opts.select, opts.title, disabled);
     // The pick box is a control, so it never sits inside the link: a selectable

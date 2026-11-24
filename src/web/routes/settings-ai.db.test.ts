@@ -232,7 +232,7 @@ describeDb(pgAvailable !== null, "settings AI connections", (getCtx) => {
 
     test("the page says nothing is connected for a member with no tokens", async () => {
         const html = await (await page(userId)).text();
-        expect(html).toContain("No AI apps connected yet.");
+        expect(html).toContain("No AI apps connected yet");
     });
 
     for (const era of MCP_ERAS) {

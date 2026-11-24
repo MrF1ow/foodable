@@ -809,3 +809,84 @@ test("an input row is only a title and its input, so any other option throws", (
         );
     }
 });
+
+test("a disabled toggle is a real switch that is held: off, nothing to press, no form, described by the reason", () => {
+    const html = itemRow({
+        id: "own",
+        title: "Your agents can delete",
+        subtitle: "Turned off for the household by Ethan",
+        trailing: {
+            kind: "toggle",
+            on: false,
+            label: "Your agents can delete",
+            disabled: true,
+        },
+    });
+    expect(html).toMatch(
+        /<button type="button" class="fd-item-row__trail fd-item-row__toggle" aria-label="Your agents can delete" disabled role="switch" aria-checked="false" aria-describedby="own-reason">/,
+    );
+    expect(html).toContain(
+        '<span class="fd-item-row__subtitle" id="own-reason">Turned off for the household by Ethan</span>',
+    );
+    expect(html).not.toContain("<form");
+    // A live toggle, or a held one with no row id or reason, names no reason.
+    const live = itemRow({
+        id: "own",
+        title: "T",
+        subtitle: "S",
+        trailing: { kind: "toggle", on: true, label: "T" },
+    });
+    expect(live).not.toContain("aria-describedby");
+    expect(live).not.toContain("own-reason");
+    expect(live).not.toContain("disabled");
+    const bare = itemRow({
+        title: "T",
+        trailing: { kind: "toggle", on: false, label: "T", disabled: true },
+    });
+    expect(bare).toContain("disabled");
+    expect(bare).not.toContain("aria-describedby");
+});
+
+test("a disclosure row is a details whose summary is the face and whose body is the answer", () => {
+    const html = itemRow({
+        id: "put-away",
+        title: "Put away",
+        disclosure: { answer: raw("<p>It moves the amount.</p>") },
+    });
+    expect(html).toStartWith(
+        `<li class="fd-item-row fd-item-row--disclosure"><details class="fd-item-row__disclosure" id="put-away">`,
+    );
+    expect(html).toContain(
+        `<summary class="fd-item-row__face fd-item-row__face--link"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="Put away">Put away</span></span></span><span class="fd-item-row__trail fd-item-row__chevron" aria-hidden="true">`,
+    );
+    expect(html).toContain(
+        `<div class="fd-item-row__answer"><p>It moves the amount.</p></div>`,
+    );
+    // The title is escaped; the answer is the caller's ready HTML.
+    expect(
+        itemRow({
+            title: XSS,
+            disclosure: { answer: raw("") },
+        }),
+    ).toContain(XSS_ESCAPED);
+    expect(
+        itemRow({ title: "T", disclosure: { answer: raw("") } }),
+    ).not.toContain("id=");
+});
+
+test("a disclosure row is only a title and its answer", () => {
+    for (const extra of [
+        { href: "/x" },
+        { lead: { kind: "icon", name: "check" } },
+        { trailing: { kind: "chevron" } },
+        { value: "v" },
+    ] as const) {
+        expect(() =>
+            itemRow({
+                title: "T",
+                disclosure: { answer: raw("") },
+                ...extra,
+            }),
+        ).toThrow(/disclosure row/);
+    }
+});

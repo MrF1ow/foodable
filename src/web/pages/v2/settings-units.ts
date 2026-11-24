@@ -1,24 +1,21 @@
+/**
+ * Settings › Units (FigCraft 418048, Light and desktop twins): two rows, Weight
+ * and Drinks, each a pull-down on the row. Choosing a value posts it and comes
+ * back here with no toast; "Not set" clears the choice. Anyone signed in changes
+ * their own units. What is already logged does not change.
+ */
 import type { AppChromeBase } from "../../attention.js";
 import { DRINK_UNITS, type DrinkUnit } from "../../../alcohol.js";
 import { WEIGHT_UNITS, type WeightUnit } from "../../../domain/units.js";
-import { esc, type Html } from "../../components/v2/html.js";
+import { join, raw, type Html } from "../../components/v2/html.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu } from "../../components/v2/menu.js";
 import {
     renderSettingsV2Page,
     settingsErrorBanner,
-    settingsField,
 } from "./settings-shared.js";
-import {
-    householdEditSheet,
-    householdRow,
-    householdRowCard,
-} from "./settings-household-rows.js";
 
 export const UNITS_PATH = "/settings/units";
-export const UNITS_INTRO =
-    "How Foodable shows amounts to you. What is already logged does not change.";
-
-export const UNITS_WEIGHT_SHEET_ID = "fd-units-weight";
-export const UNITS_DRINKS_SHEET_ID = "fd-units-drinks";
 
 const DRINK_LABELS: Record<DrinkUnit, string> = {
     us: "US drinks",
@@ -31,8 +28,6 @@ export type SettingsUnitsV2View = {
     weightUnit: WeightUnit | "";
     drinkUnit: DrinkUnit | "";
     error?: string;
-    /** A 4xx re-render reopens this sheet with the error inside it. */
-    openSheet?: typeof UNITS_WEIGHT_SHEET_ID | typeof UNITS_DRINKS_SHEET_ID;
 };
 
 /** What the Weight row shows. */
@@ -45,87 +40,65 @@ export function drinkUnitLabel(unit: DrinkUnit | ""): string {
     return unit === "" ? "Not set" : DRINK_LABELS[unit];
 }
 
-function unitSelect(opts: {
-    id: string;
-    name: string;
+/** One row with a pull-down: each choice posts its field and value. */
+function unitRow(opts: {
+    title: string;
+    field: "preferred_weight_unit" | "preferred_drink_unit";
     selected: string;
-    values: readonly string[];
-    labels: (value: string) => string;
-}): string {
-    const blank = `<option value=""${opts.selected === "" ? " selected" : ""}>Not set</option>`;
-    const options = opts.values
-        .map(
-            (value) =>
-                `<option value="${esc(value)}"${value === opts.selected ? " selected" : ""}>${esc(opts.labels(value))}</option>`,
-        )
-        .join("");
-    return `<select class="fd-settings-select" id="${esc(opts.id)}" name="${esc(opts.name)}">${blank}${options}</select>`;
-}
-
-function sheets(view: SettingsUnitsV2View): string {
-    const weight = householdEditSheet({
-        id: UNITS_WEIGHT_SHEET_ID,
-        title: "Weight",
+    value: string;
+    choices: readonly { value: string; label: string }[];
+}): Html {
+    const choose = (value: string, label: string) => ({
+        kind: "checked" as const,
+        label,
+        checked: value === opts.selected,
+        // The value already chosen only closes the menu: picking it posts nothing.
+        current: value === opts.selected,
         action: UNITS_PATH,
-        fields: String(
-            settingsField({
-                id: "preferred_weight_unit",
-                label: "Weight unit",
-                control: unitSelect({
-                    id: "preferred_weight_unit",
-                    name: "preferred_weight_unit",
-                    selected: view.weightUnit,
-                    values: WEIGHT_UNITS,
-                    labels: (v) => v,
-                }),
-            }),
-        ),
-        error:
-            view.openSheet === UNITS_WEIGHT_SHEET_ID ? view.error : undefined,
-        open: view.openSheet === UNITS_WEIGHT_SHEET_ID,
+        fields: { [opts.field]: value },
     });
-    const drinks = householdEditSheet({
-        id: UNITS_DRINKS_SHEET_ID,
-        title: "Drinks",
-        action: UNITS_PATH,
-        fields: String(
-            settingsField({
-                id: "preferred_drink_unit",
-                label: "Drink unit",
-                control: unitSelect({
-                    id: "preferred_drink_unit",
-                    name: "preferred_drink_unit",
-                    selected: view.drinkUnit,
-                    values: DRINK_UNITS,
-                    labels: (v) => DRINK_LABELS[v as DrinkUnit],
-                }),
-            }),
-        ),
-        error:
-            view.openSheet === UNITS_DRINKS_SHEET_ID ? view.error : undefined,
-        open: view.openSheet === UNITS_DRINKS_SHEET_ID,
-    });
-    return `${weight}${drinks}`;
+    return raw(
+        `<li class="fd-item-row">${menu({
+            label: opts.title,
+            anchor: "row",
+            row: { title: opts.title, value: opts.value },
+            items: [
+                choose("", "Not set"),
+                ...opts.choices.map((c) => choose(c.value, c.label)),
+            ],
+        })}</li>`,
+    );
 }
 
 export function renderSettingsUnitsV2Body(view: SettingsUnitsV2View): string {
     const rows: Html[] = [
-        householdRow({
-            label: "Weight",
+        unitRow({
+            title: "Weight",
+            field: "preferred_weight_unit",
+            selected: view.weightUnit,
             value: weightUnitLabel(view.weightUnit),
-            sheetId: UNITS_WEIGHT_SHEET_ID,
+            choices: WEIGHT_UNITS.map((unit) => ({
+                value: unit,
+                label: unit,
+            })),
         }),
-        householdRow({
-            label: "Drinks",
+        unitRow({
+            title: "Drinks",
+            field: "preferred_drink_unit",
+            selected: view.drinkUnit,
             value: drinkUnitLabel(view.drinkUnit),
-            sheetId: UNITS_DRINKS_SHEET_ID,
+            choices: DRINK_UNITS.map((unit) => ({
+                value: unit,
+                label: DRINK_LABELS[unit],
+            })),
         }),
     ];
-    // An error with no sheet to show it in sits under the intro.
-    const banner = view.openSheet
-        ? ""
-        : String(settingsErrorBanner(view.error));
-    return `<div class="fd-units fd-stores" data-fd-units><p class="fd-stores-intro">${esc(UNITS_INTRO)}</p>${banner}${String(householdRowCard(rows, "Units"))}${sheets(view)}</div>`;
+    return String(
+        join([
+            settingsErrorBanner(view.error),
+            listGroup({ rows, label: "Units", data: { "fd-units": "" } }),
+        ]),
+    );
 }
 
 export function renderSettingsUnitsV2Page(view: SettingsUnitsV2View): string {

@@ -170,9 +170,12 @@
 /* Check column: a tick for a chosen option, an empty 16 wide space for the
  * others, so every label in the menu starts at the same x. */
 .fd-menu__check {
-    display: grid;
+    /* Flex, not grid: a grid's implicit track grows to the 24 px tick and the
+       16 px box then centres it 4 px below the label's line. */
+    display: flex;
     flex: none;
-    place-items: center;
+    align-items: center;
+    justify-content: center;
     width: var(--fd-menu-check);
     height: var(--fd-menu-check);
     color: var(--text-secondary);
@@ -186,6 +189,16 @@
 
 .fd-menu__item[aria-checked="false"] .fd-menu__check .fd-icon {
     visibility: hidden;
+}
+
+/* A note is a line of why, not an action: quiet, and nothing to hover. */
+.fd-menu__note {
+    color: var(--text-secondary);
+    cursor: default;
+}
+
+.fd-menu__note:hover {
+    background: transparent;
 }
 
 /* Confirm in place: the item is replaced by Cancel and the same verb, side by

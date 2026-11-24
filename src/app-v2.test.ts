@@ -178,8 +178,8 @@ describe("/app-v2.css", () => {
     });
 
     test("Help titles are plain, not capitals; Kitchen has no per-tab title classes", () => {
-        const help = readFileSync("./public/app/v2/settings.css", "utf8");
-        const at = help.indexOf(".fd-settings-help__summary {");
+        const help = readFileSync("./public/app/v2/item-row.css", "utf8");
+        const at = help.indexOf(".fd-item-row__disclosure > summary {");
         expect(at).toBeGreaterThanOrEqual(0);
         expect(help.slice(at, help.indexOf("}", at))).not.toContain(
             "uppercase",
@@ -188,6 +188,17 @@ describe("/app-v2.css", () => {
         expect(kitchen).not.toContain("fd-kitchen-grocery-title");
         expect(kitchen).not.toContain("fd-kitchen-usual-title");
         expect(kitchen).not.toContain("fd-kitchen-usual-head");
+    });
+
+    test("a row's ⋯ in the household layout is the design's 24 px glyph in the secondary tone", () => {
+        const css = readFileSync("./public/app/v2/settings.css", "utf8");
+        const at = css.indexOf(
+            ".fd-settings--household .fd-item-row__control > .fd-menu > .fd-btn--icon,",
+        );
+        expect(at).toBeGreaterThanOrEqual(0);
+        const rule = css.slice(at, css.indexOf("}", at));
+        expect(rule).toContain("--fd-btn-icon: var(--space-2xl)");
+        expect(rule).toContain("color: var(--text-secondary)");
     });
 
     test("one breakpoint: a single 1024px media query", () => {

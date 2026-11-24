@@ -199,10 +199,7 @@ import { maybeOne, run } from "../db/sql.js";
 import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
 import { renderSettingsTimezoneV2Page } from "./pages/v2/settings-account-timezone.js";
-import {
-    renderSettingsUnitsV2Page,
-    type SettingsUnitsV2View,
-} from "./pages/v2/settings-units.js";
+import { renderSettingsUnitsV2Page } from "./pages/v2/settings-units.js";
 import { renderSettingsNutrientsV2Page } from "./pages/v2/settings-nutrients.js";
 import { renderSettingsGoalsV2Page } from "./pages/v2/settings-goals.js";
 import type {
@@ -214,6 +211,7 @@ import {
     AI_ACTIVITY_LIMIT,
     agentActivityRows,
     renderSettingsAiV2Page,
+    resolveAppFilter,
 } from "./pages/v2/settings-ai.js";
 import { listAgentActions } from "../domain/agent-actions.js";
 import { liveAgentActionDeps } from "../db/agent-actions.js";
@@ -1010,7 +1008,7 @@ export async function renderHouseholdTimezoneRoute(
 
 export async function renderSettingsUnitsV2Route(
     viewerUserId: string,
-    opts: { error?: string; openSheet?: SettingsUnitsV2View["openSheet"] } = {},
+    opts: { error?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -1023,7 +1021,6 @@ export async function renderSettingsUnitsV2Route(
             weightUnit: preferredWeightUnitFromProfile(profile) ?? "",
             drinkUnit: preferredDrinkUnitFromProfile(profile) ?? "",
             error: opts.error,
-            openSheet: opts.openSheet,
         }),
     };
 }
@@ -1148,7 +1145,7 @@ export async function renderSettingsSavedV2Route(
 
 export async function renderSettingsAiV2Route(
     viewerUserId: string,
-    opts: { mcpUrl: string; error?: string },
+    opts: { mcpUrl: string; error?: string; app?: string },
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -1194,9 +1191,16 @@ export async function renderSettingsAiV2Route(
                 viewerUserId,
                 isOwner: can(gate.viewer, "agents.undo_any").ok,
                 names: new Map(members.map((m) => [m.userId, m.displayName])),
+                undoAnyIds: new Set(
+                    members
+                        .filter((m) => can(m, "agents.undo_any").ok)
+                        .map((m) => m.userId),
+                ),
                 now,
                 timezone,
             }),
+            // Only narrows the list this viewer already sees.
+            appFilter: resolveAppFilter(opts.app, connections),
             now,
             timezone,
             mcpUrl: opts.mcpUrl,
@@ -1292,6 +1296,7 @@ export async function renderSettingsAccountPage(
 
 export async function renderSettingsHelpRoute(
     viewerUserId: string,
+    opts: { q?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -1299,7 +1304,7 @@ export async function renderSettingsHelpRoute(
     const chrome = await viewerChromeWithAttention(profile, gate.viewer);
     return {
         status: 200,
-        html: renderSettingsHelpV2Page({ chrome }),
+        html: renderSettingsHelpV2Page({ chrome, query: opts.q }),
     };
 }
 
