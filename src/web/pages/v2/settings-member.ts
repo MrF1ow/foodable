@@ -31,6 +31,8 @@ export type SettingsMemberV2View = {
     now?: Date;
     /** The viewer's zone, for "Today" and "Yesterday". */
     timezone?: string;
+    /** Opens the Make owner confirm on load (previews). */
+    openModalId?: string;
 };
 
 function memberPath(member: HouseholdMember): string {
@@ -77,26 +79,26 @@ function moreMenu(view: SettingsMemberV2View): Html | undefined {
         : undefined;
 }
 
-function makeOwnerSheet(member: HouseholdMember): string {
+function makeOwnerSheet(member: HouseholdMember, open: boolean): string {
     const formId = `${MEMBER_MAKE_OWNER_SHEET_ID}-form`;
     return sheet({
         id: MEMBER_MAKE_OWNER_SHEET_ID,
-        placement: "side",
-        header: { kind: "title", title: "Transfer ownership" },
+        placement: "dialog",
+        header: {
+            kind: "title",
+            title: `Make ${member.displayName} the owner?`,
+        },
         body: sheetSection({
             kind: "custom",
             content: raw(
-                `<form id="${formId}" method="post" action="${esc(memberPath(member))}/make-owner"><p class="fd-sheet__text">${esc(member.displayName)} becomes the owner. You stay in the household as a member and lose the owner settings.</p></form>`,
+                `<form id="${formId}" method="post" action="${esc(memberPath(member))}/make-owner"><p class="fd-sheet__text">You become a member. Only ${esc(member.displayName)} can undo this.</p></form>`,
             ),
         }),
         actions: {
             kind: "destructive",
-            danger: {
-                label: `Make ${member.displayName} the owner`,
-                type: "submit",
-                form: formId,
-            },
+            danger: { label: "Make owner", type: "submit", form: formId },
         },
+        openOnLoad: open,
     });
 }
 
@@ -131,7 +133,12 @@ export function renderSettingsMemberV2Body(view: SettingsMemberV2View): string {
     const head = raw(
         `<div class="fd-settings-member-head">${memberAvatar({ name: member.displayName, userId: member.userId, version, enabled: true, className: "fd-settings-member-head__avatar" })}<h2 class="fd-settings-member-head__name">${esc(member.displayName)}</h2></div>`,
     );
-    const sheets = view.manage?.transfer ? makeOwnerSheet(member) : "";
+    const sheets = view.manage?.transfer
+        ? makeOwnerSheet(
+              member,
+              view.openModalId === MEMBER_MAKE_OWNER_SHEET_ID,
+          )
+        : "";
     return `${String(join([settingsErrorBanner(view.error), head, listGroup({ rows, label: "Member" })]))}${sheets}`;
 }
 

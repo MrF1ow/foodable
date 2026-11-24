@@ -152,20 +152,6 @@ test("a wrapping action group can shrink, and the dup row puts it under the name
     expect(block(".fd-row--dup .fd-row__main")).toMatch(/flex:\s*1 1 100%/);
 });
 
-test("a social reader's label stays inside its column and the button keeps one line", () => {
-    const title =
-        settingsRules.match(
-            /\.fd-row--social \.fd-row__main > \.fd-row__title,[^{]*\{([^}]*)\}/,
-        )?.[1] ?? "";
-    expect(title).toContain("min-width: 0");
-    expect(title).toContain("overflow: hidden");
-    expect(title).toContain("text-overflow: ellipsis");
-    expect(title).toContain("white-space: nowrap");
-    expect(settingsRules).toMatch(
-        /\.fd-row--social \.fd-settings-btn\s*\{[^}]*white-space:\s*nowrap/,
-    );
-});
-
 const planted = (decl: string) => scaleViolations(`.fd-x { ${decl} }`);
 
 test("a literal size, space, radius or font size is a violation naming selector, property and value", () => {
@@ -363,6 +349,25 @@ const partials = readdirSync(partialsDir).filter((f) => f.endsWith(".css"));
 
 test("every legacy partial still exists, so a rename cannot hide one from the guard", () => {
     expect(LEGACY_PARTIALS.filter((f) => !partials.includes(f))).toEqual([]);
+});
+
+test("the Restock Time input is the Day value's size, and a row's ⋯ dots sit on the row's right edge", () => {
+    const block = (selector: string) =>
+        settingsRules.match(
+            new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`),
+        )?.[1] ?? "";
+    const input = block(".fd-restock__time-input");
+    expect(input).toContain("font-size: var(--text-label-size)");
+    expect(input).toContain("line-height: var(--text-label-line)");
+    const household =
+        ".fd-settings--household .fd-item-row__control > .fd-menu > .fd-btn--icon";
+    const readers =
+        ".fd-readers .fd-item-row__control > .fd-menu > .fd-btn--icon";
+    // One rule for both pages: the household selector, a comma, the readers one.
+    expect(settingsRules).toContain(`${household},\n${readers}`);
+    expect(block(readers)).toContain(
+        "margin-inline-end: calc((var(--control-md-height) - 24px) / -2)",
+    );
 });
 
 test("a partial outside the legacy list, and the marked part of a legacy one, have no literal size, space, radius or font size", () => {

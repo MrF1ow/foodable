@@ -3,15 +3,10 @@ import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js"
 import { DEFAULT_RESTOCK } from "../../../household.js";
 import {
     renderSettingsRestockV2Page,
+    restockDayLabel,
     restockLastRunLabel,
-    restockSummary,
     restockTimeLabel,
 } from "./settings-restock.js";
-import {
-    blockedLinksLabel,
-    readersSummary,
-    renderSettingsReadersV2Page,
-} from "./settings-readers.js";
 
 const chrome = {
     theme: "light" as const,
@@ -25,14 +20,9 @@ describe("restock labels", () => {
         expect(restockTimeLabel("12:00")).toBe("12:00 PM");
         expect(restockTimeLabel("18:15")).toBe("6:15 PM");
         expect(
-            restockSummary({
-                ...DEFAULT_RESTOCK,
-                enabled: true,
-                weekday: 0,
-                time: "09:00",
-            }),
-        ).toBe("Sunday, 9:00 AM");
-        expect(restockSummary(DEFAULT_RESTOCK)).toBe("Off");
+            restockDayLabel({ ...DEFAULT_RESTOCK, enabled: true, weekday: 0 }),
+        ).toBe("Sunday");
+        expect(restockDayLabel(DEFAULT_RESTOCK)).toBe("Off");
     });
 
     test("last run: date and count, date alone for an older run, or never", () => {
@@ -50,67 +40,67 @@ describe("restock labels", () => {
         expect(restockLastRunLabel(DEFAULT_RESTOCK)).toBe("Hasn't run yet");
     });
 
-    test("owners and admins get the switch and the schedule form; others read", () => {
+    test("owners and admins get the switch, the Day pull-down and the Time row; others read", () => {
         const edit = renderSettingsRestockV2Page({
             chrome,
-            restock: DEFAULT_RESTOCK,
+            restock: { ...DEFAULT_RESTOCK, enabled: true, weekday: 0 },
             canManage: true,
         });
-        expect(edit).toContain('action="/settings/household/restock"');
-        expect(edit).toContain('name="restock_enabled" value="on"');
-        expect(edit).toContain('name="restock_weekday"');
-        expect(edit).toContain('type="time"');
+        // The switch posts the opposite of what it shows.
+        expect(edit).toContain('name="restock_enabled" value="off"');
+        // Day is a pull-down on the row: the trigger reads the current day, a
+        // tick marks it, each day posts its number.
+        expect(edit).toContain('class="fd-item-row__value">Sunday</span>');
+        expect(edit).toContain('role="menuitemcheckbox" aria-checked="true"');
+        for (let day = 0; day < 7; day++) {
+            expect(edit).toContain(`name="restock_weekday" value="${day}"`);
+        }
+        // Time saves itself.
+        expect(edit).toMatch(
+            /<form[^>]*action="\/settings\/household\/restock"[^>]*data-fd-autosave[^>]*>(?:(?!<\/form>).)*<input[^>]*type="time"[^>]*name="restock_time"/,
+        );
         const read = renderSettingsRestockV2Page({
             chrome,
-            restock: DEFAULT_RESTOCK,
+            restock: { ...DEFAULT_RESTOCK, enabled: true },
             canManage: false,
         });
         expect(read).not.toContain('action="/settings/household/restock"');
-    });
-});
-
-describe("recipe link readers labels", () => {
-    test("summary and blocked count", () => {
-        expect(readersSummary({ tiktok: true, facebook: false })).toBe(
-            "TikTok on",
-        );
-        expect(readersSummary({ tiktok: true, facebook: true })).toBe(
-            "TikTok, Facebook on",
-        );
-        expect(readersSummary({ tiktok: false, facebook: false })).toBe("Off");
-        expect(blockedLinksLabel(0)).toBe("None");
-        expect(blockedLinksLabel(1)).toBe("1 link");
-        expect(blockedLinksLabel(3)).toBe("3 links");
-    });
-
-    test("a READERS section label sits above the readers card", () => {
-        const html = renderSettingsReadersV2Page({
+        expect(read).not.toContain("data-fd-menu");
+        expect(read).not.toContain('type="time"');
+        expect(read).toContain("Weekly restock");
+        expect(read).toContain(">On<");
+        // The time reads like the Day beside it: 6:30 PM, not 18:30.
+        const timed = renderSettingsRestockV2Page({
             chrome,
-            socialReaders: { tiktok: true, facebook: false },
-            blockedCount: 0,
-            isOwner: true,
-            canManage: true,
+            restock: { ...DEFAULT_RESTOCK, enabled: true, time: "18:30" },
+            canManage: false,
         });
-        const label = html.indexOf(
-            '<h2 class="fd-section-head__title">Readers</h2>',
-        );
-        expect(label).toBeGreaterThan(-1);
-        expect(label).toBeLessThan(html.indexOf('aria-label="Readers"'));
+        expect(timed).toContain(">6:30 PM<");
+        expect(timed).not.toContain("18:30");
     });
 
-    test("turning a reader on opens the terms dialog; turning it off posts", () => {
-        const html = renderSettingsReadersV2Page({
+    test("no intro and no hint: the page keeps only the rows and the last run", () => {
+        for (const canManage of [true, false]) {
+            const html = renderSettingsRestockV2Page({
+                chrome,
+                restock: DEFAULT_RESTOCK,
+                canManage,
+            });
+            expect(html).not.toContain("On the restock day Foodable adds");
+            expect(html).not.toContain("Only the owner or an admin");
+            expect(html).toContain("t run yet");
+            expect(html).not.toContain("fd-stores-intro");
+            expect(html).not.toContain("fd-settings-submit");
+        }
+    });
+
+    test("a refused save shows its reason", () => {
+        const html = renderSettingsRestockV2Page({
             chrome,
-            socialReaders: { tiktok: true, facebook: false },
-            blockedCount: 0,
-            isOwner: true,
+            restock: DEFAULT_RESTOCK,
             canManage: true,
+            error: "Restock time must be HH:MM.",
         });
-        expect(html).toContain('commandfor="household-social-reader-facebook"');
-        expect(html).toMatch(
-            /action="\/settings\/household\/social-readers"[^>]*>(?:(?!<\/form>).)*name="enabled" value="0"/,
-        );
-        expect(html).toContain(">None<");
-        expect(html).not.toContain("fetch-refusals/clear");
+        expect(html).toContain("Restock time must be HH:MM.");
     });
 });

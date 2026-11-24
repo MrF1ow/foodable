@@ -122,22 +122,27 @@ describe("settings member v2", () => {
         expect(html).toContain('fd-item-row__value">Admin<');
     });
 
-    test("Make owner opens a Transfer ownership sheet that posts to make-owner, not a modal", () => {
+    test("Make owner opens a confirm that asks, says what happens, and posts to make-owner, not a modal", () => {
         const html = renderSettingsMemberV2Page(view({ manage: ALL }));
         const sheet = html.match(
             /<dialog[^>]*id="fd-member-make-owner"[^]*?<\/dialog>/,
         )?.[0];
         expect(sheet).toBeDefined();
-        expect(sheet).toContain("Transfer ownership");
+        expect(sheet).toContain("Make Bob the owner?");
         expect(sheet).toContain(
             `action="/settings/household/members/${bob.userId}/make-owner"`,
         );
-        expect(sheet).toContain(
-            "Bob becomes the owner. You stay in the household as a member and lose the owner settings.",
+        // The old owner becomes a member, not an admin: the copy says so.
+        expect(sheet).toContain("You become a member. Only Bob can undo this.");
+        expect(sheet).not.toContain("You become an admin");
+        expect(sheet).toMatch(
+            /<button type="submit" class="fd-btn fd-btn--danger"[^>]*><span class="fd-btn__label">Make owner<\/span>/,
         );
-        expect(sheet).toContain("Make Bob the owner");
-        // The 480 px side panel from 1024 px, a bottom sheet on a phone.
-        expect(sheet).toContain("fd-sheet--side");
+        expect(sheet).toContain(">Cancel<");
+        // A confirm is a centred dialog from 1024 px, a bottom sheet on a phone.
+        expect(sheet).toContain("fd-sheet--dialog");
+        expect(sheet).not.toContain("fd-sheet--side");
+        expect(sheet).not.toContain("Transfer ownership");
         expect(html).not.toContain('<dialog class="modal"');
     });
 

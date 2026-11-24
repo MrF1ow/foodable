@@ -12,6 +12,7 @@ import { menu } from "../../components/v2/menu.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import { APP_PATHS } from "../../route-map.js";
 import type { ViewerFlags } from "../../../viewer-flags.js";
+import { monthDayLabel } from "./settings-household-dates.js";
 import { renderHouseholdLayout } from "./settings-household-layout.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 
@@ -25,35 +26,13 @@ export type HouseholdInvitesPageView = {
     /** The plaintext code just created: shown on this response only. */
     createdCode?: string;
     error?: string;
+    /** The household's time zone, which a day is counted in; default UTC. */
+    timezone?: string;
     /** For tests and previews; defaults to the current time. */
     now?: Date;
 };
 
 const CODE_ID = "household-invite-code";
-
-const MONTHS = [
-    "Jan",
-    "Feb",
-    "Mar",
-    "Apr",
-    "May",
-    "Jun",
-    "Jul",
-    "Aug",
-    "Sep",
-    "Oct",
-    "Nov",
-    "Dec",
-];
-
-/** "Nov 24"; with the year when it is not this one. */
-function fmtDay(iso: string, now: Date): string {
-    const at = new Date(iso);
-    const day = `${MONTHS[at.getUTCMonth()]} ${at.getUTCDate()}`;
-    return at.getUTCFullYear() === now.getUTCFullYear()
-        ? day
-        : `${day}, ${at.getUTCFullYear()}`;
-}
 
 function isActive(invite: HouseholdInvite, nowMs: number): boolean {
     return !invite.usedAt && Date.parse(invite.expiresAt) > nowMs;
@@ -64,10 +43,15 @@ function inviteTitle(invite: HouseholdInvite, nowMs: number): string {
     return isActive(invite, nowMs) ? "Active" : "Expired";
 }
 
-function inviteMeta(invite: HouseholdInvite, now: Date): string {
-    if (invite.usedAt) return `Used ${fmtDay(invite.usedAt, now)}`;
+function inviteMeta(
+    invite: HouseholdInvite,
+    now: Date,
+    timezone: string,
+): string {
+    const fmtDay = (iso: string) => monthDayLabel(iso, now, timezone);
+    if (invite.usedAt) return `Used ${fmtDay(invite.usedAt)}`;
     const verb = isActive(invite, now.getTime()) ? "Expires" : "Expired";
-    return `${verb} ${fmtDay(invite.expiresAt, now)}`;
+    return `${verb} ${fmtDay(invite.expiresAt)}`;
 }
 
 function fromFields(backHref: string): Record<string, string> {
@@ -99,7 +83,12 @@ function newCode(code: string): Html {
     });
 }
 
-function inviteRow(invite: HouseholdInvite, now: Date, backHref: string): Html {
+function inviteRow(
+    invite: HouseholdInvite,
+    now: Date,
+    backHref: string,
+    timezone: string,
+): Html {
     const nowMs = now.getTime();
     const control = isActive(invite, nowMs)
         ? {
@@ -124,7 +113,7 @@ function inviteRow(invite: HouseholdInvite, now: Date, backHref: string): Html {
         : undefined;
     return itemRow({
         title: inviteTitle(invite, nowMs),
-        subtitle: inviteMeta(invite, now),
+        subtitle: inviteMeta(invite, now, timezone),
         trailing: control,
     });
 }
@@ -134,7 +123,7 @@ export function renderHouseholdInvitesPage(
 ): string {
     const now = view.now ?? new Date();
     const rows = view.invites.map((invite) =>
-        inviteRow(invite, now, view.backHref),
+        inviteRow(invite, now, view.backHref, view.timezone ?? "UTC"),
     );
     const body = join([
         settingsErrorBanner(view.error),

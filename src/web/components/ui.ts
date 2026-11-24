@@ -89,69 +89,6 @@ export function emptyState(text: string, className = "empty"): string {
     return `<p class="${className}">${escapeHtml(text)}</p>`;
 }
 
-export function modal(opts: {
-    id: string;
-    title: string;
-    body: string;
-    size?: string;
-    openOnLoad?: boolean;
-}): string {
-    const id = escapeHtml(opts.id);
-    const titleId = `${id}-title`;
-    const sizeCls = opts.size ? ` modal--${escapeHtml(opts.size)}` : "";
-    const reopen = opts.openOnLoad ? " data-modal-open-on-load" : "";
-    return `<dialog class="modal${sizeCls}" id="${id}" aria-labelledby="${titleId}"${reopen}>
-<div class="modal-sheet">
-<div class="modal-handle" aria-hidden="true"></div>
-<header class="modal-head">
-<h2 class="modal-title" id="${titleId}">${escapeHtml(opts.title)}</h2>
-<button type="button" class="modal-close" command="close" commandfor="${id}" aria-label="Close"><span aria-hidden="true">×</span></button>
-</header>
-<div class="modal-body">
-${opts.body}
-</div>
-</div>
-</dialog>`;
-}
-
-export function confirmModal(opts: {
-    id: string;
-    title: string;
-    message: string;
-    action: string;
-    confirmLabel: string;
-    hiddenFields?: Record<string, string>;
-    openOnLoad?: boolean;
-    formClass?: string;
-    /** When true, the confirm form opts out of Turbo (non-redirect success HTML). */
-    turboFalse?: boolean;
-}): string {
-    const id = escapeHtml(opts.id);
-    const formClass = escapeHtml(opts.formClass ?? "modal-confirm");
-    const turboOpt = opts.turboFalse ? ' data-turbo="false"' : "";
-    const hidden =
-        opts.hiddenFields &&
-        Object.entries(opts.hiddenFields)
-            .map(
-                ([name, value]) =>
-                    `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`,
-            )
-            .join("\n");
-    const body = `<form class="${formClass}" method="post" action="${escapeHtml(opts.action)}"${turboOpt}>
-${hidden ? `${hidden}\n` : ""}<p class="modal-message">${escapeHtml(opts.message)}</p>
-<div class="modal-actions">
-<button type="button" command="close" commandfor="${id}">Cancel</button>
-<button type="submit" class="btn-danger">${escapeHtml(opts.confirmLabel)}</button>
-</div>
-</form>`;
-    return modal({
-        id: opts.id,
-        title: opts.title,
-        body,
-        openOnLoad: opts.openOnLoad,
-    });
-}
-
 export function row(opts: {
     title: string;
     meta?: string;

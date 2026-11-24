@@ -8,7 +8,11 @@ import { Hono } from "hono";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveShareLinkStore } from "../../db/share-links.js";
 import { setSqlForTests } from "../../db/sql.js";
-import { asUser, seedHousehold } from "../../db/testing/fixtures.js";
+import {
+    asUser,
+    seedHousehold,
+    seedMember,
+} from "../../db/testing/fixtures.js";
 import { describeDb } from "../../db/testing/pg.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { createRecipe } from "../../domain/recipes.js";
@@ -335,7 +339,7 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         );
     }
 
-    test("revoking stops the link, is idempotent, and sends the member back to Settings", async () => {
+    test("revoking stops the link, is idempotent, and sends the member back to the list", async () => {
         const { link, token } = await make(
             ownerId,
             householdId,
@@ -346,7 +350,9 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         const path = `/settings/household/shared-links/${link.id}/revoke`;
         const first = await post(ownerId, path);
         expect(first.status).toBe(303);
-        expect(first.headers.get("location")).toBe("/settings/household");
+        expect(first.headers.get("location")).toBe(
+            "/settings/household/shared-links",
+        );
         expect(await publicStatus(token)).toBe(404);
         const firstRevokedAt = (await storedLinks())[0]!.revokedAt;
         expect(firstRevokedAt).not.toBeNull();
@@ -374,7 +380,7 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         expect((await storedLinks(otherHouseholdId))[0]!.revokedAt).toBeNull();
     });
 
-    test("Settings lists the active links: what, who, when, expiry; not revoked or expired", async () => {
+    test("the Shared links page lists the active links: what, kind, expiry, a ⋯ with Revoke; not revoked or expired", async () => {
         const recipe = await seedRecipe(householdId, ownerId, "Dal tadka");
         await sql`update public.household_members set display_name = 'Ada' where user_id = ${ownerId}`;
         const keep = await make(ownerId, householdId, "recipe", recipe.id, 30);
@@ -394,15 +400,16 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         await sql`update public.share_links set expires_at = now() - interval '1 hour' where id = ${expired.link.id}`;
         await make(otherOwnerId, otherHouseholdId, "grocery_list", null);
 
-        const res = await get(ownerId, "/settings/household");
+        const res = await get(ownerId, "/settings/household/shared-links");
         expect(res.status).toBe(200);
         const html = await res.text();
-        expect(html).toContain("Shared links");
+        expect(html).toContain(
+            '<h1 class="fd-detail-bar__title">Shared links</h1>',
+        );
         expect(html).toContain("Dal tadka");
+        expect(html).toContain("Recipe · expires");
         expect(html).toContain("Grocery list");
-        expect(html).toContain("Ada");
         expect(html).toContain("Never expires");
-        expect(html).toMatch(/Expires/);
         // Two active rows, one Revoke each, by link id.
         expect(
             html.match(/shared-links\/[0-9a-f-]{36}\/revoke/g) ?? [],
@@ -410,11 +417,60 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         expect(html).toContain(`shared-links/${keep.link.id}/revoke`);
         expect(html).not.toContain(`shared-links/${gone.link.id}/revoke`);
         expect(html).not.toContain(`shared-links/${expired.link.id}/revoke`);
+        // One ⋯ per active link, its only item confirming in place.
+        expect(html.match(/data-fd-menu-confirm/g)).toHaveLength(2);
         // Nothing in the list can give a link's address back.
         for (const t of [keep.token]) expect(html).not.toContain(t);
     });
 
-    test("with mcp-share-links off Settings has no Shared links section", async () => {
+    test("the Household page counts the active links in a Shared links row that opens the page", async () => {
+        await make(ownerId, householdId, "grocery_list", null);
+        const gone = await make(ownerId, householdId, "grocery_list", null);
+        await post(
+            ownerId,
+            `/settings/household/shared-links/${gone.link.id}/revoke`,
+        );
+        const html = await (await get(ownerId, "/settings/household")).text();
+        expect(html).toContain('href="/settings/household/shared-links"');
+        expect(html).toMatch(
+            /Shared links<\/span><\/span><\/span><span class="fd-item-row__value">1</,
+        );
+        // The links themselves, and their Revoke, are not on this page.
+        expect(html).not.toMatch(/shared-links\/[0-9a-f-]{36}\/revoke/);
+    });
+
+    test("a member who is not the owner sees the page and the same Revoke", async () => {
+        const memberId = await seedMember(sql, householdId, {
+            displayName: "Bob",
+        });
+        const { link } = await make(ownerId, householdId, "grocery_list", null);
+        const res = await get(memberId, "/settings/household/shared-links");
+        expect(res.status).toBe(200);
+        expect(await res.text()).toContain(`shared-links/${link.id}/revoke`);
+        expect(
+            (
+                await post(
+                    memberId,
+                    `/settings/household/shared-links/${link.id}/revoke`,
+                )
+            ).status,
+        ).toBe(303);
+    });
+
+    test("revoking an unknown link shows the page with a reason and answers 404", async () => {
+        const res = await post(
+            ownerId,
+            `/settings/household/shared-links/${crypto.randomUUID()}/revoke`,
+        );
+        expect(res.status).toBe(404);
+        const html = await res.text();
+        expect(html).toContain("That link was not found.");
+        expect(html).toContain(
+            '<h1 class="fd-detail-bar__title">Shared links</h1>',
+        );
+    });
+
+    test("with mcp-share-links off Household has no Shared links row and the page is a 404", async () => {
         const recipe = await seedRecipe(householdId, ownerId);
         await make(ownerId, householdId, "recipe", recipe.id);
         setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
@@ -423,9 +479,12 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         const html = await res.text();
         expect(html).not.toContain("Shared links");
         expect(html).not.toMatch(/shared-links\/[0-9a-f-]{36}\/revoke/);
+        const page = await get(ownerId, "/settings/household/shared-links");
+        expect(page.status).toBe(404);
+        expect(await page.text()).not.toContain("Revoke");
     });
 
-    test("the Share buttons and the Shared links section show only while mcp-share-links is on", async () => {
+    test("the Share buttons and the Shared links row show only while mcp-share-links is on", async () => {
         const recipe = await seedRecipe(householdId, ownerId);
         const page = async (path: string) => {
             const res = await new Hono()
@@ -442,8 +501,8 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         };
         const recipePath = `/recipes/${recipe.id}`;
 
-        // On: the recipe and the grocery list can be shared, and Settings lists
-        // the links.
+        // On: the recipe and the grocery list can be shared, and Household has
+        // the Shared links row.
         const recipeOn = await page(recipePath);
         expect(recipeOn).toContain('id="fd-recipe-share-sheet"');
         expect(recipeOn).toContain(`action="/recipes/${recipe.id}/share"`);
@@ -451,7 +510,9 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         const groceriesOn = await page("/kitchen/groceries");
         expect(groceriesOn).toContain('id="fd-grocery-share-sheet"');
         expect(groceriesOn).toContain("fd-kitchen-grocery-share");
-        expect(await page("/settings/household")).toContain("Shared links");
+        expect(await page("/settings/household")).toContain(
+            'href="/settings/household/shared-links"',
+        );
 
         // Off: none of the three is on the page.
         setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
@@ -468,11 +529,11 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         expect(settingsOff).not.toContain("shared-links");
     });
 
-    test("Settings with no links shows an empty state", async () => {
-        const res = await get(ownerId, "/settings/household");
+    test("the Shared links page with no links shows an empty state and no ⋯", async () => {
+        const res = await get(ownerId, "/settings/household/shared-links");
         const html = await res.text();
-        expect(html).toContain("Shared links");
         expect(html).toContain("No shared links");
         expect(html).not.toMatch(/shared-links\/[0-9a-f-]{36}\/revoke/);
+        expect(html).not.toContain("data-fd-menu-trigger");
     });
 });

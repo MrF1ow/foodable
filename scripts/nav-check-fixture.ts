@@ -20,6 +20,13 @@ import {
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
 import { renderHouseholdInvitesPage } from "../src/web/pages/v2/settings-household-invites.js";
+import {
+    renderSharedLinksPage,
+    type SharedLinkRow,
+} from "../src/web/pages/v2/settings-household-shared-links.js";
+import { renderHouseholdTokenPage } from "../src/web/pages/v2/settings-household-token.js";
+import { renderSettingsRestockV2Page } from "../src/web/pages/v2/settings-restock.js";
+import { renderSettingsReadersV2Page } from "../src/web/pages/v2/settings-readers.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import {
     createHouseholdFormHtml,
@@ -225,6 +232,36 @@ function notificationsPage(chrome: ReturnType<typeof fixtureChrome>) {
     });
 }
 
+const FIXTURE_LINKS: SharedLinkRow[] = [
+    {
+        id: "11111111-1111-4111-8111-111111111111",
+        kind: "recipe",
+        recipeName: "Chicken alfredo",
+        createdByName: "Ethan",
+        createdAt: "2026-11-02T10:00:00.000Z",
+        expiresAt: "2026-12-12T10:00:00.000Z",
+    },
+    {
+        id: "22222222-2222-4222-8222-222222222222",
+        kind: "grocery_list",
+        recipeName: null,
+        createdByName: null,
+        createdAt: "2026-11-01T10:00:00.000Z",
+        expiresAt: null,
+    },
+];
+
+/** The one-time token the rotate route's 200 page shows (not a real token). */
+const FIXTURE_HOUSEHOLD_TOKEN = "nt_hh_7Qm2xR9vYb1KcN8dFhJ3sGaE5uOi";
+
+const FIXTURE_RESTOCK = {
+    enabled: true,
+    weekday: 0 as const,
+    time: "09:00",
+    lastRunOn: "2026-11-08",
+    lastRunAdded: 3,
+};
+
 function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
     return renderSettingsHouseholdV2Page({
         chrome,
@@ -245,6 +282,8 @@ function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
         canManage: true,
         canInvite: true,
         viewerUserId: ME.userId,
+        socialReaders: { tiktok: true, facebook: false },
+        sharedLinks: FIXTURE_LINKS,
         duplicatePairs: [],
         refCounts: new Map(),
     } as never);
@@ -328,6 +367,36 @@ async function pages(
             ],
             now: new Date("2026-11-10T12:00:00Z"),
         }),
+        "household-token": renderHouseholdTokenPage({
+            chrome: chrome as never,
+            token: FIXTURE_HOUSEHOLD_TOKEN,
+        }),
+        "household-restock": renderSettingsRestockV2Page({
+            chrome: chrome as never,
+            restock: FIXTURE_RESTOCK,
+            canManage: true,
+        }),
+        "household-readers": renderSettingsReadersV2Page({
+            chrome: chrome as never,
+            socialReaders: { tiktok: true, facebook: false },
+            blockedCount: 3,
+            isOwner: true,
+            canManage: true,
+        }),
+        "household-readers-terms": renderSettingsReadersV2Page({
+            chrome: chrome as never,
+            socialReaders: { tiktok: true, facebook: false },
+            blockedCount: 3,
+            isOwner: true,
+            canManage: true,
+            confirmReader: "facebook",
+        }),
+        "household-shared-links": renderSharedLinksPage({
+            chrome: chrome as never,
+            links: FIXTURE_LINKS,
+            timezone: "America/Los_Angeles",
+            now: new Date("2026-11-10T12:00:00Z"),
+        }),
         notifications: notificationsPage(chrome),
         "settings-notifications": renderSettingsNotificationsV2Page({
             chrome: chrome as never,
@@ -375,6 +444,10 @@ const ROUTE_BASE: Record<string, string> = {
     "/settings/household/timezone": "household-timezone",
     [`/settings/household/members/${SAM.userId}`]: "household-member",
     "/settings/household/invites": "household-invites",
+    "/settings/household/restock": "household-restock",
+    "/settings/household/readers": "household-readers",
+    "/settings/household/readers?turn_on=facebook": "household-readers-terms",
+    "/settings/household/shared-links": "household-shared-links",
     "/notifications": "notifications",
     "/settings/notifications": "settings-notifications",
     "/create-household": "create-household",
@@ -459,6 +532,17 @@ const server = Bun.serve({
             const status =
                 req.method === "GET" || req.method === "HEAD" ? 301 : 308;
             return Response.redirect(legacyTarget, status);
+        }
+        if (
+            path === "/settings/household/rotate-token" &&
+            req.method === "GET"
+        ) {
+            // Like the route: the token is not kept, so a refresh or Back
+            // to its page goes to Household.
+            return new Response(null, {
+                status: 303,
+                headers: { Location: "/settings/household" },
+            });
         }
         if (path === "/__stats") {
             return Response.json({
@@ -613,6 +697,21 @@ const server = Bun.serve({
                 accountTheme =
                     picked === "light" || picked === "dark" ? picked : null;
             }
+            if (path === "/settings/household/rotate-token") {
+                // Like the route: a 200 page with the token, never cached.
+                const html = applyAccountTheme(
+                    await fileHtml(
+                        `household-token-${themeFileSuffix()}${inboxUnread ? "" : "-read"}.html`,
+                        path,
+                    ),
+                );
+                return new Response(html, {
+                    headers: {
+                        "content-type": "text/html; charset=utf-8",
+                        "cache-control": "no-store",
+                    },
+                });
+            }
             if (postDelay) await sleep(postDelay);
             const referer =
                 req.headers.get("referer") || `http://127.0.0.1:${PORT}/`;
@@ -678,7 +777,11 @@ const server = Bun.serve({
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
         }
-        if (ROUTE_BASE[path]) {
+        // A page the query changes (the readers terms) has its own entry.
+        const routeKey = ROUTE_BASE[path + url.search]
+            ? path + url.search
+            : path;
+        if (ROUTE_BASE[routeKey]) {
             if (sessionMode === "guest") {
                 const login = await loginDocument();
                 return new Response(login, {
@@ -688,7 +791,7 @@ const server = Bun.serve({
             }
             if (stallMs) await sleep(stallMs);
             const html = applyAccountTheme(
-                await fileHtml(routeHtmlFile(path), path + url.search),
+                await fileHtml(routeHtmlFile(routeKey), path + url.search),
             );
             return new Response(html, {
                 headers: { "content-type": "text/html; charset=utf-8" },

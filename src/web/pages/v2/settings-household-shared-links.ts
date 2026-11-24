@@ -1,22 +1,24 @@
 /**
- * Settings › Household › Shared links: the household's active share links
- * (what is shared, who made it, when, when it expires) with Revoke.
+ * Settings › Household › Shared links (FigCraft 425268): the household's
+ * active share links, one row each (what is shared, what kind, when it
+ * expires) with a ⋯ that revokes it in place. Behind the `mcp-share-links`
+ * flag: with it off the page is a 404 and the Household page has no row.
  *
- * FigCraft Settings › Household (phone 23470 / 28382) has no such section; it
- * is built from the page's own rows and the app's confirm sheet. The list never
- * carries a link's address: only a hash is stored, so a link cannot be shown
- * again, only revoked and made anew.
+ * The list never carries a link's address: only a hash is stored, so a link
+ * cannot be shown or copied again, only revoked and made anew.
  */
+import type { AppChromeBase } from "../../attention.js";
 import type { ShareLink } from "../../../domain/sharing.js";
-import { type Html } from "../../components/v2/html.js";
-import {
-    manageRow,
-    rowDeleteTrigger,
-    rowList,
-    sectionHeader,
-} from "../../components/v2/rows.js";
-import { confirmSheet } from "../../components/v2/sheet.js";
-import { shareDateLabel, shareExpiryLabel } from "./share-sheet.js";
+import { emptyState } from "../../components/v2/empty-state.js";
+import { join, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu } from "../../components/v2/menu.js";
+import { dayMonthLabel } from "./settings-household-dates.js";
+import { renderHouseholdLayout } from "./settings-household-layout.js";
+import { settingsErrorBanner } from "./settings-shared.js";
+
+export const SHARED_LINKS_PATH = "/settings/household/shared-links";
 
 export type SharedLinkRow = {
     id: string;
@@ -61,63 +63,72 @@ export function sharedLinkRevokePath(id: string): string {
     return `/settings/household/shared-links/${encodeURIComponent(id)}/revoke`;
 }
 
-function sharedLinkSheetId(id: string): string {
-    return `fd-shared-link-revoke-${id}`;
-}
-
 function whatLabel(link: SharedLinkRow): string {
     if (link.kind === "grocery_list") return "Grocery list";
     return link.recipeName ?? "Recipe (deleted)";
 }
 
-function metaLine(link: SharedLinkRow): string {
-    const parts = [
-        link.createdByName
-            ? `Shared by ${link.createdByName} on ${shareDateLabel(link.createdAt)}`
-            : `Shared on ${shareDateLabel(link.createdAt)}`,
-        shareExpiryLabel(link.expiresAt),
-    ];
-    return parts.join(" · ");
-}
-
-function linkRow(link: SharedLinkRow): Html {
-    return manageRow({
-        title: whatLabel(link),
-        meta: metaLine(link),
-        actions: rowDeleteTrigger({
-            target: sharedLinkSheetId(link.id),
-            name: `the link to ${whatLabel(link)}`,
-            verb: "Revoke",
-        }),
-        className: "fd-row--shared-link",
-    });
-}
-
-function revokeSheet(link: SharedLinkRow): string {
-    return confirmSheet({
-        id: sharedLinkSheetId(link.id),
-        title: "Revoke link",
-        subtitle: whatLabel(link),
-        message:
-            "Anyone who has this link will no longer be able to open it. You can share again to make a new one.",
-        action: sharedLinkRevokePath(link.id),
-        confirmLabel: "Revoke",
-    });
-}
-
-/** The section, heading included: a list of active links, or an empty state. */
-export function renderSharedLinksSection(
-    links: readonly SharedLinkRow[],
-): string {
-    const head = String(
-        sectionHeader({
-            title: "Shared links",
-            count: links.length > 0 ? String(links.length) : undefined,
-            level: 2,
-        }),
-    );
-    if (links.length === 0) {
-        return `${head}<p class="fd-settings-household-empty">No shared links. Share a recipe or the grocery list and its link shows here.</p>`;
+/** "Recipe · expires 12 Dec", "Never expires", "Expires 30 Nov". */
+function metaLine(link: SharedLinkRow, now: Date, timezone: string): string {
+    const expiry =
+        link.expiresAt === null
+            ? "Never expires"
+            : `Expires ${dayMonthLabel(link.expiresAt, now, timezone)}`;
+    // Only a recipe that is still there is named a recipe; its title says the rest.
+    if (link.kind === "recipe" && link.recipeName !== null) {
+        return `Recipe · ${expiry.charAt(0).toLowerCase()}${expiry.slice(1)}`;
     }
-    return `${head}${String(rowList(links.map(linkRow), { label: "Shared links" }))}${links.map(revokeSheet).join("")}`;
+    return expiry;
+}
+
+function linkRow(link: SharedLinkRow, now: Date, timezone: string): Html {
+    const what = whatLabel(link);
+    return itemRow({
+        title: what,
+        subtitle: metaLine(link, now, timezone),
+        trailing: {
+            kind: "control",
+            html: menu({
+                label: `Actions for the link to ${what}`,
+                anchor: "more",
+                items: [
+                    {
+                        kind: "destructive",
+                        label: "Revoke",
+                        confirmLabel: "Revoke link",
+                        action: sharedLinkRevokePath(link.id),
+                    },
+                ],
+            }),
+        },
+    });
+}
+
+export type SharedLinksPageView = {
+    chrome: AppChromeBase;
+    links: readonly SharedLinkRow[];
+    /** The household's time zone, which a day is counted in; default UTC. */
+    timezone?: string;
+    error?: string;
+    /** For tests and previews; defaults to the current time. */
+    now?: Date;
+};
+
+export function renderSharedLinksPage(view: SharedLinksPageView): string {
+    const now = view.now ?? new Date();
+    const timezone = view.timezone ?? "UTC";
+    const body = join([
+        settingsErrorBanner(view.error),
+        view.links.length > 0
+            ? listGroup({
+                  rows: view.links.map((link) => linkRow(link, now, timezone)),
+                  label: "Shared links",
+              })
+            : emptyState({ title: "No shared links" }),
+    ]);
+    return renderHouseholdLayout({
+        chrome: view.chrome,
+        title: "Shared links",
+        body,
+    });
 }

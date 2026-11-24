@@ -108,7 +108,15 @@ import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
 import { renderSettingsRestockV2Page } from "../src/web/pages/v2/settings-restock.js";
 import { renderSettingsReadersV2Page } from "../src/web/pages/v2/settings-readers.js";
-import type { SharedLinkRow } from "../src/web/pages/v2/settings-household-shared-links.js";
+import {
+    renderSharedLinksPage,
+    type SharedLinkRow,
+} from "../src/web/pages/v2/settings-household-shared-links.js";
+import {
+    HOUSEHOLD_ROTATE_TOKEN_SHEET_ID,
+    renderHouseholdTokenPage,
+} from "../src/web/pages/v2/settings-household-token.js";
+import { MEMBER_MAKE_OWNER_SHEET_ID } from "../src/web/pages/v2/settings-member.js";
 import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
@@ -175,10 +183,10 @@ const PREVIEW_SHARED_LINKS: SharedLinkRow[] = [
     {
         id: "00000000-0000-4000-8000-000000000001",
         kind: "recipe",
-        recipeName: "Smoky red lentil soup",
+        recipeName: "Chicken alfredo",
         createdByName: "Ethan Flow",
         createdAt: "2026-11-10T18:00:00.000Z",
-        expiresAt: "2026-12-10T18:00:00.000Z",
+        expiresAt: "2026-12-12T18:00:00.000Z",
     },
     {
         id: "00000000-0000-4000-8000-000000000002",
@@ -194,7 +202,7 @@ const PREVIEW_SHARED_LINKS: SharedLinkRow[] = [
         recipeName: null,
         createdByName: "Ethan Flow",
         createdAt: "2026-10-21T12:00:00.000Z",
-        expiresAt: null,
+        expiresAt: "2026-11-30T12:00:00.000Z",
     },
 ];
 
@@ -1514,6 +1522,10 @@ function withFirstMenuOpen(html: string): string {
 function withEveryMenuOpen(html: string): string {
     return html
         .replaceAll(
+            'data-fd-menu-trigger aria-haspopup="menu" aria-expanded="false"',
+            'data-fd-menu-trigger aria-haspopup="menu" aria-expanded="true"',
+        )
+        .replaceAll(
             'data-fd-menu-trigger="" aria-haspopup="menu" aria-expanded="false"',
             'data-fd-menu-trigger="" aria-haspopup="menu" aria-expanded="true"',
         )
@@ -1675,7 +1687,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         submitKey: "preview",
     };
     const settingsHouseholdV2 = (
-        sharedLinks: SharedLinkRow[],
+        // Undefined is `mcp-share-links` off: no Shared links row.
+        sharedLinks: SharedLinkRow[] | undefined,
         openModalId?: string,
     ) => {
         return renderSettingsHouseholdV2Page({
@@ -1703,8 +1716,9 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             sharedLinks,
         } as never);
     };
-    const settingsMemberV2 = () =>
+    const settingsMemberV2 = (openModalId?: string) =>
         renderSettingsMemberV2Page({
+            openModalId,
             chrome,
             member: SAM as never,
             viewer: ME as never,
@@ -2249,6 +2263,35 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         "settings-household-v2": settingsHouseholdV2(PREVIEW_SHARED_LINKS),
         "settings-household-v2-empty": settingsHouseholdV2([]),
+        // mcp-share-links off: the Household page has no Shared links row.
+        "settings-household-v2-links-off": settingsHouseholdV2(undefined),
+        "settings-household-v2-rotate": settingsHouseholdV2(
+            PREVIEW_SHARED_LINKS,
+            HOUSEHOLD_ROTATE_TOKEN_SHEET_ID,
+        ),
+        "settings-household-v2-token": renderHouseholdTokenPage({
+            chrome,
+            token: "nt_hh_7Qm2xR9vYb1KcN8dFhJ3sGaE5uOi",
+        }),
+        "settings-shared-links": renderSharedLinksPage({
+            chrome,
+            links: PREVIEW_SHARED_LINKS,
+            timezone: "America/Los_Angeles",
+            now: PREVIEW_NOW,
+        }),
+        "settings-shared-links-menu": withEveryMenuOpen(
+            renderSharedLinksPage({
+                chrome,
+                links: PREVIEW_SHARED_LINKS,
+                timezone: "America/Los_Angeles",
+                now: PREVIEW_NOW,
+            }),
+        ),
+        "settings-shared-links-empty": renderSharedLinksPage({
+            chrome,
+            links: [],
+            now: PREVIEW_NOW,
+        }),
         "settings-household-v2-add-member": settingsHouseholdV2(
             [],
             "fd-household-add-member",
@@ -2261,6 +2304,9 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             now: new Date("2026-11-10T12:00:00Z"),
         }),
         "settings-household-v2-member": settingsMemberV2(),
+        "settings-household-v2-member-owner": settingsMemberV2(
+            MEMBER_MAKE_OWNER_SHEET_ID,
+        ),
         "settings-household-v2-member-menu":
             withEveryMenuOpen(settingsMemberV2()),
         "settings-goals": renderSettingsGoalsV2Page({
@@ -2410,12 +2456,60 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             },
             canManage: true,
         }),
+        "settings-restock-menu": withEveryMenuOpen(
+            renderSettingsRestockV2Page({
+                chrome,
+                restock: {
+                    enabled: true,
+                    weekday: 0,
+                    time: "09:00",
+                    lastRunOn: "2026-11-08",
+                    lastRunAdded: 3,
+                },
+                canManage: true,
+            }),
+        ),
+        "settings-restock-reader": renderSettingsRestockV2Page({
+            chrome,
+            restock: {
+                enabled: true,
+                weekday: 0,
+                time: "09:00",
+                lastRunOn: "2026-11-08",
+                lastRunAdded: 3,
+            },
+            canManage: false,
+        }),
         "settings-readers": renderSettingsReadersV2Page({
+            chrome,
+            socialReaders: { tiktok: true, facebook: true },
+            blockedCount: 3,
+            isOwner: true,
+            canManage: true,
+        }),
+        "settings-readers-terms": renderSettingsReadersV2Page({
             chrome,
             socialReaders: { tiktok: true, facebook: false },
             blockedCount: 3,
             isOwner: true,
             canManage: true,
+            confirmReader: "facebook",
+        }),
+        "settings-readers-menu": withEveryMenuOpen(
+            renderSettingsReadersV2Page({
+                chrome,
+                socialReaders: { tiktok: true, facebook: true },
+                blockedCount: 3,
+                isOwner: true,
+                canManage: true,
+            }),
+        ),
+        "settings-readers-member": renderSettingsReadersV2Page({
+            chrome,
+            socialReaders: { tiktok: true, facebook: false },
+            blockedCount: 0,
+            isOwner: false,
+            canManage: false,
         }),
         "settings-stores": renderSettingsStoresV2Page({
             chrome,

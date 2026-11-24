@@ -5,6 +5,7 @@ import {
     renderHouseholdMemberRoute,
     renderHouseholdReadersRoute,
     renderHouseholdRestockRoute,
+    renderHouseholdTokenRoute,
     renderHouseholdTimezoneRoute,
     renderHouseholdSettingsRoute,
 } from "../loaders.js";
@@ -76,7 +77,7 @@ import { liveFridgeStore } from "../../db/fridge.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
 import { liveGroceryStore } from "../../db/grocery.js";
-import { householdToday } from "../../db/restock.js";
+import { householdClock, householdToday } from "../../db/restock.js";
 import {
     buildFoodUpdate,
     addProduct,
@@ -110,11 +111,6 @@ import {
     safeReturnPath,
     usualProductsPickerHref,
 } from "../usual-products-path.js";
-import {
-    HOUSEHOLD_ADD_STORE_MODAL_ID,
-    HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
-    HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
-} from "../pages/v2/settings-household-modals.js";
 import { HOUSEHOLD_ADD_MEMBER_SHEET_ID } from "../pages/v2/settings-household-add-member.js";
 import {
     HOUSEHOLD_EXPIRY_SHEET_ID,
@@ -123,6 +119,7 @@ import {
 } from "../pages/v2/settings-household.js";
 import { RESTOCK_PATH } from "../pages/v2/settings-restock.js";
 import { READERS_PATH } from "../pages/v2/settings-readers.js";
+import type { SocialReaderId } from "../../copy/social-readers.js";
 import {
     FOODS_MERGE_MODAL_ID,
     savedFoodDeleteSheetId,
@@ -224,11 +221,11 @@ householdRoutes.get(
 async function readersFormError(
     userId: string,
     message: string,
-    openModalId?: string,
+    confirmReader?: SocialReaderId,
 ) {
     const page = await renderHouseholdReadersRoute(userId, {
         error: message,
-        openModalId,
+        confirmReader,
     });
     return { html: page.html, status: 400 as const };
 }
@@ -298,7 +295,14 @@ householdRoutes.get(
     "/settings/household/readers",
     requireSiteUser,
     async (c) => {
-        const page = await renderHouseholdReadersRoute(c.get("userId"));
+        // `?turn_on=<reader>` opens that reader's terms in place.
+        const turnOn = c.req.query("turn_on");
+        const page = await renderHouseholdReadersRoute(c.get("userId"), {
+            confirmReader:
+                turnOn === "tiktok" || turnOn === "facebook"
+                    ? turnOn
+                    : undefined,
+        });
         return c.html(page.html, page.status);
     },
 );
@@ -609,12 +613,19 @@ householdRoutes.post("/settings/household", requireManager, async (c) => {
     const body = await c.req.parseBody();
     // Only the owner chooses a role. A role an admin posts is refused, so a
     // forged form cannot make an admin; the sheet an admin sees has no Role.
-    const roleRaw = formText(body, "role").trim();
+    // Every submitted value counts (`role` repeated, or `role[]`), not just
+    // the last one: a forged `role=admin&role=` must not read as no role.
+    const form = await c.req.formData();
+    const roles = [...form.getAll("role"), ...form.getAll("role[]")]
+        .map((value) => (typeof value === "string" ? value.trim() : "x"))
+        .filter((value) => value !== "");
     const isOwner = can(manager, "household.owner_only").ok;
     let role: "admin" | "member" = "member";
-    if (roleRaw !== "") {
+    if (roles.length > 0) {
+        const chosen = roles[0]!;
         // oxlint-disable-next-line foodable/no-raw-role-check -- validates the submitted form value, not the actor's role
-        if (!isOwner || (roleRaw !== "admin" && roleRaw !== "member")) {
+        const valid = chosen === "admin" || chosen === "member";
+        if (!isOwner || !valid || roles.some((value) => value !== chosen)) {
             const page = await renderHouseholdSettingsRoute(userId, {
                 error: isOwner
                     ? "Choose admin or member."
@@ -623,7 +634,7 @@ householdRoutes.post("/settings/household", requireManager, async (c) => {
             });
             return c.html(page.html, 400);
         }
-        role = roleRaw;
+        role = chosen;
     }
     const parsed = parseMemberInput({
         display_name: String(body.display_name ?? ""),
@@ -658,10 +669,16 @@ householdRoutes.post("/settings/household", requireManager, async (c) => {
                 added.userId,
                 role,
             );
-        } catch (err) {
-            // They were added; the reason shows on their page, where the
-            // role can be changed again.
-            const page = await memberActionError(userId, added.userId, err);
+        } catch {
+            // They were added, as a member: say so, and where the role can be
+            // changed again (their page, which this answer shows).
+            const page = await memberActionError(
+                userId,
+                added.userId,
+                new Error(
+                    `${parsed.value.displayName} was added as a member, but making them an admin didn't work. Use Make admin in their ⋯ menu to try again.`,
+                ),
+            );
             return c.html(page.html, page.status);
         }
     }
@@ -701,12 +718,6 @@ householdRoutes.post(
                 ? readerRaw
                 : null;
         const enabled = enabledRaw === "1";
-        const modalId =
-            reader === "tiktok"
-                ? HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID
-                : reader === "facebook"
-                  ? HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID
-                  : undefined;
         if (!reader || (enabledRaw !== "1" && enabledRaw !== "0")) {
             const page = await readersFormError(userId, "Unknown reader.");
             return c.html(page.html, page.status);
@@ -715,7 +726,7 @@ householdRoutes.post(
             const page = await readersFormError(
                 userId,
                 "Confirm you understand the terms before turning this on.",
-                modalId,
+                reader,
             );
             return c.html(page.html, page.status);
         }
@@ -789,6 +800,12 @@ householdRoutes.post(
     },
 );
 
+// A refresh or Back to the token page asks for it with a GET: the token is not
+// kept, so send the person to the Household page.
+householdRoutes.get("/settings/household/rotate-token", requireOwner, (c) =>
+    c.redirect("/settings/household", 303),
+);
+
 householdRoutes.post(
     "/settings/household/rotate-token",
     requireOwner,
@@ -801,10 +818,10 @@ householdRoutes.post(
             tokenHashHex: householdTokenHashHex(hashHouseholdToken(token)),
             issuedBy: owner.userId,
         });
-        const page = await renderHouseholdSettingsRoute(userId, {
-            issuedToken: token,
-        });
-        return c.html(page.html, 200);
+        // The token is in this page and nowhere else: never cached.
+        c.header("Cache-Control", "no-store");
+        const page = await renderHouseholdTokenRoute(userId, token);
+        return c.html(page.html, page.status);
     },
 );
 
@@ -905,11 +922,7 @@ householdRoutes.post(
                 formText(body, "name"),
             );
         } catch (err) {
-            const page = await householdFormError(
-                userId,
-                err,
-                HOUSEHOLD_ADD_STORE_MODAL_ID,
-            );
+            const page = await householdFormError(userId, err);
             return c.html(page.html, page.status);
         }
         // toast: none
@@ -1525,10 +1538,11 @@ async function renderInvitesRoute(
         return { status: 403 as const, html: forbiddenDashboardHtml() };
     }
     const profile = await getProfile(userId);
-    const [chrome, invites, flags] = await Promise.all([
+    const [chrome, invites, flags, clock] = await Promise.all([
         viewerChromeWithAttention(profile, member),
         listHouseholdInvites(member.householdId),
         viewerFlagsFor(member),
+        householdClock(member.householdId),
     ]);
     return {
         status: 200 as const,
@@ -1538,6 +1552,7 @@ async function renderInvitesRoute(
             backHref,
             member,
             invites,
+            timezone: clock.timezone,
             createdCode: opts?.createdCode,
             error: opts?.error,
         }),

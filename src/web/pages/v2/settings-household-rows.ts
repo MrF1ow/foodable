@@ -1,9 +1,5 @@
 import { esc, raw, type Html } from "../../components/v2/html.js";
-import {
-    iconCart,
-    iconChevronRight,
-    iconRefresh,
-} from "../../components/v2/icons.js";
+import { iconChevronRight } from "../../components/v2/icons.js";
 import { sheet } from "../../components/v2/sheet.js";
 import { rowList } from "../../components/v2/rows.js";
 
@@ -13,36 +9,6 @@ import { rowList } from "../../components/v2/rows.js";
  * sheet, or (for a viewer who cannot change it) just shows its value. These
  * reuse the stores page's `fd-stores-pref` row so the two pages look alike.
  */
-
-function lineIcon(inner: string): Html {
-    return raw(
-        `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${inner}</svg>`,
-    );
-}
-
-export const ROW_ICONS = {
-    edit: lineIcon(
-        '<path d="M4 20h4L19 9l-4-4L4 16Z"/><path d="M13.5 6.5l4 4"/>',
-    ),
-    pin: lineIcon(
-        '<path d="M12 21s6-5.2 6-10a6 6 0 0 0-12 0c0 4.8 6 10 6 10Z"/><circle cx="12" cy="11" r="2.2"/>',
-    ),
-    clock: lineIcon('<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>'),
-    calendar: lineIcon(
-        '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/>',
-    ),
-    link: lineIcon(
-        '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>',
-    ),
-    hourglass: lineIcon(
-        '<path d="M7 4h10M7 20h10M8 4c0 4 4 5 4 8s-4 4-4 8M16 4c0 4-4 5-4 8s4 4 4 8"/>',
-    ),
-    bell: lineIcon(
-        '<path d="M6 17V11a6 6 0 0 1 12 0v6l1.5 2h-15Z"/><path d="M10 21h4"/>',
-    ),
-    cart: iconCart(),
-    refresh: iconRefresh(),
-} as const;
 
 export type HouseholdRowOpts = {
     /** Left of the label; a row with none is label, value, chevron. */
@@ -128,21 +94,4 @@ export function timeZoneOptions(stored: string | null): string[] {
     const list = zones.includes("UTC") ? [...zones] : ["UTC", ...zones];
     if (stored && !list.includes(stored)) list.push(stored);
     return list.sort((a, b) => a.localeCompare(b));
-}
-
-/** A switch that posts `name=on|off` (the opposite of the current state). */
-export function switchForm(opts: {
-    action: string;
-    name: string;
-    on: boolean;
-    label: string;
-    extraHidden?: Readonly<Record<string, string>>;
-}): string {
-    const hidden = Object.entries(opts.extraHidden ?? {})
-        .map(
-            ([name, value]) =>
-                `<input type="hidden" name="${esc(name)}" value="${esc(value)}" />`,
-        )
-        .join("");
-    return `<form method="post" action="${esc(opts.action)}" class="fd-inline-form">${hidden}<input type="hidden" name="${esc(opts.name)}" value="${opts.on ? "off" : "on"}" /><button type="submit" class="fd-switch" role="switch" aria-checked="${opts.on ? "true" : "false"}" aria-label="${esc(opts.label)}"><span class="fd-switch__knob" aria-hidden="true"></span></button></form>`;
 }

@@ -28,12 +28,13 @@ import { viewerChromeWithAttention } from "../attention.js";
 import { formText } from "../form.js";
 import { gatedRoute } from "../gated.js";
 import {
-    renderHouseholdSettingsRoute,
+    renderSharedLinksRoute,
     renderGroceryListPage,
     renderRecipeDetailRoute,
     renderRecipesListPage,
 } from "../loaders.js";
 import { requireMember, siteMember } from "../middleware.js";
+import { SHARED_LINKS_PATH } from "../pages/v2/settings-household-shared-links.js";
 import {
     GROCERY_SHARE_SHEET_ID,
     parseShareExpiry,
@@ -184,11 +185,22 @@ shareLinkManageRoutes.post(
     },
 );
 
+// The household's active links, with Revoke on each (members only, flag on).
+shareLinkManageRoutes.get(
+    SHARED_LINKS_PATH,
+    requireMember,
+    gatedRoute("mcp-share-links", { notFound: true }),
+    async (c) => {
+        const page = await renderSharedLinksRoute(c.get("userId"));
+        return c.html(page.html, page.status);
+    },
+);
+
 // Revoking is idempotent: a link already revoked answers like a fresh one. A
 // link of another household, an unknown id and a non-uuid are the same 404
 // (the store scopes the update to the session's household).
 shareLinkManageRoutes.post(
-    "/settings/household/shared-links/:id/revoke",
+    `${SHARED_LINKS_PATH}/:id/revoke`,
     requireMember,
     gatedRoute("mcp-share-links", { notFound: true }),
     async (c) => {
@@ -201,12 +213,12 @@ shareLinkManageRoutes.post(
             new Date(),
         );
         if (!link) {
-            const page = await renderHouseholdSettingsRoute(userId, {
+            const page = await renderSharedLinksRoute(userId, {
                 error: "That link was not found.",
             });
-            return c.html(page.html, 404);
+            return c.html(page.html, page.status === 200 ? 404 : page.status);
         }
         // toast: none
-        return c.redirect("/settings/household", 303);
+        return c.redirect(SHARED_LINKS_PATH, 303);
     },
 );

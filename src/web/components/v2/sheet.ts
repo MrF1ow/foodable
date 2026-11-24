@@ -21,8 +21,8 @@ import { icon } from "./icon.js";
  * actions).
  *
  * Styles: `public/app/v2/sheet.css`. Behaviour: `src/web/client/v2/sheet.js`.
- * The old `modal` / `confirmModal` in `../ui.ts` are untouched and stay in use
- * on every page that has not been redesigned.
+ * The old `modal` / `confirmModal` of `../ui.ts` are gone; every page builds
+ * its dialogs with this component.
  *
  * Forms: a sheet's action row is a sibling of its scrolling body, so the
  * submit button cannot sit inside the form it submits. The form goes in `body`
