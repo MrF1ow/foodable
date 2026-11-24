@@ -181,10 +181,7 @@ test("no app page HTML contains a script with a body but the one that sets html.
         // The one inline script is the head's: it sets html.fx before first
         // paint, the same text on every page.
         expect(scriptBodies(html)).toEqual([
-            ENTRANCE_FX_SCRIPT.replace(/^<script>/, "").replace(
-                /<\/script>$/,
-                "",
-            ),
+            ENTRANCE_FX_SCRIPT.slice("<script>".length, -"</script>".length),
         ]);
     }
 });

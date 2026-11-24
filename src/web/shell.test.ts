@@ -339,9 +339,9 @@ test("a window without matchMedia or setTimeout runs the script as a no-op", () 
 
 /** Runs the head script the way the browser does, in a fake document. */
 function runEntranceScript(reducedMotion: boolean): string[] {
-    const body = ENTRANCE_FX_SCRIPT.replace(/^<script>/, "").replace(
-        /<\/script>$/,
-        "",
+    const body = ENTRANCE_FX_SCRIPT.slice(
+        "<script>".length,
+        -"</script>".length,
     );
     const added: string[] = [];
     const document = {
