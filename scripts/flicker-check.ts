@@ -14,6 +14,10 @@
  *   --reps <n>        runs of every navigation and variant (FLICKER_REPS, default 2)
  *   --only <text>     only navigations whose name contains the text
  *   --out <file>      write the report there as well as to stdout (+ .json beside it)
+ *   --db <url>        the stack's Postgres (FLICKER_DB): seeds a small household
+ *                     (fridge, groceries, two recipes, meals) once, so the main
+ *                     tabs have content to render. Without it the stack is
+ *                     used as it is (empty tabs).
  *   --baseline        the commit under test predates a page some navigation
  *                     needs: such a navigation is "not present" (n/a), not a
  *                     failure. Without it a navigation whose control is missing fails.
@@ -60,6 +64,73 @@ const VARIANTS: readonly VariantId[] = ["motion", "no-fade", "reduced"];
 const SCHEMES: readonly Scheme[] = ["light", "dark"];
 
 const NO_FADE_CSS = "html.fx .app-main > * { animation: none !important }";
+
+/** A recipe the seed creates under a fixed id, so a navigation can start on its page. */
+const SEED_RECIPE = "00000000-0000-4000-8000-0000000000a1";
+
+/** A small household for the main tabs: two locations, a store, eight foods in
+ *  the fridge, three grocery lines, two recipes, a week of meals and forty future days with their own
+ *  calorie goal (the Goals navigation clears one per run). */
+const SEED_SQL = `
+do $$
+declare hh uuid; usr uuid; loc_f uuid; loc_p uuid; st uuid; sec uuid; r uuid;
+begin
+  select household_id, user_id into hh, usr from household_members limit 1;
+  insert into fridge_locations (household_id, name) values (hh, 'Fridge') returning id into loc_f;
+  insert into fridge_locations (household_id, name) values (hh, 'Pantry') returning id into loc_p;
+  insert into grocery_stores (household_id, name) values (hh, 'Corner Shop') returning id into st;
+  insert into grocery_sections (household_id, store_id, name, sort_order, is_other) values (hh, st, 'Other', 99, true) returning id into sec;
+  insert into foods (household_id, kind, name, normalized_name)
+    select hh, 'food', n, lower(n) from unnest(array['Eggs','Milk','Butter','Spinach','Rice','Chicken thighs','Tomatoes','Cheddar']) n;
+  insert into fridge_items (household_id, location_id, kind, display_name, amount, unit, food_id)
+    select hh, case when f.name = 'Rice' then loc_p else loc_f end, 'food', f.name, v.amt, v.unit, f.id
+    from foods f join (values ('Eggs',12,'each'),('Milk',1,'l'),('Butter',250,'g'),('Spinach',200,'g'),('Rice',900,'g'),('Chicken thighs',600,'g'),('Tomatoes',4,'each'),('Cheddar',200,'g')) v(name,amt,unit) on v.name = f.name
+    where f.household_id = hh;
+  insert into grocery_lines (household_id, store_id, section_id, kind, display_name, amount, unit, food_id)
+    select hh, st, sec, 'food', f.name, v.amt, v.unit, f.id
+    from foods f join (values ('Eggs',6,'each'),('Spinach',300,'g'),('Cheddar',100,'g')) v(name,amt,unit) on v.name = f.name
+    where f.household_id = hh;
+  insert into recipes (id, household_id, creator_id, name, yield_portions, instructions, prep_minutes, cook_minutes)
+    values ('${SEED_RECIPE}', hh, usr, 'Spinach omelette', 2, E'Whisk the eggs.\\nWilt the spinach in butter.\\nFold in the cheddar.', 5, 10) returning id into r;
+  insert into recipe_ingredients (household_id, recipe_id, kind, display_name, amount, unit, sort_order, food_id)
+    select hh, r, 'food', f.name, v.amt, v.unit, v.ord, f.id
+    from foods f join (values ('Eggs',4,'each',0),('Spinach',100,'g',1),('Butter',10,'g',2),('Cheddar',40,'g',3)) v(name,amt,unit,ord) on v.name = f.name
+    where f.household_id = hh;
+  insert into recipes (household_id, creator_id, name, yield_portions, instructions, prep_minutes, cook_minutes)
+    values (hh, usr, 'Tomato rice', 4, E'Fry the tomatoes.\\nAdd the rice and water.\\nSimmer.', 10, 25) returning id into r;
+  insert into recipe_ingredients (household_id, recipe_id, kind, display_name, amount, unit, sort_order, food_id)
+    select hh, r, 'food', f.name, v.amt, v.unit, v.ord, f.id
+    from foods f join (values ('Rice',300,'g',0),('Tomatoes',3,'each',1),('Butter',20,'g',2)) v(name,amt,unit,ord) on v.name = f.name
+    where f.household_id = hh;
+  insert into meals (logged_at, meal_type, description, calories, protein_g, carbs_g, fat_g, user_id) values
+    (now() - interval '1 hour', 'breakfast', 'Spinach omelette', 420, 28, 6, 30, usr),
+    (now() - interval '1 day', 'lunch', 'Tomato rice', 610, 14, 98, 15, usr),
+    (now() - interval '1 day 4 hours', 'dinner', 'Chicken and rice', 720, 48, 70, 22, usr),
+    (now() - interval '2 days', 'dinner', 'Chicken and rice', 700, 46, 68, 21, usr),
+    (now() - interval '3 days', 'breakfast', 'Omelette', 400, 26, 5, 28, usr),
+    (now() - interval '5 days', 'lunch', 'Tomato rice', 600, 13, 96, 14, usr);
+  insert into nutrition_goal_days (household_id, user_id, date, daily_calories)
+    select hh, usr, current_date + d, 1800 + d from generate_series(1, 40) d;
+end $$;
+`;
+
+/** Seed the stack's database once (the seed recipe's id says it is there). */
+async function seedStack(url: string): Promise<boolean> {
+    // Seed only a local stack's database, never a remote one.
+    const host = new URL(url).hostname;
+    if (!["localhost", "127.0.0.1", "::1", "[::1]"].includes(host))
+        throw new Error(`--db must be a local stack's Postgres, not ${host}`);
+    const sql = new Bun.SQL(url);
+    try {
+        const [row] =
+            await sql`select count(*)::int as n from recipes where id = ${SEED_RECIPE}`;
+        if (row.n > 0) return false;
+        await sql.unsafe(SEED_SQL);
+        return true;
+    } finally {
+        await sql.close();
+    }
+}
 
 // ---------------------------------------------------------------- arguments
 
@@ -411,12 +482,76 @@ function keepsBody(nav: Nav): boolean {
     return !!nav.themeChange || nav.lands === nav.start;
 }
 
+const FIRST_LOADS = [
+    "/",
+    "/kitchen/fridge",
+    "/recipes",
+    "/trends",
+    "/settings",
+] as const;
+
+const TAB = (label: string) => `nav.fd-tabs a.fd-tab[aria-label="${label}"]`;
+
 const NAVS: readonly Nav[] = [
     {
         name: "into Settings: Today -> account chip",
         start: "/",
         click: ["a.fd-account-chip"],
         lands: "/settings",
+    },
+    {
+        name: "main tabs: Today -> Kitchen",
+        start: "/",
+        click: [TAB("Kitchen")],
+        lands: "/kitchen/fridge",
+    },
+    {
+        name: "main tabs: Kitchen -> Recipes",
+        start: "/kitchen/fridge",
+        click: [TAB("Recipes")],
+        lands: "/recipes",
+    },
+    {
+        name: "main tabs: Recipes -> Trends",
+        start: "/recipes",
+        click: [TAB("Trends")],
+        lands: "/trends",
+    },
+    {
+        name: "main tabs: Trends -> Today",
+        start: "/trends",
+        click: [TAB("Today")],
+        lands: "/",
+    },
+    {
+        name: "Kitchen tabs: Fridge -> Groceries",
+        start: "/kitchen/fridge",
+        click: ['a.fd-kitchen-tab[href="/kitchen/groceries"]'],
+        lands: "/kitchen/groceries",
+    },
+    {
+        name: "Kitchen tabs: Groceries -> Usuals",
+        start: "/kitchen/groceries",
+        click: ['a.fd-kitchen-tab[href="/kitchen/usuals"]'],
+        lands: "/kitchen/usuals",
+    },
+    {
+        name: "Kitchen tabs: Usuals -> Fridge",
+        start: "/kitchen/usuals",
+        click: ['a.fd-kitchen-tab[href="/kitchen/fridge"]'],
+        lands: "/kitchen/fridge",
+    },
+    {
+        name: "recipes: open a recipe",
+        start: "/recipes",
+        click: [`a.fd-recipes-card[href="/recipes/${SEED_RECIPE}"]`],
+        lands: `/recipes/${SEED_RECIPE}`,
+    },
+    {
+        name: "recipes: recipe -> back to Recipes",
+        start: `/recipes/${SEED_RECIPE}`,
+        click: ["a.fd-recipe-back__btn", "a.fd-recipe-back__link"],
+        lands: "/recipes",
     },
     {
         name: "inside Settings: home -> Account",
@@ -1029,14 +1164,18 @@ async function main() {
     const token = (await Bun.file(tokenFile).text()).trim();
     const pw = await import(join(findPlaywrightCore(), "index.js"));
     const cookie = await ensureSession(base);
+    const db = arg("db", "FLICKER_DB");
+    if (db)
+        console.error(
+            (await seedStack(db)) ? "seeded the stack" : "stack already seeded",
+        );
     const ws = `ws://${host}.tail4a18ab.ts.net:3000?token=${token}`;
     const run = new Run(pw, ws, base, cookie, baseline);
     const results: RunResult[] = [];
     const log = (s: string) => console.error(s);
     try {
         const jobs: { nav: Nav | null; path?: string }[] = [
-            { nav: null, path: "/" },
-            { nav: null, path: "/settings" },
+            ...FIRST_LOADS.map((path) => ({ nav: null, path })),
             ...NAVS.map((nav) => ({ nav })),
         ];
         for (const job of jobs) {
@@ -1116,8 +1255,7 @@ async function main() {
 
 function jobsNames(): string[] {
     return [
-        "first full load: /",
-        "first full load: /settings",
+        ...FIRST_LOADS.map((p) => `first full load: ${p}`),
         ...NAVS.map((n) => n.name),
     ];
 }
