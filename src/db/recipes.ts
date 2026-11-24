@@ -168,6 +168,11 @@ export function liveRecipesStore(): RecipesStore {
         async deleteRecipe(householdId, id) {
             return run(async (tx) => {
                 try {
+                    // An align of the recipe is in flight or finished before
+                    // the delete takes the recipe row: it would otherwise hold
+                    // an ingredient while the delete's cascade waits for it,
+                    // and then want the recipe row the delete holds.
+                    await tx`select pg_advisory_xact_lock_shared(hashtextextended(${alignLockKey(id)}, 0))`;
                     await cleanupDismissalsForRecipeTx(tx, householdId, id);
                     const data = await rows<{ id: string }>(
                         tx,
@@ -643,6 +648,46 @@ export function liveRecipesStore(): RecipesStore {
     };
 }
 
+/**
+ * An align takes this lock exclusively (`recipeAlignTransaction`); every write
+ * to a person's version takes it shared, so a save, a delete or a reset
+ * either finishes before an align reads or waits until it has committed. It
+ * is what keeps an align from deleting a row as redundant that someone has
+ * just saved something else into.
+ */
+function alignLockKey(recipeId: string): string {
+    // One key per recipe whatever the case of the id it was named by: the
+    // route's id check lets an upper-case one through, and every writer must
+    // wait on the same lock.
+    return `recipe-align:${recipeId.toLowerCase()}`;
+}
+
+/**
+ * Waits for any align of a recipe this person has a version of, and holds new
+ * ones back until the transaction ends. Deleting a person's account takes it
+ * before the delete: an align holds their rows and then needs their user row
+ * (a replaced row is inserted anew), while the delete holds the user row and
+ * then needs their rows, so without it the two wait on each other. The keys
+ * are taken in sorted order, so two deletes never wait on each other.
+ */
+export async function lockRecipeAlignsForPerson(
+    tx: Tx,
+    userId: string,
+): Promise<void> {
+    const data = await rows<{ recipe_id: string }>(
+        tx,
+        tx`
+            select distinct recipe_id
+            from ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)}
+            where user_id = ${userId}::uuid
+        `,
+    );
+    const keys = data.map((row) => alignLockKey(String(row.recipe_id))).sort();
+    for (const key of keys) {
+        await tx`select pg_advisory_xact_lock_shared(hashtextextended(${key}, 0))`;
+    }
+}
+
 /** Each person's version of a recipe: their overrides of its base ingredients. */
 export function liveRecipeVariantsStore(): RecipeVariantsStore {
     return {
@@ -709,6 +754,7 @@ export function liveRecipeVariantsStore(): RecipeVariantsStore {
         async saveOverride(given) {
             return run(async (tx) => {
                 try {
+                    await tx`select pg_advisory_xact_lock_shared(hashtextextended(${alignLockKey(given.recipeId)}, 0))`;
                     // The person's earlier row for a base ingredient is read
                     // and merged under a lock on that ingredient, so a swap
                     // and an amount saved at once both land: the second
@@ -815,6 +861,7 @@ export function liveRecipeVariantsStore(): RecipeVariantsStore {
             if (!UUID_SHAPE.test(ref)) return false;
             return run(async (tx) => {
                 try {
+                    await tx`select pg_advisory_xact_lock_shared(hashtextextended(${alignLockKey(recipeId)}, 0))`;
                     const data = await rows(
                         tx,
                         tx`
@@ -832,9 +879,66 @@ export function liveRecipeVariantsStore(): RecipeVariantsStore {
                 }
             });
         },
+        async deleteOverrideIfUnchanged(householdId, given) {
+            if (!UUID_SHAPE.test(given.id)) return false;
+            return run(async (tx) => {
+                try {
+                    await tx`select pg_advisory_xact_lock_shared(hashtextextended(${alignLockKey(given.recipeId)}, 0))`;
+                    const data = await rows(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(RECIPE_VARIANT_OVERRIDES)}
+                            where household_id = ${householdId}
+                              and id = ${given.id}::uuid
+                              and recipe_id = ${given.recipeId}::uuid
+                              and user_id = ${given.userId}::uuid
+                              and action = ${given.action}::text
+                              and amount::float8 is not distinct from ${given.amount ?? null}::float8
+                              and unit is not distinct from ${given.unit ?? null}::text
+                              and food_id is not distinct from ${given.foodId ?? null}::uuid
+                              and display_name is not distinct from ${given.displayName ?? null}::text
+                            returning id
+                        `,
+                    );
+                    return data.length > 0;
+                } catch (err) {
+                    throw pgError("delete recipe version", err);
+                }
+            });
+        },
+        async lockVersions(recipeId) {
+            return run(async (tx) => {
+                try {
+                    await tx`select pg_advisory_xact_lock_shared(hashtextextended(${alignLockKey(recipeId)}, 0))`;
+                } catch (err) {
+                    throw pgError("lock recipe versions", err);
+                }
+            });
+        },
+        async lockBaseIngredient(householdId, ingredientId) {
+            if (!UUID_SHAPE.test(ingredientId)) return false;
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select id
+                            from ${tx.unsafe(RECIPE_INGREDIENTS)}
+                            where id = ${ingredientId}::uuid
+                              and household_id = ${householdId}::uuid
+                            for no key update
+                        `,
+                    );
+                    return data.length > 0;
+                } catch (err) {
+                    throw pgError("lock recipe ingredient", err);
+                }
+            });
+        },
         async clearVariant(householdId, recipeId, userId) {
             return run(async (tx) => {
                 try {
+                    await tx`select pg_advisory_xact_lock_shared(hashtextextended(${alignLockKey(recipeId)}, 0))`;
                     const data = await rows(
                         tx,
                         tx`
@@ -852,6 +956,34 @@ export function liveRecipeVariantsStore(): RecipeVariantsStore {
             });
         },
     };
+}
+
+/**
+ * The `transaction` an align takes, for the live stores: the base edit and
+ * every override it removes or converts commit together or not at all, and
+ * two aligns of one recipe run one after the other. It also waits for any
+ * write to a version of that recipe that is in flight, and holds new ones back
+ * until it commits (see `alignLockKey`).
+ */
+export function recipeAlignTransaction(
+    recipeId: string,
+): <T>(fn: () => Promise<T>) => Promise<T> {
+    return (fn) =>
+        run(async (tx) => {
+            await tx`select pg_advisory_xact_lock(hashtextextended(${alignLockKey(recipeId)}, 0))`;
+            // The recipe row is locked before any ingredient or override row,
+            // the order the stale-unverified sweep's cascading delete takes
+            // them (recipe, then ingredients, then overrides), so neither
+            // waits on a lock the other holds.
+            if (!UUID_SHAPE.test(recipeId)) return fn();
+            await tx`
+                select id
+                from ${tx.unsafe(RECIPES)}
+                where id = ${recipeId}::uuid
+                for no key update
+            `;
+            return fn();
+        });
 }
 
 const UUID_SHAPE =

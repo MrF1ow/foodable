@@ -7,6 +7,7 @@ import {
     type SignInOptions,
 } from "../domain/auth.js";
 import { runAsSystem } from "./actor.js";
+import { lockRecipeAlignsForPerson } from "./recipes.js";
 import { maybeOne, one, pgCode, rows, run, type Tx } from "./sql.js";
 
 export function liveAuthStore(): AuthStore {
@@ -96,6 +97,8 @@ export async function deleteAuthUser(
     tx?: Tx,
 ): Promise<boolean> {
     const exec = async (conn: Tx): Promise<boolean> => {
+        // Before the user row is locked: see lockRecipeAlignsForPerson.
+        await lockRecipeAlignsForPerson(conn, userId);
         const rows = await conn`
             delete from public.users
             where id = ${userId}

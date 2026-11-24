@@ -333,7 +333,8 @@ function quantityForNewIngredient(
     };
 }
 
-function noteForUnmeasuredIngredient(
+/** An unmeasured line says "to taste" unless it already has a note. */
+export function noteForUnmeasuredIngredient(
     quantity: RecipeIngredient["quantity"],
     note: string | null,
 ): string | null {
@@ -1503,6 +1504,66 @@ export async function addRecipeIngredientById(
             sortOrder: existing.length,
             note: noteForUnmeasuredIngredient(quantity, input.note ?? null),
         });
+        await maybeRecheckUnverified(
+            store,
+            input.householdId,
+            recipe.id,
+            wasUnverified,
+        );
+        return saved;
+    } catch (err) {
+        wrapFoodsError(err);
+    }
+}
+
+/**
+ * Changes which food a base ingredient is, and how much: the line takes the
+ * food's name, and its amount (none is "to taste") in the unit given or the
+ * food's own. The same checks as adding a food: it must be in the catalog and
+ * not a supply.
+ */
+export async function swapRecipeIngredientFood(
+    store: RecipesStore,
+    foods: FoodsStore,
+    input: {
+        householdId: string;
+        recipeId: string;
+        ingredientId: string;
+        foodId: string;
+        amount?: number | null;
+        unit?: string;
+    },
+): Promise<RecipeIngredient> {
+    const recipe = await requireRecipe(
+        store,
+        input.householdId,
+        input.recipeId,
+    );
+    const wasUnverified = recipe.verification === "unverified";
+    const ingredient = await requireIngredient(
+        store,
+        input.householdId,
+        recipe.id,
+        input.ingredientId,
+    );
+    try {
+        const food = await findFoodById(foods, input.householdId, input.foodId);
+        if (food.kind !== "food") {
+            throw new RecipeInputError("That catalog item is a supply.");
+        }
+        const quantity = quantityForNewIngredient(
+            input.amount,
+            input.unit,
+            food,
+        );
+        const saved = await store.updateIngredient({
+            ...ingredient,
+            foodId: food.id,
+            displayName: food.name,
+            quantity,
+            note: noteForUnmeasuredIngredient(quantity, ingredient.note),
+        });
+        if (!saved) throw new RecipeInputError("Unknown ingredient.");
         await maybeRecheckUnverified(
             store,
             input.householdId,

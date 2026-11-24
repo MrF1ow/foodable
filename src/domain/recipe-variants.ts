@@ -11,6 +11,7 @@
 import { familyIdOf, type FoodQuantityFactors } from "./food-quantity.js";
 import { findFoodById, FoodsInputError, type FoodsStore } from "./foods.js";
 import { amountInUnit } from "./linking.js";
+import { verifyRecipe } from "./recipe-import.js";
 import {
     canonicalFactor,
     canonicalUnitText,
@@ -18,7 +19,11 @@ import {
     isQuantityUnit,
 } from "./quantity.js";
 import {
+    addRecipeIngredientById,
+    noteForUnmeasuredIngredient,
     RecipeInputError,
+    swapRecipeIngredientFood,
+    updateRecipeIngredient,
     type RecipeIngredient,
     type RecipesStore,
 } from "./recipes.js";
@@ -194,12 +199,40 @@ export type RecipeVariantsStore = {
         userId: string,
         ref: string,
     ): Promise<boolean>;
+    /**
+     * Takes back one row, by id, only while it still says what `row` says (its
+     * action, amount, unit, food and name). False when it is gone or has been
+     * saved differently since `row` was read, and then nothing is deleted.
+     */
+    deleteOverrideIfUnchanged(
+        householdId: string,
+        row: RecipeVariantOverride,
+    ): Promise<boolean>;
     /** Takes back the person's whole version of the recipe; how many rows went. */
     clearVariant(
         householdId: string,
         recipeId: string,
         userId: string,
     ): Promise<number>;
+    /**
+     * Holds the recipe's versions still until the surrounding transaction
+     * ends: an align of the recipe waits for it, and it waits for one in
+     * flight. A caller that records rows before deleting them takes it first,
+     * so what it recorded is what it deletes. Does nothing outside a
+     * transaction, and in the in-memory twin.
+     */
+    lockVersions(recipeId: string): Promise<void>;
+    /**
+     * Locks a base ingredient's row until the surrounding transaction ends,
+     * before any override row is touched: removing the ingredient or the
+     * recipe locks the ingredient and then cascades to its overrides, so an
+     * align that went the other way round could deadlock with it. False when
+     * the ingredient is gone.
+     */
+    lockBaseIngredient(
+        householdId: string,
+        ingredientId: string,
+    ): Promise<boolean>;
 };
 
 export function createMemoryVariantsStore(): RecipeVariantsStore & {
@@ -324,6 +357,27 @@ export function createMemoryVariantsStore(): RecipeVariantsStore & {
             );
             if (at < 0) return false;
             rows.splice(at, 1);
+            return true;
+        },
+        async deleteOverrideIfUnchanged(householdId, given) {
+            const at = rows.findIndex(
+                (row) =>
+                    row.householdId === householdId &&
+                    row.recipeId === given.recipeId &&
+                    row.userId === given.userId &&
+                    row.id === given.id &&
+                    row.action === given.action &&
+                    row.amount === given.amount &&
+                    row.unit === given.unit &&
+                    row.foodId === given.foodId &&
+                    row.displayName === given.displayName,
+            );
+            if (at < 0) return false;
+            rows.splice(at, 1);
+            return true;
+        },
+        async lockVersions() {},
+        async lockBaseIngredient() {
             return true;
         },
         async clearVariant(householdId, recipeId, userId) {
@@ -898,4 +952,694 @@ export async function clearRecipeVariant(
             : 0;
     }
     return variants.clearVariant(input.householdId, recipe.id, input.userId);
+}
+
+/** One quantity as a recipe line holds it; null is "to taste". */
+type LineQuantity = { amount: number; unit: string } | null;
+
+/**
+ * How one person's version differs from the base at one place. `ref` is what
+ * `alignChange` takes to name the change: the base ingredient's id, or, for an
+ * added line, the id of the person's own row. `rowKey` names that row as it
+ * was read, so an align can tell it was saved again since.
+ */
+export type VersionDifference =
+    | {
+          kind: "removed";
+          ref: string;
+          /** Names the stored row as shown (`overrideKey`); align posts it back. */
+          rowKey: string;
+          ingredientId: string;
+          displayName: string;
+          base: LineQuantity;
+      }
+    | {
+          kind: "amount";
+          ref: string;
+          /** Names the stored row as shown (`overrideKey`); align posts it back. */
+          rowKey: string;
+          ingredientId: string;
+          displayName: string;
+          base: LineQuantity;
+          version: LineQuantity;
+      }
+    | {
+          kind: "swapped";
+          ref: string;
+          /** Names the stored row as shown (`overrideKey`); align posts it back. */
+          rowKey: string;
+          ingredientId: string;
+          /** The base's own name for the line. */
+          displayName: string;
+          foodId: string | null;
+          /** The name of the food the person uses instead. */
+          foodName: string;
+          base: LineQuantity;
+          version: LineQuantity;
+      }
+    | {
+          kind: "added";
+          ref: string;
+          /** Names the stored row as shown (`overrideKey`); align posts it back. */
+          rowKey: string;
+          ingredientId: null;
+          displayName: string;
+          foodId: string | null;
+          version: LineQuantity;
+      };
+
+/** Every difference between one person's version and the base, base order first. */
+export function versionDifferences(
+    recipe: { id: string; ingredients: readonly RecipeIngredient[] },
+    overrides: readonly RecipeVariantOverride[],
+    userId: string,
+): VersionDifference[] {
+    return differencesOf(
+        recipe,
+        variantFor(recipe, overrides, userId),
+        overrides,
+    );
+}
+
+function differencesOf(
+    recipe: { ingredients: readonly RecipeIngredient[] },
+    version: RecipeVariant,
+    overrides: readonly RecipeVariantOverride[],
+): VersionDifference[] {
+    const out: VersionDifference[] = [];
+    // The stored row behind a change: the person's row on a base ingredient,
+    // or, for an added line, the row whose id the line carries.
+    const keyOf = (ref: string, added: boolean) => {
+        const row = overrides.find(
+            (r) =>
+                sameMember(r.userId, version.userId) &&
+                (added ? r.id === ref : r.ingredientId === ref),
+        );
+        return row ? overrideKey(row) : "";
+    };
+    const gone = new Set(version.removed.map((row) => row.id));
+    for (const base of recipe.ingredients) {
+        if (gone.has(base.id)) {
+            out.push({
+                kind: "removed",
+                ref: base.id,
+                rowKey: keyOf(base.id, false),
+                ingredientId: base.id,
+                displayName: base.displayName,
+                base: base.quantity,
+            });
+            continue;
+        }
+        const line = version.ingredients.find(
+            (row) => row.baseIngredientId === base.id && row.change,
+        );
+        if (line?.change === "amount") {
+            out.push({
+                kind: "amount",
+                ref: base.id,
+                rowKey: keyOf(base.id, false),
+                ingredientId: base.id,
+                displayName: base.displayName,
+                base: base.quantity,
+                version: line.quantity,
+            });
+        } else if (line?.change === "food") {
+            out.push({
+                kind: "swapped",
+                ref: base.id,
+                rowKey: keyOf(base.id, false),
+                ingredientId: base.id,
+                displayName: base.displayName,
+                foodId: line.foodId,
+                foodName: line.displayName,
+                base: base.quantity,
+                version: line.quantity,
+            });
+        }
+    }
+    for (const line of version.ingredients) {
+        if (line.change !== "add") continue;
+        out.push({
+            kind: "added",
+            ref: line.id,
+            rowKey: keyOf(line.id, true),
+            ingredientId: null,
+            displayName: line.displayName,
+            foodId: line.foodId,
+            version: line.quantity,
+        });
+    }
+    return out;
+}
+
+export type VersionsCompare = {
+    recipeId: string;
+    /** The base recipe's lines, in order. */
+    base: {
+        ingredientId: string;
+        displayName: string;
+        foodId: string | null;
+        quantity: LineQuantity;
+    }[];
+    /** Members with a version, in the order given, and how theirs differs. */
+    versions: {
+        userId: string;
+        overrideCount: number;
+        differences: VersionDifference[];
+    }[];
+    /** Members who use the base as it is. */
+    usingBase: string[];
+};
+
+/**
+ * The admin's compare view: the base lines, each member's differences from
+ * them, and who has no version. Only `memberIds` are looked at, so a row left
+ * by someone who has since left the household shows nowhere.
+ */
+export function compareVersions(
+    recipe: { id: string; ingredients: readonly RecipeIngredient[] },
+    overrides: readonly RecipeVariantOverride[],
+    memberIds: readonly string[],
+): VersionsCompare {
+    const versions: VersionsCompare["versions"] = [];
+    const usingBase: string[] = [];
+    for (const userId of memberIds) {
+        const version = variantFor(recipe, overrides, userId);
+        if (version.overrideCount === 0) {
+            usingBase.push(userId);
+            continue;
+        }
+        versions.push({
+            userId,
+            overrideCount: version.overrideCount,
+            differences: differencesOf(recipe, version, overrides),
+        });
+    }
+    return {
+        recipeId: recipe.id,
+        base: recipe.ingredients.map((row) => ({
+            ingredientId: row.id,
+            displayName: row.displayName,
+            foodId: row.foodId,
+            quantity: row.quantity ? { ...row.quantity } : null,
+        })),
+        versions,
+        usingBase,
+    };
+}
+
+/** The same food in the same amount. */
+function sameLine(
+    a: { foodId: string | null; quantity: LineQuantity },
+    b: { foodId: string | null; quantity: LineQuantity },
+): boolean {
+    return a.foodId === b.foodId && sameQuantity(a.quantity, b.quantity);
+}
+
+function sameQuantity(a: LineQuantity, b: LineQuantity): boolean {
+    if (a == null || b == null) return a == null && b == null;
+    const close = (x: number, y: number) =>
+        Math.abs(x - y) <= 1e-6 * Math.max(1, Math.abs(x), Math.abs(y));
+    const ua = canonicalUnitText(a.unit);
+    const ub = canonicalUnitText(b.unit);
+    if (ua === ub) return close(a.amount, b.amount);
+    // Same dimension (50 g, 0.05 kg): compare exactly, not through the
+    // display rounding `amountInUnit` applies.
+    if (isQuantityUnit(ua) && isQuantityUnit(ub)) {
+        return (
+            dimensionOf(ua) === dimensionOf(ub) &&
+            close(
+                a.amount * canonicalFactor(ua),
+                b.amount * canonicalFactor(ub),
+            )
+        );
+    }
+    return false;
+}
+
+export type AlignResult = {
+    kind: "amount" | "swapped" | "added";
+    /** The base ingredient that changed, or the one the added line became. */
+    ingredientId: string;
+    /** Overrides taken away because the base now says the same. */
+    removed: number;
+    /** Added lines of other people that became an amount on the new base line. */
+    converted: number;
+    /** Other people's overrides that stay because they still differ. */
+    kept: { userId: string; action: VariantAction }[];
+};
+
+export type AlignDeps = {
+    recipes: RecipesStore;
+    /** The catalog: a food an align puts in the base is checked against it. */
+    foods: FoodsStore;
+    variants: RecipeVariantsStore;
+    /** Runs the whole align as one unit; the live one is a database transaction. */
+    transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
+};
+
+function problemKey(problem: {
+    code: string;
+    ingredientId: string | null;
+    line: string | null;
+}): string {
+    return `${problem.code}:${problem.ingredientId ?? ""}:${problem.line ?? ""}`;
+}
+
+/**
+ * Pushes one person's change into the base recipe, for everyone.
+ *
+ * - An amount or a swap on a base ingredient: the base ingredient takes that
+ *   amount, or that food and amount.
+ * - An added line: it becomes a base ingredient, after the last.
+ * - A removal is refused: taking an ingredient out of the base is a recipe
+ *   edit, and would silently drop what other people set on it.
+ *
+ * Afterwards the person's own row is gone. Everyone else keeps cooking what
+ * they cooked before: another person's row on that ingredient goes only when
+ * what it gave them is what the new base says with no row at all; a row that
+ * still differs stays (50 g next to a base of 150 g is still theirs), and one
+ * the change would have altered (an amount under a new food, a swap that
+ * followed the base amount) is rewritten to say what they had. Another
+ * person's added line of the same food becomes an amount on the new base
+ * ingredient when its amount differs, so they never get the food twice.
+ *
+ * A verified recipe is not allowed to fail its check because of the change.
+ * Everything runs in one transaction.
+ */
+export async function alignChange(
+    deps: AlignDeps,
+    input: {
+        householdId: string;
+        recipeId: string;
+        userId: string;
+        ref: string;
+        /** The change as the admin saw it (`VersionDifference.rowKey`). */
+        rowKey: string;
+    },
+): Promise<AlignResult> {
+    const run = deps.transaction ?? (<T>(fn: () => Promise<T>) => fn());
+    return run(async () => {
+        const { recipes, foods, variants } = deps;
+        // The base ingredient is locked before anything is read: a base edit
+        // that commits while this waits is then what everything below reads
+        // and decides from. It is also locked before any override row is
+        // touched: removing the ingredient locks it and then cascades to its
+        // overrides, so the other order could deadlock with that. The ref of
+        // an added line names no ingredient and locks nothing; one that is
+        // gone or is not this recipe's is found missing below.
+        await variants.lockBaseIngredient(input.householdId, input.ref);
+        const recipe = await recipes.getRecipe(
+            input.householdId,
+            input.recipeId,
+        );
+        if (!recipe) throw new RecipeInputError("Unknown recipe.");
+        const base = await recipes.listIngredients(
+            input.householdId,
+            recipe.id,
+        );
+        const all = await variants.listOverrides(input.householdId, recipe.id);
+        const gone = () =>
+            new RecipeInputError("That change no longer exists.");
+        const chosen = all.find(
+            (row) =>
+                sameMember(row.userId, input.userId) &&
+                (row.action === "add"
+                    ? row.id === input.ref
+                    : row.ingredientId === input.ref &&
+                      base.some((b) => b.id === row.ingredientId)),
+        );
+        if (!chosen) throw gone();
+        // The admin saw one version of this change; push that one, not
+        // whatever the person has saved since.
+        if (overrideKey(chosen) !== input.rowKey) {
+            throw new RecipeInputError("Their change changed; look again.");
+        }
+        if (chosen.action === "remove") {
+            throw new RecipeInputError(
+                "A removed ingredient can't be aligned: take it out of the recipe itself.",
+            );
+        }
+
+        // What the base looks like afterwards.
+        let target: RecipeIngredient;
+        let proposed: RecipeIngredient[];
+        const isNew = chosen.action === "add";
+        const old = isNew
+            ? undefined
+            : base.find((row) => row.id === chosen.ingredientId)!;
+        // The food the line becomes, by its catalog name; the stored name
+        // stands in only for a row that names no food (which the check below
+        // refuses on a verified recipe).
+        const food =
+            chosen.foodId == null
+                ? null
+                : await findCatalogFood(
+                      foods,
+                      input.householdId,
+                      chosen.foodId,
+                  );
+        if (isNew) {
+            const quantity =
+                chosen.amount == null
+                    ? null
+                    : { amount: chosen.amount, unit: chosen.unit ?? "g" };
+            target = {
+                id: crypto.randomUUID(),
+                householdId: input.householdId,
+                recipeId: recipe.id,
+                kind: "food",
+                displayName: food?.name ?? chosen.displayName ?? "",
+                quantity,
+                foodId: chosen.foodId,
+                sortOrder:
+                    base.reduce(
+                        (max, row) => Math.max(max, row.sortOrder),
+                        -1,
+                    ) + 1,
+                note: noteForUnmeasuredIngredient(quantity, null),
+            };
+            proposed = [...base, target];
+        } else {
+            const line = variantFor(
+                { id: recipe.id, ingredients: base },
+                [chosen],
+                chosen.userId,
+            ).ingredients.find((row) => row.baseIngredientId === old!.id)!;
+            target = {
+                ...old!,
+                foodId: line.foodId,
+                displayName: food?.name ?? line.displayName,
+                quantity: line.quantity,
+                note: noteForUnmeasuredIngredient(line.quantity, old!.note),
+            };
+            proposed = base.map((row) => (row.id === old!.id ? target : row));
+        }
+
+        // A verified recipe must still pass its check.
+        if (recipe.verification === "verified") {
+            const importRow = await recipes.getImport(
+                input.householdId,
+                recipe.id,
+            );
+            const before = new Set(
+                verifyRecipe(recipe, base, importRow).problems.map(problemKey),
+            );
+            const worse = verifyRecipe(
+                recipe,
+                proposed,
+                importRow,
+            ).problems.find((problem) => !before.has(problemKey(problem)));
+            if (worse) throw new RecipeInputError(worse.message);
+        }
+        if (target.foodId == null) {
+            throw new RecipeInputError("That change names no food.");
+        }
+
+        // Every row taken away is taken only while it is still what was read
+        // above: a person who saved something newer in between keeps it, and
+        // the align stops. Nothing is changed before the person's own row is
+        // confirmed.
+        const changed = () =>
+            new RecipeInputError(
+                "A version changed while it was being aligned. Nothing was changed; try again.",
+            );
+        const result: AlignResult = {
+            kind: isNew
+                ? "added"
+                : chosen.action === "food"
+                  ? "swapped"
+                  : "amount",
+            ingredientId: target.id,
+            removed: 0,
+            converted: 0,
+            kept: [],
+        };
+        // `counted` is false for a row that is replaced rather than dropped.
+        const drop = async (row: RecipeVariantOverride, counted = true) => {
+            const deleted = await variants.deleteOverrideIfUnchanged(
+                input.householdId,
+                row,
+            );
+            if (!deleted) throw changed();
+            if (counted) result.removed++;
+        };
+        await drop(chosen);
+
+        // The base edit goes through the same functions a person editing the
+        // recipe uses.
+        if (isNew) {
+            const saved = await addRecipeIngredientById(recipes, foods, {
+                householdId: input.householdId,
+                recipeId: recipe.id,
+                foodId: target.foodId,
+                amount: target.quantity?.amount ?? null,
+                unit: target.quantity?.unit,
+            });
+            target = saved;
+            result.ingredientId = saved.id;
+            proposed = [...base, saved];
+        } else if (chosen.action === "food") {
+            await swapRecipeIngredientFood(recipes, foods, {
+                householdId: input.householdId,
+                recipeId: recipe.id,
+                ingredientId: old!.id,
+                foodId: target.foodId,
+                amount: target.quantity?.amount ?? null,
+                unit: target.quantity?.unit,
+            });
+        } else {
+            await updateRecipeIngredient(
+                recipes,
+                input.householdId,
+                recipe.id,
+                old!.id,
+                {
+                    amount: target.quantity?.amount ?? null,
+                    unit: target.quantity?.unit,
+                },
+                foods,
+            );
+        }
+
+        // What the base ingredient is now, as saved.
+        if (!isNew) {
+            const saved = (
+                await recipes.listIngredients(input.householdId, recipe.id)
+            ).find((row) => row.id === old!.id);
+            if (saved) {
+                target = saved;
+                proposed = base.map((row) =>
+                    row.id === old!.id ? saved : row,
+                );
+            }
+        }
+
+        // Clean up the rows the base now makes redundant.
+        const afterwards = { id: recipe.id, ingredients: proposed };
+        for (const row of all) {
+            if (row.id === chosen.id) continue;
+            if (isNew) {
+                if (row.action !== "add" || row.foodId !== chosen.foodId) {
+                    continue;
+                }
+                const theirs =
+                    row.amount == null
+                        ? null
+                        : { amount: row.amount, unit: row.unit ?? "g" };
+                if (sameQuantity(theirs, target.quantity)) {
+                    await drop(row);
+                    continue;
+                }
+                await drop(row, false);
+                await variants.saveOverride({
+                    householdId: input.householdId,
+                    recipeId: recipe.id,
+                    userId: row.userId,
+                    ingredientId: target.id,
+                    action: "amount",
+                    amount: row.amount,
+                    unit: row.unit,
+                    defaultUnit: target.quantity?.unit ?? null,
+                });
+                result.converted++;
+                result.kept.push({ userId: row.userId, action: "amount" });
+                continue;
+            }
+            if (row.ingredientId !== target.id || row.action === "add") {
+                continue;
+            }
+            if (row.action === "remove") {
+                result.kept.push({ userId: row.userId, action: row.action });
+                continue;
+            }
+            // Everyone else cooks exactly what they cooked before the align:
+            // the food and the amount their row gave them over the old base.
+            const lineOf = (ingredients: readonly RecipeIngredient[]) =>
+                variantFor(
+                    { id: recipe.id, ingredients },
+                    [row],
+                    row.userId,
+                ).ingredients.find(
+                    (entry) => entry.baseIngredientId === target.id,
+                )!;
+            const cookedBefore = lineOf(base);
+            if (sameLine(cookedBefore, target)) {
+                // They would cook this with no row at all.
+                await drop(row);
+                continue;
+            }
+            if (sameLine(lineOf(afterwards.ingredients), cookedBefore)) {
+                result.kept.push({ userId: row.userId, action: row.action });
+                continue;
+            }
+            // Their row no longer gives them that (a swap changed the food
+            // under their amount, or the base amount they followed moved):
+            // say it outright.
+            const keepsFood = cookedBefore.foodId === target.foodId;
+            const quantity = cookedBefore.quantity;
+            await drop(row, false);
+            await variants.saveOverride({
+                householdId: input.householdId,
+                recipeId: recipe.id,
+                userId: row.userId,
+                ingredientId: target.id,
+                action: keepsFood ? "amount" : "food",
+                amount: quantity?.amount ?? null,
+                // No amount with a unit is "to taste".
+                unit: quantity?.unit ?? "g",
+                ...(keepsFood
+                    ? {}
+                    : {
+                          foodId: cookedBefore.foodId,
+                          displayName: cookedBefore.displayName,
+                      }),
+            });
+            result.kept.push({
+                userId: row.userId,
+                action: keepsFood ? "amount" : "food",
+            });
+        }
+
+        return result;
+    });
+}
+
+/** A catalog food a change names, or a refusal in the recipes' own words. */
+async function findCatalogFood(
+    foods: FoodsStore,
+    householdId: string,
+    foodId: string,
+) {
+    try {
+        const food = await findFoodById(foods, householdId, foodId);
+        if (food.kind !== "food") {
+            throw new RecipeInputError("That catalog item is a supply.");
+        }
+        return food;
+    } catch (err) {
+        if (err instanceof FoodsInputError) {
+            throw new RecipeInputError(err.message);
+        }
+        throw err;
+    }
+}
+
+async function ownRows(
+    recipes: RecipesStore,
+    variants: RecipeVariantsStore,
+    input: { householdId: string; recipeId: string; userId: string },
+) {
+    const recipe = await recipes.getRecipe(input.householdId, input.recipeId);
+    if (!recipe) throw new RecipeInputError("Unknown recipe.");
+    const all = await variants.listOverrides(input.householdId, recipe.id);
+    const mine = all.filter((row) => sameMember(row.userId, input.userId));
+    if (mine.length === 0) {
+        throw new RecipeInputError(
+            "That person has no version of this recipe.",
+        );
+    }
+    return { recipe, all, mine };
+}
+
+/**
+ * What names one stored row to a confirm: its id and when it was last saved,
+ * so a row saved again since the preview no longer matches.
+ */
+export function overrideKey(row: { id: string; updatedAt: string }): string {
+    return `${row.id}@${row.updatedAt}`;
+}
+
+/**
+ * What a reset would take back, changing nothing: how many rows, which ones
+ * (`rowKeys`, which the confirm hands back), and how the person's version
+ * differs from the base. Refused when they have no version.
+ */
+export async function previewReset(
+    recipes: RecipesStore,
+    variants: RecipeVariantsStore,
+    input: { householdId: string; recipeId: string; userId: string },
+): Promise<{
+    userId: string;
+    overrideCount: number;
+    rowKeys: string[];
+    differences: VersionDifference[];
+}> {
+    const { recipe, all, mine } = await ownRows(recipes, variants, input);
+    const base = await recipes.listIngredients(input.householdId, recipe.id);
+    return {
+        userId: mine[0]!.userId,
+        overrideCount: mine.length,
+        rowKeys: mine.map(overrideKey),
+        differences: versionDifferences(
+            { id: recipe.id, ingredients: base },
+            all,
+            input.userId,
+        ),
+    };
+}
+
+/**
+ * Takes back the rows an admin was shown (`rowKeys` from `previewReset`) and
+ * nothing else, so the person reads the base again. How many rows went.
+ * Refused, with nothing taken, when they had no version or when their rows are
+ * no longer exactly those: a row added or saved again since the preview is
+ * one the admin never saw.
+ */
+export async function resetVariant(
+    recipes: RecipesStore,
+    variants: RecipeVariantsStore,
+    input: {
+        householdId: string;
+        recipeId: string;
+        userId: string;
+        rowKeys: readonly string[];
+        /** Runs the reset as one unit; the live one is a database transaction. */
+        transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
+    },
+): Promise<number> {
+    const run = input.transaction ?? (<T>(fn: () => Promise<T>) => fn());
+    return run(async () => {
+        const { mine } = await ownRows(recipes, variants, input);
+        const changed = () =>
+            new RecipeInputError("Their version changed; look again.");
+        const shown = new Set(input.rowKeys);
+        if (
+            shown.size !== mine.length ||
+            mine.some((row) => !shown.has(overrideKey(row)))
+        ) {
+            throw changed();
+        }
+        for (const row of mine) {
+            if (
+                !(await variants.deleteOverrideIfUnchanged(
+                    input.householdId,
+                    row,
+                ))
+            ) {
+                throw changed();
+            }
+        }
+        return mine.length;
+    });
 }

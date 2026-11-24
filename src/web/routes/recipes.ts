@@ -17,15 +17,24 @@ import {
 import {
     getHouseholdConfig,
     getHouseholdMembership,
+    listHouseholdMembers,
 } from "../../db/household.js";
 import { can } from "../../domain/permissions.js";
 import { liveSocialReaderStatusStore } from "../../db/social-readers.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import { liveGroceryStore } from "../../db/grocery.js";
-import { liveRecipesStore, liveRecipeVariantsStore } from "../../db/recipes.js";
 import {
+    liveRecipesStore,
+    liveRecipeVariantsStore,
+    recipeAlignTransaction,
+} from "../../db/recipes.js";
+import {
+    alignChange,
     clearRecipeVariant,
+    compareVersions,
+    previewReset,
+    resetVariant,
     setRecipeVariant,
     VARIANT_ACTIONS,
     type VariantAction,
@@ -1117,6 +1126,177 @@ recipesRoutes.post("/recipes/:id/variant/clear", requireMember, async (c) => {
         return c.html(page.html, page.status);
     }
     // toast: none — the page reloads on the recipe, the changes taken back
+    return c.redirect(`/recipes/${recipeId}`, 303);
+});
+
+/**
+ * Admin and owner only (`household.align_recipe_versions`). A member is
+ * refused before anything is read or written.
+ */
+function alignRefusal(member: {
+    userId: string;
+    role: Parameters<typeof can>[0]["role"];
+}): RecipeForbiddenError | null {
+    const allowed = can(member, "household.align_recipe_versions");
+    return allowed.ok ? null : new RecipeForbiddenError(allowed.reason);
+}
+
+/**
+ * The compare view as data for the admin's screen: the base lines, each
+ * member's differences from them (with the `ref` that names a change to
+ * align) and who uses the base. JSON, no page: the screen reads it.
+ */
+recipesRoutes.get("/recipes/:id/versions", requireMember, async (c) => {
+    const member = siteMember(c);
+    const refusal = alignRefusal(member);
+    if (refusal) return c.json({ error: refusal.message }, 403);
+    const recipeId = c.req.param("id");
+    if (!UUID_SHAPE.test(recipeId)) {
+        return c.json({ error: "Not found" }, 404);
+    }
+    const recipes = liveRecipesStore();
+    const recipe = await recipes.getRecipe(member.householdId, recipeId);
+    if (!recipe) return c.json({ error: "Not found" }, 404);
+    const [ingredients, overrides, members] = await Promise.all([
+        recipes.listIngredients(member.householdId, recipe.id),
+        liveRecipeVariantsStore().listOverrides(member.householdId, recipe.id),
+        listHouseholdMembers(member.householdId),
+    ]);
+    const names = new Map(members.map((m) => [m.userId, m.displayName]));
+    const compare = compareVersions(
+        { id: recipe.id, ingredients },
+        overrides,
+        members.map((m) => m.userId),
+    );
+    const named = (userId: string) => ({
+        userId,
+        displayName: names.get(userId) ?? "",
+    });
+    return c.json({
+        ...compare,
+        versions: compare.versions.map((v) => ({ ...v, ...named(v.userId) })),
+        usingBase: compare.usingBase.map(named),
+    });
+});
+
+/**
+ * Push one person's change to one ingredient into the base recipe, for
+ * everyone (`user_id`, `ingredient_id`: the base ingredient, or the id of an
+ * added line, as the compare read names it) and `row_key`, the `rowKey` the
+ * compare read gave that change: when the person has saved it again since, it
+ * is a 400 and nothing changes. The base edit and the clean-up
+ * of the rows it makes redundant are one transaction. A change that no longer
+ * exists, or would break the recipe's check, is a 400 and changes nothing.
+ */
+recipesRoutes.post("/recipes/:id/versions/align", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+    const body = await c.req.parseBody();
+    try {
+        const refusal = alignRefusal(member);
+        if (refusal) throw refusal;
+        const who = formText(body, "user_id");
+        if (!UUID_SHAPE.test(who)) {
+            throw new RecipeInputError("Pick whose change to use.");
+        }
+        await alignChange(
+            {
+                recipes: liveRecipesStore(),
+                foods: liveFoodsStore(),
+                variants: liveRecipeVariantsStore(),
+                transaction: recipeAlignTransaction(recipeId),
+            },
+            {
+                householdId: member.householdId,
+                recipeId,
+                userId: who,
+                ref: formText(body, "ingredient_id"),
+                rowKey: formText(body, "row_key"),
+            },
+        );
+    } catch (err) {
+        if (
+            !(err instanceof RecipeInputError) &&
+            !(err instanceof RecipeForbiddenError)
+        ) {
+            throw err;
+        }
+        const page = await recipeFormError(userId, recipeId, err);
+        return c.html(page.html, page.status);
+    }
+    // toast: none — the page reloads on the recipe, the base now changed
+    return c.redirect(`/recipes/${recipeId}`, 303);
+});
+
+/**
+ * Reset one person's version of a recipe to the base (`user_id`). It asks
+ * first: without `confirm=1` nothing changes and the answer says what would
+ * go (`confirmRequired`, the row count and the differences), which the screen
+ * shows as the confirm in place, with `rowKeys` naming the rows it showed.
+ * The confirm posts those back as `row_keys`, and exactly those rows go, and
+ * no one else's: when the person's rows are no longer the ones shown (one
+ * added or saved again since), nothing goes and the answer is a 400.
+ */
+recipesRoutes.post("/recipes/:id/versions/reset", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    const body = await c.req.parseBody({ all: true });
+    // Without confirm the answer is JSON, errors included; the confirmed
+    // form post answers with the recipe page, as the other forms do.
+    const confirmed = formText(body, "confirm") === "1";
+    if (!UUID_SHAPE.test(recipeId)) {
+        return confirmed
+            ? c.text("Not found", 404)
+            : c.json({ error: "Not found" }, 404);
+    }
+    const input = {
+        householdId: member.householdId,
+        recipeId,
+        userId: formText(body, "user_id"),
+    };
+    try {
+        const refusal = alignRefusal(member);
+        if (refusal) throw refusal;
+        if (!UUID_SHAPE.test(input.userId)) {
+            throw new RecipeInputError("Pick whose version to reset.");
+        }
+        if (!confirmed) {
+            const preview = await previewReset(
+                liveRecipesStore(),
+                liveRecipeVariantsStore(),
+                input,
+            );
+            return c.json({ confirmRequired: true, recipeId, ...preview });
+        }
+        // The rows the admin was shown, handed back by the confirm.
+        const rowKeys = [body["row_keys"] ?? []]
+            .flat()
+            .filter((key): key is string => typeof key === "string");
+        await resetVariant(liveRecipesStore(), liveRecipeVariantsStore(), {
+            ...input,
+            rowKeys,
+            transaction: recipeAlignTransaction(recipeId),
+        });
+    } catch (err) {
+        if (
+            !(err instanceof RecipeInputError) &&
+            !(err instanceof RecipeForbiddenError)
+        ) {
+            throw err;
+        }
+        if (!confirmed) {
+            return c.json(
+                { error: err.message },
+                err instanceof RecipeForbiddenError ? 403 : 400,
+            );
+        }
+        const page = await recipeFormError(userId, recipeId, err);
+        return c.html(page.html, page.status);
+    }
+    // toast: none — the page reloads on the recipe, the person back on the base
     return c.redirect(`/recipes/${recipeId}`, 303);
 });
 

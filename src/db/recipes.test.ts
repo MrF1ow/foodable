@@ -1,7 +1,12 @@
 import { join } from "node:path";
+import { SQL } from "bun";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { liveFoodsStore } from "./foods.js";
-import { importRecipeFromUrl } from "../domain/recipe-import.js";
+import { deleteAuthUser } from "./users.js";
+import {
+    importRecipeFromUrl,
+    sweepUnverifiedRecipes,
+} from "../domain/recipe-import.js";
 import {
     addRecipeManualIngredient,
     addRecipeToGrocery,
@@ -11,8 +16,12 @@ import {
     updateRecipeIngredient,
 } from "../domain/recipes.js";
 import {
+    alignChange,
     clearRecipeVariant,
+    overrideKey,
+    previewReset,
     recipeNeeds,
+    resetVariant,
     variantFor,
     setRecipeVariant,
 } from "../domain/recipe-variants.js";
@@ -27,6 +36,7 @@ import type { SafeFetcher } from "../fetch-safe.js";
 import {
     liveRecipesStore,
     liveRecipeVariantsStore,
+    recipeAlignTransaction,
     recipeImportSqlValues,
 } from "./recipes.js";
 import { run } from "./sql.js";
@@ -38,8 +48,9 @@ import {
     seedHousehold,
     seedMember,
 } from "./testing/fixtures.js";
+import { waitForLockWaiters } from "./testing/lock-race.js";
 import { findPgBin } from "./testing/pg-temp.js";
-import { setSqlForTests } from "./sql.js";
+import { pairAppSqlForTests, setSqlForTests } from "./sql.js";
 
 const pgAvailable = await findPgBin();
 
@@ -444,6 +455,16 @@ describeDb(pgAvailable !== null, "recipe versions db", (getCtx) => {
         const peas = await seedFood(sql, householdId, { name: "Peas" });
         return { sql, recipes, foods, variants, recipe, pasta, cheese, peas };
     }
+
+    /** The key the compare read gives one person's change. */
+    const keyFor = async (recipeId: string, who: string, ref: string) => {
+        const row = (
+            await liveRecipeVariantsStore().listOverrides(householdId, recipeId)
+        ).find(
+            (r) => r.userId === who && (r.id === ref || r.ingredientId === ref),
+        );
+        return row ? overrideKey(row) : "";
+    };
 
     const countRows = async (recipeId: string) =>
         (await liveRecipeVariantsStore().listOverrides(householdId, recipeId))
@@ -1066,5 +1087,960 @@ describeDb(pgAvailable !== null, "recipe versions db", (getCtx) => {
             }),
         ).rejects.toThrow("That catalog item is a supply.");
         expect(await countRows(k.recipe.id)).toBe(0);
+    });
+
+    test("align changes the base and removes the redundant rows in one transaction, against Postgres", async () => {
+        const k = await kitchen();
+        for (const who of [userId, memberId]) {
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: who,
+                action: "amount",
+                ingredientId: k.cheese.id,
+                amount: 50,
+                unit: "g",
+            });
+        }
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+            action: "add",
+            foodId: k.peas,
+            amount: 90,
+            unit: "g",
+        });
+        const added = await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId,
+            action: "add",
+            foodId: k.peas,
+            amount: 40,
+            unit: "g",
+        });
+        const deps = {
+            recipes: k.recipes,
+            foods: k.foods,
+            variants: k.variants,
+            transaction: recipeAlignTransaction(k.recipe.id),
+        };
+        const first = await alignChange(deps, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId,
+            ref: k.cheese.id,
+            rowKey: await keyFor(k.recipe.id, userId, k.cheese.id),
+        });
+        expect(first).toMatchObject({ kind: "amount", removed: 2 });
+        const second = await alignChange(deps, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId,
+            ref: added.id,
+            rowKey: await keyFor(k.recipe.id, userId, added.id),
+        });
+        expect(second).toMatchObject({
+            kind: "added",
+            removed: 1,
+            converted: 1,
+        });
+        const ingredients = await k.recipes.listIngredients(
+            householdId,
+            k.recipe.id,
+        );
+        expect(
+            ingredients.map((row) => [row.displayName, row.quantity]),
+        ).toEqual([
+            ["Pasta", { amount: 400, unit: "g" }],
+            ["Cheese", { amount: 50, unit: "g" }],
+            ["Peas", { amount: 40, unit: "g" }],
+        ]);
+        const left = await k.variants.listOverrides(householdId, k.recipe.id);
+        expect(left).toHaveLength(1);
+        expect(left[0]).toMatchObject({
+            userId: memberId,
+            action: "amount",
+            ingredientId: ingredients[2]!.id,
+            amount: 90,
+        });
+    });
+
+    test("a failed align leaves the base and every row as they were", async () => {
+        const k = await kitchen();
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId,
+            action: "add",
+            foodId: k.peas,
+            amount: 40,
+            unit: "g",
+        });
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+            action: "add",
+            foodId: k.peas,
+            amount: 90,
+            unit: "g",
+        });
+        const mine = (
+            await k.variants.listOverrides(householdId, k.recipe.id)
+        ).find((row) => row.userId === userId)!;
+        // The last store write fails after the base ingredient was inserted
+        // and the person's own row deleted: all of it rolls back.
+        const failing = {
+            ...k.variants,
+            async saveOverride(): Promise<never> {
+                throw new Error("boom");
+            },
+        };
+        await expect(
+            alignChange(
+                {
+                    recipes: k.recipes,
+                    foods: k.foods,
+                    variants: failing,
+                    transaction: recipeAlignTransaction(k.recipe.id),
+                },
+                {
+                    householdId,
+                    recipeId: k.recipe.id,
+                    userId,
+                    ref: mine.id,
+                    rowKey: await keyFor(k.recipe.id, userId, mine.id),
+                },
+            ),
+        ).rejects.toThrow("boom");
+        expect(
+            await k.recipes.listIngredients(householdId, k.recipe.id),
+        ).toHaveLength(2);
+        expect(await countRows(k.recipe.id)).toBe(2);
+    });
+
+    test("a version saved while an align is deciding waits for it and is not deleted as redundant, against Postgres", async () => {
+        const k = await kitchen();
+        // The harness pool is one connection, which would queue the save
+        // behind the align by itself: this test needs several, as the app has.
+        const url = getCtx().pg.url;
+        const appUrl = new URL(url);
+        appUrl.username = "foodable_app";
+        const wide = new SQL(url, { prepare: false, max: 4 });
+        const wideApp = new SQL(appUrl.toString(), {
+            prepare: false,
+            max: 4,
+        });
+        pairAppSqlForTests(wide, wideApp);
+        setSqlForTests(wide);
+        try {
+            for (const who of [userId, memberId]) {
+                await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                    householdId,
+                    recipeId: k.recipe.id,
+                    userId: who,
+                    action: "amount",
+                    ingredientId: k.cheese.id,
+                    amount: 50,
+                    unit: "g",
+                });
+            }
+            // The align has read both rows (so the member's reads as 50 g) and is
+            // held there while the member saves 90 g on another connection.
+            let release: () => void = () => {};
+            const held = new Promise<void>((resolve) => (release = resolve));
+            let reading: () => void = () => {};
+            const hasRead = new Promise<void>((resolve) => (reading = resolve));
+            const paused = {
+                ...k.variants,
+                async listOverrides(hh: string, recipeId: string) {
+                    const snapshot = await k.variants.listOverrides(
+                        hh,
+                        recipeId,
+                    );
+                    reading();
+                    await held;
+                    return snapshot;
+                },
+            };
+            const aligned = alignChange(
+                {
+                    recipes: k.recipes,
+                    foods: k.foods,
+                    variants: paused,
+                    transaction: recipeAlignTransaction(k.recipe.id),
+                },
+                {
+                    householdId,
+                    recipeId: k.recipe.id,
+                    userId,
+                    ref: k.cheese.id,
+                    rowKey: await keyFor(k.recipe.id, userId, k.cheese.id),
+                },
+            );
+            await hasRead;
+            let saved = false;
+            const saving = setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: memberId,
+                action: "amount",
+                ingredientId: k.cheese.id,
+                amount: 90,
+                unit: "g",
+            }).then((row) => {
+                saved = true;
+                return row;
+            });
+            // The save is queued on the align's lock: Postgres says a session
+            // is waiting for an advisory lock. Without the lock it commits
+            // at once and nothing ever waits.
+            let waiting = 0;
+            for (
+                let attempt = 0;
+                attempt < 200 && !saved && !waiting;
+                attempt++
+            ) {
+                const [row] = (await getCtx().sql`
+                    select count(*)::int as n from pg_locks
+                    where locktype = 'advisory' and not granted
+                `) as { n: number }[];
+                waiting = row!.n;
+            }
+            expect(waiting).toBe(1);
+            expect(saved).toBe(false);
+            release();
+            await aligned;
+            await saving;
+            const left = await k.variants.listOverrides(
+                householdId,
+                k.recipe.id,
+            );
+            expect(left.map((row) => [row.userId, row.amount])).toEqual([
+                [memberId, 90],
+            ]);
+            expect(
+                (await k.recipes.listIngredients(householdId, k.recipe.id))[1]!
+                    .quantity,
+            ).toEqual({ amount: 50, unit: "g" });
+        } finally {
+            setSqlForTests(getCtx().sql);
+            await wide.close();
+            await wideApp.close();
+        }
+    });
+
+    /** Several connections, as the app has; the harness pool is one. */
+    async function withWidePool(body: () => Promise<void>) {
+        const url = getCtx().pg.url;
+        const appUrl = new URL(url);
+        appUrl.username = "foodable_app";
+        const wide = new SQL(url, { prepare: false, max: 4 });
+        const wideApp = new SQL(appUrl.toString(), {
+            prepare: false,
+            max: 4,
+        });
+        pairAppSqlForTests(wide, wideApp);
+        setSqlForTests(wide);
+        try {
+            await body();
+        } finally {
+            setSqlForTests(getCtx().sql);
+            await wide.close();
+            await wideApp.close();
+        }
+    }
+
+    const settle = <T>(work: Promise<T>) =>
+        work.then(
+            (value) => ({ ok: true as const, value }),
+            (err) => ({
+                ok: false as const,
+                message: String((err as Error)?.message ?? err),
+            }),
+        );
+
+    /** An align held just before it updates the base ingredient. */
+    function alignHeldAtBaseEdit(
+        k: Awaited<ReturnType<typeof kitchen>>,
+        ref: string,
+        rowKey: string,
+    ) {
+        let release: () => void = () => {};
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let reached: () => void = () => {};
+        const atEdit = new Promise<void>((resolve) => (reached = resolve));
+        const paused = {
+            ...k.recipes,
+            async updateIngredient(
+                row: Parameters<typeof k.recipes.updateIngredient>[0],
+            ) {
+                reached();
+                await held;
+                return k.recipes.updateIngredient(row);
+            },
+        };
+        const aligned = settle(
+            alignChange(
+                {
+                    recipes: paused,
+                    foods: k.foods,
+                    variants: k.variants,
+                    transaction: recipeAlignTransaction(k.recipe.id),
+                },
+                { householdId, recipeId: k.recipe.id, userId, ref, rowKey },
+            ),
+        );
+        return { aligned, atEdit, release };
+    }
+
+    test("an align and removing the same ingredient both finish, whichever starts first, against Postgres", async () => {
+        await withWidePool(async () => {
+            // The align is held after it has started and before its base edit.
+            const first = await kitchen();
+            await setRecipeVariant(first.recipes, first.foods, first.variants, {
+                householdId,
+                recipeId: first.recipe.id,
+                userId,
+                action: "amount",
+                ingredientId: first.cheese.id,
+                amount: 50,
+                unit: "g",
+            });
+            const a = alignHeldAtBaseEdit(
+                first,
+                first.cheese.id,
+                await keyFor(first.recipe.id, userId, first.cheese.id),
+            );
+            await a.atEdit;
+            const removing = settle(
+                removeRecipeIngredient(
+                    first.recipes,
+                    householdId,
+                    first.recipe.id,
+                    first.cheese.id,
+                ),
+            );
+            await waitForLockWaiters(getCtx().sql, 1);
+            a.release();
+            const [aligned, removed] = await Promise.all([a.aligned, removing]);
+            expect(aligned).toMatchObject({ ok: true });
+            expect(removed).toEqual({ ok: true, value: true });
+            expect(
+                (
+                    await first.recipes.listIngredients(
+                        householdId,
+                        first.recipe.id,
+                    )
+                ).map((row) => row.displayName),
+            ).toEqual(["Pasta"]);
+        });
+    });
+
+    test("removing an ingredient that is in flight when an align starts makes the align say it is gone, and nothing deadlocks, against Postgres", async () => {
+        await withWidePool(async () => {
+            const k = await kitchen();
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId,
+                action: "amount",
+                ingredientId: k.cheese.id,
+                amount: 50,
+                unit: "g",
+            });
+            let release: () => void = () => {};
+            const held = new Promise<void>((resolve) => (release = resolve));
+            let reached: () => void = () => {};
+            const removedRow = new Promise<void>(
+                (resolve) => (reached = resolve),
+            );
+            const pausedRemove = {
+                ...k.recipes,
+                deleteIngredient: (hh: string, id: string) =>
+                    run(async () => {
+                        const done = await k.recipes.deleteIngredient(hh, id);
+                        reached();
+                        await held;
+                        return done;
+                    }),
+            };
+            const removing = settle(
+                removeRecipeIngredient(
+                    pausedRemove,
+                    householdId,
+                    k.recipe.id,
+                    k.cheese.id,
+                ),
+            );
+            await removedRow;
+            const aligned = settle(
+                alignChange(
+                    {
+                        recipes: k.recipes,
+                        foods: k.foods,
+                        variants: k.variants,
+                        transaction: recipeAlignTransaction(k.recipe.id),
+                    },
+                    {
+                        householdId,
+                        recipeId: k.recipe.id,
+                        userId,
+                        ref: k.cheese.id,
+                        rowKey: await keyFor(k.recipe.id, userId, k.cheese.id),
+                    },
+                ),
+            );
+            await waitForLockWaiters(getCtx().sql, 1);
+            release();
+            const [removed, result] = await Promise.all([removing, aligned]);
+            expect(removed).toEqual({ ok: true, value: true });
+            expect(result).toEqual({
+                ok: false,
+                message: "That change no longer exists.",
+            });
+        });
+    });
+
+    test("a base edit that commits while an align waits on the ingredient's row decides what the align pins others to, against Postgres", async () => {
+        await withWidePool(async () => {
+            const k = await kitchen();
+            // Alice: 50 g. Bob: peas, following the base amount.
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId,
+                action: "amount",
+                ingredientId: k.cheese.id,
+                amount: 50,
+                unit: "g",
+            });
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: memberId,
+                action: "food",
+                ingredientId: k.cheese.id,
+                foodId: k.peas,
+            });
+            const rowKey = await keyFor(k.recipe.id, userId, k.cheese.id);
+            // Someone edits the base cheese to 300 g and has not committed.
+            const holder = new SQL(getCtx().pg.url, {
+                prepare: false,
+                max: 1,
+            });
+            const reserved = await holder.reserve();
+            await reserved`begin`;
+            await reserved`update public.recipe_ingredients set amount = 300 where id = ${k.cheese.id}::uuid`;
+            const aligned = settle(
+                alignChange(
+                    {
+                        recipes: k.recipes,
+                        foods: k.foods,
+                        variants: k.variants,
+                        transaction: recipeAlignTransaction(k.recipe.id),
+                    },
+                    {
+                        householdId,
+                        recipeId: k.recipe.id,
+                        userId,
+                        ref: k.cheese.id,
+                        rowKey,
+                    },
+                ),
+            );
+            await waitForLockWaiters(getCtx().sql, 1);
+            await reserved`commit`;
+            reserved.release();
+            await holder.close();
+            expect(await aligned).toMatchObject({ ok: true });
+            const base = await k.recipes.listIngredients(
+                householdId,
+                k.recipe.id,
+            );
+            expect(
+                base.find((row) => row.id === k.cheese.id)?.quantity,
+            ).toEqual({ amount: 50, unit: "g" });
+            // Bob cooked peas at the base amount he saw last, 300 g, and
+            // still does.
+            const bob = variantFor(
+                { id: k.recipe.id, ingredients: base },
+                await k.variants.listOverrides(householdId, k.recipe.id),
+                memberId,
+            ).ingredients.find(
+                (line) => line.baseIngredientId === k.cheese.id,
+            )!;
+            expect({ foodId: bob.foodId, quantity: bob.quantity }).toEqual({
+                foodId: k.peas,
+                quantity: { amount: 300, unit: "g" },
+            });
+        });
+    });
+
+    test("an align and deleting the recipe both finish, against Postgres", async () => {
+        await withWidePool(async () => {
+            const k = await kitchen();
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId,
+                action: "amount",
+                ingredientId: k.cheese.id,
+                amount: 50,
+                unit: "g",
+            });
+            const a = alignHeldAtBaseEdit(
+                k,
+                k.cheese.id,
+                await keyFor(k.recipe.id, userId, k.cheese.id),
+            );
+            await a.atEdit;
+            const deleting = settle(
+                deleteRecipe(k.recipes, householdId, k.recipe.id, {
+                    userId,
+                    isOwner: true,
+                }),
+            );
+            await waitForLockWaiters(getCtx().sql, 1);
+            a.release();
+            const [aligned, deleted] = await Promise.all([a.aligned, deleting]);
+            expect(aligned).toMatchObject({ ok: true });
+            expect(deleted).toMatchObject({ ok: true });
+            expect(
+                await k.recipes.getRecipe(householdId, k.recipe.id),
+            ).toBeNull();
+        });
+    });
+
+    test("an align and a food merge's repoint both finish, against Postgres", async () => {
+        await withWidePool(async () => {
+            const k = await kitchen();
+            const other = await seedFood(k.sql, householdId, {
+                name: "Cheddar",
+            });
+            // Alice's row names the food the base ingredient already is, so
+            // the merge of that food reaches the ingredient and her row.
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId,
+                action: "food",
+                ingredientId: k.cheese.id,
+                foodId: k.cheese.foodId!,
+                amount: 150,
+                unit: "g",
+            });
+            const a = alignHeldAtBaseEdit(
+                k,
+                k.cheese.id,
+                await keyFor(k.recipe.id, userId, k.cheese.id),
+            );
+            await a.atEdit;
+            const merging = settle(
+                k.foods.repointFoodRefs(householdId, k.cheese.foodId!, other),
+            );
+            await waitForLockWaiters(getCtx().sql, 1);
+            a.release();
+            const [aligned, merged] = await Promise.all([a.aligned, merging]);
+            expect(aligned).toMatchObject({ ok: true });
+            expect(merged).toMatchObject({ ok: true });
+        });
+    });
+
+    test("an align named by an upper-case recipe id waits on the same lock as every version write, against Postgres", async () => {
+        await withWidePool(async () => {
+            const k = await kitchen();
+            const holder = new SQL(getCtx().pg.url, {
+                prepare: false,
+                max: 1,
+            });
+            try {
+                // What a version save holds while it writes: the shared lock
+                // on the recipe's (lower-case) id.
+                let release: () => void = () => {};
+                const released = new Promise<void>((r) => (release = r));
+                let held: () => void = () => {};
+                const isHeld = new Promise<void>((r) => (held = r));
+                const holding = holder.begin(async (tx) => {
+                    await tx`select pg_advisory_xact_lock_shared(hashtextextended(${`recipe-align:${k.recipe.id}`}, 0))`;
+                    held();
+                    await released;
+                });
+                await isHeld;
+                const ran = recipeAlignTransaction(k.recipe.id.toUpperCase())(
+                    async () => "ran",
+                );
+                // It queues behind the save; under a different key it would
+                // not wait and this would time out.
+                await waitForLockWaiters(getCtx().sql, 1);
+                release();
+                await holding;
+                expect(await ran).toBe("ran");
+            } finally {
+                await holder.close();
+            }
+        });
+    });
+
+    test("an align on an unverified recipe and the stale-unverified sweep both finish, whichever reaches the recipe first, against Postgres", async () => {
+        await withWidePool(async () => {
+            const k = await kitchen();
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId,
+                action: "amount",
+                ingredientId: k.cheese.id,
+                amount: 50,
+                unit: "g",
+            });
+            await getCtx()
+                .sql`update public.recipes set verification = 'unverified', updated_at = now() - interval '40 days' where id = ${k.recipe.id}`;
+            const row = (
+                await k.variants.listOverrides(householdId, k.recipe.id)
+            )[0]!;
+            let release: () => void = () => {};
+            const held = new Promise<void>((r) => (release = r));
+            let reached: () => void = () => {};
+            const atEdit = new Promise<void>((r) => (reached = r));
+            const paused = {
+                ...k.recipes,
+                async updateIngredient(
+                    r: Parameters<typeof k.recipes.updateIngredient>[0],
+                ) {
+                    reached();
+                    await held;
+                    return k.recipes.updateIngredient(r);
+                },
+            };
+            const aligned = settle(
+                alignChange(
+                    {
+                        recipes: paused,
+                        foods: k.foods,
+                        variants: k.variants,
+                        transaction: recipeAlignTransaction(k.recipe.id),
+                    },
+                    {
+                        householdId,
+                        recipeId: k.recipe.id,
+                        userId,
+                        ref: k.cheese.id,
+                        rowKey: overrideKey(row),
+                    },
+                ),
+            );
+            await atEdit;
+            const sweeping = settle(
+                sweepUnverifiedRecipes({
+                    households: [
+                        {
+                            id: householdId,
+                            preferences: { unverifiedRecipeExpiryDays: 30 },
+                        },
+                    ],
+                    recipes: k.recipes,
+                    now: new Date(),
+                }),
+            );
+            await waitForLockWaiters(getCtx().sql, 1);
+            release();
+            const [a, s] = await Promise.all([aligned, sweeping]);
+            expect(a).toMatchObject({ ok: true });
+            expect(s).toMatchObject({ ok: true });
+        });
+    });
+
+    test("an align that rewrites a person's row and that person's account deletion both finish, whichever reaches the person first, against Postgres", async () => {
+        await withWidePool(async () => {
+            const k = await kitchen();
+            const gouda = (
+                await addRecipeManualIngredient(k.recipes, k.foods, {
+                    householdId,
+                    recipeId: k.recipe.id,
+                    name: "Gouda",
+                    amount: 1,
+                    unit: "g",
+                })
+            ).foodId!;
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId,
+                action: "food",
+                ingredientId: k.cheese.id,
+                foodId: gouda,
+                amount: 150,
+                unit: "g",
+            });
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: memberId,
+                action: "amount",
+                ingredientId: k.cheese.id,
+                amount: 50,
+                unit: "g",
+            });
+            const row = (
+                await k.variants.listOverrides(householdId, k.recipe.id)
+            ).find((r) => r.userId === userId)!;
+            let release: () => void = () => {};
+            const held = new Promise<void>((r) => (release = r));
+            let reached: () => void = () => {};
+            const atSave = new Promise<void>((r) => (reached = r));
+            const paused = {
+                ...k.variants,
+                async saveOverride(
+                    r: Parameters<typeof k.variants.saveOverride>[0],
+                ) {
+                    reached();
+                    await held;
+                    return k.variants.saveOverride(r);
+                },
+            };
+            const aligned = settle(
+                alignChange(
+                    {
+                        recipes: k.recipes,
+                        foods: k.foods,
+                        variants: paused,
+                        transaction: recipeAlignTransaction(k.recipe.id),
+                    },
+                    {
+                        householdId,
+                        recipeId: k.recipe.id,
+                        userId,
+                        ref: k.cheese.id,
+                        rowKey: overrideKey(row),
+                    },
+                ),
+            );
+            await atSave;
+            const other = new SQL(getCtx().pg.url, { prepare: false, max: 1 });
+            try {
+                const deleting = settle(
+                    (async () => {
+                        await other.begin((tx) => deleteAuthUser(memberId, tx));
+                    })(),
+                );
+                await waitForLockWaiters(getCtx().sql, 1);
+                release();
+                const [a, d] = await Promise.all([aligned, deleting]);
+                expect(a).toMatchObject({ ok: true });
+                expect(d).toMatchObject({ ok: true });
+            } finally {
+                await other.close();
+            }
+        });
+    });
+
+    test("an account deletion that is under way holds an align back, and neither deadlocks, against Postgres", async () => {
+        await withWidePool(async () => {
+            const k = await kitchen();
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId,
+                action: "amount",
+                ingredientId: k.cheese.id,
+                amount: 50,
+                unit: "g",
+            });
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: memberId,
+                action: "amount",
+                ingredientId: k.cheese.id,
+                amount: 20,
+                unit: "g",
+            });
+            const row = (
+                await k.variants.listOverrides(householdId, k.recipe.id)
+            ).find((r) => r.userId === userId)!;
+            const other = new SQL(getCtx().pg.url, { prepare: false, max: 1 });
+            let release: () => void = () => {};
+            const held = new Promise<void>((r) => (release = r));
+            let deletedRow: () => void = () => {};
+            const isDeleted = new Promise<void>((r) => (deletedRow = r));
+            try {
+                const deleting = settle(
+                    other.begin(async (tx) => {
+                        await deleteAuthUser(memberId, tx);
+                        deletedRow();
+                        await held;
+                    }),
+                );
+                await isDeleted;
+                const aligned = settle(
+                    alignChange(
+                        {
+                            recipes: k.recipes,
+                            foods: k.foods,
+                            variants: k.variants,
+                            transaction: recipeAlignTransaction(k.recipe.id),
+                        },
+                        {
+                            householdId,
+                            recipeId: k.recipe.id,
+                            userId,
+                            ref: k.cheese.id,
+                            rowKey: overrideKey(row),
+                        },
+                    ),
+                );
+                await waitForLockWaiters(getCtx().sql, 1);
+                release();
+                const [a, d] = await Promise.all([aligned, deleting]);
+                expect(d).toMatchObject({ ok: true });
+                expect(a).toMatchObject({ ok: true });
+            } finally {
+                release();
+                await other.close();
+            }
+        });
+    });
+
+    test("deleteOverrideIfUnchanged deletes a row only while it says what was read, against Postgres", async () => {
+        const k = await kitchen();
+        const row = await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+            action: "amount",
+            ingredientId: k.cheese.id,
+            amount: 12.345678,
+            unit: "g",
+        });
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+            action: "amount",
+            ingredientId: k.cheese.id,
+            amount: 50,
+            unit: "g",
+        });
+        expect(
+            await k.variants.deleteOverrideIfUnchanged(householdId, row),
+        ).toBe(false);
+        expect(await countRows(k.recipe.id)).toBe(1);
+        const [current] = await k.variants.listOverrides(
+            householdId,
+            k.recipe.id,
+        );
+        expect(
+            await k.variants.deleteOverrideIfUnchanged(householdId, current!),
+        ).toBe(true);
+        expect(await countRows(k.recipe.id)).toBe(0);
+        expect(
+            await k.variants.deleteOverrideIfUnchanged(householdId, current!),
+        ).toBe(false);
+    });
+
+    test("reset removes one person's rows on the recipe and no one else's, against Postgres", async () => {
+        const k = await kitchen();
+        for (const who of [userId, memberId]) {
+            await setRecipeVariant(k.recipes, k.foods, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: who,
+                action: "remove",
+                ingredientId: k.cheese.id,
+            });
+        }
+        const { rowKeys } = await previewReset(k.recipes, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+        });
+        expect(
+            await resetVariant(k.recipes, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: memberId,
+                rowKeys,
+                transaction: recipeAlignTransaction(k.recipe.id),
+            }),
+        ).toBe(1);
+        const left = await k.variants.listOverrides(householdId, k.recipe.id);
+        expect(left.map((row) => row.userId)).toEqual([userId]);
+    });
+
+    test("a reset confirm takes only the rows the preview showed: one saved since is refused and kept, against Postgres", async () => {
+        const k = await kitchen();
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+            action: "amount",
+            ingredientId: k.cheese.id,
+            amount: 50,
+            unit: "g",
+        });
+        const { rowKeys } = await previewReset(k.recipes, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+        });
+        expect(rowKeys).toHaveLength(1);
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+            action: "amount",
+            ingredientId: k.pasta.id,
+            amount: 100,
+            unit: "g",
+        });
+        await expect(
+            resetVariant(k.recipes, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: memberId,
+                rowKeys,
+                transaction: recipeAlignTransaction(k.recipe.id),
+            }),
+        ).rejects.toThrow("Their version changed; look again.");
+        expect(await countRows(k.recipe.id)).toBe(2);
+        // The same row saved again (same content) is a different row to a confirm.
+        const fresh = await previewReset(k.recipes, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+        });
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+            action: "amount",
+            ingredientId: k.pasta.id,
+            amount: 100,
+            unit: "g",
+        });
+        await expect(
+            resetVariant(k.recipes, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: memberId,
+                rowKeys: fresh.rowKeys,
+            }),
+        ).rejects.toThrow("Their version changed; look again.");
+        const now = await previewReset(k.recipes, k.variants, {
+            householdId,
+            recipeId: k.recipe.id,
+            userId: memberId,
+        });
+        expect(
+            await resetVariant(k.recipes, k.variants, {
+                householdId,
+                recipeId: k.recipe.id,
+                userId: memberId,
+                rowKeys: now.rowKeys,
+            }),
+        ).toBe(2);
     });
 });
