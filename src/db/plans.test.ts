@@ -245,6 +245,33 @@ describeDb(pgAvailable !== null, "recipe plans db", (getCtx) => {
         ).toBe(true);
     });
 
+    test("a draft is never planned: the one-off and repeat inserts skip it", async () => {
+        const { sql } = getCtx();
+        const store = liveRecipePlansStore();
+        await sql`update public.recipes set verification = 'unverified' where id = ${recipeId}`;
+        expect(
+            await store.addPlan({
+                householdId,
+                recipeId,
+                date: "2026-11-12",
+                slot: "dinner",
+            }),
+        ).toBeNull();
+        expect(
+            await store.addRule({
+                householdId,
+                recipeId,
+                slot: "dinner",
+                startsOn: "2026-11-12",
+                repeat: "daily",
+            }),
+        ).toBeNull();
+        expect(await planCount()).toBe(0);
+        const [rules] =
+            await sql`select count(*)::int as n from public.plan_rules`;
+        expect(rules.n).toBe(0);
+    });
+
     test("a request for another household reaches none of this one's plans", async () => {
         const { sql } = getCtx();
         const store = liveRecipePlansStore();

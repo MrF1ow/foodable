@@ -11,7 +11,6 @@
 import { familyIdOf, type FoodQuantityFactors } from "./food-quantity.js";
 import { findFoodById, FoodsInputError, type FoodsStore } from "./foods.js";
 import { amountInUnit } from "./linking.js";
-import { verifyRecipe } from "./recipe-import.js";
 import {
     canonicalFactor,
     canonicalUnitText,
@@ -20,6 +19,7 @@ import {
 } from "./quantity.js";
 import {
     addRecipeIngredientById,
+    assertEditKeepsCheck,
     noteForUnmeasuredIngredient,
     RecipeInputError,
     swapRecipeIngredientFood,
@@ -1198,14 +1198,6 @@ export type AlignDeps = {
     transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
 };
 
-function problemKey(problem: {
-    code: string;
-    ingredientId: string | null;
-    line: string | null;
-}): string {
-    return `${problem.code}:${problem.ingredientId ?? ""}:${problem.line ?? ""}`;
-}
-
 /**
  * Pushes one person's change into the base recipe, for everyone.
  *
@@ -1336,22 +1328,14 @@ export async function alignChange(
             proposed = base.map((row) => (row.id === old!.id ? target : row));
         }
 
-        // A verified recipe must still pass its check.
-        if (recipe.verification === "verified") {
-            const importRow = await recipes.getImport(
-                input.householdId,
-                recipe.id,
-            );
-            const before = new Set(
-                verifyRecipe(recipe, base, importRow).problems.map(problemKey),
-            );
-            const worse = verifyRecipe(
-                recipe,
-                proposed,
-                importRow,
-            ).problems.find((problem) => !before.has(problemKey(problem)));
-            if (worse) throw new RecipeInputError(worse.message);
-        }
+        // A saved recipe must not break: the same refusal every base edit
+        // uses, and before the person's row is dropped, so a refused align
+        // keeps it.
+        assertEditKeepsCheck(
+            { recipe, ingredients: base },
+            { recipe, ingredients: proposed },
+            await recipes.getImport(input.householdId, recipe.id),
+        );
         if (target.foodId == null) {
             throw new RecipeInputError("That change names no food.");
         }

@@ -11,6 +11,7 @@ import {
     loadPlanVersionSources,
     versionFoodIds,
     planRecipesOf,
+    plansOfSavedRecipes,
     WEEK_PLAN_DAYS,
     type PlanRecipe,
 } from "../domain/plan-week.js";
@@ -45,15 +46,15 @@ export async function loadWeekPlanInputs(
     today?: string,
 ): Promise<WeekPlanInputs> {
     const from = today ?? (await householdToday(householdId));
-    const plans = await liveRecipePlansStore().listPlans(
+    const listed = await liveRecipePlansStore().listPlans(
         householdId,
         from,
         addPlanDays(from, WEEK_PLAN_DAYS - 1),
     );
-    if (plans.length === 0) {
+    if (listed.length === 0) {
         return {
             today: from,
-            plans,
+            plans: listed,
             recipes: [],
             stock: [],
             foodsById: new Map(),
@@ -66,6 +67,8 @@ export async function loadWeekPlanInputs(
         recipesStore.listIngredientsForHousehold(householdId),
         listFridge(liveFridgeStore(), householdId),
     ]);
+    // listRecipes holds saved recipes only: a plan on a draft is not shown.
+    const plans = plansOfSavedRecipes(listed, allRecipes);
     const versions = await loadPlanVersionSources(
         { recipes: recipesStore, variants: liveRecipeVariantsStore() },
         householdId,

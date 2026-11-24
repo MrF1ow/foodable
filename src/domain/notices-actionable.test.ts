@@ -753,7 +753,7 @@ describe("noticesFor", () => {
             notes: null,
             prepMinutes: null,
             cookMinutes: null,
-            verification: "unverified",
+            verification: "verified",
             updatedAt: "2026-11-01T00:00:00Z",
         } as never);
         await deps.recipes.insertIngredient({

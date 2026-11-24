@@ -1,4 +1,4 @@
-export const UNVERIFIED_RECIPES_PROMPT = `Check my Foodable recipes for unverified imports. Call \`list_recipes\` with \`verification: "unverified"\`. For each one, call \`get_recipe\` and read its import data: the source link, the pasted text, unresolved lines and problems. Work only from that text. Do not open or fetch the original post or page. If something needed is missing, list it for me instead of guessing.
+export const UNVERIFIED_RECIPES_PROMPT = `Help me finish my Foodable recipe drafts. Call \`list_recipes\` with \`verification: "unverified"\` to list them. For each one, call \`get_recipe\` and read its import data: the source link, the pasted text, unresolved lines and problems. Work only from that text. Do not open or fetch the original post or page. If something needed is missing, list it for me instead of guessing.
 
 Fix only what the text supports:
 
@@ -8,4 +8,4 @@ Fix only what the text supports:
 
 Do not invent quantities or ingredients, and do not pick a brand: ingredients name plain foods.
 
-Then call \`verify_recipe\`. If it still fails, leave it and add a note saying what is missing. Finish with a short summary: verified, still unverified, and why.`;
+Then call \`verify_recipe\`. If it still fails, leave it and say what is missing. When a draft is ready to save, ask me; call \`save_recipe\` only for the ones I say yes to. Finish with a short summary: saved, still drafts, and why. Drafts nobody saves are deleted 7 days after import.`;

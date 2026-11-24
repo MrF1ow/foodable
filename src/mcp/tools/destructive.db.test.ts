@@ -16,6 +16,7 @@ import { liveAgentActionDeps } from "../../db/agent-actions.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import * as groceryDb from "../../db/grocery.js";
 import { liveFridgeStore } from "../../db/fridge.js";
+import { liveRecipesStore } from "../../db/recipes.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
 import { pairAppSqlForTests, setSqlForTests } from "../../db/sql.js";
@@ -31,6 +32,7 @@ import { describeDb } from "../../db/testing/pg.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { undoAgentAction } from "../../domain/agent-actions.js";
 import { findFoodById, updateFood } from "../../domain/foods.js";
+import { sweepExpiredDrafts } from "../../domain/recipe-import.js";
 import { ledgerMatchesStock } from "../../domain/stock.js";
 import {
     createMemoryFlags,
@@ -347,7 +349,14 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         );
     }
 
-    async function recipe(): Promise<{ id: string; ingredient: string }> {
+    /**
+     * A saved recipe "Soup" with Flour. `spare` adds Salt after it, so taking
+     * Flour out leaves the recipe an ingredient: a saved recipe refuses an
+     * edit that takes out its last one.
+     */
+    async function recipe(
+        opts: { spare?: boolean } = {},
+    ): Promise<{ id: string; ingredient: string }> {
         const made = await call("create_recipe", {
             name: "Soup",
             yield_portions: 2,
@@ -360,6 +369,14 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             amount: 200,
             unit: "g",
         });
+        if (opts.spare) {
+            await call("add_recipe_ingredient", {
+                recipe_id: id,
+                food_id: await food("Salt"),
+                amount: 1,
+                unit: "g",
+            });
+        }
         const [row] = await rows(
             "select id from public.recipe_ingredients where recipe_id = $1",
             id,
@@ -558,7 +575,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             };
         },
         remove_recipe_ingredient: async () => {
-            const soup = await recipe();
+            const soup = await recipe({ spare: true });
             // A member's version of the ingredient goes with it, and comes
             // back with it.
             const set = await call("set_recipe_variant", {
@@ -578,12 +595,13 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 args: { recipe_id: soup.id, ingredient_id: soup.ingredient },
                 summary: "Removed Flour from recipe Soup",
                 changed: async () => {
-                    expect(await count("recipe_ingredients")).toBe(0);
+                    expect(await count("recipe_ingredients")).toBe(1);
                     expect(await count("recipe_variant_overrides")).toBe(0);
                 },
                 restored: async () => {
                     const back = await rows(
-                        "select id from public.recipe_ingredients",
+                        "select id from public.recipe_ingredients where id = $1",
+                        soup.ingredient,
                     );
                     expect(back.map((row) => row.id)).toEqual([
                         soup.ingredient,
@@ -600,6 +618,43 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                             unit: "g",
                         },
                     ]);
+                },
+            };
+        },
+        discard_recipe_draft: async () => {
+            const made = await call("import_recipe_from_text", {
+                text: "Leek soup",
+                name: "Leek soup",
+                instructions: "1. Simmer",
+                ingredients: [{ name: "Leek", amount: 2, unit: "each" }],
+                on_similar: "create",
+            });
+            expect(made.isError).toBeFalsy();
+            const id = (made.structuredContent!.recipe as { id: string }).id;
+            const [before] = await rows(
+                "select verification, draft_expires_at from public.recipes where id = $1",
+                id,
+            );
+            expect(before!.verification).toBe("unverified");
+            expect(before!.draft_expires_at).not.toBeNull();
+            return {
+                tool: "discard_recipe_draft",
+                args: { recipe_id: id },
+                summary: "Discarded draft Leek soup",
+                changed: async () => {
+                    expect(await count("recipes")).toBe(0);
+                    expect(await count("recipe_imports")).toBe(0);
+                    expect(await count("recipe_ingredients")).toBe(0);
+                },
+                restored: async () => {
+                    // Back as the same draft, with the expiry it had.
+                    const [back] = await rows(
+                        "select verification, draft_expires_at from public.recipes where id = $1",
+                        id,
+                    );
+                    expect(back).toEqual(before);
+                    expect(await count("recipe_imports")).toBe(1);
+                    expect(await count("recipe_ingredients")).toBe(1);
                 },
             };
         },
@@ -834,6 +889,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 "delete_grocery_line",
                 "delete_meal",
                 "delete_recipe",
+                "discard_recipe_draft",
                 "delete_water",
                 "delete_weight",
                 "discard_fridge_item",
@@ -1869,6 +1925,324 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         );
     });
 
+    test("discarding a recipe that is already saved is refused, keeps it and records no undo", async () => {
+        const made = await call("import_recipe_from_text", {
+            text: "Leek soup",
+            name: "Leek soup",
+            instructions: "1. Simmer",
+            ingredients: [{ name: "Leek", amount: 2, unit: "each" }],
+            on_similar: "create",
+        });
+        const id = (made.structuredContent!.recipe as { id: string }).id;
+        const saved = await call("save_recipe", { recipe_id: id });
+        expect(saved.structuredContent).toMatchObject({ status: "saved" });
+        const before = await fingerprint();
+        const result = await call("discard_recipe_draft", { recipe_id: id });
+        expect(result.isError).toBe(true);
+        expect(result.content.map((c) => c.text).join("\n")).toContain(
+            "Leek soup is saved, not a draft",
+        );
+        expect(await fingerprint()).toBe(before);
+        expect(await actions()).toEqual([]);
+    });
+
+    /** A draft whose Salt has no amount: it saves only once Salt is gone. */
+    async function draftWithUnmeasuredSalt() {
+        const made = await call("import_recipe_from_text", {
+            text: "Leek soup",
+            name: "Leek soup",
+            instructions: "1. Simmer",
+            ingredients: [
+                { name: "Leek", amount: 2, unit: "each" },
+                { name: "Salt" },
+            ],
+            on_similar: "create",
+        });
+        expect(made.isError).toBeFalsy();
+        const id = (made.structuredContent!.recipe as { id: string }).id;
+        const [salt] = await rows(
+            "select id from public.recipe_ingredients where recipe_id = $1 and display_name = 'Salt'",
+            id,
+        );
+        expect(salt).toBeDefined();
+        const removed = await call("remove_recipe_ingredient", {
+            recipe_id: id,
+            ingredient_id: salt!.id,
+        });
+        expect(removed.isError).toBeFalsy();
+        const [entry] = await actions();
+        return { id, saltId: salt!.id as string, actionId: entry!.id };
+    }
+
+    test("undoing an ingredient removal into a recipe saved since is refused when it would break the recipe, and changes nothing", async () => {
+        const draft = await draftWithUnmeasuredSalt();
+        const saved = await call("save_recipe", { recipe_id: draft.id });
+        expect(saved.structuredContent).toMatchObject({ status: "saved" });
+        const before = await fingerprint();
+        const out = await undo(draft.actionId);
+        expect(out.status).toBe("conflict");
+        expect(out.message).toContain(
+            "Leek soup is saved, and undoing this would break it",
+        );
+        expect(out.message).toContain("Salt has no amount");
+        expect(await fingerprint()).toBe(before);
+        const [action] = await actions();
+        expect(action!.undone_at).toBeNull();
+    });
+
+    test("undoing an ingredient removal into a draft puts it back, and the recipe stays a draft", async () => {
+        const draft = await draftWithUnmeasuredSalt();
+        expect((await undo(draft.actionId)).status).toBe("undone");
+        const back = await rows(
+            "select id from public.recipe_ingredients where id = $1",
+            draft.saltId,
+        );
+        expect(back).toHaveLength(1);
+        const [recipe] = await rows(
+            "select verification, draft_expires_at from public.recipes where id = $1",
+            draft.id,
+        );
+        expect(recipe!.verification).toBe("unverified");
+        expect(recipe!.draft_expires_at).not.toBeNull();
+    });
+
+    test("an ingredient added while a discard waits for the recipe is recorded with the draft, so undo brings it back too", async () => {
+        const made = await call("import_recipe_from_text", {
+            text: "Leek soup",
+            name: "Leek soup",
+            instructions: "1. Simmer",
+            ingredients: [{ name: "Leek", amount: 2, unit: "each" }],
+            on_similar: "create",
+        });
+        const id = (made.structuredContent!.recipe as { id: string }).id;
+        const url = getCtx().pg.url;
+        const appUrl = new URL(url);
+        appUrl.username = "foodable_app";
+        const wide = new SQL(url, { prepare: false, max: 4 });
+        const wideApp = new SQL(appUrl.toString(), {
+            prepare: false,
+            max: 4,
+        });
+        const edit = new SQL(url, { prepare: false, max: 1 });
+        pairAppSqlForTests(wide, wideApp);
+        setSqlForTests(wide);
+        try {
+            // An edit of the draft holds the recipe, the way withRecipeLock
+            // does, and adds an ingredient once the discard has arrived.
+            let arrived: () => void = () => {};
+            const discardArrived = new Promise<void>((r) => (arrived = r));
+            let holding: () => void = () => {};
+            const held = new Promise<void>((r) => (holding = r));
+            const editing = edit.begin(async (tx) => {
+                await tx`select id from public.recipes where id = ${id}::uuid for no key update`;
+                holding();
+                await discardArrived;
+                await tx`
+                    insert into public.recipe_ingredients (
+                        id, household_id, recipe_id, kind, display_name,
+                        food_id, amount, unit, sort_order
+                    )
+                    select gen_random_uuid(), household_id, recipe_id, kind,
+                        'Leek tops', food_id, 1, 'each', 1
+                    from public.recipe_ingredients
+                    where recipe_id = ${id}::uuid
+                `;
+            });
+            await held;
+            const discarding = call("discard_recipe_draft", {
+                recipe_id: id,
+            });
+            await waitForLockWaiters(getCtx().sql, 1);
+            arrived();
+            await editing;
+            const done = await discarding;
+            expect(done.isError).toBeFalsy();
+            expect(await count("recipes")).toBe(0);
+            const [entry] = await actions();
+            setSqlForTests(getCtx().sql);
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(
+                (
+                    await rows(
+                        "select display_name from public.recipe_ingredients where recipe_id = $1 order by sort_order",
+                        id,
+                    )
+                ).map((row) => row.display_name),
+            ).toEqual(["Leek", "Leek tops"]);
+        } finally {
+            setSqlForTests(getCtx().sql);
+            await edit.close();
+            await wide.close();
+            await wideApp.close();
+        }
+    });
+
+    /** Rewrites an entry's snapshot, the way an older build recorded it. */
+    async function rewriteSnapshot(
+        actionId: string,
+        rewrite: (change: Record<string, any>) => void,
+    ): Promise<void> {
+        const [entry] = await rows(
+            "select snapshot from public.agent_actions where id = $1",
+            actionId,
+        );
+        const snapshot = entry!.snapshot as { changes: Record<string, any>[] };
+        for (const change of snapshot.changes) rewrite(change);
+        await rows(
+            "update public.agent_actions set snapshot = $2::jsonb where id = $1",
+            actionId,
+            JSON.stringify(snapshot),
+        );
+    }
+
+    const sweep = () =>
+        sweepExpiredDrafts({
+            householdIds: [householdId],
+            recipes: liveRecipesStore(),
+            now: new Date(),
+        });
+
+    test("an undo recorded before drafts (verification unverified to verified) never turns a saved recipe back into a draft, so the sweep leaves it", async () => {
+        const draft = await draftWithUnmeasuredSalt();
+        // The removal as an older build recorded it: it auto-verified the
+        // recipe, with no expiry column on the row.
+        await rewriteSnapshot(draft.actionId, (change) => {
+            if (change.table !== "recipes") return;
+            change.row.verification = "unverified";
+            change.after.verification = "verified";
+            delete change.row.draft_expires_at;
+            delete change.after.draft_expires_at;
+        });
+        await rows(
+            "update public.recipes set verification = 'verified', draft_expires_at = null, created_at = now() - interval '30 days' where id = $1",
+            draft.id,
+        );
+        const before = await fingerprint();
+        const out = await undo(draft.actionId);
+        expect(out.status).toBe("conflict");
+        expect(out.message).toContain(
+            "Leek soup is saved, and undoing this would make it a draft again",
+        );
+        expect(await fingerprint()).toBe(before);
+        expect(await sweep()).toBe(0);
+        const [recipe] = await rows(
+            "select verification from public.recipes where id = $1",
+            draft.id,
+        );
+        expect(recipe!.verification).toBe("verified");
+    });
+
+    for (const [label, expiry] of [
+        ["past", () => new Date(Date.now() - 86_400_000).toISOString()],
+        ["missing", () => undefined],
+    ] as const) {
+        test(`undoing a discard whose draft's expiry is ${label} brings it back with a fresh week, so the next sweep leaves it`, async () => {
+            const made = await call("import_recipe_from_text", {
+                text: "Leek soup",
+                name: "Leek soup",
+                instructions: "1. Simmer",
+                ingredients: [{ name: "Leek", amount: 2, unit: "each" }],
+                on_similar: "create",
+            });
+            const id = (made.structuredContent!.recipe as { id: string }).id;
+            expect(
+                (await call("discard_recipe_draft", { recipe_id: id })).isError,
+            ).toBeFalsy();
+            const [entry] = await actions();
+            const old = new Date(Date.now() - 30 * 86_400_000).toISOString();
+            await rewriteSnapshot(entry!.id, (change) => {
+                if (change.table !== "recipes") return;
+                const value = expiry();
+                if (value === undefined) delete change.row.draft_expires_at;
+                else change.row.draft_expires_at = value;
+                change.row.created_at = old;
+            });
+            const startedAt = Date.now();
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await sweep()).toBe(0);
+            const [recipe] = await rows(
+                "select verification, draft_expires_at from public.recipes where id = $1",
+                id,
+            );
+            expect(recipe!.verification).toBe("unverified");
+            const expires = new Date(recipe!.draft_expires_at).getTime();
+            const week = 7 * 86_400_000;
+            expect(expires).toBeGreaterThanOrEqual(startedAt + week - 60_000);
+            expect(expires).toBeLessThanOrEqual(Date.now() + week + 60_000);
+        });
+    }
+
+    test("an ingredient added while delete_recipe waits for the recipe is recorded with it, so undo brings it back too", async () => {
+        const made = await call("import_recipe_from_text", {
+            text: "Bread",
+            name: "Bread",
+            instructions: "1. Bake",
+            ingredients: [{ name: "Flour", amount: 2, unit: "each" }],
+            on_similar: "create",
+        });
+        const id = (made.structuredContent!.recipe as { id: string }).id;
+        const saved = await call("save_recipe", { recipe_id: id });
+        expect(saved.structuredContent).toMatchObject({ status: "saved" });
+        const url = getCtx().pg.url;
+        const appUrl = new URL(url);
+        appUrl.username = "foodable_app";
+        const wide = new SQL(url, { prepare: false, max: 4 });
+        const wideApp = new SQL(appUrl.toString(), {
+            prepare: false,
+            max: 4,
+        });
+        const edit = new SQL(url, { prepare: false, max: 1 });
+        pairAppSqlForTests(wide, wideApp);
+        setSqlForTests(wide);
+        try {
+            // An edit holds the recipe, the way withRecipeLock does, and adds
+            // an ingredient once the delete has arrived.
+            let arrived: () => void = () => {};
+            const deleteArrived = new Promise<void>((r) => (arrived = r));
+            let holding: () => void = () => {};
+            const held = new Promise<void>((r) => (holding = r));
+            const editing = edit.begin(async (tx) => {
+                await tx`select id from public.recipes where id = ${id}::uuid for no key update`;
+                holding();
+                await deleteArrived;
+                await tx`
+                    insert into public.recipe_ingredients (
+                        id, household_id, recipe_id, kind, display_name,
+                        food_id, amount, unit, sort_order
+                    )
+                    select gen_random_uuid(), household_id, recipe_id, kind,
+                        'Late addition', food_id, 1, 'each', 1
+                    from public.recipe_ingredients
+                    where recipe_id = ${id}::uuid
+                `;
+            });
+            await held;
+            const deleting = call("delete_recipe", { id });
+            await waitForLockWaiters(getCtx().sql, 1);
+            arrived();
+            await editing;
+            const done = await deleting;
+            expect(done.isError).toBeFalsy();
+            expect(await count("recipes")).toBe(0);
+            const [entry] = await actions();
+            setSqlForTests(getCtx().sql);
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(
+                (
+                    await rows(
+                        "select display_name from public.recipe_ingredients where recipe_id = $1 order by sort_order",
+                        id,
+                    )
+                ).map((row) => row.display_name),
+            ).toEqual(["Flour", "Late addition"]);
+        } finally {
+            setSqlForTests(getCtx().sql);
+            await edit.close();
+            await wide.close();
+            await wideApp.close();
+        }
+    });
+
     test("a guarded tool that fails leaves no entry behind", async () => {
         const result = await call("unplan_recipe", {
             plan_id: crypto.randomUUID(),
@@ -2002,7 +2376,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             return { tool: "delete_recipe", args: { id: soup.id } };
         },
         remove_recipe_ingredient: async () => {
-            const soup = await recipe();
+            const soup = await recipe({ spare: true });
             await dismiss("y", "recipe_ingredient", soup.ingredient);
             return {
                 tool: "remove_recipe_ingredient",
@@ -2292,7 +2666,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
         });
 
         test("a recipe ingredient", async () => {
-            const soup = await recipe();
+            const soup = await recipe({ spare: true });
             const [ingredient] = await rows(
                 "select food_id from public.recipe_ingredients where id = $1",
                 soup.ingredient,
@@ -2307,7 +2681,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             );
             expect(out.status).toBe("conflict");
             expect(out.message).toContain(MERGED);
-            expect(await count("recipe_ingredients")).toBe(0);
+            expect(await count("recipe_ingredients")).toBe(1);
         });
 
         test("a meal item", async () => {

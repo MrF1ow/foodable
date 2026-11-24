@@ -191,6 +191,28 @@ test("recipe items snapshot macrosForPerson for the requested portions", async (
     expect(result.built.totals.protein_g).toBe(11);
 });
 
+test("a portion of a draft is refused: it is a draft until it is saved", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "alice",
+        name: "Imported",
+        yieldPortions: 1,
+        verification: "unverified",
+    });
+    const err = await resolveAndBuildMeal({
+        householdId: HH,
+        foods,
+        recipes,
+        items: [{ recipeId: recipe.id, portions: 1 }],
+    }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(MealItemsError);
+    expect((err as Error).message).toBe(
+        "That recipe is a draft; save it first.",
+    );
+});
+
 test("resolveAndBuildMeal find-or-creates a named food", async () => {
     const foods = createMemoryFoodsStore();
     const recipes = createMemoryRecipesStore();

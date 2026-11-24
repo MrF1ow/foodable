@@ -1533,6 +1533,19 @@
         align-items: end;
     }
 
+    /* A draft's panel takes its own row under the title, never the action slot. */
+    .fd-recipe-detail:has(> #fd-recipe-draft) {
+        grid-template-areas:
+            "back back back"
+            "head star act"
+            "draft draft draft"
+            "body body body";
+    }
+
+    #fd-recipe-draft {
+        grid-area: draft;
+    }
+
     .fd-recipe-back {
         grid-area: back;
     }

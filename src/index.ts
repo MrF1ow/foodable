@@ -19,7 +19,7 @@ import { liveAgentActionsStore } from "./db/agent-actions.js";
 import { startFlagPinSweep } from "./flag-pins.js";
 import {
     startFetchMemorySweep,
-    startUnverifiedRecipeCleanup,
+    startDraftSweep,
 } from "./domain/recipe-import.js";
 import { listHouseholdsForRecipeSweep } from "./db/household.js";
 import { liveRecipesStore } from "./db/recipes.js";
@@ -540,9 +540,9 @@ if (import.meta.main) {
     );
     void runAsSystem("rate limit sweep", async () => startRateLimitSweep());
     startFlagPinSweep();
-    void runAsSystem("unverified recipe sweep", async () =>
-        startUnverifiedRecipeCleanup(
-            () => listHouseholdsForRecipeSweep(),
+    void runAsSystem("recipe draft sweep", async () =>
+        startDraftSweep(
+            async () => (await listHouseholdsForRecipeSweep()).map((h) => h.id),
             liveRecipesStore(),
         ),
     );

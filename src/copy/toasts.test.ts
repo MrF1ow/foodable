@@ -36,7 +36,8 @@ test("no keep-list toast announces a success", () => {
 test("the blocked-recipe toast names no control the app lacks", () => {
     const text = TOASTS["recipes.unverified.blocked"].text;
     expect(text).not.toContain("check again");
-    expect(text).toContain("Ask your AI assistant");
+    // A cook or plan of a draft lands here; the recipe page has Save.
+    expect(text).toBe("That recipe is a draft; save it first.");
 });
 
 test("the cooked-short toast is true for a shortfall and an uncounted ingredient alike", () => {

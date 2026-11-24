@@ -36,6 +36,7 @@ import {
     fridgeItemToRow,
     type FridgeStore,
 } from "./fridge.js";
+import { createMemoryRecipesStore } from "./recipes.js";
 import { createMemorySettingsStore } from "./settings.js";
 import {
     addFridgeItemAdjust,
@@ -103,6 +104,7 @@ function setup() {
         settings,
         stock,
         foods,
+        recipes: createMemoryRecipesStore(),
         now: () => clock,
     };
     return {

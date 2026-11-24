@@ -869,6 +869,13 @@ const TOOLS_BASE: ToolIdentity[] = [
         hasPhotoHint: false,
     },
     {
+        name: "discard_recipe_draft",
+        category: "recipes",
+        badges: ["remove"],
+        params: [{ name: "recipe_id", required: true }],
+        hasPhotoHint: false,
+    },
+    {
         name: "add_recipe_to_grocery",
         category: "recipes",
         badges: ["log"],
@@ -970,6 +977,13 @@ const TOOLS_BASE: ToolIdentity[] = [
             { name: "recipe_id", required: true },
             { name: "resolved_lines", required: false },
         ],
+        hasPhotoHint: false,
+    },
+    {
+        name: "save_recipe",
+        category: "recipes",
+        badges: ["edit"],
+        params: [{ name: "recipe_id", required: true }],
         hasPhotoHint: false,
     },
     {
@@ -1193,6 +1207,7 @@ export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
     "set_recipe_variant",
     "clear_recipe_variant",
     "delete_recipe",
+    "discard_recipe_draft",
     "add_recipe_to_grocery",
     "cook_recipe",
     "update_recipe",
@@ -1201,6 +1216,7 @@ export const HOUSEHOLD_SCOPED_TOOL_NAMES = [
     "reorder_recipe_ingredients",
     "import_recipe_from_text",
     "verify_recipe",
+    "save_recipe",
     "import_recipe_from_url",
     "get_week_plan",
     "plan_recipe",

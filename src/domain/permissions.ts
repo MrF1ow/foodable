@@ -194,6 +194,7 @@ export const TOOL_ACTIONS = {
     delete_water: "nutrition.edit",
     delete_weight: "nutrition.edit",
     discard_fridge_item: "fridge.edit",
+    discard_recipe_draft: "recipe.edit",
     dismiss_notice: "notification.dismiss_everyone",
     merge_foods: "food.edit",
     move_fridge_items: "fridge.edit",

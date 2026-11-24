@@ -276,12 +276,7 @@ export function runRecipesStoreContract(
                     (r) => r.recipeId === recipe.id,
                 )?.dismissedMentions,
             ).toEqual(dismissed);
-            await store.setVerification(
-                c.householdId,
-                recipe.id,
-                "verified",
-                [],
-            );
+            await store.promoteDraft(c.householdId, recipe.id);
             expect(
                 (await store.getImport(c.householdId, recipe.id))
                     ?.dismissedMentions,

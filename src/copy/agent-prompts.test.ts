@@ -16,4 +16,5 @@ test("UNVERIFIED_RECIPES_PROMPT names registered MCP tools", async () => {
     expect(found).toContain("list_recipes");
     expect(found).toContain("get_recipe");
     expect(found).toContain("verify_recipe");
+    expect(found).toContain("save_recipe");
 });

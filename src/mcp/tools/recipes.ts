@@ -41,6 +41,9 @@ import {
     RecipeUnverifiedError,
     recheckRecipe,
     resolveUnresolvedLines,
+    assertCanDeleteRecipe,
+    isRecipeDraft,
+    saveRecipeDraft,
 } from "../../domain/recipes.js";
 import {
     clearRecipeVariant,
@@ -48,7 +51,8 @@ import {
     VARIANT_ACTIONS,
 } from "../../domain/recipe-variants.js";
 import { sortNotices } from "../../domain/notices.js";
-import { guessMealType, validateTz } from "../../domain/tz.js";
+import { dateInTz, guessMealType, validateTz } from "../../domain/tz.js";
+import { householdClock } from "../../db/restock.js";
 import type {
     RecipeImport,
     RecipeProblem,
@@ -134,7 +138,55 @@ const RECIPE_FIELDS = {
     prep_minutes: z.number().nullable(),
     cook_minutes: z.number().nullable(),
     verification: z.enum(["verified", "unverified"]),
+    draft_expires_at: z.string().nullable(),
 };
+
+/** What a draft says about itself: whether it is one and whether Save would pass. */
+const DRAFT_FIELDS = {
+    draft: z.boolean(),
+    ready_to_save: z.boolean(),
+    draft_expires_at: z.string().nullable(),
+};
+
+/** The draft fields for a recipe's state and its current problems. */
+function draftWire(
+    verification: "verified" | "unverified" | null,
+    problems: readonly unknown[],
+    draftExpiresAt: string | null | undefined,
+) {
+    const draft = verification === "unverified";
+    return {
+        draft,
+        ready_to_save: draft && problems.length === 0,
+        draft_expires_at: draft ? (draftExpiresAt ?? null) : null,
+    };
+}
+
+/**
+ * The household's local day an expiry falls on, so a household west of UTC
+ * is not told a day late.
+ */
+async function expiryDay(
+    householdId: string,
+    expiresAt: string,
+): Promise<string> {
+    const { timezone } = await householdClock(householdId);
+    return dateInTz(new Date(expiresAt), timezone);
+}
+
+/** The line that tells the agent what a draft needs before it can be saved. */
+async function draftText(
+    wire: ReturnType<typeof draftWire>,
+    householdId: string,
+): Promise<string> {
+    if (!wire.draft) return "";
+    const expires = wire.draft_expires_at
+        ? ` It is deleted on ${await expiryDay(householdId, wire.draft_expires_at)} unless it is saved.`
+        : "";
+    return wire.ready_to_save
+        ? `\nDraft: it passes the check and is ready to save.${expires} Ask the person whether to save it; call save_recipe only when they say so.`
+        : `\nDraft: fix what is listed first, then ask the person whether to save it; call save_recipe only when they say so.${expires}`;
+}
 
 const RECIPE_PROBLEM = z.object({
     code: z.string(),
@@ -248,6 +300,7 @@ export const IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA = z.object({
     verification: z.enum(["verified", "unverified"]).nullable(),
     problems: z.array(RECIPE_PROBLEM),
     mention_warnings: z.array(MENTION_WARNING),
+    ...DRAFT_FIELDS,
 });
 
 export const VERIFY_RECIPE_OUTPUT_SCHEMA = z.object({
@@ -256,6 +309,17 @@ export const VERIFY_RECIPE_OUTPUT_SCHEMA = z.object({
     verification: z.enum(["verified", "unverified"]).nullable(),
     problems: z.array(RECIPE_PROBLEM),
     mention_warnings: z.array(MENTION_WARNING),
+    ...DRAFT_FIELDS,
+});
+
+export const SAVE_RECIPE_OUTPUT_SCHEMA = z.object({
+    status: z.enum(["saved", "already_saved", "not_ready"]),
+    recipe_id: z.string(),
+    recipe_name: z.string(),
+    verification: z.enum(["verified", "unverified"]),
+    problems: z
+        .array(RECIPE_PROBLEM)
+        .describe("what is left to fix when the check refused the save"),
 });
 
 export function importRecipeFromUrlPausedStructuredContent(url: string) {
@@ -279,6 +343,7 @@ export function importRecipeFromUrlPausedStructuredContent(url: string) {
         from_memory: outcome.fromMemory,
         remembered_until: outcome.rememberedUntil,
         mention_warnings: [] as ReturnType<typeof wireMentionWarnings>,
+        ...draftWire(null, [], null),
     };
     IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(payload);
     return payload;
@@ -317,6 +382,7 @@ export const IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA = z.object({
     from_memory: z.boolean(),
     remembered_until: z.string().nullable(),
     mention_warnings: z.array(MENTION_WARNING),
+    ...DRAFT_FIELDS,
 });
 
 const RECIPE_IMPORT_WIRE = z.object({
@@ -480,6 +546,7 @@ export const GET_RECIPE_OUTPUT_SCHEMA = z.object({
             "the viewing member's own version: ingredients are then theirs, removed are the base ingredients it leaves out",
         ),
     verification: z.enum(["verified", "unverified"]),
+    ...DRAFT_FIELDS,
     problems: z.array(RECIPE_PROBLEM),
     import: RECIPE_IMPORT_WIRE.nullable(),
     mention_warnings: z
@@ -584,6 +651,10 @@ function recipeFields(recipe: Recipe) {
         prep_minutes: recipe.prepMinutes,
         cook_minutes: recipe.cookMinutes,
         verification: recipe.verification,
+        draft_expires_at:
+            recipe.verification === "unverified"
+                ? (recipe.draftExpiresAt ?? null)
+                : null,
     };
 }
 
@@ -658,13 +729,14 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         callerActor,
         analytics,
         runDestructive,
+        requireCan,
     } = ctx;
     server.registerTool(
         "list_recipes",
         {
             title: "List Recipes",
             description:
-                "List household recipes. Filter by tag, recipes whose fridge stock fully covers every ingredient (can_make_now), or recipes safe for a member (no catalog allergen hits and no dislikes). `filters`: all must hold; `favourites` is your own stars, `cookable` is can_make_now. `query`: name contains.",
+                "List household recipes. Filter by tag, recipes whose fridge stock fully covers every ingredient (can_make_now), or recipes safe for a member (no catalog allergen hits and no dislikes). `filters`: all must hold; `favourites` is your own stars, `cookable` is can_make_now. `query`: name contains. `verification: unverified` lists drafts instead.",
             annotations: {
                 readOnlyHint: true,
                 destructiveHint: false,
@@ -754,6 +826,12 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     const payload = {
                         recipes: recipes.map(recipeFields),
                     };
+                    // Drafts say the household's local day they go on.
+                    const timezone = payload.recipes.some(
+                        (recipe) => recipe.draft_expires_at,
+                    )
+                        ? (await householdClock(householdId)).timezone
+                        : null;
                     return {
                         content: [
                             {
@@ -764,7 +842,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         : payload.recipes
                                               .map(
                                                   (recipe) =>
-                                                      `${recipe.name} yield ${recipe.yield_portions}${recipe.verification === "unverified" ? " (unverified)" : ""}${idTag(recipe.id)}`,
+                                                      `${recipe.name} yield ${recipe.yield_portions}${recipe.verification === "unverified" ? ` (draft${recipe.draft_expires_at && timezone ? `, deleted ${dateInTz(new Date(recipe.draft_expires_at), timezone)} unless saved` : ""})` : ""}${idTag(recipe.id)}`,
                                               )
                                               .join("\n"),
                             },
@@ -933,6 +1011,11 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             tz,
                         ) as SuggestedMealType,
                         verification: view.verification,
+                        ...draftWire(
+                            view.verification,
+                            problems,
+                            view.draftExpiresAt,
+                        ),
                         problems: wireProblems(problems),
                         import: wireImport(importRow),
                         mention_warnings: wireMentionWarnings(mentionWarnings),
@@ -989,7 +1072,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${perPortionLine}${versionLine}${allergenBlock}\n${ingredientBlock}${stepsLines}${getRecipeImportText(payload)}${cookPreviewText(cookWire)}${mentionWarningsText(mentionWarnings)}`,
+                                text: `${perPortionLine}${versionLine}${allergenBlock}\n${ingredientBlock}${stepsLines}${getRecipeImportText(payload)}${await draftText(payload, actor.householdId)}${cookPreviewText(cookWire)}${mentionWarningsText(mentionWarnings)}`,
                             },
                         ],
                         structuredContent: payload,
@@ -1421,52 +1504,75 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 "delete_recipe",
                 async () => {
                     const actor = await callerActor();
+                    const target = await liveRecipesStore().getRecipe(
+                        actor.householdId,
+                        args.id,
+                    );
+                    if (target && isRecipeDraft(target)) {
+                        throw new Error(
+                            `${target.name} is a draft: discard it with discard_recipe_draft instead.`,
+                        );
+                    }
                     const run = await runDestructive(
                         "delete_recipe",
                         async (rec, _householdId, notify) => {
                             const store = liveRecipesStore();
-                            const recipe = await store.getRecipe(
-                                actor.householdId,
-                                args.id,
-                            );
-                            const ingredientIds = (
-                                await store.listIngredients(
+                            // Under the recipe's edit lock, held until the
+                            // guard commits: an ingredient added after the
+                            // capture would be deleted without being recorded.
+                            const { recipe, report, deleted } =
+                                await store.withRecipeLock(
                                     actor.householdId,
                                     args.id,
-                                )
-                            ).map((row) => row.id);
-                            // The recipe with its ingredients, plans, import
-                            // and portions. Favourites are private to each
-                            // member, so the report names them as lost.
-                            const report = recipe
-                                ? await rec.captureCascade("recipes", [
-                                      { id: args.id },
-                                  ])
-                                : { captured: 0, uncaptured: [] };
-                            // The dismissals on the recipe and on each of its
-                            // ingredients go with it.
-                            await captureDismissals(
-                                rec,
-                                actor.householdId,
-                                (dismissal) =>
-                                    dismissedOn("recipe", [args.id])(
-                                        dismissal,
-                                    ) ||
-                                    dismissedOn(
-                                        "recipe_ingredient",
-                                        ingredientIds,
-                                    )(dismissal),
-                            );
-                            const deleted = await deleteRecipe(
-                                store,
-                                actor.householdId,
-                                args.id,
-                                {
-                                    userId: actor.userId,
-                                    isOwner: actor.isOwner,
-                                },
-                                { notify },
-                            );
+                                    async () => {
+                                        const recipe = await store.getRecipe(
+                                            actor.householdId,
+                                            args.id,
+                                        );
+                                        const ingredientIds = (
+                                            await store.listIngredients(
+                                                actor.householdId,
+                                                args.id,
+                                            )
+                                        ).map((row) => row.id);
+                                        // The recipe with its ingredients,
+                                        // plans, import and portions.
+                                        // Favourites are private to each
+                                        // member, so the report names them as
+                                        // lost.
+                                        const report = recipe
+                                            ? await rec.captureCascade(
+                                                  "recipes",
+                                                  [{ id: args.id }],
+                                              )
+                                            : { captured: 0, uncaptured: [] };
+                                        // The dismissals on the recipe and on
+                                        // each of its ingredients go with it.
+                                        await captureDismissals(
+                                            rec,
+                                            actor.householdId,
+                                            (dismissal) =>
+                                                dismissedOn("recipe", [
+                                                    args.id,
+                                                ])(dismissal) ||
+                                                dismissedOn(
+                                                    "recipe_ingredient",
+                                                    ingredientIds,
+                                                )(dismissal),
+                                        );
+                                        const deleted = await deleteRecipe(
+                                            store,
+                                            actor.householdId,
+                                            args.id,
+                                            {
+                                                userId: actor.userId,
+                                                isOwner: actor.isOwner,
+                                            },
+                                            { notify },
+                                        );
+                                        return { recipe, report, deleted };
+                                    },
+                                );
                             return {
                                 value: { deleted },
                                 summary: `Deleted recipe ${recipe?.name ?? args.id}${uncapturedNote(report.uncaptured)}`,
@@ -1483,6 +1589,128 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                     run.value.deleted
                                         ? `Deleted recipe ${args.id}.`
                                         : `No recipe found with id ${args.id}.`,
+                                    run.undo,
+                                ),
+                            },
+                        ],
+                    };
+                },
+                analytics,
+                undefined,
+                { outcome: destructiveOutcome },
+            ),
+    );
+
+    server.registerTool(
+        "discard_recipe_draft",
+        {
+            title: "Discard Recipe Draft",
+            description:
+                "Discard an unsaved import (a draft). Only its importer or the owner may.",
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                recipe_id: z.string(),
+            }),
+        },
+        async (args) =>
+            withAnalytics(
+                "discard_recipe_draft",
+                async () => {
+                    const actor = await callerActor();
+                    const store = liveRecipesStore();
+                    const recipe = await store.getRecipe(
+                        actor.householdId,
+                        args.recipe_id,
+                    );
+                    if (!recipe) {
+                        throw new Error(
+                            `No recipe found with id ${args.recipe_id}.`,
+                        );
+                    }
+                    if (!isRecipeDraft(recipe)) {
+                        throw new Error(
+                            `${recipe.name} is saved, not a draft: delete it with delete_recipe.`,
+                        );
+                    }
+                    // The importer is the draft's creator.
+                    assertCanDeleteRecipe(recipe, {
+                        userId: actor.userId,
+                        isOwner: actor.isOwner,
+                    });
+                    const run = await runDestructive(
+                        "discard_recipe_draft",
+                        async (rec) => {
+                            // Under the recipe's edit lock, held until the
+                            // guard commits: an ingredient added after the
+                            // capture would be deleted without being recorded.
+                            const { report, deleted } =
+                                await store.withRecipeLock(
+                                    actor.householdId,
+                                    recipe.id,
+                                    async () => {
+                                        const ingredientIds = (
+                                            await store.listIngredients(
+                                                actor.householdId,
+                                                recipe.id,
+                                            )
+                                        ).map((row) => row.id);
+                                        // The draft with its ingredients,
+                                        // import row and expiry, so an undo
+                                        // brings it back as it was.
+                                        const report = await rec.captureCascade(
+                                            "recipes",
+                                            [{ id: recipe.id }],
+                                        );
+                                        await captureDismissals(
+                                            rec,
+                                            actor.householdId,
+                                            (dismissal) =>
+                                                dismissedOn("recipe", [
+                                                    recipe.id,
+                                                ])(dismissal) ||
+                                                dismissedOn(
+                                                    "recipe_ingredient",
+                                                    ingredientIds,
+                                                )(dismissal),
+                                        );
+                                        // No notify: a draft is only the
+                                        // importer's. A Save that lands first
+                                        // keeps it: nothing is deleted and no
+                                        // undo is recorded.
+                                        const deleted =
+                                            await store.deleteDraftRecipe(
+                                                actor.householdId,
+                                                recipe.id,
+                                            );
+                                        return { report, deleted };
+                                    },
+                                );
+                            return {
+                                value: { deleted },
+                                summary: `Discarded draft ${recipe.name}${uncapturedNote(report.uncaptured)}`,
+                                changed: deleted,
+                            };
+                        },
+                    );
+                    if (run.refused) return run.result;
+                    return {
+                        content: [
+                            {
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value.deleted
+                                        ? `Discarded the draft ${recipe.name}.`
+                                        : (await store.getRecipe(
+                                                actor.householdId,
+                                                recipe.id,
+                                            ))
+                                          ? `${recipe.name} was already saved, so it was not discarded.`
+                                          : `No recipe found with id ${args.recipe_id}.`,
                                     run.undo,
                                 ),
                             },
@@ -2103,7 +2331,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From Text",
             description:
-                'Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients. Pass the steps in instructions; without them the recipe stays unverified. Leave an ingredient\'s amount out only when it is not measured, and then set its note to "to taste" (or "as needed", "for garnish"); an ingredient with no amount and no such note keeps the recipe unverified. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food. When it returns similar_foods, ask the person about every listed ingredient at once, then call again passing each chosen food_id on that ingredient or new_food: true. mention_warnings lists foods the steps use that the ingredients lack: they never block or unverify a recipe; ask the person, and call add_recipe_ingredient only if they say yes.',
+                'Create a recipe from structured fields the agent extracted from recipe text. Pass text (raw source, required) and structured ingredients. It is a draft until saved. Pass the steps in instructions; without them it cannot be saved. Leave an ingredient\'s amount out only when it is not measured, and then set its note to "to taste" (or "as needed", "for garnish"); an ingredient with no amount and no such note blocks saving. The server find-or-creates catalog foods and returns nutrition or unit gaps. Use get_household_config recipe_search_places for where this household looks up recipes. Do not store the recipe as a food. When it returns similar_foods, ask the person about every listed ingredient at once, then call again passing each chosen food_id on that ingredient or new_food: true. mention_warnings lists foods the steps use that the ingredients lack: they never block or unverify a recipe; ask the person, and call add_recipe_ingredient only if they say yes.',
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -2214,12 +2442,17 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             problems: wireProblems(result.problems),
                             mention_warnings:
                                 wireMentionWarnings(mentionWarnings),
+                            ...draftWire(
+                                result.verification,
+                                result.problems,
+                                result.recipe.draftExpiresAt,
+                            ),
                         };
                         return {
                             content: [
                                 {
                                     type: "text",
-                                    text: `Imported ${result.recipe.name} (${result.verification})${idTag(result.recipe.id)}\n${payload.ingredients
+                                    text: `Imported ${result.recipe.name} as a draft${idTag(result.recipe.id)}\n${payload.ingredients
                                         .map(
                                             (row) =>
                                                 `${row.display_name} ${row.amount != null && row.unit ? `${row.amount} ${row.unit}` : row.note?.trim() || "to taste"}${row.missing.length ? ` missing ${row.missing.join(", ")}` : ""}${idTag(row.id, "ingredient_id")}${row.food_id ? idTag(row.food_id, "food_id") : ""}`,
@@ -2228,7 +2461,11 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                         places.length
                                             ? `\nSearch places: ${places.map((place) => place.name).join(", ")}`
                                             : ""
-                                    }${mentionWarningsText(mentionWarnings)}`,
+                                    }${
+                                        result.problems.length > 0
+                                            ? `\nProblems:\n${result.problems.map((row) => `- ${row.message}`).join("\n")}`
+                                            : ""
+                                    }${await draftText(payload, actor.householdId)}${mentionWarningsText(mentionWarnings)}`,
                                 },
                             ],
                             structuredContent: payload,
@@ -2252,6 +2489,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                     verification: null,
                                     problems: [],
                                     mention_warnings: [],
+                                    ...draftWire(null, [], null),
                                 },
                             };
                         }
@@ -2270,7 +2508,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Verify Recipe",
             description:
-                "Run the deterministic check on a recipe. Only this check can verify a recipe; there is no override. Use after fixing an unverified import. It also lists mention_warnings (foods the steps use that the ingredients lack), which never affect the result. Pass resolved_lines with the unresolved import lines you have dealt with (added as ingredients, or not needed); they are removed before the check runs, and any other unresolved lines still count.",
+                "Run the deterministic check on a recipe. It never saves a draft (save_recipe does). Use after fixing an imported draft. It also lists mention_warnings (foods the steps use that the ingredients lack), which never affect the result. Pass resolved_lines with the unresolved import lines you have dealt with (added as ingredients, or not needed); they are removed before the check runs, and any other unresolved lines still count.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -2313,6 +2551,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             mention_warnings: [] as ReturnType<
                                 typeof wireMentionWarnings
                             >,
+                            ...draftWire(null, [], null),
                         };
                         return {
                             content: [
@@ -2347,7 +2586,13 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         verification: checked.verification,
                         problems: wireProblems(checked.problems),
                         mention_warnings: wireMentionWarnings(mentionWarnings),
+                        ...draftWire(
+                            checked.verification,
+                            checked.problems,
+                            recipe.draftExpiresAt,
+                        ),
                     };
+                    const isDraft = checked.verification === "unverified";
                     return {
                         content: [
                             {
@@ -2355,12 +2600,71 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 text: `${
                                     checked.verified
                                         ? `${recipe.name} passed the check.`
-                                        : checked.verification === "verified"
-                                          ? `${recipe.name} was made by hand, so it stays verified. The check found: ${checked.problems.map((row) => row.message).join(" ")}`
-                                          : `${recipe.name} is still unverified (${checked.problems.length} problem${checked.problems.length === 1 ? "" : "s"}): ${checked.problems.map((row) => row.message).join(" ")}`
-                                }${mentionWarningsText(mentionWarnings)}${problemIngredientTags(checked.problems)}`,
+                                        : !isDraft
+                                          ? `${recipe.name} is saved and stays saved. The check found: ${checked.problems.map((row) => row.message).join(" ")}`
+                                          : `${recipe.name} is still a draft (${checked.problems.length} problem${checked.problems.length === 1 ? "" : "s"}): ${checked.problems.map((row) => row.message).join(" ")}`
+                                }${await draftText(payload, actor.householdId)}${mentionWarningsText(mentionWarnings)}${problemIngredientTags(checked.problems)}`,
                             },
                         ],
+                        structuredContent: payload,
+                    };
+                },
+                analytics,
+            ),
+    );
+
+    server.registerTool(
+        "save_recipe",
+        {
+            title: "Save Recipe",
+            description:
+                "Save an imported draft as a household recipe. Call it only when the person says so in chat. It saves only when the check passes, else lists what is left.",
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                recipe_id: z.string(),
+            }),
+            outputSchema: SAVE_RECIPE_OUTPUT_SCHEMA,
+        },
+        async (args) =>
+            withAnalytics(
+                "save_recipe",
+                async () => {
+                    await requireCan("recipe.edit");
+                    const householdId = await callerHouseholdId();
+                    const result = await saveRecipeDraft(
+                        liveRecipesStore(),
+                        householdId,
+                        args.recipe_id,
+                    );
+                    const payload = {
+                        status: result.alreadySaved
+                            ? ("already_saved" as const)
+                            : result.saved
+                              ? ("saved" as const)
+                              : ("not_ready" as const),
+                        recipe_id: result.recipe.id,
+                        recipe_name: result.recipe.name,
+                        verification: result.saved
+                            ? ("verified" as const)
+                            : ("unverified" as const),
+                        problems: wireProblems(result.problems),
+                    };
+                    const text = result.alreadySaved
+                        ? `${result.recipe.name} is already saved.`
+                        : result.saved
+                          ? `Saved ${result.recipe.name}. It is a household recipe now.`
+                          : `${result.recipe.name} is not saved: it is still a draft. Fix these first:\n${result.problems
+                                .map((row) => `- ${row.message}`)
+                                .join(
+                                    "\n",
+                                )}${problemIngredientTags(result.problems)}`;
+                    return {
+                        content: [{ type: "text", text }],
                         structuredContent: payload,
                     };
                 },
@@ -2373,7 +2677,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Import Recipe From URL",
             description:
-                "Import a recipe from a link. For a recipe website, reads the page's published recipe data. For a social post (Instagram, TikTok, Facebook, Threads, Pinterest, YouTube), returns status paste_needed when no text is given — ask the user to paste the caption (for Pinterest, first ask for the recipe website the pin links to, otherwise the recipe text), then call again with text. The household may have turned on an opt-in TikTok or Facebook reader; if status is still paste_needed, reader_failure explains why and you should ask for the caption. Never open, fetch, or browse the post yourself. When status is no_recipe_in_text, the caption has no recipe — ask the user to type it or send a screenshot. Returns unresolved_lines and problems so you can fix an unverified import and call verify_recipe. mention_warnings lists foods the steps use that the ingredients lack: they never block or unverify a recipe; ask the user, and call add_recipe_ingredient only if they say yes.",
+                "Import a recipe from a link. For a recipe website, reads the page's published recipe data. For a social post (Instagram, TikTok, Facebook, Threads, Pinterest, YouTube), returns status paste_needed when no text is given — ask the user to paste the caption (for Pinterest, first ask for the recipe website the pin links to, otherwise the recipe text), then call again with text. The household may have turned on an opt-in TikTok or Facebook reader; if status is still paste_needed, reader_failure explains why and you should ask for the caption. Never open, fetch, or browse the post yourself. When status is no_recipe_in_text, the caption has no recipe — ask the user to type it or send a screenshot. Returns unresolved_lines and problems so you can fix the draft and call verify_recipe. mention_warnings lists foods the steps use that the ingredients lack: they never block or unverify a recipe; ask the user, and call add_recipe_ingredient only if they say yes.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -2479,11 +2783,16 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                   remembered_until: outcome.rememberedUntil,
                                   mention_warnings:
                                       wireMentionWarnings(mentionWarnings),
+                                  ...draftWire(
+                                      outcome.verification,
+                                      outcome.problems,
+                                      outcome.draftExpiresAt,
+                                  ),
                               };
                               IMPORT_RECIPE_FROM_URL_OUTPUT_SCHEMA.parse(built);
                               return {
                                   payload: built,
-                                  text: `${built.message}${built.recipe_id ? idTag(built.recipe_id, "recipe_id") : ""}${problemIngredientTags(outcome.problems)}${mentionWarningsText(mentionWarnings)}`,
+                                  text: `${built.message}${built.recipe_id ? idTag(built.recipe_id, "recipe_id") : ""}${problemIngredientTags(outcome.problems)}${await draftText(built, actor.householdId)}${mentionWarningsText(mentionWarnings)}`,
                               };
                           })()
                         : (() => {

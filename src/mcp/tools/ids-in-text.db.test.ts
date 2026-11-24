@@ -551,6 +551,9 @@ const CALLS: Record<string, CallRow | CallSpec> = {
     verify_recipe: noIds("echoes only ids the caller passed in", (s) => ({
         recipe_id: s.recipe,
     })),
+    save_recipe: noIds("echoes only ids the caller passed in", (s) => ({
+        recipe_id: s.recipe,
+    })),
     update_meal: noIds("echoes only ids the caller passed in", (s) => ({
         id: s.meal,
         notes: "With tea",
@@ -747,6 +750,17 @@ const CALLS: Record<string, CallRow | CallSpec> = {
                 yield_portions: 1,
             });
             return { id: made.id };
+        },
+    ),
+    discard_recipe_draft: noIds(
+        "echoes only ids the caller passed in",
+        async (_s, make) => {
+            const made = await make("import_recipe_from_text", {
+                text: "Scratch draft",
+                name: "Scratch draft",
+                on_similar: "create",
+            });
+            return { recipe_id: (made.recipe as { id: string }).id };
         },
     ),
     // Last, since it empties the list the rows above read: the stores are

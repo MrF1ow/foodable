@@ -17,6 +17,8 @@ import {
 } from "../../../domain/log-macro-format.js";
 import type { AppChromeBase } from "../../attention.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
+import { button } from "../../components/v2/button.js";
+import { confirmSheet, sheetTrigger } from "../../components/v2/sheet.js";
 import { esc } from "../../components/v2/html.js";
 import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
 import { renderAppShell } from "../../shell.js";
@@ -94,6 +96,19 @@ export type RecipeDetailV2View = {
      * leaves the Share button and the sheet out (`mcp-share-links` is off).
      */
     share?: { open?: boolean; error?: string };
+    /**
+     * Set when the recipe is an imported draft nobody has saved: what the
+     * check still finds and when the sweep deletes it. The page then shows a
+     * Save form in place of Share, Plan and Cook.
+     */
+    draft?: {
+        problems: string[];
+        expiresOn: string | null;
+        /** The viewer may save recipes (`recipe.edit`). */
+        canSave: boolean;
+        /** The viewer imported it, or is the owner. */
+        canDiscard: boolean;
+    };
     error?: string;
 };
 
@@ -352,6 +367,56 @@ function plannedLine(planned: RecipeDetailV2View["planned"]): string {
     return `<p class="fd-recipe-meta fd-recipe-planned">${esc(text)}</p>\n`;
 }
 
+/**
+ * A draft's panel: that it is not saved, when it goes, what the check still
+ * finds, the Save form (`POST /recipes/:id/save`) and Discard draft, which
+ * confirms and posts to the draft-only discard (`POST /recipes/:id/discard`).
+ * Each shows only to a viewer who may use it.
+ */
+function draftPanel(
+    recipeId: string,
+    draft: NonNullable<RecipeDetailV2View["draft"]>,
+): string {
+    const discardId = `recipe-discard-${recipeId}`;
+    const expires = draft.expiresOn
+        ? ` It is deleted on ${draft.expiresOn} unless you save it.`
+        : "";
+    const left =
+        draft.problems.length > 0
+            ? `<p class="fd-recipe-meta">Fix these before you save it:</p><ul>${draft.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`
+            : `<p class="fd-recipe-meta">It passes the check and is ready to save.</p>`;
+    const save = draft.canSave
+        ? `<form method="post" action="/recipes/${esc(recipeId)}/save" class="fd-inline-form">${String(button({ label: "Save", variant: "primary", type: "submit" }))}</form>`
+        : "";
+    const discard = draft.canDiscard
+        ? sheetTrigger({
+              target: discardId,
+              label: "Discard draft",
+              className: "fd-btn fd-btn--danger",
+          })
+        : "";
+    const actions =
+        save || discard
+            ? `<div class="fd-recipe-actions">${save}${discard}</div>`
+            : "";
+    return `<section class="fd-recipe-section" id="fd-recipe-draft" aria-labelledby="fd-recipe-draft-heading">
+<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title" id="fd-recipe-draft-heading">Draft</h2></div>
+<p class="fd-recipe-meta">This imported recipe is not saved yet, so it is not in your recipes, the plan or the grocery list.${esc(expires)}</p>
+${left}${actions}
+</section>
+${
+    draft.canDiscard
+        ? confirmSheet({
+              id: discardId,
+              title: "Discard draft",
+              message: "Discard this draft? This cannot be undone.",
+              action: `/recipes/${recipeId}/discard`,
+              confirmLabel: "Discard",
+          })
+        : ""
+}`;
+}
+
 function servingsMeta(portions: number): string {
     return portions === 1 ? "1 serving" : `${portions} servings`;
 }
@@ -370,26 +435,38 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
     const backChevron = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18 9 12 15 6"/></svg>`;
     const backRound = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18 9 12 15 6"/></svg>`;
     // The heading id is the anchor Today's "Cook it" link has always used.
-    const actions = `<div class="fd-recipe-actions" id="fd-recipe-cook-heading">${view.share ? String(renderShareTrigger(RECIPE_SHARE_SHEET_ID, "fd-recipe-plan-btn fd-recipe-share-btn")) : ""}${view.plan ? String(renderPlanTrigger()) : ""}${view.cook ? String(renderCookTrigger()) : ""}</div>`;
+    // A draft has no Share, Plan or Cook: Save comes first.
+    const draft = view.draft ? draftPanel(view.recipe.id, view.draft) : "";
+    const actions = view.draft
+        ? ""
+        : `<div class="fd-recipe-actions" id="fd-recipe-cook-heading">${view.share ? String(renderShareTrigger(RECIPE_SHARE_SHEET_ID, "fd-recipe-plan-btn fd-recipe-share-btn")) : ""}${view.plan ? String(renderPlanTrigger()) : ""}${view.cook ? String(renderCookTrigger()) : ""}</div>`;
     const pageError =
-        view.error && !view.cook?.open && !view.plan?.open && !view.share?.open
+        view.error &&
+        // A draft has no sheets to hold the error.
+        (view.draft ||
+            (!view.cook?.open && !view.plan?.open && !view.share?.open))
             ? `<p class="fd-recipe-error" role="alert">${esc(view.error)}</p>`
             : "";
     return `<div class="fd-recipe-detail">
 ${pageError}<p class="fd-recipe-back"><a class="fd-recipe-back__btn fd-settings-phone-back" href="/recipes" aria-label="Back to recipes">${backRound}</a><a class="fd-recipe-back__link" href="/recipes">${backChevron}<span>Recipes</span></a></p>
-${favouriteStarForm({
-    recipeId: view.recipe.id,
-    recipeName: view.recipe.name,
-    on: view.favourite === true,
-    back: { kind: "recipe" },
-    className: "fd-recipe-star",
-})}
+${
+    // A draft is not in the list yet, so it has nothing to star.
+    view.draft
+        ? ""
+        : favouriteStarForm({
+              recipeId: view.recipe.id,
+              recipeName: view.recipe.name,
+              on: view.favourite === true,
+              back: { kind: "recipe" },
+              className: "fd-recipe-star",
+          })
+}
 <header class="fd-recipe-header">
 <h1 class="fd-recipe-title">${esc(view.recipe.name)}</h1>
 ${metaRow ? `<p class="fd-recipe-meta">${metaRow}</p>` : ""}
 <p class="fd-recipe-meta fd-recipe-meta--you">${esc(portionNote)}</p>
 ${plannedLine(view.planned)}</header>
-<div class="fd-recipe-layout">
+${draft}<div class="fd-recipe-layout">
 <div class="fd-recipe-col fd-recipe-col--primary">
 <section class="fd-recipe-section fd-recipe-section--macros" aria-label="Per serving">
 ${macrosBlock(view.macrosPerPortion, view.gapReasons)}
@@ -408,10 +485,10 @@ ${instructionsHtml(view.recipe.instructions, view.mentions)}
 </div>
 ${actions}
 </div>
-${view.cook ? renderCookSheet(view.cook) : ""}
-${view.plan ? renderPlanSheet(view.plan) : ""}
+${view.cook && !view.draft ? renderCookSheet(view.cook) : ""}
+${view.plan && !view.draft ? renderPlanSheet(view.plan) : ""}
 ${
-    view.share
+    view.share && !view.draft
         ? renderShareSheet({
               id: RECIPE_SHARE_SHEET_ID,
               action: `/recipes/${view.recipe.id}/share`,

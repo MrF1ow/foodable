@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { test, expect, describe } from "bun:test";
+import { test, expect, describe, spyOn } from "bun:test";
 import { IMPORT_MESSAGES } from "../copy/recipe-import.js";
 import { TOASTS } from "../copy/toasts.js";
 import type { FetchFailure, SafeFetcher } from "../fetch-safe.js";
@@ -19,7 +19,8 @@ import {
     safeSourceUrl,
     recipeImportFromRow,
     recipeImportToRow,
-    sweepUnverifiedRecipes,
+    saveRecipeDraft,
+    sweepExpiredDrafts,
     type RecipeImportOutcome,
     type RecipeImportStatus,
     verifyRecipe,
@@ -264,11 +265,11 @@ test("recipe import row mappers round-trip", () => {
     expect(mapped.problems[0]?.code).toBe("no_instructions");
 });
 
-test("sweepUnverifiedRecipes respects expiry", async () => {
+test("sweepExpiredDrafts deletes expired drafts through deleteDraftRecipe, and nothing else", async () => {
     const store = createMemoryRecipesStore();
     const old = await store.insertRecipe({
         ...baseRecipe({ id: "old", name: "Old", verification: "unverified" }),
-        updatedAt: "2020-01-01T00:00:00.000Z",
+        draftExpiresAt: "2026-05-30T00:00:00.000Z",
     });
     const recent = await store.insertRecipe({
         ...baseRecipe({
@@ -276,33 +277,108 @@ test("sweepUnverifiedRecipes respects expiry", async () => {
             name: "Recent",
             verification: "unverified",
         }),
-        updatedAt: "2026-05-20T00:00:00.000Z",
+        draftExpiresAt: "2026-06-05T00:00:00.000Z",
+    });
+    // A draft written with no expiry goes 7 days after it was made.
+    const noExpiry = await store.insertRecipe({
+        ...baseRecipe({
+            id: "no-expiry",
+            name: "No expiry",
+            verification: "unverified",
+        }),
+        draftExpiresAt: null,
     });
     const verified = await store.insertRecipe({
         ...baseRecipe({ id: "ok", name: "Verified", verification: "verified" }),
-        updatedAt: "2020-01-01T00:00:00.000Z",
+        draftExpiresAt: "2020-01-01T00:00:00.000Z",
     });
-    const recipes = store;
-    const deleted = await sweepUnverifiedRecipes({
-        households: [
-            { id: HH, preferences: { unverifiedRecipeExpiryDays: 30 } },
-        ],
+    const deletedIds: string[] = [];
+    const recipes = {
+        listExpiredDrafts: store.listExpiredDrafts,
+        async deleteDraftRecipe(householdId: string, id: string) {
+            deletedIds.push(id);
+            return store.deleteDraftRecipe(householdId, id);
+        },
+    };
+    const deleted = await sweepExpiredDrafts({
+        householdIds: [HH],
         recipes,
         now: new Date("2026-06-01T00:00:00.000Z"),
     });
     expect(deleted).toBe(1);
-    expect(await recipes.getRecipe(HH, old.id)).toBeNull();
-    expect(await recipes.getRecipe(HH, recent.id)).not.toBeNull();
-    expect(await recipes.getRecipe(HH, verified.id)).not.toBeNull();
+    expect(deletedIds).toEqual([old.id]);
+    expect(await store.getRecipe(HH, old.id)).toBeNull();
+    expect(await store.getRecipe(HH, recent.id)).not.toBeNull();
+    expect(await store.getRecipe(HH, noExpiry.id)).not.toBeNull();
+    expect(await store.getRecipe(HH, verified.id)).not.toBeNull();
+    const later = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000);
     expect(
-        await sweepUnverifiedRecipes({
-            households: [
-                { id: HH, preferences: { unverifiedRecipeExpiryDays: null } },
-            ],
-            recipes,
-            now: new Date(),
+        await sweepExpiredDrafts({ householdIds: [HH], recipes, now: later }),
+    ).toBe(2);
+    expect(await store.getRecipe(HH, noExpiry.id)).toBeNull();
+    expect(await store.getRecipe(HH, verified.id)).not.toBeNull();
+});
+
+test("sweepExpiredDrafts logs a draft whose delete fails and goes on with the rest", async () => {
+    const store = createMemoryRecipesStore();
+    for (const id of ["a", "b", "c"]) {
+        await store.insertRecipe({
+            ...baseRecipe({ id, name: id, verification: "unverified" }),
+            draftExpiresAt: "2026-05-30T00:00:00.000Z",
+        });
+    }
+    const recipes = {
+        listExpiredDrafts: store.listExpiredDrafts,
+        async deleteDraftRecipe(householdId: string, id: string) {
+            if (id === "a") throw new Error("connection reset");
+            return store.deleteDraftRecipe(householdId, id);
+        },
+    };
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    try {
+        expect(
+            await sweepExpiredDrafts({
+                householdIds: [HH],
+                recipes,
+                now: new Date("2026-06-01T00:00:00.000Z"),
+            }),
+        ).toBe(2);
+        expect(logged).toHaveBeenCalledTimes(1);
+        expect(String(logged.mock.calls[0]!.join(" "))).toContain(
+            "connection reset",
+        );
+    } finally {
+        logged.mockRestore();
+    }
+    expect(await store.getRecipe(HH, "a")).not.toBeNull();
+    expect(await store.getRecipe(HH, "b")).toBeNull();
+    expect(await store.getRecipe(HH, "c")).toBeNull();
+});
+
+test("the memory store's deleteDraftRecipe leaves a recipe saved since it was listed", async () => {
+    const store = createMemoryRecipesStore();
+    const draft = await store.insertRecipe({
+        ...baseRecipe({ id: "d", name: "Draft", verification: "unverified" }),
+        draftExpiresAt: "2026-05-30T00:00:00.000Z",
+    });
+    const racing = {
+        async listExpiredDrafts(householdId: string, now: Date) {
+            const expired = await store.listExpiredDrafts(householdId, now);
+            await store.promoteDraft(householdId, draft.id);
+            return expired;
+        },
+        deleteDraftRecipe: store.deleteDraftRecipe,
+    };
+    expect(
+        await sweepExpiredDrafts({
+            householdIds: [HH],
+            recipes: racing,
+            now: new Date("2026-06-01T00:00:00.000Z"),
         }),
     ).toBe(0);
+    expect((await store.getRecipe(HH, draft.id))?.verification).toBe(
+        "verified",
+    );
 });
 
 test("only a not-measured phrase counts as an explicit missing amount", () => {
@@ -463,17 +539,17 @@ const OUTCOME_MESSAGES: [string, RecipeImportOutcome, string][] = [
     [
         "imported",
         importOutcome("imported"),
-        "Imported Test Soup from example.com.",
+        "Imported Test Soup from example.com as a draft. Save it to keep it.",
     ],
     [
         "unverified, two ingredients",
         importOutcome("unverified_needs_review", { problems: twoProblems }),
-        "Imported as unverified: 2 ingredients need checking.",
+        "Imported as a draft: 2 ingredients need checking.",
     ],
     [
         "unverified, one ingredient",
         importOutcome("unverified_needs_review", { problems: oneProblem }),
-        "Imported as unverified: 1 ingredient needs checking.",
+        "Imported as a draft: 1 ingredient needs checking.",
     ],
     [
         "paste needed, social",
@@ -642,8 +718,20 @@ describe("importRecipeFromUrl", () => {
                 url: "https://natashaskitchen.com/soup",
             },
         );
+        // It passes the check, so it is ready to save, but it is a draft
+        // that expires in 7 days until a person saves it.
         expect(result.status).toBe("imported");
-        expect(result.verification).toBe("verified");
+        expect(result.verification).toBe("unverified");
+        const expires = Date.parse(result.draftExpiresAt!);
+        expect(expires - Date.now()).toBeGreaterThan(6.9 * 24 * 3600_000);
+        expect(expires - Date.now()).toBeLessThanOrEqual(7 * 24 * 3600_000);
+        expect(
+            (await recipes.getRecipe(HH, result.recipeId!))?.draftExpiresAt,
+        ).toBe(result.draftExpiresAt);
+        expect(await recipes.listRecipes(HH)).toEqual([]);
+        expect((await recipes.listDraftRecipes(HH)).map((r) => r.id)).toEqual([
+            result.recipeId!,
+        ]);
         expect(fetcher.calls.fetch).toBe(1);
         const ingredients = await recipes.listIngredients(HH, result.recipeId!);
         expect(ingredients.map((row) => row.displayName)).toEqual(["rice"]);
@@ -678,6 +766,33 @@ describe("importRecipeFromUrl", () => {
             "1.5 lb Chicken Breast 50g Egg Whites",
         ]);
         expect(result.problems.length).toBeGreaterThan(0);
+    });
+
+    test("a duplicate of an unready draft carries the draft's problems", async () => {
+        const html = `<!doctype html><html><head><script type="application/ld+json">{"@type":"Recipe","name":"Run Together","recipeIngredient":["2 cups flour","1.5 lb Chicken Breast 50g Egg Whites"],"recipeInstructions":["Mix"]}</script></head></html>`;
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const deps = {
+            recipes,
+            foods,
+            fetcher: fakeFetcher({
+                fetch: () => ({ ok: true, body: html }),
+            }),
+        };
+        const input = {
+            householdId: HH,
+            creatorId: USER,
+            url: "https://example.com/run-together",
+        };
+        const first = await importRecipeFromUrl(deps, input);
+        expect(first.status).toBe("unverified_needs_review");
+        const dup = await importRecipeFromUrl(deps, input);
+        expect(dup.status).toBe("duplicate");
+        expect(dup.verification).toBe("unverified");
+        expect(dup.problems.length).toBeGreaterThan(0);
+        expect(dup.problems.map((p) => p.code)).toEqual(
+            first.problems.map((p) => p.code),
+        );
     });
 
     test("duplicate skips fetcher", async () => {
@@ -1055,7 +1170,8 @@ describe("importRecipeFromUrl", () => {
             },
         );
         expect(result.status).toBe("imported");
-        expect(result.verification).toBe("verified");
+        expect(result.verification).toBe("unverified");
+        expect(result.draftExpiresAt).not.toBeNull();
         expect(fetcher.calls.fetch).toBe(0);
         expect(fetcher.calls.robots).toBe(0);
         const imp = await recipes.getImport(HH, result.recipeId!);
@@ -2007,6 +2123,11 @@ test("handled unresolved lines can be cleared so a fixed recipe verifies", async
         "2 eggs 1 cup flour",
     ]);
     expect(done.verified).toBe(true);
+    // Passing the check saves nothing: the draft waits for Save.
+    expect((await store.getRecipe(HH, recipe.id))?.verification).toBe(
+        "unverified",
+    );
+    expect((await saveRecipeDraft(store, HH, recipe.id)).saved).toBe(true);
     expect((await store.getRecipe(HH, recipe.id))?.verification).toBe(
         "verified",
     );
@@ -2109,5 +2230,78 @@ describe("source links", () => {
         expect(
             (await foods.listFoods(HH)).filter((f) => !f.archivedAt),
         ).toHaveLength(1);
+    });
+});
+
+describe("the memory store serializes Save and draft edits as the live store does", () => {
+    async function readyDraft() {
+        const store = createMemoryRecipesStore();
+        await store.insertRecipe({
+            ...baseRecipe(),
+            draftExpiresAt: "2026-12-01T00:00:00.000Z",
+        });
+        await store.insertIngredient(ingredient());
+        await store.upsertImport({
+            recipeId: "r1",
+            householdId: HH,
+            sourceKind: "text",
+            sourceUrl: null,
+            sourceText: "paste",
+            sourceTextOrigin: "pasted",
+            transcript: null,
+            credit: null,
+            unresolvedLines: [],
+            problems: [],
+            dismissedMentions: [],
+            importedAt: "2026-01-01T00:00:00.000Z",
+        });
+        return store;
+    }
+
+    test("a Save started while a draft edit records its problems runs after it and stays saved", async () => {
+        const store = await readyDraft();
+        let release: () => void = () => {};
+        const held = new Promise<void>((resolve) => (release = resolve));
+        let reached: () => void = () => {};
+        const atRead = new Promise<void>((resolve) => (reached = resolve));
+        const paused = {
+            ...store,
+            async getImport(hh: string, id: string) {
+                reached();
+                await held;
+                return store.getImport(hh, id);
+            },
+        };
+        const editing = updateRecipe(paused, HH, "r1", { notes: "Hot." });
+        await atRead;
+        let savedYet = false;
+        const saving = saveRecipeDraft(store, HH, "r1").then((r) => {
+            savedYet = true;
+            return r;
+        });
+        // Every microtask runs before the next macrotask: an unblocked Save on
+        // the memory store would have finished by then.
+        await new Promise<void>((resolve) => setImmediate(resolve));
+        expect(savedYet).toBe(false);
+        release();
+        await editing;
+        expect((await saving).saved).toBe(true);
+        const after = await store.getRecipe(HH, "r1");
+        expect(after?.verification).toBe("verified");
+        expect(after?.draftExpiresAt).toBeNull();
+    });
+
+    test("recheck records problems and never changes whether the recipe is a draft", async () => {
+        const store = await readyDraft();
+        await saveRecipeDraft(store, HH, "r1");
+        const checked = await recheckRecipe(store, HH, "r1");
+        expect(checked.verification).toBe("verified");
+        expect((await store.getRecipe(HH, "r1"))?.verification).toBe(
+            "verified",
+        );
+        const draft = await readyDraft();
+        expect(await draft.promoteDraft(HH, "r1")).toBe(true);
+        expect(await draft.promoteDraft(HH, "r1")).toBe(false);
+        expect(await draft.promoteDraft(HH, "missing")).toBe(false);
     });
 });

@@ -1114,6 +1114,7 @@ beforeEach(() => {
         settings: db.settingsStore,
         stock: db.stockStore,
         foods: db.foodsStore,
+        recipes: db.recipesStore,
     });
     // The owner's own agents may delete, as in a household that had agents
     // allowed; the tests about the switches turn it (and others') off.
@@ -4770,8 +4771,12 @@ describe("household config tools", () => {
         // version of a recipe), `change` and `variant` in get_recipe's output
         // schema, and `member_ids` on plan_recipe and a plan entry, with
         // their descriptions as short as they go.
-        const TOOLS_LIST_MAX_CHARS = 232679;
-        const TOOLS_LIST_MAX_COUNT = 104;
+        // +2538: save_recipe and discard_recipe_draft (imports are drafts
+        // until a person saves them), and `draft`, `ready_to_save` and
+        // `draft_expires_at` on the recipe outputs, with no field
+        // descriptions and the tool descriptions cut to one line each.
+        const TOOLS_LIST_MAX_CHARS = 235217;
+        const TOOLS_LIST_MAX_COUNT = 106;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
             const snapshot = (await Bun.file(
@@ -6501,12 +6506,21 @@ describe("phone-app domain MCP tools", () => {
             expect(textOf(got)).toContain(
                 "Method:\n1. Toast the bread\n2. Butter it",
             );
+            // A saved recipe never loses its steps: the edit is refused with
+            // what it would break.
             const cleared = await call("update_recipe", {
                 id: recipeId,
                 instructions: null,
             });
-            expect(cleared.isError).toBeFalsy();
-            const empty = await call("get_recipe", { id: recipeId });
+            expect(cleared.isError).toBe(true);
+            expect(textOf(cleared)).toContain("Add the steps.");
+            const bare = await call("create_recipe", {
+                name: "Plain toast",
+                yield_portions: 1,
+            });
+            const empty = await call("get_recipe", {
+                id: bare.structuredContent?.id as string,
+            });
             expect(empty.structuredContent?.steps).toEqual([]);
             expect(textOf(empty)).not.toContain("Method:");
         });
@@ -7909,7 +7923,7 @@ describe("phone-app domain MCP tools", () => {
     });
 
     test("verify_recipe output validates for verified, unverified, and not_found", async () => {
-        const { VERIFY_RECIPE_OUTPUT_SCHEMA } =
+        const { SAVE_RECIPE_OUTPUT_SCHEMA, VERIFY_RECIPE_OUTPUT_SCHEMA } =
             await import("./mcp/tools/recipes.js");
         await withUser(alice, async (call) => {
             const complete = await call("import_recipe_from_text", {
@@ -7921,10 +7935,32 @@ describe("phone-app domain MCP tools", () => {
             const completeId = (
                 complete.structuredContent?.recipe as { id: string }
             ).id;
+            // Passing the check leaves it a draft, ready to save.
             const ok = await call("verify_recipe", { recipe_id: completeId });
             expect(ok.isError).toBeFalsy();
             VERIFY_RECIPE_OUTPUT_SCHEMA.parse(ok.structuredContent);
-            expect(ok.structuredContent?.status).toBe("verified");
+            expect(ok.structuredContent?.status).toBe("unverified");
+            expect(ok.structuredContent).toMatchObject({
+                draft: true,
+                ready_to_save: true,
+            });
+            expect(textOf(ok)).toContain(
+                "call save_recipe only when they say so",
+            );
+            const saved = await call("save_recipe", { recipe_id: completeId });
+            SAVE_RECIPE_OUTPUT_SCHEMA.parse(saved.structuredContent);
+            expect(saved.structuredContent?.status).toBe("saved");
+            const again = await call("save_recipe", { recipe_id: completeId });
+            expect(again.structuredContent?.status).toBe("already_saved");
+            const verified = await call("verify_recipe", {
+                recipe_id: completeId,
+            });
+            expect(verified.structuredContent).toMatchObject({
+                status: "verified",
+                draft: false,
+                ready_to_save: false,
+                draft_expires_at: null,
+            });
 
             const incomplete = await call("import_recipe_from_text", {
                 text: "caption",
@@ -7938,6 +7974,18 @@ describe("phone-app domain MCP tools", () => {
             const open = await call("verify_recipe", { recipe_id: openId });
             VERIFY_RECIPE_OUTPUT_SCHEMA.parse(open.structuredContent);
             expect(open.structuredContent?.status).toBe("unverified");
+            expect(open.structuredContent?.ready_to_save).toBe(false);
+            // Save refuses it with what is left to fix.
+            const refused = await call("save_recipe", { recipe_id: openId });
+            expect(refused.isError).toBeFalsy();
+            expect(refused.structuredContent?.status).toBe("not_ready");
+            expect(textOf(refused)).toContain("Add the steps.");
+            // Save after a discard: the draft is gone, so it is unknown and
+            // nothing is saved.
+            await call("discard_recipe_draft", { recipe_id: openId });
+            const gone = await call("save_recipe", { recipe_id: openId });
+            expect(gone.isError).toBe(true);
+            expect(textOf(gone)).toContain("Unknown recipe.");
 
             const missing = await call("verify_recipe", {
                 recipe_id: "00000000-0000-4000-8000-000000000099",
@@ -7969,7 +8017,10 @@ describe("phone-app domain MCP tools", () => {
                 resolved_lines: ["1 x 400g tin tomatoes"],
             });
             expect(fixed.isError).toBeFalsy();
-            expect(fixed.structuredContent?.status).toBe("verified");
+            expect(fixed.structuredContent).toMatchObject({
+                status: "unverified",
+                ready_to_save: true,
+            });
         });
     });
 
@@ -7992,7 +8043,35 @@ describe("phone-app domain MCP tools", () => {
         });
     });
 
-    test("unverified recipe refuses cook and add_recipe_to_grocery", async () => {
+    test("a draft's expiry reads as the household's local day", async () => {
+        db.profile = { ...PROFILE_BASE, timezone: "America/New_York" };
+        await withUser(alice, async (call) => {
+            const imported = await call("import_recipe_from_text", {
+                text: "x",
+                instructions: "",
+                name: "Late night stew",
+                ingredients: [{ name: "rice", amount: 50, unit: "g" }],
+            });
+            const id = (imported.structuredContent?.recipe as { id: string })
+                .id;
+            const row = await db.recipesStore.getRecipe("hh-1", id);
+            await db.recipesStore.updateRecipe({
+                ...row!,
+                draftExpiresAt: "2026-12-01T02:00:00.000Z",
+            });
+            const shown = await call("get_recipe", { id });
+            expect(textOf(shown)).toContain("deleted on 2026-11-30");
+            expect(textOf(shown)).not.toContain("2026-12-01");
+            const listed = await call("list_recipes", {
+                verification: "unverified",
+            });
+            expect(textOf(listed)).toContain(
+                "Late night stew yield 1 (draft, deleted 2026-11-30 unless saved)",
+            );
+        });
+    });
+
+    test("a draft refuses cook, the grocery list, the plan and a logged portion, saying it is a draft", async () => {
         await withUser(alice, async (call) => {
             const imported = await call("import_recipe_from_text", {
                 text: "x",
@@ -8007,8 +8086,9 @@ describe("phone-app domain MCP tools", () => {
                 recipe_id: recipeId,
                 total_portions: 1,
             });
+            const DRAFT = "That recipe is a draft; save it first.";
             expect(cooked.isError).toBeTruthy();
-            expect(textOf(cooked).toLowerCase()).toContain("unverified");
+            expect(textOf(cooked)).toContain(DRAFT);
             const added = await call("add_recipe_to_grocery", {
                 recipe_id: recipeId,
                 store_id: (
@@ -8017,7 +8097,29 @@ describe("phone-app domain MCP tools", () => {
                 total_portions: 1,
             });
             expect(added.isError).toBeTruthy();
-            expect(textOf(added).toLowerCase()).toContain("unverified");
+            expect(textOf(added)).toContain(DRAFT);
+            for (const repeat of ["once", "weekly"]) {
+                const planned = await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: new Date(Date.now() + 2 * 86_400_000)
+                        .toISOString()
+                        .slice(0, 10),
+                    slot: "dinner",
+                    repeat,
+                });
+                expect(planned.isError).toBeTruthy();
+                expect(textOf(planned)).toContain(DRAFT);
+            }
+            const logged = await call("log_recipe_portion", {
+                recipe_id: recipeId,
+                portions: 1,
+            });
+            expect(logged.isError).toBeTruthy();
+            expect(textOf(logged)).toContain(DRAFT);
+            // delete_recipe points a draft to discard_recipe_draft.
+            const deleted = await call("delete_recipe", { id: recipeId });
+            expect(deleted.isError).toBeTruthy();
+            expect(textOf(deleted)).toContain("discard_recipe_draft");
         });
     });
 
@@ -8081,8 +8183,34 @@ describe("phone-app domain MCP tools", () => {
                     (row) => row.display_name.toLowerCase() === "milk",
                 )?.missing,
             ).toContain("grams_per_ml");
-            const listed = await call("list_recipes", { tag: "breakfast" });
-            expect(textOf(listed)).toContain("Overnight oats");
+            // A draft: left out of the list, filtered or not, until the
+            // drafts themselves are asked for.
+            expect(imported.structuredContent).toMatchObject({
+                draft: true,
+            });
+            expect(imported.structuredContent?.draft_expires_at).not.toBeNull();
+            for (const args of [{}, { tag: "breakfast" }, { query: "oats" }]) {
+                const listed = await call("list_recipes", args);
+                expect(textOf(listed)).not.toContain("Overnight oats");
+            }
+            const drafts = await call("list_recipes", {
+                tag: "breakfast",
+                verification: "unverified",
+            });
+            expect(textOf(drafts)).toContain(
+                "Overnight oats yield 2 (draft, deleted",
+            );
+            const [row] = drafts.structuredContent?.recipes as {
+                draft_expires_at: string | null;
+            }[];
+            expect(row?.draft_expires_at).not.toBeNull();
+            const shown = await call("get_recipe", {
+                id: (imported.structuredContent?.recipe as { id: string }).id,
+            });
+            expect(shown.structuredContent).toMatchObject({
+                draft: true,
+                verification: "unverified",
+            });
         });
     });
 
@@ -9757,7 +9885,10 @@ describe("/mcp destructive tools are guarded", () => {
                 row(item.id, { food_id: item.foodId }),
             );
         }
-        for (const recipe of await db.recipesStore.listRecipes("hh-1")) {
+        for (const recipe of [
+            ...(await db.recipesStore.listRecipes("hh-1")),
+            ...(await db.recipesStore.listDraftRecipes("hh-1")),
+        ]) {
             agent.__seed("recipes", row(recipe.id));
         }
         for (const ingredient of await db.recipesStore.listIngredientsForHousehold(
@@ -9787,6 +9918,7 @@ describe("/mcp destructive tools are guarded", () => {
             items: await db.fridgeStore.listItems("hh-1"),
             movements: await db.stockStore.listMovements("hh-1"),
             recipes: await db.recipesStore.listRecipes("hh-1"),
+            drafts: await db.recipesStore.listDraftRecipes("hh-1"),
             ingredients:
                 await db.recipesStore.listIngredientsForHousehold("hh-1"),
             plans: await db.plansStore.listPlans(
@@ -9949,6 +10081,14 @@ describe("/mcp destructive tools are guarded", () => {
                 amount: 200,
                 unit: "g",
             });
+            // A second line: a saved recipe refuses losing its last one.
+            const salt = await call("upsert_food", { name: "Salt" });
+            await call("add_recipe_ingredient", {
+                recipe_id: recipe.structuredContent?.id,
+                food_id: salt.structuredContent?.id,
+                amount: 1,
+                unit: "g",
+            });
             const [ingredient] =
                 await db.recipesStore.listIngredientsForHousehold("hh-1");
             expect(added.isError).toBeFalsy();
@@ -9959,6 +10099,25 @@ describe("/mcp destructive tools are guarded", () => {
                     ingredient_id: ingredient!.id,
                 },
                 summary: "Removed Flour from recipe Soup",
+            };
+        },
+        discard_recipe_draft: async (call) => {
+            const made = await call("import_recipe_from_text", {
+                text: "Leek soup",
+                name: "Leek soup",
+                instructions: "1. Simmer",
+                ingredients: [{ name: "Leek", amount: 2, unit: "each" }],
+                on_similar: "create",
+            });
+            expect(made.isError).toBeFalsy();
+            return {
+                tool: "discard_recipe_draft",
+                args: {
+                    recipe_id: (
+                        made.structuredContent?.recipe as { id: string }
+                    ).id,
+                },
+                summary: "Discarded draft Leek soup",
             };
         },
         unplan_recipe: async (call) => {
@@ -10013,6 +10172,7 @@ describe("/mcp destructive tools are guarded", () => {
                 "delete_water",
                 "delete_weight",
                 "discard_fridge_item",
+                "discard_recipe_draft",
                 "merge_foods",
                 "remove_recipe_ingredient",
                 "unplan_recipe",
@@ -11125,6 +11285,7 @@ describe("/mcp event notifications", () => {
                 settings: db.settingsStore,
                 stock: db.stockStore,
                 foods: db.foodsStore,
+                recipes: db.recipesStore,
             });
             const sentAfterCommit: boolean[] = [];
             setNotifyDepsForTests({
@@ -11209,6 +11370,7 @@ describe("/mcp event notifications", () => {
                     settings: db.settingsStore,
                     stock: db.stockStore,
                     foods: db.foodsStore,
+                    recipes: db.recipesStore,
                 });
                 const failed = await call("unplan_recipe", { plan_id: planId });
                 expect(failed.isError).toBe(true);
@@ -11487,6 +11649,7 @@ describe("/mcp event notifications", () => {
             settings: db.settingsStore,
             stock: db.stockStore,
             foods: db.foodsStore,
+            recipes: db.recipesStore,
         });
         const batch = ["Stew", "Soup"].map((name, index) => ({
             jsonrpc: "2.0",
@@ -15827,7 +15990,14 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         IMPORT_RECIPE_FROM_TEXT_OUTPUT_SCHEMA.parse(
                             imported.structuredContent,
                         );
-                    expect(importBody.verification).toBe("verified");
+                    // A complete import is a draft, ready to save.
+                    expect(importBody.verification).toBe("unverified");
+                    expect(importBody).toMatchObject({
+                        draft: true,
+                        ready_to_save: true,
+                    });
+                    expect(importBody.draft_expires_at).not.toBeNull();
+                    expect(textOf(imported)).toContain("save_recipe");
                     expect(
                         importBody.mention_warnings.map((w) => w.key),
                     ).toEqual(["egg"]);
@@ -15850,7 +16020,8 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         "egg",
                     ]);
                     // A warning never changes verification.
-                    expect(body.verification).toBe("verified");
+                    expect(body.verification).toBe("unverified");
+                    expect(body.ready_to_save).toBe(true);
                     expect(body.problems).toEqual([]);
                     expect(textOf(got)).toContain(
                         "The steps mention egg, which isn't an ingredient.",
@@ -15862,12 +16033,32 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                     const checkedBody = VERIFY_RECIPE_OUTPUT_SCHEMA.parse(
                         checked.structuredContent,
                     );
-                    expect(checkedBody.status).toBe("verified");
+                    expect(checkedBody.status).toBe("unverified");
+                    expect(checkedBody.ready_to_save).toBe(true);
                     expect(
                         checkedBody.mention_warnings.map((w) => w.key),
                     ).toEqual(["egg"]);
                     expect(textOf(checked)).toContain("passed the check");
                     expect(textOf(checked)).toContain("mention egg");
+
+                    // Save is the one promotion, on either era.
+                    const saved = await call("save_recipe", {
+                        recipe_id: recipeId,
+                    });
+                    expect(saved.isError).toBeFalsy();
+                    expect(saved.structuredContent).toMatchObject({
+                        status: "saved",
+                        verification: "verified",
+                    });
+                    const savedBody = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                        (await call("get_recipe", { id: recipeId }))
+                            .structuredContent,
+                    );
+                    expect(savedBody).toMatchObject({
+                        verification: "verified",
+                        draft: false,
+                        draft_expires_at: null,
+                    });
 
                     const added = await call("add_recipe_ingredient", {
                         recipe_id: recipeId,
@@ -15941,7 +16132,7 @@ describe("/mcp serves one tool surface on both protocol eras", () => {
                         const checkedBody = VERIFY_RECIPE_OUTPUT_SCHEMA.parse(
                             checked.structuredContent,
                         );
-                        expect(checkedBody.status).toBe("verified");
+                        expect(checkedBody.status).toBe("unverified");
                         expect(checkedBody.mention_warnings).toEqual([]);
                         expect(logged).toHaveBeenCalled();
 
@@ -17528,6 +17719,21 @@ describe("authenticated dashboard HTTP", () => {
             "/recipes/".length,
         );
         expect(recipeId.length).toBeGreaterThan(0);
+        // It lands as a draft with a 7-day expiry, on a page that offers
+        // Save, and stays out of the recipe list until it is saved.
+        const draft = await db.recipesStore.getRecipe("hh-1", recipeId);
+        expect(draft?.verification).toBe("unverified");
+        expect(draft?.draftExpiresAt).not.toBeNull();
+        expect(
+            (await db.recipesStore.listRecipes("hh-1")).map((r) => r.id),
+        ).not.toContain(recipeId);
+        const draftPage = await siteApp.request(
+            `http://x/recipes/${recipeId}`,
+            { headers: { cookie: cookieFor(alice) } },
+        );
+        const draftHtml = await draftPage.text();
+        expect(draftHtml).toContain(`action="/recipes/${recipeId}/save"`);
+        expect(draftHtml).not.toContain('id="fd-recipe-cook-sheet"');
 
         db.recipeImportFetcher = {
             async robotsAllows() {

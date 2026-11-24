@@ -513,6 +513,19 @@ describe("dismissal cleanup on writers (memory)", () => {
             sortOrder: 0,
             note: null,
         });
+        // A second line, so taking this one out leaves the recipe with an
+        // ingredient (a saved recipe never loses its last one).
+        await recipes.insertIngredient({
+            id: crypto.randomUUID(),
+            householdId: HH,
+            recipeId: recipe2.id,
+            kind: "food",
+            displayName: "Tomato",
+            quantity: { amount: 1, unit: "g" },
+            foodId: null,
+            sortOrder: 1,
+            note: null,
+        });
         await seedSubjectDismissals(dismissals, "recipe_ingredient", ing2);
         expect(
             await removeRecipeIngredient(recipes, HH, recipe2.id, ing2),
