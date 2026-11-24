@@ -7,7 +7,6 @@ function esc(s) {
 }
 
 const foodPickerInit = new WeakSet();
-var foodPickerFillResetBound = false;
 
 // A new search (or clearing the box) makes every earlier one stale: its
 // response is dropped and, where the browser can, its request aborted. The
@@ -27,46 +26,6 @@ function cancelFoodPickerSearch(root) {
         root._foodPickerSearchAbort = null;
     }
     return root._foodPickerSearchSeq;
-}
-
-function resetFoodPicker(root) {
-    root._foodPickerEpoch = (root._foodPickerEpoch || 0) + 1;
-    cancelFoodPickerSearch(root);
-    var searchInput = root.querySelector("[data-search-input]");
-    if (searchInput) searchInput.value = "";
-    var searchResults = root.querySelector("[data-search-results]");
-    if (searchResults) searchResults.textContent = "";
-    var barcodeResults = root.querySelector("[data-barcode-results]");
-    if (barcodeResults) {
-        barcodeResults.textContent = "";
-        if (typeof barcodeResults.removeAttribute === "function") {
-            barcodeResults.removeAttribute("data-barcode");
-        }
-    }
-    var form = root.querySelector("[data-barcode-form]");
-    if (form && typeof form.removeAttribute === "function") {
-        form.removeAttribute("data-lookup-called");
-    }
-    // A moved dialog opens on the tab a fresh picker starts on.
-    if (root._foodPickerShow && root._foodPickerInitialTab) {
-        root._foodPickerShow(root._foodPickerInitialTab);
-    }
-}
-
-function bindFoodPickerFillReset() {
-    if (foodPickerFillResetBound) return;
-    if (
-        typeof document === "undefined" ||
-        typeof document.addEventListener !== "function"
-    ) {
-        return;
-    }
-    foodPickerFillResetBound = true;
-    document.addEventListener("foodable:dialog-fill", function (event) {
-        var scope = event && event.target;
-        if (!scope || typeof scope.querySelectorAll !== "function") return;
-        scope.querySelectorAll("[data-food-picker]").forEach(resetFoodPicker);
-    });
 }
 
 function initFoodPicker(root) {
@@ -89,11 +48,6 @@ function initFoodPicker(root) {
             show(tab.getAttribute("data-tab"));
         });
     });
-    var initialTab = root.querySelector('[role="tab"][aria-selected="true"]');
-    root._foodPickerShow = show;
-    root._foodPickerInitialTab = initialTab
-        ? initialTab.getAttribute("data-tab")
-        : null;
     var searchInput = root.querySelector("[data-search-input]");
     var searchResults = root.querySelector("[data-search-results]");
     var hit = root.getAttribute("data-hit");
@@ -156,12 +110,8 @@ function initFoodPicker(root) {
                 searchResults.innerHTML = "";
                 return;
             }
-            var epoch = root._foodPickerEpoch || 0;
             function current() {
-                return (
-                    (root._foodPickerEpoch || 0) === epoch &&
-                    root._foodPickerSearchSeq === seq
-                );
+                return root._foodPickerSearchSeq === seq;
             }
             root._foodPickerSearchTimer = setTimeout(function () {
                 root._foodPickerSearchTimer = null;
@@ -223,6 +173,5 @@ function initFoodPickers(root) {
 }
 
 window.FoodableApp.onLoad(function (root) {
-    bindFoodPickerFillReset();
     initFoodPickers(root);
 });

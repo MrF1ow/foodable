@@ -9,6 +9,7 @@ import { itemRow } from "../../components/v2/item-row.js";
 import { listGroup } from "../../components/v2/list-group.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import { sheet, sheetSection } from "../../components/v2/sheet.js";
+import { MEMBER_NAME_MAX_LENGTH } from "../../../household.js";
 import { APP_PATHS } from "../../route-map.js";
 import {
     renderSettingsV2Page,
@@ -114,7 +115,8 @@ ${button({ label: "Remove photo", variant: "danger", size: "md", type: "submit" 
 
 /** The Name sheet: one text field, saved with the rest of the profile post.
  *  It posts over Turbo and comes back to Account (303). A name that is left
- *  blank is not saved (the field is `required`). */
+ *  blank is not saved (the field is `required`); one longer than
+ *  `MEMBER_NAME_MAX_LENGTH` is refused like Add member's. */
 function nameSheet(view: SettingsAccountV2View, fromField: string): string {
     const formId = `${ACCOUNT_NAME_SHEET_ID}-form`;
     const error =
@@ -130,6 +132,7 @@ ${field({
     value: view.displayName,
     autocomplete: "name",
     required: true,
+    maxlength: MEMBER_NAME_MAX_LENGTH,
     error,
 })}
 </form>`;

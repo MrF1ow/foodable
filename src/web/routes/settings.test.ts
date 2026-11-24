@@ -87,6 +87,7 @@ let profileTimezone = "UTC";
 let alcoholTracking = false;
 let drinkUnit: "us" | "uk" = "us";
 let upsertPatch: Record<string, unknown> | undefined;
+let renamedTo: string[] = [];
 
 const BOB = "22222222-2222-4222-8222-222222222222";
 
@@ -148,7 +149,13 @@ mock.module("../../db/household.js", () => ({
     householdExists: async () => true,
     listHouseholdMembers: async () => [member],
     getHousehold: async () => ({ id: "hh-1", name: "Test" }),
-    updateMemberDisplayName: async () => undefined,
+    updateMemberDisplayName: async (
+        _householdId: string,
+        _userId: string,
+        displayName: string,
+    ) => {
+        renamedTo.push(displayName);
+    },
 }));
 
 // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns a profiles stub in this file
@@ -279,6 +286,7 @@ afterAll(() => {
 afterEach(() => {
     resetFlagsForTests();
     upsertPatch = undefined;
+    renamedTo = [];
     profileTheme = "light";
     profileTimezone = "UTC";
     alcoholTracking = false;
@@ -402,6 +410,42 @@ describe("settings routes", () => {
         expect(res.status).toBe(303);
         expect(profileTheme).toBe("dark");
         expect(upsertPatch?.theme).toBeUndefined();
+    });
+
+    test("POST /settings group=account caps the own name at Add member's 80 characters", async () => {
+        const post = (
+            display_name: string,
+            extra: Record<string, string> = {},
+        ) =>
+            hono.request("http://test/settings", {
+                method: "POST",
+                headers: {
+                    cookie: cookie(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    group: "account",
+                    return: "/settings/account",
+                    display_name,
+                    ...extra,
+                }),
+            });
+
+        const long = await post("a".repeat(81), { theme: "dark" });
+        expect(long.status).toBe(400);
+        const html = await long.text();
+        expect(html).toContain("Name must be at most 80 characters.");
+        expect(html).toMatch(
+            /<dialog [^>]*id="fd-account-name"[^>]*data-sheet-open-on-load/,
+        );
+        expect(renamedTo).toEqual([]);
+        expect(upsertPatch).toBeUndefined();
+
+        // The cap counts the trimmed name, like parseMemberInput.
+        const ok = await post(`  ${"a".repeat(80)}  `);
+        expect(ok.status).toBe(303);
+        expect(ok.headers.get("location")).toBe("/settings/account");
+        expect(renamedTo).toEqual(["a".repeat(80)]);
     });
 
     test("POST /settings group=account with theme saves theme (legacy form)", async () => {
