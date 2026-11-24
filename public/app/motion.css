@@ -1,8 +1,9 @@
 /* App-only motion primitives (Magic UI's blur-fade and border-beam, in CSS).
  *
- * Entrances are gated on html.fx, which the shell script sets inside a frame
- * and never under prefers-reduced-motion, so a renderer that never ticks
- * shows the static page instead of a blank one. Only opacity, filter,
+ * Entrances are gated on html.fx, which the inline script in <head> sets before
+ * the first paint and never under prefers-reduced-motion, so the first full
+ * load paints once (the page fades in from blank). The page's own entrance
+ * (`html.fx-enter`, see app.css) ends before a Turbo visit renders. Only opacity, filter,
  * transform and registered properties animate: nothing here moves layout. */
 
 @keyframes fx-blur-in {

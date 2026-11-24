@@ -18069,7 +18069,6 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain('data-fd-settings-page="home"');
         expect(html).toContain('href="/settings/help"');
         expect(html).not.toContain("bottom-nav");
-        expect(html).toContain('name="foodable-theme-chrome" content="page"');
         expect(html).not.toContain("coming-soon");
     });
 
@@ -18276,12 +18275,21 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(save.status).toBe(303);
         expect(db.profile?.theme).toBeNull();
-        const r = await siteApp.request("http://x/settings/display", {
+        // The Display control lives on Settings home now; the old page
+        // redirects there.
+        const old = await siteApp.request("http://x/settings/display", {
+            headers: { cookie: cookieFor(alice) },
+        });
+        expect(old.status).toBe(301);
+        expect(old.headers.get("location")).toBe("/settings");
+        const r = await siteApp.request("http://x/settings", {
             headers: { cookie: cookieFor(alice) },
         });
         const html = await r.text();
         expect(html).toContain('<html lang="en">');
-        expect(html).toContain('name="theme" value="system" checked');
+        expect(html).toContain(
+            'type="radio" name="theme" value="system" checked',
+        );
     });
 
     test("?member= of a stranger is 403", async () => {

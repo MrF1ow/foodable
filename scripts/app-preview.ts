@@ -102,7 +102,7 @@ import { listExpiring } from "../src/domain/stock.js";
 import { defaultFreezeExpiry } from "../src/domain/fridge.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
-import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
+import { renderSettingsTimezoneV2Page } from "../src/web/pages/v2/settings-account-timezone.js";
 import { renderSettingsUnitsV2Page } from "../src/web/pages/v2/settings-units.js";
 import { renderSettingsNutrientsV2Page } from "../src/web/pages/v2/settings-nutrients.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
@@ -123,7 +123,6 @@ import {
     renderSettingsStoreV2Page,
     STORE_DELETE_SHEET_ID,
 } from "../src/web/pages/v2/settings-stores-detail.js";
-import { renderSettingsExportV2Page } from "../src/web/pages/v2/settings-export.js";
 import { renderSettingsAiV2Page } from "../src/web/pages/v2/settings-ai.js";
 import {
     renderSettingsScoreHouseholdV2Page,
@@ -2260,9 +2259,11 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             email: "ethan@example.com",
             timezone: "America/Los_Angeles",
         }),
-        "settings-display": renderSettingsDisplayV2Page({
+        "settings-timezone": renderSettingsTimezoneV2Page({
             chrome,
-            storedTheme: null,
+            backHref: "/kitchen/fridge",
+            timezone: "America/Los_Angeles",
+            now: new Date("2026-11-10T12:00:00Z"),
         }),
         "settings-units": renderSettingsUnitsV2Page({
             chrome,
@@ -2324,7 +2325,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             duplicateCount: 2,
             searchQuery: "",
         }),
-        "settings-export": renderSettingsExportV2Page({ chrome }),
         "settings-ai": renderSettingsAiV2Page({
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,

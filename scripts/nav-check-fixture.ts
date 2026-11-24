@@ -41,7 +41,7 @@ import {
 import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
-import { renderSettingsDisplayV2Page } from "../src/web/pages/v2/settings-display.js";
+import { renderSettingsTimezoneV2Page } from "../src/web/pages/v2/settings-account-timezone.js";
 import { renderSettingsHelpV2Page } from "../src/web/pages/v2/settings-help.js";
 import { renderNotificationsPage } from "../src/web/pages/v2/notifications.js";
 import { renderSettingsNotificationsV2Page } from "../src/web/pages/v2/settings-notifications.js";
@@ -299,9 +299,11 @@ async function pages(
             email: "ethan@example.com",
             timezone: "America/Los_Angeles",
         }),
-        "settings-display": renderSettingsDisplayV2Page({
+        "settings-timezone": renderSettingsTimezoneV2Page({
             chrome: chrome as never,
-            storedTheme: null,
+            backHref: "/kitchen/fridge",
+            timezone: "America/Los_Angeles",
+            now: new Date("2026-11-10T12:00:00Z"),
         }),
         help: renderSettingsHelpV2Page({ chrome: chrome as never }),
         "dev-gallery-v2": renderDevGalleryV2Page(chrome as never),
@@ -346,7 +348,7 @@ const ROUTE_BASE: Record<string, string> = {
     "/trends": "trends",
     "/settings": "settings",
     "/settings/account": "settings-account",
-    "/settings/display": "settings-display",
+    "/settings/account/timezone": "settings-timezone",
     "/settings/help": "help",
     "/dev/gallery-v2": "dev-gallery-v2",
     "/settings/household": "household",
@@ -580,7 +582,7 @@ const server = Bun.serve({
             const entries: [string, string][] = [];
             for (const [k, v] of form.entries()) entries.push([k, String(v)]);
             posts.push({ path, entries });
-            // Settings › Display (and the theme buttons on Settings home) save
+            // The Display control on Settings home saves
             // the appearance, as the real route does; the saved theme is what
             // the next page renders.
             if (path === "/settings/display") {
@@ -594,11 +596,16 @@ const server = Bun.serve({
             const dest = new URL(referer);
             let destKey = dest.pathname + dest.search;
             if (path === "/settings/display") {
-                // Like the route: Settings home's control comes back to it.
-                destKey =
-                    entries.find(([k]) => k === "return")?.[1] === "/settings"
-                        ? "/settings"
-                        : "/settings/display";
+                // Like the route: the control on Settings comes back to it.
+                destKey = "/settings";
+            }
+            if (
+                path === "/settings" &&
+                entries.find(([k]) => k === "return")?.[1] ===
+                    "/settings/account"
+            ) {
+                // The time zone page and the name sheet come back to Account.
+                destKey = "/settings/account";
             }
             const file = routeHtmlFile(destKey.split("?")[0]!);
             let html = applyAccountTheme(

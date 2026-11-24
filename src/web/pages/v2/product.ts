@@ -184,7 +184,7 @@ function productBackIcon(): string {
 function productTopBar(backHref: string): string {
     const cart = String(iconCart());
     return `<header class="fd-product-top fd-settings-phone-top">
-<a class="fd-settings-phone-back fd-product-top__back" href="${esc(backHref)}" data-turbo="false" aria-label="Back">${productBackIcon()}</a>
+<a class="fd-settings-phone-back fd-product-top__back" href="${esc(backHref)}" aria-label="Back">${productBackIcon()}</a>
 <span class="fd-settings-phone-top__balance" aria-hidden="true"></span>
 <a class="fd-settings-phone-back fd-product-top__cart" href="${esc(APP_PATHS.kitchenGroceries)}" aria-label="Groceries">${cart}</a>
 </header>`;

@@ -5,6 +5,7 @@ import {
     APP_TABS,
     appBar,
     appHead,
+    ENTRANCE_FX_SCRIPT,
     renderAppShell,
     parseAppearanceInput,
     renderBarePage,
@@ -68,7 +69,9 @@ test("a tab page uses the shell and marks its tab active", () => {
     expect(html).toMatch(
         /<a class="fd-tab" href="\/kitchen\/fridge" aria-current="page"/,
     );
-    expect(html).toContain('href="/settings" data-turbo="false"');
+    // The way into Settings is a Turbo visit, like the tabs.
+    expect(html).toContain('href="/settings"');
+    expect(html).not.toContain('href="/settings" data-turbo="false"');
     expect(html).not.toContain('href="/logout"');
     expect(html).not.toContain("app-bar");
     expect(html).toMatch(
@@ -93,9 +96,8 @@ test("system theme leaves data-theme off and offers both theme colors", () => {
     expect(html).toContain(
         `<meta name="theme-color" content="${THEME_COLOR.dark}" media="(prefers-color-scheme: dark)" />`,
     );
-    expect(html).toContain(
-        '<meta name="foodable-theme-chrome" content="page" />',
-    );
+    // The chrome is always the page colour: no meta says so.
+    expect(html).not.toContain("foodable-theme-chrome");
     expect(html).not.toContain("has-bottom-nav");
     expect(html).not.toContain("--accent");
 });
@@ -110,18 +112,20 @@ test("an explicit theme stamps data-theme on html", () => {
     expect(html).not.toContain("--accent");
 });
 
-test("themeColorMeta uses page bg on bare pages and nav chrome on tabs", () => {
+test("themeColorMeta is the page background in every theme; the nav colour is not chrome", () => {
     expect(themeColorMeta("dark", "page")).toContain(THEME_COLOR.dark);
-    expect(themeColorMeta("dark", "nav")).toContain(THEME_NAV_COLOR.dark);
-    expect(themeColorMeta("system", "nav")).toContain(THEME_NAV_COLOR.light);
+    expect(themeColorMeta("light", "page")).toContain(THEME_COLOR.light);
     expect(themeColorMeta("system", "page")).toContain(THEME_COLOR.light);
+    expect(themeColorMeta("system", "page")).toContain(THEME_COLOR.dark);
+    for (const theme of ["light", "dark", "system"] as const) {
+        expect(themeColorMeta(theme, "page")).not.toContain(
+            THEME_NAV_COLOR.dark,
+        );
+    }
 });
 
-test("bare pages stamp page chrome and omit the bottom nav", () => {
+test("bare pages carry the page-coloured chrome and omit the bottom nav", () => {
     const html = renderBarePage("Household", "<p>x</p>", "dark");
-    expect(html).toContain(
-        '<meta name="foodable-theme-chrome" content="page" />',
-    );
     expect(html).toContain(
         `<meta name="theme-color" content="${THEME_COLOR.dark}" />`,
     );
@@ -198,89 +202,188 @@ function runShellScript(
     );
 }
 
-test("the fx gate is a no-op on a window without matchMedia", () => {
+/** A fake document and window for shell.js: records the classes it removes
+ *  and the timer and listeners it registers. */
+function fxHarness(opts: { matchMedia?: boolean; setTimeout?: boolean } = {}) {
     const html = {
         classList: {
             added: [] as string[],
+            removed: [] as string[],
             add(c: string) {
                 this.added.push(c);
             },
+            remove(c: string) {
+                this.removed.push(c);
+            },
         },
     };
+    const listeners: Record<string, (() => void)[]> = {};
+    const timers: { fn: () => void; ms: number }[] = [];
     const document = {
         documentElement: html,
         querySelectorAll: () => [],
-        addEventListener() {},
+        addEventListener(type: string, fn: () => void) {
+            (listeners[type] ??= []).push(fn);
+        },
     };
-    const window = { addEventListener() {} };
-    expect(() => runShellScript(document, window)).not.toThrow();
-    expect(html.classList.added).toEqual([]);
+    const window: Record<string, unknown> = { addEventListener() {} };
+    if (opts.matchMedia !== false) {
+        window.matchMedia = () => ({ matches: false });
+    }
+    if (opts.setTimeout !== false) {
+        window.setTimeout = (fn: () => void, ms: number) => {
+            timers.push({ fn, ms });
+            return timers.length;
+        };
+    }
+    return { html, listeners, timers, document, window };
+}
+
+test("shell.js never adds fx: the head script sets it before first paint", () => {
+    const h = fxHarness();
+    runShellScript(h.document, h.window);
+    expect(h.html.classList.added).toEqual([]);
 });
 
-test("html.fx is added on the next frame when reduced motion is not requested", () => {
-    const html = {
-        classList: {
-            added: [] as string[],
-            add(c: string) {
-                this.added.push(c);
-            },
-        },
-    };
-    const raf: Array<(time: number) => void> = [];
-    const document = {
-        documentElement: html,
-        querySelectorAll: () => [],
-        addEventListener() {},
-    };
-    const window = {
-        addEventListener() {},
-        matchMedia(_q: string) {
-            return { matches: false };
-        },
-        requestAnimationFrame(cb: (time: number) => void) {
-            raf.push(cb);
-            return raf.length;
-        },
-    };
-    runShellScript(document, window);
-    expect(html.classList.added).toEqual([]);
-    expect(raf.length).toBe(1);
-    raf[0]!(0);
-    expect(html.classList.added).toEqual(["fx"]);
+test("the entrance ends on a timer once the fade has played", () => {
+    const h = fxHarness();
+    runShellScript(h.document, h.window);
+    expect(h.timers).toHaveLength(1);
+    expect(h.timers[0]!.ms).toBeGreaterThanOrEqual(900);
+    expect(h.html.classList.removed).toEqual([]);
+    h.timers[0]!.fn();
+    expect(h.html.classList.removed).toEqual(["fx-enter"]);
 });
 
-test("html.fx is not added when reduced motion is requested", () => {
-    const html = {
-        classList: {
-            added: [] as string[],
-            add(c: string) {
-                this.added.push(c);
+test("the entrance ends before a Turbo visit or refresh renders", () => {
+    const h = fxHarness();
+    runShellScript(h.document, h.window);
+    for (const type of ["turbo:visit", "turbo:before-render"]) {
+        h.html.classList.removed.length = 0;
+        expect(h.listeners[type]?.length).toBeGreaterThan(0);
+        for (const fn of h.listeners[type]!) fn();
+        // The theme sync listens on before-render too and removes nothing.
+        expect(h.html.classList.removed).toContain("fx-enter");
+    }
+});
+
+/** Runs shell.js and returns what a pick form's `change` does, keystrokes and
+ *  all: how many times it was submitted. */
+function pickHarness() {
+    const h = fxHarness();
+    runShellScript(h.document, h.window);
+    let submitted = 0;
+    const form = (marked: boolean) => ({
+        hasAttribute: (n: string) => marked && n === "data-fd-pick",
+        requestSubmit: () => submitted++,
+    });
+    const fire = (type: string, event: object) => {
+        for (const fn of h.listeners[type] ?? [])
+            (fn as (e: object) => void)(event);
+    };
+    return {
+        key: (t: number) => fire("keydown", { timeStamp: t }),
+        enter: (marked = true) => {
+            let prevented = false;
+            fire("keydown", {
+                key: "Enter",
+                timeStamp: 100,
+                target: { type: "radio", form: form(marked) },
+                preventDefault: () => (prevented = true),
+            });
+            return prevented;
+        },
+        change: (t: number, marked = true) =>
+            fire("change", { target: { form: form(marked) }, timeStamp: t }),
+        submitted: () => submitted,
+    };
+}
+
+test("a pick list saves when a pointer chooses a row", () => {
+    const p = pickHarness();
+    p.change(5000);
+    expect(p.submitted()).toBe(1);
+});
+
+test("an arrow key moving through a pick list saves nothing", () => {
+    const p = pickHarness();
+    p.key(9000);
+    p.change(9004);
+    expect(p.submitted()).toBe(0);
+    // A tap long after the last key saves again.
+    p.change(12000);
+    expect(p.submitted()).toBe(1);
+});
+
+test("Enter on a radio of a pick list saves the checked row", () => {
+    const p = pickHarness();
+    expect(p.enter()).toBe(true);
+    expect(p.submitted()).toBe(1);
+    // Another form's Enter is the browser's own.
+    expect(p.enter(false)).toBe(false);
+    expect(p.submitted()).toBe(1);
+});
+
+test("a change in a form that is not a pick list is left alone", () => {
+    const p = pickHarness();
+    p.change(5000, false);
+    expect(p.submitted()).toBe(0);
+});
+
+test("a window without matchMedia or setTimeout runs the script as a no-op", () => {
+    const h = fxHarness({ matchMedia: false, setTimeout: false });
+    expect(() => runShellScript(h.document, h.window)).not.toThrow();
+    expect(h.html.classList.added).toEqual([]);
+    expect(h.timers).toEqual([]);
+});
+
+/** Runs the head script the way the browser does, in a fake document. */
+function runEntranceScript(reducedMotion: boolean): string[] {
+    const body = ENTRANCE_FX_SCRIPT.slice(
+        "<script>".length,
+        -"</script>".length,
+    );
+    const added: string[] = [];
+    const document = {
+        documentElement: {
+            classList: {
+                add(...c: string[]) {
+                    added.push(...c);
+                },
             },
         },
     };
-    const raf: Array<(time: number) => void> = [];
-    const document = {
-        documentElement: html,
-        querySelectorAll: () => [],
-        addEventListener() {},
-    };
     const window = {
-        addEventListener() {},
-        matchMedia(q: string) {
-            return { matches: q.includes("prefers-reduced-motion: reduce") };
-        },
-        requestAnimationFrame(cb: (time: number) => void) {
-            raf.push(cb);
-            return raf.length;
-        },
+        matchMedia: (q: string) => ({
+            matches: reducedMotion && q.includes("prefers-reduced-motion"),
+        }),
     };
-    runShellScript(document, window);
-    expect(raf).toEqual([]);
-    expect(html.classList.added).toEqual([]);
+    new Function("document", "window", body)(document, window);
+    return added;
+}
+
+test("the head script sets fx and fx-enter before first paint, unless motion is reduced", () => {
+    expect(runEntranceScript(false)).toEqual(["fx", "fx-enter"]);
+    expect(runEntranceScript(true)).toEqual([]);
+});
+
+test("every page head carries the entrance script ahead of its stylesheets", () => {
+    for (const head of [
+        appHead("T", "system", "page"),
+        renderBarePage("T", "<p>x</p>"),
+    ]) {
+        expect(head).toContain(ENTRANCE_FX_SCRIPT);
+        expect(head.indexOf(ENTRANCE_FX_SCRIPT)).toBeLessThan(
+            head.indexOf('rel="stylesheet"'),
+        );
+    }
+    // The same text everywhere, so Turbo's head merge never runs it again.
+    expect(appHead("A", "light", "page")).toContain(ENTRANCE_FX_SCRIPT);
+    expect(appHead("B", "dark", "page")).toContain(ENTRANCE_FX_SCRIPT);
 });
 
 test("foodable-theme meta syncs html data-theme before turbo body paint", () => {
-    const THEME_NAV_BG = { light: "#fefefd", dark: "#131615" };
+    const THEME_PAGE_BG = { light: "#fbfaf7", dark: "#0d0f0e" };
     const htmlEl = {
         attrs: { "data-theme": "light" } as Record<string, string>,
         setAttribute(k: string, v: string) {
@@ -299,11 +402,6 @@ test("foodable-theme meta syncs html data-theme before turbo body paint", () => 
             return n === "content" ? themeContent : null;
         },
     };
-    const chromeMeta = {
-        getAttribute(n: string) {
-            return n === "content" ? "nav" : null;
-        },
-    };
     function metaEl(initial: Record<string, string | null>) {
         const attrs = { ...initial };
         return {
@@ -318,9 +416,7 @@ test("foodable-theme meta syncs html data-theme before turbo body paint", () => 
             },
         };
     }
-    const colorMetas = [
-        metaEl({ content: THEME_NAV_BG.light, name: "theme-color" }),
-    ];
+    const colorMetas = [metaEl({ content: "#ffffff", name: "theme-color" })];
     const listeners: Record<string, ((e: unknown) => void)[]> = {};
     const document = {
         documentElement: htmlEl,
@@ -330,7 +426,6 @@ test("foodable-theme meta syncs html data-theme before turbo body paint", () => 
             },
         },
         querySelector(sel: string) {
-            if (sel.includes("foodable-theme-chrome")) return chromeMeta;
             if (sel.includes("foodable-theme")) return themeMeta;
             return null;
         },
@@ -355,11 +450,7 @@ test("foodable-theme meta syncs html data-theme before turbo body paint", () => 
     };
     const injected = SHELL_JS.replace(
         "const THEME_PAGE_BG = null;",
-        () =>
-            `const THEME_PAGE_BG = ${JSON.stringify({ light: "#fbfaf7", dark: "#0d0f0e" })};`,
-    ).replace(
-        "const THEME_NAV_BG = null;",
-        () => `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_BG)};`,
+        () => `const THEME_PAGE_BG = ${JSON.stringify(THEME_PAGE_BG)};`,
     );
     new Function("document", "window", "Element", injected)(
         document,
@@ -370,11 +461,11 @@ test("foodable-theme meta syncs html data-theme before turbo body paint", () => 
     themeContent = "system";
     listeners["turbo:before-render"]![0]!({});
     expect(htmlEl.getAttribute("data-theme")).toBeNull();
-    expect(colorMetas[0]!.getAttribute("content")).toBe(THEME_NAV_BG.light);
+    expect(colorMetas[0]!.getAttribute("content")).toBe(THEME_PAGE_BG.light);
     expect(colorMetas[0]!.getAttribute("media")).toBe(
         "(prefers-color-scheme: light)",
     );
-    expect(colorMetas[1]!.getAttribute("content")).toBe(THEME_NAV_BG.dark);
+    expect(colorMetas[1]!.getAttribute("content")).toBe(THEME_PAGE_BG.dark);
     expect(colorMetas[1]!.getAttribute("media")).toBe(
         "(prefers-color-scheme: dark)",
     );

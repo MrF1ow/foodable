@@ -1,18 +1,14 @@
 import { Hono, type Context } from "hono";
 import { parseAppearanceInput } from "../shell.js";
 
-import {
-    ACCOUNT_TIMEZONE_SHEET_ID,
-    parseNutritionPrefsInput,
-} from "../pages/v2/settings-account.js";
+import { parseNutritionPrefsInput } from "../pages/v2/settings-account.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
     renderSettingsAccountPage,
     renderSettingsAiV2Route,
     renderSettingsAccountV2Route,
-    renderSettingsDisplayV2Route,
-    renderSettingsExportV2Route,
+    renderSettingsTimezoneV2Route,
     renderSettingsNutrientsV2Route,
     renderSettingsUnitsV2Route,
     alcoholOf,
@@ -54,7 +50,7 @@ import {
 } from "../../domain/agent-actions.js";
 import { exportAllData } from "../../domain/export.js";
 import { checkRateLimit } from "../../rate-limit.js";
-import { isValidDisplayTheme } from "../pages/v2/settings-display.js";
+import { isValidDisplayTheme } from "../pages/v2/settings-home.js";
 import { formText } from "../form.js";
 import {
     requireManager,
@@ -137,6 +133,15 @@ settingsRoutes.get("/settings/account", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
+// Time zone is a page of its own, with a search field (`?q=`).
+settingsRoutes.get(APP_PATHS.settingsTimezone, requireSiteUser, async (c) => {
+    const page = await renderSettingsTimezoneV2Route(c.get("userId"), {
+        backHref: resolveBackHref(c),
+        q: c.req.query("q"),
+    });
+    return c.html(page.html, page.status);
+});
+
 settingsRoutes.get("/settings/units", requireSiteUser, async (c) => {
     const page = await renderSettingsUnitsV2Route(c.get("userId"));
     return c.html(page.html, page.status);
@@ -147,9 +152,15 @@ settingsRoutes.get("/settings/nutrients", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
-settingsRoutes.get("/settings/display", requireSiteUser, async (c) => {
-    const page = await renderSettingsDisplayV2Route(c.get("userId"));
-    return c.html(page.html, page.status);
+// Display and Export data are rows on Settings now; their old pages are gone,
+// so a bookmark lands there.
+settingsRoutes.get("/settings/display", (c) => {
+    // toast: none (retired page)
+    return c.redirect(APP_PATHS.settings, 301);
+});
+settingsRoutes.get("/settings/export", (c) => {
+    // toast: none (retired page)
+    return c.redirect(APP_PATHS.settings, 301);
 });
 
 settingsRoutes.get("/settings/goals", requireSiteUser, async (c) => {
@@ -528,11 +539,6 @@ settingsRoutes.get("/settings/saved", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
-settingsRoutes.get("/settings/export", requireSiteUser, async (c) => {
-    const page = await renderSettingsExportV2Route(c.get("userId"));
-    return c.html(page.html, page.status);
-});
-
 settingsRoutes.post("/settings/export", requireSiteUser, async (c) => {
     const userId = c.get("userId");
     const limited = await checkRateLimit(userId);
@@ -548,7 +554,7 @@ settingsRoutes.post("/settings/export", requireSiteUser, async (c) => {
         origin,
     );
     if (!result.downloadPath) {
-        const page = await renderSettingsExportV2Route(userId, {
+        const page = await renderSettingsHomeRoute(userId, {
             error: "Nothing to export yet.",
         });
         // A non-member gets the membership page with its own status.
@@ -627,7 +633,7 @@ settingsRoutes.post("/settings/display", requireMember, async (c) => {
     const body = await c.req.parseBody();
     const themeRaw = formText(body, "theme");
     if (!isValidDisplayTheme(themeRaw)) {
-        const page = await renderSettingsDisplayV2Route(userId, {
+        const page = await renderSettingsHomeRoute(userId, {
             error: "Choose Auto, Light, or Dark.",
         });
         return c.html(page.html, 400);
@@ -636,14 +642,8 @@ settingsRoutes.post("/settings/display", requireMember, async (c) => {
         theme: themeRaw === "system" ? "system" : themeRaw,
     });
     await upsertProfile(userId, appearance);
-    // The inline control on Settings home comes back to it; only that
-    // exact path is honoured.
-    const back =
-        formText(body, "return") === "/settings"
-            ? "/settings"
-            : "/settings/display";
-    // toast: none — full reload refreshes theme chrome on this page
-    return c.redirect(back, 303);
+    // toast: none — Turbo applies the new theme on the page it lands on
+    return c.redirect(APP_PATHS.settings, 303);
 });
 
 settingsRoutes.get("/settings/help", requireSiteUser, async (c) => {
@@ -680,7 +680,13 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
         referer: undefined,
         origin,
     });
-    const redirectTo = settingsUrlWithBack(backHref);
+    // The Account name sheet and the time zone page post here and come back
+    // to Account; only that exact path is honoured, anything else goes to
+    // Settings as before.
+    const redirectTo =
+        formText(body, "return") === APP_PATHS.settingsAccount
+            ? APP_PATHS.settingsAccount
+            : settingsUrlWithBack(backHref);
     const group = formText(body, "group");
     if (group === "nutrition") {
         const prefs = parseNutritionPrefsInput({
@@ -695,22 +701,19 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
         });
         if (prefs.timezone) {
             if (!validateTz(prefs.timezone)) {
-                const page = await renderSettingsAccountPage(userId, {
+                const page = await renderSettingsTimezoneV2Route(userId, {
                     backHref,
                     error: "Choose a time zone from the list.",
-                    openSheetId: ACCOUNT_TIMEZONE_SHEET_ID,
                 });
-                return c.html(page.html, 400);
+                return c.html(
+                    page.html,
+                    page.status === 200 ? 400 : page.status,
+                );
             }
         } else {
             delete prefs.timezone;
         }
         await upsertProfile(userId, prefs);
-        // The Account time zone sheet posts only the zone.
-        if (typeof body.timezone === "string") {
-            // toast: none
-            return c.redirect(redirectTo, 303);
-        }
         // toast: none
         return c.redirect(redirectTo, 303);
     }

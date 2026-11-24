@@ -70,6 +70,91 @@ test("a checked Checkbox lead posts under its name and value", () => {
     );
 });
 
+test("the Radio lead is a ring in a group, and the row is its label", () => {
+    const html = itemRow({
+        title: "America/Denver",
+        value: "UTC-7",
+        lead: {
+            kind: "radio",
+            label: "America/Denver",
+            name: "timezone",
+            value: "America/Denver",
+            checked: true,
+        },
+    });
+    expect(html).toContain(
+        `<label class="fd-item-row__face fd-item-row__face--choice">`,
+    );
+    expect(html).toContain(
+        `<input type="radio" class="fd-item-row__check-input" name="timezone" value="America/Denver" checked aria-label="America/Denver">`,
+    );
+    // The lead is a span inside the label: labels do not nest.
+    expect(html).toContain(
+        `<span class="fd-item-row__lead fd-item-row__check fd-item-row__check--radio">`,
+    );
+    expect(html.match(/<label/g)).toHaveLength(1);
+    expect(() =>
+        itemRow({
+            title: "x",
+            href: "/x",
+            lead: { kind: "radio", label: "x", name: "n", value: "v" },
+        }),
+    ).toThrow("link row");
+});
+
+test("a submit row is one button holding the face, inside its own form", () => {
+    const html = itemRow({
+        title: "Export data",
+        value: "ZIP",
+        lead: { kind: "icon", name: "download" },
+        submit: {
+            action: "/settings/export",
+            formData: { turbo: "false" },
+        },
+    });
+    expect(html).toContain(
+        `<form class="fd-inline-form" method="post" action="/settings/export" data-turbo="false">`,
+    );
+    expect(html).toContain(
+        `<button type="submit" class="fd-item-row__face fd-item-row__face--link">`,
+    );
+    expect(html).toContain(`<span class="fd-item-row__value">ZIP</span>`);
+    expect(() =>
+        itemRow({ title: "x", href: "/x", submit: { action: "/y" } }),
+    ).toThrow("link or a button");
+    expect(() =>
+        itemRow({
+            title: "x",
+            submit: { action: "/y" },
+            trailing: { kind: "add", label: "Add" },
+        }),
+    ).toThrow("link row");
+});
+
+test("a link row can carry data attributes on its link", () => {
+    const html = itemRow({
+        title: "Log out",
+        href: "/logout",
+        linkData: { turbo: "false" },
+    });
+    expect(html).toContain(
+        `<a class="fd-item-row__face fd-item-row__face--link" href="/logout" data-turbo="false">`,
+    );
+});
+
+test("an opens row is a button that shows the sheet", () => {
+    const html = itemRow({
+        title: "Name",
+        value: "Ethan Flow",
+        trailing: { kind: "chevron" },
+        opens: "fd-account-name",
+    });
+    expect(html).toContain(
+        `<button type="button" class="fd-item-row__face fd-item-row__face--link" commandfor="fd-account-name" command="show-modal">`,
+    );
+    expect(html).toContain("fd-item-row__chevron");
+});
+
 test("the Avatar lead shows initials and is decorative", () => {
     const html = itemRow({
         title: "Sam",
