@@ -42,6 +42,138 @@
     flex-direction: column;
     gap: var(--space-2xs);
 }
+/* The Household pages end the bar with a round control (⋯, or the + of Invite
+   codes): in the Detail bar on the phone, in the page header from 1024 px. */
+.fd-settings-page-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-md);
+    width: 100%;
+}
+.fd-settings-page-head__actions {
+    display: flex;
+    flex: none;
+}
+.fd-settings-invite-create {
+    display: contents;
+}
+
+/* A row's ⋯ is the bare glyph, as an Item row draws its own More control. */
+.fd-settings--household .fd-item-row__control .fd-btn--icon {
+    background: transparent;
+    box-shadow: none;
+    color: var(--text-secondary);
+}
+
+/* A sheet's form: its fields stacked. */
+.fd-settings-sheet-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+}
+
+/* The household name and its member count (FigCraft 411160). */
+.fd-settings-hh-card .fd-card__content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+.fd-settings-hh-name {
+    color: var(--text-primary);
+    font-size: var(--text-title-section-size);
+    font-weight: 600;
+    line-height: var(--text-title-section-line);
+}
+.fd-settings-hh-count {
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+}
+
+/* A person's page: their circle and name over the rows (FigCraft 418641). */
+.fd-settings-member-head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-md);
+}
+.fd-settings-member-head__avatar {
+    box-sizing: border-box;
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+}
+.fd-settings-member-head__name {
+    margin: 0;
+    color: var(--text-primary);
+    font-family: var(--font-display);
+    font-size: var(--text-title-sheet-size);
+    font-weight: 700;
+    line-height: var(--text-title-sheet-line);
+}
+
+/* The one-time invite code (FigCraft 418939): a card with the code in a box. */
+.fd-settings-invite-code {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+.fd-settings-invite-code__label {
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    line-height: var(--text-caption-line);
+    text-transform: uppercase;
+}
+.fd-settings-invite-code__box {
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: var(--control-lg-height);
+    padding: 0 var(--space-xl);
+    border-radius: var(--control-lg-radius);
+    background: var(--surface-raised);
+    box-shadow: inset 0 0 0 1px var(--line);
+}
+.fd-settings-invite-code__box code {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    color: var(--text-secondary);
+    font: inherit;
+    font-size: var(--text-body-size);
+    line-height: var(--text-body-line);
+}
+.fd-settings-invite-code__copy {
+    display: flex;
+    flex: none;
+    align-self: center;
+    min-height: 0;
+    line-height: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.fd-settings-invite-code__copy:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
+}
+.fd-settings-invite-code__note {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+}
 /* The pages built from components (home, account, time zone) stack their
    parts 12 px apart; a section header brings its own 20 px above. */
 .fd-settings--flat .fd-page-layout__column,
@@ -71,6 +203,11 @@
 @media (min-width: 1024px) {
     .fd-settings-detail {
         display: none;
+    }
+    /* On desktop the design sets a section 12 px lower than the phone does. */
+    .fd-settings--household .fd-card + .fd-section-header,
+    .fd-settings--household .fd-list-group + .fd-section-header {
+        margin-top: var(--space-md);
     }
     .fd-settings--flat .fd-page-layout__columns {
         gap: var(--space-3xl);
@@ -133,22 +270,29 @@
 .fd-settings-photo__forms {
     display: flex;
     flex: 1 1 auto;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: var(--fd-s-6);
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--fd-s-12);
     min-width: 0;
 }
 .fd-settings-photo__form {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: var(--fd-s-6);
+    gap: var(--fd-s-12);
     max-width: 100%;
 }
-.fd-settings-photo__input {
-    max-width: 100%;
-    font: 400 0.8125rem/1.2 var(--font-body);
-    color: var(--text-secondary);
+/* The file input is visually hidden inside the picture's label, which opens
+   the picker; Change photo does the same through the script. */
+.fd-settings-photo__pick {
+    flex: none;
+    display: flex;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+}
+.fd-settings-photo__pick:focus-within {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: var(--space-2xs);
 }
 
 .fd-settings-phone-top {
@@ -413,36 +557,7 @@
     margin-top: var(--fd-s-6);
 }
 
-.fd-settings-household {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-12);
-}
-
-/* The household name as the page title, the count under it (FigCraft
- * 62119 / 62121). */
-.fd-settings-hh-head {
-    margin-bottom: var(--fd-s-12);
-}
-
-.fd-settings-title.fd-settings-hh-title {
-    font: 600 22px/28px var(--font-body);
-}
-
-.fd-settings-hh-sub {
-    margin: 4px 0 0;
-    font: 400 13px/18px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-settings-household-name {
-    margin: 0;
-    font-size: 1.125rem;
-    font-weight: 600;
-}
-
-.fd-settings-household-empty,
-.fd-settings-muted {
+.fd-settings-household-empty {
     margin: 0;
     font-size: 0.9375rem;
     color: var(--text-secondary);
@@ -466,44 +581,9 @@
     cursor: pointer;
 }
 
-.fd-settings-btn--primary {
-    border-color: transparent;
-    background: var(--accent-fill);
-    color: var(--accent-on);
-    font-weight: 600;
-}
-
 .fd-settings-btn--sm {
     padding: var(--fd-s-6) var(--fd-s-10);
     font-size: 0.8125rem;
-}
-
-.fd-settings-btn--danger {
-    border-color: var(--status-over);
-    background: transparent;
-    color: var(--status-over);
-    font-weight: 600;
-}
-
-.fd-row__body--with-trailing {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-6);
-}
-
-.fd-row--settings-member .fd-row__link {
-    flex: 1 1 auto;
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-6);
-    min-width: 0;
-    color: inherit;
-    text-decoration: none;
-}
-
-.fd-row--settings-member .fd-row__main {
-    flex: 1 1 auto;
-    min-width: 0;
 }
 
 /*
@@ -528,10 +608,6 @@
 }
 .fd-row--social .fd-settings-btn {
     white-space: nowrap;
-}
-
-.fd-row__trailing {
-    flex: 0 0 auto;
 }
 
 .fd-row__actions--wrap {
@@ -604,16 +680,6 @@
     margin: 0;
     font-weight: 500;
     color: var(--text-primary);
-}
-
-.fd-settings-member-today {
-    margin: var(--fd-s-12) 0 0;
-}
-
-.fd-settings-link {
-    color: var(--accent-text);
-    font-weight: 600;
-    text-decoration: none;
 }
 
 .fd-settings-goals-date,
@@ -1190,12 +1256,6 @@
     align-self: center;
 }
 
-/* Last active reads on desktop only (FigCraft 49584); the phone list is name and role. */
-.fd-row__last-active,
-.fd-settings-members-head {
-    display: none;
-}
-
 /* Product score (FigCraft 23689): a preset, four weight sliders, two switches
  * and the household default. Rows are hairline-separated, not carded. */
 .fd-scoreset {
@@ -1450,34 +1510,6 @@
     color: var(--text-tertiary);
 }
 
-/* Members in one panel with initials avatars (FigCraft 23470 phone,
- * 49474 desktop). */
-.fd-settings-members-card {
-    padding: 0 16px;
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-settings-members-card .fd-row--settings-member:last-child {
-    border-bottom: 0;
-}
-
-.fd-row--settings-member .fd-settings-member-avatar {
-    box-sizing: border-box;
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    margin-right: var(--fd-s-6);
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font: 600 13px/1 var(--font-body);
-}
-
 @media (min-width: 1024px) {
     .fd-settings {
         flex-direction: column;
@@ -1513,54 +1545,8 @@
         max-width: 680px;
     }
 
-    /* Members table: Member | Role | Last active (FigCraft 49584). The row's
-     * name, role and last-active share fixed columns with the header; the
-     * chevron or Manage button sits in a fixed slot on the right. */
-    .fd-settings-members-head {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) 8rem 9rem 5rem;
-        gap: var(--fd-s-6);
-        padding: var(--fd-s-6) 0 var(--fd-s-4);
-        font: 600 11px/14px var(--font-body);
-        letter-spacing: 0.08em;
-        text-transform: uppercase;
-        color: var(--text-secondary);
-    }
-
-    .fd-row--settings-member .fd-row__main,
-    .fd-row--settings-member .fd-row__line {
-        display: contents;
-    }
-
-    .fd-row--settings-member .fd-row__title {
-        flex: 1 1 0;
-        min-width: 0;
-    }
-
-    .fd-row--settings-member .fd-row__meta--lg {
-        flex: 0 0 8rem;
-    }
-
-    .fd-row--settings-member .fd-row__last-active {
-        display: block;
-        flex: 0 0 9rem;
-        font: 400 13px/17px var(--font-body);
-        color: var(--text-secondary);
-    }
-
-    .fd-row--settings-member .fd-row__chevron,
-    .fd-row--settings-member .fd-row__trailing {
-        flex: 0 0 5rem;
-        display: flex;
-        justify-content: flex-end;
-    }
-
     .fd-scoreset {
         max-width: 42.5rem;
-    }
-
-    .fd-settings-members-card {
-        padding: var(--fd-s-6) 22px;
     }
 }
 

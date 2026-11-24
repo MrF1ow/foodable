@@ -130,7 +130,7 @@ describe("settings account v2", () => {
         expect(banner).toContain('role="alert"');
     });
 
-    test("the photo forms use the component buttons, remove only with a picture", () => {
+    test("the picture and Change photo open the picker through a visually hidden file input; remove only with a picture", () => {
         const without = renderSettingsAccountV2Page(view);
         expect(without).toContain('action="/settings/account/photo"');
         expect(without).not.toContain("Remove photo");
@@ -142,9 +142,20 @@ describe("settings account v2", () => {
         expect(withPhoto).toContain(
             '<button type="submit" class="fd-btn fd-btn--danger fd-btn--sm" data-fd-btn><span class="fd-btn__label">Remove photo</span></button>',
         );
-        expect(withPhoto).toContain(
-            '<button type="submit" class="fd-btn fd-btn--primary fd-btn--sm" data-fd-btn><span class="fd-btn__label">Change photo</span></button>',
-        );
         expect(withPhoto).not.toContain("fd-settings-submit");
+        // The file input is there for the picker but never drawn: it is
+        // visually hidden, and the picture and the button are its labels.
+        expect(withPhoto).toMatch(
+            /<label class="fd-settings-photo__pick"><input type="file" id="photo" name="photo" class="fd-visually-hidden"/,
+        );
+        expect(withPhoto).toContain("data-fd-photo-pick");
+        expect(withPhoto).toContain("Change photo");
+        // The form still resizes in the browser and stays a Turbo form.
+        expect(withPhoto).toMatch(
+            /<form method="POST" action="\/settings\/account\/photo"[^>]*data-fd-avatar-upload>/,
+        );
+        expect(withPhoto).not.toMatch(
+            /<form method="POST" action="\/settings\/account\/photo"[^>]*data-turbo="false"/,
+        );
     });
 });

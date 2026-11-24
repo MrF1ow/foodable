@@ -23,6 +23,12 @@ export type FieldOptions = {
     value?: string;
     placeholder?: string;
     autocomplete?: string;
+    /** Phone keyboards: `none` stops the first letter being capitalised (a login). */
+    autocapitalize?: "none" | "words";
+    spellcheck?: boolean;
+    minlength?: number;
+    /** The most characters the box takes; the server keeps the same cap. */
+    maxlength?: number;
     required?: boolean;
     disabled?: boolean;
     /** A decorative icon at the end of the box (the eye of a password). */
@@ -56,6 +62,12 @@ export function field(opts: FieldOptions): Html {
         opts.autocomplete != null
             ? `autocomplete="${esc(opts.autocomplete)}"`
             : "",
+        opts.autocapitalize != null
+            ? `autocapitalize="${opts.autocapitalize}"`
+            : "",
+        opts.spellcheck != null ? `spellcheck="${opts.spellcheck}"` : "",
+        opts.minlength != null ? `minlength="${opts.minlength}"` : "",
+        opts.maxlength != null ? `maxlength="${opts.maxlength}"` : "",
         opts.required ? "required" : "",
         opts.disabled ? "disabled" : "",
         opts.error ? `aria-invalid="true"` : "",

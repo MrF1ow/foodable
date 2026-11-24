@@ -93,24 +93,8 @@ describe("rendered pages have no legacy links", () => {
                 unverifiedRecipeExpiryDays: null,
                 isOwner: true,
                 canManage: true,
+                canInvite: true,
                 viewerUserId: ME.userId,
-                noticeResult: {
-                    notices: [],
-                    dismissals: [],
-                    subjectNames: new Map(),
-                    subjectTimes: new Map(),
-                    noticeFoods: new Map(),
-                    catalogFoods: [],
-                    aliasMap: new Map(),
-                    barcodedIds: new Set(),
-                    possibleDuplicatePairs: [],
-                    recipesListPrefetch: {
-                        recipes: [],
-                        allIngredients: [],
-                        fridgeItems: [],
-                        foodsById: new Map(),
-                    },
-                },
             } as never),
         );
         assertNoLegacy(

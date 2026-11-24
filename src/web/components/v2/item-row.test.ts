@@ -165,6 +165,34 @@ test("the Avatar lead shows initials and is decorative", () => {
     );
 });
 
+test("the Avatar lead puts a member's picture over the initials only when one is set", () => {
+    const withPicture = itemRow({
+        title: "Sam",
+        lead: {
+            kind: "avatar",
+            initials: "S",
+            picture: { userId: "u 1", version: 1700000000000 },
+        },
+    });
+    expect(withPicture).toContain(
+        "fd-avatar fd-item-row__lead fd-item-row__avatar fd-avatar--photo",
+    );
+    expect(withPicture).toContain('src="/avatars/u%201?v=1700000000000"');
+    expect(withPicture).toContain(">S<img");
+    const without = itemRow({
+        title: "Sam",
+        lead: {
+            kind: "avatar",
+            initials: "S",
+            picture: { userId: "u1", version: null },
+        },
+    });
+    expect(without).not.toContain("<img");
+    expect(without).toContain(
+        `<span class="fd-item-row__lead fd-item-row__avatar" aria-hidden="true">S</span>`,
+    );
+});
+
 test("the Icon lead draws the named design icon", () => {
     const html = itemRow({
         title: "Show cards in chat",

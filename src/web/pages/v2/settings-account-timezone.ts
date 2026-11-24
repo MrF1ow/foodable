@@ -19,6 +19,7 @@ import { itemRow } from "../../components/v2/item-row.js";
 import { listGroup } from "../../components/v2/list-group.js";
 import { searchField } from "../../components/v2/search-field.js";
 import { APP_PATHS } from "../../route-map.js";
+import { renderHouseholdLayout } from "./settings-household-layout.js";
 import { timeZoneOptions } from "./settings-household-rows.js";
 import {
     renderSettingsV2Page,
@@ -86,8 +87,17 @@ export function timeZonesFor(stored: string, query: string): string[] {
         .slice(0, TIME_ZONE_SEARCH_LIMIT);
 }
 
+/** Settings › Household › Time zone: the household's zone, the same page. */
+export const HOUSEHOLD_TIMEZONE_PATH = "/settings/household/timezone";
+
 export type SettingsTimezoneV2View = {
     chrome: AppChromeBase;
+    /**
+     * The household's zone rather than the person's: a manager's page, saved
+     * to the household (303 back to Household, no toast), with a first choice
+     * that follows the owner's zone, which stores none.
+     */
+    household?: boolean;
     /** Where Settings sends the person back to (carried through the post). */
     backHref: string;
     /** The stored IANA zone, "" when none is set yet. */
@@ -100,9 +110,12 @@ export type SettingsTimezoneV2View = {
     now?: Date;
 };
 
-function searchForm(query: string): Html {
+function searchForm(query: string, household: boolean): Html {
+    const action = household
+        ? HOUSEHOLD_TIMEZONE_PATH
+        : APP_PATHS.settingsTimezone;
     return raw(
-        `<form class="fd-settings-tz-search" method="get" action="${esc(APP_PATHS.settingsTimezone)}" role="search" data-turbo-action="replace">${searchField(
+        `<form class="fd-settings-tz-search" method="get" action="${esc(action)}" role="search" data-turbo-action="replace">${searchField(
             {
                 label: "Search time zones",
                 placeholder: "Search time zones",
@@ -120,6 +133,7 @@ export function renderSettingsTimezoneV2Body(
     const now = view.now ?? new Date();
     const query = (view.query ?? "").trim();
     const zones = timeZonesFor(view.timezone, query);
+    const household = view.household === true;
     const rows = zones.map((zone) =>
         itemRow({
             title: zone,
@@ -133,6 +147,21 @@ export function renderSettingsTimezoneV2Body(
             },
         }),
     );
+    // The household's own choice to store no zone: it follows the owner's.
+    if (household && query === "") {
+        rows.unshift(
+            itemRow({
+                title: "Use the owner's time zone",
+                lead: {
+                    kind: "radio",
+                    label: "Use the owner's time zone",
+                    name: "timezone",
+                    value: "",
+                    checked: view.timezone === "",
+                },
+            }),
+        );
+    }
     const list =
         rows.length > 0
             ? String(listGroup({ rows, label: "Time zones" }))
@@ -140,19 +169,32 @@ export function renderSettingsTimezoneV2Body(
     // Only the zone is posted: the settings handler writes just what the form
     // carries, so units, alcohol and the widget switch keep their values.
     const choices = `<fieldset class="fd-settings-tz-group"><legend class="fd-visually-hidden">Time zone</legend>${list}</fieldset>`;
-    const form = `<form class="fd-settings-tz-form" method="post" action="/settings" data-fd-pick><input type="hidden" name="group" value="nutrition" /><input type="hidden" name="return" value="${esc(APP_PATHS.settingsAccount)}" /><input type="hidden" name="from" value="${esc(view.backHref)}" />${choices}<noscript><button type="submit" class="fd-btn">Save</button></noscript></form>`;
+    const carried = household
+        ? ""
+        : `<input type="hidden" name="group" value="nutrition" /><input type="hidden" name="return" value="${esc(APP_PATHS.settingsAccount)}" /><input type="hidden" name="from" value="${esc(view.backHref)}" />`;
+    const form = `<form class="fd-settings-tz-form" method="post" action="${household ? HOUSEHOLD_TIMEZONE_PATH : "/settings"}" data-fd-pick>${carried}${choices}<noscript><button type="submit" class="fd-btn">Save</button></noscript></form>`;
     return `${String(settingsErrorBanner(view.error))}${form}`;
 }
 
 export function renderSettingsTimezoneV2Page(
     view: SettingsTimezoneV2View,
 ): string {
+    const query = (view.query ?? "").trim();
+    if (view.household) {
+        return renderHouseholdLayout({
+            chrome: view.chrome,
+            title: "Time zone",
+            headerExtra: searchForm(query, true),
+            className: "fd-settings--timezone",
+            body: renderSettingsTimezoneV2Body(view),
+        });
+    }
     return renderSettingsV2Page({
         chrome: view.chrome,
         page: "timezone",
         title: "Time zone",
         backHref: APP_PATHS.settingsAccount,
-        headerExtra: searchForm((view.query ?? "").trim()),
+        headerExtra: searchForm(query, false),
         className: "fd-settings--timezone fd-settings--flat",
         body: renderSettingsTimezoneV2Body(view),
     });

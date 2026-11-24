@@ -28,7 +28,11 @@ import { addAllergen } from "../domain/rules.js";
 import { shiftLocalDate } from "../domain/tz.js";
 import type { HouseholdMember } from "../household.js";
 import { loadViewerNotices } from "./attention.js";
-import { createHouseholdFormHtml, forbiddenDashboardHtml } from "./loaders.js";
+import {
+    createHouseholdFormHtml,
+    forbiddenDashboardHtml,
+    ownerFirst,
+} from "./loaders.js";
 
 const pgAvailable = await findPgBin();
 
@@ -336,3 +340,24 @@ describeDb(
         });
     },
 );
+
+test("ownerFirst puts the owner first and keeps the others in their order", () => {
+    const people = [
+        { name: "Adele", role: "admin" },
+        { name: "Bob", role: "member" },
+        { name: "Zed", role: "owner" },
+        { name: "Cara", role: "member" },
+    ];
+    expect(ownerFirst(people).map((p) => p.name)).toEqual([
+        "Zed",
+        "Adele",
+        "Bob",
+        "Cara",
+    ]);
+    // Nothing is dropped or reordered when there is no owner in the list.
+    expect(ownerFirst(people.slice(0, 2)).map((p) => p.name)).toEqual([
+        "Adele",
+        "Bob",
+    ]);
+    expect(people.map((p) => p.name)).toEqual(["Adele", "Bob", "Zed", "Cara"]);
+});

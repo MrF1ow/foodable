@@ -36,6 +36,7 @@ import {
     type Html,
 } from "./html.js";
 import { icon, type IconName } from "./icon.js";
+import { memberAvatar } from "./avatar.js";
 import { macroLine, type Macros, type Text } from "./rows.js";
 import { scoreBadge } from "./score-badge.js";
 
@@ -58,7 +59,12 @@ export type ItemRowLead =
           value: string;
           checked?: boolean;
       }
-    | { kind: "avatar"; initials: string }
+    | {
+          kind: "avatar";
+          initials: string;
+          /** The member's picture over the initials (the profile-pictures flag). */
+          picture?: { userId: string; version: Date | number | null };
+      }
     | { kind: "icon"; name: IconName }
     | { kind: "dot"; color?: DotColor };
 
@@ -162,9 +168,18 @@ function leadSlot(lead: ItemRowLead, disabled: boolean): Html {
             );
         }
         case "avatar":
-            return raw(
-                `<span class="fd-item-row__lead fd-item-row__avatar" aria-hidden="true">${esc(lead.initials)}</span>`,
-            );
+            return lead.picture?.version != null
+                ? memberAvatar({
+                      name: lead.initials,
+                      initials: lead.initials,
+                      userId: lead.picture.userId,
+                      version: lead.picture.version,
+                      enabled: true,
+                      className: "fd-item-row__lead fd-item-row__avatar",
+                  })
+                : raw(
+                      `<span class="fd-item-row__lead fd-item-row__avatar" aria-hidden="true">${esc(lead.initials)}</span>`,
+                  );
         case "icon":
             return raw(
                 `<span class="fd-item-row__lead fd-item-row__icon">${icon(lead.name)}</span>`,

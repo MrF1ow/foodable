@@ -6,7 +6,6 @@ import {
     XSS,
     XSS_ESCAPED,
 } from "../../components/v2/test-helpers.js";
-import { renderHouseholdNav } from "../../components/settings-nav.js";
 import {
     DUPLICATES_PATH,
     duplicateComparePath,
@@ -255,10 +254,4 @@ describe("the compare page", () => {
         expect(html).not.toContain("<script>alert(1)");
         expect(await injectedAttributes(html)).toEqual([]);
     });
-});
-
-test("the household sub-nav links Possible duplicates to its Saved foods & recipes home", () => {
-    const html = renderHouseholdNav("members", { possibleDuplicates: 2 });
-    expect(html).toContain('href="/settings/saved/duplicates"');
-    expect(html).not.toContain("/settings/household/possible-duplicates");
 });

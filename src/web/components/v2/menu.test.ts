@@ -355,3 +355,20 @@ test("a danger post item is refused in an anchored menu, kept in the details men
         "fd-menu__item--danger",
     );
 });
+
+test("an opens item is a button that opens the named dialog, in the anchored menu", () => {
+    const html = anchored([
+        { kind: "opens", label: "Make owner", sheetId: "fd-owner" },
+    ]);
+    expect(html).toContain("fd-menu--anchored");
+    expect(html).toContain(
+        '<button type="button" class="fd-menu__item" role="menuitem" command="show-modal" commandfor="fd-owner"><span class="fd-menu__text"><span class="fd-menu__label">Make owner</span></span></button>',
+    );
+    // It is a menu item, not a form: it submits nothing.
+    expect(html).not.toContain("<form");
+});
+
+test("an opens item escapes its label and dialog id", async () => {
+    const html = anchored([{ kind: "opens", label: XSS, sheetId: XSS }]);
+    expect(await injectedAttributes(html)).toEqual([]);
+});

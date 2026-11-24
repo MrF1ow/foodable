@@ -6,7 +6,6 @@ import {
 } from "../../components/v2/icons.js";
 import { sheet } from "../../components/v2/sheet.js";
 import { rowList } from "../../components/v2/rows.js";
-import { settingsField } from "./settings-shared.js";
 
 /**
  * The rows of the Household group and of its sub-pages: an icon, a label, the
@@ -55,8 +54,6 @@ export type HouseholdRowOpts = {
     href?: string;
     /** An edit-sheet row: opens the sheet with this id. */
     sheetId?: string;
-    /** A trigger row for an old-style dialog (the rotate-token confirm). */
-    modalId?: string;
 };
 
 function rowInner(opts: HouseholdRowOpts, chevron: boolean): string {
@@ -78,10 +75,9 @@ export function householdRow(opts: HouseholdRowOpts): Html {
             `<li class="fd-row fd-row--stores-pref"><a class="fd-row__body fd-stores-pref" href="${esc(opts.href)}">${rowInner(opts, true)}</a></li>`,
         );
     }
-    const target = opts.sheetId ?? opts.modalId;
-    if (target) {
+    if (opts.sheetId) {
         return raw(
-            `<li class="fd-row fd-row--stores-pref"><button type="button" class="fd-row__body fd-stores-pref" commandfor="${esc(target)}" command="show-modal">${rowInner(opts, true)}</button></li>`,
+            `<li class="fd-row fd-row--stores-pref"><button type="button" class="fd-row__body fd-stores-pref" commandfor="${esc(opts.sheetId)}" command="show-modal">${rowInner(opts, true)}</button></li>`,
         );
     }
     return raw(
@@ -122,25 +118,6 @@ export function householdEditSheet(opts: {
     });
 }
 
-export function textInputField(opts: {
-    id: string;
-    label: string;
-    name: string;
-    value: string;
-    maxlength?: number;
-    required?: boolean;
-    placeholder?: string;
-    inputmode?: string;
-}): string {
-    return String(
-        settingsField({
-            id: opts.id,
-            label: opts.label,
-            control: `<input class="fd-settings-input" id="${esc(opts.id)}" name="${esc(opts.name)}" value="${esc(opts.value)}"${opts.maxlength ? ` maxlength="${opts.maxlength}"` : ""}${opts.required ? " required" : ""}${opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : ""}${opts.inputmode ? ` inputmode="${esc(opts.inputmode)}"` : ""} autocomplete="off" />`,
-        }),
-    );
-}
-
 /**
  * The IANA names a time zone picker lists: what the runtime supports, plus the
  * stored value when it is missing (aliases such as `US/Pacific` are valid and
@@ -151,26 +128,6 @@ export function timeZoneOptions(stored: string | null): string[] {
     const list = zones.includes("UTC") ? [...zones] : ["UTC", ...zones];
     if (stored && !list.includes(stored)) list.push(stored);
     return list.sort((a, b) => a.localeCompare(b));
-}
-
-export function timeZoneSelect(opts: {
-    id: string;
-    name: string;
-    stored: string | null;
-    /** Label of the empty choice; absent means a zone must be picked. */
-    emptyLabel?: string;
-}): string {
-    const options = timeZoneOptions(opts.stored)
-        .map(
-            (zone) =>
-                `<option value="${esc(zone)}"${zone === opts.stored ? " selected" : ""}>${esc(zone)}</option>`,
-        )
-        .join("");
-    const empty =
-        opts.emptyLabel !== undefined
-            ? `<option value=""${opts.stored ? "" : " selected"}>${esc(opts.emptyLabel)}</option>`
-            : "";
-    return `<select class="fd-settings-input" id="${esc(opts.id)}" name="${esc(opts.name)}">${empty}${options}</select>`;
 }
 
 /** A switch that posts `name=on|off` (the opposite of the current state). */

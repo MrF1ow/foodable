@@ -5,6 +5,7 @@ import {
     renderHouseholdMemberRoute,
     renderHouseholdReadersRoute,
     renderHouseholdRestockRoute,
+    renderHouseholdTimezoneRoute,
     renderHouseholdSettingsRoute,
 } from "../loaders.js";
 import { formText } from "../form.js";
@@ -110,16 +111,15 @@ import {
     usualProductsPickerHref,
 } from "../usual-products-path.js";
 import {
-    HOUSEHOLD_ADD_MEMBER_MODAL_ID,
     HOUSEHOLD_ADD_STORE_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
 } from "../pages/v2/settings-household-modals.js";
+import { HOUSEHOLD_ADD_MEMBER_SHEET_ID } from "../pages/v2/settings-household-add-member.js";
 import {
     HOUSEHOLD_EXPIRY_SHEET_ID,
     HOUSEHOLD_LOCATION_SHEET_ID,
     HOUSEHOLD_NAME_SHEET_ID,
-    HOUSEHOLD_TIMEZONE_SHEET_ID,
 } from "../pages/v2/settings-household.js";
 import { RESTOCK_PATH } from "../pages/v2/settings-restock.js";
 import { READERS_PATH } from "../pages/v2/settings-readers.js";
@@ -176,6 +176,30 @@ async function householdFormError(
     const page = await renderHouseholdSettingsRoute(userId, {
         error: message,
         openModalId,
+    });
+    return { html: page.html, status: 400 as const };
+}
+
+/**
+ * A refused member action (role, ownership, removal) shows its reason on that
+ * person's page, where the menu is. When that page cannot be drawn (they are
+ * not in this household), the reason shows on the Household page instead.
+ */
+async function memberActionError(
+    userId: string,
+    targetId: string,
+    err: unknown,
+) {
+    const message =
+        err instanceof Error ? err.message : "Could not update that member.";
+    const member = await renderHouseholdMemberRoute(userId, targetId, {
+        error: message,
+    });
+    if (member.status === 200) {
+        return { html: member.html, status: 400 as const };
+    }
+    const page = await renderHouseholdSettingsRoute(userId, {
+        error: message,
     });
     return { html: page.html, status: 400 as const };
 }
@@ -279,6 +303,19 @@ householdRoutes.get(
     },
 );
 
+// The household's time zone is a page of its own, with a search field
+// (`?q=`), for owners and admins.
+householdRoutes.get(
+    "/settings/household/timezone",
+    requireManager,
+    async (c) => {
+        const page = await renderHouseholdTimezoneRoute(c.get("userId"), {
+            q: c.req.query("q"),
+        });
+        return c.html(page.html, page.status);
+    },
+);
+
 householdRoutes.post(
     "/settings/household/timezone",
     requireManager,
@@ -291,11 +328,10 @@ householdRoutes.post(
             ["timezone"],
         );
         if (!saved.ok) {
-            const page = await renderHouseholdSettingsRoute(c.get("userId"), {
+            const page = await renderHouseholdTimezoneRoute(c.get("userId"), {
                 error: saved.error,
-                openModalId: HOUSEHOLD_TIMEZONE_SHEET_ID,
             });
-            return c.html(page.html, 400);
+            return c.html(page.html, page.status === 200 ? 400 : page.status);
         }
         // toast: none
         return c.redirect("/settings/household", 303);
@@ -571,6 +607,24 @@ householdRoutes.post("/settings/household", requireManager, async (c) => {
     const userId = c.get("userId");
     const manager = siteMember(c);
     const body = await c.req.parseBody();
+    // Only the owner chooses a role. A role an admin posts is refused, so a
+    // forged form cannot make an admin; the sheet an admin sees has no Role.
+    const roleRaw = formText(body, "role").trim();
+    const isOwner = can(manager, "household.owner_only").ok;
+    let role: "admin" | "member" = "member";
+    if (roleRaw !== "") {
+        // oxlint-disable-next-line foodable/no-raw-role-check -- validates the submitted form value, not the actor's role
+        if (!isOwner || (roleRaw !== "admin" && roleRaw !== "member")) {
+            const page = await renderHouseholdSettingsRoute(userId, {
+                error: isOwner
+                    ? "Choose admin or member."
+                    : "Only the owner can choose a role.",
+                openModalId: HOUSEHOLD_ADD_MEMBER_SHEET_ID,
+            });
+            return c.html(page.html, 400);
+        }
+        role = roleRaw;
+    }
     const parsed = parseMemberInput({
         display_name: String(body.display_name ?? ""),
         password: String(body.password ?? ""),
@@ -581,7 +635,7 @@ householdRoutes.post("/settings/household", requireManager, async (c) => {
     if (!parsed.ok) {
         const page = await renderHouseholdSettingsRoute(userId, {
             error: parsed.error,
-            openModalId: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
+            openModalId: HOUSEHOLD_ADD_MEMBER_SHEET_ID,
         });
         return c.html(page.html, 400);
     }
@@ -592,9 +646,24 @@ householdRoutes.post("/settings/household", requireManager, async (c) => {
     if (!added.ok) {
         const page = await renderHouseholdSettingsRoute(userId, {
             error: added.error,
-            openModalId: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
+            openModalId: HOUSEHOLD_ADD_MEMBER_SHEET_ID,
         });
         return c.html(page.html, 400);
+    }
+    // oxlint-disable-next-line foodable/no-raw-role-check -- the role chosen in the form, already checked against the owner above, not the actor's role
+    if (role === "admin") {
+        try {
+            await setHouseholdMemberRole(
+                manager.householdId,
+                added.userId,
+                role,
+            );
+        } catch (err) {
+            // They were added; the reason shows on their page, where the
+            // role can be changed again.
+            const page = await memberActionError(userId, added.userId, err);
+            return c.html(page.html, page.status);
+        }
     }
     // toast: none
     return c.redirect("/settings/household", 303);
@@ -750,13 +819,12 @@ householdRoutes.post(
             owner.householdId,
         );
         const targetId = c.req.param("userId");
-        const makeOwnerModal = `household-make-owner-${targetId}`;
         const check = checkManagedMember(owner, target, "transfer");
         if (!check.ok) {
-            const page = await householdFormError(
+            const page = await memberActionError(
                 userId,
+                targetId,
                 new Error(check.error),
-                makeOwnerModal,
             );
             return c.html(page.html, page.status);
         }
@@ -767,7 +835,7 @@ householdRoutes.post(
                 check.target.userId,
             );
         } catch (err) {
-            const page = await householdFormError(userId, err, makeOwnerModal);
+            const page = await memberActionError(userId, targetId, err);
             return c.html(page.html, page.status);
         }
         // toast: none
@@ -790,23 +858,22 @@ householdRoutes.post(
             owner.householdId,
         );
         const targetId = c.req.param("userId");
-        const removeModal = `household-remove-${targetId}`;
         const check = checkManagedMember(owner, target, "remove");
         if (!check.ok) {
-            const page = await householdFormError(
+            const page = await memberActionError(
                 userId,
+                targetId,
                 new Error(check.error),
-                removeModal,
             );
             return c.html(page.html, page.status);
         }
         if (formText(body, "confirm") !== "yes") {
-            const page = await householdFormError(
+            const page = await memberActionError(
                 userId,
+                targetId,
                 new Error(
-                    `Tick the box to confirm removing ${check.target.displayName}.`,
+                    `Confirm removing ${check.target.displayName} from the menu.`,
                 ),
-                removeModal,
             );
             return c.html(page.html, page.status);
         }
@@ -816,7 +883,7 @@ householdRoutes.post(
                 check.target.userId,
             );
         } catch (err) {
-            const page = await householdFormError(userId, err, removeModal);
+            const page = await memberActionError(userId, targetId, err);
             return c.html(page.html, page.status);
         }
         // toast: none
@@ -1013,7 +1080,6 @@ householdRoutes.post(
         const owner = siteMember(c);
         const body = await c.req.parseBody();
         const targetId = c.req.param("userId");
-        const manageModal = `household-manage-${targetId}`;
         const role = formText(body, "role");
         const target = await getHouseholdMembership(
             targetId,
@@ -1022,10 +1088,10 @@ householdRoutes.post(
         const check = checkManagedMember(owner, target, "role");
         // oxlint-disable-next-line foodable/no-raw-role-check -- validates the submitted form value, not the actor's role
         if (!check.ok || (role !== "admin" && role !== "member")) {
-            const page = await householdFormError(
+            const page = await memberActionError(
                 userId,
+                targetId,
                 new Error(check.ok ? "Choose admin or member." : check.error),
-                manageModal,
             );
             return c.html(page.html, page.status);
         }
@@ -1036,11 +1102,14 @@ householdRoutes.post(
                 role,
             );
         } catch (err) {
-            const page = await householdFormError(userId, err, manageModal);
+            const page = await memberActionError(userId, targetId, err);
             return c.html(page.html, page.status);
         }
-        // toast: none
-        return c.redirect("/settings/household", 303);
+        // toast: none. The page shows the new role.
+        return c.redirect(
+            `/settings/household/members/${encodeURIComponent(check.target.userId)}`,
+            303,
+        );
     },
 );
 

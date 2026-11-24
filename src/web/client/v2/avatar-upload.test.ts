@@ -21,7 +21,19 @@ async function setup(opts: {
     const listeners: Record<string, Listener[]> = {};
     const drawn: unknown[][] = [];
     const encodes: [string, number][] = [];
-    const input: { files: unknown[]; name: string } = {
+    const inputListeners: Record<string, Listener[]> = {};
+    const openerListeners: Record<string, Listener[]> = {};
+    let picks = 0;
+    const input: {
+        files: unknown[];
+        name: string;
+        addEventListener: (t: string, fn: Listener) => void;
+        click: () => void;
+    } = {
+        addEventListener: (t, fn) => (inputListeners[t] ??= []).push(fn),
+        click: () => {
+            picks += 1;
+        },
         files:
             opts.file === null
                 ? []
@@ -39,7 +51,14 @@ async function setup(opts: {
         addEventListener: (t: string, fn: Listener) =>
             (listeners[t] ??= []).push(fn),
         querySelector: (sel: string) =>
-            sel === 'input[type="file"]' ? input : null,
+            sel === 'input[type="file"]'
+                ? input
+                : sel === "[data-fd-photo-pick]"
+                  ? {
+                        addEventListener: (t: string, fn: Listener) =>
+                            (openerListeners[t] ??= []).push(fn),
+                    }
+                  : null,
         requestSubmit: () => {
             submits += 1;
             // A real submit fires the event again; the script must let it by.
@@ -127,6 +146,15 @@ async function setup(opts: {
             for (const fn of listeners.submit ?? []) fn(event);
             return event;
         },
+        /** Choosing a file in the (hidden) input. */
+        choose: () => {
+            for (const fn of inputListeners.change ?? []) fn({});
+        },
+        /** Tapping the Change photo button. */
+        tapChange: () => {
+            for (const fn of openerListeners.click ?? []) fn({});
+        },
+        picks: () => picks,
         flush,
         submits: () => submits,
         submitted,
@@ -216,4 +244,26 @@ test("a second submit while the resize is in flight is ignored", async () => {
     // Once it has been sent, a fresh choice can be submitted again.
     await t.submit();
     expect(t.submits()).toBe(2);
+});
+
+test("choosing a file in the hidden input sends it, and Change photo opens the picker", async () => {
+    const t = await setup({ encode: webp(20_000) });
+    t.tapChange();
+    expect(t.picks()).toBe(1);
+    expect(t.submits()).toBe(0);
+    t.choose();
+    await t.flush();
+    // The choice submits, the script holds that submit back, shrinks the
+    // picture and submits again; only that second one goes through.
+    expect(t.submits()).toBe(2);
+    expect(t.submitted).toHaveLength(1);
+    const file = t.input.files[0] as { name: string };
+    expect(file.name).toBe("photo.webp");
+});
+
+test("choosing nothing sends nothing", async () => {
+    const t = await setup({ encode: webp(20_000), file: null });
+    t.choose();
+    await t.flush();
+    expect(t.submits()).toBe(0);
 });

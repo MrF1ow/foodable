@@ -89,79 +89,17 @@ export function emptyState(text: string, className = "empty"): string {
     return `<p class="${className}">${escapeHtml(text)}</p>`;
 }
 
-/** Values copied onto a shared dialog when its trigger opens it. */
-export type ModalFill = {
-    action?: string;
-    title?: string;
-    message?: string;
-    fields?: Record<string, string | number | boolean | null>;
-    /** Plain text copied onto `[data-fill-slot="<name>"]`. */
-    text?: Record<string, string>;
-    /** `class` copied onto `[data-fill-slot="<name>"]`. Empty string clears it. */
-    classes?: Record<string, string>;
-    /**
-     * `<template>` id cloned into `[data-fill-slot="<name>"]`. The template
-     * holds the same escaped markup the rest of the page would render.
-     */
-    templates?: Record<string, string>;
-};
-
-function fillValue(value: string | number | boolean | null): string {
-    if (value == null) return "";
-    if (typeof value === "boolean") return value ? "true" : "false";
-    return String(value);
-}
-
-function fillAttributes(fill: ModalFill | undefined): string {
-    if (!fill) return "";
-    const attrs: [string, string][] = [];
-    if (fill.action != null) attrs.push(["fill-action", fill.action]);
-    if (fill.title != null) attrs.push(["fill-title", fill.title]);
-    if (fill.message != null) attrs.push(["fill-message", fill.message]);
-    for (const [name, value] of Object.entries(fill.fields ?? {})) {
-        attrs.push([`fill-field-${name}`, fillValue(value)]);
-    }
-    for (const [name, value] of Object.entries(fill.text ?? {})) {
-        attrs.push([`fill-text-${name}`, value]);
-    }
-    for (const [name, value] of Object.entries(fill.classes ?? {})) {
-        attrs.push([`fill-class-${name}`, value]);
-    }
-    for (const [name, value] of Object.entries(fill.templates ?? {})) {
-        attrs.push([`fill-template-${name}`, value]);
-    }
-    return attrs
-        .map(
-            ([key, value]) => ` data-${escapeHtml(key)}="${escapeHtml(value)}"`,
-        )
-        .join("");
-}
-
-/** An unfilled shared dialog cannot post until the client copies a target in. */
-function disableSubmitButtons(html: string): string {
-    return html.replace(/<button\b([^>]*)>/gi, (full, attrs: string) => {
-        if (!/\btype\s*=\s*"submit"/.test(attrs)) return full;
-        if (/\bdisabled\b/.test(attrs)) return full;
-        return `<button${attrs} disabled>`;
-    });
-}
-
 export function modal(opts: {
     id: string;
     title: string;
     body: string;
     size?: string;
     openOnLoad?: boolean;
-    /** Disable submit buttons in `body` (a shared dialog not yet filled). */
-    submitDisabled?: boolean;
 }): string {
     const id = escapeHtml(opts.id);
     const titleId = `${id}-title`;
     const sizeCls = opts.size ? ` modal--${escapeHtml(opts.size)}` : "";
     const reopen = opts.openOnLoad ? " data-modal-open-on-load" : "";
-    const body = opts.submitDisabled
-        ? disableSubmitButtons(opts.body)
-        : opts.body;
     return `<dialog class="modal${sizeCls}" id="${id}" aria-labelledby="${titleId}"${reopen}>
 <div class="modal-sheet">
 <div class="modal-handle" aria-hidden="true"></div>
@@ -170,37 +108,10 @@ export function modal(opts: {
 <button type="button" class="modal-close" command="close" commandfor="${id}" aria-label="Close"><span aria-hidden="true">×</span></button>
 </header>
 <div class="modal-body">
-${body}
+${opts.body}
 </div>
 </div>
 </dialog>`;
-}
-
-export function modalTrigger(opts: {
-    target: string;
-    label: string;
-    className?: string;
-    /** When set, used as button inner HTML (label still drives aria-label / title). */
-    icon?: string;
-    /** Extra `data-*` attributes. Both the key and the value are escaped. */
-    data?: Record<string, string>;
-    /** Declarative `data-fill-*` attributes for a shared dialog. */
-    fill?: ModalFill;
-}): string {
-    const cls = opts.className ?? "btn-primary";
-    const aria = escapeHtml(opts.label);
-    const inner = opts.icon ?? escapeHtml(opts.label);
-    const title = opts.icon ? ` title="${aria}" aria-label="${aria}"` : "";
-    const data = opts.data
-        ? Object.entries(opts.data)
-              .map(
-                  ([key, value]) =>
-                      ` data-${escapeHtml(key)}="${escapeHtml(value)}"`,
-              )
-              .join("")
-        : "";
-    const fill = fillAttributes(opts.fill);
-    return `<button type="button" class="${escapeHtml(cls)}" commandfor="${escapeHtml(opts.target)}" command="show-modal"${title}${data}${fill}>${inner}</button>`;
 }
 
 export function confirmModal(opts: {
@@ -212,14 +123,8 @@ export function confirmModal(opts: {
     hiddenFields?: Record<string, string>;
     openOnLoad?: boolean;
     formClass?: string;
-    /** Pre-escaped HTML before the confirm form (same contract as {@link modal}'s `body`). */
-    bodyPrefix?: string;
     /** When true, the confirm form opts out of Turbo (non-redirect success HTML). */
     turboFalse?: boolean;
-    /** Render the confirm button disabled (a shared dialog not yet filled). */
-    submitDisabled?: boolean;
-    /** `data-fill-slot` on the confirm button so a shared dialog can retitle it. */
-    submitSlot?: string;
 }): string {
     const id = escapeHtml(opts.id);
     const formClass = escapeHtml(opts.formClass ?? "modal-confirm");
@@ -236,13 +141,13 @@ export function confirmModal(opts: {
 ${hidden ? `${hidden}\n` : ""}<p class="modal-message">${escapeHtml(opts.message)}</p>
 <div class="modal-actions">
 <button type="button" command="close" commandfor="${id}">Cancel</button>
-<button type="submit" class="btn-danger"${opts.submitSlot ? ` data-fill-slot="${escapeHtml(opts.submitSlot)}"` : ""}${opts.submitDisabled ? " disabled" : ""}>${escapeHtml(opts.confirmLabel)}</button>
+<button type="submit" class="btn-danger">${escapeHtml(opts.confirmLabel)}</button>
 </div>
 </form>`;
     return modal({
         id: opts.id,
         title: opts.title,
-        body: `${opts.bodyPrefix ?? ""}${body}`,
+        body,
         openOnLoad: opts.openOnLoad,
     });
 }

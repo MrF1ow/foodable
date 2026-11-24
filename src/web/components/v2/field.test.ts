@@ -67,6 +67,22 @@ test("a trailing icon is decoration inside the box", () => {
     );
 });
 
+test("a box takes a length range and a keyboard hint", () => {
+    const html = field({
+        id: "n",
+        label: "Name",
+        name: "n",
+        minlength: 2,
+        maxlength: 80,
+        autocapitalize: "none",
+        spellcheck: false,
+    });
+    expect(html).toContain('minlength="2"');
+    expect(html).toContain('maxlength="80"');
+    expect(html).toContain('autocapitalize="none"');
+    expect(html).toContain('spellcheck="false"');
+});
+
 test("a hint is described by the input", () => {
     const html = field({ id: "a", label: "A", name: "a", hint: "Lowercase" });
     expect(html).toContain(

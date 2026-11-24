@@ -1175,6 +1175,9 @@ export function mergeHouseholdConfig(
 export type LoginIdentifier =
     { kind: "email"; email: string } | { kind: "username"; username: string };
 
+/** The most characters a member's name may have (the Add member field's maxlength). */
+export const MEMBER_NAME_MAX_LENGTH = 80;
+
 export type MemberDraft = {
     displayName: string;
     login: LoginIdentifier;
@@ -1253,6 +1256,12 @@ export function parseMemberInput(raw: unknown): ParseResult<MemberDraft> {
         !record.display_name.trim()
     ) {
         return { ok: false, error: "Enter a name." };
+    }
+    if (record.display_name.trim().length > MEMBER_NAME_MAX_LENGTH) {
+        return {
+            ok: false,
+            error: `Name must be at most ${MEMBER_NAME_MAX_LENGTH} characters.`,
+        };
     }
     // The Settings form has one "Email or username" field, like sign-in
     // (`authEmailForSignIn`): an `@` makes it an email. Two separate fields

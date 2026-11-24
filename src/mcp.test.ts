@@ -17006,9 +17006,7 @@ describe("authenticated dashboard HTTP", () => {
             alice,
         );
         expect(r.status).toBe(400);
-        expect(await r.text()).toContain(
-            "Tick the box to confirm removing Bob.",
-        );
+        expect(await r.text()).toContain("Confirm removing Bob from the menu.");
         expect(db.wipedUsers).toEqual([]);
     });
 
@@ -17069,7 +17067,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("Password must be at least 12 characters.");
         expect(html).toContain('action="/settings/household"');
         expect(html).toMatch(
-            /<dialog class="modal" id="household-add-member"[^>]*data-modal-open-on-load/,
+            /<dialog class="fd-sheet[^"]*" id="fd-household-add-member"[^>]*data-sheet-open-on-load/,
         );
         expect(db.addedLogins).toEqual([]);
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
@@ -18099,9 +18097,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toMatch(
-            /<h1 class="fd-settings-title fd-settings-hh-title">[^<]+<\/h1>/,
-        );
+        expect(html).toContain('<span class="fd-settings-hh-name">');
         expect(html).toContain('action="/settings/household"');
         expect(html).toContain("Alice");
         expect(html).toContain("Bob");
@@ -18160,10 +18156,8 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(200);
         const html = await r.text();
-        expect(html).toMatch(
-            /<h1 class="fd-settings-title fd-settings-hh-title">[^<]+<\/h1>/,
-        );
-        expect(html).not.toContain('commandfor="household-add-member"');
+        expect(html).toContain('<span class="fd-settings-hh-name">');
+        expect(html).not.toContain('commandfor="fd-household-add-member"');
         expect(html).not.toContain('action="/settings/household/stores"');
     });
 

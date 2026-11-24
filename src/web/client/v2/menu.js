@@ -216,6 +216,25 @@ function bindMenu(root) {
             );
             return;
         }
+        // An item that opens a sheet closes the menu behind it, and the sheet
+        // gives focus back to the ⋯ when it closes (the item it came from is
+        // hidden by then, so the browser's own return would land on the page).
+        if (item.getAttribute("command") === "show-modal") {
+            const dialog = document.getElementById(
+                item.getAttribute("commandfor") || "",
+            );
+            close(root, false);
+            if (dialog) {
+                dialog.addEventListener(
+                    "close",
+                    () => {
+                        if (trigger.isConnected) trigger.focus();
+                    },
+                    { once: true },
+                );
+            }
+            return;
+        }
         // A link or a submit leaves the page; the menu is closed as it goes.
         if (item.tagName === "A") close(root, false);
     });
