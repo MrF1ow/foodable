@@ -12,12 +12,14 @@ const chrome = {
 };
 
 describe("settings help v2", () => {
-    test("glossary anchors and back link turbo off", () => {
+    test("glossary anchors, and a Detail bar back to Settings that stays a Turbo visit", () => {
         const html = renderSettingsHelpV2Page({ chrome });
         expect(html).toContain('data-fd-settings-page="help"');
         expect(html).toContain("fd-settings-help");
-        expect(html).toContain('class="fd-settings-back"');
-        expect(html).toContain('data-turbo="false"');
+        expect(html).toMatch(
+            /fd-settings-detail[\s\S]*?aria-label="Back" href="\/settings"/,
+        );
+        expect(html).not.toContain('data-turbo="false"');
         for (const id of HELP_GLOSSARY_IDS) {
             expect(html).toContain(`id="${id}"`);
         }

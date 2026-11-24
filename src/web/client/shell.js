@@ -61,25 +61,15 @@ document.addEventListener("foodable:scroll-lock-release", (event) => {
 // meta[name=foodable-theme] (merged on visits and morph refreshes); sync html
 // and theme-color before the new body paints. Colours come from src/tokens.ts
 // via getAppJs() — never edit the literals here.
+// Browser chrome is the page background in every theme (`THEME_COLOR`,
+// src/tokens.ts), the same on the shell, login and bare pages.
 const THEME_PAGE_BG = null;
-const THEME_NAV_BG = null;
 
 function readFoodableTheme() {
     const v = document
         .querySelector('meta[name="foodable-theme"]')
         ?.getAttribute("content");
     return v === "light" || v === "dark" || v === "system" ? v : "system";
-}
-
-function readThemeChromeKind() {
-    const v = document
-        .querySelector('meta[name="foodable-theme-chrome"]')
-        ?.getAttribute("content");
-    return v === "page" ? "page" : "nav";
-}
-
-function themePalette(kind) {
-    return kind === "page" ? THEME_PAGE_BG : THEME_NAV_BG;
 }
 
 function htmlThemeMatches(theme) {
@@ -90,8 +80,8 @@ function htmlThemeMatches(theme) {
     return dt === theme;
 }
 
-function themeColorMetasMatch(theme, kind) {
-    const palette = themePalette(kind);
+function themeColorMetasMatch(theme) {
+    const palette = THEME_PAGE_BG;
     const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
     if (theme === "system") {
         if (metas.length < 2) return false;
@@ -116,9 +106,9 @@ function themeColorMetasMatch(theme, kind) {
     );
 }
 
-function syncThemeColorMeta(theme, kind) {
+function syncThemeColorMeta(theme) {
     if (!document.head || typeof document.createElement !== "function") return;
-    const palette = themePalette(kind);
+    const palette = THEME_PAGE_BG;
     const metas = [...document.querySelectorAll('meta[name="theme-color"]')];
     if (theme === "system") {
         const specs = [
@@ -154,11 +144,10 @@ function syncThemeColorMeta(theme, kind) {
 function syncDocumentTheme() {
     if (typeof document.querySelector !== "function") return;
     const theme = readFoodableTheme();
-    const kind = readThemeChromeKind();
     const html = document.documentElement;
     if (!html) return;
     const htmlOk = htmlThemeMatches(theme);
-    const metaOk = themeColorMetasMatch(theme, kind);
+    const metaOk = themeColorMetasMatch(theme);
     if (htmlOk && metaOk) return;
     if (theme === "system") {
         if (typeof html.removeAttribute === "function")
@@ -166,7 +155,7 @@ function syncDocumentTheme() {
     } else if (typeof html.setAttribute === "function") {
         html.setAttribute("data-theme", theme);
     }
-    if (!metaOk) syncThemeColorMeta(theme, kind);
+    if (!metaOk) syncThemeColorMeta(theme);
 }
 
 function onTurboThemeSync() {
@@ -178,20 +167,57 @@ document.addEventListener("turbo:render", onTurboThemeSync);
 document.addEventListener("turbo:load", onTurboThemeSync);
 document.addEventListener("turbo:morph", onTurboThemeSync);
 
-// html.fx is set inside a frame, never under prefers-reduced-motion, so a
-// renderer that never ticks keeps the static page. Guard matchMedia: tests
-// run this script against a fake window without it. The pointer glow on
-// panels (magic-card) only reads --mx / --my.
+// html.fx and html.fx-enter are set by the inline script in <head>
+// (src/web/shell.ts, ENTRANCE_FX_SCRIPT) before the first paint, never under
+// prefers-reduced-motion. fx gates the modal and toast animations for the whole
+// session; fx-enter gates the entrance fade of `.app-main`, which belongs to a
+// full page load only. It ends here: on a timer once the fade has played, and
+// before any Turbo visit or refresh renders, so a page Turbo swaps in is there
+// at full strength from its first frame. Guard matchMedia: tests run this
+// script against a fake window without it. The pointer glow on panels
+// (magic-card) only reads --mx / --my.
 const mq = (q) =>
     typeof window.matchMedia === "function" && window.matchMedia(q).matches;
-if (
-    typeof window.matchMedia === "function" &&
-    !mq("(prefers-reduced-motion: reduce)")
-) {
-    window.requestAnimationFrame(() =>
-        document.documentElement.classList.add("fx"),
-    );
+const ENTRANCE_MS = 1000;
+function endEntrance() {
+    document.documentElement.classList.remove("fx-enter");
 }
+if (typeof window.setTimeout === "function") {
+    window.setTimeout(endEntrance, ENTRANCE_MS);
+}
+document.addEventListener("turbo:visit", endEntrance);
+document.addEventListener("turbo:before-render", endEntrance);
+// A pick list (`form[data-fd-pick]`, Settings › Time zone) saves when a row is
+// chosen by tap or click, never when the arrow keys walk the radios: moving
+// through the group must not save and send the person away (WCAG 3.2.2). Any
+// keypress just before the change means a key moved it. Enter saves the
+// checked row (Chrome does not submit a radio on Enter by itself), and a Save
+// button does without script.
+let lastKeyAt = -1000;
+document.addEventListener(
+    "keydown",
+    (e) => {
+        lastKeyAt = e.timeStamp;
+        const t = e.target;
+        const form = t && t.type === "radio" && t.form;
+        if (e.key !== "Enter" || !form || !form.hasAttribute) return;
+        if (!form.hasAttribute("data-fd-pick")) return;
+        e.preventDefault();
+        if (typeof form.requestSubmit === "function") form.requestSubmit();
+    },
+    true,
+);
+document.addEventListener(
+    "change",
+    (e) => {
+        const form = e.target && e.target.form;
+        if (!form || !form.hasAttribute || !form.hasAttribute("data-fd-pick"))
+            return;
+        if (e.timeStamp - lastKeyAt < 300) return;
+        if (typeof form.requestSubmit === "function") form.requestSubmit();
+    },
+    true,
+);
 if (mq("(hover: hover) and (pointer: fine)")) {
     document.addEventListener(
         "pointermove",

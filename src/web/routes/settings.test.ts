@@ -320,7 +320,7 @@ describe("settings routes", () => {
         expect(await res.text()).toContain('data-fd-settings-page="help"');
     });
 
-    test("POST /settings/display saves theme and redirects", async () => {
+    test("POST /settings/display saves theme and redirects to Settings with a 303", async () => {
         const body = new URLSearchParams({ theme: "dark" });
         const res = await hono.request("http://test/settings/display", {
             method: "POST",
@@ -331,26 +331,30 @@ describe("settings routes", () => {
             body,
         });
         expect(res.status).toBe(303);
-        expect(res.headers.get("location")).toBe("/settings/display");
+        expect(res.headers.get("location")).toBe("/settings");
         expect(upsertPatch).toEqual({ theme: "dark" });
     });
 
-    test("POST /settings/display from Settings home returns there", async () => {
-        for (const [ret, want] of [
-            ["/settings", "/settings"],
-            ["https://evil.example/", "/settings/display"],
-            ["/settings/../x", "/settings/display"],
-        ] as const) {
+    test("POST /settings/display always comes back to Settings, whatever `return` says", async () => {
+        for (const ret of [
+            "/settings",
+            "https://evil.example/",
+            "/settings/../x",
+            undefined,
+        ]) {
             const res = await hono.request("http://test/settings/display", {
                 method: "POST",
                 headers: {
                     cookie: cookie(ALICE),
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
-                body: new URLSearchParams({ theme: "light", return: ret }),
+                body: new URLSearchParams({
+                    theme: "light",
+                    ...(ret ? { return: ret } : {}),
+                }),
             });
             expect(res.status).toBe(303);
-            expect(res.headers.get("location")).toBe(want);
+            expect(res.headers.get("location")).toBe("/settings");
         }
     });
 
@@ -365,7 +369,20 @@ describe("settings routes", () => {
             body,
         });
         expect(res.status).toBe(400);
-        expect(await res.text()).toContain("Choose Auto, Light, or Dark.");
+        // The refusal shows on Settings, where the control is.
+        const html = await res.text();
+        expect(html).toContain("Choose Auto, Light, or Dark.");
+        expect(html).toContain('data-fd-settings-page="home"');
+    });
+
+    test("GET /settings/display and /settings/export redirect to Settings", async () => {
+        for (const path of ["/settings/display", "/settings/export"]) {
+            const res = await hono.request(`http://test${path}`, {
+                headers: { cookie: cookie(ALICE) },
+            });
+            expect(res.status).toBe(301);
+            expect(res.headers.get("location")).toBe("/settings");
+        }
     });
 
     test("POST /settings group=account without theme leaves stored theme", async () => {
@@ -461,12 +478,102 @@ describe("settings routes", () => {
         resetSessionSecretWarningForTest();
     });
 
-    test("GET /settings/export page renders", async () => {
-        const res = await hono.request("http://test/settings/export", {
-            headers: { cookie: cookie(ALICE) },
-        });
+    test("GET /settings/account/timezone serves the time zone page, with search", async () => {
+        profileTimezone = "America/Denver";
+        const res = await hono.request(
+            "http://test/settings/account/timezone",
+            {
+                headers: { cookie: cookie(ALICE) },
+            },
+        );
         expect(res.status).toBe(200);
-        expect(await res.text()).toContain('data-fd-settings-page="export"');
+        const html = await res.text();
+        expect(html).toContain('data-fd-settings-page="timezone"');
+        expect(html).toContain('value="America/Denver" checked');
+        expect(html).toContain('name="q"');
+        const found = await hono.request(
+            "http://test/settings/account/timezone?q=tokyo",
+            { headers: { cookie: cookie(ALICE) } },
+        );
+        expect(found.status).toBe(200);
+        const list = await found.text();
+        expect(list).toContain('value="Asia/Tokyo"');
+        expect(list).not.toContain('value="America/Chicago"');
+    });
+
+    test("saving a time zone from its page is a 303 back to Account with no toast", async () => {
+        const res = await hono.request("http://test/settings", {
+            method: "POST",
+            headers: {
+                cookie: cookie(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                group: "nutrition",
+                timezone: "Europe/London",
+                from: "/",
+                return: "/settings/account",
+            }),
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/settings/account");
+        expect(res.headers.get("set-cookie") ?? "").not.toContain("toast");
+        expect(upsertPatch).toEqual({ timezone: "Europe/London" });
+    });
+
+    test("only Account is honoured as a place to return to", async () => {
+        for (const ret of ["https://evil.example/", "/settings/goals", ""]) {
+            const res = await hono.request("http://test/settings", {
+                method: "POST",
+                headers: {
+                    cookie: cookie(ALICE),
+                    "Content-Type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    group: "nutrition",
+                    timezone: "Europe/London",
+                    return: ret,
+                }),
+            });
+            expect(res.status).toBe(303);
+            expect(res.headers.get("location")).toBe("/settings");
+        }
+    });
+
+    test("a time zone that is not one is a 400 on the time zone page, not a sheet", async () => {
+        const res = await hono.request("http://test/settings", {
+            method: "POST",
+            headers: {
+                cookie: cookie(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                group: "nutrition",
+                timezone: "Mars/Olympus",
+                return: "/settings/account",
+            }),
+        });
+        expect(res.status).toBe(400);
+        const html = await res.text();
+        expect(html).toContain('data-fd-settings-page="timezone"');
+        expect(html).toContain("Choose a time zone from the list.");
+    });
+
+    test("the name sheet posts group=account and returns to Account when asked", async () => {
+        const res = await hono.request("http://test/settings", {
+            method: "POST",
+            headers: {
+                cookie: cookie(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                group: "account",
+                display_name: "Alice B",
+                return: "/settings/account",
+            }),
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/settings/account");
     });
 });
 

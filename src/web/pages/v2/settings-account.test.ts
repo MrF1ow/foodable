@@ -17,45 +17,44 @@ const view = {
 };
 
 describe("settings account v2", () => {
-    test("account page is one card of Name, Email and Time zone rows, a Security card with Log out, and no unit, alcohol or widget fields", () => {
+    test("a Detail bar, then Name, Email and Time zone rows, then Security with Log out", () => {
         const html = renderSettingsAccountV2Page(view);
         expect(html).toContain('data-fd-settings-page="account"');
-        expect(html).toContain(">Photo<");
-        // The rows sit in the card scope that styles them (F19).
-        expect(html).toContain("fd-settings-hh");
-        expect(html).toContain("fd-list--card");
-        // Name and Time zone are rows that open edit sheets.
         expect(html).toMatch(
-            /commandfor="fd-account-name" command="show-modal"[\s\S]*?Name[\s\S]*?Ethan/,
+            /fd-settings-detail[\s\S]*?aria-label="Back" href="\/settings"[\s\S]*?fd-detail-bar__title">Account</,
         );
+        // Desktop: the Settings layout with the title above it.
+        expect(html).toContain("fd-page-layout--settings");
+        expect(html).toContain('<h1 class="fd-settings-page-title">Account');
+        // Name opens its sheet and shows the name, with a chevron.
         expect(html).toMatch(
-            /commandfor="fd-account-timezone" command="show-modal"[\s\S]*?Time zone[\s\S]*?America\/Los_Angeles/,
+            /commandfor="fd-account-name" command="show-modal"[\s\S]*?>Name<[\s\S]*?fd-item-row__value">Ethan<[\s\S]*?fd-item-row__chevron/,
         );
-        expect(html).toContain('name="display_name"');
-        // Email: shown as text, never an input, and not a sheet trigger.
-        expect(html).toContain(">Email<");
-        expect(html).toContain("ethan@example.com");
+        // Email is text: no input, no link, no sheet.
+        expect(html).toMatch(
+            /<span class="fd-item-row__title" title="Email">Email<\/span>[\s\S]*?fd-item-row__value">ethan@example.com</,
+        );
         expect(html).not.toMatch(/<input[^>]*ethan@example\.com/);
         expect(html).not.toMatch(/name="email"/);
-        expect(html).not.toMatch(/commandfor="fd-account-email"/);
-        // Time zone: a select that posts group=nutrition + timezone.
-        expect(html).toMatch(/<select[^>]*name="timezone"/);
-        expect(html).toContain('name="group" value="nutrition"');
-        expect(html).toContain('<option value="America/Los_Angeles" selected>');
-        // Security card: Log out, red, no Save buttons outside sheets.
+        // Time zone is a page now, not a sheet.
+        expect(html).toMatch(
+            /<a class="fd-item-row__face fd-item-row__face--link" href="\/settings\/account\/timezone">[\s\S]*?>Time zone<[\s\S]*?America\/Los_Angeles/,
+        );
+        expect(html).not.toContain("fd-account-timezone");
+        expect(html).not.toMatch(/<select[^>]*name="timezone"/);
+        // Security: the section header, then the red Log out row.
         expect(html).toContain(">Security<");
-        expect(html).toMatch(/<a [^>]*href="\/logout"[^>]*>[\s\S]*?Log out/);
-        expect(html).not.toContain("Save name");
-        expect(html).not.toContain("Save time zone");
-        expect(html).not.toContain("Change password");
-        // The moved fields are gone, markers included.
+        expect(html).toMatch(
+            /<li class="fd-item-row fd-item-row--danger">[\s\S]*?href="\/logout" data-turbo="false"[\s\S]*?>Log out</,
+        );
         for (const gone of [
+            "Save name",
+            "Save time zone",
+            "Change password",
             "preferred_weight_unit",
             "preferred_drink_unit",
             "widgets_enabled",
             "alcohol_tracking_enabled",
-            "has_widgets_enabled",
-            "has_alcohol_tracking_enabled",
             "Weight unit",
             "Drink unit",
             "in-chat widgets",
@@ -64,18 +63,37 @@ describe("settings account v2", () => {
             expect(html).not.toContain(gone);
         }
         expect(html).not.toContain('name="theme"');
-        expect(html).toContain('class="fd-settings-back"');
-        expect(html).toMatch(
-            /class="fd-settings-phone-back"[^>]*href="\/settings"/,
-        );
+        // No explanation of where the data lives, no sheet subtitle.
+        expect(html).not.toContain("Your data stays on this household");
+        expect(html).not.toContain("Your days and times count");
     });
 
-    test("the account forms and the logout link keep data-turbo=false", () => {
+    test("only Log out opts out of Turbo; the name and photo forms are Turbo forms", () => {
         const html = renderSettingsAccountV2Page(view);
-        const forms = html.match(/<form [^>]*action="\/settings"[^>]*>/g) ?? [];
-        expect(forms).toHaveLength(2);
-        for (const form of forms) expect(form).toContain('data-turbo="false"');
+        const forms = html.match(/<form [^>]*>/g) ?? [];
+        expect(forms.length).toBeGreaterThanOrEqual(2);
+        for (const form of forms) expect(form).not.toContain("data-turbo");
+        expect(html.match(/data-turbo="false"/g)).toHaveLength(1);
         expect(html).toMatch(/<a [^>]*href="\/logout"[^>]*data-turbo="false"/);
+    });
+
+    test("the Name sheet is a bottom sheet from parts that posts the name and returns to Account", () => {
+        const html = renderSettingsAccountV2Page(view);
+        expect(html).toMatch(
+            /<dialog class="fd-sheet fd-sheet--bottom" id="fd-account-name"/,
+        );
+        const form = html.match(
+            /<form id="fd-account-name-form"[\s\S]*?<\/form>/,
+        )![0];
+        expect(form).toContain('action="/settings"');
+        expect(form).toContain('name="group" value="account"');
+        expect(form).toContain('name="return" value="/settings/account"');
+        expect(form).toContain('name="from" value="/kitchen/fridge"');
+        expect(form).toContain('name="display_name"');
+        expect(form).toContain('value="Ethan"');
+        expect(html).toContain(
+            '<button type="submit" class="fd-btn fd-btn--primary" data-fd-btn form="fd-account-name-form"><span class="fd-btn__label">Save</span></button>',
+        );
     });
 
     test("no email known shows no Email row", () => {
@@ -83,38 +101,50 @@ describe("settings account v2", () => {
         expect(html).not.toContain(">Email<");
     });
 
-    test("time zone picker keeps an alias the runtime does not list", () => {
+    test("no zone stored reads Not set; an alias is shown as stored", () => {
+        const none = renderSettingsAccountV2Page({ ...view, timezone: "" });
+        expect(none).toContain('fd-item-row__value">Not set<');
         const alias = renderSettingsAccountV2Page({
             ...view,
             timezone: "US/Pacific",
         });
-        expect(alias).toContain('<option value="US/Pacific" selected>');
+        expect(alias).toContain('fd-item-row__value">US/Pacific<');
     });
 
-    test("Not set is offered only when no zone is stored", () => {
-        const none = renderSettingsAccountV2Page({ ...view, timezone: "" });
-        expect(none).toContain('<option value="" selected>Not set</option>');
-        const stored = renderSettingsAccountV2Page(view);
-        expect(stored).not.toContain('<option value=""');
-        expect(stored).not.toContain(">Not set<");
-    });
-
-    test("an error for a sheet reopens that sheet and shows inside it, not as a page banner", () => {
+    test("an error for the name sheet reopens it and shows inside the field, not as a page banner", () => {
         const html = renderSettingsAccountV2Page({
             ...view,
-            error: "Choose a time zone from the list.",
-            openSheetId: "fd-account-timezone",
+            error: "Enter a name.",
+            openSheetId: "fd-account-name",
         });
-        expect(html.match(/Choose a time zone from the list\./g)).toHaveLength(
-            1,
-        );
+        expect(html.match(/Enter a name\./g)).toHaveLength(1);
         expect(html).toMatch(
-            /<dialog[^>]*id="fd-account-timezone"[^>]*data-sheet-open-on-load|<dialog[^>]*data-sheet-open-on-load[^>]*id="fd-account-timezone"/,
+            /<dialog[^>]*id="fd-account-name"[^>]*data-sheet-open-on-load|<dialog[^>]*data-sheet-open-on-load[^>]*id="fd-account-name"/,
         );
+        expect(html).toContain('aria-invalid="true"');
         const banner = renderSettingsAccountV2Page({
             ...view,
             error: "That photo is too large.",
         });
         expect(banner.match(/That photo is too large\./g)).toHaveLength(1);
+        expect(banner).toContain('role="alert"');
+    });
+
+    test("the photo forms use the component buttons, remove only with a picture", () => {
+        const without = renderSettingsAccountV2Page(view);
+        expect(without).toContain('action="/settings/account/photo"');
+        expect(without).not.toContain("Remove photo");
+        const withPhoto = renderSettingsAccountV2Page({
+            ...view,
+            photo: { userId: "u1", version: new Date(1700000000000) },
+        });
+        expect(withPhoto).toContain('action="/settings/account/photo/remove"');
+        expect(withPhoto).toContain(
+            '<button type="submit" class="fd-btn fd-btn--danger fd-btn--sm" data-fd-btn><span class="fd-btn__label">Remove photo</span></button>',
+        );
+        expect(withPhoto).toContain(
+            '<button type="submit" class="fd-btn fd-btn--primary fd-btn--sm" data-fd-btn><span class="fd-btn__label">Change photo</span></button>',
+        );
+        expect(withPhoto).not.toContain("fd-settings-submit");
     });
 });

@@ -1,5 +1,5 @@
 import { escapeHtml } from "../html.js";
-import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
+import { THEME_COLOR } from "../tokens.js";
 import { appScriptHref, appStylesheetHref } from "../widgets.js";
 import type { MemberRole } from "../household.js";
 import type { ViewerFlags } from "../viewer-flags.js";
@@ -100,15 +100,18 @@ export function htmlOpen(theme: ThemePref): string {
     return `<html lang="en"${attr}>`;
 }
 
-export type ThemeChromeKind = "page" | "nav";
+/** What browser chrome takes its colour from. Only the page background
+ *  (--bg): the shell, login and bare pages all use it. The nav surface colour
+ *  (THEME_NAV_COLOR) is no longer a chrome colour; the tokens and the manifest
+ *  still read it. */
+export type ThemeChromeKind = "page";
 
-/** Browser chrome meta tags. "page" is the page background (--bg), which the
- *  shell, login and bare pages all use; "nav" is the nav surface. */
+/** Browser chrome meta tags: the page background for the theme. */
 export function themeColorMeta(
     theme: ThemePref,
-    kind: ThemeChromeKind,
+    _kind: ThemeChromeKind,
 ): string {
-    const colors = kind === "nav" ? THEME_NAV_COLOR : THEME_COLOR;
+    const colors = THEME_COLOR;
     if (theme !== "system") {
         return `<meta name="theme-color" content="${colors[theme]}" />`;
     }
@@ -123,21 +126,25 @@ export function appBar(): string {
     return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a><a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a></header>`;
 }
 
+/** Sets `html.fx` (animations on) and `html.fx-enter` (the entrance fade of
+ *  `.app-main`) before the first paint, unless the person asked for reduced
+ *  motion, so the first full load paints once and fades in from blank instead
+ *  of painting, hiding and fading in. The fade belongs to a full load only:
+ *  `client/shell.js` ends it (`fx-enter` off) before a Turbo visit renders.
+ *  The same text on every page, so Turbo's head merge never runs it again. */
+export const ENTRANCE_FX_SCRIPT = `<script>(function(){var d=document.documentElement;if(!window.matchMedia("(prefers-reduced-motion: reduce)").matches)d.classList.add("fx","fx-enter")})()</script>`;
+
 /** Everything in `<head>` before the stylesheet and script tags, which differ
  *  between the app shell and the bare pages. */
-export function appHeadMeta(
-    title: string,
-    theme: ThemePref,
-    themeChrome: ThemeChromeKind,
-): string {
+export function appHeadMeta(title: string, theme: ThemePref): string {
     return `<meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+${ENTRANCE_FX_SCRIPT}
 <meta name="foodable-theme" content="${theme}" />
-<meta name="foodable-theme-chrome" content="${themeChrome}" />
 <meta name="turbo-refresh-method" content="morph" />
 <meta name="turbo-refresh-scroll" content="preserve" />
 <meta name="turbo-cache-control" content="no-preview" />
-${themeColorMeta(theme, themeChrome)}
+${themeColorMeta(theme, "page")}
 <title>${escapeHtml(title)}</title>
 <link rel="icon" href="/favicon.ico" sizes="32x32" />
 <link rel="icon" href="/brand/icon.svg" type="image/svg+xml" data-turbo-track="reload" />
@@ -148,9 +155,9 @@ ${themeColorMeta(theme, themeChrome)}
 export function appHead(
     title: string,
     theme: ThemePref,
-    themeChrome: ThemeChromeKind,
+    _themeChrome: ThemeChromeKind,
 ): string {
-    return `${appHeadMeta(title, theme, themeChrome)}
+    return `${appHeadMeta(title, theme)}
 <link rel="stylesheet" href="${appStylesheetHref()}" data-turbo-track="reload" />
 <script src="${appScriptHref()}" defer data-turbo-track="reload"></script>`;
 }

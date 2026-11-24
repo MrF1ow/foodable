@@ -14,6 +14,8 @@ export type ProfileCardOptions = {
     email?: string;
     /** Initials already worked out; default from `name`. */
     initials?: string;
+    /** A ready-made circle in place of the initials (the member's picture). */
+    avatar?: Html;
     fields: readonly { key: string; value: string | number | null }[];
     className?: string;
 };
@@ -32,10 +34,12 @@ export function profileCard(opts: ProfileCardOptions): Html {
                   )
                   .join("")}</dl>`
             : "";
-    const avatar = avatarInitials({
-        name: opts.name,
-        initials: opts.initials,
-    });
+    const avatar =
+        opts.avatar ??
+        avatarInitials({
+            name: opts.name,
+            initials: opts.initials,
+        });
     return raw(
         `<div class="${cls("fd-profile-card", opts.className)}"><div class="fd-profile-card__who"><span class="fd-profile-card__id"><span class="fd-profile-card__name">${esc(opts.name)}</span>${email}</span>${avatar}</div>${fields}</div>`,
     );

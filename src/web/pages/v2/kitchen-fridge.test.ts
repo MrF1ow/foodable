@@ -130,7 +130,9 @@ describe("renderKitchenFridgeV2Page", () => {
             ],
         });
         const html = renderKitchenFridgeV2Page(view);
-        expect(html).not.toContain("<script>");
+        // The hostile name never reaches the markup raw. (The head's own
+        // one-line script that sets html.fx is the only script tag.)
+        expect(html).not.toContain('<script>alert("x")');
         expect(html).toContain("&lt;script&gt;");
     });
 

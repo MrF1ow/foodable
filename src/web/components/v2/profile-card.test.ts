@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { raw } from "./html.js";
 import { profileCard } from "./profile-card.js";
 import { XSS, XSS_ESCAPED } from "./test-helpers.js";
 
@@ -31,6 +32,18 @@ describe("profileCard (FigCraft 381535)", () => {
             '<div class="fd-profile-card__field"><dt class="fd-profile-card__key">Household</dt><dd class="fd-profile-card__val">The Flow household</dd></div>',
         );
         expect(html.match(/fd-profile-card__field"/g)?.length).toBe(3);
+    });
+
+    test("a ready-made avatar replaces the initials circle", () => {
+        const html = String(
+            profileCard({
+                name: "Ethan Flow",
+                avatar: raw('<span class="fd-avatar">pic</span>'),
+                fields: [],
+            }),
+        );
+        expect(html).toContain('<span class="fd-avatar">pic</span>');
+        expect(html).not.toContain("fd-avatar-initials");
     });
 
     test("the email and the fields are optional", () => {

@@ -30,15 +30,22 @@ Response codes:
 - Validation errors render **4xx** HTML in place (modals reopen via `data-modal-open-on-load`).
 - Expired-session login on POST is **401** (GET stays **200**), so Turbo renders the login page instead of dropping the response.
 
-Flows that opt out of Turbo:
+Flows that opt out of Turbo (each answers with something Turbo cannot render as a page, or must be a real load):
 
 - the login `/approve` form;
 - the rotate-household-token confirm form (owner only, on Settings › Household; one-time secret on a 200 page);
+- the invite-create form (Settings › Household › Invites; the one-time code on a 200 page);
 - the Share sheet form (`share-sheet.ts`, the one-time link on a 200 page);
-- the links into Settings (sidebar item, account row, account chip), the Settings back links, and the Settings forms (account, display, invites, export), because iOS Safari re-tints its toolbar only on a full page load.
+- Export data on Settings home (the 303 goes to a download link, not a page);
+- the logout link, on the Account page and the gate app bar;
+- the Settings forms still waiting for their page to switch: goals, AI connections and stores (each drops its opt-out with its page).
 
-Goals, Product score and Settings › Notifications autosave (`client/v2/autosave.js`), so they keep Turbo. The logout link, on the Account page and the gate app bar, keeps `data-turbo="false"`.
+Everything else in Settings is Turbo: the sidebar item, the account row and chip, every Settings back link, the account forms (name, time zone, photo) and the Display control on Settings home. iOS Safari's toolbar tint is synced in place on the visit (see Theme sync below), so a theme change no longer needs a full load; the tint on a real iPhone is what the user's audit checks.
+
+Goals, Product score and Settings › Notifications autosave (`client/v2/autosave.js`), and so do the Display control and the time zone list, so they keep Turbo.
+
+Entrance fade: `html.fx` (animations on) and `html.fx-enter` (the fade of `.app-main`) are set by the inline script in `<head>` (`ENTRANCE_FX_SCRIPT` in `src/web/shell.ts`) before the first paint, unless the person asked for reduced motion, so a full load paints once and fades in from blank. `client/shell.js` removes `fx-enter` after a second and before any Turbo visit or refresh renders: a page Turbo swaps in is never faded. `scripts/flicker-check.ts` is the check (see the foodable-test skill).
 
 The login template adds `<meta name="turbo-visit-control" content="reload">`, and `shell.js` forces a full reload if login HTML would morph into app chrome.
 
-Theme sync: Turbo merges provisional `<head>` nodes (including `meta[name=foodable-theme]`) on visits and morph refreshes, but never copies `data-theme` onto `<html>`. So `shell.js` syncs `document.documentElement` and the server-rendered `meta[name=theme-color]` tags in place (content/media only, never remove/recreate) from that meta on `turbo:before-render` (after the head merge, before body paint), and only when the preference differs. The shell, login and bare pages all emit page chrome (`THEME_COLOR`).
+Theme sync: Turbo merges provisional `<head>` nodes (including `meta[name=foodable-theme]`) on visits and morph refreshes, but never copies `data-theme` onto `<html>`. So `shell.js` syncs `document.documentElement` and the server-rendered `meta[name=theme-color]` tags in place (content/media only, never remove/recreate) from that meta on `turbo:before-render` (after the head merge, before body paint), and only when the preference differs. The shell, login and bare pages all emit page chrome (`THEME_COLOR`, the page background); the nav surface colour (`THEME_NAV_COLOR`) is no longer a chrome colour.
