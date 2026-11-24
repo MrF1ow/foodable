@@ -213,6 +213,17 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         const made = await make("import_recipe_from_text", scrambleArgs(s));
         return { id: (made.recipe as { id: string }).id };
     },
+    // The caller's own version drops the seeded ingredient: the removed
+    // ingredient's id is in `variant`, so the text must carry it.
+    "get_recipe#own-version": async (s, make) => {
+        await make("set_recipe_variant", {
+            recipe_id: s.recipe,
+            member_id: s.owner,
+            action: "remove",
+            ingredient_id: s.ingredient,
+        });
+        return { id: s.recipe };
+    },
     get_week_plan: () => ({}),
     get_household_rules: () => ({}),
     search_food: () => ({ query: "eggs" }),
@@ -410,6 +421,14 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         slot: "dinner",
         servings: 2,
     }),
+    // A plan for named people echoes their ids in its entry, so the text names them.
+    "plan_recipe#members": (s) => ({
+        recipe_id: s.recipe,
+        date: new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10),
+        slot: "snack",
+        servings: 2,
+        member_ids: [s.owner, s.member],
+    }),
     add_plan_missing_to_groceries: () => ({}),
     add_recipe_to_grocery: noIds("returns counts, no row ids", (s) => ({
         recipe_id: s.recipe,
@@ -498,6 +517,27 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         member_id: s.owner,
         portion_count: 1,
     })),
+    set_recipe_variant: noIds(
+        "no structured result: the id of the change is in its text",
+        (s) => ({
+            recipe_id: s.recipe,
+            member_id: s.owner,
+            action: "remove",
+            ingredient_id: s.ingredient,
+        }),
+    ),
+    clear_recipe_variant: noIds(
+        "no structured result: it echoes only ids the caller passed in",
+        async (s, make) => {
+            await make("set_recipe_variant", {
+                recipe_id: s.recipe,
+                member_id: s.owner,
+                action: "remove",
+                ingredient_id: s.ingredient,
+            });
+            return { recipe_id: s.recipe, member_id: s.owner };
+        },
+    ),
     reorder_recipe_ingredients: noIds(
         "echoes only ids the caller passed in",
         async (s, make) => {

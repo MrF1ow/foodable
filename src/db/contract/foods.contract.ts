@@ -1478,7 +1478,7 @@ export function runFoodsStoreContract(
             expect(await store.listFoods(c.otherHouseholdId)).toEqual([]);
         });
 
-        test("countFoodRefs aggregates five tables per household", async () => {
+        test("countFoodRefs aggregates six tables per household", async () => {
             await reset();
             const c = ctx();
             const store = createStore();

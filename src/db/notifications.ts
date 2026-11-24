@@ -23,7 +23,7 @@ import { liveGroceryStore } from "./grocery.js";
 import { listHouseholdMembers } from "./household.js";
 import { liveNoticeDismissalsStore } from "./notice-dismissals.js";
 import { liveRecipePlansStore } from "./plans.js";
-import { liveRecipesStore } from "./recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "./recipes.js";
 import { householdClock } from "./restock.js";
 import { pgError, rows, run } from "./sql.js";
 import { liveWeighInStore } from "./weigh-ins.js";
@@ -489,6 +489,7 @@ export function liveNoticesForDeps(): NoticesForDeps {
         dismissals: liveNoticeDismissalsStore(),
         grocery: liveGroceryStore(),
         plans: liveRecipePlansStore(),
+        variants: liveRecipeVariantsStore(),
         weighIns: liveWeighInStore(),
         allergenMembers: liveAllergenMembers,
     };

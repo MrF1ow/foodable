@@ -1,4 +1,4 @@
-import { test, expect } from "bun:test";
+import { describe, test, expect } from "bun:test";
 import {
     addFoodById,
     addLocation,
@@ -26,6 +26,10 @@ import {
     RecipeInputError,
 } from "./recipes.js";
 import { RecipeUnverifiedError } from "./recipe-import.js";
+import {
+    createMemoryVariantsStore,
+    setRecipeVariant,
+} from "./recipe-variants.js";
 import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
 import {
     addFridgeItemAdjust,
@@ -1693,4 +1697,238 @@ test("cook preview is unavailable for the four domain errors and nothing else", 
     expect(isCookPreviewUnavailable(new Error("db down"))).toBe(false);
     expect(isCookPreviewUnavailable("nope")).toBe(false);
     expect(isCookPreviewUnavailable(null)).toBe(false);
+});
+
+describe("cooking for people with their own versions", () => {
+    const ALICE = "alice";
+    const BOB = "bob";
+
+    async function kitchen() {
+        const fridge = createMemoryFridgeStore();
+        const stock = createMemoryStockStore();
+        const foods = createMemoryFoodsStore();
+        const recipes = createMemoryRecipesStore();
+        const variants = createMemoryVariantsStore();
+        const loc = await addLocation(fridge, HH, "Fridge");
+        const pasta = await findOrCreateManualFood(foods, HH, "food", "Pasta");
+        const cheese = await findOrCreateManualFood(
+            foods,
+            HH,
+            "food",
+            "Cheese",
+        );
+        const vegan = await findOrCreateManualFood(
+            foods,
+            HH,
+            "food",
+            "Vegan cheese",
+        );
+        for (const [food, amount] of [
+            [pasta, 1000],
+            [cheese, 1000],
+            [vegan, 1000],
+        ] as const) {
+            await applyMovement(fridge, stock, foods, {
+                householdId: HH,
+                foodId: food.id,
+                delta: amount,
+                unit: "g",
+                reason: "purchase",
+                locationId: loc.id,
+            });
+        }
+        const recipe = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Mac",
+            yieldPortions: 4,
+        });
+        const pastaLine = await addRecipeManualIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: recipe.id,
+            name: "Pasta",
+            amount: 400,
+            unit: "g",
+        });
+        const cheeseLine = await addRecipeManualIngredient(recipes, foods, {
+            householdId: HH,
+            recipeId: recipe.id,
+            name: "Cheese",
+            amount: 200,
+            unit: "g",
+        });
+        return {
+            fridge,
+            stock,
+            foods,
+            recipes,
+            variants,
+            recipe,
+            pasta,
+            cheese,
+            vegan,
+            pastaLine,
+            cheeseLine,
+        };
+    }
+
+    async function amountLeft(
+        k: Awaited<ReturnType<typeof kitchen>>,
+        foodId: string,
+    ) {
+        const items = await k.fridge.listItems(HH);
+        return items
+            .filter((item) => item.foodId === foodId)
+            .reduce((sum, item) => sum + item.quantity.amount, 0);
+    }
+
+    test("stock is deducted by each listed member's version", async () => {
+        const k = await kitchen();
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            userId: ALICE,
+            action: "remove",
+            ingredientId: k.cheeseLine.id,
+        });
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            userId: BOB,
+            action: "amount",
+            ingredientId: k.pastaLine.id,
+            amount: 800,
+            unit: "g",
+        });
+        const result = await cookRecipe(k.recipes, k.fridge, k.stock, k.foods, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            totalPortions: 3,
+            memberPortions: [
+                { userId: ALICE, portions: 1 },
+                { userId: BOB, portions: 2 },
+            ],
+            variants: k.variants,
+        });
+        expect(result.shortfalls).toEqual([]);
+        // Pasta: Alice 1/4 x 400, Bob 2/4 x 800. Cheese: Alice none, Bob 2/4 x 200.
+        expect(await amountLeft(k, k.pasta.id)).toBe(500);
+        expect(await amountLeft(k, k.cheese.id)).toBe(900);
+    });
+
+    test("portions with nobody named are cooked at the base, and a swapped food draws its own stock", async () => {
+        const k = await kitchen();
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            userId: ALICE,
+            action: "food",
+            ingredientId: k.cheeseLine.id,
+            foodId: k.vegan.id,
+        });
+        await cookRecipe(k.recipes, k.fridge, k.stock, k.foods, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            totalPortions: 4,
+            memberPortions: [{ userId: ALICE, portions: 1 }],
+            variants: k.variants,
+        });
+        expect(await amountLeft(k, k.pasta.id)).toBe(600);
+        expect(await amountLeft(k, k.cheese.id)).toBe(850);
+        expect(await amountLeft(k, k.vegan.id)).toBe(950);
+    });
+
+    test("with no member portions, or no variants given, the base is cooked as before", async () => {
+        const k = await kitchen();
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            userId: ALICE,
+            action: "remove",
+            ingredientId: k.cheeseLine.id,
+        });
+        await cookRecipe(k.recipes, k.fridge, k.stock, k.foods, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            totalPortions: 4,
+        });
+        expect(await amountLeft(k, k.cheese.id)).toBe(800);
+    });
+
+    test("the preview plans exactly what the cook takes, per member version, and writes nothing", async () => {
+        const k = await kitchen();
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            userId: ALICE,
+            action: "remove",
+            ingredientId: k.cheeseLine.id,
+        });
+        await setRecipeVariant(k.recipes, k.foods, k.variants, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            userId: BOB,
+            action: "food",
+            ingredientId: k.cheeseLine.id,
+            foodId: k.vegan.id,
+        });
+        const input = {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            totalPortions: 3,
+            memberPortions: [
+                { userId: ALICE, portions: 1 },
+                { userId: BOB, portions: 2 },
+            ],
+            variants: k.variants,
+        };
+        const before = await k.fridge.listItems(HH);
+        const preview = await previewCookRecipe(
+            k.recipes,
+            k.fridge,
+            k.foods,
+            input,
+        );
+        expect(await k.fridge.listItems(HH)).toEqual(before);
+        expect(
+            preview.lines.map((line) => [
+                line.displayName,
+                line.before - line.after,
+            ]),
+        ).toEqual([
+            ["Pasta", 300],
+            ["Vegan cheese", 100],
+        ]);
+        await cookRecipe(k.recipes, k.fridge, k.stock, k.foods, input);
+        expect(await amountLeft(k, k.pasta.id)).toBe(700);
+        expect(await amountLeft(k, k.vegan.id)).toBe(900);
+        expect(await amountLeft(k, k.cheese.id)).toBe(1000);
+    });
+
+    test("a food the recipe lists twice is one line of the cook, with or without versions", async () => {
+        const k = await kitchen();
+        await addRecipeManualIngredient(k.recipes, k.foods, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            name: "Cheese",
+            amount: 0.1,
+            unit: "kg",
+        });
+        const preview = await previewCookRecipe(k.recipes, k.fridge, k.foods, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            totalPortions: 4,
+        });
+        expect(
+            preview.lines
+                .filter((line) => line.displayName === "Cheese")
+                .map((line) => [line.before, line.before - line.after]),
+        ).toEqual([[1000, 300]]);
+        await cookRecipe(k.recipes, k.fridge, k.stock, k.foods, {
+            householdId: HH,
+            recipeId: k.recipe.id,
+            totalPortions: 4,
+        });
+        expect(await amountLeft(k, k.cheese.id)).toBe(700);
+    });
 });

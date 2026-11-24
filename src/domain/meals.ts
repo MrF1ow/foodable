@@ -18,6 +18,7 @@ import {
     type RecipeIngredient,
     type RecipesStore,
 } from "./recipes.js";
+import { variantFor, type RecipeVariantsStore } from "./recipe-variants.js";
 
 export class MealItemsError extends Error {
     readonly code: "meal_items" | "recipe_unverified";
@@ -439,6 +440,12 @@ export async function resolveAndBuildMeal(opts: {
     recipes: RecipesStore;
     items: MealItemSpec[];
     onSimilar?: OnSimilar;
+    /**
+     * Whose meal this is. With `variants`, a recipe portion is worked out from
+     * that person's version of the recipe instead of the base.
+     */
+    forUserId?: string;
+    variants?: RecipeVariantsStore;
 }): Promise<{ built: BuiltMealFromItems; specs: MealItemSpec[] }> {
     const onSimilar = opts.onSimilar ?? "create";
     if (onSimilar === "ask") {
@@ -538,10 +545,21 @@ export async function resolveAndBuildMeal(opts: {
                 throw err;
             }
         }
-        const ingredients = await opts.recipes.listIngredients(
+        const base = await opts.recipes.listIngredients(
             opts.householdId,
             recipeId,
         );
+        const ingredients =
+            opts.variants && opts.forUserId
+                ? variantFor(
+                      { id: recipeId, ingredients: base },
+                      await opts.variants.listOverrides(
+                          opts.householdId,
+                          recipeId,
+                      ),
+                      opts.forUserId,
+                  ).ingredients
+                : base;
         recipesById.set(recipeId, { recipe, ingredients });
         for (const ingredient of ingredients) {
             if (ingredient.foodId) foodIds.add(ingredient.foodId);

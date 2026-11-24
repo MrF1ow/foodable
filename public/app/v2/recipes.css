@@ -1301,6 +1301,12 @@
     margin-top: var(--fd-s-2);
 }
 
+.fd-plan-named {
+    margin: 0;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-secondary);
+}
+
 .fd-plan-error {
     margin: 0;
     font: 400 14px/20px var(--font-body);

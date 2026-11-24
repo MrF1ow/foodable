@@ -797,4 +797,99 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
             });
         },
     );
+
+    test.each(ERAS)(
+        "a plan for a named person follows their saved portions as they change, and a servings given with them is ignored (%p)",
+        async (era) => {
+            await withClient(ownerId, era, async (call) => {
+                const food = async (name: string) =>
+                    (
+                        await call("upsert_food", {
+                            name,
+                            on_similar: "create",
+                        })
+                    ).structuredContent!.id as string;
+                const pasta = await food("Pasta");
+                const nuts = await food("Peanuts");
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: pasta,
+                    amount: 400,
+                    unit: "g",
+                });
+                await call("add_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    food_id: nuts,
+                    amount: 200,
+                    unit: "g",
+                });
+                const [nutRow] = await getCtx().sql`
+                    select id from public.recipe_ingredients
+                    where recipe_id = ${recipeId} and food_id = ${nuts}
+                `;
+                await call("set_recipe_portion", {
+                    recipe_id: recipeId,
+                    member_id: ownerId,
+                    portion_count: 2,
+                });
+                await call("set_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: ownerId,
+                    action: "remove",
+                    ingredient_id: (nutRow as { id: string }).id,
+                });
+                const today = (await call("get_week_plan")).structuredContent!
+                    .today as string;
+                const planned = await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: today,
+                    slot: "dinner",
+                    servings: 6,
+                    member_ids: [ownerId],
+                });
+                expect(planned.isError).toBeFalsy();
+                // Stored as the person's 2 portions, not the 6 asked for.
+                expect(planned.structuredContent!.plan.servings).toBe(2);
+                const [stored] = await getCtx().sql`
+                    select servings::int as servings from public.recipe_plans
+                `;
+                expect(Number(stored!.servings)).toBe(2);
+                const need = async () => {
+                    const week = await call("get_week_plan");
+                    return {
+                        missing: Object.fromEntries(
+                            week.structuredContent!.missing.map((m: any) => [
+                                m.display_name,
+                                m.amount,
+                            ]),
+                        ),
+                        servings: week
+                            .structuredContent!.days.flatMap(
+                                (d: any) => d.plans,
+                            )
+                            .map((p: any) => p.servings),
+                        text: week.content[0]!.text,
+                    };
+                };
+                const before = await need();
+                // 2 portions of a yield-2 recipe: all the pasta, none of the
+                // peanuts the person leaves out.
+                expect(before.missing).toEqual({ Pasta: 400 });
+                expect(before.servings).toEqual([2]);
+                expect(before.text).toContain("(2 portions)");
+
+                // The person lowers their portions: the plan follows, the
+                // stored 2 does not hold the excess at the base.
+                await call("set_recipe_portion", {
+                    recipe_id: recipeId,
+                    member_id: ownerId,
+                    portion_count: 1,
+                });
+                const after = await need();
+                expect(after.missing).toEqual({ Pasta: 200 });
+                expect(after.servings).toEqual([1]);
+                expect(after.text).toContain("(1 portion)");
+            });
+        },
+    );
 });

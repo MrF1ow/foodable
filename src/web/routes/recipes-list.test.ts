@@ -24,6 +24,7 @@ import {
     createMemoryRecipesStore,
     createRecipe,
 } from "../../domain/recipes.js";
+import { createMemoryVariantsStore } from "../../domain/recipe-variants.js";
 import { recheckRecipe } from "../../domain/recipe-import.js";
 import * as actualAttention from "../attention.js";
 import * as actualNoticeDismissals from "../../db/notice-dismissals.js";
@@ -83,6 +84,7 @@ const db = {
     foodsStore: createMemoryFoodsStore(),
     fridgeStore: createMemoryFridgeStore(),
     recipesStore: createMemoryRecipesStore(),
+    variantsStore: createMemoryVariantsStore(),
     dismissalsStore: createMemoryNoticeDismissalsStore(),
     groceryStore: createMemoryGroceryStore(),
     stockStore: createMemoryStockStore(),
@@ -124,6 +126,7 @@ mock.module("../../db/fridge.js", () => ({
 mock.module("../../db/recipes.js", () => ({
     ...realRecipesDb,
     liveRecipesStore: () => db.recipesStore,
+    liveRecipeVariantsStore: () => db.variantsStore,
 }));
 mock.module("../../db/grocery.js", () => ({
     ...realGrocery,
@@ -284,6 +287,7 @@ beforeEach(async () => {
     db.foodsStore = createMemoryFoodsStore();
     db.fridgeStore = createMemoryFridgeStore();
     db.recipesStore = createMemoryRecipesStore();
+    db.variantsStore = createMemoryVariantsStore();
     db.dismissalsStore = createMemoryNoticeDismissalsStore();
     db.groceryStore = createMemoryGroceryStore();
     db.stockStore = createMemoryStockStore();
@@ -1261,6 +1265,29 @@ describe("POST /recipes/:id/plan", () => {
         expect(toastOf(res)).toBeNull();
     });
 
+    test("naming people plans exactly their saved portions and ignores the servings sent with them", async () => {
+        await db.recipesStore.upsertPortion({
+            householdId: HH,
+            recipeId: db.recipeId,
+            userId: ALICE.toLowerCase(),
+            portionCount: 2,
+        });
+        const day = addPlanDays(todayUtc(), 2);
+        const body = new URLSearchParams({
+            date: day,
+            slot: "lunch",
+            servings: "9",
+        });
+        body.append("member_ids", ALICE);
+        body.append("member_ids", BOB);
+        const res = await postPlanPath(`/recipes/${db.recipeId}/plan`, body);
+        expect(res.status).toBe(303);
+        // Alice's 2 and Bob's 1 (none saved): 3, not the 9 sent.
+        expect(await planned()).toMatchObject([
+            { date: day, slot: "lunch", servings: 3, memberIds: [ALICE, BOB] },
+        ]);
+    });
+
     test("the recipe page the redirect lands on shows the planned day", async () => {
         const before = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(before.html).not.toContain("fd-recipe-planned");
@@ -1420,6 +1447,49 @@ describe("moving and removing a plan", () => {
         expect(toastOf(res)).toBeNull();
         expect(await planned()).toMatchObject([
             { id, date: day, slot: "lunch", servings: 4 },
+        ]);
+    });
+
+    test("a plan for named people refuses servings in the sheet's form, and moves without them", async () => {
+        const named = await db.plansStore.addPlan({
+            householdId: HH,
+            recipeId: db.recipeId,
+            date: todayUtc(),
+            slot: "dinner",
+            servings: 2,
+            memberIds: ["u1"],
+        });
+        const id = named!.id;
+        const day = addPlanDays(todayUtc(), 2);
+        const refused = await postPlanPath(
+            `/recipes/plan/${id}/move`,
+            new URLSearchParams({
+                date: day,
+                slot: "lunch",
+                servings: "5",
+                back: "recipes",
+            }),
+        );
+        expect(refused.status).toBe(400);
+        expect(await refused.text()).toContain(
+            "This plan is for named people; change their portions instead.",
+        );
+        expect(await planned()).toMatchObject([
+            { id, date: todayUtc(), slot: "dinner", servings: 2 },
+        ]);
+        const moved = await postPlanPath(
+            `/recipes/plan/${id}/move`,
+            new URLSearchParams({ date: day, slot: "lunch", back: "recipes" }),
+        );
+        expect(moved.status).toBe(303);
+        expect(await planned()).toMatchObject([
+            {
+                id,
+                date: day,
+                slot: "lunch",
+                servings: 2,
+                memberIds: ["u1"],
+            },
         ]);
     });
 

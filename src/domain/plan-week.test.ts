@@ -10,6 +10,7 @@ import type { RecipePlan, PlanSlot } from "./plan.js";
 import {
     addMissingToGroceries,
     addPlanDays,
+    countedServings,
     missingForPlan,
     planRecipesOf,
     unknownMissingNotice,
@@ -17,6 +18,7 @@ import {
     type PlanRecipe,
 } from "./plan-week.js";
 import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
+import type { RecipeVariantOverride } from "./recipe-variants.js";
 
 const HH = "hh-plan";
 
@@ -912,6 +914,203 @@ describe("planRecipesOf", () => {
                     { displayName: "Salt", quantity: null, foodId: null },
                 ],
             },
+        ]);
+    });
+});
+
+describe("plans for named people", () => {
+    const ALICE = "alice";
+    const BOB = "bob";
+    const R = "mac";
+    const recipes = [{ id: R, name: "Mac", yieldPortions: 4 }];
+    const base = (
+        id: string,
+        name: string,
+        amount: number,
+        foodId: string,
+        sortOrder: number,
+    ) => ({
+        id,
+        householdId: HH,
+        recipeId: R,
+        kind: "food" as const,
+        displayName: name,
+        quantity: { amount, unit: "g" },
+        foodId,
+        sortOrder,
+        note: null,
+    });
+    const ingredients = [
+        base("i-pasta", "Pasta", 400, "f-pasta", 0),
+        base("i-cheese", "Cheese", 200, "f-cheese", 1),
+    ];
+    const override = (
+        userId: string,
+        extra: Partial<RecipeVariantOverride>,
+    ): RecipeVariantOverride => ({
+        id: `o-${userId}-${extra.ingredientId}`,
+        householdId: HH,
+        recipeId: R,
+        userId,
+        ingredientId: null,
+        action: "remove",
+        amount: null,
+        unit: null,
+        foodId: null,
+        displayName: null,
+        createdAt: "2026-11-01T00:00:00.000Z",
+        updatedAt: "2026-11-01T00:00:00.000Z",
+        ...extra,
+    });
+    const overrides = [
+        override(ALICE, { ingredientId: "i-cheese", action: "remove" }),
+        override(BOB, {
+            ingredientId: "i-pasta",
+            action: "amount",
+            amount: 800,
+            unit: "g",
+        }),
+    ];
+    const versions = {
+        overrides,
+        portions: [
+            { recipeId: R, userId: ALICE, portionCount: 1 },
+            { recipeId: R, userId: BOB, portionCount: 2 },
+        ],
+        ingredients,
+    };
+    const named = (memberIds: string[], servings = 3): RecipePlan => ({
+        ...plan(R, "2026-11-12", "dinner", servings),
+        memberIds,
+    });
+    const window = { from: "2026-11-12", days: 7 };
+    const needs = (lines: ReturnType<typeof missingForPlan>) =>
+        Object.fromEntries(lines.map((l) => [l.displayName, l.need]));
+
+    test("a plan with member_ids totals each member's version at their portion count", () => {
+        const planned = [named([ALICE, BOB])];
+        const lines = missingForPlan(
+            planned,
+            planRecipesOf(planned, recipes, ingredients, versions),
+            [],
+            window,
+        );
+        // Pasta: Alice 1/4 x 400 + Bob 2/4 x 800; cheese: Bob 2/4 x 200 only.
+        expect(needs(lines)).toEqual({
+            Pasta: { amount: 500, unit: "g" },
+            Cheese: { amount: 100, unit: "g" },
+        });
+        expect(lines[0]!.neededBy).toHaveLength(1);
+    });
+
+    test("a stored number above the members' portions counts nothing at the base", () => {
+        // Stored 4, but the plan is for Alice alone and she eats 1.
+        const planned = [named([ALICE], 4)];
+        const lines = missingForPlan(
+            planned,
+            planRecipesOf(planned, recipes, ingredients, versions),
+            [],
+            window,
+        );
+        // Alice's 1 portion: a quarter of the pasta, no cheese.
+        expect(needs(lines)).toEqual({ Pasta: { amount: 100, unit: "g" } });
+        expect(lines[0]!.neededBy.map((n) => n.servings)).toEqual([1]);
+    });
+
+    test("a stored number below the members' portions is not what counts", () => {
+        // Stored 1, for two people who eat 1 and 2: three portions.
+        const planned = [named([ALICE, BOB], 1)];
+        const recipesWith = planRecipesOf(
+            planned,
+            recipes,
+            ingredients,
+            versions,
+        );
+        expect(countedServings(planned[0]!, recipesWith[0]!.versions)).toBe(3);
+        const lines = missingForPlan(planned, recipesWith, [], window);
+        expect(needs(lines)).toEqual({
+            Pasta: { amount: 500, unit: "g" },
+            Cheese: { amount: 100, unit: "g" },
+        });
+        expect(lines[0]!.neededBy.map((n) => n.servings)).toEqual([3]);
+    });
+
+    test("a person who lowers their saved portions lowers the plan with it", () => {
+        const lowered = {
+            ...versions,
+            portions: [{ recipeId: R, userId: ALICE, portionCount: 1 }],
+        };
+        // Stored 3 when Alice ate 2 and Bob 1; now Alice eats 1 and Bob has none (one).
+        const planned = [named([ALICE, BOB], 3)];
+        const lines = missingForPlan(
+            planned,
+            planRecipesOf(planned, recipes, ingredients, {
+                ...lowered,
+                overrides: [override(ALICE, { ingredientId: "i-cheese" })],
+            }),
+            [],
+            window,
+        );
+        // Alice 1 (no cheese) and Bob 1 at the base: 2 portions, not 3. The
+        // cheese Alice left out is not bought for a third portion.
+        expect(needs(lines)).toEqual({
+            Pasta: { amount: 200, unit: "g" },
+            Cheese: { amount: 50, unit: "g" },
+        });
+        expect(lines[0]!.neededBy.map((n) => n.servings)).toEqual([2]);
+    });
+
+    test("a plan with no members counts at the base, as does one when no versions are given", () => {
+        const unnamed = [plan(R, "2026-11-12", "dinner", 2)];
+        expect(
+            needs(
+                missingForPlan(
+                    unnamed,
+                    planRecipesOf(unnamed, recipes, ingredients, versions),
+                    [],
+                    window,
+                ),
+            ),
+        ).toEqual({
+            Pasta: { amount: 200, unit: "g" },
+            Cheese: { amount: 100, unit: "g" },
+        });
+        const planned = [named([ALICE, BOB])];
+        expect(
+            needs(
+                missingForPlan(
+                    planned,
+                    planRecipesOf(planned, recipes, ingredients),
+                    [],
+                    window,
+                ),
+            ),
+        ).toEqual({
+            Pasta: { amount: 300, unit: "g" },
+            Cheese: { amount: 150, unit: "g" },
+        });
+    });
+
+    test("two plans of one recipe stay two entries, each totalled by its own members", () => {
+        const planned = [
+            named([ALICE]),
+            {
+                ...plan(R, "2026-11-13", "dinner", 2),
+                memberIds: [BOB],
+            },
+        ];
+        const lines = missingForPlan(
+            planned,
+            planRecipesOf(planned, recipes, ingredients, versions),
+            [],
+            window,
+        );
+        const pasta = lines.find((l) => l.displayName === "Pasta")!;
+        expect(pasta.neededBy.map((n) => [n.date, n.need])).toEqual([
+            // Alice's 1 portion alone (the 3 stored are not counted), then
+            // Bob's 2 portions at his 800 g.
+            ["2026-11-12", { amount: 100, unit: "g" }],
+            ["2026-11-13", { amount: 400, unit: "g" }],
         ]);
     });
 });

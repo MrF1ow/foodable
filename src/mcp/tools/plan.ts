@@ -8,7 +8,7 @@ import { liveNotifier } from "../../db/notify.js";
 import { loadWeekPlanInputs, type WeekPlanInputs } from "../../db/plan-week.js";
 import { liveGroceryStore } from "../../db/grocery.js";
 import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
-import { liveRecipesStore } from "../../db/recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "../../db/recipes.js";
 import { householdClock, householdToday } from "../../db/restock.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { GroceryInputError } from "../../domain/grocery.js";
@@ -25,6 +25,7 @@ import {
 import {
     addMissingToGroceries,
     addPlanDays,
+    countedServings,
     missingForPlan,
     WEEK_PLAN_DAYS,
     weekPlan,
@@ -54,6 +55,8 @@ const PLAN_ENTRY_SCHEMA = z.object({
     servings: z.number(),
     /** True on a day of a repeating plan (plan_id is rule:<id>:<date>); absent on a one-off. */
     repeats: z.boolean().optional(),
+    /** Who it is planned for, when anyone is named; absent otherwise. */
+    member_ids: z.array(z.string()).optional(),
     /** Calories in one portion of the recipe; null when the recipe's macros are unknown or incomplete. */
     kcal_per_portion: z.number().nullable(),
 });
@@ -129,6 +132,7 @@ export const PLAN_RECIPE_OUTPUT_SCHEMA = z.object({
         servings: z.number(),
         /** True when the plan repeats (plan_id is its first day); absent on a one-off. */
         repeats: z.boolean().optional(),
+        member_ids: z.array(z.string()).optional(),
     }),
     /** The recipe was already planned on that day and meal, so nothing new was made. */
     already_planned: z.boolean(),
@@ -195,20 +199,46 @@ function missingWire(line: PlanMissingLine) {
     };
 }
 
-function planWire(plan: RecipePlan, recipeName: string) {
+function planWire(
+    plan: RecipePlan,
+    recipeName: string,
+    /** What the plan counts; see `countedServings`. Default the stored servings. */
+    servings: number = plan.servings,
+) {
     return {
         plan_id: plan.id,
         recipe_id: plan.recipeId,
         recipe_name: recipeName,
         date: plan.date,
         slot: plan.slot,
-        servings: plan.servings,
+        servings,
         ...(plan.ruleId !== undefined ? { repeats: true } : {}),
+        ...((plan.memberIds?.length ?? 0) > 0
+            ? { member_ids: plan.memberIds }
+            : {}),
     };
 }
 
+/** The people a plan is for, as the text names them. */
+function memberTags(plan: { member_ids?: string[] }): string {
+    return (plan.member_ids ?? []).map((id) => idTag(id, "member_id")).join("");
+}
+
+/**
+ * What a plan counts: its servings, or for a plan that names people their
+ * portions (`servings` is already that sum, from `countedServings`).
+ */
+function countedText(plan: {
+    servings: number;
+    member_ids?: string[];
+}): string {
+    return (plan.member_ids ?? []).length === 0
+        ? `${plan.servings} servings`
+        : `${plan.servings} ${plan.servings === 1 ? "portion" : "portions"}`;
+}
+
 function planLine(plan: ReturnType<typeof planWire>): string {
-    return `${plan.recipe_name} · ${weekdayName(plan.date)} ${plan.date} · ${plan.slot} · ${plan.servings} servings${plan.repeats ? " · repeats" : ""}`;
+    return `${plan.recipe_name} · ${weekdayName(plan.date)} ${plan.date} · ${plan.slot} · ${countedText(plan)}${plan.repeats ? " · repeats" : ""}${plan.member_ids ? " · for" : ""}${memberTags(plan)}`;
 }
 
 /** Calories in one portion of each planned recipe, by recipe id. Null when unknown or incomplete. */
@@ -236,7 +266,13 @@ function kcalPerPortionByRecipe(
 }
 
 export function registerPlanTools(server: McpServer, ctx: ToolContext) {
-    const { callerHouseholdId, callerActor, analytics, runDestructive } = ctx;
+    const {
+        callerHouseholdId,
+        callerActor,
+        analytics,
+        runDestructive,
+        requireHouseholdMemberId,
+    } = ctx;
 
     registerWidgetResource(server, {
         key: "week-plan",
@@ -283,6 +319,9 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             : checkPlanDate(args.from),
                     );
                     const kcal = kcalPerPortionByRecipe(inputs);
+                    const recipeById = new Map(
+                        inputs.recipes.map((r) => [r.id, r]),
+                    );
                     const nameById = new Map(
                         inputs.recipes.map((r) => [r.id, r.name]),
                     );
@@ -295,9 +334,15 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                                 recipe_id: plan.recipeId,
                                 recipe_name: nameById.get(plan.recipeId) ?? "",
                                 slot: plan.slot,
-                                servings: plan.servings,
+                                servings: countedServings(
+                                    plan,
+                                    recipeById.get(plan.recipeId)?.versions,
+                                ),
                                 ...(plan.ruleId !== undefined
                                     ? { repeats: true }
+                                    : {}),
+                                ...((plan.memberIds?.length ?? 0) > 0
+                                    ? { member_ids: plan.memberIds }
                                     : {}),
                                 kcal_per_portion:
                                     kcal.get(plan.recipeId) ?? null,
@@ -325,6 +370,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             dismissals: liveNoticeDismissalsStore(),
                             grocery: liveGroceryStore(),
                             plans: liveRecipePlansStore(),
+                            variants: liveRecipeVariantsStore(),
                         },
                         householdId,
                         { today, timezone, actionable: true },
@@ -340,7 +386,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     const lines = days.flatMap((day) =>
                         day.plans.map(
                             (plan) =>
-                                `- ${day.weekday} ${day.date} · ${plan.slot}: ${plan.recipe_name} (${plan.servings} servings${plan.repeats ? ", repeats" : ""})${idTag(plan.plan_id, "plan_id")}${idTag(plan.recipe_id, "recipe_id")}`,
+                                `- ${day.weekday} ${day.date} · ${plan.slot}: ${plan.recipe_name} (${countedText(plan)}${plan.repeats ? ", repeats" : ""})${idTag(plan.plan_id, "plan_id")}${idTag(plan.recipe_id, "recipe_id")}${memberTags(plan)}`,
                         ),
                     );
                     const missingLines = missing.map(
@@ -385,7 +431,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Plan Recipe",
             description:
-                "Put a recipe on the household's week plan for a day and meal slot. `date` is YYYY-MM-DD in the household's calendar and must be today or later; `slot` is breakfast, lunch, dinner or snack; `servings` defaults to the recipe's yield. A recipe already on that day and slot (once or by a repeat) comes back unchanged (already_planned true), whatever servings; servings change in the app. Repeats of one recipe and slot may not overlap. `repeat` (default once) plans it from `date` weekly, daily, on weekdays (Mon-Fri) or on `days` (0 = Sunday to 6); plan_id is its first day.",
+                "Put a recipe on the household's week plan for a day and meal slot. `date` is YYYY-MM-DD in the household's calendar and must be today or later; `slot` is breakfast, lunch, dinner or snack; `servings` defaults to the recipe's yield. A recipe already on that day and slot (once or by a repeat) comes back unchanged (already_planned true), whatever servings; servings change in the app. Repeats of one recipe and slot may not overlap. `repeat` (default once) plans it from `date` weekly, daily, on weekdays (Mon-Fri) or on `days` (0 = Sunday to 6); plan_id is its first day. `member_ids`: who eats it; the plan is their saved portions added up (`servings` ignored), and the week's needs use each one's own version.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -398,6 +444,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                 slot: z.enum(PLAN_SLOTS),
                 servings: z.coerce.number().optional(),
                 repeat: z.enum(PLAN_REPEATS).optional(),
+                member_ids: z.array(z.string()).optional(),
                 // A blank, null or true/false weekday is refused, not read as
                 // Sunday (or Monday) by the number coercion.
                 days: z
@@ -432,6 +479,24 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                         args.recipe_id,
                     );
                     if (!recipe) throw new Error("Recipe not found.");
+                    // Naming people is a read of their versions, so any
+                    // member of the household may be named.
+                    const memberIds: string[] = [];
+                    const memberPortions: Record<string, number> = {};
+                    for (const id of args.member_ids ?? []) {
+                        // Stored ids are lower case, whatever case was typed.
+                        const memberId = (
+                            await requireHouseholdMemberId(id)
+                        ).toLowerCase();
+                        memberIds.push(memberId);
+                        const saved = await liveRecipesStore().getPortion(
+                            householdId,
+                            recipe.id,
+                            memberId,
+                        );
+                        if (saved)
+                            memberPortions[memberId] = saved.portionCount;
+                    }
                     // The web app's Add to plan runs the same function.
                     const outcome = await planRecipe(
                         liveRecipePlansStore(),
@@ -445,6 +510,8 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             servings: args.servings,
                             repeat: args.repeat,
                             days: args.days,
+                            memberIds,
+                            memberPortions,
                             today: await householdToday(householdId),
                             createdBy: actor.userId,
                         },
@@ -458,7 +525,23 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     );
                     if (!outcome) throw new Error("Recipe not found.");
                     const { plan, alreadyPlanned } = outcome;
-                    const wire = planWire(plan, recipe.name);
+                    // A plan for named people counts their portions as saved
+                    // now, so a plan that was already there reads the same
+                    // as everywhere else.
+                    const portionsOf: Record<string, number> = {};
+                    for (const userId of plan.memberIds ?? []) {
+                        const saved = await liveRecipesStore().getPortion(
+                            householdId,
+                            recipe.id,
+                            userId,
+                        );
+                        if (saved) portionsOf[userId] = saved.portionCount;
+                    }
+                    const wire = planWire(
+                        plan,
+                        recipe.name,
+                        countedServings(plan, { portions: portionsOf }),
+                    );
                     return {
                         content: [
                             {

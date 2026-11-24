@@ -23,6 +23,10 @@ import {
     type RelogStoredItem,
 } from "./meals.js";
 import type { FoodResult } from "../foods.js";
+import {
+    createMemoryVariantsStore,
+    setRecipeVariant,
+} from "./recipe-variants.js";
 
 const HH = "hh-1";
 
@@ -1077,4 +1081,57 @@ test("grams of a per-100 ml food with no density stay unknown and the note says 
     expect(built.unknownItems).toHaveLength(1);
     expect(built.unknownItems[0]).toContain("Half & Half");
     expect(built.unknownItems[0]).toContain("ml");
+});
+
+test("a logged recipe portion uses its person's version, and the base without one", async () => {
+    const recipes = createMemoryRecipesStore();
+    const foods = createMemoryFoodsStore();
+    const variants = createMemoryVariantsStore();
+    const recipe = await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: "alice",
+        name: "Mac",
+        yieldPortions: 4,
+    });
+    const cheese = await catalogFood(foods, "Cheese", {
+        defaultUnit: "g",
+        calories: 400,
+        proteinG: 25,
+        carbsG: 0,
+        fatG: 30,
+        nutritionSource: "manual",
+    });
+    const line = await recipes.insertIngredient({
+        id: "i-cheese",
+        householdId: HH,
+        recipeId: recipe.id,
+        kind: "food",
+        displayName: "Cheese",
+        quantity: { amount: 400, unit: "g" },
+        foodId: cheese.id,
+        sortOrder: 0,
+        note: null,
+    });
+    await setRecipeVariant(recipes, foods, variants, {
+        householdId: HH,
+        recipeId: recipe.id,
+        userId: "alice",
+        action: "amount",
+        ingredientId: line.id,
+        amount: 200,
+        unit: "g",
+    });
+    const log = (userId?: string) =>
+        resolveAndBuildMeal({
+            householdId: HH,
+            foods,
+            recipes,
+            items: [{ recipeId: recipe.id, portions: 2 }],
+            forUserId: userId,
+            variants,
+        });
+    // 2 portions of 4: alice's 200 g batch is 100 g, the base's 400 g is 200 g.
+    expect((await log("alice")).built.totals.calories).toBe(400);
+    expect((await log("bob")).built.totals.calories).toBe(800);
+    expect((await log()).built.totals.calories).toBe(800);
 });

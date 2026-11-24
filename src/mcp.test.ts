@@ -211,6 +211,7 @@ import {
     stripIdTags,
 } from "./mcp/shared.js";
 import { setGoalDayRowsForTests } from "./db/agent-actions-goal-days.js";
+import { createMemoryVariantsStore } from "./domain/recipe-variants.js";
 import {
     createMemoryRecipesStore,
     addRecipeManualIngredient,
@@ -450,6 +451,7 @@ const db = {
     stockStore: createMemoryStockStore(),
     groceryStore: createMemoryGroceryStore(),
     recipesStore: createMemoryRecipesStore(),
+    variantsStore: createMemoryVariantsStore(),
     shareLinksStore: createMemoryShareLinkStore(),
     settingsStore: createMemorySettingsStore(),
     rulesStore: createMemoryRulesStore(),
@@ -860,6 +862,7 @@ mock.module("./db/grocery.js", () => ({
 mock.module("./db/recipes.js", () => ({
     ...actualDbRecipes,
     liveRecipesStore: () => db.recipesStore,
+    liveRecipeVariantsStore: () => db.variantsStore,
 }));
 
 mock.module("./db/share-links.js", () => ({
@@ -1046,6 +1049,7 @@ beforeEach(() => {
     db.stockStore = createMemoryStockStore();
     db.groceryStore = createMemoryGroceryStore();
     db.recipesStore = createMemoryRecipesStore();
+    db.variantsStore = createMemoryVariantsStore();
     db.shareLinksStore = createMemoryShareLinkStore();
     db.settingsStore = createMemorySettingsStore();
     db.rulesStore = createMemoryRulesStore();
@@ -4762,8 +4766,12 @@ describe("household config tools", () => {
         // +94: plan_recipe says an entry already on that day and slot comes
         // back unchanged whatever the servings, and that repeats of one
         // recipe and slot may not overlap, in place of its one old sentence.
-        const TOOLS_LIST_MAX_CHARS = 229970;
-        const TOOLS_LIST_MAX_COUNT = 102;
+        // +2709: set_recipe_variant and clear_recipe_variant (a person's own
+        // version of a recipe), `change` and `variant` in get_recipe's output
+        // schema, and `member_ids` on plan_recipe and a plan entry, with
+        // their descriptions as short as they go.
+        const TOOLS_LIST_MAX_CHARS = 232679;
+        const TOOLS_LIST_MAX_COUNT = 104;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
             const snapshot = (await Bun.file(
@@ -12585,6 +12593,469 @@ describe("get_recipe carries the cook preview over HTTP", () => {
     );
 });
 
+describe("a person's own version of a recipe over HTTP", () => {
+    const REFUSAL =
+        "An agent can only add, change or delete the entries of the person it acts for. Nothing was changed. Ask U2 to do it, or their agent.";
+    type Call = (
+        name: string,
+        args?: Record<string, unknown>,
+    ) => Promise<ToolResult>;
+
+    beforeEach(() => {
+        db.members.push({
+            householdId: "hh-1",
+            userId: "u2",
+            role: "member",
+            displayName: "U2",
+        });
+        // The tests below are not about the agent switch.
+        void db.settingsStore.setMemberAgentsCanDelete("hh-1", "u1", true);
+    });
+
+    // Yield 4: 400 g of rice and 200 g of beans (100 kcal per 100 g each),
+    // with 1000 g of each in the fridge.
+    async function mealPrep(call: Call) {
+        const loc = await call("add_fridge_location", { name: "Pantry" });
+        const recipe = await call("create_recipe", {
+            name: "Rice bowl",
+            yield_portions: 4,
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        const ids: Record<string, string> = {};
+        const lines: Record<string, string> = {};
+        for (const [name, amount] of [
+            ["Rice", 400],
+            ["Beans", 200],
+        ] as const) {
+            const food = await call("upsert_food", {
+                name,
+                calories: 100,
+                protein_g: 10,
+                carbs_g: 10,
+                fat_g: 1,
+            });
+            ids[name] = food.structuredContent?.id as string;
+            await call("add_recipe_ingredient", {
+                recipe_id: recipeId,
+                food_id: ids[name],
+                amount,
+                unit: "g",
+            });
+            await call("add_fridge_item", {
+                location_id: loc.structuredContent?.id,
+                kind: "food",
+                food_id: ids[name],
+                amount: 1000,
+                unit: "g",
+            });
+        }
+        const got = await call("get_recipe", { id: recipeId });
+        for (const row of got.structuredContent?.ingredients as {
+            id: string;
+            display_name: string;
+        }[]) {
+            lines[row.display_name] = row.id;
+        }
+        return { recipeId, ids, lines };
+    }
+
+    const stockOf = async (food: string) =>
+        (await db.fridgeStore.listItems("hh-1"))
+            .filter((item) => item.foodId === food)
+            .reduce((sum, item) => sum + item.quantity.amount, 0);
+
+    test.each(ERAS)(
+        "get_recipe with member_id shows that member's version, and the caller's own by default (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { recipeId, lines } = await mealPrep(call);
+                const set = await call("set_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u1",
+                    action: "remove",
+                    ingredient_id: lines["Beans"],
+                });
+                expect(set.isError).toBeFalsy();
+                expect(textOf(set)).toContain("leaves it out");
+                await call("set_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u1",
+                    action: "amount",
+                    ingredient_id: lines["Rice"],
+                    amount: 800,
+                    unit: "g",
+                });
+                // Another member's version is a row the app or their agent made.
+                await db.variantsStore.saveOverride({
+                    householdId: "hh-1",
+                    recipeId,
+                    userId: "u2",
+                    ingredientId: lines["Rice"]!,
+                    action: "amount",
+                    amount: 100,
+                    unit: "g",
+                });
+
+                const mine = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                    (await call("get_recipe", { id: recipeId }))
+                        .structuredContent,
+                );
+                expect(mine.ingredients.map((i) => i.display_name)).toEqual([
+                    "Rice",
+                ]);
+                expect(mine.ingredients[0]).toMatchObject({
+                    amount: 800,
+                    change: "amount",
+                });
+                expect(mine.variant).toEqual({
+                    override_count: 2,
+                    removed: [{ id: lines["Beans"]!, display_name: "Beans" }],
+                });
+                // One serving from the viewing member's version: 800 / 4 g.
+                expect(mine.cook_preview?.lines[0]).toMatchObject({
+                    before: 1000,
+                    after: 800,
+                });
+
+                const theirs = await call("get_recipe", {
+                    id: recipeId,
+                    member_id: "u2",
+                });
+                const other = GET_RECIPE_OUTPUT_SCHEMA.parse(
+                    theirs.structuredContent,
+                );
+                expect(
+                    other.ingredients.map((i) => [i.display_name, i.amount]),
+                ).toEqual([
+                    ["Rice", 100],
+                    ["Beans", 200],
+                ]);
+                expect(other.variant?.override_count).toBe(1);
+                expect(textOf(theirs)).toContain("own version");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "set_recipe_variant and clear_recipe_variant act only for the caller: another member's is refused (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { recipeId, lines } = await mealPrep(call);
+                const refused = await call("set_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u2",
+                    action: "remove",
+                    ingredient_id: lines["Beans"],
+                });
+                expect(refused.isError).toBe(true);
+                expect(textOf(refused)).toContain(REFUSAL);
+                expect(
+                    await db.variantsStore.listOverrides("hh-1", recipeId),
+                ).toEqual([]);
+
+                await db.variantsStore.saveOverride({
+                    householdId: "hh-1",
+                    recipeId,
+                    userId: "u2",
+                    ingredientId: lines["Beans"]!,
+                    action: "remove",
+                });
+                const cleared = await call("clear_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u2",
+                });
+                expect(cleared.isError).toBe(true);
+                expect(textOf(cleared)).toContain(REFUSAL);
+                expect(
+                    await db.variantsStore.listOverrides("hh-1", recipeId),
+                ).toHaveLength(1);
+
+                // Your own goes through, and takes only your rows.
+                await call("set_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u1",
+                    action: "remove",
+                    ingredient_id: lines["Rice"],
+                });
+                const own = await call("clear_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u1",
+                });
+                expect(own.isError).toBeFalsy();
+                expect(textOf(own)).toContain("Cleared 1 change");
+                expect(
+                    (
+                        await db.variantsStore.listOverrides("hh-1", recipeId)
+                    ).map((row) => row.userId),
+                ).toEqual(["u2"]);
+                const nothing = await call("clear_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u1",
+                });
+                expect(nothing.isError).toBeFalsy();
+                expect(textOf(nothing)).toContain("no changes");
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "cook sizes the stock from every listed member's version and logs only the acting person's meal (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { recipeId, ids, lines } = await mealPrep(call);
+                await call("set_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u1",
+                    action: "remove",
+                    ingredient_id: lines["Beans"],
+                });
+                await db.variantsStore.saveOverride({
+                    householdId: "hh-1",
+                    recipeId,
+                    userId: "u2",
+                    ingredientId: lines["Rice"]!,
+                    action: "amount",
+                    amount: 800,
+                    unit: "g",
+                });
+
+                // A meal for the other member is refused, and nothing is cooked.
+                const refused = await call("cook_recipe", {
+                    recipe_id: recipeId,
+                    portions_by_member: [
+                        { user_id: "u1", portions: 1 },
+                        { user_id: "u2", portions: 1 },
+                    ],
+                });
+                expect(refused.isError).toBe(true);
+                expect(await stockOf(ids["Rice"]!)).toBe(1000);
+
+                // Without logging, each listed member's version sizes the batch:
+                // rice 1/4 x 400 + 2/4 x 800, beans only for u2, 2/4 x 200.
+                const batch = await call("cook_recipe", {
+                    recipe_id: recipeId,
+                    portions_by_member: [
+                        { user_id: "u1", portions: 1 },
+                        { user_id: "u2", portions: 2 },
+                    ],
+                    log_meals: false,
+                });
+                expect(batch.isError).toBeFalsy();
+                expect(batch.structuredContent?.total_portions).toBe(3);
+                expect(batch.structuredContent?.meal_ids).toEqual([]);
+                expect(await stockOf(ids["Rice"]!)).toBe(500);
+                expect(await stockOf(ids["Beans"]!)).toBe(900);
+
+                // Logging: the acting person's meal comes from their version
+                // (rice only: 100 g = 100 kcal), the other portion is the base.
+                const cooked = await call("cook_recipe", {
+                    recipe_id: recipeId,
+                    portions_by_member: [{ user_id: "u1", portions: 1 }],
+                    total_portions: 2,
+                });
+                expect(cooked.isError).toBeFalsy();
+                expect(cooked.structuredContent?.meal_ids).toHaveLength(1);
+                expect(db.inserted).toHaveLength(1);
+                expect(db.inserted[0]).toMatchObject({
+                    user_id: "u1",
+                    calories: 100,
+                });
+                // rice: 1/4 x 400 + 1/4 x 400 = 200; beans: 1/4 x 200 = 50.
+                expect(await stockOf(ids["Rice"]!)).toBe(300);
+                expect(await stockOf(ids["Beans"]!)).toBe(850);
+
+                // log_recipe_portion logs the same version.
+                const portion = await call("log_recipe_portion", {
+                    recipe_id: recipeId,
+                    portions: 2,
+                    meal_type: "dinner",
+                });
+                expect(portion.isError).toBeFalsy();
+                expect(db.inserted[1]).toMatchObject({
+                    user_id: "u1",
+                    calories: 200,
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "plan_recipe with member_ids totals exactly those members' versions and ignores the servings given (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { recipeId, lines } = await mealPrep(call);
+                for (const item of await db.fridgeStore.listItems("hh-1")) {
+                    await db.fridgeStore.deleteItem("hh-1", item.id);
+                }
+                await call("set_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u1",
+                    action: "remove",
+                    ingredient_id: lines["Beans"],
+                });
+                await db.variantsStore.saveOverride({
+                    householdId: "hh-1",
+                    recipeId,
+                    userId: "u2",
+                    ingredientId: lines["Rice"]!,
+                    action: "amount",
+                    amount: 800,
+                    unit: "g",
+                });
+                await db.recipesStore.upsertPortion({
+                    householdId: "hh-1",
+                    recipeId,
+                    userId: "u2",
+                    portionCount: 2,
+                });
+                const today = (await call("get_week_plan")).structuredContent
+                    ?.today as string;
+                const planned = await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: today,
+                    slot: "dinner",
+                    servings: 4,
+                    member_ids: ["u1", "u2"],
+                });
+                expect(planned.isError).toBeFalsy();
+                expect(
+                    (
+                        planned.structuredContent?.plan as {
+                            member_ids: string[];
+                        }
+                    ).member_ids,
+                ).toEqual(["u1", "u2"]);
+                expect(textOf(planned)).toContain("[member_id: u2]");
+                const week = await call("get_week_plan");
+                const need = Object.fromEntries(
+                    (
+                        week.structuredContent?.missing as {
+                            display_name: string;
+                            amount: number;
+                        }[]
+                    ).map((row) => [row.display_name, row.amount]),
+                );
+                // Four servings asked for, but the plan is its people: u1 1
+                // portion (rice 100), u2 2 portions (rice 400, beans 100),
+                // and nothing left over at the base.
+                expect(need).toEqual({ Rice: 500, Beans: 100 });
+                expect(textOf(planned)).toContain("3 portions");
+                expect(
+                    (planned.structuredContent?.plan as { servings: number })
+                        .servings,
+                ).toBe(3);
+
+                // Two servings for people who saved three portions between
+                // them: the text says what is counted.
+                const lunch = await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: today,
+                    slot: "lunch",
+                    servings: 2,
+                    member_ids: ["u1", "u2"],
+                });
+                expect(lunch.isError).toBeFalsy();
+                expect(textOf(lunch)).toContain("lunch · 3 portions");
+                expect(textOf(lunch)).not.toContain("2 servings");
+                expect(textOf(await call("get_week_plan"))).toContain(
+                    "(3 portions)",
+                );
+
+                const refused = await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: today,
+                    slot: "lunch",
+                    member_ids: ["nobody"],
+                });
+                expect(refused.isError).toBe(true);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_recipe_to_grocery totals each member's version at their portion count (%p)",
+        async (era) => {
+            const store = await createGroceryStore(
+                db.settingsStore,
+                "hh-1",
+                "Safeway",
+            );
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { recipeId, lines } = await mealPrep(call);
+                // Nothing in the fridge covers it.
+                for (const item of await db.fridgeStore.listItems("hh-1")) {
+                    await db.fridgeStore.deleteItem("hh-1", item.id);
+                }
+                await call("set_recipe_variant", {
+                    recipe_id: recipeId,
+                    member_id: "u1",
+                    action: "remove",
+                    ingredient_id: lines["Beans"],
+                });
+                await db.variantsStore.saveOverride({
+                    householdId: "hh-1",
+                    recipeId,
+                    userId: "u2",
+                    ingredientId: lines["Rice"]!,
+                    action: "amount",
+                    amount: 800,
+                    unit: "g",
+                });
+                await db.recipesStore.upsertPortion({
+                    householdId: "hh-1",
+                    recipeId,
+                    userId: "u2",
+                    portionCount: 2,
+                });
+                const added = await call("add_recipe_to_grocery", {
+                    recipe_id: recipeId,
+                    store_id: store.id,
+                    member_ids: ["u1", "u2"],
+                });
+                expect(added.isError).toBeFalsy();
+                expect(added.structuredContent?.total_portions).toBe(3);
+                const needs = Object.fromEntries(
+                    (
+                        added.structuredContent?.remainder as {
+                            display_name: string;
+                            remainder: { amount: number; unit: string };
+                        }[]
+                    ).map((row) => [row.display_name, row.remainder]),
+                );
+                expect(needs).toEqual({
+                    Rice: { amount: 500, unit: "g" },
+                    Beans: { amount: 100, unit: "g" },
+                });
+            });
+        },
+    );
+});
+
 describe("set_nutrition_goals over HTTP", () => {
     test.each(ERAS)(
         "per-day override and get_goal_progress agree (%p)",
@@ -17352,6 +17823,123 @@ describe("authenticated dashboard HTTP", () => {
                 "foodable_toast",
             );
         }
+    });
+
+    test("POST /recipes/:id/variant and /variant/clear change only the signed-in person's own version", async () => {
+        const recipe = await createRecipe(db.recipesStore, {
+            householdId: "hh-1",
+            creatorId: alice,
+            name: "Mac",
+            yieldPortions: 4,
+        });
+        const cheese = await addRecipeManualIngredient(
+            db.recipesStore,
+            db.foodsStore,
+            {
+                householdId: "hh-1",
+                recipeId: recipe.id,
+                name: "Cheese",
+                amount: 200,
+                unit: "g",
+            },
+        );
+        const post = (who: string, path: string, body: string) =>
+            siteApp.request(`http://x/recipes/${recipe.id}${path}`, {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(who),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body,
+            });
+        const rows = () => db.variantsStore.listOverrides("hh-1", recipe.id);
+
+        // A form that names another person does not reach them.
+        const set = await post(
+            bob,
+            "/variant",
+            `action=amount&ingredient_id=${cheese.id}&amount=50&unit=g&user_id=${alice}&member_id=${alice}`,
+        );
+        expect(set.status).toBe(303);
+        expect(set.headers.get("location")).toBe(`/recipes/${recipe.id}`);
+        expect((await rows()).map((row) => [row.userId, row.amount])).toEqual([
+            [bob, 50],
+        ]);
+        // The base recipe is as it was.
+        expect(
+            (await db.recipesStore.listIngredients("hh-1", recipe.id))[0]
+                ?.quantity,
+        ).toEqual({ amount: 200, unit: "g" });
+
+        const bad = await post(bob, "/variant", "action=teleport");
+        expect(bad.status).toBe(400);
+        expect(await bad.text()).toContain("Pick what to change");
+        const unknown = await post(
+            bob,
+            "/variant",
+            "action=remove&ingredient_id=nope",
+        );
+        expect(unknown.status).toBe(400);
+        expect(await rows()).toHaveLength(1);
+
+        // A blank ingredient_id names nothing: refused, not "clear it all".
+        const blank = await post(bob, "/variant/clear", "ingredient_id=");
+        expect(blank.status).toBe(400);
+        expect(await blank.text()).toContain("Name the change to clear");
+        expect(await rows()).toHaveLength(1);
+
+        // Alice clearing hers touches nothing of Bob's.
+        const none = await post(alice, "/variant/clear", "");
+        expect(none.status).toBe(303);
+        expect(await rows()).toHaveLength(1);
+        const cleared = await post(bob, "/variant/clear", "");
+        expect(cleared.status).toBe(303);
+        expect(await rows()).toEqual([]);
+        expect(
+            (
+                await siteApp.request(
+                    `http://x/recipes/not-a-uuid/variant/clear`,
+                    {
+                        method: "POST",
+                        headers: { cookie: cookieFor(bob) },
+                    },
+                )
+            ).status,
+        ).toBe(404);
+    });
+
+    test("POST /recipes/:id/plan keeps the people it is planned for, and refuses someone outside the household", async () => {
+        const recipe = await createRecipe(db.recipesStore, {
+            householdId: "hh-1",
+            creatorId: alice,
+            name: "Mac",
+            yieldPortions: 4,
+        });
+        const plan = (extra: string) =>
+            siteApp.request(`http://x/recipes/${recipe.id}/plan`, {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: `date=2099-01-05&slot=dinner&servings=2${extra}`,
+            });
+        const refused = await plan(`&member_ids=${outsider}`);
+        expect(refused.status).toBe(400);
+        expect(await refused.text()).toContain(
+            "Pick people who are in the household.",
+        );
+        expect(
+            await db.plansStore.listPlans("hh-1", "2099-01-01", "2099-01-31"),
+        ).toEqual([]);
+        const ok = await plan(`&member_ids=${alice}&member_ids=${bob}`);
+        expect(ok.status).toBe(303);
+        const planned = await db.plansStore.listPlans(
+            "hh-1",
+            "2099-01-01",
+            "2099-01-31",
+        );
+        expect(planned.map((p) => p.memberIds)).toEqual([[alice, bob]]);
     });
 
     test("POST /kitchen/groceries/lines adds a supply and checking it does not insert fridge stock", async () => {

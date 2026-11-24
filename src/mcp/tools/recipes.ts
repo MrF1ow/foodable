@@ -7,7 +7,7 @@ import { liveGroceryStore } from "../../db/grocery.js";
 import { getHouseholdConfig } from "../../db/household.js";
 import { liveSocialReaderStatusStore } from "../../db/social-readers.js";
 import { insertMeal } from "../../db/nutrition.js";
-import { liveRecipesStore } from "../../db/recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "../../db/recipes.js";
 import { liveRulesStore } from "../../db/rules.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
@@ -42,6 +42,11 @@ import {
     recheckRecipe,
     resolveUnresolvedLines,
 } from "../../domain/recipes.js";
+import {
+    clearRecipeVariant,
+    setRecipeVariant,
+    VARIANT_ACTIONS,
+} from "../../domain/recipe-variants.js";
 import { sortNotices } from "../../domain/notices.js";
 import { guessMealType, validateTz } from "../../domain/tz.js";
 import type {
@@ -398,6 +403,7 @@ const GET_RECIPE_INGREDIENT = z.object({
     food_id: z.string().nullable(),
     per_portion_amount: z.number().nullable(),
     person_amount: z.number().nullable(),
+    change: z.enum(["amount", "food", "add"]).nullable(),
     product: z
         .object({
             food_id: z.string(),
@@ -462,6 +468,17 @@ export const GET_RECIPE_OUTPUT_SCHEMA = z.object({
     macros_per_portion: MACROS_ITEM,
     notices: z.array(NOTICE_SCHEMA),
     ingredients: z.array(GET_RECIPE_INGREDIENT),
+    variant: z
+        .object({
+            override_count: z.number(),
+            removed: z.array(
+                z.object({ id: z.string(), display_name: z.string() }),
+            ),
+        })
+        .nullable()
+        .describe(
+            "the viewing member's own version: ingredients are then theirs, removed are the base ingredients it leaves out",
+        ),
     verification: z.enum(["verified", "unverified"]),
     problems: z.array(RECIPE_PROBLEM),
     import: RECIPE_IMPORT_WIRE.nullable(),
@@ -509,20 +526,29 @@ function cookPreviewWire(preview: CookPreview) {
 }
 
 /**
- * The one-serving dry run behind `get_recipe`. A recipe the cook cannot run on
+ * The one-serving dry run behind `get_recipe`, for the viewing member's own
+ * version of the recipe. A recipe the cook cannot run on
  * (unverified, an unlinked or archived ingredient) is null, never an error:
  * reading a recipe must not depend on being able to cook it.
  */
 async function recipeCookPreview(
     householdId: string,
     recipeId: string,
+    /** Whose serving it is: that member's version of the recipe is cooked. */
+    memberId: string,
 ): Promise<CookPreview | null> {
     try {
         return await previewCookRecipe(
             liveRecipesStore(),
             liveFridgeStore(),
             liveFoodsStore(),
-            { householdId, recipeId, totalPortions: 1 },
+            {
+                householdId,
+                recipeId,
+                totalPortions: 1,
+                memberPortions: [{ userId: memberId, portions: 1 }],
+                variants: liveRecipeVariantsStore(),
+            },
         );
     } catch (err) {
         if (isCookPreviewUnavailable(err)) {
@@ -570,11 +596,14 @@ function ingredientLinesForRecipeText(
         person_amount: number | null;
         unit: string | null;
         note: string | null;
+        change?: "amount" | "food" | "add" | null;
     }[],
 ): string {
     return rows
         .map((ingredient) => {
-            const ids = `${idTag(ingredient.id, "ingredient_id")}${ingredient.food_id ? idTag(ingredient.food_id, "food_id") : ""}${ingredient.product ? ` → ${ingredient.product.name}${idTag(ingredient.product.food_id, "food_id")}` : ""}`;
+            // A line only this person added is their override, not a base
+            // ingredient: its id is the override's.
+            const ids = `${idTag(ingredient.id, ingredient.change === "add" ? "override_id" : "ingredient_id")}${ingredient.food_id ? idTag(ingredient.food_id, "food_id") : ""}${ingredient.product ? ` → ${ingredient.product.name}${idTag(ingredient.product.food_id, "food_id")}` : ""}`;
             // An unmeasured ingredient shows its note ("to taste"), never 0.
             if (ingredient.person_amount == null || !ingredient.unit) {
                 return `${ingredient.display_name} ${ingredient.note?.trim() || "to taste"}${ids}`;
@@ -779,14 +808,17 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 "get_recipe",
                 async () => {
                     const actor = await callerActor();
-                    const memberId = args.member_id
-                        ? await requireHouseholdMemberId(args.member_id)
-                        : actor.userId;
+                    const memberId = (
+                        args.member_id
+                            ? await requireHouseholdMemberId(args.member_id)
+                            : actor.userId
+                    ).toLowerCase();
                     const view = await getRecipeView(
                         liveRecipesStore(),
                         actor.householdId,
                         args.id,
                         memberId,
+                        liveRecipeVariantsStore(),
                     );
                     const catalog = await effectiveFoodsByIds(
                         liveFoodsStore(),
@@ -827,7 +859,15 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         args.id,
                         {
                             recipe: view,
-                            ingredients: view.ingredients,
+                            // The steps belong to the recipe, so what they
+                            // mention is checked against the base's
+                            // ingredients, not one person's version.
+                            ingredients: view.variant
+                                ? await store.listIngredients(
+                                      actor.householdId,
+                                      args.id,
+                                  )
+                                : view.ingredients,
                             importRow,
                         },
                     );
@@ -844,6 +884,18 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             ? ` (${gapReasonTexts.join("; ")})`
                             : "";
                     const perPortionLine = `${view.name} yield ${view.yieldPortions}, portion ${view.portionCount}${idTag(view.id)}\nPer portion: ${wiredMacros.incomplete && wiredMacros.calories == null ? "macros incomplete" : `${wiredMacros.calories ?? "—"} kcal${wiredMacros.incomplete ? ", incomplete" : ""}`}${perPortionReasonTail}`;
+                    const versionLine = view.variant
+                        ? `\nThis is that member's own version of the recipe (${view.variant.overrideCount} change${view.variant.overrideCount === 1 ? "" : "s"} from the base)${
+                              view.variant.removed.length > 0
+                                  ? `; it leaves out ${view.variant.removed
+                                        .map(
+                                            (row) =>
+                                                `${row.displayName}${idTag(row.id, "ingredient_id")}`,
+                                        )
+                                        .join(", ")}`
+                                  : ""
+                          }.`
+                        : "";
                     const allergenBlockLines = recipeAllergen
                         .filter((n) => n.severity === "block")
                         .map((n) => `Allergen: ${noticeSentence(n)}`);
@@ -855,6 +907,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                     const cook = await recipeCookPreview(
                         actor.householdId,
                         args.id,
+                        memberId,
                     );
                     const cookWire = cook ? cookPreviewWire(cook) : null;
                     const shortFoodIds = new Set(
@@ -885,6 +938,15 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         mention_warnings: wireMentionWarnings(mentionWarnings),
                         steps,
                         portion_count: view.portionCount,
+                        variant: view.variant
+                            ? {
+                                  override_count: view.variant.overrideCount,
+                                  removed: view.variant.removed.map((row) => ({
+                                      id: row.id,
+                                      display_name: row.displayName,
+                                  })),
+                              }
+                            : null,
                         macros_per_portion: wiredMacros,
                         notices: noticesWire,
                         cook_preview: cookWire,
@@ -901,6 +963,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 food_id: ingredient.foodId,
                                 per_portion_amount: ingredient.perPortionAmount,
                                 person_amount: ingredient.personAmount,
+                                change: ingredient.change,
                                 product: eff?.product
                                     ? {
                                           food_id: eff.product.id,
@@ -926,7 +989,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         content: [
                             {
                                 type: "text",
-                                text: `${perPortionLine}${allergenBlock}\n${ingredientBlock}${stepsLines}${getRecipeImportText(payload)}${cookPreviewText(cookWire)}${mentionWarningsText(mentionWarnings)}`,
+                                text: `${perPortionLine}${versionLine}${allergenBlock}\n${ingredientBlock}${stepsLines}${getRecipeImportText(payload)}${cookPreviewText(cookWire)}${mentionWarningsText(mentionWarnings)}`,
                             },
                         ],
                         structuredContent: payload,
@@ -1161,6 +1224,178 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
     );
 
     server.registerTool(
+        "set_recipe_variant",
+        {
+            title: "Set Recipe Version",
+            description:
+                "Change your own version of a recipe, one ingredient at a time; the base stays as it is. Only the person you act for (on a household token, the owner): another member's is refused. action: remove, amount (amount and unit; no amount is to taste), food (another food in its place, optionally with an amount), add (food_id, amount and unit). ingredient_id is the base ingredient, except for add. Setting it again replaces your change. Cook, groceries, the week plan and logged meals use your version for your portions.",
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: false,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                recipe_id: z.string(),
+                member_id: z.string(),
+                action: z.enum(VARIANT_ACTIONS),
+                ingredient_id: z.string().optional(),
+                amount: z.coerce.number().nullable().optional(),
+                unit: z.string().optional(),
+                food_id: z.string().optional(),
+            }),
+        },
+        async (args) =>
+            withAnalytics(
+                "set_recipe_variant",
+                async () => {
+                    const householdId = await callerHouseholdId();
+                    const memberId = await requireActingMemberId(
+                        args.member_id,
+                    );
+                    try {
+                        const row = await setRecipeVariant(
+                            liveRecipesStore(),
+                            liveFoodsStore(),
+                            liveRecipeVariantsStore(),
+                            {
+                                householdId,
+                                recipeId: args.recipe_id,
+                                userId: memberId,
+                                action: args.action,
+                                ingredientId: args.ingredient_id,
+                                amount: args.amount,
+                                unit: args.unit,
+                                foodId: args.food_id,
+                            },
+                        );
+                        const what =
+                            row.action === "remove"
+                                ? "leaves it out"
+                                : row.action === "add"
+                                  ? `adds ${row.displayName}`
+                                  : row.action === "food"
+                                    ? `uses ${row.displayName} instead`
+                                    : "has its own amount";
+                        return {
+                            content: [
+                                {
+                                    type: "text",
+                                    text: `Your version ${what}.${row.ingredientId ? idTag(row.ingredientId, "ingredient_id") : ""}${idTag(row.id, "override_id")}`,
+                                },
+                            ],
+                        };
+                    } catch (err) {
+                        if (err instanceof RecipeInputError) {
+                            throw new Error(err.message);
+                        }
+                        throw err;
+                    }
+                },
+                analytics,
+            ),
+    );
+
+    server.registerTool(
+        "clear_recipe_variant",
+        {
+            title: "Clear Recipe Version",
+            description:
+                "Take back your own changes to a recipe: all of them, or one ingredient's (ingredient_id: the base ingredient, or an added one's override_id). Only the person you act for; another member's is refused. Can be undone for 24 hours.",
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: true,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                recipe_id: z.string(),
+                member_id: z.string(),
+                ingredient_id: z.string().optional(),
+            }),
+        },
+        async (args) =>
+            withAnalytics(
+                "clear_recipe_variant",
+                async () => {
+                    const memberId = await requireActingMemberId(
+                        args.member_id,
+                    );
+                    // A blank id names nothing: it is not "everything".
+                    if (
+                        args.ingredient_id !== undefined &&
+                        args.ingredient_id.trim() === ""
+                    ) {
+                        throw new Error(
+                            "Name the change to clear, or leave ingredient_id out to clear the whole version.",
+                        );
+                    }
+                    const run = await runDestructive(
+                        "clear_recipe_variant",
+                        async (rec, householdId) => {
+                            const store = liveRecipeVariantsStore();
+                            const ref = args.ingredient_id
+                                ?.trim()
+                                .toLowerCase();
+                            const mine = (
+                                await store.listOverrides(
+                                    householdId,
+                                    args.recipe_id,
+                                )
+                            ).filter(
+                                (row) =>
+                                    row.userId.toLowerCase() ===
+                                        memberId.toLowerCase() &&
+                                    (!ref ||
+                                        row.id.toLowerCase() === ref ||
+                                        row.ingredientId?.toLowerCase() ===
+                                            ref),
+                            );
+                            await rec.captureByIds(
+                                "recipe_variant_overrides",
+                                mine.map((row) => row.id),
+                                "deleted",
+                            );
+                            const cleared = await clearRecipeVariant(
+                                liveRecipesStore(),
+                                store,
+                                {
+                                    householdId,
+                                    recipeId: args.recipe_id,
+                                    userId: memberId,
+                                    ingredientId: args.ingredient_id,
+                                },
+                            );
+                            return {
+                                value: { cleared },
+                                summary: `Cleared ${cleared} change${cleared === 1 ? "" : "s"} to a recipe version`,
+                                changed: cleared > 0,
+                            };
+                        },
+                        { target: memberId },
+                    );
+                    if (run.refused) return run.result;
+                    return {
+                        content: [
+                            {
+                                type: "text" as const,
+                                text: withUndo(
+                                    run.value.cleared > 0
+                                        ? `Cleared ${run.value.cleared} change${run.value.cleared === 1 ? "" : "s"}: your version of the recipe is the base again.`
+                                        : "You had no changes to take back.",
+                                    run.undo,
+                                ),
+                            },
+                        ],
+                    };
+                },
+                analytics,
+                undefined,
+                { outcome: destructiveOutcome },
+            ),
+    );
+
+    server.registerTool(
         "delete_recipe",
         {
             title: "Delete Recipe",
@@ -1260,7 +1495,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Recipe to Grocery",
             description:
-                "Add a recipe's remainder to a grocery store, netting fridge stock. Size it with member_ids (the sum of those members' saved portions: one meal, nothing left over) and/or total_portions. For a whole batch (baking a loaf, a casserole) pass total_portions = the recipe's yield_portions; for leftovers (\"cook once, eat twice\") pass more than the members' sum. total_portions may not be less than the members' sum. Returns the per-ingredient remainder.",
+                "Add a recipe's remainder to a grocery store, netting fridge stock. Size it with member_ids (the sum of those members' saved portions: one meal, nothing left over; each member's portions use that member's own version of the recipe) and/or total_portions. For a whole batch (baking a loaf, a casserole) pass total_portions = the recipe's yield_portions; for leftovers (\"cook once, eat twice\") pass more than the members' sum. total_portions may not be less than the members' sum. Returns the per-ingredient remainder.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -1292,9 +1527,15 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                 "add_recipe_to_grocery",
                 async () => {
                     const householdId = await callerHouseholdId();
-                    const memberIds = args.member_ids ?? [];
-                    for (const memberId of memberIds) {
-                        await requireHouseholdMemberId(memberId);
+                    // Versions and portions are keyed by the stored (lower
+                    // case) id, whatever case was typed.
+                    const memberIds: string[] = [];
+                    for (const memberId of args.member_ids ?? []) {
+                        memberIds.push(
+                            (
+                                await requireHouseholdMemberId(memberId)
+                            ).toLowerCase(),
+                        );
                     }
                     const recipes = liveRecipesStore();
                     const portionCounts: number[] = [];
@@ -1321,6 +1562,20 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                     args.recipe_id,
                                 )
                             ).map((row) => row.foodId),
+                            // Foods only the members' versions name.
+                            ...(memberIds.length > 0
+                                ? (
+                                      await liveRecipeVariantsStore().listOverridesForRecipes(
+                                          householdId,
+                                          [args.recipe_id],
+                                      )
+                                  ).flatMap((row) =>
+                                      row.foodId &&
+                                      memberIds.includes(row.userId)
+                                          ? [row.foodId]
+                                          : [],
+                                  )
+                                : []),
                             ...fridge.items.map((item) => item.foodId),
                         ],
                     );
@@ -1338,6 +1593,11 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                             storeId: args.store_id,
                             portionCounts,
                             totalPortions: args.total_portions,
+                            members: memberIds.map((userId, index) => ({
+                                userId,
+                                portions: portionCounts[index]!,
+                            })),
+                            variants: liveRecipeVariantsStore(),
                             foodsById: foods,
                             foods: liveFoodsStore(),
                         });
@@ -1471,7 +1731,7 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 ? await requireActingMemberId(row.user_id)
                                 : await requireHouseholdMemberId(row.user_id);
                             portions.push({
-                                userId,
+                                userId: userId.toLowerCase(),
                                 portions: row.portions,
                             });
                         }
@@ -1492,6 +1752,10 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                 recipeId: args.recipe_id,
                                 totalPortions,
                                 deductStock,
+                                // Each listed member's portions are cooked
+                                // from that member's version.
+                                memberPortions: portions,
+                                variants: liveRecipeVariantsStore(),
                             },
                         );
                         const mealIds: string[] = [];
@@ -1505,6 +1769,8 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                             portions: row.portions,
                                         },
                                     ],
+                                    undefined,
+                                    row.userId,
                                 );
                                 const { meal } = await insertMeal(row.userId, {
                                     description: computed.description,
@@ -1722,11 +1988,11 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                                     args.recipe_id,
                                 )
                             ).find((row) => row.id === args.ingredient_id);
-                            await rec.captureByIds(
-                                "recipe_ingredients",
-                                [args.ingredient_id],
-                                "deleted",
-                            );
+                            // The ingredient and every member's version
+                            // change on it, which the delete cascades.
+                            await rec.captureCascade("recipe_ingredients", [
+                                { id: args.ingredient_id },
+                            ]);
                             await captureDismissals(
                                 rec,
                                 householdId,

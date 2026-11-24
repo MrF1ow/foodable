@@ -43,7 +43,17 @@ import {
     type WeighInStore,
 } from "./notices-actionable.js";
 import type { PlansStore, RecipePlan } from "./plan.js";
-import { addPlanDays, planRecipesOf, WEEK_PLAN_DAYS } from "./plan-week.js";
+import {
+    addPlanDays,
+    loadPlanVersionSources,
+    planRecipesOf,
+    WEEK_PLAN_DAYS,
+} from "./plan-week.js";
+import {
+    sameMember,
+    variantFor,
+    type RecipeVariantsStore,
+} from "./recipe-variants.js";
 import { groceryRestockNotices } from "./restock.js";
 import { fridgeNotices } from "./stock.js";
 
@@ -58,6 +68,10 @@ export type NoticesForDeps = {
     grocery?: GroceryListStore;
     /** Planned recipes, for the missing-for-plan notice. Without it none is produced. */
     plans?: PlansStore;
+    /** Members' versions of the planned recipes. With it a plan that names
+     *  people is totalled from their versions, as the week plan does; without
+     *  it every plan counts at the base. */
+    variants?: RecipeVariantsStore;
     /** Latest weigh-ins, for the weigh-in notice. Without it none is produced. */
     weighIns?: WeighInStore;
     /** Every member with their allergens, for the allergen conditions. Without
@@ -139,6 +153,43 @@ export function panelGroupKey(notice: Notice): string {
         return `recipe:${notice.subject.recipeId}`;
     }
     return `${notice.subject.kind}:${notice.subject.id}`;
+}
+
+/**
+ * One allergen notice per recipe, whoever it names: a recipe notice for a
+ * person's own version joins the one already found for the same recipe (their
+ * names, allergens and the earliest planned day), or is added.
+ */
+function mergeRecipeAllergenNotice(found: Notice[], notice: Notice): void {
+    const same = found.find(
+        (other) =>
+            other.code === notice.code &&
+            other.subject.kind === notice.subject.kind &&
+            other.subject.id === notice.subject.id,
+    );
+    if (!same || notice.subject.kind !== "recipe") {
+        found.push(notice);
+        return;
+    }
+    const related = new Map(
+        [...same.related, ...notice.related].map((row) => [
+            `${row.kind}:${row.id}`,
+            row,
+        ]),
+    );
+    const labels = new Set([
+        ...((same.params.allergens as string[]) ?? []),
+        ...((notice.params.allergens as string[]) ?? []),
+    ]);
+    const days = [same.params.plannedOn, notice.params.plannedOn].filter(
+        (day): day is string => typeof day === "string",
+    );
+    same.related = [...related.values()];
+    same.params = {
+        ...same.params,
+        allergens: [...labels],
+        ...(days.length > 0 ? { plannedOn: days.sort()[0] } : {}),
+    };
 }
 
 /** Display name for a notice group from params or related recipe context. */
@@ -422,6 +473,24 @@ export async function noticesFor(
         }
     }
 
+    // What a person's own version of a planned recipe is made from, for the
+    // plans that name people; undefined when no plan does.
+    const allergenVersions = async () => {
+        if (!deps.variants || !plans) return undefined;
+        const sources = await loadPlanVersionSources(
+            { recipes: deps.recipes, variants: deps.variants },
+            householdId,
+            plans,
+            allIngredients,
+        );
+        return sources
+            ? {
+                  ingredients: sources.ingredients,
+                  overrides: sources.overrides,
+              }
+            : undefined;
+    };
+
     if (allergic) {
         // From what this read already holds: the list, the plans just read,
         // the recipes and their ingredients, the fridge and the catalog. Only
@@ -447,18 +516,64 @@ export async function noticesFor(
                 foodsById.set(id, food);
             }
         }
-        raw.push(
-            ...allergenConditionNotices({
-                today,
-                members: allergenMembers,
-                lines: grocery?.lines ?? [],
-                plans: plans ?? [],
-                recipes,
-                ingredients: allIngredients,
-                fridgeItems,
-                foodsById,
-            }),
-        );
+        const versions = await allergenVersions();
+        const allergenInput = {
+            today,
+            members: allergenMembers,
+            lines: grocery?.lines ?? [],
+            plans: plans ?? [],
+            recipes,
+            ingredients: allIngredients,
+            fridgeItems,
+            foodsById,
+        };
+        // A plan that names people is checked for each of them against their
+        // own version of the recipe, as `get_recipe` shows it; a plan that
+        // names nobody checks the base for everyone.
+        const isNamed = (plan: { memberIds?: readonly string[] }) =>
+            versions != null && (plan.memberIds?.length ?? 0) > 0;
+        const found = allergenConditionNotices({
+            ...allergenInput,
+            plans: allergenInput.plans.filter((plan) => !isNamed(plan)),
+        });
+        for (const plan of allergenInput.plans.filter(isNamed)) {
+            for (const userId of plan.memberIds ?? []) {
+                const person = allergenMembers.find(
+                    (member) =>
+                        member.userId != null &&
+                        sameMember(member.userId, userId),
+                );
+                const recipe = recipes.find((row) => row.id === plan.recipeId);
+                if (!person || !recipe || !versions) continue;
+                const mine = variantFor(
+                    {
+                        id: recipe.id,
+                        ingredients: versions.ingredients.filter(
+                            (row) => row.recipeId === recipe.id,
+                        ),
+                    },
+                    versions.overrides,
+                    userId,
+                );
+                for (const notice of allergenConditionNotices({
+                    today,
+                    members: [person],
+                    lines: [],
+                    fridgeItems: [],
+                    plans: [{ recipeId: recipe.id, date: plan.date }],
+                    recipes: [recipe],
+                    ingredients: mine.ingredients.map((row) => ({
+                        recipeId: recipe.id,
+                        displayName: row.displayName,
+                        foodId: row.foodId,
+                    })),
+                    foodsById,
+                })) {
+                    mergeRecipeAllergenNotice(found, notice);
+                }
+            }
+        }
+        raw.push(...found);
     }
 
     let filtered = raw;
@@ -537,6 +652,14 @@ async function actionableNotices(
                 plans,
                 input.recipes,
                 input.allIngredients,
+                deps.variants
+                    ? await loadPlanVersionSources(
+                          { recipes: deps.recipes, variants: deps.variants },
+                          householdId,
+                          plans,
+                          input.allIngredients,
+                      )
+                    : undefined,
             );
             notices.push(
                 ...planMissingNotices({

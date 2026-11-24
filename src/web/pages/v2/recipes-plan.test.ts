@@ -210,6 +210,49 @@ describe("week renderers", () => {
         expect(html).toContain('data-fd-sheet-focus="panel"');
     });
 
+    test("a plan for named people shows their portions as saved now and offers no servings to edit", () => {
+        const named = plan({
+            id: "p1",
+            date: TODAY,
+            servings: 4,
+            memberIds: ["ana", "ben"],
+        });
+        const view = buildWeekPlanView({
+            today: TODAY,
+            plans: [named, plan({ id: "p2", date: TODAY, slot: "lunch" })],
+            recipes: [
+                {
+                    ...pancakes,
+                    versions: {
+                        ingredients: [],
+                        overrides: [],
+                        // Ana eats 2, Ben has none saved (one): 3, not the stored 4.
+                        portions: { ana: 2 },
+                    },
+                },
+            ],
+            stock: [],
+            foodsById: new Map(),
+        });
+        const entries = view.days[0]!.plans;
+        expect(entries.map((p) => [p.id, p.servings, p.named])).toEqual([
+            ["p2", 2, false],
+            ["p1", 3, true],
+        ]);
+        const html = renderPlanEditSheets(view, "today");
+        const sheetOf = (id: string) =>
+            html.match(
+                new RegExp(
+                    `<dialog[^>]*id="fd-plan-edit-${id}"[\\s\\S]*?</dialog>`,
+                ),
+            )![0];
+        expect(sheetOf("p1")).not.toContain('name="servings"');
+        expect(sheetOf("p1")).toContain(
+            "3 servings: the portions of the people",
+        );
+        expect(sheetOf("p2")).toContain('name="servings"');
+    });
+
     test("a plan id or recipe name made of $-patterns stays inert", async () => {
         for (const payload of DOLLAR_PAYLOADS) {
             const view = buildWeekPlanView({

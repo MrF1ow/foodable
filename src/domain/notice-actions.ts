@@ -20,6 +20,8 @@ import {
     addMissingToGroceries,
     addPlanDays,
     missingForPlan,
+    loadPlanVersionSources,
+    versionFoodIds,
     planRecipesOf,
 } from "./plan-week.js";
 import type { PlanTransaction } from "./plan.js";
@@ -151,12 +153,21 @@ async function addPlanMissing(
         deps.recipes.listIngredientsForHousehold(householdId),
         deps.fridge.listItems(householdId),
     ]);
-    const recipes = planRecipesOf(plans, allRecipes, allIngredients);
+    const versions = deps.variants
+        ? await loadPlanVersionSources(
+              { recipes: deps.recipes, variants: deps.variants },
+              householdId,
+              plans,
+              allIngredients,
+          )
+        : undefined;
+    const recipes = planRecipesOf(plans, allRecipes, allIngredients, versions);
     const planned = new Set(plans.map((plan) => plan.recipeId));
     const foodsById = await effectiveFoodsByIds(deps.foods, householdId, [
         ...allIngredients
             .filter((row) => planned.has(row.recipeId))
             .map((row) => row.foodId),
+        ...versionFoodIds(versions),
         ...stock.map((item) => item.foodId),
     ]);
     // Only this food's lines, worked out from the plan as it is now.

@@ -10,6 +10,7 @@ import {
     type FoodQuality,
     type FoodsStore,
 } from "../domain/foods.js";
+import { foldAddedAmounts } from "../domain/recipe-variants.js";
 import { cleanupDismissalsForFoodTx } from "./notice-dismissals.js";
 import {
     definedColumns,
@@ -38,10 +39,76 @@ const REF_TABLES = [
     "fridge_items",
     "grocery_lines",
     "recipe_ingredients",
+    "recipe_variant_overrides",
     "member_dislikes",
     "stock_movements",
     "meal_items",
 ] as const;
+
+/**
+ * One person may add a food to a recipe once (`recipe_variant_overrides_added_food_key`),
+ * so where they added both the dropped food and the kept one, repointing would
+ * collide. The two rows become one: the kept food's row takes the summed
+ * amount (or stays as it is when the amounts do not convert) and the dropped
+ * food's row goes. Runs before the repoint, in its transaction.
+ */
+async function foldAddedVariantRows(
+    tx: Tx,
+    householdId: string,
+    fromId: string,
+    toId: string,
+): Promise<void> {
+    const pairs = await rows<{
+        drop_id: string;
+        keep_id: string;
+        drop_amount: string | null;
+        drop_unit: string | null;
+        keep_amount: string | null;
+        keep_unit: string | null;
+    }>(
+        tx,
+        tx`
+            select d.id::text as drop_id, k.id::text as keep_id,
+                   d.amount::text as drop_amount, d.unit as drop_unit,
+                   k.amount::text as keep_amount, k.unit as keep_unit
+            from ${tx.unsafe("recipe_variant_overrides")} d
+            join ${tx.unsafe("recipe_variant_overrides")} k
+              on k.recipe_id = d.recipe_id
+             and k.user_id = d.user_id
+             and k.action = 'add'
+             and k.food_id = ${toId}::uuid
+            where d.household_id = ${householdId}
+              and d.action = 'add'
+              and d.food_id = ${fromId}::uuid
+            for update of d, k
+        `,
+    );
+    for (const pair of pairs) {
+        const folded = foldAddedAmounts(
+            {
+                amount:
+                    pair.keep_amount == null ? null : Number(pair.keep_amount),
+                unit: pair.keep_unit,
+            },
+            {
+                amount:
+                    pair.drop_amount == null ? null : Number(pair.drop_amount),
+                unit: pair.drop_unit,
+            },
+        );
+        await tx`
+            update ${tx.unsafe("recipe_variant_overrides")}
+            set amount = ${folded.amount}::numeric,
+                unit = ${folded.unit}::text,
+                updated_at = now()
+            where id = ${pair.keep_id}::uuid
+        `;
+        await tx`
+            delete from ${tx.unsafe("recipe_variant_overrides")}
+            where id = ${pair.drop_id}::uuid
+        `;
+    }
+}
 
 function patchKeys(keys: string[]): [string, ...string[]] {
     return keys as [string, ...string[]];
@@ -731,6 +798,14 @@ export function liveFoodsStore(): FoodsStore {
             return run(async (tx) => {
                 for (const table of REF_TABLES) {
                     try {
+                        if (table === "recipe_variant_overrides") {
+                            await foldAddedVariantRows(
+                                tx,
+                                householdId,
+                                fromId,
+                                toId,
+                            );
+                        }
                         await tx`
                             update ${tx.unsafe(table)}
                             set food_id = ${toId}
@@ -758,6 +833,9 @@ export function liveFoodsStore(): FoodsStore {
                                 where household_id = ${householdId}
                                 union all
                                 select food_id from ${tx.unsafe("recipe_ingredients")}
+                                where household_id = ${householdId}
+                                union all
+                                select food_id from ${tx.unsafe("recipe_variant_overrides")}
                                 where household_id = ${householdId}
                                 union all
                                 select food_id from ${tx.unsafe("meal_items")}

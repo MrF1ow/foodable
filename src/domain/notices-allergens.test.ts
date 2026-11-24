@@ -24,6 +24,7 @@ import {
 import { noticesFor } from "./notices-for.js";
 import type { Notice } from "./notices.js";
 import { createMemoryPlansStore, type RecipePlan } from "./plan.js";
+import { createMemoryVariantsStore } from "./recipe-variants.js";
 import {
     createMemoryRecipesStore,
     type Recipe,
@@ -929,5 +930,57 @@ describe("noticesFor reads", () => {
                 .filter((n) => n.code.endsWith("allergen"))
                 .map((n) => [n.code, n.subject.id]),
         ).toEqual([["recipe.allergen", "r1"]]);
+    });
+});
+
+describe("a plan that names people", () => {
+    const CAL = member("cal", "Cal", []);
+    async function allergenNotices(plans: Partial<RecipePlan>[]) {
+        const stores = {
+            foods: createMemoryFoodsStore(),
+            fridge: createMemoryFridgeStore(),
+            grocery: createMemoryGroceryStore(),
+            recipes: createMemoryRecipesStore(),
+            plans: createMemoryPlansStore(),
+        };
+        await stores.foods.insertFood(food({ allergens: ["peanut"] }));
+        await stores.recipes.insertRecipe(recipe({ yieldPortions: 4 }));
+        await stores.recipes.insertIngredient(ingredient());
+        for (const over of plans) {
+            await stores.plans.addPlan({
+                householdId: HH,
+                recipeId: "r1",
+                date: TODAY,
+                slot: "dinner",
+                servings: 4,
+                createdBy: null,
+                ...over,
+            });
+        }
+        const { notices } = await noticesFor(
+            {
+                ...stores,
+                variants: createMemoryVariantsStore(),
+                dismissals: createMemoryNoticeDismissalsStore(),
+                allergenMembers: async () => [ANA, CAL],
+            },
+            HH,
+            {
+                today: TODAY,
+                timezone: "UTC",
+                actionable: true,
+                allergens: true,
+            },
+        );
+        return notices.filter((n) => n.code === "recipe.allergen");
+    }
+
+    test("a plan for Cal alone warns nobody: Ana is not eating it, whatever it stores", async () => {
+        expect(await allergenNotices([{ memberIds: ["cal"] }])).toEqual([]);
+    });
+
+    test("a plan for Ana warns, and a plan for nobody warns for the whole household", async () => {
+        expect(await allergenNotices([{ memberIds: ["ana"] }])).toHaveLength(1);
+        expect(await allergenNotices([{ memberIds: [] }])).toHaveLength(1);
     });
 });

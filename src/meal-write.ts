@@ -1,7 +1,7 @@
 import { snapshotToMealItemWrite, type MealInput } from "./db/nutrition.js";
 import { getProfile, timezoneFromProfile } from "./db/profiles.js";
 import { liveFoodsStore } from "./db/foods.js";
-import { liveRecipesStore } from "./db/recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "./db/recipes.js";
 import { LoggedAtError, resolveWriteLoggedAt } from "./domain/tz.js";
 import type { OnSimilar } from "./domain/foods.js";
 import {
@@ -54,6 +54,11 @@ export async function mealWriteFromItems(
     householdId: string,
     items: MealItemSpec[],
     onSimilar?: OnSimilar,
+    /**
+     * Whose meal it is. A recipe portion is then worked out from that
+     * person's version of the recipe; without it, from the base.
+     */
+    forUserId?: string,
 ): Promise<{
     totals: Pick<
         MealInput,
@@ -77,6 +82,8 @@ export async function mealWriteFromItems(
         recipes: liveRecipesStore(),
         items,
         onSimilar,
+        forUserId,
+        variants: forUserId ? liveRecipeVariantsStore() : undefined,
     });
     return {
         totals: {

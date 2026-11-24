@@ -15,7 +15,7 @@ import { liveGroceryStore } from "../../db/grocery.js";
 import { liveNoticeDismissalsStore } from "../../db/notice-dismissals.js";
 import { liveNotifier } from "../../db/notify.js";
 import { listHouseholdMembers } from "../../db/household.js";
-import { liveRecipesStore } from "../../db/recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "../../db/recipes.js";
 import { liveRulesStore } from "../../db/rules.js";
 import { getAllMealItems } from "../../db/nutrition.js";
 import { householdToday } from "../../db/restock.js";
@@ -148,6 +148,41 @@ async function recordFoodMerge(
             await liveRecipesStore().listIngredientsForHousehold(householdId),
         ).map((row) => row.id),
         "updated",
+    );
+    // A swapped or added food in somebody's version of a recipe. Where one
+    // person added both foods to a recipe the merge folds the two rows into
+    // the kept food's: that row is changed, the dropped food's is removed.
+    const variants = liveRecipeVariantsStore();
+    const onKeep = await variants.listOverridesByFood(householdId, keep.id);
+    const dropRows = await variants.listOverridesByFood(householdId, drop.id);
+    const folded = (row: (typeof dropRows)[number]) =>
+        row.action === "add" &&
+        onKeep.some(
+            (other) =>
+                other.action === "add" &&
+                other.recipeId === row.recipeId &&
+                other.userId === row.userId,
+        );
+    await rec.captureByIds(
+        "recipe_variant_overrides",
+        [
+            ...dropRows.filter((row) => !folded(row)),
+            ...onKeep.filter((other) =>
+                dropRows.some(
+                    (row) =>
+                        folded(row) &&
+                        other.action === "add" &&
+                        other.recipeId === row.recipeId &&
+                        other.userId === row.userId,
+                ),
+            ),
+        ].map((row) => row.id),
+        "updated",
+    );
+    await rec.captureByIds(
+        "recipe_variant_overrides",
+        dropRows.filter(folded).map((row) => row.id),
+        "deleted",
     );
     await rec.captureByIds(
         "stock_movements",

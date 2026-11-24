@@ -773,6 +773,193 @@ begin
         end if;
     end;
 
+    -- Recipe versions: the table, row level security, grants, the lookup
+    -- indexes, the household policy, the shape checks, the cascades, and the
+    -- member_ids the week plan's rows gained.
+    declare
+        p text;
+        idx text;
+        col text;
+        tbl text;
+        i record;
+        u uuid;
+        fid uuid;
+        fid2 uuid;
+        failed boolean;
+    begin
+        if to_regclass('public.recipe_variant_overrides') is null then
+            raise exception 'recipe_variant_overrides table missing';
+        end if;
+        if not exists (
+            select 1 from pg_tables
+            where schemaname = 'public'
+              and tablename = 'recipe_variant_overrides' and rowsecurity
+        ) then
+            raise exception 'recipe_variant_overrides RLS not enabled';
+        end if;
+        foreach p in array array['select', 'insert', 'update', 'delete'] loop
+            if not has_table_privilege(
+                'service_role', 'public.recipe_variant_overrides', p
+            ) then
+                raise exception 'service_role lacks % on recipe_variant_overrides', p;
+            end if;
+        end loop;
+        foreach col in array array[
+            'household_id', 'recipe_id', 'user_id', 'ingredient_id', 'action',
+            'amount', 'unit', 'food_id', 'display_name', 'created_at',
+            'updated_at'
+        ] loop
+            if not exists (
+                select 1 from information_schema.columns
+                where table_schema = 'public'
+                  and table_name = 'recipe_variant_overrides'
+                  and column_name = col
+            ) then
+                raise exception 'recipe_variant_overrides.% missing', col;
+            end if;
+        end loop;
+        foreach idx in array array[
+            'recipe_variant_overrides_ingredient_key',
+            'recipe_variant_overrides_added_food_key',
+            'recipe_variant_overrides_recipe_idx',
+            'recipe_variant_overrides_user_idx'
+        ] loop
+            if not exists (
+                select 1 from pg_indexes
+                where schemaname = 'public'
+                  and tablename = 'recipe_variant_overrides'
+                  and indexname = idx
+            ) then
+                raise exception '% index missing', idx;
+            end if;
+        end loop;
+        if not exists (
+            select 1 from pg_policies
+            where schemaname = 'public'
+              and tablename = 'recipe_variant_overrides'
+              and 'foodable_app' = any (roles)
+        ) then
+            raise exception 'recipe_variant_overrides has no foodable_app policy';
+        end if;
+
+        foreach tbl in array array['recipe_plans', 'plan_rules'] loop
+            if not exists (
+                select 1 from information_schema.columns
+                where table_schema = 'public'
+                  and table_name = tbl
+                  and column_name = 'member_ids'
+                  and data_type = 'ARRAY'
+                  and is_nullable = 'NO'
+            ) then
+                raise exception '%.member_ids missing or nullable', tbl;
+            end if;
+        end loop;
+
+        begin
+            -- Behaviour, on the seeded recipes; all of it rolled back.
+            select i0.id as ingredient_id, i0.recipe_id, i0.household_id
+            into i
+            from public.recipe_ingredients i0
+            order by i0.created_at, i0.id
+            limit 1;
+            select user_id into u from public.household_members
+            where household_id = i.household_id limit 1;
+            insert into public.foods (household_id, kind, name, normalized_name)
+            values (i.household_id, 'food', 'Variant check', 'variant check')
+            returning id into fid;
+            if i.ingredient_id is null or u is null then
+                raise exception 'no seeded recipe to check recipe versions on';
+            end if;
+            if true then
+                -- An override that does not fit its action is refused.
+                failed := false;
+                begin
+                    insert into public.recipe_variant_overrides
+                        (household_id, recipe_id, user_id, action)
+                    values (i.household_id, i.recipe_id, u, 'remove');
+                exception when check_violation then
+                    failed := true;
+                end;
+                if not failed then
+                    raise exception 'a remove with no ingredient was accepted';
+                end if;
+                failed := false;
+                begin
+                    insert into public.recipe_variant_overrides
+                        (household_id, recipe_id, user_id, action, ingredient_id,
+                         food_id, display_name)
+                    values (i.household_id, i.recipe_id, u, 'add', i.ingredient_id,
+                            fid, 'x');
+                exception when check_violation then
+                    failed := true;
+                end;
+                if not failed then
+                    raise exception 'an add that names a base ingredient was accepted';
+                end if;
+                -- One row per person and base ingredient.
+                insert into public.recipe_variant_overrides
+                    (household_id, recipe_id, user_id, action, ingredient_id)
+                values (i.household_id, i.recipe_id, u, 'remove', i.ingredient_id);
+                failed := false;
+                begin
+                    insert into public.recipe_variant_overrides
+                        (household_id, recipe_id, user_id, action, ingredient_id,
+                         amount, unit)
+                    values (i.household_id, i.recipe_id, u, 'amount',
+                            i.ingredient_id, 2, 'g');
+                exception when unique_violation then
+                    failed := true;
+                end;
+                if not failed then
+                    raise exception 'a second override of one ingredient was accepted';
+                end if;
+                -- A person adds a food once; different foods are not limited.
+                insert into public.foods (household_id, kind, name, normalized_name)
+                values (i.household_id, 'food', 'Variant check two', 'variant check two')
+                returning id into fid2;
+                insert into public.recipe_variant_overrides
+                    (household_id, recipe_id, user_id, action, food_id,
+                     display_name, amount, unit)
+                values (i.household_id, i.recipe_id, u, 'add', fid, 'a', 1, 'g'),
+                       (i.household_id, i.recipe_id, u, 'add', fid2, 'b', 1, 'g');
+                failed := false;
+                begin
+                    insert into public.recipe_variant_overrides
+                        (household_id, recipe_id, user_id, action, food_id,
+                         display_name, amount, unit)
+                    values (i.household_id, i.recipe_id, u, 'add', fid, 'c', 2, 'g');
+                exception when unique_violation then
+                    failed := true;
+                end;
+                if not failed then
+                    raise exception 'a second add of one food was accepted';
+                end if;
+                -- Deleting the base ingredient takes its overrides, not the added ones.
+                delete from public.recipe_ingredients where id = i.ingredient_id;
+                if exists (
+                    select 1 from public.recipe_variant_overrides
+                    where ingredient_id = i.ingredient_id
+                ) then
+                    raise exception 'an override outlived its ingredient';
+                end if;
+                if (select count(*) from public.recipe_variant_overrides
+                    where recipe_id = i.recipe_id) <> 2 then
+                    raise exception 'deleting an ingredient took the added ones too';
+                end if;
+                delete from public.recipes where id = i.recipe_id;
+                if exists (
+                    select 1 from public.recipe_variant_overrides
+                    where recipe_id = i.recipe_id
+                ) then
+                    raise exception 'an override outlived its recipe';
+                end if;
+            end if;
+            raise exception 'dryrun-rollback';
+        exception when others then
+            if sqlerrm <> 'dryrun-rollback' then raise; end if;
+        end;
+    end;
+
     if exists (
         select 1
         from information_schema.columns
