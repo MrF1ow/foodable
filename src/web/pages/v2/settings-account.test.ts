@@ -91,6 +91,7 @@ describe("settings account v2", () => {
         expect(form).toContain('name="from" value="/kitchen/fridge"');
         expect(form).toContain('name="display_name"');
         expect(form).toContain('value="Ethan"');
+        expect(form).toContain('maxlength="80"');
         expect(html).toContain(
             '<button type="submit" class="fd-btn fd-btn--primary" data-fd-btn form="fd-account-name-form"><span class="fd-btn__label">Save</span></button>',
         );
