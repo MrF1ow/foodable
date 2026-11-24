@@ -22,6 +22,7 @@ import {
     timezoneFromProfile,
     getProfile,
 } from "../../db/profiles.js";
+import { run as inTransaction } from "../../db/sql.js";
 import { withAnalytics } from "../../analytics.js";
 import { todayInTz, dateInTz } from "../../domain/tz.js";
 import {
@@ -58,9 +59,25 @@ import {
     destructiveOutcome,
     withUndo,
 } from "../shared.js";
-import type { ToolContext } from "../shared.js";
+import type { DestructiveRun, ToolContext } from "../shared.js";
 
 const MAX_GOAL_DAYS_PER_CALL = 92;
+
+/** The result a refused destructive step hands back as the whole tool result. */
+type RefusedResult = Extract<
+    DestructiveRun<unknown>,
+    { refused: true }
+>["result"];
+
+/**
+ * Thrown inside the clear-all transaction when a guarded step is refused, so
+ * the transaction rolls back and the call returns the refusal.
+ */
+class ClearRefused extends Error {
+    constructor(readonly result: RefusedResult) {
+        super("set_nutrition_goals refused");
+    }
+}
 
 // The fields that change what the targets are. Writing any of them is a save of
 // the goals, which stamps goals_set_on; a write of only the name or note is not.
@@ -453,19 +470,25 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                     // by passing them as null in the same call.
                     let clearAllUndo = "";
                     let clearedAll = 0;
+                    // The ids of every override this person has, on any day.
+                    const overrideIds = async (hh: string) => {
+                        const dates = (await getAllGoalDays(userId)).map(
+                            (row) => row.date,
+                        );
+                        const found = await goalDayRows().list(
+                            userId,
+                            hh,
+                            dates,
+                        );
+                        return found.map((row) => row.id);
+                    };
+                    // Its own guarded step and its own undo entry: it records
+                    // only the overrides, never the standing defaults.
                     const clearAll = async (hh: string) =>
                         runDestructive(
                             "set_nutrition_goals",
                             async (rec) => {
-                                const dates = (
-                                    await getAllGoalDays(userId)
-                                ).map((row) => row.date);
-                                const found = await goalDayRows().list(
-                                    userId,
-                                    hh,
-                                    dates,
-                                );
-                                const ids = found.map((row) => row.id);
+                                const ids = await overrideIds(hh);
                                 await rec.captureByIds(
                                     "nutrition_goal_days",
                                     ids,
@@ -487,8 +510,9 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                             { target: userId },
                         );
                     // A call that also writes the defaults clears the overrides
-                    // in the same guarded step as that write (below), so a
-                    // refusal, by the switch or the database, changes nothing.
+                    // and writes the defaults in one transaction (below), each
+                    // part recorded on its own, so a refusal, by the switch or
+                    // the database, changes nothing and records nothing.
                     const clearHousehold =
                         args.clear === true && !dayScoped ? householdId : null;
                     if (clearHousehold != null) {
@@ -796,66 +820,23 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         goal_name: goalName,
                         goal_note: goalNote,
                     });
-                    let goals: NutritionGoals;
-                    let undoNote = "";
-                    if (clearHousehold != null) {
-                        // Clearing every override and writing the defaults are
-                        // one guarded step: the switch refuses both or neither,
-                        // and a write the database refuses rolls back the
-                        // clear with it, so a refused call changes nothing.
-                        const hh = clearHousehold;
-                        const run = await runDestructive(
-                            "set_nutrition_goals",
-                            async (rec) => {
-                                const dates = (
-                                    await getAllGoalDays(userId)
-                                ).map((row) => row.date);
-                                const found = await goalDayRows().list(
-                                    userId,
-                                    hh,
-                                    dates,
-                                );
-                                const ids = found.map((row) => row.id);
-                                await rec.captureByIds(
-                                    "nutrition_goal_days",
-                                    ids,
-                                    "deleted",
-                                );
-                                await rec.captureByKeys(
-                                    "nutrition_goals",
-                                    [{ user_id: userId }],
-                                    "updated",
-                                );
-                                const saved = await upsertNutritionGoals(
+                    // The defaults write, the same with or without a clear:
+                    // an ordinary upsert, or its own guarded step when it
+                    // clears a target, the name or the note.
+                    const writeDefaults = async (): Promise<
+                        DestructiveRun<NutritionGoals>
+                    > => {
+                        if (cleared.length === 0) {
+                            return {
+                                refused: false,
+                                value: await upsertNutritionGoals(
                                     userId,
                                     merged,
-                                );
-                                const removed = await goalDayRows().remove(
-                                    userId,
-                                    hh,
-                                    ids,
-                                );
-                                const parts = [
-                                    `Cleared ${overrides(removed)} on every day`,
-                                    ...(cleared.length > 0
-                                        ? [
-                                              `cleared ${cleared.join(", ")} from the default goals`,
-                                          ]
-                                        : []),
-                                ];
-                                return {
-                                    value: { saved, removed },
-                                    summary: parts.join("; "),
-                                };
-                            },
-                            { target: userId },
-                        );
-                        if (run.refused) return run.result;
-                        goals = run.value.saved;
-                        clearedAll = run.value.removed;
-                        clearAllUndo = run.undo;
-                    } else if (cleared.length > 0) {
-                        const run = await runDestructive(
+                                ),
+                                undo: "",
+                            };
+                        }
+                        return runDestructive(
                             "set_nutrition_goals",
                             async (rec) => {
                                 await rec.captureByKeys(
@@ -873,11 +854,50 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                             },
                             { target: userId },
                         );
-                        if (run.refused) return run.result;
-                        goals = run.value;
-                        undoNote = run.undo;
+                    };
+                    let goals: NutritionGoals;
+                    let undoNote = "";
+                    if (clearHousehold != null) {
+                        // Both parts run in one transaction: a part the switch
+                        // refuses, or a write the database refuses, rolls the
+                        // other back with it, so a refused call changes
+                        // nothing and records nothing. The overrides' clear is
+                        // its own entry (only when there are overrides), so
+                        // undoing it never touches the standing goals. The
+                        // guarded steps flush their notifications before this
+                        // transaction commits, so neither may take `notify`.
+                        const hh = clearHousehold;
+                        try {
+                            const both = await inTransaction(async () => {
+                                let removed = 0;
+                                let undo = "";
+                                if ((await overrideIds(hh)).length > 0) {
+                                    const swept = await clearAll(hh);
+                                    if (swept.refused) {
+                                        throw new ClearRefused(swept.result);
+                                    }
+                                    removed = swept.value;
+                                    undo = swept.undo;
+                                }
+                                const written = await writeDefaults();
+                                if (written.refused) {
+                                    throw new ClearRefused(written.result);
+                                }
+                                return { removed, undo, written };
+                            });
+                            goals = both.written.value;
+                            clearedAll = both.removed;
+                            clearAllUndo = both.undo;
+                            undoNote = both.written.undo;
+                        } catch (err) {
+                            if (err instanceof ClearRefused) return err.result;
+                            throw err;
+                        }
                     } else {
-                        goals = await upsertNutritionGoals(userId, merged);
+                        const written = await writeDefaults();
+                        if (written.refused) return written.result;
+                        goals = written.value;
+                        undoNote = written.undo;
                     }
                     // An alcohol target set by someone who has alcohol tracking
                     // off is saved but invisible everywhere else, so say so here
@@ -887,9 +907,10 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         alcohol,
                         "Alcohol target saved",
                     );
-                    const undoAll = [clearAllUndo, undoNote]
-                        .filter(Boolean)
-                        .join(" ");
+                    // Two entries share one undo sentence: say it once.
+                    const undoAll = [
+                        ...new Set([clearAllUndo, undoNote].filter(Boolean)),
+                    ].join(" ");
                     const clearedNote =
                         clearedAll > 0
                             ? `Cleared ${overrides(clearedAll)} on every day. `

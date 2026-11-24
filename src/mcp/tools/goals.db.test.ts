@@ -217,9 +217,10 @@ describeDb(
                 goal_name: null,
                 goal_note: null,
             });
-            // Both parts are one recorded step, so one undo puts both back.
+            // Each part is its own recorded entry: the overrides' clear, and
+            // the nulling of the defaults.
             const recorded = await actions();
-            expect(recorded.length).toBe(1);
+            expect(recorded.length).toBe(2);
             expect(JSON.stringify(recorded)).toContain(
                 "from the default goals",
             );
@@ -269,6 +270,144 @@ describeDb(
                 "2099-01-01",
             ]);
             expect(await actions()).toEqual([]);
+        });
+
+        const agentsMayNotDelete = () =>
+            asUser(
+                ownerId,
+                () =>
+                    liveSettingsStore().setAgentDestructiveAllowed(
+                        householdId,
+                        false,
+                    ),
+                householdId,
+            );
+        const undo = (actionId: string) =>
+            undoAgentAction(liveAgentActionDeps(), {
+                householdId,
+                userId: ownerId,
+                actionId,
+                now: new Date(),
+            });
+
+        test("with no overrides, a call that also sets targets records nothing", async () => {
+            const result = await callTool(
+                ownerId,
+                "legacy",
+                "set_nutrition_goals",
+                { clear: true, daily_calories: 2500 },
+            );
+            expect(result.isError).toBeFalsy();
+            expect(text(result)).not.toContain("Cleared");
+            expect(text(result)).not.toContain(UNDO_SENTENCE);
+            expect((await standing())?.daily_calories).toBe(2500);
+            expect(await actions()).toEqual([]);
+        });
+
+        test("with no overrides, a call that also sets targets is not refused while agents may not delete", async () => {
+            await agentsMayNotDelete();
+            const result = await callTool(
+                ownerId,
+                "legacy",
+                "set_nutrition_goals",
+                { clear: true, daily_calories: 2500 },
+            );
+            expect(result.isError).toBeFalsy();
+            expect((await standing())?.daily_calories).toBe(2500);
+            expect(await actions()).toEqual([]);
+        });
+
+        test("undoing the clear puts the overrides back and keeps the targets the call set", async () => {
+            await days(ownerId, ["2026-06-01"]);
+            await callTool(ownerId, "legacy", "set_nutrition_goals", {
+                clear: true,
+                daily_calories: 2500,
+            });
+            const [entry] = await actions();
+            const out = await undo(entry!.id);
+            expect(out.status).toBe("undone");
+            expect(await dayDates(ownerId)).toEqual(["2026-06-01"]);
+            // Setting a target is not a destructive change and is never
+            // undone, with or without a clear in the same call.
+            expect((await standing())?.daily_calories).toBe(2500);
+        });
+
+        test("undoing the clear puts the overrides back after the standing goals were edited since", async () => {
+            await days(ownerId, ["2026-06-01", "2099-01-01"]);
+            const result = await callTool(
+                ownerId,
+                "legacy",
+                "set_nutrition_goals",
+                { clear: true, daily_calories: 2500 },
+            );
+            expect(result.isError).toBeFalsy();
+            expect(text(result)).toContain("Cleared 2 per-day goal overrides");
+            expect(await dayDates(ownerId)).toEqual([]);
+            // A person edits the standing goals afterwards.
+            await ctx().sql`
+                update public.nutrition_goals set daily_calories = ${2600}
+                where user_id = ${ownerId}
+            `;
+            const [entry] = await actions();
+            expect(entry!.summary).not.toContain("default goals");
+            const out = await undo(entry!.id);
+            expect(out.status).toBe("undone");
+            expect(await dayDates(ownerId)).toEqual([
+                "2026-06-01",
+                "2099-01-01",
+            ]);
+            expect((await standing())?.daily_calories).toBe(2600);
+        });
+
+        test("with no standing goals before, the clear is recorded on its own and the new goals are not part of its undo", async () => {
+            await ctx().sql`
+                delete from public.nutrition_goals where user_id = ${ownerId}
+            `;
+            await days(ownerId, ["2026-06-01"]);
+            const result = await callTool(
+                ownerId,
+                "legacy",
+                "set_nutrition_goals",
+                { clear: true, daily_calories: 2500 },
+            );
+            expect(result.isError).toBeFalsy();
+            const recorded = await actions();
+            expect(recorded.length).toBe(1);
+            expect(JSON.stringify(recorded[0]!.snapshot)).not.toContain(
+                'nutrition_goals"',
+            );
+            const out = await undo(recorded[0]!.id);
+            expect(out.status).toBe("undone");
+            expect(await dayDates(ownerId)).toEqual(["2026-06-01"]);
+            expect((await standing())?.daily_calories).toBe(2500);
+        });
+
+        test("clearing targets with null in the same call is its own entry, so the overrides undo alone", async () => {
+            await days(ownerId, ["2026-06-01"]);
+            const result = await callTool(
+                ownerId,
+                "legacy",
+                "set_nutrition_goals",
+                { clear: true, daily_calories: null },
+            );
+            expect(result.isError).toBeFalsy();
+            // A person sets the target again afterwards.
+            await ctx().sql`
+                update public.nutrition_goals set daily_calories = ${2600}
+                where user_id = ${ownerId}
+            `;
+            // Two entries, one undo sentence.
+            expect(text(result).split(UNDO_SENTENCE).length - 1).toBe(1);
+            const recorded = await actions();
+            expect(recorded.length).toBe(2);
+            const clear = recorded.find((a) =>
+                String(a.summary).includes("per-day goal override"),
+            );
+            expect(clear!.summary).not.toContain("default goals");
+            const out = await undo(clear!.id);
+            expect(out.status).toBe("undone");
+            expect(await dayDates(ownerId)).toEqual(["2026-06-01"]);
+            expect((await standing())?.daily_calories).toBe(2600);
         });
 
         test("refused while agents may not delete, a call that also sets targets writes none of them", async () => {
