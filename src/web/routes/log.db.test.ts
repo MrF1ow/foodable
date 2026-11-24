@@ -357,12 +357,9 @@ describeDb(pgAvailable !== null, "log search recipes db", (getCtx) => {
         return body.groups.find((g) => g.kind === "recipe")?.items ?? [];
     }
 
-    test("an unverified recipe is listed but not loggable, and logging it is refused", async () => {
+    test("a draft (an unsaved import) is not a search result, and logging it is refused", async () => {
         const recipeId = await insertRecipe("Zorbo stew", "unverified");
-        const rows = await searchRecipes("zorbo");
-        expect(rows).toHaveLength(1);
-        expect(rows[0]!.open).toBe(`/recipes/${recipeId}`);
-        expect(rows[0]!.loggable).toBe(false);
+        expect(await searchRecipes("zorbo")).toHaveLength(0);
 
         const post = await hono.request("http://test/log", {
             method: "POST",

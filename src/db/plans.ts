@@ -337,8 +337,9 @@ export function liveRecipePlansStore(): PlansStore {
                         slot,
                     );
                     if (planned) return planned;
-                    // Selecting from recipes keeps a recipe id from another
-                    // household from being planned: no row, no insert.
+                    // Selecting from saved recipes keeps a recipe id from
+                    // another household, or a draft, from being planned: no
+                    // row, no insert.
                     // In a savepoint: a refused insert aborts only the
                     // savepoint, so the transaction can still commit.
                     const inserted = await tx.savepoint((sp) =>
@@ -361,6 +362,7 @@ export function liveRecipePlansStore(): PlansStore {
                             from ${sp.unsafe(RECIPES)} r
                             where r.id = ${plan.recipeId}::uuid
                               and r.household_id = ${plan.householdId}::uuid
+                              and r.verification = 'verified'
                             returning ${sp.unsafe(PLAN_COLS)}
                         `,
                             "plan recipe",
@@ -624,8 +626,9 @@ export function liveRecipePlansStore(): PlansStore {
                     if (clashing.length > 0) {
                         throw repeatOverlapError(slot, clashing, candidate);
                     }
-                    // Selecting from recipes keeps a recipe id from another
-                    // household from being planned: no row, no insert.
+                    // Selecting from saved recipes keeps a recipe id from
+                    // another household, or a draft, from being planned: no
+                    // row, no insert.
                     const inserted = await tx.savepoint((sp) =>
                         maybeOne<Record<string, unknown>>(
                             sp as Tx,
@@ -648,6 +651,7 @@ export function liveRecipePlansStore(): PlansStore {
                             from ${sp.unsafe(RECIPES)} r
                             where r.id = ${rule.recipeId}::uuid
                               and r.household_id = ${rule.householdId}::uuid
+                              and r.verification = 'verified'
                             returning ${sp.unsafe(PLAN_RULE_COLS)}
                         `,
                             "plan recipe",

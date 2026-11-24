@@ -9,8 +9,12 @@ import {
 import { formAmount, formOptionalNumber, formText } from "../form.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import {
+    assertCanDeleteRecipe,
     deleteRecipe,
+    isRecipeDraft,
+    RecipeEditBreaksCheckError,
     RecipeForbiddenError,
+    saveRecipeDraft,
     RecipeInputError,
     RecipeUnverifiedError,
 } from "../../domain/recipes.js";
@@ -64,6 +68,7 @@ import {
     importOutcomeShowsPasteStep,
     importRecipeFromUrl,
     importRecipeFromSharedText,
+    RECIPE_DRAFT_REFUSAL,
 } from "../../domain/recipe-import.js";
 import {
     cleanRecipeLink,
@@ -673,6 +678,13 @@ recipesRoutes.post("/recipes/:id/favourite", requireMember, async (c) => {
     const recipeId = c.req.param("id");
     if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
     const body = await c.req.parseBody();
+    const recipe = await liveRecipesStore().getRecipe(
+        member.householdId,
+        recipeId,
+    );
+    if (!recipe) return c.text("Not found", 404);
+    // A draft is not in the list yet: Save it first.
+    if (isRecipeDraft(recipe)) return c.text(RECIPE_DRAFT_REFUSAL, 409);
     const found = await liveRecipesStore().setFavourite(
         member.householdId,
         userId,
@@ -718,6 +730,12 @@ recipesRoutes.post("/recipes/:id/mentions/add", requireMember, async (c) => {
         return c.redirect(`/recipes/${recipeId}`, 303);
     } catch (err) {
         if (!(err instanceof RecipeInputError)) throw err;
+        // A saved recipe that the line would break: answer in place with
+        // what it would break, like every other refused edit.
+        if (err instanceof RecipeEditBreaksCheckError) {
+            const page = await recipeFormError(member.userId, recipeId, err);
+            return c.html(page.html, page.status);
+        }
         return redirectWithToast(
             c,
             `/recipes/${recipeId}`,
@@ -866,6 +884,7 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
                 householdId: member.householdId,
                 recipeId,
                 recipeName: recipe.name,
+                recipeIsDraft: isRecipeDraft(recipe),
                 recipeYield: recipe.yieldPortions,
                 date,
                 slot,
@@ -1355,6 +1374,99 @@ recipesRoutes.post("/recipes/plan/add-missing", requireMember, async (c) => {
             message: err.message,
         });
     }
+});
+
+/**
+ * Save: the one way an imported draft becomes a recipe. It runs the check;
+ * when it passes the draft is saved and the page reloads (303), otherwise the
+ * recipe page answers in place (422) with what is left to fix. Saving a
+ * recipe that is already saved changes nothing.
+ */
+recipesRoutes.post("/recipes/:id/save", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+    try {
+        const refusal = can(member, "recipe.edit");
+        if (!refusal.ok) throw new RecipeForbiddenError(refusal.reason);
+        const result = await saveRecipeDraft(
+            liveRecipesStore(),
+            member.householdId,
+            recipeId,
+        );
+        if (!result.saved) {
+            const page = await renderRecipeDetailRoute(userId, recipeId, {
+                error: `Not saved yet. Fix these first: ${result.problems
+                    .map((p) => p.message)
+                    .join(" ")}`,
+            });
+            return c.html(page.html, 422);
+        }
+    } catch (err) {
+        if (
+            !(err instanceof RecipeInputError) &&
+            !(err instanceof RecipeForbiddenError)
+        ) {
+            throw err;
+        }
+        if (err.message === "Unknown recipe.") {
+            return c.text("Not found", 404);
+        }
+        const page = await recipeFormError(userId, recipeId, err);
+        return c.html(page.html, page.status);
+    }
+    // toast: none — the page reloads as a saved recipe
+    return c.redirect(`/recipes/${recipeId}`, 303);
+});
+
+/**
+ * Discard draft: deletes the recipe only while it is still a draft
+ * (`deleteDraftRecipe`), with the permission `discard_recipe_draft` uses:
+ * whoever imported it, or the owner. A draft saved since the page was drawn
+ * is kept and the page answers in place (409); nobody is notified, since a
+ * draft is only its importer's.
+ */
+recipesRoutes.post("/recipes/:id/discard", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const recipeId = c.req.param("id");
+    if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+    const store = liveRecipesStore();
+    const alreadySaved = (name: string) =>
+        new RecipeInputError(
+            `${name} was already saved, so it was not discarded.`,
+        );
+    try {
+        const refusal = can(member, "recipe.edit");
+        if (!refusal.ok) throw new RecipeForbiddenError(refusal.reason);
+        const recipe = await store.getRecipe(member.householdId, recipeId);
+        if (!recipe) return c.text("Not found", 404);
+        if (!isRecipeDraft(recipe)) throw alreadySaved(recipe.name);
+        assertCanDeleteRecipe(recipe, {
+            userId,
+            isOwner: can(member, "recipe.delete_any").ok,
+        });
+        if (!(await store.deleteDraftRecipe(member.householdId, recipeId))) {
+            const now = await store.getRecipe(member.householdId, recipeId);
+            if (!now) return c.text("Not found", 404);
+            throw alreadySaved(now.name);
+        }
+    } catch (err) {
+        if (
+            !(err instanceof RecipeInputError) &&
+            !(err instanceof RecipeForbiddenError)
+        ) {
+            throw err;
+        }
+        const page = await recipeFormError(userId, recipeId, err);
+        return c.html(
+            page.html,
+            err instanceof RecipeForbiddenError ? 403 : 409,
+        );
+    }
+    // toast: none
+    return c.redirect("/recipes", 303);
 });
 
 recipesRoutes.post("/recipes/:id/delete", requireMember, async (c) => {

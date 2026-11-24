@@ -1690,9 +1690,9 @@ test("cookPreview flags a shortfall it could not count for want of a unit factor
 test("cook preview is unavailable for the four domain errors and nothing else", () => {
     expect(isCookPreviewUnavailable(new StockInputError("x"))).toBe(true);
     expect(isCookPreviewUnavailable(new RecipeInputError("x"))).toBe(true);
-    expect(
-        isCookPreviewUnavailable(new RecipeUnverifiedError("Soup", "x")),
-    ).toBe(true);
+    expect(isCookPreviewUnavailable(new RecipeUnverifiedError("Soup"))).toBe(
+        true,
+    );
     expect(isCookPreviewUnavailable(new FoodsInputError("x"))).toBe(true);
     expect(isCookPreviewUnavailable(new Error("db down"))).toBe(false);
     expect(isCookPreviewUnavailable("nope")).toBe(false);

@@ -31,7 +31,7 @@ import {
     weekPlan,
     type PlanMissingLine,
 } from "../../domain/plan-week.js";
-import { macrosForPerson } from "../../domain/recipes.js";
+import { isRecipeDraft, macrosForPerson } from "../../domain/recipes.js";
 import { WEEKDAY_NAMES } from "../../domain/weekdays.js";
 import {
     registerWidgetResource,
@@ -504,6 +504,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             householdId,
                             recipeId: recipe.id,
                             recipeName: recipe.name,
+                            recipeIsDraft: isRecipeDraft(recipe),
                             recipeYield: recipe.yieldPortions,
                             date: args.date.trim(),
                             slot: args.slot,

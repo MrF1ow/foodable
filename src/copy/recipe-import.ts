@@ -14,12 +14,15 @@ export type ImportMessage = {
 };
 
 export const IMPORT_MESSAGES = {
-    imported: { headline: "Imported {name} from {site}." },
+    imported: {
+        headline: "Imported {name} from {site} as a draft.",
+        reason: "Save it to keep it.",
+    },
     unverified_needs_review: {
-        headline: "Imported as unverified: {count} need checking.",
+        headline: "Imported as a draft: {count} need checking.",
     },
     unverified_needs_review_one: {
-        headline: "Imported as unverified: {count} needs checking.",
+        headline: "Imported as a draft: {count} needs checking.",
     },
     paste_needed: { headline: "Paste the {platform} caption below." },
     paste_needed_site: { headline: "Paste the recipe from {site} below." },

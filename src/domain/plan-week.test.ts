@@ -13,6 +13,7 @@ import {
     countedServings,
     missingForPlan,
     planRecipesOf,
+    plansOfSavedRecipes,
     unknownMissingNotice,
     weekPlan,
     type PlanRecipe,
@@ -1112,5 +1113,17 @@ describe("plans for named people", () => {
             ["2026-11-12", { amount: 100, unit: "g" }],
             ["2026-11-13", { amount: 400, unit: "g" }],
         ]);
+    });
+});
+
+describe("plansOfSavedRecipes", () => {
+    test("a plan left on a draft is not part of the week", () => {
+        const plans = [
+            { id: "p1", recipeId: "saved" },
+            { id: "p2", recipeId: "draft" },
+        ];
+        expect(
+            plansOfSavedRecipes(plans, [{ id: "saved" }]).map((p) => p.id),
+        ).toEqual(["p1"]);
     });
 });

@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { RECIPE_DRAFT_REFUSAL } from "./recipe-import.js";
 
 /**
  * Public read-only share links. A link grants one object to anyone holding
@@ -147,7 +148,11 @@ function isShareKind(value: unknown): value is ShareKind {
  * the household), and the domain imports no store.
  */
 export type ShareTargets = {
-    getRecipe(householdId: string, id: string): Promise<unknown | null>;
+    /** The recipe, or null; its `verification` says whether it is a draft. */
+    getRecipe(
+        householdId: string,
+        id: string,
+    ): Promise<Record<string, unknown> | null>;
 };
 
 export type CreateShareLinkInput = {
@@ -184,12 +189,17 @@ export async function createShareLink(
             "The grocery list link shares the whole list, so it takes no target.",
         );
     }
-    if (
-        input.kind === "recipe" &&
-        targetId !== null &&
-        !(await targets.getRecipe(input.householdId, targetId))
-    ) {
-        throw new ShareLinkInputError("That recipe is not in your household.");
+    if (input.kind === "recipe" && targetId !== null) {
+        const recipe = await targets.getRecipe(input.householdId, targetId);
+        if (!recipe) {
+            throw new ShareLinkInputError(
+                "That recipe is not in your household.",
+            );
+        }
+        // A draft is nobody's recipe yet: it would arrive elsewhere as saved.
+        if (recipe.verification === "unverified") {
+            throw new ShareLinkInputError(RECIPE_DRAFT_REFUSAL);
+        }
     }
     const days = validateExpiresInDays(input.expiresInDays);
     const token = mintShareToken();

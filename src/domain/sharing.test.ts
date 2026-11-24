@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
+import { createMemoryFoodsStore } from "./foods.js";
 import { createMemoryRecipesStore, createRecipe } from "./recipes.js";
+import { planSharedImport } from "./sharing-import.js";
 import {
     createMemoryShareLinkStore,
     createShareLink,
@@ -173,6 +175,26 @@ test("a recipe link needs a target, a grocery list link refuses one", async () =
         ),
     ).rejects.toBeInstanceOf(ShareLinkInputError);
     expect(await store.listForHousehold(HH, { now: NOW })).toEqual([]);
+});
+
+test("a draft cannot be shared: the link is refused and nothing is made", async () => {
+    const store = createMemoryShareLinkStore();
+    await expect(
+        createShareLink(
+            store,
+            {
+                householdId: HH,
+                kind: "recipe",
+                targetId: "draft",
+                createdBy: ME,
+            },
+            NOW,
+            { getRecipe: async () => ({ verification: "unverified" }) },
+        ),
+    ).rejects.toThrow("That recipe is a draft; save it first.");
+    expect(
+        await store.listForHousehold(HH, { now: NOW, includeInactive: true }),
+    ).toEqual([]);
 });
 
 test("a bad expiry creates nothing", async () => {
@@ -608,4 +630,30 @@ test("a token that is not 43 base64url characters never reaches the store", asyn
     expect(lookups).toBe(0);
     await resolveShareToken(counting, mintShareToken(), NOW);
     expect(lookups).toBe(1);
+});
+
+test("a shared import does not take the name of a draft in the household", async () => {
+    const recipes = createMemoryRecipesStore();
+    await createRecipe(recipes, {
+        householdId: HH,
+        creatorId: ME,
+        name: "Lentil soup",
+        yieldPortions: 2,
+        verification: "unverified",
+        draftExpiresAt: "2026-12-01T12:00:00.000Z",
+    });
+    const plan = await planSharedImport(
+        { recipes, foods: createMemoryFoodsStore() },
+        HH,
+        {
+            version: 1,
+            name: "Lentil soup",
+            portions: 2,
+            instructions: "1. Simmer.",
+            tags: [],
+            ingredients: [],
+        },
+    );
+    expect(plan.recipe.name).toBe("Lentil soup (2)");
+    expect(plan.recipe.renamedFrom).toBe("Lentil soup");
 });

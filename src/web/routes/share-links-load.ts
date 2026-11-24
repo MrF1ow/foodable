@@ -5,7 +5,7 @@
 
 import { listGrocery, type GroceryListStore } from "../../domain/grocery.js";
 import type { FoodsStore } from "../../domain/foods.js";
-import type { RecipesStore } from "../../domain/recipes.js";
+import { isRecipeDraft, type RecipesStore } from "../../domain/recipes.js";
 import type { SettingsStore } from "../../domain/settings.js";
 import {
     recipeShareDocument,
@@ -69,8 +69,8 @@ export function orderGroceryLines<L extends OrderableList["lines"][number]>(
 
 /**
  * The view a visitor gets for a live link, or null when the object cannot be
- * loaded (the recipe was deleted, or `targetId` names nothing in the link's
- * household): the route answers that exactly like an unknown token.
+ * loaded (the recipe was deleted, is a draft, or `targetId` names nothing in
+ * the link's household): the route answers that exactly like an unknown token.
  */
 export async function loadShareView(
     link: ShareLink,
@@ -82,7 +82,9 @@ export async function loadShareView(
             link.householdId,
             link.targetId,
         );
-        if (!recipe) return null;
+        // A draft is not shared: a link made before drafts existed answers
+        // as if it were unknown.
+        if (!recipe || isRecipeDraft(recipe)) return null;
         const ingredients = await stores.recipes.listIngredients(
             link.householdId,
             recipe.id,
@@ -108,8 +110,8 @@ export type ShareDocumentStores = {
 
 /**
  * The portable document for a recipe link, or null when there is none: a
- * grocery-list link (only recipes travel), a recipe that cannot be loaded, or
- * one outside the document's bounds. The route answers all of those with the
+ * grocery-list link (only recipes travel), a recipe that cannot be loaded or
+ * is a draft, or one outside the document's bounds. The route answers all of those with the
  * one 404. The recipe, its ingredients and the foods they point at are all
  * read scoped to `link.householdId`, so an ingredient whose `food_id` names
  * another household's food ships as an unknown food, never that food.
@@ -123,7 +125,8 @@ export async function loadShareDocument(
         link.householdId,
         link.targetId,
     );
-    if (!recipe) return null;
+    // A draft never travels, so its import can't land as a saved recipe.
+    if (!recipe || isRecipeDraft(recipe)) return null;
     const ingredients = await stores.recipes.listIngredients(
         link.householdId,
         recipe.id,

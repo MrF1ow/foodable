@@ -18,6 +18,7 @@ import {
 } from "../domain/agent-actions.js";
 import { jwtSubAndHouseholdForActor } from "./actor.js";
 import { liveFoodsStore } from "./foods.js";
+import { liveRecipesStore } from "./recipes.js";
 import { liveSettingsStore } from "./settings.js";
 import { liveStockStore } from "./stock.js";
 import { maybeOne, pgCode, pgError, rows, run, type Tx } from "./sql.js";
@@ -608,5 +609,6 @@ export function liveAgentActionDeps(): AgentActionDeps & AgentUndoDeps {
         settings: liveSettingsStore(),
         stock: liveStockStore(),
         foods: liveFoodsStore(),
+        recipes: liveRecipesStore(),
     };
 }

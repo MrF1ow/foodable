@@ -2100,9 +2100,12 @@ describe("aligning one person's change into the base", () => {
         expect(wrapped).toBe(1);
     });
 
-    test("an unverified recipe is checked again after the base changes", async () => {
+    test("a draft stays a draft after an align: only Save promotes it", async () => {
         const s = await setup();
-        await s.recipes.setVerification(HH, s.made.id, "unverified", []);
+        await s.recipes.updateRecipe({
+            ...(await s.recipes.getRecipe(HH, s.made.id))!,
+            verification: "unverified",
+        });
         await set(s, ALICE, {
             action: "amount",
             ingredientId: s.cheese.id,
@@ -2111,7 +2114,7 @@ describe("aligning one person's change into the base", () => {
         });
         await align(s, ALICE, s.cheese.id);
         expect((await s.recipes.getRecipe(HH, s.made.id))?.verification).toBe(
-            "verified",
+            "unverified",
         );
     });
 });

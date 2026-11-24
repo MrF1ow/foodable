@@ -153,10 +153,14 @@ export async function planSharedImport(
         }
         ingredients.push({ amount: line.amount, unit: line.unit, food });
     }
-    const existing = await stores.recipes.listRecipes(householdId);
+    // A draft holds its name too: saving it later must not meet a twin.
+    const [saved, drafts] = await Promise.all([
+        stores.recipes.listRecipes(householdId),
+        stores.recipes.listDraftRecipes(householdId),
+    ]);
     const name = uniqueRecipeName(
         doc.name,
-        existing.map((recipe) => recipe.name),
+        [...saved, ...drafts].map((recipe) => recipe.name),
     );
     return {
         recipe: {

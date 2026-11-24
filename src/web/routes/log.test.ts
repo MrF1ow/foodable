@@ -945,6 +945,24 @@ describe("GET /api/log/search", () => {
         expect(recipe?.items[0]?.kcal_per_100g).toBeUndefined();
     });
 
+    test("a draft is never a search result; saved, it is", async () => {
+        const draft = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Imported omelette roll",
+            yieldPortions: 1,
+            verification: "unverified",
+            draftExpiresAt: "2026-12-01T00:00:00.000Z",
+        });
+        expect(names(await search("omelette roll"))).not.toContain(
+            "Imported omelette roll",
+        );
+        await db.recipesStore.promoteDraft(HH, draft.id);
+        expect(names(await search("omelette roll"))).toContain(
+            "Imported omelette roll",
+        );
+    });
+
     test("five household hits skip OFF unless online=1", async () => {
         for (const name of [
             "Bean one",

@@ -90,14 +90,39 @@ export type RecipeImport = {
     importedAt: string;
 };
 
+/** What planning, cooking, shopping, logging or sharing a draft answers. */
+export const RECIPE_DRAFT_REFUSAL = "That recipe is a draft; save it first.";
+
+/** How long an imported recipe stays a draft before the sweep deletes it. */
+export const RECIPE_DRAFT_DAYS = 7;
+
+/** When a draft imported at `now` expires. */
+export function draftExpiryFrom(now: Date): string {
+    return new Date(
+        now.getTime() + RECIPE_DRAFT_DAYS * 24 * 60 * 60 * 1000,
+    ).toISOString();
+}
+
+/**
+ * A draft is an imported recipe nobody has saved yet: its verification is
+ * still `unverified`. Only Save (`saveRecipeDraft`) makes it a recipe.
+ */
+export function isRecipeDraft(recipe: Pick<Recipe, "verification">): boolean {
+    return recipe.verification === "unverified";
+}
+
+/**
+ * Refuses a draft where only a saved recipe may go: the plan, a cook, the
+ * grocery list, a logged portion, a share link.
+ */
 export class RecipeUnverifiedError extends Error {
     readonly code = "recipe_unverified" as const;
+    readonly recipeName: string;
 
-    constructor(recipeName: string, firstProblem: string) {
-        super(
-            `${recipeName} is unverified: ${firstProblem}. Fix it, then check again.`,
-        );
+    constructor(recipeName: string) {
+        super(RECIPE_DRAFT_REFUSAL);
         this.name = "RecipeUnverifiedError";
+        this.recipeName = recipeName;
     }
 }
 
@@ -192,25 +217,36 @@ export async function resolveUnresolvedLines(
     verification: RecipeVerification;
     removed: number;
 }> {
-    const importRow = await store.getImport(householdId, recipeId);
-    let removed = 0;
-    if (importRow) {
-        const done = new Set(lines.map((line) => line.trim()).filter(Boolean));
-        const remaining = importRow.unresolvedLines.filter(
-            (line) => !done.has(line.trim()),
-        );
-        removed = importRow.unresolvedLines.length - remaining.length;
-        if (removed > 0) {
-            await store.upsertImport({
-                ...importRow,
-                unresolvedLines: remaining,
-            });
+    return store.withRecipeLock(householdId, recipeId, async () => {
+        const importRow = await store.getImport(householdId, recipeId);
+        let removed = 0;
+        if (importRow) {
+            const done = new Set(
+                lines.map((line) => line.trim()).filter(Boolean),
+            );
+            const remaining = importRow.unresolvedLines.filter(
+                (line) => !done.has(line.trim()),
+            );
+            removed = importRow.unresolvedLines.length - remaining.length;
+            if (removed > 0) {
+                await store.upsertImport({
+                    ...importRow,
+                    unresolvedLines: remaining,
+                });
+            }
         }
-    }
-    const checked = await recheckRecipe(store, householdId, recipeId);
-    return { ...checked, removed };
+        const checked = await recheckRecipe(store, householdId, recipeId);
+        return { ...checked, removed };
+    });
 }
 
+/**
+ * Runs the check and records the problems it found. It never writes whether
+ * the recipe is a draft: only Save (`saveRecipeDraft`) promotes one, and an
+ * edit that would break a saved recipe is refused before it is written
+ * (`assertEditKeepsCheck`). It holds the recipe's edit lock, so what it
+ * records is what the recipe is.
+ */
 export async function recheckRecipe(
     store: RecipesStore,
     householdId: string,
@@ -220,43 +256,88 @@ export async function recheckRecipe(
     problems: RecipeProblem[];
     verification: RecipeVerification;
 }> {
-    const recipe = await store.getRecipe(householdId, recipeId);
-    if (!recipe) {
-        throw new RecipeInputError("Unknown recipe.");
-    }
-    const ingredients = await store.listIngredients(householdId, recipeId);
-    const importRow = await store.getImport(householdId, recipeId);
-    const result = verifyRecipe(recipe, ingredients, importRow);
-    // A recipe with no import row was made by a person, who is the source:
-    // the plan keeps hand-made recipes verified. The check still reports what
-    // it found, but it never demotes them.
-    if (!importRow && recipe.verification === "verified") {
-        return { ...result, verification: "verified" };
-    }
-    const verification: RecipeVerification = result.verified
-        ? "verified"
-        : "unverified";
-    await store.setVerification(
-        householdId,
-        recipeId,
-        verification,
-        result.problems,
-    );
-    return { ...result, verification };
+    return store.withRecipeLock(householdId, recipeId, async () => {
+        const recipe = await store.getRecipe(householdId, recipeId);
+        if (!recipe) {
+            throw new RecipeInputError("Unknown recipe.");
+        }
+        const ingredients = await store.listIngredients(householdId, recipeId);
+        const importRow = await store.getImport(householdId, recipeId);
+        const result = verifyRecipe(recipe, ingredients, importRow);
+        // A recipe with no import row was made by a person and has nowhere to
+        // keep problems; the check still reports what it found.
+        if (importRow) {
+            await store.recordProblems(householdId, recipeId, result.problems);
+        }
+        return { ...result, verification: recipe.verification };
+    });
 }
 
+export type SaveRecipeResult = {
+    /** True when the recipe is saved now (or already was). */
+    saved: boolean;
+    /** True when it was saved before this call: nothing changed. */
+    alreadySaved: boolean;
+    /** What is left to fix when the check refused the save. */
+    problems: RecipeProblem[];
+    recipe: Recipe;
+};
+
+/**
+ * Save: the one way a draft becomes a recipe. It runs the check; when it
+ * passes the recipe is verified and its expiry cleared, otherwise nothing
+ * changes but the recorded problems, which come back. A recipe that is
+ * already saved is a no-op success. The check and the promotion run under the
+ * recipe's edit lock, so no edit lands between them; a recipe that is gone
+ * (discarded or swept) is "Unknown recipe."
+ */
+export async function saveRecipeDraft(
+    store: RecipesStore,
+    householdId: string,
+    recipeId: string,
+): Promise<SaveRecipeResult> {
+    return store.withRecipeLock(householdId, recipeId, async () => {
+        const recipe = await store.getRecipe(householdId, recipeId);
+        if (!recipe) throw new RecipeInputError("Unknown recipe.");
+        if (!isRecipeDraft(recipe)) {
+            return { saved: true, alreadySaved: true, problems: [], recipe };
+        }
+        const ingredients = await store.listIngredients(householdId, recipeId);
+        const importRow = await store.getImport(householdId, recipeId);
+        const { problems } = verifyRecipe(recipe, ingredients, importRow);
+        if (problems.length > 0) {
+            if (importRow) {
+                await store.recordProblems(householdId, recipeId, problems);
+            }
+            return { saved: false, alreadySaved: false, problems, recipe };
+        }
+        if (!(await store.promoteDraft(householdId, recipeId))) {
+            throw new RecipeInputError("Unknown recipe.");
+        }
+        if (importRow) await store.recordProblems(householdId, recipeId, []);
+        const saved = (await store.getRecipe(householdId, recipeId)) ?? {
+            ...recipe,
+            verification: "verified" as const,
+            draftExpiresAt: null,
+        };
+        return {
+            saved: true,
+            alreadySaved: false,
+            problems: [],
+            recipe: saved,
+        };
+    });
+}
+
+/** Refuses a draft (`RecipeUnverifiedError`); a saved recipe passes. */
 export async function assertRecipeVerified(
     store: RecipesStore,
     householdId: string,
     recipeId: string,
 ): Promise<void> {
     const recipe = await store.getRecipe(householdId, recipeId);
-    if (!recipe || recipe.verification === "verified") return;
-    const ingredients = await store.listIngredients(householdId, recipeId);
-    const importRow = await store.getImport(householdId, recipeId);
-    const { problems } = verifyRecipe(recipe, ingredients, importRow);
-    const first = problems[0]?.message ?? "It did not pass the check.";
-    throw new RecipeUnverifiedError(recipe.name, first);
+    if (!recipe || !isRecipeDraft(recipe)) return;
+    throw new RecipeUnverifiedError(recipe.name);
 }
 
 export function recipeImportFromRow(row: {
@@ -364,6 +445,8 @@ export type RecipeImportOutcome = {
     recipeId: string | null;
     recipeName: string | null;
     verification: RecipeVerification | null;
+    /** When the imported draft expires unless it is saved; null otherwise. */
+    draftExpiresAt?: string | null;
     problems: RecipeProblem[];
     source: {
         kind: RecipeSourceKind;
@@ -413,6 +496,7 @@ function emptyOutcome(
         recipeId: null,
         recipeName: null,
         verification: null,
+        draftExpiresAt: null,
         problems: [],
         source: null,
         unresolvedLines: [],
@@ -699,6 +783,7 @@ async function saveImportedRecipe(
                 prepMinutes: prepared.prepMinutes,
                 cookMinutes: prepared.cookMinutes,
                 verification: "unverified",
+                draftExpiresAt: draftExpiryFrom(new Date()),
             });
 
             const importedAt = new Date().toISOString();
@@ -755,6 +840,7 @@ async function saveImportedRecipe(
                 recipeId: recipe.id,
                 recipeName: recipe.name,
                 verification: checked.verification,
+                draftExpiresAt: recipe.draftExpiresAt ?? null,
                 problems: checked.problems,
                 source: sourceForOutcome,
                 unresolvedLines: parsed.unresolved,
@@ -971,9 +1057,27 @@ export async function importRecipeFromUrl(
         [cleaned, rawTrimmed],
     );
     if (duplicate) {
+        // A draft's readiness comes from the check, so a duplicate of one
+        // carries what is left to fix (a saved recipe has nothing left).
+        const draftProblems = isRecipeDraft(duplicate)
+            ? verifyRecipe(
+                  duplicate,
+                  await deps.recipes.listIngredients(
+                      input.householdId,
+                      duplicate.id,
+                  ),
+                  await deps.recipes.getImport(input.householdId, duplicate.id),
+              ).problems
+            : [];
         return emptyOutcome("duplicate", {
+            problems: draftProblems,
             recipeId: duplicate.id,
             recipeName: duplicate.name,
+            // The recipe already there may be someone's draft.
+            verification: duplicate.verification,
+            draftExpiresAt: isRecipeDraft(duplicate)
+                ? (duplicate.draftExpiresAt ?? null)
+                : null,
             // A stored source can be a bare host or any text the editor
             // accepted; never let it throw here.
             source: (() => {
@@ -1440,54 +1544,74 @@ export function prepareImportedRecipe(input: {
     };
 }
 
-export type SweepHousehold = {
-    id: string;
-    preferences: { unverifiedRecipeExpiryDays: number | null };
-};
-
-export async function sweepUnverifiedRecipes(opts: {
-    households: SweepHousehold[];
-    recipes: RecipesStore;
+/**
+ * Deletes every draft whose expiry has passed, household by household, each
+ * through the store's `deleteDraftRecipe` (which takes the align lock, cleans
+ * up dismissals and leaves alone a draft saved since it was listed). Silent:
+ * nobody is told, since only the importer had seen it. A delete that fails is
+ * logged and the sweep goes on. Returns how many went.
+ */
+export async function sweepExpiredDrafts(opts: {
+    householdIds: string[];
+    recipes: Pick<RecipesStore, "listExpiredDrafts" | "deleteDraftRecipe">;
     now: Date;
 }): Promise<number> {
     let deleted = 0;
-    for (const household of opts.households) {
-        const days = household.preferences.unverifiedRecipeExpiryDays;
-        if (days == null) continue;
-        const before = new Date(opts.now);
-        before.setDate(before.getDate() - days);
-        deleted += await opts.recipes.deleteStaleUnverified(
-            household.id,
-            before,
+    for (const householdId of opts.householdIds) {
+        const expired = await opts.recipes.listExpiredDrafts(
+            householdId,
+            opts.now,
         );
+        for (const recipe of expired) {
+            // One draft that cannot be deleted is logged and left for the
+            // next run; the rest still go.
+            try {
+                if (
+                    await opts.recipes.deleteDraftRecipe(householdId, recipe.id)
+                ) {
+                    deleted += 1;
+                }
+            } catch (err) {
+                console.error(
+                    "[draft-sweep]",
+                    `recipe ${recipe.id}:`,
+                    err instanceof Error ? err.message : String(err),
+                );
+            }
+        }
     }
     return deleted;
 }
 
 const SWEEP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
-// Per instance by design: overlap guard; unverified recipe deletes run in Postgres.
-let sweepRunning = false;
+// Per instance by design: overlap guard; each delete is its own transaction.
+let draftSweepRunning = false;
 
-export function startUnverifiedRecipeCleanup(
-    loadHouseholds: () => Promise<SweepHousehold[]>,
-    recipes: RecipesStore,
+/** The draft sweep: once shortly after boot, then daily. */
+export function startDraftSweep(
+    loadHouseholdIds: () => Promise<string[]>,
+    recipes: Pick<RecipesStore, "listExpiredDrafts" | "deleteDraftRecipe">,
 ): void {
-    setInterval(() => {
-        if (sweepRunning) return;
-        sweepRunning = true;
-        loadHouseholds()
-            .then((households) =>
-                sweepUnverifiedRecipes({
-                    households,
-                    recipes,
-                    now: new Date(),
-                }),
+    const sweep = () => {
+        if (draftSweepRunning) return;
+        draftSweepRunning = true;
+        loadHouseholdIds()
+            .then((householdIds) =>
+                sweepExpiredDrafts({ householdIds, recipes, now: new Date() }),
             )
+            .catch((err) => {
+                console.error(
+                    "[draft-sweep]",
+                    err instanceof Error ? err.message : String(err),
+                );
+            })
             .finally(() => {
-                sweepRunning = false;
+                draftSweepRunning = false;
             });
-    }, SWEEP_INTERVAL_MS);
+    };
+    setTimeout(sweep, 60_000).unref?.();
+    setInterval(sweep, SWEEP_INTERVAL_MS);
 }
 
 // Per instance by design: overlap guard; fetch-memory expiry deletes are safe concurrently in Postgres.

@@ -78,7 +78,29 @@ export type RecipesListV2View = {
      * (the `mcp-share-links` flag). Absent or false leaves that form out.
      */
     sharedImportEnabled?: boolean;
+    /**
+     * The viewer's own drafts (imports nobody has saved), with the
+     * household's local day each is deleted on. Absent or empty leaves the
+     * Drafts section out.
+     */
+    drafts?: readonly { id: string; name: string; expiresOn: string | null }[];
 };
+
+/** The viewer's drafts: each opens its recipe page, where Save is. */
+function draftsSection(view: RecipesListV2View): string {
+    const drafts = view.drafts ?? [];
+    if (drafts.length === 0) return "";
+    const rows = drafts
+        .map(
+            (d) =>
+                `<li><a href="/recipes/${esc(d.id)}">${esc(d.name)}</a>${d.expiresOn ? ` <span class="fd-recipes-empty">deleted ${esc(d.expiresOn)} unless saved</span>` : ""}</li>`,
+        )
+        .join("");
+    return `<section class="fd-recipes-all" id="fd-recipes-drafts" aria-labelledby="fd-recipes-drafts-heading">
+<div class="fd-recipes-section-head"><h2 class="fd-recipes-section-head__title" id="fd-recipes-drafts-heading">Drafts</h2></div>
+<ul>${rows}</ul>
+</section>`;
+}
 
 export function recipesListV2Href(opts: {
     q?: string;
@@ -323,8 +345,10 @@ export function renderRecipesListBody(view: RecipesListV2View): string {
         () => `<nav data-fd-recipes-filter-count="${filters.length}" `,
     );
     const chipsHtml = chips;
+    // Drafts are not counted as saved, but with some listed above the page
+    // is not empty.
     const emptyAll =
-        view.totalCount === 0
+        view.totalCount === 0 && (view.drafts ?? []).length === 0
             ? `<p class="fd-recipes-empty">No recipes yet. Paste a link above to import one.</p>`
             : "";
     const emptyFilter =
@@ -423,6 +447,7 @@ ${filterHidden}
 ${chipsHtml}
 </div>
 ${planPick}${weekStrip}${importLinkBlock}
+${draftsSection(view)}
 ${emptyAll}
 ${emptyFilter}
 ${grid}

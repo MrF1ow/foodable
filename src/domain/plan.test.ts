@@ -162,6 +162,19 @@ describe("planRecipe", () => {
         });
     });
 
+    test("a draft is never planned, once or repeating: it says it is a draft", async () => {
+        const store = createMemoryPlansStore();
+        for (const repeat of ["once", "weekly"]) {
+            await expect(
+                planRecipe(store, { ...base, repeat, recipeIsDraft: true }),
+            ).rejects.toThrow("That recipe is a draft; save it first.");
+        }
+        expect(
+            await store.listPlans(base.householdId, "2026-11-01", "2026-12-31"),
+        ).toEqual([]);
+        expect(await store.listRules(base.householdId)).toEqual([]);
+    });
+
     test("a plan keeps the people it is for, and the plan already there keeps its own", async () => {
         const store = createMemoryPlansStore();
         const out = await planRecipe(store, {
@@ -1474,7 +1487,7 @@ describe("a repeating plan and the plan notices", () => {
             notes: null,
             prepMinutes: null,
             cookMinutes: null,
-            verification: "unverified",
+            verification: "verified",
             updatedAt: "2026-11-01T00:00:00Z",
         } as never);
         await recipes.insertIngredient({

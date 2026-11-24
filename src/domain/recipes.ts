@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { formatMissingNutrientList, noticeSentence } from "../copy/notices.js";
 import { normalizeBarcode, type FoodResult } from "../foods.js";
 import type { Notice, NoticeCode, NoticeRelated } from "./notices.js";
@@ -54,7 +55,12 @@ import {
     type RecipeProblem,
     type RecipeVerification,
 } from "./recipe-import.js";
-import { assertRecipeVerified } from "./recipe-import.js";
+import {
+    assertRecipeVerified,
+    draftExpiryFrom,
+    isRecipeDraft,
+    verifyRecipe,
+} from "./recipe-import.js";
 import {
     recipeNeeds,
     variantFor,
@@ -64,9 +70,12 @@ import {
 
 export type { RecipeVerification, RecipeImport, RecipeProblem };
 export {
+    isRecipeDraft,
     recheckRecipe,
+    RECIPE_DRAFT_REFUSAL,
     RecipeUnverifiedError,
     resolveUnresolvedLines,
+    saveRecipeDraft,
 } from "./recipe-import.js";
 
 export type Recipe = {
@@ -82,6 +91,11 @@ export type Recipe = {
     prepMinutes: number | null;
     cookMinutes: number | null;
     verification: RecipeVerification;
+    /**
+     * When an unsaved import (a draft) is swept; null once it is saved, and
+     * on hand-made and shared recipes. See `isRecipeDraft`.
+     */
+    draftExpiresAt?: string | null;
     updatedAt: string;
 };
 
@@ -167,11 +181,26 @@ export type RecipeMacros = {
 };
 
 export type RecipesStore = {
+    /** The household's saved recipes, by name. Drafts are left out. */
     listRecipes(householdId: string): Promise<Recipe[]>;
+    /** The household's drafts (unsaved imports), by name. */
+    listDraftRecipes(householdId: string): Promise<Recipe[]>;
+    /**
+     * Drafts whose expiry has passed at `now`; one with no expiry goes 7 days
+     * after it was made.
+     */
+    listExpiredDrafts(householdId: string, now: Date): Promise<Recipe[]>;
+    /** Any recipe of the household, a draft included. */
     getRecipe(householdId: string, id: string): Promise<Recipe | null>;
     insertRecipe(row: Recipe): Promise<Recipe>;
     updateRecipe(row: Recipe): Promise<Recipe | null>;
     deleteRecipe(householdId: string, id: string): Promise<boolean>;
+    /**
+     * Deletes the recipe only while it is still a draft, in the same step as
+     * the check, so a Save that lands first keeps it. False when it was saved
+     * (or is gone): nothing changed.
+     */
+    deleteDraftRecipe(householdId: string, id: string): Promise<boolean>;
     listIngredients(
         householdId: string,
         recipeId: string,
@@ -212,13 +241,33 @@ export type RecipesStore = {
         recipeId: string,
         key: string,
     ): Promise<boolean>;
-    setVerification(
+    /**
+     * Records the check's problems on the import row. It never changes whether
+     * the recipe is a draft.
+     */
+    recordProblems(
         householdId: string,
         recipeId: string,
-        verification: RecipeVerification,
         problems: RecipeProblem[],
     ): Promise<void>;
-    deleteStaleUnverified(householdId: string, before: Date): Promise<number>;
+    /**
+     * Save's write: a draft becomes a recipe and its expiry is cleared. Only a
+     * recipe that is still a draft changes; false when there is none (it was
+     * saved, discarded or swept).
+     */
+    promoteDraft(householdId: string, recipeId: string): Promise<boolean>;
+    /**
+     * Runs `fn` holding the recipe's edit lock, so a check and the write it
+     * allows see the same recipe: Save, and every edit of a recipe's base or
+     * of a draft, take it. Calls inside `fn` that take it again do not wait.
+     * The live store runs `fn` in one transaction: the recipe's align lock
+     * shared (an align holds it exclusive), then the recipe row.
+     */
+    withRecipeLock<T>(
+        householdId: string,
+        recipeId: string,
+        fn: () => Promise<T>,
+    ): Promise<T>;
     findRecipeBySourceUrl(
         householdId: string,
         urls: string[],
@@ -299,6 +348,94 @@ export class RecipeInputError extends Error {
         super(message);
         this.name = "RecipeInputError";
     }
+}
+
+/**
+ * An edit refused because it would make a saved recipe fail its check. The
+ * problems it would add come with it.
+ */
+export class RecipeEditBreaksCheckError extends RecipeInputError {
+    readonly problems: RecipeProblem[];
+
+    constructor(problems: RecipeProblem[]) {
+        super(
+            `That change would break this saved recipe: ${problems
+                .map((p) => p.message)
+                .join(" ")}`,
+        );
+        this.name = "RecipeEditBreaksCheckError";
+        this.problems = problems;
+    }
+}
+
+function problemKey(problem: {
+    code: string;
+    ingredientId: string | null;
+    line: string | null;
+}): string {
+    return `${problem.code}:${problem.ingredientId ?? ""}:${problem.line ?? ""}`;
+}
+
+/**
+ * The check problems an edit would add: those of the recipe after the edit
+ * that it did not have before. Problems it already had never count.
+ */
+export function problemsAddedByEdit(
+    before: { recipe: Recipe; ingredients: RecipeIngredient[] },
+    after: { recipe: Recipe; ingredients: RecipeIngredient[] },
+    importRow: RecipeImport | null,
+): RecipeProblem[] {
+    const had = new Set(
+        verifyRecipe(before.recipe, before.ingredients, importRow).problems.map(
+            problemKey,
+        ),
+    );
+    return verifyRecipe(
+        after.recipe,
+        after.ingredients,
+        importRow,
+    ).problems.filter((problem) => !had.has(problemKey(problem)));
+}
+
+/**
+ * The one rule for editing a recipe's base: a saved recipe never breaks. An
+ * edit that would add a check problem to it is refused
+ * (`RecipeEditBreaksCheckError`) before anything is written. A draft is never
+ * refused; its problems are recorded after the edit instead.
+ */
+export function assertEditKeepsCheck(
+    before: { recipe: Recipe; ingredients: RecipeIngredient[] },
+    after: { recipe: Recipe; ingredients: RecipeIngredient[] },
+    importRow: RecipeImport | null,
+): void {
+    if (isRecipeDraft(before.recipe)) return;
+    const added = problemsAddedByEdit(before, after, importRow);
+    if (added.length > 0) throw new RecipeEditBreaksCheckError(added);
+}
+
+/** `assertEditKeepsCheck` with the import row and base read from the store. */
+async function guardBaseEdit(
+    store: RecipesStore,
+    recipe: Recipe,
+    propose: (ingredients: RecipeIngredient[]) => {
+        recipe?: Recipe;
+        ingredients: RecipeIngredient[];
+    },
+): Promise<void> {
+    if (isRecipeDraft(recipe)) return;
+    // Called under the recipe's edit lock (`editUnderLock`), whose live
+    // transaction runs one statement at a time.
+    const ingredients = await store.listIngredients(
+        recipe.householdId,
+        recipe.id,
+    );
+    const importRow = await store.getImport(recipe.householdId, recipe.id);
+    const next = propose(ingredients);
+    assertEditKeepsCheck(
+        { recipe, ingredients },
+        { recipe: next.recipe ?? recipe, ingredients: next.ingredients },
+        importRow,
+    );
 }
 
 export class RecipeForbiddenError extends Error {
@@ -476,7 +613,13 @@ export function emptyRecipeDetails(): Pick<
 }
 
 function cloneRecipe(row: Recipe): Recipe {
-    return { ...row, tags: [...row.tags] };
+    const copy: Recipe & { createdAt?: string } = {
+        ...row,
+        tags: [...row.tags],
+    };
+    // The memory store's own creation stamp is not part of a recipe.
+    delete copy.createdAt;
+    return copy;
 }
 
 function cloneIngredient(row: RecipeIngredient): RecipeIngredient {
@@ -807,15 +950,44 @@ function nowIso(): string {
     return new Date().toISOString();
 }
 
-async function maybeRecheckUnverified(
+/** After an edit to a draft, record what its check now finds. */
+async function recordDraftProblems(
     store: RecipesStore,
     householdId: string,
     recipeId: string,
-    wasUnverified: boolean,
+    wasDraft: boolean,
 ): Promise<void> {
-    if (wasUnverified) {
+    if (wasDraft) {
         await recheckRecipe(store, householdId, recipeId);
     }
+}
+
+/**
+ * The in-memory twin of the live store's per-recipe lock: one holder per key
+ * at a time, in arrival order. A holder that asks again for a key it holds
+ * runs at once, as the live lock does inside its own transaction.
+ */
+function createKeyedLock() {
+    const tails = new Map<string, Promise<void>>();
+    const held = new AsyncLocalStorage<ReadonlySet<string>>();
+    return {
+        async hold<T>(key: string, fn: () => Promise<T>): Promise<T> {
+            const mine = held.getStore();
+            if (mine?.has(key)) return fn();
+            const before = tails.get(key) ?? Promise.resolve();
+            let release: () => void = () => {};
+            const done = new Promise<void>((resolve) => (release = resolve));
+            const tail = before.then(() => done);
+            tails.set(key, tail);
+            await before;
+            try {
+                return await held.run(new Set([...(mine ?? []), key]), fn);
+            } finally {
+                release();
+                if (tails.get(key) === tail) tails.delete(key);
+            }
+        },
+    };
 }
 
 export type MemoryRecipesStore = RecipesStore &
@@ -823,9 +995,10 @@ export type MemoryRecipesStore = RecipesStore &
         __paritySetRecipeActivityAt?(id: string, activityAt: string): void;
     };
 
-type MemoryRecipeRow = Recipe & { activityAt: string };
+type MemoryRecipeRow = Recipe & { activityAt: string; createdAt: string };
 
 export function createMemoryRecipesStore(): MemoryRecipesStore {
+    const recipeLocks = createKeyedLock();
     const recipes: MemoryRecipeRow[] = [];
     const ingredients: RecipeIngredient[] = [];
     const portions: RecipePortion[] = [];
@@ -847,6 +1020,47 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
         }
     }
 
+    async function removeRecipe(
+        householdId: string,
+        id: string,
+    ): Promise<boolean> {
+        const ingIds = ingredients
+            .filter(
+                (row) => row.householdId === householdId && row.recipeId === id,
+            )
+            .map((row) => row.id);
+        await cleanupDismissalsForRecipe(
+            linkedDismissals,
+            householdId,
+            id,
+            ingIds,
+        );
+        const before = recipes.length;
+        const next = recipes.filter(
+            (row) => !(row.householdId === householdId && row.id === id),
+        );
+        const removed = next.length < before;
+        recipes.length = 0;
+        recipes.push(...next);
+        const keepIng = ingredients.filter(
+            (row) => !(row.householdId === householdId && row.recipeId === id),
+        );
+        ingredients.length = 0;
+        ingredients.push(...keepIng);
+        const keepPortions = portions.filter(
+            (row) => !(row.householdId === householdId && row.recipeId === id),
+        );
+        portions.length = 0;
+        portions.push(...keepPortions);
+        const keepFavourites = favourites.filter(
+            (row) => !(row.householdId === householdId && row.recipeId === id),
+        );
+        favourites.length = 0;
+        favourites.push(...keepFavourites);
+        imports.delete(id);
+        return removed;
+    }
+
     return {
         linkDismissals(s) {
             linkedDismissals = s;
@@ -856,9 +1070,34 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
         },
         async listRecipes(householdId) {
             return recipes
-                .filter((row) => row.householdId === householdId)
+                .filter(
+                    (row) =>
+                        row.householdId === householdId && !isRecipeDraft(row),
+                )
                 .map(cloneRecipe)
                 .sort((a, b) => a.name.localeCompare(b.name));
+        },
+        async listDraftRecipes(householdId) {
+            return recipes
+                .filter(
+                    (row) =>
+                        row.householdId === householdId && isRecipeDraft(row),
+                )
+                .map(cloneRecipe)
+                .sort((a, b) => a.name.localeCompare(b.name));
+        },
+        async listExpiredDrafts(householdId, now) {
+            const cutoff = now.getTime();
+            return recipes
+                .filter((row) => {
+                    if (row.householdId !== householdId) return false;
+                    if (!isRecipeDraft(row)) return false;
+                    const expires = row.draftExpiresAt
+                        ? Date.parse(row.draftExpiresAt)
+                        : Date.parse(row.createdAt) + 7 * 24 * 60 * 60 * 1000;
+                    return expires < cutoff;
+                })
+                .map(cloneRecipe);
         },
         async getRecipe(householdId, id) {
             const row = recipes.find(
@@ -868,9 +1107,11 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
             return row ? cloneRecipe(row) : null;
         },
         async insertRecipe(row) {
+            const stamp = new Date().toISOString();
             const saved: MemoryRecipeRow = {
                 ...cloneRecipe(row),
-                activityAt: new Date().toISOString(),
+                activityAt: stamp,
+                createdAt: stamp,
             };
             recipes.push(saved);
             return cloneRecipe(saved);
@@ -885,6 +1126,7 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
             const updated: MemoryRecipeRow = {
                 ...cloneRecipe({ ...row, updatedAt: nowIso() }),
                 activityAt: new Date().toISOString(),
+                createdAt: recipes[idx]!.createdAt,
             };
             recipes[idx] = updated;
             return cloneRecipe(updated);
@@ -902,46 +1144,21 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
             const row = recipes.find((recipe) => recipe.id === id);
             if (row) row.activityAt = activityAt;
         },
+        // A delete waits for a Save or an edit in flight, as the live
+        // store's row lock makes it.
         async deleteRecipe(householdId, id) {
-            const ingIds = ingredients
-                .filter(
-                    (row) =>
-                        row.householdId === householdId && row.recipeId === id,
-                )
-                .map((row) => row.id);
-            await cleanupDismissalsForRecipe(
-                linkedDismissals,
-                householdId,
-                id,
-                ingIds,
+            return recipeLocks.hold(id.toLowerCase(), () =>
+                removeRecipe(householdId, id),
             );
-            const before = recipes.length;
-            const next = recipes.filter(
-                (row) => !(row.householdId === householdId && row.id === id),
-            );
-            const removed = next.length < before;
-            recipes.length = 0;
-            recipes.push(...next);
-            const keepIng = ingredients.filter(
-                (row) =>
-                    !(row.householdId === householdId && row.recipeId === id),
-            );
-            ingredients.length = 0;
-            ingredients.push(...keepIng);
-            const keepPortions = portions.filter(
-                (row) =>
-                    !(row.householdId === householdId && row.recipeId === id),
-            );
-            portions.length = 0;
-            portions.push(...keepPortions);
-            const keepFavourites = favourites.filter(
-                (row) =>
-                    !(row.householdId === householdId && row.recipeId === id),
-            );
-            favourites.length = 0;
-            favourites.push(...keepFavourites);
-            imports.delete(id);
-            return removed;
+        },
+        async deleteDraftRecipe(householdId, id) {
+            return recipeLocks.hold(id.toLowerCase(), async () => {
+                const row = recipes.find(
+                    (r) => r.householdId === householdId && r.id === id,
+                );
+                if (!row || !isRecipeDraft(row)) return false;
+                return removeRecipe(householdId, id);
+            });
         },
         async listIngredients(householdId, recipeId) {
             return ingredients
@@ -1068,13 +1285,7 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
             }
             return true;
         },
-        async setVerification(householdId, recipeId, verification, problems) {
-            const idx = recipes.findIndex(
-                (row) => row.householdId === householdId && row.id === recipeId,
-            );
-            if (idx >= 0) {
-                recipes[idx] = { ...recipes[idx]!, verification };
-            }
+        async recordProblems(householdId, recipeId, problems) {
             const imp = imports.get(recipeId);
             if (imp && imp.householdId === householdId) {
                 imports.set(recipeId, {
@@ -1082,6 +1293,24 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                     problems: problems.map((p) => ({ ...p })),
                 });
             }
+        },
+        async promoteDraft(householdId, recipeId) {
+            const idx = recipes.findIndex(
+                (row) =>
+                    row.householdId === householdId &&
+                    row.id === recipeId &&
+                    row.verification === "unverified",
+            );
+            if (idx < 0) return false;
+            recipes[idx] = {
+                ...recipes[idx]!,
+                verification: "verified",
+                draftExpiresAt: null,
+            };
+            return true;
+        },
+        async withRecipeLock(_householdId, recipeId, fn) {
+            return recipeLocks.hold(recipeId.toLowerCase(), fn);
         },
         async findRecipeBySourceUrl(householdId, urls) {
             const keys = new Set(
@@ -1136,45 +1365,6 @@ export function createMemoryRecipesStore(): MemoryRecipesStore {
                 )
                 .map((row) => row.recipeId);
         },
-        async deleteStaleUnverified(householdId, before) {
-            const cutoff = before.toISOString();
-            const staleIds = recipes
-                .filter(
-                    (row) =>
-                        row.householdId === householdId &&
-                        row.verification === "unverified" &&
-                        row.updatedAt < cutoff,
-                )
-                .map((row) => row.id);
-            for (const id of staleIds) {
-                imports.delete(id);
-                const nextRecipes = recipes.filter(
-                    (row) =>
-                        !(row.householdId === householdId && row.id === id),
-                );
-                recipes.length = 0;
-                recipes.push(...nextRecipes);
-                const keepIng = ingredients.filter(
-                    (row) =>
-                        !(
-                            row.householdId === householdId &&
-                            row.recipeId === id
-                        ),
-                );
-                ingredients.length = 0;
-                ingredients.push(...keepIng);
-                const keepPortions = portions.filter(
-                    (row) =>
-                        !(
-                            row.householdId === householdId &&
-                            row.recipeId === id
-                        ),
-                );
-                portions.length = 0;
-                portions.push(...keepPortions);
-            }
-            return staleIds.length;
-        },
     };
 }
 
@@ -1199,6 +1389,8 @@ export async function createRecipe(
         prepMinutes?: number | null;
         cookMinutes?: number | null;
         verification?: RecipeVerification;
+        /** A draft's expiry; imports set it, everything else leaves it null. */
+        draftExpiresAt?: string | null;
     },
 ): Promise<Recipe> {
     const name = input.name.trim();
@@ -1222,6 +1414,7 @@ export async function createRecipe(
         prepMinutes: parseOptionalMinutes(input.prepMinutes, "prep time"),
         cookMinutes: parseOptionalMinutes(input.cookMinutes, "cook time"),
         verification: input.verification ?? "verified",
+        draftExpiresAt: input.draftExpiresAt ?? null,
         updatedAt: stamp,
     });
 }
@@ -1229,7 +1422,8 @@ export async function createRecipe(
 /**
  * Deletes a recipe. A removal (not an edit, not a new recipe) tells the
  * household through `deps.notify`, once the store has deleted it, with the
- * recipe's name as it stood.
+ * recipe's name as it stood. A draft's removal tells nobody: only the person
+ * who imported it has seen it.
  */
 export async function deleteRecipe(
     store: RecipesStore,
@@ -1242,7 +1436,7 @@ export async function deleteRecipe(
     if (!recipe) return false;
     assertCanDeleteRecipe(recipe, actor);
     const deleted = await store.deleteRecipe(householdId, recipeId);
-    if (deleted) {
+    if (deleted && !isRecipeDraft(recipe)) {
         await deps.notify?.({
             kind: "recipe_changes",
             subjectKind: "recipe",
@@ -1265,51 +1459,85 @@ export function assertCanDeleteRecipe(
     }
 }
 
+/**
+ * Runs one edit of a recipe under its edit lock (`withRecipeLock`): the
+ * recipe is read inside it, so the guard and the write see what is there
+ * now, and a draft's problems are recorded before the lock is let go.
+ */
+async function editUnderLock<T>(
+    store: RecipesStore,
+    householdId: string,
+    recipeId: string,
+    edit: (recipe: Recipe) => Promise<T>,
+): Promise<T> {
+    return store.withRecipeLock(householdId, recipeId, async () => {
+        const recipe = await requireRecipe(store, householdId, recipeId);
+        const result = await edit(recipe);
+        await recordDraftProblems(
+            store,
+            householdId,
+            recipeId,
+            isRecipeDraft(recipe),
+        );
+        return result;
+    });
+}
+
 export async function updateRecipe(
     store: RecipesStore,
     householdId: string,
     recipeId: string,
     patch: RecipePatch,
 ): Promise<Recipe> {
-    const recipe = await requireRecipe(store, householdId, recipeId);
-    const next: Recipe = {
-        ...recipe,
-        name: patch.name === undefined ? recipe.name : patch.name.trim(),
-        yieldPortions:
-            patch.yieldPortions === undefined
-                ? recipe.yieldPortions
-                : parseYield(patch.yieldPortions),
-        instructions:
-            patch.instructions === undefined
-                ? recipe.instructions
-                : parseOptionalText(patch.instructions, "Instructions", 20_000),
-        sourceUrl:
-            patch.sourceUrl === undefined
-                ? recipe.sourceUrl
-                : parseSourceUrl(patch.sourceUrl),
-        tags:
-            patch.tags === undefined
-                ? recipe.tags
-                : normalizeRecipeTags(patch.tags),
-        notes:
-            patch.notes === undefined
-                ? recipe.notes
-                : parseOptionalText(patch.notes, "Notes", 5_000),
-        prepMinutes:
-            patch.prepMinutes === undefined
-                ? recipe.prepMinutes
-                : parseOptionalMinutes(patch.prepMinutes, "prep time"),
-        cookMinutes:
-            patch.cookMinutes === undefined
-                ? recipe.cookMinutes
-                : parseOptionalMinutes(patch.cookMinutes, "cook time"),
-    };
-    if (!next.name) throw new RecipeInputError("Enter a recipe name.");
-    const wasUnverified = recipe.verification === "unverified";
-    const saved = await store.updateRecipe(next);
-    if (!saved) throw new RecipeInputError("Unknown recipe.");
-    await maybeRecheckUnverified(store, householdId, recipeId, wasUnverified);
-    return (await store.getRecipe(householdId, recipeId)) ?? saved;
+    await editUnderLock(store, householdId, recipeId, async (recipe) => {
+        const next: Recipe = {
+            ...recipe,
+            name: patch.name === undefined ? recipe.name : patch.name.trim(),
+            yieldPortions:
+                patch.yieldPortions === undefined
+                    ? recipe.yieldPortions
+                    : parseYield(patch.yieldPortions),
+            instructions:
+                patch.instructions === undefined
+                    ? recipe.instructions
+                    : parseOptionalText(
+                          patch.instructions,
+                          "Instructions",
+                          20_000,
+                      ),
+            sourceUrl:
+                patch.sourceUrl === undefined
+                    ? recipe.sourceUrl
+                    : parseSourceUrl(patch.sourceUrl),
+            tags:
+                patch.tags === undefined
+                    ? recipe.tags
+                    : normalizeRecipeTags(patch.tags),
+            notes:
+                patch.notes === undefined
+                    ? recipe.notes
+                    : parseOptionalText(patch.notes, "Notes", 5_000),
+            prepMinutes:
+                patch.prepMinutes === undefined
+                    ? recipe.prepMinutes
+                    : parseOptionalMinutes(patch.prepMinutes, "prep time"),
+            cookMinutes:
+                patch.cookMinutes === undefined
+                    ? recipe.cookMinutes
+                    : parseOptionalMinutes(patch.cookMinutes, "cook time"),
+        };
+        if (!next.name) throw new RecipeInputError("Enter a recipe name.");
+        await guardBaseEdit(store, recipe, (ingredients) => ({
+            recipe: next,
+            ingredients,
+        }));
+        const saved = await store.updateRecipe(next);
+        if (!saved) throw new RecipeInputError("Unknown recipe.");
+        return saved;
+    });
+    const after = await store.getRecipe(householdId, recipeId);
+    if (!after) throw new RecipeInputError("Unknown recipe.");
+    return after;
 }
 
 async function requireIngredient(
@@ -1333,60 +1561,68 @@ export async function updateRecipeIngredient(
     patch: RecipeIngredientPatch,
     foods?: FoodsStore,
 ): Promise<RecipeIngredient> {
-    const recipe = await requireRecipe(store, householdId, recipeId);
-    const wasUnverified = recipe.verification === "unverified";
-    const ingredient = await requireIngredient(
-        store,
-        householdId,
-        recipeId,
-        ingredientId,
-    );
-    const note =
-        patch.note === undefined
-            ? ingredient.note
-            : parseOptionalText(patch.note, "Ingredient note", 500);
-    // A blank unit (an untouched form field) means "not given", not grams.
-    const unitIn = patch.unit?.trim() ? patch.unit : undefined;
-    let quantity: RecipeIngredient["quantity"];
-    if (patch.amount === null) {
-        quantity = null;
-    } else if (patch.amount === undefined) {
-        if (ingredient.quantity == null) {
+    return editUnderLock(store, householdId, recipeId, async (recipe) => {
+        const ingredient = await requireIngredient(
+            store,
+            householdId,
+            recipeId,
+            ingredientId,
+        );
+        const note =
+            patch.note === undefined
+                ? ingredient.note
+                : parseOptionalText(patch.note, "Ingredient note", 500);
+        // A blank unit (an untouched form field) means "not given", not grams.
+        const unitIn = patch.unit?.trim() ? patch.unit : undefined;
+        let quantity: RecipeIngredient["quantity"];
+        if (patch.amount === null) {
             quantity = null;
+        } else if (patch.amount === undefined) {
+            if (ingredient.quantity == null) {
+                quantity = null;
+            } else {
+                quantity = {
+                    amount: ingredient.quantity.amount,
+                    unit:
+                        unitIn === undefined
+                            ? ingredient.quantity.unit
+                            : parseUnit(unitIn),
+                };
+            }
         } else {
-            quantity = {
-                amount: ingredient.quantity.amount,
-                unit:
-                    unitIn === undefined
-                        ? ingredient.quantity.unit
-                        : parseUnit(unitIn),
-            };
+            const amount = parseAmount(patch.amount);
+            let unit;
+            if (unitIn !== undefined) {
+                unit = parseUnit(unitIn);
+            } else if (ingredient.quantity?.unit) {
+                unit = ingredient.quantity.unit;
+            } else if (foods && ingredient.foodId) {
+                const food = await foods.getFood(
+                    householdId,
+                    ingredient.foodId,
+                );
+                unit = parseUnit(
+                    storedFoodUnit(undefined, food ?? { defaultUnit: "g" }),
+                );
+            } else {
+                unit = parseUnit(undefined);
+            }
+            quantity = { amount, unit };
         }
-    } else {
-        const amount = parseAmount(patch.amount);
-        let unit;
-        if (unitIn !== undefined) {
-            unit = parseUnit(unitIn);
-        } else if (ingredient.quantity?.unit) {
-            unit = ingredient.quantity.unit;
-        } else if (foods && ingredient.foodId) {
-            const food = await foods.getFood(householdId, ingredient.foodId);
-            unit = parseUnit(
-                storedFoodUnit(undefined, food ?? { defaultUnit: "g" }),
-            );
-        } else {
-            unit = parseUnit(undefined);
-        }
-        quantity = { amount, unit };
-    }
-    const saved = await store.updateIngredient({
-        ...ingredient,
-        quantity,
-        note: noteForUnmeasuredIngredient(quantity, note),
+        const proposed: RecipeIngredient = {
+            ...ingredient,
+            quantity,
+            note: noteForUnmeasuredIngredient(quantity, note),
+        };
+        await guardBaseEdit(store, recipe, (ingredients) => ({
+            ingredients: ingredients.map((row) =>
+                row.id === proposed.id ? proposed : row,
+            ),
+        }));
+        const saved = await store.updateIngredient(proposed);
+        if (!saved) throw new RecipeInputError("Unknown ingredient.");
+        return saved;
     });
-    if (!saved) throw new RecipeInputError("Unknown ingredient.");
-    await maybeRecheckUnverified(store, householdId, recipeId, wasUnverified);
-    return saved;
 }
 
 export async function removeRecipeIngredient(
@@ -1395,19 +1631,13 @@ export async function removeRecipeIngredient(
     recipeId: string,
     ingredientId: string,
 ): Promise<boolean> {
-    const recipe = await requireRecipe(store, householdId, recipeId);
-    const wasUnverified = recipe.verification === "unverified";
-    await requireIngredient(store, householdId, recipeId, ingredientId);
-    const removed = await store.deleteIngredient(householdId, ingredientId);
-    if (removed) {
-        await maybeRecheckUnverified(
-            store,
-            householdId,
-            recipeId,
-            wasUnverified,
-        );
-    }
-    return removed;
+    return editUnderLock(store, householdId, recipeId, async (recipe) => {
+        await requireIngredient(store, householdId, recipeId, ingredientId);
+        await guardBaseEdit(store, recipe, (ingredients) => ({
+            ingredients: ingredients.filter((row) => row.id !== ingredientId),
+        }));
+        return store.deleteIngredient(householdId, ingredientId);
+    });
 }
 
 export async function reorderRecipeIngredients(
@@ -1416,35 +1646,34 @@ export async function reorderRecipeIngredients(
     recipeId: string,
     orderedIds: string[],
 ): Promise<RecipeIngredient[]> {
-    const recipe = await requireRecipe(store, householdId, recipeId);
-    const wasUnverified = recipe.verification === "unverified";
-    const ingredients = await store.listIngredients(householdId, recipeId);
-    if (orderedIds.length !== ingredients.length) {
-        throw new RecipeInputError(
-            "Send every ingredient id exactly once to reorder.",
-        );
-    }
-    const byId = new Map(ingredients.map((row) => [row.id, row]));
-    const seen = new Set<string>();
-    for (const id of orderedIds) {
-        if (!byId.has(id) || seen.has(id)) {
+    return editUnderLock(store, householdId, recipeId, async () => {
+        const ingredients = await store.listIngredients(householdId, recipeId);
+        if (orderedIds.length !== ingredients.length) {
             throw new RecipeInputError(
                 "Send every ingredient id exactly once to reorder.",
             );
         }
-        seen.add(id);
-    }
-    const next: RecipeIngredient[] = [];
-    for (const [index, id] of orderedIds.entries()) {
-        const row = byId.get(id)!;
-        const saved = await store.updateIngredient({
-            ...row,
-            sortOrder: index,
-        });
-        if (saved) next.push(saved);
-    }
-    await maybeRecheckUnverified(store, householdId, recipeId, wasUnverified);
-    return next;
+        const byId = new Map(ingredients.map((row) => [row.id, row]));
+        const seen = new Set<string>();
+        for (const id of orderedIds) {
+            if (!byId.has(id) || seen.has(id)) {
+                throw new RecipeInputError(
+                    "Send every ingredient id exactly once to reorder.",
+                );
+            }
+            seen.add(id);
+        }
+        const next: RecipeIngredient[] = [];
+        for (const [index, id] of orderedIds.entries()) {
+            const row = byId.get(id)!;
+            const saved = await store.updateIngredient({
+                ...row,
+                sortOrder: index,
+            });
+            if (saved) next.push(saved);
+        }
+        return next;
+    });
 }
 
 async function requireRecipe(
@@ -1464,6 +1693,45 @@ function wrapFoodsError(err: unknown): never {
     throw err;
 }
 
+/**
+ * Adds a line for `food` after the recipe's last, under the recipe's edit
+ * lock: a saved recipe's check is guarded first.
+ */
+async function appendIngredientUnderLock(
+    store: RecipesStore,
+    input: { householdId: string; recipeId: string },
+    food: Food,
+    quantity: RecipeIngredient["quantity"],
+    note: string | null,
+): Promise<RecipeIngredient> {
+    return editUnderLock(
+        store,
+        input.householdId,
+        input.recipeId,
+        async (recipe) => {
+            const existing = await store.listIngredients(
+                input.householdId,
+                recipe.id,
+            );
+            const proposed: RecipeIngredient = {
+                id: crypto.randomUUID(),
+                householdId: input.householdId,
+                recipeId: recipe.id,
+                kind: "food",
+                displayName: food.name,
+                quantity,
+                foodId: food.id,
+                sortOrder: existing.length,
+                note: noteForUnmeasuredIngredient(quantity, note),
+            };
+            await guardBaseEdit(store, recipe, (ingredients) => ({
+                ingredients: [...ingredients, proposed],
+            }));
+            return store.insertIngredient(proposed);
+        },
+    );
+}
+
 export async function addRecipeIngredientById(
     store: RecipesStore,
     foods: FoodsStore,
@@ -1476,44 +1744,25 @@ export async function addRecipeIngredientById(
         note?: string | null;
     },
 ): Promise<RecipeIngredient> {
-    const recipe = await requireRecipe(
-        store,
-        input.householdId,
-        input.recipeId,
-    );
-    const wasUnverified = recipe.verification === "unverified";
-    const existing = await store.listIngredients(input.householdId, recipe.id);
+    await requireRecipe(store, input.householdId, input.recipeId);
+    let food: Food;
+    let quantity: RecipeIngredient["quantity"];
     try {
-        const food = await findFoodById(foods, input.householdId, input.foodId);
+        food = await findFoodById(foods, input.householdId, input.foodId);
         if (food.kind !== "food") {
             throw new RecipeInputError("That catalog item is a supply.");
         }
-        const quantity = quantityForNewIngredient(
-            input.amount,
-            input.unit,
-            food,
-        );
-        const saved = await store.insertIngredient({
-            id: crypto.randomUUID(),
-            householdId: input.householdId,
-            recipeId: recipe.id,
-            kind: "food",
-            displayName: food.name,
-            quantity,
-            foodId: food.id,
-            sortOrder: existing.length,
-            note: noteForUnmeasuredIngredient(quantity, input.note ?? null),
-        });
-        await maybeRecheckUnverified(
-            store,
-            input.householdId,
-            recipe.id,
-            wasUnverified,
-        );
-        return saved;
+        quantity = quantityForNewIngredient(input.amount, input.unit, food);
     } catch (err) {
         wrapFoodsError(err);
     }
+    return appendIngredientUnderLock(
+        store,
+        input,
+        food,
+        quantity,
+        input.note ?? null,
+    );
 }
 
 /**
@@ -1534,46 +1783,51 @@ export async function swapRecipeIngredientFood(
         unit?: string;
     },
 ): Promise<RecipeIngredient> {
-    const recipe = await requireRecipe(
+    await requireIngredient(
         store,
         input.householdId,
         input.recipeId,
-    );
-    const wasUnverified = recipe.verification === "unverified";
-    const ingredient = await requireIngredient(
-        store,
-        input.householdId,
-        recipe.id,
         input.ingredientId,
     );
+    let food: Food;
+    let quantity: RecipeIngredient["quantity"];
     try {
-        const food = await findFoodById(foods, input.householdId, input.foodId);
+        food = await findFoodById(foods, input.householdId, input.foodId);
         if (food.kind !== "food") {
             throw new RecipeInputError("That catalog item is a supply.");
         }
-        const quantity = quantityForNewIngredient(
-            input.amount,
-            input.unit,
-            food,
-        );
-        const saved = await store.updateIngredient({
-            ...ingredient,
-            foodId: food.id,
-            displayName: food.name,
-            quantity,
-            note: noteForUnmeasuredIngredient(quantity, ingredient.note),
-        });
-        if (!saved) throw new RecipeInputError("Unknown ingredient.");
-        await maybeRecheckUnverified(
-            store,
-            input.householdId,
-            recipe.id,
-            wasUnverified,
-        );
-        return saved;
+        quantity = quantityForNewIngredient(input.amount, input.unit, food);
     } catch (err) {
         wrapFoodsError(err);
     }
+    return editUnderLock(
+        store,
+        input.householdId,
+        input.recipeId,
+        async (recipe) => {
+            const ingredient = await requireIngredient(
+                store,
+                input.householdId,
+                recipe.id,
+                input.ingredientId,
+            );
+            const proposed: RecipeIngredient = {
+                ...ingredient,
+                foodId: food.id,
+                displayName: food.name,
+                quantity,
+                note: noteForUnmeasuredIngredient(quantity, ingredient.note),
+            };
+            await guardBaseEdit(store, recipe, (ingredients) => ({
+                ingredients: ingredients.map((row) =>
+                    row.id === proposed.id ? proposed : row,
+                ),
+            }));
+            const saved = await store.updateIngredient(proposed);
+            if (!saved) throw new RecipeInputError("Unknown ingredient.");
+            return saved;
+        },
+    );
 }
 
 export async function addRecipeIngredientByBarcode(
@@ -1590,46 +1844,21 @@ export async function addRecipeIngredientByBarcode(
         lookup: (barcode: string) => Promise<FoodResult | null>;
     },
 ): Promise<RecipeIngredient> {
-    const recipe = await requireRecipe(
-        store,
-        input.householdId,
-        input.recipeId,
-    );
-    const wasUnverified = recipe.verification === "unverified";
-    const existing = await store.listIngredients(input.householdId, recipe.id);
+    await requireRecipe(store, input.householdId, input.recipeId);
+    let food: Food;
+    let quantity: RecipeIngredient["quantity"];
     try {
-        const food = await findOrCreateFoodByBarcode(
+        food = await findOrCreateFoodByBarcode(
             foods,
             input.householdId,
             input.barcode,
             opts.lookup,
         );
-        const quantity = quantityForNewIngredient(
-            input.amount,
-            input.unit,
-            food,
-        );
-        const saved = await store.insertIngredient({
-            id: crypto.randomUUID(),
-            householdId: input.householdId,
-            recipeId: recipe.id,
-            kind: "food",
-            displayName: food.name,
-            quantity,
-            foodId: food.id,
-            sortOrder: existing.length,
-            note: noteForUnmeasuredIngredient(quantity, null),
-        });
-        await maybeRecheckUnverified(
-            store,
-            input.householdId,
-            recipe.id,
-            wasUnverified,
-        );
-        return saved;
+        quantity = quantityForNewIngredient(input.amount, input.unit, food);
     } catch (err) {
         wrapFoodsError(err);
     }
+    return appendIngredientUnderLock(store, input, food, quantity, null);
 }
 
 export async function addRecipeManualIngredient(
@@ -1644,47 +1873,22 @@ export async function addRecipeManualIngredient(
         onSimilar?: OnSimilar;
     },
 ): Promise<RecipeIngredient> {
-    const recipe = await requireRecipe(
-        store,
-        input.householdId,
-        input.recipeId,
-    );
-    const wasUnverified = recipe.verification === "unverified";
-    const existing = await store.listIngredients(input.householdId, recipe.id);
+    await requireRecipe(store, input.householdId, input.recipeId);
+    let food: Food;
+    let quantity: RecipeIngredient["quantity"];
     try {
-        const food = await findOrCreateManualFood(
+        food = await findOrCreateManualFood(
             foods,
             input.householdId,
             "food",
             input.name,
             { onSimilar: input.onSimilar },
         );
-        const quantity = quantityForNewIngredient(
-            input.amount,
-            input.unit,
-            food,
-        );
-        const saved = await store.insertIngredient({
-            id: crypto.randomUUID(),
-            householdId: input.householdId,
-            recipeId: recipe.id,
-            kind: "food",
-            displayName: food.name,
-            quantity,
-            foodId: food.id,
-            sortOrder: existing.length,
-            note: noteForUnmeasuredIngredient(quantity, null),
-        });
-        await maybeRecheckUnverified(
-            store,
-            input.householdId,
-            recipe.id,
-            wasUnverified,
-        );
-        return saved;
+        quantity = quantityForNewIngredient(input.amount, input.unit, food);
     } catch (err) {
         wrapFoodsError(err);
     }
+    return appendIngredientUnderLock(store, input, food, quantity, null);
 }
 
 export async function setPersonPortion(
@@ -2245,7 +2449,12 @@ export async function listRecipesFiltered(
     fridgeStock: LinkedNeed[],
     filter: RecipeListFilter,
 ): Promise<Recipe[]> {
-    const recipes = await store.listRecipes(householdId);
+    // Drafts are their own listing: asking for unverified recipes asks for
+    // them, and every other filter only ever sees saved recipes.
+    const recipes =
+        filter.verification === "unverified"
+            ? await store.listDraftRecipes(householdId)
+            : await store.listRecipes(householdId);
     const matched: Recipe[] = [];
     const flags = new Map<string, RecipeFilterFlags>();
     const needFlags = (filter.filters?.length ?? 0) > 0;
@@ -2476,6 +2685,7 @@ export async function importRecipeFromText(
             prepMinutes: input.prepMinutes,
             cookMinutes: input.cookMinutes,
             verification: "unverified",
+            draftExpiresAt: draftExpiryFrom(new Date()),
         });
         const importedAt = nowIso();
         await store.upsertImport({
@@ -2567,6 +2777,7 @@ export function recipeFromRow(row: {
     prep_minutes?: unknown;
     cook_minutes?: unknown;
     verification?: unknown;
+    draft_expires_at?: unknown;
     updated_at?: unknown;
 }): Recipe {
     return {
@@ -2595,6 +2806,10 @@ export function recipeFromRow(row: {
                 : Number(row.cook_minutes),
         verification:
             row.verification === "unverified" ? "unverified" : "verified",
+        draftExpiresAt:
+            row.draft_expires_at == null || row.draft_expires_at === ""
+                ? null
+                : new Date(row.draft_expires_at as string).toISOString(),
         updatedAt:
             row.updated_at == null || row.updated_at === ""
                 ? new Date().toISOString()
@@ -2616,6 +2831,7 @@ export function recipeToRow(row: Recipe) {
         prep_minutes: row.prepMinutes,
         cook_minutes: row.cookMinutes,
         verification: row.verification,
+        draft_expires_at: row.draftExpiresAt ?? null,
         updated_at: row.updatedAt,
     };
 }

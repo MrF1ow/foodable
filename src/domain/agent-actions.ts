@@ -51,6 +51,13 @@ import {
     type GuardedTool,
     type PermissionRole,
 } from "./permissions.js";
+import {
+    draftExpiryFrom,
+    isRecipeDraft,
+    verifyRecipe,
+    type RecipeProblem,
+} from "./recipe-import.js";
+import type { Recipe, RecipesStore } from "./recipes.js";
 import type { SettingsStore } from "./settings.js";
 import type { StockStore } from "./stock.js";
 
@@ -751,6 +758,14 @@ export type AgentUndoDeps = {
     store: AgentActionsStore;
     stock: Pick<StockStore, "insertMovement" | "listMovements">;
     foods: FoodsStore;
+    /**
+     * The recipes an undo writes rows of, read inside its transaction, and
+     * their edit lock, held while it writes (see `keepSavedRecipesWhole`).
+     */
+    recipes: Pick<
+        RecipesStore,
+        "getRecipe" | "listIngredients" | "getImport" | "withRecipeLock"
+    >;
 };
 
 export type AgentActionMeta<T> = {
@@ -1259,13 +1274,21 @@ export async function undoAgentAction(
                 restoredItems: new Map(),
                 foodRefs: new Map(),
             };
-            for (const change of orderForUndo(record.snapshot.changes)) {
-                await replayChange(undoer, change);
-            }
-            // Only once every row is back: a food the action itself archived
-            // is live again by now.
-            await refuseArchivedFoods(undoer);
-            await compensateLedger(undoer);
+            const changes = record.snapshot.changes;
+            await keepSavedRecipesWhole(
+                deps.recipes,
+                record,
+                changes,
+                async () => {
+                    for (const change of orderForUndo(changes)) {
+                        await replayChange(undoer, change);
+                    }
+                    // Only once every row is back: a food the action itself
+                    // archived is live again by now.
+                    await refuseArchivedFoods(undoer);
+                    await compensateLedger(undoer);
+                },
+            );
             await tx.markUndone(record.id, input.userId, input.now);
             return {
                 status: "undone" as const,
@@ -1279,6 +1302,103 @@ export async function undoAgentAction(
         }
         throw err;
     }
+}
+
+/** The recipes whose own row, ingredients or import row a snapshot writes. */
+function recipesTouched(changes: readonly AgentSnapshotChange[]): string[] {
+    const ids = new Set<string>();
+    for (const change of changes) {
+        const column =
+            change.table === "recipes"
+                ? "id"
+                : change.table === "recipe_ingredients" ||
+                    change.table === "recipe_imports"
+                  ? "recipe_id"
+                  : null;
+        if (!column) continue;
+        for (const row of [change.row, change.after]) {
+            const value = row?.[column];
+            if (typeof value === "string" && value) {
+                ids.add(value.toLowerCase());
+            }
+        }
+    }
+    return [...ids].sort();
+}
+
+type RecipeState = { recipe: Recipe; problems: RecipeProblem[] };
+
+const problemKey = (p: RecipeProblem) =>
+    `${p.code}:${p.ingredientId ?? ""}:${p.line ?? ""}`;
+
+/** The recipe as it is now in the undo's transaction, with its check problems. */
+async function recipeState(
+    recipes: AgentUndoDeps["recipes"],
+    householdId: string,
+    recipeId: string,
+): Promise<RecipeState | null> {
+    const recipe = await recipes.getRecipe(householdId, recipeId);
+    if (!recipe) return null;
+    const ingredients = await recipes.listIngredients(householdId, recipeId);
+    const importRow = await recipes.getImport(householdId, recipeId);
+    return {
+        recipe,
+        problems: verifyRecipe(recipe, ingredients, importRow).problems,
+    };
+}
+
+/**
+ * Runs an undo's writes under the edit lock of every recipe they touch (in id
+ * order; the lock Save and every recipe edit take) and refuses, as a conflict,
+ * one that would add a check problem to a saved recipe or make it a draft
+ * again: a saved recipe never breaks, and never goes back to being a draft the
+ * sweep would delete, whichever path writes it. An entry recorded before
+ * drafts existed can hold exactly that, a `verification` it set from
+ * unverified to verified. A draft, a recipe the undo brings back whole, and
+ * problems the recipe already had are left alone.
+ */
+async function keepSavedRecipesWhole(
+    recipes: AgentUndoDeps["recipes"],
+    record: AgentActionRecord,
+    changes: readonly AgentSnapshotChange[],
+    write: () => Promise<void>,
+): Promise<void> {
+    const ids = recipesTouched(changes);
+    const guarded = async () => {
+        const saved = new Map<string, Set<string>>();
+        for (const id of ids) {
+            const was = await recipeState(recipes, record.householdId, id);
+            if (was && !isRecipeDraft(was.recipe)) {
+                saved.set(id, new Set(was.problems.map(problemKey)));
+            }
+        }
+        await write();
+        for (const [id, had] of saved) {
+            const now = await recipeState(recipes, record.householdId, id);
+            if (!now) continue;
+            if (isRecipeDraft(now.recipe)) {
+                throw new UndoRefused({
+                    status: "conflict",
+                    message: `${now.recipe.name} is saved, and undoing this would make it a draft again.`,
+                });
+            }
+            const added = now.problems.filter((p) => !had.has(problemKey(p)));
+            if (added.length > 0) {
+                throw new UndoRefused({
+                    status: "conflict",
+                    message: `${now.recipe.name} is saved, and undoing this would break it: ${added
+                        .map((p) => p.message)
+                        .join(" ")}`,
+                });
+            }
+        }
+    };
+    const locked = ids.reduceRight<() => Promise<void>>(
+        (inner, id) => () =>
+            recipes.withRecipeLock(record.householdId, id, inner),
+        guarded,
+    );
+    await locked();
 }
 
 async function mayUndo(
@@ -1594,6 +1714,22 @@ async function refuseArchivedFoods(undoer: Undoer): Promise<void> {
     }
 }
 
+/**
+ * A draft an undo brings back whose expiry has passed, or that has none (an
+ * entry recorded before drafts expired), gets a fresh week from now: the next
+ * sweep would otherwise delete it again, unannounced, right after "Undone".
+ */
+function withLiveDraftExpiry(
+    table: AgentSnapshotTable,
+    row: AgentSnapshotRow,
+    now: Date,
+): AgentSnapshotRow {
+    if (table !== "recipes" || row.verification !== "unverified") return row;
+    const expires = instantOf(row.draft_expires_at);
+    if (expires > now.getTime()) return row;
+    return { ...row, draft_expires_at: draftExpiryFrom(now) };
+}
+
 async function replayChange(
     undoer: Undoer,
     change: AgentSnapshotChange,
@@ -1603,7 +1739,10 @@ async function replayChange(
     const key = agentRowKey(table, row);
     switch (change.op) {
         case "deleted": {
-            await tx.insertRow(table, row);
+            await tx.insertRow(
+                table,
+                withLiveDraftExpiry(table, row, undoer.input.now),
+            );
             for (const column of FOOD_REFERENCE_COLUMNS) {
                 noteFoodReference(undoer, table, row[column]);
             }

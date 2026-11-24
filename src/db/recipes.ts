@@ -41,7 +41,7 @@ const RECIPE_VARIANT_OVERRIDES = "recipe_variant_overrides";
 const OVERRIDE_COLS =
     "id, household_id, recipe_id, user_id, ingredient_id, action, amount, unit, food_id, display_name, created_at, updated_at";
 const RECIPE_COLS =
-    "id, household_id, creator_id, name, yield_portions, instructions, source_url, tags, notes, prep_minutes, cook_minutes, verification, updated_at";
+    "id, household_id, creator_id, name, yield_portions, instructions, source_url, tags, notes, prep_minutes, cook_minutes, verification, draft_expires_at, updated_at";
 const RECIPE_INGREDIENT_COLS =
     "id, household_id, recipe_id, kind, display_name, amount, unit, food_id, sort_order, note";
 const RECIPE_PORTION_COLS = "recipe_id, household_id, user_id, portion_count";
@@ -100,12 +100,54 @@ export function liveRecipesStore(): RecipesStore {
                             select ${tx.unsafe(RECIPE_COLS)}
                             from ${tx.unsafe(RECIPES)}
                             where household_id = ${householdId}
+                              and verification = 'verified'
                             order by name asc
                         `,
                     );
                     return data.map((row) => recipeFromRow(row as never));
                 } catch (err) {
                     throw pgError("list recipes", err);
+                }
+            });
+        },
+        async listDraftRecipes(householdId) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_COLS)}
+                            from ${tx.unsafe(RECIPES)}
+                            where household_id = ${householdId}
+                              and verification = 'unverified'
+                            order by name asc
+                        `,
+                    );
+                    return data.map((row) => recipeFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list draft recipes", err);
+                }
+            });
+        },
+        async listExpiredDrafts(householdId, now) {
+            return run(async (tx) => {
+                try {
+                    const data = await rows(
+                        tx,
+                        tx`
+                            select ${tx.unsafe(RECIPE_COLS)}
+                            from ${tx.unsafe(RECIPES)}
+                            where household_id = ${householdId}
+                              and verification = 'unverified'
+                              and coalesce(
+                                  draft_expires_at,
+                                  created_at + interval '7 days'
+                              ) < ${now.toISOString()}::timestamptz
+                        `,
+                    );
+                    return data.map((row) => recipeFromRow(row as never));
+                } catch (err) {
+                    throw pgError("list expired draft recipes", err);
                 }
             });
         },
@@ -168,11 +210,22 @@ export function liveRecipesStore(): RecipesStore {
         async deleteRecipe(householdId, id) {
             return run(async (tx) => {
                 try {
-                    // An align of the recipe is in flight or finished before
-                    // the delete takes the recipe row: it would otherwise hold
-                    // an ingredient while the delete's cascade waits for it,
-                    // and then want the recipe row the delete holds.
+                    // The align lock shared, then the recipe row, then the
+                    // dismissals: the order withRecipeLock and an align take.
+                    // An edit holding the row may delete an ingredient's
+                    // dismissals, so the delete must wait for the row before
+                    // it touches them, or each waits on the other.
                     await tx`select pg_advisory_xact_lock_shared(hashtextextended(${alignLockKey(id)}, 0))`;
+                    const found = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            select id from ${tx.unsafe(RECIPES)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                            for update
+                        `,
+                    );
+                    if (found.length === 0) return false;
                     await cleanupDismissalsForRecipeTx(tx, householdId, id);
                     const data = await rows<{ id: string }>(
                         tx,
@@ -186,6 +239,42 @@ export function liveRecipesStore(): RecipesStore {
                     return data.length > 0;
                 } catch (err) {
                     throw pgError("delete recipe", err);
+                }
+            });
+        },
+        async deleteDraftRecipe(householdId, id) {
+            return run(async (tx) => {
+                try {
+                    // The same lock order as deleteRecipe. The row lock on a
+                    // recipe that is still a draft holds off a Save until the
+                    // delete commits; one saved first is left alone, with its
+                    // dismissals.
+                    await tx`select pg_advisory_xact_lock_shared(hashtextextended(${alignLockKey(id)}, 0))`;
+                    const draft = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            select id from ${tx.unsafe(RECIPES)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                              and verification = 'unverified'
+                            for update
+                        `,
+                    );
+                    if (draft.length === 0) return false;
+                    await cleanupDismissalsForRecipeTx(tx, householdId, id);
+                    const data = await rows<{ id: string }>(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(RECIPES)}
+                            where id = ${id}
+                              and household_id = ${householdId}
+                              and verification = 'unverified'
+                            returning id
+                        `,
+                    );
+                    return data.length > 0;
+                } catch (err) {
+                    throw pgError("delete draft recipe", err);
                 }
             });
         },
@@ -496,19 +585,9 @@ export function liveRecipesStore(): RecipesStore {
                 }
             });
         },
-        async setVerification(householdId, recipeId, verification, problems) {
+        async recordProblems(householdId, recipeId, problems) {
             return run(async (tx) => {
                 try {
-                    await rows(
-                        tx,
-                        tx`
-                            update ${tx.unsafe(RECIPES)}
-                            set verification = ${verification}
-                            where id = ${recipeId}
-                              and household_id = ${householdId}
-                            returning id
-                        `,
-                    );
                     await rows(
                         tx,
                         tx`
@@ -520,27 +599,51 @@ export function liveRecipesStore(): RecipesStore {
                         `,
                     );
                 } catch (err) {
-                    throw pgError("set recipe verification", err);
+                    throw pgError("record recipe problems", err);
                 }
             });
         },
-        async deleteStaleUnverified(householdId, before) {
+        async promoteDraft(householdId, recipeId) {
             return run(async (tx) => {
                 try {
-                    const data = await rows<{ id: string }>(
+                    const data = await rows(
                         tx,
                         tx`
-                            delete from ${tx.unsafe(RECIPES)}
-                            where household_id = ${householdId}
+                            update ${tx.unsafe(RECIPES)}
+                            set verification = 'verified',
+                                draft_expires_at = null
+                            where id = ${recipeId}
+                              and household_id = ${householdId}
                               and verification = 'unverified'
-                              and updated_at < ${before.toISOString()}
                             returning id
                         `,
                     );
-                    return data.length;
+                    return data.length > 0;
                 } catch (err) {
-                    throw pgError("delete stale unverified recipes", err);
+                    throw pgError("save recipe draft", err);
                 }
+            });
+        },
+        async withRecipeLock(householdId, recipeId, fn) {
+            return run(async (tx) => {
+                try {
+                    // The align lock shared, then the recipe row: the order
+                    // deleteRecipe, deleteDraftRecipe and an align (which
+                    // holds it exclusive, and may call in here) all take.
+                    await tx`select pg_advisory_xact_lock_shared(hashtextextended(${alignLockKey(recipeId)}, 0))`;
+                    if (UUID_SHAPE.test(recipeId)) {
+                        await tx`
+                            select id
+                            from ${tx.unsafe(RECIPES)}
+                            where id = ${recipeId}::uuid
+                              and household_id = ${householdId}
+                            for no key update
+                        `;
+                    }
+                } catch (err) {
+                    throw pgError("lock recipe", err);
+                }
+                return fn();
             });
         },
         async findRecipeBySourceUrl(householdId, urls) {

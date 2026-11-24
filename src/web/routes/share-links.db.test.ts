@@ -413,6 +413,32 @@ describeDb(
             expect(names).toContain("cache-control");
         });
 
+        test("a link to a recipe that is now a draft is the unknown-token 404, as a page and as a document", async () => {
+            const { recipe } = await seedRecipe(
+                householdId,
+                ownerId,
+                "Lentil soup",
+            );
+            // Minted while the recipe was saved; an old unverified import
+            // became a draft since.
+            const old = await mint(householdId, ownerId, "recipe", recipe.id);
+            await sql`update public.recipes set verification = 'unverified' where id = ${recipe.id}`;
+            const shoot = async (path: string) => {
+                const res = await app().request(path);
+                return {
+                    status: res.status,
+                    body: await res.text(),
+                    headers: [...res.headers.entries()].sort(([a], [b]) =>
+                        a.localeCompare(b),
+                    ),
+                };
+            };
+            const unknown = await shoot(`/s/${mintShareToken()}`);
+            expect(unknown.status).toBe(404);
+            expect(await shoot(`/s/${old.token}`)).toEqual(unknown);
+            expect(await shoot(`/s/${old.token}.json`)).toEqual(unknown);
+        });
+
         describe("the portable recipe document", () => {
             test("a live recipe token answers a document that parses, with the headers", async () => {
                 const { recipe, foodId } = await seedRecipe(

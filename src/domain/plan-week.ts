@@ -180,6 +180,18 @@ export async function loadPlanVersionSources(
  * `missingForPlan` reads. One assembly for the week view, the plan notices and
  * the notice action, so they cannot disagree about what a recipe needs.
  */
+/**
+ * The plans whose recipe is among `recipes` (the store's saved recipes): a
+ * plan left on a draft, from before drafts existed, is not part of the week.
+ */
+export function plansOfSavedRecipes<T extends Pick<RecipePlan, "recipeId">>(
+    plans: readonly T[],
+    recipes: readonly Pick<Recipe, "id">[],
+): T[] {
+    const saved = new Set(recipes.map((recipe) => recipe.id));
+    return plans.filter((plan) => saved.has(plan.recipeId));
+}
+
 export function planRecipesOf(
     plans: readonly Pick<RecipePlan, "recipeId" | "memberIds">[],
     recipes: readonly Pick<Recipe, "id" | "name" | "yieldPortions">[],

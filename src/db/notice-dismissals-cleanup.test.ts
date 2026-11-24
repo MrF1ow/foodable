@@ -385,6 +385,25 @@ describeDb(
                 ${0}
             )
         `;
+            // A second line, so taking this one out leaves the saved recipe
+            // an ingredient (it never loses its last one).
+            await sql`
+            insert into public.recipe_ingredients (
+                id, household_id, recipe_id, kind, display_name,
+                amount, unit, food_id, sort_order
+            )
+            values (
+                ${crypto.randomUUID()},
+                ${householdId},
+                ${recipe2},
+                ${"food"},
+                ${"Tomato"},
+                ${1},
+                ${"g"},
+                ${foodId},
+                ${1}
+            )
+        `;
             await insertDismissals(sql, householdId, "recipe_ingredient", ing2);
             expect(
                 await removeRecipeIngredient(

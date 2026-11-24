@@ -5,14 +5,17 @@ import { liveFoodsStore } from "./foods.js";
 import { deleteAuthUser } from "./users.js";
 import {
     importRecipeFromUrl,
-    sweepUnverifiedRecipes,
+    saveRecipeDraft,
+    sweepExpiredDrafts,
 } from "../domain/recipe-import.js";
 import {
     addRecipeManualIngredient,
     addRecipeToGrocery,
     createRecipe,
     deleteRecipe,
+    RecipeEditBreaksCheckError,
     removeRecipeIngredient,
+    updateRecipe,
     updateRecipeIngredient,
 } from "../domain/recipes.js";
 import {
@@ -1697,7 +1700,7 @@ describeDb(pgAvailable !== null, "recipe versions db", (getCtx) => {
                 unit: "g",
             });
             await getCtx()
-                .sql`update public.recipes set verification = 'unverified', updated_at = now() - interval '40 days' where id = ${k.recipe.id}`;
+                .sql`update public.recipes set verification = 'unverified', draft_expires_at = now() - interval '1 day' where id = ${k.recipe.id}`;
             const row = (
                 await k.variants.listOverrides(householdId, k.recipe.id)
             )[0]!;
@@ -1734,13 +1737,8 @@ describeDb(pgAvailable !== null, "recipe versions db", (getCtx) => {
             );
             await atEdit;
             const sweeping = settle(
-                sweepUnverifiedRecipes({
-                    households: [
-                        {
-                            id: householdId,
-                            preferences: { unverifiedRecipeExpiryDays: 30 },
-                        },
-                    ],
+                sweepExpiredDrafts({
+                    householdIds: [householdId],
                     recipes: k.recipes,
                     now: new Date(),
                 }),
@@ -2044,3 +2042,567 @@ describeDb(pgAvailable !== null, "recipe versions db", (getCtx) => {
         ).toBe(2);
     });
 });
+
+describeDb(pgAvailable !== null, "recipe drafts against Postgres", (getCtx) => {
+    let householdId: string;
+    let userId: string;
+
+    beforeEach(async () => {
+        const { sql, truncateAll } = getCtx();
+        await truncateAll();
+        setSqlForTests(sql);
+        const seeded = await seedHousehold(sql);
+        householdId = seeded.householdId;
+        userId = seeded.userId;
+    });
+
+    afterEach(() => {
+        setSqlForTests(null);
+    });
+
+    async function imported(
+        name: string,
+        verification: "verified" | "unverified",
+        draftExpiresAt: string | null = null,
+    ) {
+        const store = liveRecipesStore();
+        const recipe = await createRecipe(store, {
+            householdId,
+            creatorId: userId,
+            name,
+            yieldPortions: 1,
+            verification,
+            draftExpiresAt,
+        });
+        await store.upsertImport({
+            recipeId: recipe.id,
+            householdId,
+            sourceKind: "text",
+            sourceUrl: null,
+            sourceText: "raw",
+            sourceTextOrigin: "pasted",
+            transcript: null,
+            credit: null,
+            unresolvedLines: [],
+            problems: [],
+            dismissedMentions: [],
+            importedAt: new Date().toISOString(),
+        });
+        return recipe;
+    }
+
+    async function expiryOf(id: string): Promise<Date | null> {
+        const [row] = await getCtx()
+            .sql`select draft_expires_at from public.recipes where id = ${id}`;
+        return row.draft_expires_at == null
+            ? null
+            : new Date(row.draft_expires_at);
+    }
+
+    test("the backfill gives unverified imports a 7-day expiry once, and nothing else", async () => {
+        const draft = await imported("Old import", "unverified");
+        const saved = await imported("Saved import", "verified");
+        const handMade = await createRecipe(liveRecipesStore(), {
+            householdId,
+            creatorId: userId,
+            name: "Hand-made",
+            yieldPortions: 1,
+        });
+        const backfill = await Bun.file(
+            new URL(
+                "../../db/migrations/20261124150100_backfill_recipe_draft_expiry.sql",
+                import.meta.url,
+            ),
+        ).text();
+        const before = Date.now();
+        await getCtx().sql.unsafe(backfill);
+        const first = await expiryOf(draft.id);
+        expect(first).not.toBeNull();
+        const days = (first!.getTime() - before) / (24 * 3600_000);
+        expect(days).toBeGreaterThan(6.99);
+        expect(days).toBeLessThan(7.01);
+        expect(await expiryOf(saved.id)).toBeNull();
+        expect(await expiryOf(handMade.id)).toBeNull();
+        // Run again: it only fills a missing expiry, so nothing moves.
+        await getCtx().sql.unsafe(backfill);
+        expect((await expiryOf(draft.id))?.getTime()).toBe(first!.getTime());
+        expect(await expiryOf(saved.id)).toBeNull();
+        expect(await expiryOf(handMade.id)).toBeNull();
+    });
+
+    test("listRecipes leaves drafts out, the drafts listing and getRecipe find them, and Save clears the expiry", async () => {
+        const store = liveRecipesStore();
+        const expires = new Date(Date.now() + 7 * 24 * 3600_000).toISOString();
+        const draft = await imported("Draft", "unverified", expires);
+        const saved = await imported("Saved", "verified");
+        expect((await store.listRecipes(householdId)).map((r) => r.id)).toEqual(
+            [saved.id],
+        );
+        const drafts = await store.listDraftRecipes(householdId);
+        expect(drafts.map((r) => r.id)).toEqual([draft.id]);
+        expect(drafts[0]!.draftExpiresAt).toBe(expires);
+        expect((await store.getRecipe(householdId, draft.id))?.id).toBe(
+            draft.id,
+        );
+        await store.promoteDraft(householdId, draft.id);
+        const after = await store.getRecipe(householdId, draft.id);
+        expect(after?.verification).toBe("verified");
+        expect(after?.draftExpiresAt).toBeNull();
+        expect(await store.listDraftRecipes(householdId)).toEqual([]);
+    });
+
+    test("the sweep deletes drafts past their expiry, or 7 days after they were made when they have none", async () => {
+        const store = liveRecipesStore();
+        const past = await imported(
+            "Past",
+            "unverified",
+            new Date(Date.now() - 3600_000).toISOString(),
+        );
+        const future = await imported(
+            "Future",
+            "unverified",
+            new Date(Date.now() + 3600_000).toISOString(),
+        );
+        const oldNull = await imported("Old, no expiry", "unverified");
+        const newNull = await imported("New, no expiry", "unverified");
+        const saved = await imported("Saved", "verified");
+        await getCtx()
+            .sql`update public.recipes set created_at = now() - interval '8 days' where id = ${oldNull.id} or id = ${saved.id}`;
+        const deleted = await sweepExpiredDrafts({
+            householdIds: [householdId],
+            recipes: store,
+            now: new Date(),
+        });
+        expect(deleted).toBe(2);
+        expect(await store.getRecipe(householdId, past.id)).toBeNull();
+        expect(await store.getRecipe(householdId, oldNull.id)).toBeNull();
+        expect(await store.getRecipe(householdId, future.id)).not.toBeNull();
+        expect(await store.getRecipe(householdId, newNull.id)).not.toBeNull();
+        expect(await store.getRecipe(householdId, saved.id)).not.toBeNull();
+        expect(await store.getImport(householdId, past.id)).toBeNull();
+    });
+
+    test("a draft saved after the sweep listed it as expired survives the sweep's delete", async () => {
+        const store = liveRecipesStore();
+        const draft = await imported(
+            "Saved just in time",
+            "unverified",
+            new Date(Date.now() - 3600_000).toISOString(),
+        );
+        const racing = {
+            ...store,
+            async listExpiredDrafts(hh: string, now: Date) {
+                const expired = await store.listExpiredDrafts(hh, now);
+                // Save lands between the listing and the delete.
+                await store.promoteDraft(hh, draft.id);
+                return expired;
+            },
+        };
+        const deleted = await sweepExpiredDrafts({
+            householdIds: [householdId],
+            recipes: racing,
+            now: new Date(),
+        });
+        expect(deleted).toBe(0);
+        const after = await store.getRecipe(householdId, draft.id);
+        expect(after?.verification).toBe("verified");
+        expect(await store.getImport(householdId, draft.id)).not.toBeNull();
+    });
+
+    test("deleteDraftRecipe deletes a draft and leaves a saved recipe alone", async () => {
+        const store = liveRecipesStore();
+        const draft = await imported("Draft", "unverified");
+        const saved = await imported("Saved", "verified");
+        expect(await store.deleteDraftRecipe(householdId, saved.id)).toBe(
+            false,
+        );
+        expect(await store.getRecipe(householdId, saved.id)).not.toBeNull();
+        expect(await store.getImport(householdId, saved.id)).not.toBeNull();
+        expect(await store.deleteDraftRecipe(householdId, draft.id)).toBe(true);
+        expect(await store.getRecipe(householdId, draft.id)).toBeNull();
+        expect(await store.getImport(householdId, draft.id)).toBeNull();
+    });
+});
+
+describeDb(
+    pgAvailable !== null,
+    "Save and recipe edits take one lock, against Postgres",
+    (getCtx) => {
+        let householdId: string;
+        let userId: string;
+
+        beforeEach(async () => {
+            const { sql, truncateAll } = getCtx();
+            await truncateAll();
+            setSqlForTests(sql);
+            const seeded = await seedHousehold(sql);
+            householdId = seeded.householdId;
+            userId = seeded.userId;
+        });
+
+        afterEach(() => {
+            setSqlForTests(null);
+        });
+
+        async function withWidePool(body: () => Promise<void>) {
+            const url = getCtx().pg.url;
+            const appUrl = new URL(url);
+            appUrl.username = "foodable_app";
+            const wide = new SQL(url, { prepare: false, max: 4 });
+            const wideApp = new SQL(appUrl.toString(), {
+                prepare: false,
+                max: 4,
+            });
+            pairAppSqlForTests(wide, wideApp);
+            setSqlForTests(wide);
+            try {
+                await body();
+            } finally {
+                setSqlForTests(getCtx().sql);
+                await wide.close();
+                await wideApp.close();
+            }
+        }
+
+        const settle = <T>(work: Promise<T>) =>
+            work.then(
+                (value) => ({ ok: true as const, value }),
+                (err: unknown) => ({
+                    ok: false as const,
+                    error: err,
+                    message: String((err as Error)?.message ?? err),
+                }),
+            );
+
+        /**
+         * Waits until `other` is blocked on a lock, or has finished (it did
+         * not need to wait), so the held work is released only once the
+         * other one has had its chance to run in between.
+         */
+        async function untilWaitingOrDone(other: Promise<unknown>) {
+            let done = false;
+            void other.then(
+                () => (done = true),
+                () => (done = true),
+            );
+            const deadline = Date.now() + 2_000;
+            while (!done && Date.now() < deadline) {
+                const [row] = await getCtx().sql`
+                    select count(*)::int as n
+                    from pg_stat_activity
+                    where datname = current_database()
+                      and wait_event_type = 'Lock'
+                `;
+                if (row.n >= 1) return;
+                // oxlint-disable-next-line foodable/no-wall-clock-waits -- polls pg_stat_activity until the other session waits on a lock, as waitForLockWaiters does; nothing signals that moment
+                await Bun.sleep(10);
+            }
+        }
+
+        /** A store whose first `getImport` waits until `release` is called. */
+        function heldAtImportRead(store: ReturnType<typeof liveRecipesStore>) {
+            let release: () => void = () => {};
+            const held = new Promise<void>((resolve) => (release = resolve));
+            let reached: () => void = () => {};
+            const atRead = new Promise<void>((resolve) => (reached = resolve));
+            let first = true;
+            const paused = {
+                ...store,
+                async getImport(hh: string, id: string) {
+                    if (first) {
+                        first = false;
+                        reached();
+                        await held;
+                    }
+                    return store.getImport(hh, id);
+                },
+            };
+            return { paused, atRead, release };
+        }
+
+        /** A draft that passes its check: one ingredient, steps, an import row. */
+        async function readyRecipe(
+            verification: "verified" | "unverified",
+            names: string[] = ["Eggs"],
+        ) {
+            const store = liveRecipesStore();
+            const recipe = await createRecipe(store, {
+                householdId,
+                creatorId: userId,
+                name: "Omelette",
+                yieldPortions: 1,
+                instructions: "Whisk.\nCook.",
+                verification,
+                draftExpiresAt:
+                    verification === "unverified"
+                        ? new Date(Date.now() + 3 * 86400_000).toISOString()
+                        : null,
+            });
+            const ingredientIds: string[] = [];
+            for (const [index, name] of names.entries()) {
+                const foodId = await seedFood(getCtx().sql, householdId, {
+                    name,
+                });
+                const id = crypto.randomUUID();
+                ingredientIds.push(id);
+                await store.insertIngredient({
+                    id,
+                    householdId,
+                    recipeId: recipe.id,
+                    kind: "food",
+                    displayName: name,
+                    quantity: { amount: 2, unit: "each" },
+                    foodId,
+                    sortOrder: index,
+                    note: null,
+                });
+            }
+            await store.upsertImport({
+                recipeId: recipe.id,
+                householdId,
+                sourceKind: "text",
+                sourceUrl: null,
+                sourceText: "raw",
+                sourceTextOrigin: "pasted",
+                transcript: null,
+                credit: null,
+                unresolvedLines: [],
+                problems: [],
+                dismissedMentions: [],
+                importedAt: new Date().toISOString(),
+            });
+            return { recipe, ingredientIds };
+        }
+
+        test("a Save that lands while a draft edit records its problems stays saved", async () => {
+            await withWidePool(async () => {
+                const store = liveRecipesStore();
+                const { recipe } = await readyRecipe("unverified");
+                const edit = heldAtImportRead(store);
+                const editing = settle(
+                    updateRecipe(edit.paused, householdId, recipe.id, {
+                        notes: "Serve hot.",
+                    }),
+                );
+                await edit.atRead;
+                const saving = settle(
+                    saveRecipeDraft(store, householdId, recipe.id),
+                );
+                await untilWaitingOrDone(saving);
+                edit.release();
+                const [edited, saved] = await Promise.all([editing, saving]);
+                expect(edited.ok).toBe(true);
+                expect(saved).toMatchObject({
+                    ok: true,
+                    value: { saved: true },
+                });
+                const after = await store.getRecipe(householdId, recipe.id);
+                expect(after?.verification).toBe("verified");
+                expect(after?.draftExpiresAt).toBeNull();
+                expect(after?.notes).toBe("Serve hot.");
+            });
+        });
+
+        test("a draft edit that would empty the recipe while Save runs waits, and is refused on the saved recipe", async () => {
+            await withWidePool(async () => {
+                const store = liveRecipesStore();
+                const { recipe, ingredientIds } =
+                    await readyRecipe("unverified");
+                const save = heldAtImportRead(store);
+                const saving = settle(
+                    saveRecipeDraft(save.paused, householdId, recipe.id),
+                );
+                await save.atRead;
+                const removing = settle(
+                    removeRecipeIngredient(
+                        store,
+                        householdId,
+                        recipe.id,
+                        ingredientIds[0]!,
+                    ),
+                );
+                await untilWaitingOrDone(removing);
+                save.release();
+                const [saved, removed] = await Promise.all([saving, removing]);
+                expect(saved).toMatchObject({
+                    ok: true,
+                    value: { saved: true },
+                });
+                expect(removed.ok).toBe(false);
+                expect(
+                    !removed.ok &&
+                        removed.error instanceof RecipeEditBreaksCheckError,
+                ).toBe(true);
+                const after = await store.getRecipe(householdId, recipe.id);
+                expect(after?.verification).toBe("verified");
+                expect(
+                    await store.listIngredients(householdId, recipe.id),
+                ).toHaveLength(1);
+            });
+        });
+
+        test("a Save that waits for a draft edit emptying the recipe refuses with what is left", async () => {
+            await withWidePool(async () => {
+                const store = liveRecipesStore();
+                const { recipe, ingredientIds } =
+                    await readyRecipe("unverified");
+                const edit = heldAtImportRead(store);
+                const removing = settle(
+                    removeRecipeIngredient(
+                        edit.paused,
+                        householdId,
+                        recipe.id,
+                        ingredientIds[0]!,
+                    ),
+                );
+                await edit.atRead;
+                const saving = settle(
+                    saveRecipeDraft(store, householdId, recipe.id),
+                );
+                await untilWaitingOrDone(saving);
+                edit.release();
+                const [removed, saved] = await Promise.all([removing, saving]);
+                expect(removed).toEqual({ ok: true, value: true });
+                expect(saved.ok && saved.value.saved).toBe(false);
+                expect(
+                    saved.ok && saved.value.problems.map((p) => p.code),
+                ).toEqual(["no_ingredients"]);
+                const after = await store.getRecipe(householdId, recipe.id);
+                expect(after?.verification).toBe("unverified");
+                expect(after?.draftExpiresAt).not.toBeNull();
+            });
+        });
+
+        test("two removals at once on a saved two-ingredient recipe: one lands, the other is refused", async () => {
+            await withWidePool(async () => {
+                const store = liveRecipesStore();
+                const { recipe, ingredientIds } = await readyRecipe(
+                    "verified",
+                    ["Eggs", "Butter"],
+                );
+                const first = heldAtImportRead(store);
+                const removingFirst = settle(
+                    removeRecipeIngredient(
+                        first.paused,
+                        householdId,
+                        recipe.id,
+                        ingredientIds[0]!,
+                    ),
+                );
+                await first.atRead;
+                const removingSecond = settle(
+                    removeRecipeIngredient(
+                        store,
+                        householdId,
+                        recipe.id,
+                        ingredientIds[1]!,
+                    ),
+                );
+                await untilWaitingOrDone(removingSecond);
+                first.release();
+                const [a, b] = await Promise.all([
+                    removingFirst,
+                    removingSecond,
+                ]);
+                expect(a).toEqual({ ok: true, value: true });
+                expect(b.ok).toBe(false);
+                expect(
+                    !b.ok && b.error instanceof RecipeEditBreaksCheckError,
+                ).toBe(true);
+                expect(
+                    (await store.listIngredients(householdId, recipe.id)).map(
+                        (row) => row.displayName,
+                    ),
+                ).toEqual(["Butter"]);
+            });
+        });
+
+        test("deleting a recipe while an edit removes an ingredient with a notice dismissal waits for the edit, and neither deadlocks", async () => {
+            await withWidePool(async () => {
+                const store = liveRecipesStore();
+                const { recipe, ingredientIds } = await readyRecipe(
+                    "verified",
+                    ["Eggs", "Butter"],
+                );
+                await getCtx().sql`
+                    insert into public.notice_dismissals
+                        (household_id, code, subject_kind, subject_id)
+                    values
+                        (${householdId}, 'recipe_ingredient_unknown', 'recipe_ingredient', ${ingredientIds[0]!})
+                `;
+                const edit = heldAtImportRead(store);
+                const removing = settle(
+                    removeRecipeIngredient(
+                        edit.paused,
+                        householdId,
+                        recipe.id,
+                        ingredientIds[0]!,
+                    ),
+                );
+                await edit.atRead;
+                const deleting = settle(
+                    deleteRecipe(store, householdId, recipe.id, {
+                        userId,
+                        isOwner: true,
+                    }),
+                );
+                await untilWaitingOrDone(deleting);
+                edit.release();
+                const [removed, deleted] = await Promise.all([
+                    removing,
+                    deleting,
+                ]);
+                expect(removed).toEqual({ ok: true, value: true });
+                expect(deleted).toEqual({ ok: true, value: true });
+                expect(
+                    await store.getRecipe(householdId, recipe.id),
+                ).toBeNull();
+                const [left] = await getCtx().sql`
+                    select count(*)::int as n from public.notice_dismissals
+                    where household_id = ${householdId}
+                `;
+                expect(left.n).toBe(0);
+            });
+        });
+
+        test("a discard that arrives while Save runs leaves the saved recipe; a Save after a discard says unknown recipe", async () => {
+            await withWidePool(async () => {
+                const store = liveRecipesStore();
+                const { recipe } = await readyRecipe("unverified");
+                const save = heldAtImportRead(store);
+                const saving = settle(
+                    saveRecipeDraft(save.paused, householdId, recipe.id),
+                );
+                await save.atRead;
+                const discarding = settle(
+                    store.deleteDraftRecipe(householdId, recipe.id),
+                );
+                await untilWaitingOrDone(discarding);
+                save.release();
+                const [saved, discarded] = await Promise.all([
+                    saving,
+                    discarding,
+                ]);
+                expect(saved).toMatchObject({
+                    ok: true,
+                    value: { saved: true },
+                });
+                expect(discarded).toEqual({ ok: true, value: false });
+                expect(
+                    (await store.getRecipe(householdId, recipe.id))
+                        ?.verification,
+                ).toBe("verified");
+
+                const { recipe: other } = await readyRecipe("unverified", [
+                    "Milk",
+                ]);
+                expect(
+                    await store.deleteDraftRecipe(householdId, other.id),
+                ).toBe(true);
+                expect(
+                    await settle(saveRecipeDraft(store, householdId, other.id)),
+                ).toMatchObject({ ok: false, message: "Unknown recipe." });
+            });
+        });
+    },
+);

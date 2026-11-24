@@ -28,7 +28,7 @@ import {
     createMemoryVariantsStore,
     setRecipeVariant,
 } from "../../domain/recipe-variants.js";
-import { recheckRecipe } from "../../domain/recipe-import.js";
+import { recheckRecipe, saveRecipeDraft } from "../../domain/recipe-import.js";
 import * as actualAttention from "../attention.js";
 import * as actualNoticeDismissals from "../../db/notice-dismissals.js";
 import * as actualGrocery from "../../db/grocery.js";
@@ -927,7 +927,8 @@ describe("steps-mention warnings on the recipe page", () => {
                 importedAt: "2026-01-01T00:00:00.000Z",
             });
         }
-        await recheckRecipe(db.recipesStore, HH, recipe.id);
+        // Saved, as a person would after the import.
+        await saveRecipeDraft(db.recipesStore, HH, recipe.id);
         return recipe.id;
     }
 
@@ -2963,5 +2964,254 @@ describe("recipe versions: compare and align (admin)", () => {
         expect(read.status).toBe(404);
         expect(await flourQty()).toEqual({ amount: 100, unit: "g" });
         expect(await rowCount()).toBe(2);
+    });
+});
+
+describe("drafts in the app", () => {
+    /** A draft Alice imported: no steps yet, so the check still fails. */
+    async function draftOf(
+        opts: {
+            creatorId?: string;
+            name?: string;
+            steps?: string | null;
+            expiresAt?: string;
+        } = {},
+    ): Promise<string> {
+        const recipe = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: opts.creatorId ?? ALICE,
+            name: opts.name ?? "Imported stew",
+            yieldPortions: 2,
+            instructions: opts.steps ?? null,
+            verification: "unverified",
+            draftExpiresAt: opts.expiresAt ?? "2026-12-01T12:00:00.000Z",
+        });
+        await addRecipeIngredientById(db.recipesStore, db.foodsStore, {
+            householdId: HH,
+            recipeId: recipe.id,
+            foodId: db.flourId,
+            amount: 100,
+            unit: "g",
+        });
+        await db.recipesStore.upsertImport({
+            recipeId: recipe.id,
+            householdId: HH,
+            sourceKind: "text",
+            sourceUrl: null,
+            sourceText: "pasted",
+            sourceTextOrigin: "pasted",
+            transcript: null,
+            credit: null,
+            unresolvedLines: [],
+            problems: [],
+            dismissedMentions: [],
+            importedAt: "2026-11-24T12:00:00.000Z",
+        });
+        return recipe.id;
+    }
+
+    function postSave(recipeId: string, as = ALICE) {
+        return recipesApp().request(`http://x/recipes/${recipeId}/save`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(as),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "",
+        });
+    }
+
+    test("a draft's page shows what is left and Save, and no Cook, Plan or Share", async () => {
+        setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
+        const id = await draftOf();
+        const html = (await renderRecipeDetailRoute(ALICE, id)).html;
+        expect(html).toContain('id="fd-recipe-draft"');
+        expect(html).toContain(`action="/recipes/${id}/save"`);
+        expect(html).toContain("Add the steps.");
+        expect(html).toContain("deleted on 2026-12-01");
+        expect(html).not.toContain('id="fd-recipe-cook-sheet"');
+        expect(html).not.toContain("fd-recipe-cook-btn");
+        expect(html).not.toContain("fd-recipe-plan-btn");
+        // A saved recipe's page has no Save.
+        const saved = (await renderRecipeDetailRoute(ALICE, db.recipeId)).html;
+        expect(saved).not.toContain("/save");
+        expect(saved).toContain("fd-recipe-cook-btn");
+    });
+
+    test("Save refuses a failing check in place with what is left, and saves once it passes", async () => {
+        const id = await draftOf();
+        const refused = await postSave(id);
+        expect(refused.status).toBe(422);
+        expect(await refused.text()).toContain(
+            "Not saved yet. Fix these first: Add the steps.",
+        );
+        expect((await db.recipesStore.getRecipe(HH, id))?.verification).toBe(
+            "unverified",
+        );
+        const ready = await draftOf({
+            name: "Ready stew",
+            steps: "1. Simmer",
+        });
+        const ok = await postSave(ready);
+        expect(ok.status).toBe(303);
+        expect(ok.headers.get("location")).toBe(`/recipes/${ready}`);
+        const row = await db.recipesStore.getRecipe(HH, ready);
+        expect(row?.verification).toBe("verified");
+        expect(row?.draftExpiresAt).toBeNull();
+        // Saving a saved recipe changes nothing.
+        expect((await postSave(ready)).status).toBe(303);
+        expect((await postSave("nope")).status).toBe(404);
+    });
+
+    test("the list shows a member their own drafts with their expiry, apart from the recipes", async () => {
+        const mine = await draftOf({ name: "Bob draft", creatorId: BOB });
+        await draftOf({ name: "Alice draft" });
+        const html = (await renderRecipesListPage(BOB, {})).html;
+        expect(html).toContain('id="fd-recipes-drafts"');
+        expect(html).toContain(`href="/recipes/${mine}"`);
+        expect(html).toContain("deleted 2026-12-01 unless saved");
+        expect(html).not.toContain("Alice draft");
+        // Drafts are not cards in All recipes, nor counted as saved.
+        const all = html.slice(html.indexOf("fd-recipes-all-heading"));
+        expect(all).not.toContain("Bob draft");
+        expect(html).toContain("1 saved");
+        // A search never finds a draft either.
+        const searched = (await renderRecipesListPage(BOB, { q: "draft" }))
+            .html;
+        expect(searched).not.toContain('class="fd-recipe-card');
+    });
+
+    test("the owner's list shows every household draft, so one another member imported can be reached", async () => {
+        const theirs = await draftOf({ name: "Bob draft", creatorId: BOB });
+        const mine = await draftOf({ name: "Alice draft" });
+        const html = (await renderRecipesListPage(ALICE, {})).html;
+        const drafts = html.slice(
+            html.indexOf('id="fd-recipes-drafts"'),
+            html.indexOf("fd-recipes-all-heading"),
+        );
+        expect(drafts).toContain(`href="/recipes/${theirs}"`);
+        expect(drafts).toContain(`href="/recipes/${mine}"`);
+        // The owner may discard it from its page.
+        const page = (await renderRecipeDetailRoute(ALICE, theirs)).html;
+        expect(page).toContain(`action="/recipes/${theirs}/discard"`);
+    });
+
+    test("a draft's expiry is the household's local day, on its page and in the list", async () => {
+        db.ownerTimezone = "America/New_York";
+        const id = await draftOf({ expiresAt: "2026-12-01T02:00:00.000Z" });
+        const page = (await renderRecipeDetailRoute(ALICE, id)).html;
+        expect(page).toContain("deleted on 2026-11-30");
+        expect(page).not.toContain("2026-12-01");
+        const list = (await renderRecipesListPage(ALICE, {})).html;
+        expect(list).toContain("deleted 2026-11-30 unless saved");
+    });
+
+    test("with only drafts, the list does not say there are no recipes", async () => {
+        await db.recipesStore.deleteRecipe(HH, db.recipeId);
+        const none = (await renderRecipesListPage(ALICE, {})).html;
+        expect(none).toContain("No recipes yet.");
+        await draftOf({ name: "Alice draft" });
+        const html = (await renderRecipesListPage(ALICE, {})).html;
+        expect(html).toContain('id="fd-recipes-drafts"');
+        expect(html).toContain("0 saved");
+        expect(html).not.toContain("No recipes yet.");
+    });
+
+    test("a draft has no favourite star, and starring one is refused", async () => {
+        const id = await draftOf();
+        const html = (await renderRecipeDetailRoute(ALICE, id)).html;
+        expect(html).not.toContain("fd-recipe-star");
+        const saved = (await renderRecipeDetailRoute(ALICE, db.recipeId)).html;
+        expect(saved).toContain("fd-recipe-star");
+        const res = await postFavourite(
+            new URLSearchParams({ on: "1", back: "recipe" }),
+            { recipeId: id },
+        );
+        expect(res.status).toBe(409);
+        expect(await res.text()).toContain(
+            "That recipe is a draft; save it first.",
+        );
+        expect(await favouriteIds(ALICE)).toEqual([]);
+    });
+
+    function postDiscard(recipeId: string, as = ALICE) {
+        return recipesApp().request(`http://x/recipes/${recipeId}/discard`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(as),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: "",
+        });
+    }
+
+    test("a draft's page offers Discard draft, which deletes it and goes back to Recipes", async () => {
+        const id = await draftOf();
+        const html = (await renderRecipeDetailRoute(ALICE, id)).html;
+        expect(html).toContain("Discard draft");
+        expect(html).toContain(`action="/recipes/${id}/discard"`);
+        expect(html).not.toContain(`action="/recipes/${id}/delete"`);
+        const saved = (await renderRecipeDetailRoute(ALICE, db.recipeId)).html;
+        expect(saved).not.toContain("Discard draft");
+        const res = await postDiscard(id);
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe("/recipes");
+        expect(await db.recipesStore.getRecipe(HH, id)).toBeNull();
+        // Gone, or never a recipe: not found.
+        expect((await postDiscard(id)).status).toBe(404);
+        expect((await postDiscard("nope")).status).toBe(404);
+    });
+
+    test("Discard from a stale page keeps a draft saved since, and says so in place", async () => {
+        const id = await draftOf({ steps: "1. Simmer" });
+        const stale = (await renderRecipeDetailRoute(ALICE, id)).html;
+        expect(stale).toContain(`action="/recipes/${id}/discard"`);
+        // Someone saves it while the page is open.
+        expect((await postSave(id, BOB)).status).toBe(303);
+        const res = await postDiscard(id);
+        expect(res.status).toBe(409);
+        expect(await res.text()).toContain(
+            "Imported stew was already saved, so it was not discarded.",
+        );
+        const row = await db.recipesStore.getRecipe(HH, id);
+        expect(row?.verification).toBe("verified");
+    });
+
+    test("only the importer or the owner sees and may use Discard draft", async () => {
+        const id = await draftOf();
+        const asBob = (await renderRecipeDetailRoute(BOB, id)).html;
+        expect(asBob).toContain(`action="/recipes/${id}/save"`);
+        expect(asBob).not.toContain("Discard draft");
+        expect(asBob).not.toContain(`/recipes/${id}/discard`);
+        const refused = await postDiscard(id, BOB);
+        expect(refused.status).toBe(403);
+        expect(await db.recipesStore.getRecipe(HH, id)).not.toBeNull();
+        const bobs = await draftOf({ name: "Bob stew", creatorId: BOB });
+        const own = (await renderRecipeDetailRoute(BOB, bobs)).html;
+        expect(own).toContain(`action="/recipes/${bobs}/discard"`);
+        expect((await postDiscard(bobs, BOB)).status).toBe(303);
+        expect(await db.recipesStore.getRecipe(HH, bobs)).toBeNull();
+    });
+
+    test("planning a draft from the app says it is a draft", async () => {
+        const id = await draftOf({ steps: "1. Simmer" });
+        const res = await recipesApp().request(`http://x/recipes/${id}/plan`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: new URLSearchParams({
+                date: addPlanDays(dateInTz(new Date(), "UTC"), 1),
+                slot: "dinner",
+            }).toString(),
+        });
+        expect(res.status).toBeGreaterThanOrEqual(400);
+        expect(await res.text()).toContain(
+            "That recipe is a draft; save it first.",
+        );
+        expect(
+            await db.plansStore.listPlans(HH, "2000-01-01", "2999-12-31"),
+        ).toEqual([]);
     });
 });

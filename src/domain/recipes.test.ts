@@ -16,7 +16,11 @@ import {
 import { cookRecipe, createMemoryStockStore } from "./stock.js";
 import {
     addRecipeIngredientByBarcode,
+    addRecipeIngredientById,
     addRecipeManualIngredient,
+    RecipeEditBreaksCheckError,
+    saveRecipeDraft,
+    swapRecipeIngredientFood,
     addRecipeToGrocery,
     amountForPortion,
     createMemoryRecipesStore,
@@ -1621,7 +1625,7 @@ test("createRecipe defaults to verified", async () => {
     expect(recipe.verification).toBe("verified");
 });
 
-test("importRecipeFromText verifies a complete recipe on import", async () => {
+test("importRecipeFromText keeps a complete recipe a draft, ready to save", async () => {
     const store = createMemoryRecipesStore();
     const foods = createMemoryFoodsStore();
     const result = await importRecipeFromText(
@@ -1637,7 +1641,8 @@ test("importRecipeFromText verifies a complete recipe on import", async () => {
         },
         { lookup: async () => null },
     );
-    expect(result.verification).toBe("verified");
+    expect(result.verification).toBe("unverified");
+    expect(result.recipe.draftExpiresAt).not.toBeNull();
     expect(result.problems).toHaveLength(0);
     const imp = await store.getImport(HH, result.recipe.id);
     expect(imp?.sourceKind).toBe("text");
@@ -1743,7 +1748,7 @@ test("updateRecipeIngredient clearing amount with blank note stores to taste", a
     expect(saved?.verification).toBe("verified");
 });
 
-test("editing an unverified recipe until complete verifies it", async () => {
+test("editing a draft until complete records no problems, and only Save verifies it", async () => {
     const store = createMemoryRecipesStore();
     const foods = createMemoryFoodsStore();
     const result = await importRecipeFromText(
@@ -1760,11 +1765,26 @@ test("editing an unverified recipe until complete verifies it", async () => {
         { lookup: async () => null },
     );
     expect(result.recipe.verification).toBe("unverified");
+    const refused = await saveRecipeDraft(store, HH, result.recipe.id);
+    expect(refused.saved).toBe(false);
+    expect(refused.problems.map((p) => p.code)).toEqual(["no_instructions"]);
     await updateRecipe(store, HH, result.recipe.id, {
         instructions: "1. Stir\n2. Serve",
     });
-    const saved = await store.getRecipe(HH, result.recipe.id);
-    expect(saved?.verification).toBe("verified");
+    expect((await store.getImport(HH, result.recipe.id))?.problems).toEqual([]);
+    expect((await store.getRecipe(HH, result.recipe.id))?.verification).toBe(
+        "unverified",
+    );
+    const saved = await saveRecipeDraft(store, HH, result.recipe.id);
+    expect(saved).toMatchObject({ saved: true, alreadySaved: false });
+    const row = await store.getRecipe(HH, result.recipe.id);
+    expect(row?.verification).toBe("verified");
+    expect(row?.draftExpiresAt).toBeNull();
+    // Saving again is a no-op success.
+    expect(await saveRecipeDraft(store, HH, result.recipe.id)).toMatchObject({
+        saved: true,
+        alreadySaved: true,
+    });
 });
 
 test("editing a verified recipe keeps it verified", async () => {
@@ -1808,7 +1828,7 @@ test("ingredient edits bump updatedAt on memory store", async () => {
     expect(saved!.updatedAt !== before).toBe(true);
 });
 
-test("addRecipeToGrocery throws RecipeUnverifiedError when unverified", async () => {
+test("addRecipeToGrocery refuses a draft, saying it is a draft", async () => {
     const recipes = createMemoryRecipesStore();
     const foods = createMemoryFoodsStore();
     const grocery = createMemoryGroceryStore();
@@ -1840,10 +1860,10 @@ test("addRecipeToGrocery throws RecipeUnverifiedError when unverified", async ()
             foodsById: new Map(),
             fridgeItems: [],
         }),
-    ).rejects.toBeInstanceOf(RecipeUnverifiedError);
+    ).rejects.toThrow("That recipe is a draft; save it first.");
 });
 
-test("cookRecipe throws RecipeUnverifiedError when unverified", async () => {
+test("cookRecipe refuses a draft, saying it is a draft", async () => {
     const recipes = createMemoryRecipesStore();
     const foods = createMemoryFoodsStore();
     const fridge = createMemoryFridgeStore();
@@ -1869,6 +1889,14 @@ test("cookRecipe throws RecipeUnverifiedError when unverified", async () => {
             deductStock: false,
         }),
     ).rejects.toBeInstanceOf(RecipeUnverifiedError);
+    await expect(
+        cookRecipe(recipes, fridge, stock, foods, {
+            householdId: HH,
+            recipeId: imported.recipe.id,
+            totalPortions: 1,
+            deductStock: false,
+        }),
+    ).rejects.toThrow("That recipe is a draft; save it first.");
 });
 
 test("recipeCanMakeNow and verification filter ignore unverified recipes", async () => {
@@ -2406,4 +2434,168 @@ test("getRecipeView shows the member's own version, and the base to anyone witho
     const base = await getRecipeView(recipes, HH, recipe.id, ALICE);
     expect(base.ingredients).toHaveLength(2);
     expect(base.variant).toBeNull();
+});
+
+describe("drafts", () => {
+    async function importDraft(
+        recipes: ReturnType<typeof createMemoryRecipesStore>,
+        foods: ReturnType<typeof createMemoryFoodsStore>,
+        name = "Imported soup",
+    ) {
+        return (
+            await importRecipeFromText(
+                recipes,
+                foods,
+                {
+                    householdId: HH,
+                    creatorId: ALICE,
+                    text: "pasted",
+                    instructions: "1. Simmer",
+                    name,
+                    ingredients: [{ name: "Leek", amount: 1, unit: "g" }],
+                },
+                { lookup: async () => null },
+            )
+        ).recipe;
+    }
+
+    test("a draft is in no list but its own; getRecipe still finds it", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const saved = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Hand-made",
+            yieldPortions: 1,
+        });
+        expect(saved.draftExpiresAt).toBeNull();
+        const draft = await importDraft(recipes, foods);
+        expect(draft.verification).toBe("unverified");
+        expect((await listRecipes(recipes, HH)).map((r) => r.id)).toEqual([
+            saved.id,
+        ]);
+        expect((await recipes.listDraftRecipes(HH)).map((r) => r.id)).toEqual([
+            draft.id,
+        ]);
+        expect((await recipes.getRecipe(HH, draft.id))?.id).toBe(draft.id);
+        const filtered = (filter: Parameters<typeof listRecipesFiltered>[4]) =>
+            listRecipesFiltered(recipes, HH, new Map(), [], filter).then(
+                (rows) => rows.map((r) => r.id),
+            );
+        expect(await filtered({})).toEqual([saved.id]);
+        expect(await filtered({ query: "soup" })).toEqual([]);
+        expect(await filtered({ filters: ["quick"] })).not.toContain(draft.id);
+        expect(await filtered({ verification: "unverified" })).toEqual([
+            draft.id,
+        ]);
+        expect(await filtered({ verification: "verified" })).toEqual([
+            saved.id,
+        ]);
+    });
+
+    test("Save refuses a failing check with what is left, and passes it once fixed", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const draft = await importDraft(recipes, foods);
+        await updateRecipe(recipes, HH, draft.id, { instructions: "" });
+        const refused = await saveRecipeDraft(recipes, HH, draft.id);
+        expect(refused.saved).toBe(false);
+        expect(refused.problems.map((p) => p.message)).toEqual([
+            "Add the steps.",
+        ]);
+        expect((await recipes.getRecipe(HH, draft.id))?.verification).toBe(
+            "unverified",
+        );
+        await updateRecipe(recipes, HH, draft.id, {
+            instructions: "1. Simmer",
+        });
+        expect((await saveRecipeDraft(recipes, HH, draft.id)).saved).toBe(true);
+        expect((await listRecipes(recipes, HH)).map((r) => r.id)).toEqual([
+            draft.id,
+        ]);
+        expect(await recipes.listDraftRecipes(HH)).toEqual([]);
+    });
+
+    test("an edit that would break a saved recipe is refused on every base edit path", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const draft = await importDraft(recipes, foods, "Saved soup");
+        await saveRecipeDraft(recipes, HH, draft.id);
+        const [leek] = await recipes.listIngredients(HH, draft.id);
+        const onion = await findOrCreateManualFood(foods, HH, "food", "Onion");
+        const refused = async (edit: Promise<unknown>) => {
+            const err = await edit.catch((e: unknown) => e);
+            expect(err).toBeInstanceOf(RecipeEditBreaksCheckError);
+            return err as RecipeEditBreaksCheckError;
+        };
+        // Clearing the steps.
+        const steps = await refused(
+            updateRecipe(recipes, HH, draft.id, { instructions: "" }),
+        );
+        expect(steps.problems.map((p) => p.code)).toEqual(["no_instructions"]);
+        expect(steps.message).toContain("Add the steps.");
+        // An amount taken away with a note that is not "to taste".
+        await refused(
+            updateRecipeIngredient(recipes, HH, draft.id, leek!.id, {
+                amount: null,
+                note: "sliced",
+            }),
+        );
+        // A new line with no amount.
+        await refused(
+            addRecipeIngredientById(recipes, foods, {
+                householdId: HH,
+                recipeId: draft.id,
+                foodId: onion.id,
+                amount: null,
+                note: "chopped",
+            }),
+        );
+        // Taking out the last ingredient.
+        await refused(removeRecipeIngredient(recipes, HH, draft.id, leek!.id));
+        // Nothing was written.
+        const after = await recipes.getRecipe(HH, draft.id);
+        expect(after?.instructions).toBe("1. Simmer");
+        expect(after?.verification).toBe("verified");
+        expect(await recipes.listIngredients(HH, draft.id)).toEqual([leek!]);
+        // An edit that adds no problem goes through.
+        await swapRecipeIngredientFood(recipes, foods, {
+            householdId: HH,
+            recipeId: draft.id,
+            ingredientId: leek!.id,
+            foodId: onion.id,
+            amount: 2,
+            unit: "g",
+        });
+        expect(
+            (await recipes.listIngredients(HH, draft.id))[0]?.displayName,
+        ).toBe("Onion");
+    });
+
+    test("problems a saved recipe already has never block other edits", async () => {
+        const recipes = createMemoryRecipesStore();
+        // Hand-made with no steps and no ingredients: two problems already.
+        const recipe = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Sketch",
+            yieldPortions: 1,
+        });
+        const renamed = await updateRecipe(recipes, HH, recipe.id, {
+            name: "Sketch 2",
+        });
+        expect(renamed.name).toBe("Sketch 2");
+    });
+
+    test("a draft is never refused: an edit records its problems instead", async () => {
+        const recipes = createMemoryRecipesStore();
+        const foods = createMemoryFoodsStore();
+        const draft = await importDraft(recipes, foods);
+        await updateRecipe(recipes, HH, draft.id, { instructions: "" });
+        expect(
+            (await recipes.getImport(HH, draft.id))?.problems.map(
+                (p) => p.code,
+            ),
+        ).toEqual(["no_instructions"]);
+    });
 });

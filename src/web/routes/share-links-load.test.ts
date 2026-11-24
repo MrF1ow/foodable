@@ -163,6 +163,33 @@ describe("loadShareView", () => {
     });
 });
 
+describe("a draft is never shared", () => {
+    test("a link to a recipe that is a draft has no view and no document", async () => {
+        const recipes = createMemoryRecipesStore();
+        const draft = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: USER,
+            name: "Imported stew",
+            yieldPortions: 2,
+            verification: "unverified",
+        });
+        const l = link({ kind: "recipe", targetId: draft.id });
+        expect(
+            await loadShareView(l, {
+                recipes,
+                grocery: createMemoryGroceryStore(),
+                settings: createMemorySettingsStore(),
+            }),
+        ).toBeNull();
+        expect(
+            await loadShareDocument(l, {
+                recipes,
+                foods: createMemoryFoodsStore(),
+            }),
+        ).toBeNull();
+    });
+});
+
 describe("loadShareDocument", () => {
     async function seed() {
         const recipes = createMemoryRecipesStore();

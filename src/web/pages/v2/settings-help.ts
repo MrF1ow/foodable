@@ -78,8 +78,8 @@ const GLOSSARY_COPY: GlossaryCopy[] = [
     },
     {
         id: "unverified-recipes",
-        title: "How do I get unverified recipes verified?",
-        body: "Imports that do not pass the check stay unverified. They cannot go on the grocery list, be cooked, or be logged until the check passes. Give this prompt to your agent, or set it up as a nightly or weekly automation in your agent.",
+        title: "How do I finish an imported recipe?",
+        body: "An imported recipe is a draft until you save it. A draft stays out of your recipe list, the week plan, cooking, the grocery list and search, and it is deleted 7 days after import unless you save it. Your drafts are listed under Drafts on the Recipes page. Save checks the recipe first and tells you what is left to fix. Once saved, an edit that would break the check is refused. To have your agent fix drafts, give it this prompt in a chat; it saves a draft only when you tell it to.",
     },
     {
         id: "share-to-foodable",

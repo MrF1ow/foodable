@@ -8,7 +8,11 @@ import {
     newFood,
     type FoodsStore,
 } from "./foods.js";
-import { importRecipeFromUrl, recheckRecipe } from "./recipe-import.js";
+import {
+    importRecipeFromUrl,
+    recheckRecipe,
+    saveRecipeDraft,
+} from "./recipe-import.js";
 import {
     addMentionedIngredient,
     dismissFlaggedMention,
@@ -191,7 +195,6 @@ describe("recipeMentionWarnings", () => {
             steps: "Fry the rice.\nScramble 2 eggs into it.",
             verified: true,
         });
-        await recipes.setVerification(HH, recipeId, "verified", []);
         expect(
             (await recipeMentionWarnings({ recipes, foods }, HH, recipeId)).map(
                 (w) => w.key,
@@ -324,9 +327,7 @@ describe("addMentionedIngredient", () => {
         const { recipes, foods, recipeId } = await recipeWith({
             steps: "Fry the rice.\nAdd 2 eggs and stir.",
         });
-        expect((await recheckRecipe(recipes, HH, recipeId)).verified).toBe(
-            true,
-        );
+        expect((await saveRecipeDraft(recipes, HH, recipeId)).saved).toBe(true);
         expect((await recipes.getRecipe(HH, recipeId))?.verification).toBe(
             "verified",
         );
@@ -491,15 +492,15 @@ describe("addMentionedIngredient's own cost", () => {
             const { recipes, foods, recipeId } = await recipeWith({
                 steps: "Fry the rice.\nAdd 2 eggs and stir.",
             });
-            if (verified) await recheckRecipe(recipes, HH, recipeId);
-            const watched = counting(recipes, ["setVerification"]);
+            if (verified) await saveRecipeDraft(recipes, HH, recipeId);
+            const watched = counting(recipes, ["recordProblems"]);
             await addMentionedIngredient(
                 { recipes: watched.store, foods },
                 HH,
                 recipeId,
                 "egg",
             );
-            expect(watched.count("setVerification")).toBe(verified ? 0 : 1);
+            expect(watched.count("recordProblems")).toBe(verified ? 0 : 1);
         }
     });
 

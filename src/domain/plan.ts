@@ -5,6 +5,7 @@
 import type { Notify } from "./foods.js";
 import type { NotificationEvent } from "./notifications.js";
 import type { RecipesStore } from "./recipes.js";
+import { RECIPE_DRAFT_REFUSAL } from "./recipe-import.js";
 
 export const PLAN_SLOTS = ["breakfast", "lunch", "dinner", "snack"] as const;
 export type PlanSlot = (typeof PLAN_SLOTS)[number];
@@ -698,6 +699,8 @@ export async function planRecipe(
         recipeId: string;
         /** The name the notification freezes; the caller already has the recipe. */
         recipeName?: string | null;
+        /** True when the recipe is an unsaved import: a draft is never planned. */
+        recipeIsDraft?: boolean;
         recipeYield: number;
         date: string;
         slot: string;
@@ -723,6 +726,7 @@ export async function planRecipe(
     },
     opts: { transaction?: PlanTransaction; notify?: Notify } = {},
 ): Promise<{ plan: RecipePlan; alreadyPlanned: boolean } | null> {
+    if (input.recipeIsDraft) throw new PlanInputError(RECIPE_DRAFT_REFUSAL);
     const date = checkPlanDay(input.date, input.today);
     const slot = checkPlanSlot(input.slot);
     const memberIds = checkPlanMembers(input.memberIds);

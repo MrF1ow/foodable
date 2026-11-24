@@ -81,6 +81,7 @@ import { alreadyHaveTag } from "../domain/linking.js";
 import {
     gapFromNotice,
     getRecipeView,
+    isRecipeDraft,
     type RecipeView,
     listRecipes,
     macrosForPerson,
@@ -88,6 +89,7 @@ import {
     recipeFilters,
     recipeNotices,
 } from "../domain/recipes.js";
+import { verifyRecipe } from "../domain/recipe-import.js";
 import { renderRecipesListV2Page } from "./pages/v2/recipes-list.js";
 import {
     applyFilters,
@@ -156,6 +158,7 @@ import {
 import { renderHouseholdTokenPage } from "./pages/v2/settings-household-token.js";
 import { liveShareLinkStore } from "../db/share-links.js";
 import {
+    dateInTz,
     guessMealType,
     shiftLocalDate,
     todayInTz,
@@ -1979,6 +1982,11 @@ export async function renderRecipesListPage(
             importSourceLabel: opts.importSourceLabel,
             sharedImport: opts.sharedImport,
             sharedImportEnabled: chrome.flags.mcpShareLinks,
+            drafts: await viewerDrafts(
+                householdId,
+                viewerUserId,
+                can(gate.viewer, "recipe.delete_any").ok,
+            ),
         }),
     };
 }
@@ -2254,6 +2262,21 @@ export async function renderRecipeDetailRoute(
             ).includes(recipeId),
             mentions: await recipeMentionsForPage(householdId, view),
             cook,
+            draft: isRecipeDraft(view)
+                ? {
+                      // Save needs recipe.edit; Discard is the importer's or
+                      // the owner's, as on the discard route.
+                      canSave: can(gate.viewer, "recipe.edit").ok,
+                      canDiscard:
+                          view.creatorId === viewerUserId ||
+                          can(gate.viewer, "recipe.delete_any").ok,
+                      problems: await draftProblems(householdId, recipeId),
+                      expiresOn: await draftExpiryDay(
+                          householdId,
+                          view.draftExpiresAt,
+                      ),
+                  }
+                : undefined,
             share: chrome.flags.mcpShareLinks
                 ? { open: opts.openModalId === RECIPE_SHARE_SHEET_ID }
                 : undefined,
@@ -2269,6 +2292,65 @@ export async function renderRecipeDetailRoute(
             error: opts.error,
         }),
     };
+}
+
+/**
+ * The household's local day a draft is deleted on, or null when it has no
+ * expiry. A UTC date would be a day off for a household west of UTC.
+ */
+async function draftExpiryDay(
+    householdId: string,
+    expiresAt: string | null | undefined,
+    timezone?: string,
+): Promise<string | null> {
+    if (!expiresAt) return null;
+    const tz = timezone ?? (await householdClock(householdId)).timezone;
+    return dateInTz(new Date(expiresAt), tz);
+}
+
+/**
+ * The drafts the Recipes list shows, each with its expiry day: the viewer's
+ * own, or every draft in the household for the owner, who may discard any
+ * (one another member or an agent imported has no other way in).
+ */
+async function viewerDrafts(
+    householdId: string,
+    viewerUserId: string,
+    seesAll: boolean,
+): Promise<{ id: string; name: string; expiresOn: string | null }[]> {
+    const drafts = (
+        await liveRecipesStore().listDraftRecipes(householdId)
+    ).filter((recipe) => seesAll || recipe.creatorId === viewerUserId);
+    if (drafts.length === 0) return [];
+    const { timezone } = await householdClock(householdId);
+    return Promise.all(
+        drafts.map(async (recipe) => ({
+            id: recipe.id,
+            name: recipe.name,
+            expiresOn: await draftExpiryDay(
+                householdId,
+                recipe.draftExpiresAt,
+                timezone,
+            ),
+        })),
+    );
+}
+
+/** What the check finds on a draft's base recipe now, one sentence each. */
+async function draftProblems(
+    householdId: string,
+    recipeId: string,
+): Promise<string[]> {
+    const store = liveRecipesStore();
+    const [recipe, ingredients, importRow] = await Promise.all([
+        store.getRecipe(householdId, recipeId),
+        store.listIngredients(householdId, recipeId),
+        store.getImport(householdId, recipeId),
+    ]);
+    if (!recipe) return [];
+    return verifyRecipe(recipe, ingredients, importRow).problems.map(
+        (p) => p.message,
+    );
 }
 
 /** What the two Possible duplicates pages read: the current pairs and each food's use count. */
