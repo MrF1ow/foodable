@@ -2,7 +2,10 @@ import { Hono, type Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { parseAppearanceInput } from "../shell.js";
 
-import { parseNutritionPrefsInput } from "../pages/v2/settings-account.js";
+import {
+    ACCOUNT_NAME_SHEET_ID,
+    parseNutritionPrefsInput,
+} from "../pages/v2/settings-account.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
@@ -63,6 +66,7 @@ import {
 import {
     canManageHousehold,
     HouseholdAlreadyExistsError,
+    MEMBER_NAME_MAX_LENGTH,
 } from "../../household.js";
 import {
     createHouseholdForCaller,
@@ -776,11 +780,20 @@ settingsRoutes.post("/settings", requireMember, async (c) => {
         // toast: none
         return c.redirect(redirectTo, 303);
     }
+    const displayName = formText(body, "display_name").trim();
+    // Same cap as Add member (`parseMemberInput`).
+    if (displayName.length > MEMBER_NAME_MAX_LENGTH) {
+        const page = await renderSettingsAccountV2Route(userId, {
+            backHref,
+            openSheetId: ACCOUNT_NAME_SHEET_ID,
+            error: `Name must be at most ${MEMBER_NAME_MAX_LENGTH} characters.`,
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
     if ("theme" in body) {
         const appearance = parseAppearanceInput({ theme: body.theme });
         await upsertProfile(userId, appearance);
     }
-    const displayName = formText(body, "display_name").trim();
     if (displayName) {
         await updateMemberDisplayName(member.householdId, userId, displayName);
     }
