@@ -2,8 +2,8 @@ import { FIXTURE_APP_CHROME_FLAGS } from "./test-support/chrome-flags.js";
 import { test, expect } from "bun:test";
 import { APP_JS_SOURCES, getAppJs } from "./widgets.js";
 import { TOASTS } from "./copy/toasts.js";
-import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
-import { renderAppShell } from "./web/shell.js";
+import { THEME_COLOR } from "./tokens.js";
+import { ENTRANCE_FX_SCRIPT, renderAppShell } from "./web/shell.js";
 import {
     buildPreviewKitchenFridgeView,
     renderKitchenFridgeV2Page,
@@ -85,17 +85,10 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     for (const path of APP_JS_SOURCES) {
         let src = (await Bun.file(path).text()).trim();
         if (path.endsWith("shell.js")) {
-            src = src
-                .replace(
-                    "const THEME_PAGE_BG = null;",
-                    () =>
-                        `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
-                )
-                .replace(
-                    "const THEME_NAV_BG = null;",
-                    () =>
-                        `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
-                );
+            src = src.replace(
+                "const THEME_PAGE_BG = null;",
+                () => `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
+            );
         }
         if (path.endsWith("toast.js")) {
             src = src.replace(
@@ -105,8 +98,13 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
         }
         expect(js).toContain(`(function () {\n${src}\n})();`);
     }
-    expect(js).toContain(JSON.stringify(THEME_NAV_COLOR));
-    expect(js).toContain('classList.add("fx")');
+    expect(js).toContain(JSON.stringify(THEME_COLOR));
+    // The nav surface colour is no longer a chrome colour: shell.js has none.
+    expect(js).not.toContain("THEME_NAV_BG");
+    // html.fx is set before first paint by the head script, not by shell.js:
+    // shell.js only ends the entrance (fx-enter) and never adds a class.
+    expect(js).not.toContain('classList.add("fx")');
+    expect(js).toContain('classList.remove("fx-enter")');
     expect(() =>
         new Bun.Transpiler({ loader: "js" }).transformSync(js),
     ).not.toThrow();
@@ -159,7 +157,7 @@ test("getAppJs client IIFEs evaluate without ReferenceError when stubbed", async
     ).not.toThrow();
 });
 
-test("no app page HTML contains a script with a body", () => {
+test("no app page HTML contains a script with a body but the one that sets html.fx", () => {
     const today = renderTodayV2Page(
         buildPreviewTodayPageData(PAGE_CHROME as never, "2026-11-10"),
     );
@@ -180,7 +178,11 @@ test("no app page HTML contains a script with a body", () => {
         expect(html).toMatch(
             /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
         );
-        expect(scriptBodies(html)).toEqual([]);
+        // The one inline script is the head's: it sets html.fx before first
+        // paint, the same text on every page.
+        expect(scriptBodies(html)).toEqual([
+            ENTRANCE_FX_SCRIPT.slice("<script>".length, -"</script>".length),
+        ]);
     }
 });
 

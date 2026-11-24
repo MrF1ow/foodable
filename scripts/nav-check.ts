@@ -392,12 +392,10 @@ try {
             h1: string | null;
             marker: string | null;
             themeColor: string | null;
-            themeChrome: string | null;
             navW: number;
             navH: number;
             navGap: number;
             navCentre: number;
-            chrome: string | null;
             chip: string | null;
             tracked: number;
             open: string[];
@@ -417,12 +415,10 @@ try {
                 h1: q("h1")?.textContent?.trim() ?? null,
                 marker: window.__marker ?? null,
                 themeColor: q("meta[name='theme-color']")?.getAttribute("content") ?? null,
-                themeChrome: q("meta[name='foodable-theme-chrome']")?.getAttribute("content") ?? null,
                 navW: Math.round(r.width),
                 navH: Math.round(r.height),
                 navGap: Math.round(innerHeight - r.bottom),
                 navCentre: Math.round(r.left + r.width / 2 - document.documentElement.clientWidth / 2),
-                chrome: q("meta[name='foodable-theme-chrome']")?.getAttribute("content") ?? null,
                 chip: q(".fd-account-chip")?.getAttribute("href") ?? null,
                 tracked: document.querySelectorAll("link[rel='stylesheet'][data-turbo-track='reload'], script[data-turbo-track='reload']").length,
                 open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
@@ -461,8 +457,7 @@ try {
     );
     record(
         "v2 shell browser chrome: page colour, honest meta, kept across visits",
-        v2Today.themeChrome === "page" &&
-            v2Today.themeColor === THEME_COLOR.dark &&
+        v2Today.themeColor === THEME_COLOR.dark &&
             v2Kitchen.themeColor === THEME_COLOR.dark &&
             v2Recipes.themeColor === THEME_COLOR.dark,
         { v2Today, v2Kitchen, v2Recipes },
@@ -795,8 +790,8 @@ try {
     await sleep(400);
     const v2SidebarSettings = await v2Snap();
     record(
-        "v2 sidebar Settings opts out of Turbo (full load)",
-        v2SidebarSettings.marker == null &&
+        "v2 sidebar Settings is a Turbo visit (no full load)",
+        v2SidebarSettings.marker === "stay" &&
             (await ev<string>(`location.pathname`)) === "/settings",
         { v2SidebarSettings },
     );
@@ -816,8 +811,8 @@ try {
         path: location.pathname,
     })`);
     record(
-        "v2 account chip opens Settings with a full load",
-        chipNav.marker == null && chipNav.path === "/settings",
+        "v2 account chip opens Settings over Turbo (no full load)",
+        chipNav.marker === "stay" && chipNav.path === "/settings",
         chipNav,
     );
 
@@ -863,10 +858,10 @@ try {
         marker: string | null;
     }>(`({
         page: document.querySelector(".fd-settings")?.getAttribute("data-fd-settings-page") ?? null,
-        hasMenu: !!document.querySelector(".fd-settings-menu a[href='/settings/account']"),
+        hasMenu: !!document.querySelector(".fd-settings .fd-item-row a[href='/settings/account']"),
         marker: window.__marker ?? null,
     })`);
-    await clickSel(".fd-settings-menu a[href='/settings/account']");
+    await clickSel(".fd-settings .fd-item-row a[href='/settings/account']");
     await sleep(400);
     const accountPage = await ev<{
         path: string;
@@ -874,16 +869,147 @@ try {
         marker: string | null;
     }>(`({
         path: location.pathname,
-        backTurbo: document.querySelector(".fd-settings-back")?.getAttribute("data-turbo") ?? null,
+        backTurbo: document.querySelector(".fd-settings-detail a[aria-label='Back']")?.getAttribute("data-turbo") ?? null,
         marker: window.__marker ?? null,
     })`);
     record(
-        "v2 Settings home and account menu navigation",
+        "v2 Settings home and account row navigation over Turbo",
         settingsHome.page === "home" &&
             settingsHome.hasMenu &&
             accountPage.path === "/settings/account" &&
-            accountPage.backTurbo === "false",
+            accountPage.marker === "stay" &&
+            accountPage.backTurbo === null,
         { settingsHome, accountPage, ex: drain() },
+    );
+
+    // Account › Time zone: a Turbo visit to a page with search, where a choice
+    // saves itself and the 303 comes back to Account with no toast.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/account");
+    await setMarker();
+    await clickSel(
+        ".fd-settings .fd-item-row a[href='/settings/account/timezone']",
+    );
+    await sleep(400);
+    const tzPage = await ev<{
+        path: string;
+        marker: string | null;
+        page: string | null;
+        search: boolean;
+        radios: number;
+        checked: string | null;
+        back: string | null;
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        page: document.querySelector(".fd-settings")?.getAttribute("data-fd-settings-page") ?? null,
+        search: !!document.querySelector("form.fd-settings-tz-search input[type=search][name=q]"),
+        radios: document.querySelectorAll(".fd-settings-tz-form input[type=radio][name=timezone]").length,
+        checked: document.querySelector(".fd-settings-tz-form input[type=radio]:checked")?.value ?? null,
+        back: document.querySelector(".fd-settings-detail a[aria-label='Back']")?.getAttribute("href") ?? null,
+    })`);
+    await ev(`(() => {
+        const radio = document.querySelector('.fd-settings-tz-form input[name="timezone"][value="Europe/London"]');
+        radio.checked = true;
+        radio.form.requestSubmit();
+    })()`);
+    await sleep(700);
+    const tzSaved = await ev<{
+        path: string;
+        marker: string | null;
+        toasts: number;
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    const tzPosts = (await stats()).posts.filter((p) => p.path === "/settings");
+    record(
+        "Settings › Account › Time zone: Turbo visit, search, a choice saves and returns to Account with no toast",
+        tzPage.path === "/settings/account/timezone" &&
+            tzPage.marker === "stay" &&
+            tzPage.page === "timezone" &&
+            tzPage.search &&
+            tzPage.radios > 0 &&
+            tzPage.checked === "America/Los_Angeles" &&
+            tzPage.back === "/settings/account" &&
+            tzPosts.length === 1 &&
+            tzPosts[0]!.entries.some(
+                ([k, v]) => k === "timezone" && v === "Europe/London",
+            ) &&
+            tzSaved.path === "/settings/account" &&
+            tzSaved.marker === "stay" &&
+            tzSaved.toasts === 0,
+        { tzPage, tzSaved, tzPosts, ex: drain() },
+    );
+
+    // Export data answers with a download link, so it stays a full load; every
+    // other Settings move above and below is Turbo.
+    await goto("/settings");
+    await setMarker();
+    await control("reset=posts");
+    await clickSel('form[action="/settings/export"] button');
+    await sleep(500);
+    const exportNav = await ev<{ marker: string | null; path: string }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+    })`);
+    const exportPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/export",
+    );
+    record(
+        "Settings › Export data stays a full load",
+        exportNav.marker == null &&
+            exportNav.path === "/settings" &&
+            exportPosts.length === 1,
+        { exportNav, exportPosts, ex: drain() },
+    );
+
+    // The entrance fade belongs to a full load: the head script sets html.fx
+    // and html.fx-enter before first paint, shell.js ends fx-enter, and a page
+    // Turbo swaps in is never faded.
+    await goto("/settings");
+    const firstLoad = await ev<{
+        fx: boolean;
+        enter: boolean;
+        anim: string;
+    }>(`({
+        fx: document.documentElement.classList.contains("fx"),
+        enter: document.documentElement.classList.contains("fx-enter"),
+        anim: getComputedStyle(document.querySelector(".app-main > :nth-child(2), .app-main > :first-child")).animationName,
+    })`);
+    await sleep(1300);
+    const settled = await ev<{ fx: boolean; enter: boolean }>(`({
+        fx: document.documentElement.classList.contains("fx"),
+        enter: document.documentElement.classList.contains("fx-enter"),
+    })`);
+    await setMarker();
+    await clickSel('.fd-tabs a[href="/kitchen/fridge"]');
+    // Sampled the moment the new body is in, not after a settle.
+    const turboPage = await ev<{
+        enter: boolean;
+        anim: string;
+        marker: string | null;
+    }>(`new Promise((resolve) => {
+        const read = () => resolve({
+            enter: document.documentElement.classList.contains("fx-enter"),
+            anim: getComputedStyle(document.querySelector(".app-main > :first-child")).animationName,
+            marker: window.__marker ?? null,
+        });
+        if (location.pathname === "/kitchen/fridge") read();
+        else document.addEventListener("turbo:render", read, { once: true });
+    })`);
+    record(
+        "the entrance fade plays on the first full load only, never on a Turbo visit",
+        firstLoad.fx &&
+            firstLoad.enter &&
+            /fx-blur-in/.test(firstLoad.anim) &&
+            settled.fx &&
+            !settled.enter &&
+            turboPage.marker === "stay" &&
+            !turboPage.enter &&
+            turboPage.anim === "none",
+        { firstLoad, settled, turboPage, ex: drain() },
     );
 
     await goto("/kitchen/fridge");
@@ -958,11 +1084,6 @@ try {
             ? `${THEME_COLOR.light}|(prefers-color-scheme: light),${THEME_COLOR.dark}|(prefers-color-scheme: dark)`
             : THEME_COLOR[theme];
     }
-    async function themeChromeKind() {
-        return ev<string | null>(
-            `document.querySelector('meta[name="foodable-theme-chrome"]')?.getAttribute("content") ?? null`,
-        );
-    }
     // Tag each theme-color meta with an expando so a later check can tell a
     // kept node from one Turbo removed and re-created.
     async function tagThemeMetas() {
@@ -991,10 +1112,12 @@ try {
     }
 
     await control("session=app&theme=dark&reset=posts&post=ok");
-    await goto("/settings/display");
+    await goto("/settings");
     await setMarker();
     const darkStart = await themeSnap();
     const darkStartMetas = await themeMetaSig();
+    // Settings home's Display control: the choice posts and the 303 back to
+    // the same page is a Turbo refresh, not a full load.
     await pickTheme("light");
     const afterLight = await themeSnap();
     const afterLightMetas = await themeMetaSig();
@@ -1002,33 +1125,20 @@ try {
         (p) => p.path === "/settings/display",
     );
 
-    // Back is a full load, twice over: Display to Settings home, then Settings
-    // home to the Today tab.
-    await setMarker();
-    await clickSel("a.fd-settings-back");
-    await sleep(400);
-    const backHop1 = await ev<{ path: string; marker: string | null }>(`({
-        path: location.pathname,
-        marker: window.__marker ?? null,
-    })`);
-    await setMarker();
-    await clickSel("a.fd-settings-phone-back");
+    // Back from Settings home to the Today tab is a Turbo visit too.
+    await clickSel(".fd-settings-detail a[aria-label='Back']");
     await sleep(400);
     const afterBack = await themeSnap();
     const backMetas = await themeMetaSig();
-    const backChrome = await themeChromeKind();
     const backPath = await ev<string>(`location.pathname`);
     record(
-        "settings back full load to tab",
-        backHop1.path === "/settings" &&
-            backHop1.marker == null &&
-            backPath === "/" &&
-            afterBack.marker == null &&
-            backChrome === "page" &&
+        "settings back to the tab is a Turbo visit that keeps the theme",
+        backPath === "/" &&
+            afterBack.marker === "stay" &&
             afterBack.dataTheme === "light" &&
             afterBack.bg === THEME_COLOR.light &&
             backMetas === expectedMetaSig("light"),
-        { backHop1, backPath, afterBack, backMetas, backChrome, ex: drain() },
+        { backPath, afterBack, backMetas, ex: drain() },
     );
 
     // A Turbo visit between tabs keeps the very same theme-color nodes.
@@ -1057,50 +1167,45 @@ try {
         },
     );
 
-    // The account chip is the way into Settings from a tab: also a full load.
+    // The account chip is the way into Settings from a tab: a Turbo visit.
     await setMarker();
     await clickSel(".fd-account-chip");
     await sleep(400);
     const afterGear = await themeSnap();
     const gearMetas = await themeMetaSig();
-    const gearChrome = await themeChromeKind();
     const gearPath = await ev<string>(`location.pathname`);
     record(
-        "settings gear full load from tab",
+        "settings gear is a Turbo visit from tab",
         gearPath === "/settings" &&
-            afterGear.marker == null &&
-            gearChrome === "page" &&
+            afterGear.marker === "stay" &&
             afterGear.dataTheme === "light" &&
             afterGear.bg === THEME_COLOR.light &&
             gearMetas === expectedMetaSig("light"),
-        { gearPath, afterGear, gearMetas, gearChrome, ex: drain() },
+        { gearPath, afterGear, gearMetas, ex: drain() },
     );
 
-    // Settings home's own theme buttons: Auto drops data-theme and brings back
-    // the media-keyed metas.
+    // Settings home's own Display control: Auto drops data-theme and brings
+    // back the media-keyed metas, with no full load.
     await setMarker();
-    await clickSel('button.fd-settings-theme-btn[value="system"]');
-    await sleep(600);
+    await pickTheme("system");
     const afterSystem = await themeSnap();
     const systemMetas = await themeMetaSig();
     const systemPath = await ev<string>(`location.pathname`);
 
     await setMarker();
-    await clickSel('.fd-settings-menu a[href^="/settings/help"]');
+    await clickSel('main a[href="/settings/help"]');
     await sleep(300);
     const afterHelp = await themeSnap();
     const helpPath = await ev<string>(`location.pathname`);
     const helpMetas = await themeMetaSig();
-    const helpChrome = await themeChromeKind();
     record(
         "settings help sub-nav turbo visit",
         helpPath === "/settings/help" &&
             afterHelp.marker === "stay" &&
-            helpChrome === "page" &&
             afterHelp.dataTheme === null &&
             afterHelp.meta === "system" &&
             helpMetas === expectedMetaSig("system"),
-        { helpPath, afterHelp, helpMetas, helpChrome, ex: drain() },
+        { helpPath, afterHelp, helpMetas, ex: drain() },
     );
 
     record(
@@ -1113,13 +1218,13 @@ try {
             displayPosts[0]!.entries.some(
                 ([k, v]) => k === "theme" && v === "light",
             ) &&
-            afterLight.marker == null &&
+            afterLight.marker === "stay" &&
             afterLight.dataTheme === "light" &&
             afterLight.meta === "light" &&
             afterLight.bg === THEME_COLOR.light &&
             afterLightMetas === expectedMetaSig("light") &&
             systemPath === "/settings" &&
-            afterSystem.marker == null &&
+            afterSystem.marker === "stay" &&
             afterSystem.dataTheme === null &&
             afterSystem.meta === "system" &&
             afterSystem.bg === THEME_COLOR.light &&

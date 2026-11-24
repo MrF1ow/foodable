@@ -206,14 +206,13 @@ describe("settings store page", () => {
 
     test("the phone back goes to the stores page and the desktop link says Stores", () => {
         const html = renderSettingsStoreV2Page(view());
-        expect(html).toContain(
-            'class="fd-settings-phone-back" href="/settings/household/stores"',
+        expect(html).toMatch(
+            /fd-settings-detail[\s\S]*?aria-label="Stores" href="\/settings\/household\/stores"[\s\S]*?fd-detail-bar__title">Costco</,
         );
         expect(html).toContain(
             'class="fd-stores-back" href="/settings/household/stores"',
         );
-        expect(html).toContain(
-            '<h1 class="fd-settings-phone-title">Costco</h1>',
-        );
+        // Going back to the stores is a Turbo visit.
+        expect(html).not.toContain('data-turbo="false"');
     });
 });

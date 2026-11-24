@@ -198,7 +198,6 @@ function desktopSidebar(chrome: AppChrome, active: V2NavId): string {
               name: identity.viewerName,
               role: roleLabel(identity.viewerRole),
               href: APP_PATHS.settings,
-              data: { turbo: "false" },
               avatar: memberAvatar({
                   name: identity.viewerName,
                   userId: identity.viewerUserId,
@@ -225,7 +224,6 @@ function desktopSidebar(chrome: AppChrome, active: V2NavId): string {
                 label: SETTINGS_LABEL,
                 href: APP_PATHS.settings,
                 current: active === "settings",
-                data: { turbo: "false" },
             },
             account,
         }),
@@ -279,9 +277,9 @@ function accountChip(chrome: AppChrome): string {
             enabled: true,
             className: "fd-account-chip__avatar",
         });
-        return `<a class="fd-account-chip fd-account-chip--photo" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(label)}" title="Settings">${String(avatar)}</a>`;
+        return `<a class="fd-account-chip fd-account-chip--photo" href="${APP_PATHS.settings}" aria-label="${escapeHtml(label)}" title="Settings">${String(avatar)}</a>`;
     }
-    return `<a class="fd-account-chip" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(label)}" title="Settings">${escapeHtml(name ? initialsOf(name) : "Me")}</a>`;
+    return `<a class="fd-account-chip" href="${APP_PATHS.settings}" aria-label="${escapeHtml(label)}" title="Settings">${escapeHtml(name ? initialsOf(name) : "Me")}</a>`;
 }
 
 /** The page's own header is what `pageHeader` (components/ui.ts) writes first:
@@ -319,9 +317,9 @@ function desktopTopBar(chrome: AppChrome): string {
  *  a deploy that changes any of them gets one full reload rather than a morph
  *  across versions. */
 export function appHeadV2(title: string, theme: ThemePref): string {
-    // "page": the phone page behind the floating nav and the desktop page are
-    // both --surface-bg, so the browser chrome takes the page colour.
-    return `${appHeadMeta(title, theme, "page")}
+    // The phone page behind the floating nav and the desktop page are both
+    // --surface-bg, so the browser chrome takes the page colour.
+    return `${appHeadMeta(title, theme)}
 <link rel="stylesheet" href="${appStylesheetHref()}" data-turbo-track="reload" />
 <link rel="stylesheet" href="${appV2StylesheetHref()}" data-turbo-track="reload" />
 <script src="${appScriptHref()}" defer data-turbo-track="reload"></script>

@@ -34,12 +34,13 @@ describe("settings stores page", () => {
         const html = renderSettingsStoresV2Page(view());
         expect(html).toContain(SETTINGS_STORES_V2_MARKER);
         expect(html).toContain('data-fd-settings-page="stores"');
-        // The desktop nav highlights Stores, not Household.
+        // The desktop menu has no Stores row (the design's list of ten): the
+        // page belongs to Household, which it keeps current.
         expect(html).toContain(
-            'href="/settings/household/stores" aria-current="page"',
+            'href="/settings/household" aria-current="page"',
         );
         expect(html).not.toContain(
-            'href="/settings/household" aria-current="page"',
+            'href="/settings/household/stores" aria-current="page"',
         );
         expect(html).toContain('href="/settings/household/stores/s1"');
         expect(html).toContain("6 sections");
@@ -47,8 +48,8 @@ describe("settings stores page", () => {
         expect(html).toContain("1 section<");
         expect(html).toContain("No sections");
         // The phone back arrow goes to the household, not Settings home.
-        expect(html).toContain(
-            'class="fd-settings-phone-back" href="/settings/household"',
+        expect(html).toMatch(
+            /fd-settings-detail[\s\S]*?aria-label="Back" href="\/settings\/household"/,
         );
     });
 

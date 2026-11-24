@@ -4,7 +4,7 @@
  *
  *   text      title, meta (beside the title), subtitle, value (before the
  *             trailing control)
- *   lead      checkbox, avatar, icon, dot
+ *   lead      checkbox, radio, avatar, icon, dot
  *   extras    score (on the title line), macros (under the subtitle)
  *   trailing  chevron, more, add, toggle (on / off), control (a slot)
  *   state     default, disabled (greyed, still there), warning (the words are
@@ -27,6 +27,7 @@ import type { DotColor } from "./dot.js";
 import {
     actionButton,
     cls,
+    dataAttrs,
     esc,
     join,
     raw,
@@ -47,6 +48,15 @@ export type ItemRowLead =
           /** Field the ticked box posts under. */
           name?: string;
           value?: string;
+      }
+    | {
+          /** One of a group of choices: a ring that fills when picked, and the
+           *  whole row is the label, so tapping the title picks it too. */
+          kind: "radio";
+          label: string;
+          name: string;
+          value: string;
+          checked?: boolean;
       }
     | { kind: "avatar"; initials: string }
     | { kind: "icon"; name: IconName }
@@ -99,12 +109,30 @@ export type ItemRowOptions = {
     state?: ItemRowState;
     /** Whole-row link; the row then holds no other control. */
     href?: string;
+    /** `data-*` on the link of a link row (`turbo: "false"` for a response
+     *  Turbo cannot follow, such as Log out). */
+    linkData?: Readonly<Record<string, string>>;
+    /** Whole-row button: the row posts this form when pressed (Export data).
+     *  Like a link row, it holds no other control. `formData` goes on the
+     *  `<form>` (`data-turbo="false"` for a response Turbo cannot follow). */
+    submit?: ActionForm & { formData?: Readonly<Record<string, string>> };
+    /** Whole-row button that opens the sheet with this id (Name on Account). */
+    opens?: string;
     swipe?: ItemRowSwipe;
     /** The pick box of a list in select mode. */
     select?: boolean | ItemRowSelect;
     id?: string;
     className?: string;
 };
+
+function hiddenFieldsOf(fields?: Readonly<Record<string, string>>): string {
+    return Object.entries(fields ?? {})
+        .map(
+            ([name, value]) =>
+                `<input type="hidden" name="${esc(name)}" value="${esc(value)}">`,
+        )
+        .join("");
+}
 
 const present = (value: Text | undefined): value is Text =>
     value != null && value !== "";
@@ -120,6 +148,17 @@ function leadSlot(lead: ItemRowLead, disabled: boolean): Html {
             ].join("");
             return raw(
                 `<label class="fd-item-row__lead fd-item-row__check"><input type="checkbox" class="fd-item-row__check-input"${attrs} aria-label="${esc(lead.label)}"><span class="fd-item-row__check-box" aria-hidden="true">${icon("check")}</span></label>`,
+            );
+        }
+        case "radio": {
+            const attrs = [
+                ` name="${esc(lead.name)}"`,
+                ` value="${esc(lead.value)}"`,
+                lead.checked ? " checked" : "",
+                disabled ? " disabled" : "",
+            ].join("");
+            return raw(
+                `<span class="fd-item-row__lead fd-item-row__check fd-item-row__check--radio"><input type="radio" class="fd-item-row__check-input"${attrs} aria-label="${esc(lead.label)}"><span class="fd-item-row__check-box" aria-hidden="true">${icon("check")}</span></span>`,
             );
         }
         case "avatar":
@@ -244,9 +283,15 @@ export function itemRow(opts: ItemRowOptions): Html {
             "itemRow: a warning row needs its words in the subtitle or the value",
         );
     }
-    if (opts.href != null) {
+    if (
+        [opts.href, opts.submit, opts.opens].filter((x) => x != null).length > 1
+    ) {
+        throw new Error("itemRow: a row is a link or a button, not both");
+    }
+    if (opts.href != null || opts.submit != null || opts.opens != null) {
         const control =
             opts.lead?.kind === "checkbox" ||
+            opts.lead?.kind === "radio" ||
             (opts.trailing != null && opts.trailing.kind !== "chevron");
         if (control) {
             throw new Error(
@@ -280,12 +325,25 @@ export function itemRow(opts: ItemRowOptions): Html {
     const pick = selectBox(opts.select, opts.title, disabled);
     // The pick box is a control, so it never sits inside the link: a selectable
     // link row is a face holding the box beside the link.
+    const submitEl = opts.submit
+        ? `<form class="fd-inline-form" method="${opts.submit.method ?? "post"}" action="${esc(opts.submit.action)}"${dataAttrs(opts.submit.formData)}>${hiddenFieldsOf(opts.submit.fields)}<button type="submit" class="fd-item-row__face fd-item-row__face--link">${content}</button></form>`
+        : null;
+    const opensEl =
+        opts.opens != null
+            ? `<button type="button" class="fd-item-row__face fd-item-row__face--link" commandfor="${esc(opts.opens)}" command="show-modal">${content}</button>`
+            : null;
     const faceEl =
-        href == null
-            ? `<div class="fd-item-row__face">${pick}${content}</div>`
-            : opts.select
-              ? `<div class="fd-item-row__face fd-item-row__face--link">${pick}<a class="fd-item-row__anchor" href="${safeHref(href)}">${content}</a></div>`
-              : `<a class="fd-item-row__face fd-item-row__face--link" href="${safeHref(href)}">${content}</a>`;
+        submitEl != null && !disabled
+            ? submitEl
+            : opensEl != null && !disabled
+              ? opensEl
+              : href == null
+                ? opts.lead?.kind === "radio" && !opts.select
+                    ? `<label class="fd-item-row__face fd-item-row__face--choice">${content}</label>`
+                    : `<div class="fd-item-row__face">${pick}${content}</div>`
+                : opts.select
+                  ? `<div class="fd-item-row__face fd-item-row__face--link">${pick}<a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a></div>`
+                  : `<a class="fd-item-row__face fd-item-row__face--link" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>`;
 
     const attrs = [
         opts.id != null ? ` id="${esc(opts.id)}"` : "",

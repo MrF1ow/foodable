@@ -21,7 +21,7 @@ Colours, type sizes (`--fs-*`) and radii (`--r-*`) live in `src/tokens.ts`. `bun
 
 ## Assembly and client scripts
 
-Entrance animations are gated on `html.fx`, which `src/web/client/shell.js` sets inside a frame and never under `prefers-reduced-motion`. App pages emit data attributes, not `<script>` blocks; client behaviour ships as `/app.js` (`getAppJs()`: Turbo, toast, modal, food picker) and `/app-v2.js` (`getAppV2Js()`: one IIFE per file in `src/web/client/v2/`). `getAppCss()`, `getAppV2Css()` and the two script getters in `src/widgets.ts` assemble with the widget resolver (`app.css` reaches app-only partials as `../../app/…`), cache, and warm at boot.
+Entrance animations are gated on `html.fx`, set by an inline head script (`ENTRANCE_FX_SCRIPT` in `src/web/shell.ts`) before the first paint and never under `prefers-reduced-motion`; the entrance fade of `.app-main` also needs `html.fx-enter`, which `src/web/client/shell.js` ends after a second and before any Turbo visit renders, so only a full load fades. App pages emit data attributes, not `<script>` blocks; client behaviour ships as `/app.js` (`getAppJs()`: Turbo, toast, modal, food picker) and `/app-v2.js` (`getAppV2Js()`: one IIFE per file in `src/web/client/v2/`). `getAppCss()`, `getAppV2Css()` and the two script getters in `src/widgets.ts` assemble with the widget resolver (`app.css` reaches app-only partials as `../../app/…`), cache, and warm at boot.
 
 ## Brand layer stays out of widgets
 

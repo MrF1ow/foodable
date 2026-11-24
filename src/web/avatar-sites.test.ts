@@ -137,13 +137,14 @@ describe("Settings profile card", () => {
     test("shows the viewer's picture", () => {
         const html = home(true);
         expect(html).toContain(imgFor(ME));
-        expect(html).toContain("fd-settings-profile__avatar");
+        expect(html).toContain("fd-profile-card");
+        expect(html).toContain("fd-avatar--photo");
     });
     test("initials when there is no picture or the pictures did not load", () => {
         expect(home(true, new Map())).not.toContain("/avatars/");
         const off = home(false);
         expect(off).not.toContain("/avatars/");
-        expect(off).toContain("fd-settings-profile__avatar");
+        expect(off).toContain("fd-profile-card");
     });
 });
 
@@ -279,7 +280,10 @@ describe("Settings > Account", () => {
         expect(html).toContain('action="/settings/account/photo"');
         expect(html).toContain('enctype="multipart/form-data"');
         expect(html).toContain("data-fd-avatar-upload");
-        expect(html).toContain('data-turbo="false"');
+        // The upload is a Turbo form: only Log out is a full load here.
+        expect(html.match(/<form [^>]*photo"[^>]*>/)?.[0]).not.toContain(
+            "data-turbo",
+        );
         expect(html).toContain('accept="image/jpeg,image/png,image/webp"');
         expect(html).not.toContain("Remove photo");
         expect(html).not.toContain("<img");
@@ -292,11 +296,11 @@ describe("Settings > Account", () => {
     });
     test("Remove is the small destructive button, not a primary submit", () => {
         const html = page({ userId: ME, version: T });
-        const remove = html.match(/<button[^>]*>Remove photo<\/button>/)?.[0];
-        expect(remove).toContain(
-            "fd-settings-btn fd-settings-btn--danger fd-settings-btn--sm",
-        );
-        expect(remove).not.toContain("fd-settings-submit");
+        const remove = html.match(
+            /<button[^>]*>(?:<span[^>]*>)?Remove photo<\/span><\/button>/,
+        )?.[0];
+        expect(remove).toContain("fd-btn fd-btn--danger fd-btn--sm");
+        expect(remove).not.toContain("fd-btn--primary");
         expect(html).not.toContain("fd-settings-submit--quiet");
     });
     test("the Photo card keeps the gap other Account cards have", async () => {

@@ -18,7 +18,7 @@
 
 import { fileURLToPath } from "node:url";
 import { TOASTS } from "./copy/toasts.js";
-import { THEME_COLOR, THEME_NAV_COLOR } from "./tokens.js";
+import { THEME_COLOR } from "./tokens.js";
 
 const SRC_DIR = "./public/widgets/src";
 const INCLUDE_RE = /\/\*@include\s+([^\s@]+)\s*@\*\//g;
@@ -446,17 +446,10 @@ export async function getAppJs(): Promise<string> {
         }
         let src = (await file.text()).trim();
         if (path.endsWith("shell.js")) {
-            src = src
-                .replace(
-                    "const THEME_PAGE_BG = null;",
-                    () =>
-                        `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
-                )
-                .replace(
-                    "const THEME_NAV_BG = null;",
-                    () =>
-                        `const THEME_NAV_BG = ${JSON.stringify(THEME_NAV_COLOR)};`,
-                );
+            src = src.replace(
+                "const THEME_PAGE_BG = null;",
+                () => `const THEME_PAGE_BG = ${JSON.stringify(THEME_COLOR)};`,
+            );
         }
         if (path.endsWith("toast.js")) {
             src = src.replace(

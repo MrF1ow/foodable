@@ -162,7 +162,7 @@ describe("Settings › Notifications", () => {
         expect(html).toMatch(
             /href="\/settings\/notifications" aria-current="page"/,
         );
-        expect(html).toContain("fd-settings-back");
+        expect(html).toContain("fd-settings-detail");
         expect(html).not.toContain("data-fd-toast");
     });
 });

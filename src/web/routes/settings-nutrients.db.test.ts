@@ -309,7 +309,9 @@ describeDb(
             expect(res.status).toBe(200);
             const html = await res.text();
             expect(html).toContain(`test-${userId}@foodable.test`);
-            expect(html).toContain('<option value="US/Pacific" selected>');
+            // The stored zone, even an alias the runtime does not list, is
+            // what the Time zone row shows.
+            expect(html).toContain('fd-item-row__value">US/Pacific<');
             expect(html).not.toContain("preferred_weight_unit");
             expect(html).not.toContain("widgets_enabled");
             expect(html).not.toContain("alcohol_tracking_enabled");
@@ -350,7 +352,9 @@ describeDb(
             const html = await bad.text();
             expect(html).toContain("Choose a time zone from the list.");
             expect(html).not.toContain("IANA");
-            expect(html).toContain("data-sheet-open-on-load");
+            // The refusal is on the time zone page, where the list is.
+            expect(html).toContain('data-fd-settings-page="timezone"');
+            expect(html).not.toContain("data-sheet-open-on-load");
             expect((await getProfile(userId))?.timezone).toBe("US/Pacific");
         });
 

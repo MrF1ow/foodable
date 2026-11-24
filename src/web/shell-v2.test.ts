@@ -337,7 +337,7 @@ describe("the shell", () => {
         const html = v2Html();
         const chip = between(html, /<a class="fd-account-chip"/, "</a>");
         expect(chip).toContain('href="/settings"');
-        expect(chip).toContain('data-turbo="false"');
+        expect(chip).not.toContain("data-turbo");
         expect(chip).toContain(
             'aria-label="Settings, signed in as Ethan Flow"',
         );
@@ -409,10 +409,10 @@ describe("the shell", () => {
             "</a>",
         );
         expect(settings).toContain('href="/settings"');
-        expect(settings).toContain('data-turbo="false"');
+        expect(settings).not.toContain("data-turbo");
         const account = between(html, /<a class="fd-sidebar__account"/, "</a>");
         expect(account).toContain('href="/settings"');
-        expect(account).toContain('data-turbo="false"');
+        expect(account).not.toContain("data-turbo");
         expect(account).toContain('class="fd-sidebar__title">Ethan Flow<');
         expect(account).toContain('class="fd-sidebar__meta">Owner<');
         expect(account).toContain(">EF<");
@@ -653,11 +653,9 @@ describe("head and theme chrome", () => {
         expect(tags[3]).toMatch(/src="\/app-v2\.js/);
     });
 
-    test("page-coloured browser chrome, and the meta says so", () => {
+    test("page-coloured browser chrome", () => {
         const dark = v2Html({ theme: "dark" });
-        expect(dark).toContain(
-            '<meta name="foodable-theme-chrome" content="page" />',
-        );
+        expect(dark).not.toContain("foodable-theme-chrome");
         expect(dark).toContain(
             `<meta name="theme-color" content="${THEME_COLOR.dark}" />`,
         );

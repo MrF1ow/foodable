@@ -191,7 +191,7 @@ import { groceryRestockNotices } from "../domain/restock.js";
 import { maybeOne, run } from "../db/sql.js";
 import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
-import { renderSettingsDisplayV2Page } from "./pages/v2/settings-display.js";
+import { renderSettingsTimezoneV2Page } from "./pages/v2/settings-account-timezone.js";
 import {
     renderSettingsUnitsV2Page,
     type SettingsUnitsV2View,
@@ -203,7 +203,6 @@ import type {
     GoalsFormField,
 } from "./pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "./pages/v2/settings-saved.js";
-import { renderSettingsExportV2Page } from "./pages/v2/settings-export.js";
 import {
     AI_ACTIVITY_LIMIT,
     agentActivityRows,
@@ -907,6 +906,7 @@ async function settingsViewerEmail(userId: string): Promise<string | null> {
 
 export async function renderSettingsHomeRoute(
     viewerUserId: string,
+    opts: { error?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -923,6 +923,7 @@ export async function renderSettingsHomeRoute(
                 profile?.theme === "light" || profile?.theme === "dark"
                     ? profile.theme
                     : null,
+            error: opts.error,
         }),
     };
 }
@@ -955,23 +956,21 @@ export async function renderSettingsAccountV2Route(
     };
 }
 
-export async function renderSettingsDisplayV2Route(
+export async function renderSettingsTimezoneV2Route(
     viewerUserId: string,
-    opts: { error?: string } = {},
+    opts: { error?: string; backHref?: string; q?: string } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const chrome = await viewerChromeWithAttention(profile, gate.viewer);
-    const stored =
-        profile?.theme === "light" || profile?.theme === "dark"
-            ? profile.theme
-            : null;
     return {
         status: 200,
-        html: renderSettingsDisplayV2Page({
+        html: renderSettingsTimezoneV2Page({
             chrome,
-            storedTheme: stored,
+            backHref: opts.backHref ?? "/",
+            timezone: profile?.timezone ?? "",
+            query: opts.q,
             error: opts.error,
         }),
     };
@@ -1109,23 +1108,6 @@ export async function renderSettingsSavedV2Route(
             searchQuery: q,
             error: opts.error,
             openModalId: opts.openModalId,
-        }),
-    };
-}
-
-export async function renderSettingsExportV2Route(
-    viewerUserId: string,
-    opts: { error?: string } = {},
-): Promise<{ status: 200 | 403; html: string }> {
-    const gate = await memberGate(viewerUserId);
-    if ("html" in gate) return { status: gate.status, html: gate.html };
-    const profile = await getProfile(viewerUserId);
-    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
-    return {
-        status: 200,
-        html: renderSettingsExportV2Page({
-            chrome,
-            error: opts.error,
         }),
     };
 }

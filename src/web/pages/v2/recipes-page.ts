@@ -376,7 +376,7 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
             ? `<p class="fd-recipe-error" role="alert">${esc(view.error)}</p>`
             : "";
     return `<div class="fd-recipe-detail">
-${pageError}<p class="fd-recipe-back"><a class="fd-recipe-back__btn fd-settings-phone-back" href="/recipes" data-turbo="false" aria-label="Back to recipes">${backRound}</a><a class="fd-recipe-back__link" href="/recipes">${backChevron}<span>Recipes</span></a></p>
+${pageError}<p class="fd-recipe-back"><a class="fd-recipe-back__btn fd-settings-phone-back" href="/recipes" aria-label="Back to recipes">${backRound}</a><a class="fd-recipe-back__link" href="/recipes">${backChevron}<span>Recipes</span></a></p>
 ${favouriteStarForm({
     recipeId: view.recipe.id,
     recipeName: view.recipe.name,

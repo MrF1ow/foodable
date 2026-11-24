@@ -1,59 +1,108 @@
-/* Settings: home, account, display, help. Phone first; desktop
- * two-pane layout is last so it wins on cascade (same rule as trends.css). */
+/* Settings: the Detail bar and the Page layout around every Settings page
+ * (FigCraft Screens › Settings and Desktop › Settings).
+ *
+ * Phone: the Detail bar (back, title centred) over the page's content; the
+ * layout's header (the desktop title) and menu are hidden. From 1024 px the
+ * Detail bar goes, the title and the menu (a flat list of Side links) show
+ * beside a 640 content column, and Settings home becomes two columns. The
+ * layout's own gaps and widths are in layout.css. */
 
 .fd-settings {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    /* The shell's main already holds the phone gutter (FigCraft 23562: 20px). */
-    padding: var(--space-gutter) 0;
-    padding-bottom: calc(var(--space-gutter) + 5.5rem);
-    max-width: 40rem;
+    min-width: 0;
 }
-
-.fd-settings-aside {
+.fd-settings-detail {
+    margin: 0 0 var(--space-md);
+}
+.fd-settings .fd-page-layout__box {
+    gap: var(--space-md);
+}
+/* The header holds the desktop title; a page that puts something under it
+   for phones too (the time zone search) shows it there as well. */
+.fd-settings .fd-page-layout__header,
+.fd-settings .fd-page-layout__menu {
+    display: none;
+}
+.fd-settings--timezone .fd-page-layout__header {
+    display: flex;
+}
+.fd-settings-page-title {
+    display: none;
+    margin: 0;
+    color: var(--text-primary);
+    font-family: var(--font-display);
+    font-size: var(--text-title-page-size);
+    font-weight: 700;
+    line-height: var(--text-title-page-line);
+    letter-spacing: -0.5px;
+}
+.fd-settings-menu {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: var(--space-2xs);
 }
-
-.fd-settings-profile {
+/* The pages built from components (home, account, time zone) stack their
+   parts 12 px apart; a section header brings its own 20 px above. */
+.fd-settings--flat .fd-page-layout__column,
+.fd-settings--flat .fd-settings-content {
     display: flex;
     flex-direction: column;
-    gap: var(--space-gap);
-    padding: var(--space-section);
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    border: none;
-    text-align: left;
-    box-shadow: 0 4px 14px var(--overlay-shadow);
+    gap: var(--space-md);
 }
-
-.fd-settings-profile__row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-gap);
+.fd-settings--flat .fd-page-layout__columns {
+    gap: var(--space-md);
 }
-
-.fd-settings-profile__text {
-    flex: 1 1 auto;
+/* The Display row's control: a small Segmented that keeps its own width. */
+.fd-settings-display .fd-segmented {
+    flex: none;
+}
+.fd-settings-tz-search {
+    margin: 0;
+}
+/* The zones are a fieldset for the radio group's name; it draws nothing. */
+.fd-settings-tz-group {
+    margin: 0;
+    padding: 0;
+    border: 0;
     min-width: 0;
 }
 
-.fd-settings-profile__avatar {
-    box-sizing: border-box;
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.75rem;
-    height: 2.75rem;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font: 600 0.8125rem/1.1 var(--font-body);
-    border: 1px solid var(--line);
+@media (min-width: 1024px) {
+    .fd-settings-detail {
+        display: none;
+    }
+    .fd-settings--flat .fd-page-layout__columns {
+        gap: var(--space-3xl);
+    }
+    /* The design sets the title 8 px lower and 44 px above the columns. */
+    .fd-settings .fd-page-layout__box {
+        gap: calc(var(--space-3xl) + var(--space-md));
+        padding-top: var(--space-sm);
+    }
+    /* The time zone page keeps 32 px from the search field to the columns and
+       puts 24 between the title and the search field. */
+    .fd-settings--timezone .fd-page-layout__box {
+        gap: var(--space-3xl);
+    }
+    .fd-settings--timezone .fd-page-layout__header {
+        gap: var(--space-2xl);
+    }
+    /* Preferences and Connect are 24 apart in the right column (12 from the
+       column's gap, 12 here, and the header's own 20). */
+    .fd-settings--home .fd-list-group + .fd-section-header {
+        margin-top: var(--space-md);
+    }
+    .fd-settings .fd-page-layout__header,
+    .fd-settings .fd-page-layout__menu {
+        display: flex;
+    }
+    .fd-settings-page-title {
+        display: block;
+    }
+    .fd-settings-tz-search {
+        max-width: 360px;
+    }
 }
 
 /* Settings > Account > Photo: the picture beside the change and remove forms. */
@@ -102,167 +151,6 @@
     color: var(--text-secondary);
 }
 
-.fd-settings-profile__name {
-    margin: 0;
-    font: 600 1rem/1.25 var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-settings-profile__email {
-    margin: 2px 0 0;
-    font: 400 0.8125rem/1.2 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-settings-profile__stats {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: var(--space-gap);
-    padding-top: 2px;
-}
-
-.fd-settings-profile__stat {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
-
-.fd-settings-profile__stat-label {
-    font: 600 0.6875rem/1.1 var(--font-body);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-settings-profile__stat-value {
-    font: 400 0.875rem/1.2 var(--font-body);
-    color: var(--text-primary);
-    overflow-wrap: anywhere;
-}
-
-.fd-settings-menu__groups {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-/* The flat desktop nav only shows from 1024px; phones get the grouped menu. */
-.fd-settings-menu--desktop {
-    display: none;
-}
-
-.fd-settings-menu__group-label {
-    margin: 0;
-    padding: 22px 0 8px 4px;
-    font: 600 0.6875rem/1.1 var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-settings-menu__list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    border: none;
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-settings-menu__list--inset {
-    margin-top: var(--fd-s-6);
-    box-shadow: none;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--surface-raised);
-}
-
-.fd-settings-menu__item + .fd-settings-menu__item {
-    border-top: 1px solid var(--line);
-}
-
-.fd-settings-menu__link {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 51px;
-    padding: 13px var(--space-section);
-    color: var(--text-primary);
-    text-decoration: none;
-    font: 400 0.9375rem/1.25 var(--font-body);
-}
-
-.fd-settings-menu__icon {
-    flex: none;
-    color: var(--text-secondary);
-}
-
-.fd-settings-menu__label {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.fd-settings-menu__badge {
-    flex: none;
-    font: 400 0.8125rem/1.2 var(--font-body);
-    color: var(--text-tertiary);
-}
-
-.fd-settings-menu__link:hover {
-    background: var(--surface-raised);
-}
-
-.fd-settings-menu__link[aria-current="page"] {
-    color: var(--text-primary);
-    font-weight: 500;
-}
-
-.fd-settings-menu__chev {
-    color: var(--text-tertiary);
-    flex: none;
-}
-
-.fd-settings-home-pane__head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--space-gap);
-    flex-wrap: wrap;
-}
-
-.fd-settings-home-pane__title {
-    margin: 0;
-    font: 600 1.125rem/1.25 var(--font-display);
-    letter-spacing: -0.02em;
-    color: var(--text-primary);
-}
-
-.fd-settings-home-pane__meta {
-    font: 400 0.8125rem/1.2 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-settings-home-pane__lead {
-    margin: var(--space-section) 0 0;
-    font: 400 0.875rem/1.4 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-settings-home-pane__link {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--fd-s-6);
-    margin-top: var(--space-section);
-    font: 600 0.875rem/1.25 var(--font-body);
-    color: var(--accent-text);
-    text-decoration: none;
-}
-
 .fd-settings-phone-top {
     display: grid;
     grid-template-columns: 2.25rem 1fr 2.25rem;
@@ -294,79 +182,6 @@
 
 .fd-settings-phone-top__balance {
     width: 2.25rem;
-}
-
-.fd-settings-desktop-banner {
-    display: none;
-}
-
-.fd-settings-columns {
-    display: contents;
-}
-
-.fd-settings-home-pane {
-    display: none;
-}
-
-.fd-settings-menu__display-row {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 51px;
-    padding: 13px var(--space-section);
-    color: var(--text-primary);
-    font: 400 0.9375rem/1.25 var(--font-body);
-}
-
-.fd-settings-menu__display-row .fd-settings-menu__label {
-    flex: 0 1 auto;
-    min-width: 0;
-}
-
-.fd-settings-theme-form {
-    flex: none;
-    margin: 0;
-    margin-left: auto;
-}
-
-.fd-settings-theme-seg {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    padding: 3px;
-    border-radius: var(--radius-pill);
-    border: 1px solid var(--line);
-    background: var(--surface-bg);
-}
-
-.fd-settings-theme-btn {
-    border: 0;
-    margin: 0;
-    padding: 4px 10px;
-    border-radius: var(--radius-pill);
-    background: transparent;
-    color: var(--text-secondary);
-    font: 400 0.75rem/1.1 var(--font-body);
-    cursor: pointer;
-}
-
-.fd-settings-theme-btn--on {
-    background: var(--text-primary);
-    color: var(--surface-bg);
-}
-
-.fd-settings-back {
-    display: inline-flex;
-    align-items: center;
-    margin-bottom: var(--fd-s-12);
-    color: var(--accent-text);
-    text-decoration: none;
-    font-weight: 500;
-}
-
-.fd-settings-back::before {
-    content: "‹";
-    margin-right: 0.25rem;
 }
 
 .fd-settings-main {
@@ -464,15 +279,6 @@
     text-align: center;
 }
 
-.fd-settings-section-label {
-    margin: 22px 0 8px;
-    padding-left: 4px;
-    font: 600 0.6875rem/1.1 var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
 .fd-settings-form--prefs {
     margin-top: var(--fd-s-12);
 }
@@ -529,19 +335,6 @@
     font: inherit;
     font-weight: 600;
     cursor: pointer;
-}
-
-/* Account's Log out row: the Household row card with a red label. */
-.fd-settings-account .fd-stores-pref--danger,
-.fd-settings-account .fd-stores-pref--danger .fd-row__title {
-    color: var(--status-over);
-}
-
-.fd-settings-footnote {
-    margin: 14px 0 0;
-    padding-left: 4px;
-    font: 400 0.75rem/1.35 var(--font-body);
-    color: var(--text-secondary);
 }
 
 /* Help: one card of rows, the Settings card language. Each row is a native
@@ -823,13 +616,6 @@
     text-decoration: none;
 }
 
-.fd-settings-export-lead {
-    margin: 0 0 var(--fd-s-12);
-    color: var(--text-secondary);
-    font-size: 0.9375rem;
-    line-height: 1.45;
-}
-
 .fd-settings-goals-date,
 .fd-settings-goals-note {
     margin: 0 0 var(--fd-s-12);
@@ -941,25 +727,6 @@
     .fd-settings-back,
 .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
     .fd-settings-head--phone {
-    display: none;
-}
-
-/* Hide the side menu on phone subpages (home shows the full menu). */
-.fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
-    .fd-settings-aside
-    .fd-settings-menu--phone {
-    display: none;
-}
-
-.fd-settings[data-fd-settings-page="home"] .fd-settings-back {
-    display: none;
-}
-
-/* The home's in-content profile card is desktop-only (the phone shows its
-   own above the menu). */
-.fd-settings[data-fd-settings-page="home"]
-    .fd-settings-content
-    > .fd-settings-profile {
     display: none;
 }
 
@@ -1721,52 +1488,6 @@
         padding-bottom: 0;
     }
 
-    .fd-settings-desktop-banner {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        flex: 0 0 auto;
-        width: 15rem;
-        max-width: 100%;
-        margin-bottom: var(--space-section);
-    }
-
-    .fd-settings-desktop-banner__title {
-        margin: 0;
-        font: 600 2.125rem/1.2 var(--font-display);
-        letter-spacing: -0.02em;
-        color: var(--text-primary);
-    }
-
-    .fd-settings-desktop-banner__sub {
-        margin: 0;
-        font: 400 0.875rem/1.3 var(--font-body);
-        color: var(--text-secondary);
-    }
-
-    .fd-settings-columns {
-        display: flex;
-        flex-direction: row;
-        align-items: flex-start;
-        gap: var(--space-section);
-        min-width: 0;
-    }
-
-    .fd-settings-aside {
-        flex: 0 0 15rem;
-        width: 15rem;
-        position: sticky;
-        top: var(--fd-s-12);
-    }
-
-    .fd-settings-aside .fd-settings-menu--phone {
-        display: none;
-    }
-
-    .fd-settings-aside .fd-settings-menu--desktop {
-        display: block;
-    }
-
     .fd-settings-phone-top,
     .fd-settings[data-fd-settings-page="home"] .fd-settings-phone-top {
         display: none;
@@ -1776,45 +1497,6 @@
         display: none;
     }
 
-    .fd-settings-profile-phone {
-        display: none;
-    }
-
-    .fd-settings[data-fd-settings-page="home"]
-        .fd-settings-content
-        > .fd-settings-profile {
-        display: none;
-    }
-
-    .fd-settings-menu__list {
-        border-radius: 0;
-        background: transparent;
-        box-shadow: none;
-    }
-
-    .fd-settings-menu__link {
-        min-height: 42px;
-        padding: 9px 12px;
-        gap: 12px;
-        border-radius: var(--radius-sm);
-        color: var(--text-secondary);
-        font: 400 0.9375rem/1.25 var(--font-body);
-    }
-
-    .fd-settings-menu__link[aria-current="page"] {
-        background: var(--surface-panel);
-        color: var(--text-primary);
-        font-weight: 500;
-    }
-
-    .fd-settings-menu__item + .fd-settings-menu__item {
-        border-top: none;
-    }
-
-    .fd-settings-menu__badge {
-        margin-left: auto;
-    }
-
     .fd-settings-main {
         flex: 1 1 0;
         min-width: 0;
@@ -1822,20 +1504,6 @@
 
     .fd-settings[data-fd-settings-page="home"] .fd-settings-main {
         flex: 1 1 0;
-    }
-
-    .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
-        .fd-settings-back {
-        display: none;
-    }
-
-    .fd-settings-home-pane {
-        display: flex;
-        flex-direction: column;
-        padding: 22px;
-        border-radius: var(--radius-lg);
-        background: var(--surface-panel);
-        box-shadow: 0 4px 14px var(--overlay-shadow);
     }
 
     /* Goals and AI connections read in a 680px column beside the menu
