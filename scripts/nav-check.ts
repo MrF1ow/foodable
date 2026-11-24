@@ -3605,6 +3605,327 @@ try {
         },
     );
 
+    // Settings › Units: a pull-down on each row, no sheet. A choice posts on
+    // its own over Turbo and comes back to the page with no toast.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings");
+    await setMarker();
+    await clickSel('a[href="/settings/units"]');
+    await sleep(500);
+    const unitsPage = await ev<{
+        path: string;
+        marker: string | null;
+        title: string | null;
+        optOuts: number;
+        dialogs: number;
+        rows: string[];
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        title: document.querySelector("h1")?.textContent?.trim() ?? null,
+        optOuts: document.querySelectorAll('.fd-settings [data-turbo="false"]').length,
+        dialogs: document.querySelectorAll(".fd-settings dialog").length,
+        rows: [...document.querySelectorAll(".fd-settings-content .fd-menu--row .fd-item-row__title")].map((e) => e.textContent),
+    })`);
+    await clickSel(".fd-settings-content .fd-menu--row [data-fd-menu-trigger]");
+    await sleep(150);
+    const unitsMenu = await ev<{ open: boolean; choices: string[] }>(`({
+        open: !document.querySelector(".fd-settings-content .fd-menu--row .fd-menu__panel")?.hidden,
+        choices: [...document.querySelectorAll(".fd-settings-content .fd-menu--row .fd-menu__panel .fd-menu__label")].slice(0, 3).map((e) => e.textContent),
+    })`);
+    await ev(
+        `[...document.querySelectorAll(".fd-settings-content .fd-menu--row .fd-menu__panel button")].find((b) => b.textContent.trim() === "kg").click()`,
+    );
+    await sleep(600);
+    const unitPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/units",
+    );
+    const afterUnits = await ev<{
+        marker: string | null;
+        path: string;
+        toasts: number;
+    }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    record(
+        "Settings › Units: a Turbo page with a pull-down on Weight and Drinks and no sheet; choosing a unit posts it alone over Turbo with no toast",
+        unitsPage.path === "/settings/units" &&
+            unitsPage.marker === "stay" &&
+            unitsPage.title === "Units" &&
+            unitsPage.optOuts === 0 &&
+            unitsPage.dialogs === 0 &&
+            unitsPage.rows.join("|") === "Weight|Drinks" &&
+            unitsMenu.open &&
+            unitsMenu.choices.join("|") === "Not set|kg|lb" &&
+            unitPosts.length === 1 &&
+            unitPosts[0]!.entries.some(
+                ([k, v]) => k === "preferred_weight_unit" && v === "kg",
+            ) &&
+            afterUnits.marker === "stay" &&
+            afterUnits.path === "/settings/units" &&
+            afterUnits.toasts === 0,
+        { unitsPage, unitsMenu, unitPosts, afterUnits, ex: drain() },
+    );
+
+    // Settings › Nutrients shown: each switch posts alone over Turbo.
+    await control("reset=posts");
+    await goto("/settings");
+    await setMarker();
+    await clickSel('a[href="/settings/nutrients"]');
+    await sleep(500);
+    await clickSel('.fd-settings-content button[aria-label="Sugar"]');
+    await sleep(600);
+    const nutrientPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/nutrients",
+    );
+    const afterNutrients = await ev<{
+        marker: string | null;
+        path: string;
+        title: string | null;
+        optOuts: number;
+        toasts: number;
+    }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+        title: document.querySelector("h1")?.textContent?.trim() ?? null,
+        optOuts: document.querySelectorAll('.fd-settings [data-turbo="false"]').length,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    record(
+        "Settings › Nutrients shown: a switch posts alone over Turbo and comes back to the page with no toast",
+        afterNutrients.path === "/settings/nutrients" &&
+            afterNutrients.marker === "stay" &&
+            afterNutrients.title === "Nutrients shown" &&
+            afterNutrients.optOuts === 0 &&
+            afterNutrients.toasts === 0 &&
+            nutrientPosts.length === 1 &&
+            nutrientPosts[0]!.entries.some(
+                ([k, v]) => k === "nutrient" && v === "sugar",
+            ) &&
+            nutrientPosts[0]!.entries.some(
+                ([k, v]) => k === "shown" && v === "0",
+            ),
+        { nutrientPosts, afterNutrients, ex: drain() },
+    );
+
+    // Settings › AI connections: no form opts out of Turbo and there is no
+    // sheet. An app's ⋯ confirms Disconnect in place; the switches and a
+    // change's ⋯ Undo post over Turbo, each back to the page with no toast.
+    await control("reset=posts");
+    await goto("/settings");
+    await setMarker();
+    await clickSel('a[href="/settings/ai-connections"]');
+    await sleep(500);
+    const aiPage = await ev<{
+        path: string;
+        marker: string | null;
+        title: string | null;
+        optOuts: number;
+        dialogs: number;
+        apps: number;
+        switches: string[];
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        title: document.querySelector("h1")?.textContent?.trim() ?? null,
+        optOuts: document.querySelectorAll('.fd-settings [data-turbo="false"]').length,
+        dialogs: document.querySelectorAll(".fd-settings dialog").length,
+        apps: document.querySelectorAll('.fd-settings-content ul[aria-label="Connected apps"] > li').length,
+        switches: [...document.querySelectorAll('.fd-settings-content [data-fd-ai-agents] [role="switch"], .fd-settings-content [data-fd-ai-household] [role="switch"]')].map((e) => e.getAttribute("aria-label")),
+    })`);
+    await clickSel(
+        '.fd-settings-content ul[aria-label="Connected apps"] .fd-menu [data-fd-menu-trigger]',
+    );
+    await sleep(150);
+    await clickSel(".fd-settings-content [data-fd-menu-arm]");
+    await sleep(150);
+    const disconnectConfirm = await ev<{ open: boolean; verbs: string[] }>(`({
+        open: !document.querySelector(".fd-settings-content .fd-menu__confirm-row")?.hidden,
+        verbs: [...document.querySelectorAll('.fd-settings-content ul[aria-label="Connected apps"] > li:first-child .fd-menu__confirm-row .fd-menu__label')].map((e) => e.textContent),
+    })`);
+    await clickSel(
+        '.fd-settings-content .fd-menu__confirm-row form[action="/settings/ai-connections/disconnect"] button',
+    );
+    await sleep(600);
+    const disconnectPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/ai-connections/disconnect",
+    );
+    const afterDisconnect = await ev<{
+        marker: string | null;
+        path: string;
+        toasts: number;
+    }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    await control("reset=posts");
+    await clickSel(
+        '.fd-settings-content button[aria-label="Your agents can delete"]',
+    );
+    await sleep(500);
+    await clickSel(
+        '.fd-settings-content button[aria-label="Any agent can delete"]',
+    );
+    await sleep(500);
+    await clickSel(
+        ".fd-settings-content [data-fd-ai-activity] .fd-menu [data-fd-menu-trigger]",
+    );
+    await sleep(150);
+    await clickSel(
+        '.fd-settings-content [data-fd-ai-activity] .fd-menu form[action$="/undo"] button',
+    );
+    await sleep(600);
+    const aiPosts = (await stats()).posts.map((p) => p.path);
+    const afterAi = await ev<{
+        marker: string | null;
+        path: string;
+        toasts: number;
+    }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    record(
+        "Settings › AI connections: a Turbo page with no opt-out and no sheet; an app's ⋯ confirms Disconnect in place; the agent switches and a change's Undo post over Turbo with no toast",
+        aiPage.path === "/settings/ai-connections" &&
+            aiPage.marker === "stay" &&
+            aiPage.title === "AI connections" &&
+            aiPage.optOuts === 0 &&
+            aiPage.dialogs === 0 &&
+            aiPage.apps === 4 &&
+            aiPage.switches.join("|") ===
+                "Show cards in chat|Your agents can delete|Any agent can delete" &&
+            disconnectConfirm.open &&
+            disconnectConfirm.verbs.join("|") === "Cancel|Disconnect" &&
+            disconnectPosts.length === 1 &&
+            disconnectPosts[0]!.entries.some(
+                ([k, v]) =>
+                    k === "client" &&
+                    v === "7d3f6c2e-5b1a-4e8f-9a3d-1c2b3a4d5e6f",
+            ) &&
+            afterDisconnect.marker === "stay" &&
+            afterDisconnect.path === "/settings/ai-connections" &&
+            afterDisconnect.toasts === 0 &&
+            aiPosts.length === 3 &&
+            aiPosts[0] === "/settings/ai-connections/agent-delete" &&
+            aiPosts[1] === "/settings/ai-connections/destructive" &&
+            aiPosts[2]!.startsWith("/settings/ai-connections/actions/") &&
+            aiPosts[2]!.endsWith("/undo") &&
+            afterAi.marker === "stay" &&
+            afterAi.path === "/settings/ai-connections" &&
+            afterAi.toasts === 0,
+        {
+            aiPage,
+            disconnectConfirm,
+            disconnectPosts,
+            afterDisconnect,
+            aiPosts,
+            afterAi,
+            ex: drain(),
+        },
+    );
+
+    // An app's ⋯ › Changes narrows Recent changes to that app over a Turbo
+    // visit that lands on the section; Show all brings every change back.
+    await control("reset=posts");
+    await goto("/settings/ai-connections");
+    await setMarker();
+    await clickSel(
+        '.fd-settings-content ul[aria-label="Connected apps"] > li:first-child .fd-menu [data-fd-menu-trigger]',
+    );
+    await sleep(150);
+    await clickSel(
+        '.fd-settings-content ul[aria-label="Connected apps"] > li:first-child .fd-menu a[href^="/settings/ai-connections?app="]',
+    );
+    await sleep(600);
+    const changesState = `({
+        marker: window.__marker ?? null,
+        href: location.pathname + location.search + location.hash,
+        rows: document.querySelectorAll("[data-fd-ai-activity] > li").length,
+        showAll: document.querySelector("#recent-changes .fd-section-header__action")?.textContent?.trim() ?? null,
+        scope: document.querySelector(".fd-settings-ai__scope")?.textContent ?? null,
+        sideways: document.documentElement.scrollWidth > window.innerWidth,
+        optOuts: document.querySelectorAll('.fd-settings [data-turbo="false"]').length,
+    })`;
+    const changesOn = await ev<{
+        marker: string | null;
+        href: string;
+        rows: number;
+        showAll: string | null;
+        scope: string | null;
+        sideways: boolean;
+        optOuts: number;
+    }>(changesState);
+    await clickSel("#recent-changes .fd-section-header__action");
+    await sleep(600);
+    const changesOff = await ev<{
+        marker: string | null;
+        href: string;
+        rows: number;
+        showAll: string | null;
+        scope: string | null;
+        sideways: boolean;
+        optOuts: number;
+    }>(changesState);
+    record(
+        "Settings › AI connections: an app's ⋯ › Changes narrows Recent changes to it over a Turbo visit that lands on the section, and Show all brings every change back",
+        changesOn.marker === "stay" &&
+            changesOn.href ===
+                "/settings/ai-connections?app=7d3f6c2e-5b1a-4e8f-9a3d-1c2b3a4d5e6f#recent-changes" &&
+            changesOn.rows === 1 &&
+            changesOn.showAll === "Show all" &&
+            changesOn.scope === "Changes by Claude among the latest 50" &&
+            !changesOn.sideways &&
+            changesOn.optOuts === 0 &&
+            changesOff.marker === "stay" &&
+            changesOff.href === "/settings/ai-connections#recent-changes" &&
+            changesOff.rows === 2 &&
+            changesOff.showAll === null &&
+            changesOff.scope === null,
+        { changesOn, changesOff, ex: drain() },
+    );
+
+    // Settings › Help: the search field is a GET that Turbo follows in place.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/help");
+    await setMarker();
+    const helpBefore = await ev<number>(
+        `document.querySelectorAll(".fd-item-row__disclosure").length`,
+    );
+    await ev(`(() => {
+        const input = document.querySelector('.fd-settings-help-search input[name="q"]');
+        input.value = "zip";
+        input.form.requestSubmit();
+    })()`);
+    await sleep(600);
+    const helpSearch = await ev<{
+        marker: string | null;
+        href: string;
+        rows: number;
+        typed: string | null;
+        optOuts: number;
+    }>(`({
+        marker: window.__marker ?? null,
+        href: location.pathname + location.search,
+        rows: document.querySelectorAll(".fd-item-row__disclosure").length,
+        typed: document.querySelector('.fd-settings-help-search input[name="q"]')?.value ?? null,
+        optOuts: document.querySelectorAll('.fd-settings [data-turbo="false"]').length,
+    })`);
+    record(
+        "Settings › Help: searching lists the matching topics over a Turbo visit, with the typed words kept in the field",
+        helpBefore > 5 &&
+            helpSearch.marker === "stay" &&
+            helpSearch.href === "/settings/help?q=zip" &&
+            helpSearch.rows >= 1 &&
+            helpSearch.rows < helpBefore &&
+            helpSearch.typed === "zip" &&
+            helpSearch.optOuts === 0,
+        { helpBefore, helpSearch, ex: drain() },
+    );
+
     // Settings › Saved foods & recipes: Select lives in the Detail bar's ⋯ and
     // starts select mode from there (the menu closes, the row ⋯ steps aside);
     // a food's ⋯ has Edit, Merge and Delete, and Edit and Merge open the one

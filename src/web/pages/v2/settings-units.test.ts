@@ -4,8 +4,6 @@ import {
     drinkUnitLabel,
     renderSettingsUnitsV2Body,
     renderSettingsUnitsV2Page,
-    UNITS_DRINKS_SHEET_ID,
-    UNITS_WEIGHT_SHEET_ID,
     weightUnitLabel,
 } from "./settings-units.js";
 
@@ -22,46 +20,94 @@ const chrome = {
 
 const view = { chrome, weightUnit: "lb" as const, drinkUnit: "us" as const };
 
-describe("Settings › Units", () => {
-    test("lists Weight and Drinks with their values, and no Water row", () => {
-        const html = renderSettingsUnitsV2Body(view);
-        expect(html).toContain("How Foodable shows amounts to you.");
-        expect(html).toContain("What is already logged does not change.");
-        expect(html).toMatch(/fd-row__title">Weight</);
-        expect(html).toMatch(/fd-stores-pref__value">lb</);
-        expect(html).toMatch(/fd-row__title">Drinks</);
-        expect(html).toMatch(/fd-stores-pref__value">US drinks</);
-        expect(html).not.toContain("Water");
-    });
-
-    test("rows are label, value and chevron, with no leading icon", () => {
-        const html = renderSettingsUnitsV2Body(view);
-        expect(html).not.toContain("fd-stores-pref__icon");
-        // Each row button opens on its label (the chevron is the only icon).
-        expect(
-            html.match(
-                /command="show-modal"><span class="fd-stores-pref__main"/g,
+/** The pull-down of one row: its trigger's value and the choices it posts. */
+function pullDown(html: string, title: string) {
+    const menu = html.match(
+        new RegExp(
+            `<div class="fd-menu fd-menu--anchored fd-menu--row"[^>]*>(?:(?!<li ).)*?title="${title}"(?:(?!<li ).)*`,
+            "s",
+        ),
+    )?.[0];
+    if (!menu) throw new Error(`no pull-down for ${title}`);
+    return {
+        value: menu.match(/class="fd-item-row__value">([^<]*)</)?.[1],
+        // The chosen value is a button that only closes the menu (nothing to
+        // post); every other is a form of one hidden field and its button.
+        choices: [
+            ...menu.matchAll(
+                /(?:<form class="fd-menu__form" method="post" action="([^"]+)"><input type="hidden" name="([^"]+)" value="([^"]*)">)?<button[^>]*aria-checked="(true|false)"[^>]*>.*?fd-menu__label">([^<]*)</gs,
             ),
-        ).toHaveLength(2);
-        expect(html.match(/fd-row__chevron/g)).toHaveLength(2);
+        ].map((m) =>
+            m[1] === undefined
+                ? { current: true, checked: m[4] === "true", label: m[5] }
+                : {
+                      action: m[1],
+                      name: m[2],
+                      value: m[3],
+                      checked: m[4] === "true",
+                      label: m[5],
+                  },
+        ),
+    };
+}
+
+describe("Settings › Units", () => {
+    test("two rows, Weight and Drinks, with their values and no intro or Water row", () => {
+        const html = renderSettingsUnitsV2Body(view);
+        expect(html).not.toContain("How Foodable shows amounts to you.");
+        expect(html).not.toContain("What is already logged does not change.");
+        expect(html).not.toContain("Water");
+        expect(pullDown(html, "Weight").value).toBe("lb");
+        expect(pullDown(html, "Drinks").value).toBe("US drinks");
+        expect(html.match(/fd-menu--row/g)).toHaveLength(2);
+        // Pull-downs, not sheets: no dialog, no old row or select.
+        expect(html).not.toContain("<dialog");
+        expect(html).not.toContain("fd-settings-select");
+        expect(html).not.toContain("fd-stores-pref");
     });
 
-    test("each row opens a sheet whose form posts the unit to /settings/units", () => {
+    test("each pull-down posts its unit to /settings/units and ticks the stored choice", () => {
         const html = renderSettingsUnitsV2Body(view);
-        expect(html).toContain(`commandfor="${UNITS_WEIGHT_SHEET_ID}"`);
-        expect(html).toContain(`commandfor="${UNITS_DRINKS_SHEET_ID}"`);
-        expect(html.match(/action="\/settings\/units"/g)).toHaveLength(2);
-        expect(html).toContain('name="preferred_weight_unit"');
-        expect(html).toContain('name="preferred_drink_unit"');
-        // The stored choice is the selected option; "Not set" clears it.
-        expect(html).toMatch(/<option value="lb" selected>lb</);
-        expect(html).toMatch(/<option value="us" selected>US drinks</);
-        expect(html).toContain('<option value="">Not set</option>');
-        // No full-page reload: only Account and Display opt out of Turbo.
+        expect(pullDown(html, "Weight").choices).toEqual([
+            {
+                action: "/settings/units",
+                name: "preferred_weight_unit",
+                value: "",
+                checked: false,
+                label: "Not set",
+            },
+            {
+                action: "/settings/units",
+                name: "preferred_weight_unit",
+                value: "kg",
+                checked: false,
+                label: "kg",
+            },
+            // Picking the unit already chosen posts nothing.
+            { current: true, checked: true, label: "lb" },
+        ]);
+        expect(pullDown(html, "Drinks").choices).toEqual([
+            {
+                action: "/settings/units",
+                name: "preferred_drink_unit",
+                value: "",
+                checked: false,
+                label: "Not set",
+            },
+            { current: true, checked: true, label: "US drinks" },
+            {
+                action: "/settings/units",
+                name: "preferred_drink_unit",
+                value: "uk",
+                checked: false,
+                label: "UK units",
+            },
+        ]);
+        // A save is a Turbo visit: nothing opts out.
         expect(html).not.toContain("data-turbo");
     });
 
-    test("a unit never chosen reads Not set", () => {
+    test("a unit never chosen reads Not set and ticks it", () => {
         expect(weightUnitLabel("")).toBe("Not set");
         expect(drinkUnitLabel("")).toBe("Not set");
         expect(drinkUnitLabel("uk")).toBe("UK units");
@@ -70,20 +116,22 @@ describe("Settings › Units", () => {
             weightUnit: "",
             drinkUnit: "",
         });
-        expect(html).toContain('<option value="" selected>Not set</option>');
-        expect(html.match(/fd-stores-pref__value">Not set</g)).toHaveLength(2);
+        expect(pullDown(html, "Weight").value).toBe("Not set");
+        expect(pullDown(html, "Drinks").value).toBe("Not set");
+        expect(
+            pullDown(html, "Weight").choices.find((c) => c.checked)?.label,
+        ).toBe("Not set");
     });
 
-    test("an error reopens its sheet and shows inside it", () => {
+    test("a refused value says so above the rows", () => {
         const html = renderSettingsUnitsV2Body({
             ...view,
             error: "Choose kg or lb.",
-            openSheet: UNITS_WEIGHT_SHEET_ID,
         });
-        expect(html).toContain("data-sheet-open-on-load");
         expect(html.match(/Choose kg or lb\./g)).toHaveLength(1);
-        const sheet = html.slice(html.indexOf(`id="${UNITS_WEIGHT_SHEET_ID}"`));
-        expect(sheet.indexOf("Choose kg or lb.")).toBeGreaterThan(-1);
+        expect(html.indexOf("Choose kg or lb.")).toBeLessThan(
+            html.indexOf("fd-menu--row"),
+        );
     });
 
     test("the page is the Units section", () => {

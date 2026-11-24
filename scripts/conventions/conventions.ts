@@ -479,6 +479,7 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/routes/settings.test.ts": "settings",
     "src/web/routes/settings-ai.db.test.ts": "settings",
     "src/web/routes/settings-nutrients.db.test.ts": "settings",
+    "src/web/routes/settings-help.db.test.ts": "settings",
     "src/web/routes/settings-agent-actions.db.test.ts": "settings",
     "src/web/routes/trends.ts": "web",
     "src/web/routes/trends.test.ts": "web",

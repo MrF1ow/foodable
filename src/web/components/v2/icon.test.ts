@@ -124,12 +124,12 @@ test("the old icon modules still emit today's exact markup", () => {
             }
         }
     }
-    expect(parts.length).toBe(23);
+    expect(parts.length).toBe(22);
     const digest = new Bun.CryptoHasher("sha256")
         .update(parts.join("\n"))
         .digest("hex");
     expect(digest).toBe(
-        "4ea67a42f1b89a7c20d0a0311a80e549df0658c9c7821f349a97aa91efaae901",
+        "b3943c6d208a3f25f64e77da2e34b24b8a842f66658cc790a19c9269b5a21fc7",
     );
 });
 

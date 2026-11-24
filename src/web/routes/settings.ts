@@ -53,6 +53,7 @@ import {
     type AgentUndoStatus,
 } from "../../domain/agent-actions.js";
 import { exportAllData } from "../../domain/export.js";
+import { can } from "../../domain/permissions.js";
 import { checkRateLimit } from "../../rate-limit.js";
 import { isValidDisplayTheme } from "../pages/v2/settings-home.js";
 import { formText } from "../form.js";
@@ -91,11 +92,7 @@ import {
     isSwitchableNutrient,
     NUTRIENTS_PATH,
 } from "../pages/v2/settings-nutrients.js";
-import {
-    UNITS_DRINKS_SHEET_ID,
-    UNITS_PATH,
-    UNITS_WEIGHT_SHEET_ID,
-} from "../pages/v2/settings-units.js";
+import { UNITS_PATH } from "../pages/v2/settings-units.js";
 import { isDrinkUnit } from "../../alcohol.js";
 import { isWeightUnit } from "../../domain/units.js";
 import {
@@ -442,6 +439,8 @@ settingsRoutes.post(
 settingsRoutes.get("/settings/ai-connections", requireSiteUser, async (c) => {
     const page = await renderSettingsAiV2Route(c.get("userId"), {
         mcpUrl: `${getBaseUrl(c)}/mcp`,
+        // Narrows Recent changes to one app; read-only, so a GET.
+        app: c.req.query("app"),
     });
     return c.html(page.html, page.status);
 });
@@ -514,6 +513,22 @@ settingsRoutes.post(AI_AGENT_DELETE_PATH, requireMember, async (c) => {
         const page = await renderSettingsAiV2Route(c.get("userId"), {
             mcpUrl: `${getBaseUrl(c)}/mcp`,
             error: "Choose On or Off.",
+        });
+        return c.html(page.html, page.status === 200 ? 400 : page.status);
+    }
+    // The page holds a member's switch Off while the owner's household switch
+    // is off; a post that would turn it on is refused the same way. The owner's
+    // own switch stays theirs to move.
+    if (
+        value === "1" &&
+        !can(member, "agents.household_switch").ok &&
+        !(await liveSettingsStore().getAgentDestructiveAllowed(
+            member.householdId,
+        ))
+    ) {
+        const page = await renderSettingsAiV2Route(c.get("userId"), {
+            mcpUrl: `${getBaseUrl(c)}/mcp`,
+            error: "Agents cannot delete while the household switch is off.",
         });
         return c.html(page.html, page.status === 200 ? 400 : page.status);
     }
@@ -639,14 +654,12 @@ settingsRoutes.post(UNITS_PATH, requireMember, async (c) => {
     if (hasWeight && weight !== "" && !isWeightUnit(weight)) {
         const page = await renderSettingsUnitsV2Route(userId, {
             error: "Choose kg or lb.",
-            openSheet: UNITS_WEIGHT_SHEET_ID,
         });
         return c.html(page.html, page.status === 200 ? 400 : page.status);
     }
     if (hasDrink && drink !== "" && !isDrinkUnit(drink)) {
         const page = await renderSettingsUnitsV2Route(userId, {
             error: "Choose US drinks or UK units.",
-            openSheet: UNITS_DRINKS_SHEET_ID,
         });
         return c.html(page.html, page.status === 200 ? 400 : page.status);
     }
@@ -710,7 +723,9 @@ settingsRoutes.post("/settings/display", requireMember, async (c) => {
 });
 
 settingsRoutes.get("/settings/help", requireSiteUser, async (c) => {
-    const page = await renderSettingsHelpRoute(c.get("userId"));
+    const page = await renderSettingsHelpRoute(c.get("userId"), {
+        q: c.req.query("q"),
+    });
     return c.html(page.html, page.status);
 });
 

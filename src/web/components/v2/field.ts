@@ -31,6 +31,8 @@ export type FieldOptions = {
     maxlength?: number;
     required?: boolean;
     disabled?: boolean;
+    /** Shown and copyable, not editable (a prompt to copy). */
+    readonly?: boolean;
     /** Takes focus when the page renders (a field the person asked to edit). */
     autofocus?: boolean;
     /** A decorative icon at the end of the box (the eye of a password). */
@@ -80,6 +82,7 @@ export function field(opts: FieldOptions): Html {
         opts.maxlength != null ? `maxlength="${opts.maxlength}"` : "",
         opts.required ? "required" : "",
         opts.disabled ? "disabled" : "",
+        opts.readonly ? "readonly" : "",
         opts.autofocus ? "autofocus" : "",
         opts.inputData ? dataAttrs(opts.inputData).trim() : "",
         opts.error ? `aria-invalid="true"` : "",

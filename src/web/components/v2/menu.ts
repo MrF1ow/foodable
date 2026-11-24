@@ -85,6 +85,12 @@ export type MenuItem =
           /** `data-*` the script finds the button by. */
           data: Readonly<Record<string, string>>;
       }
+    /**
+     * A line that says why there is nothing to press (a change that was
+     * undone, or that only someone else may undo). Not an action: it draws as
+     * a quiet, dimmed item, and choosing it does nothing.
+     */
+    | { kind: "note"; label: string }
     /** Deletes, clears or overwrites: confirms in place as Cancel + the same verb. */
     | {
           kind: "destructive";
@@ -173,6 +179,8 @@ function anchoredItem(item: MenuItem, checks: boolean): string {
                 ? `<button type="button" class="fd-menu__item" ${state}>${body}</button>`
                 : `<a class="fd-menu__item" ${state} href="${safeHref(item.href)}">${body}</a>`;
         }
+        case "note":
+            return `<div class="fd-menu__item fd-menu__note" role="menuitem" aria-disabled="true" tabindex="-1">${anchoredBody(item, checks)}</div>`;
         case "destructive": {
             const verb = item.confirmLabel ?? item.label;
             return `<div class="fd-menu__confirm" data-fd-menu-confirm><button type="button" class="fd-menu__item fd-menu__item--danger" role="menuitem" data-fd-menu-arm>${anchoredBody(item, checks)}</button><div class="fd-menu__confirm-row" role="group" aria-label="Confirm ${esc(verb)}" hidden><button type="button" class="fd-menu__item" role="menuitem" data-fd-menu-cancel>${anchoredBody({ label: "Cancel" }, checks)}</button><form class="fd-menu__form" method="post" action="${esc(item.action)}">${hiddenFields(item.fields)}<button type="submit" class="fd-menu__item fd-menu__item--danger" role="menuitem">${anchoredBody({ label: verb }, checks)}</button></form></div></div>`;
@@ -223,6 +231,7 @@ export function menu(opts: {
                 i.kind === "checked" ||
                 i.kind === "destructive" ||
                 i.kind === "button" ||
+                i.kind === "note" ||
                 i.kind === "opens",
         )
             ? "more"

@@ -64,6 +64,9 @@ import { SCORE_PRESETS } from "../src/domain/product-score.js";
 import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
 import { goalsDraftFrom } from "../src/web/pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
+import { renderSettingsAiV2Page } from "../src/web/pages/v2/settings-ai.js";
+import { renderSettingsNutrientsV2Page } from "../src/web/pages/v2/settings-nutrients.js";
+import { renderSettingsUnitsV2Page } from "../src/web/pages/v2/settings-units.js";
 import { renderSettingsScoreV2Page } from "../src/web/pages/v2/settings-score.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
 import { viewerChromeFromProfile } from "../src/web/shell.js";
@@ -417,6 +420,72 @@ function savedFixture(chrome: ReturnType<typeof fixtureChrome>) {
     });
 }
 
+/** Four connected apps (the first with a name and id the Disconnect case posts), two undoable changes. */
+function aiFixture(
+    chrome: ReturnType<typeof fixtureChrome>,
+    opts: { appFilter?: string } = {},
+) {
+    const at = (iso: string) => new Date(iso);
+    return renderSettingsAiV2Page({
+        chrome: chrome as never,
+        appFilter: opts.appFilter,
+        connections: [
+            {
+                clientId: "7d3f6c2e-5b1a-4e8f-9a3d-1c2b3a4d5e6f",
+                clientName: "Claude",
+                firstConnectedAt: at("2026-10-03T12:00:00.000Z"),
+                lastUsedAt: at("2026-11-10T08:00:00.000Z"),
+            },
+            {
+                clientId: "2b1c0d9e-8f7a-4b6c-8d5e-4f3a2b1c0d9e",
+                clientName: "Grok CLI",
+                firstConnectedAt: at("2026-11-01T08:00:00.000Z"),
+                lastUsedAt: at("2026-11-08T08:00:00.000Z"),
+            },
+            {
+                clientId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+                clientName: "ChatGPT",
+                firstConnectedAt: at("2026-11-09T18:30:00.000Z"),
+                lastUsedAt: null,
+            },
+            {
+                clientId: null,
+                clientName: null,
+                firstConnectedAt: at("2026-09-14T09:00:00.000Z"),
+                lastUsedAt: at("2026-10-20T09:00:00.000Z"),
+            },
+        ],
+        destructive: { allowed: true, canChange: true },
+        personal: { canDelete: true, householdOffBy: null },
+        showCards: true,
+        activity: [
+            {
+                id: "a1000000-0000-4000-8000-000000000001",
+                summary: "Cleared 20 grocery lines",
+                connection: "Claude",
+                memberId: "0b6c4d2e-7a1f-4c3b-9e5d-2f8a6b1c3d4e",
+                actor: { kind: "viewer" },
+                when: "2 hours ago",
+                createdAt: "2026-11-10T13:04:00.000Z",
+                state: { kind: "undo" },
+            },
+            {
+                id: "a1000000-0000-4000-8000-000000000002",
+                summary: "Logged Chicken rice bowl",
+                connection: "Grok CLI",
+                memberId: "0b6c4d2e-7a1f-4c3b-9e5d-2f8a6b1c3d4e",
+                actor: { kind: "viewer" },
+                when: "2 days ago",
+                createdAt: "2026-11-08T18:30:00.000Z",
+                state: { kind: "undo" },
+            },
+        ],
+        now: new Date("2026-11-10T15:00:00.000Z"),
+        timezone: "UTC",
+        mcpUrl: "https://food.flow.home/mcp",
+    });
+}
+
 function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
     return renderSettingsHouseholdV2Page({
         chrome,
@@ -556,6 +625,22 @@ async function pages(
             timezone: "America/Los_Angeles",
             now: new Date("2026-11-10T12:00:00Z"),
         }),
+        "settings-units": renderSettingsUnitsV2Page({
+            chrome: chrome as never,
+            weightUnit: "lb",
+            drinkUnit: "us",
+        }),
+        "settings-nutrients": renderSettingsNutrientsV2Page({
+            chrome: chrome as never,
+            hidden: [],
+            alcoholTrackingEnabled: true,
+        }),
+        "settings-ai": aiFixture(chrome),
+        "settings-ai-changes": aiFixture(chrome, { appFilter: "Claude" }),
+        "help-search": renderSettingsHelpV2Page({
+            chrome: chrome as never,
+            query: "zip",
+        }),
         "settings-goals": goalsFixture(chrome),
         "settings-goals-refused": goalsFixture(chrome, { refused: true }),
         "settings-saved": savedFixture(chrome),
@@ -631,6 +716,12 @@ const ROUTE_BASE: Record<string, string> = {
     "/settings/goals": "settings-goals",
     "/settings/saved": "settings-saved",
     "/settings/product-score": "settings-score",
+    "/settings/units": "settings-units",
+    "/settings/nutrients": "settings-nutrients",
+    "/settings/ai-connections": "settings-ai",
+    "/settings/ai-connections?app=7d3f6c2e-5b1a-4e8f-9a3d-1c2b3a4d5e6f":
+        "settings-ai-changes",
+    "/settings/help?q=zip": "help-search",
     "/create-household": "create-household",
 };
 

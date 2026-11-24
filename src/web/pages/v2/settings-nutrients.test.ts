@@ -35,24 +35,28 @@ function switchOf(html: string, label: string) {
 }
 
 describe("Settings › Nutrients shown", () => {
-    test("four switches in the design's order, with its copy", () => {
+    test("four switches in the design's order, with no intro", () => {
         const html = renderSettingsNutrientsV2Body({
             chrome,
             hidden: [],
             alcoholTrackingEnabled: false,
         });
-        expect(html).toContain(
+        expect(html).not.toContain(
             "What Today and the chat cards show besides calories and macros.",
         );
         expect(html).toContain("Limits and minimums");
         const order = ["Fiber", "Sugar", "Caffeine", "Alcohol"].map((l) =>
-            html.indexOf(`fd-row__title">${l}<`),
+            html.indexOf(`fd-item-row__title" title="${l}"`),
         );
         expect(order.every((i) => i > -1)).toBe(true);
         expect([...order].sort((a, b) => a - b)).toEqual(order);
-        expect(html).toContain("At least, from your goals");
-        expect(html).toContain("At most, from your goals");
-        expect(html).toContain("Off hides it; logged drinks stay");
+        expect(html).toContain(">At least<");
+        expect(html.match(/>At most</g)).toHaveLength(3);
+        expect(html).not.toContain("from your goals");
+        expect(html).not.toContain("logged drinks stay");
+        // Item rows in a List group, not the old pref rows.
+        expect(html).toContain("fd-list-group");
+        expect(html).not.toContain("fd-stores-pref");
     });
 
     test("a switch shows the member's state and posts the opposite", () => {

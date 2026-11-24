@@ -37,10 +37,9 @@ Flows that opt out of Turbo (each answers with something Turbo cannot render as 
 - the invite-create form (Settings › Household › Invites; the one-time code on a 200 page);
 - the Share sheet form (`share-sheet.ts`, the one-time link on a 200 page);
 - Export data on Settings home (the 303 goes to a download link, not a page);
-- the logout link, on the Account page and the gate app bar;
-- the Settings forms still waiting for their page to switch: AI connections (it drops its opt-out with its page).
+- the logout link, on the Account page and the gate app bar.
 
-Everything else in Settings is Turbo: the sidebar item, the account row and chip, every Settings back link, the account forms (name, time zone, photo) and the Display control on Settings home. iOS Safari's toolbar tint is synced in place on the visit (see Theme sync below), so a theme change no longer needs a full load; the tint on a real iPhone is what the user's audit checks.
+Everything else in Settings is Turbo: the sidebar item, the account row and chip, every Settings back link, the account forms (name, time zone, photo), the Display control on Settings home, and the Units, Nutrients shown, AI connections (Disconnect, the agent switches, Undo) and Help search forms. No Settings form is left waiting. iOS Safari's toolbar tint is synced in place on the visit (see Theme sync below), so a theme change no longer needs a full load; the tint on a real iPhone is what the user's audit checks.
 
 Goals, Product score and Settings › Notifications autosave (`client/v2/autosave.js`), and so do the Display control and the time zone list, so they keep Turbo.
 

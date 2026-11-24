@@ -24,7 +24,8 @@
 .fd-settings .fd-page-layout__menu {
     display: none;
 }
-.fd-settings--timezone .fd-page-layout__header {
+.fd-settings--timezone .fd-page-layout__header,
+.fd-settings--help .fd-page-layout__header {
     display: flex;
 }
 .fd-settings-page-title {
@@ -67,9 +68,12 @@
     color: var(--text-secondary);
 }
 /* The frames centre the dots 12 px in from the row's right edge (a 24 px
-   control ending at the edge); the 40 px round box hangs 8 px past it. */
+   control ending at the edge); the 40 px round box hangs 8 px past it. The
+   design's More is a 24 px glyph in the secondary tone. */
 .fd-settings--household .fd-item-row__control > .fd-menu > .fd-btn--icon,
 .fd-readers .fd-item-row__control > .fd-menu > .fd-btn--icon {
+    --fd-btn-icon: var(--space-2xl);
+    color: var(--text-secondary);
     margin-inline-end: calc((var(--control-md-height) - 24px) / -2);
 }
 
@@ -226,10 +230,12 @@
     }
     /* The time zone page keeps 32 px from the search field to the columns and
        puts 24 between the title and the search field. */
-    .fd-settings--timezone .fd-page-layout__box {
+    .fd-settings--timezone .fd-page-layout__box,
+    .fd-settings--help .fd-page-layout__box {
         gap: var(--space-3xl);
     }
-    .fd-settings--timezone .fd-page-layout__header {
+    .fd-settings--timezone .fd-page-layout__header,
+    .fd-settings--help .fd-page-layout__header {
         gap: var(--space-2xl);
     }
     /* Preferences and Connect are 24 apart in the right column (12 from the
@@ -244,7 +250,8 @@
     .fd-settings-page-title {
         display: block;
     }
-    .fd-settings-tz-search {
+    .fd-settings-tz-search,
+    .fd-settings-help-search {
         max-width: 360px;
     }
 }
@@ -372,59 +379,7 @@
     font-size: 0.875rem;
 }
 
-.fd-settings-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-12);
-    padding: var(--fd-s-12);
-    border-radius: var(--radius-lg);
-    border: none;
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-settings-form--sheet {
-    gap: 0;
-    padding: 0;
-    overflow: hidden;
-}
-
-.fd-settings-form--sheet .fd-settings-section-title {
-    padding: 22px var(--space-section) 8px;
-    font: 600 0.6875rem/1.1 var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-settings-form--sheet .fd-settings-field,
-.fd-settings-form--sheet .fd-settings-check {
-    margin: 0;
-    padding: 13px var(--space-section);
-    border-top: 1px solid var(--line);
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-}
-
-.fd-settings-form--sheet .fd-settings-field__label {
-    flex: 0 0 auto;
-    font: 400 0.9375rem/1.25 var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-settings-form--sheet .fd-settings-input,
-.fd-settings-form--sheet .fd-settings-select {
-    flex: 1 1 10rem;
-    max-width: 14rem;
-    text-align: right;
-    border: none;
-    background: transparent;
-    padding: 0;
-}
-
-.fd-settings-form--sheet .fd-settings-submit {
+.fd-settings-submit {
     margin: var(--space-section);
     align-self: stretch;
     text-align: center;
@@ -488,86 +443,20 @@
     cursor: pointer;
 }
 
-/* Help: one card of rows, the Settings card language. Each row is a native
-   <details>; the title is the row label, the answer opens beneath it. */
-.fd-settings-help {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    border-radius: var(--radius-lg);
-    overflow: hidden;
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
+/* Help (FigCraft 421933): the topics are disclosure Item rows in a List group;
+   what opens beneath a row is styled with the row, in item-row.css. */
+.fd-item-row__answer .fd-field,
+.fd-item-row__answer .fd-btn {
+    margin-top: var(--space-sm);
 }
 
-.fd-settings-help__item + .fd-settings-help__item {
-    border-top: 1px solid var(--line);
-}
-
-.fd-settings-help__summary {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 51px;
-    padding: 13px var(--space-section);
-    color: var(--text-primary);
-    font: 400 0.9375rem/1.25 var(--font-body);
-    cursor: pointer;
-    list-style: none;
-}
-
-.fd-settings-help__summary::-webkit-details-marker {
-    display: none;
-}
-
-.fd-settings-help__summary:hover {
-    background: var(--surface-raised);
-}
-
-.fd-settings-help__summary:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: -2px;
-}
-
-.fd-settings-help__label {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.fd-settings-help__chev {
-    flex: none;
-    color: var(--text-tertiary);
-}
-
-.fd-settings-help__row[open] .fd-settings-help__chev {
-    transform: rotate(90deg);
-}
-
-.fd-settings-help__answer {
-    padding: 0 var(--space-section) 16px;
-    font: 400 0.9375rem/1.45 var(--font-body);
+.fd-settings-help__status {
     color: var(--text-secondary);
 }
 
-.fd-settings-help__answer p {
+/* The search field above the topics keeps the width of the time zone search. */
+.fd-settings-help-search {
     margin: 0;
-}
-
-.fd-settings-help__answer .field,
-.fd-settings-help__answer textarea {
-    margin-top: var(--fd-s-10);
-}
-
-.fd-settings-help__answer .btn-sm {
-    margin-top: var(--fd-s-6);
-}
-
-.fd-settings-household-empty {
-    margin: 0;
-    font-size: 0.9375rem;
-    color: var(--text-secondary);
 }
 
 .fd-row__actions--wrap {
@@ -602,123 +491,34 @@
     }
 }
 
-/* AI connections (FigCraft 23638): one card of apps, each with a Disconnect,
- * then the address to connect a new agent. */
-.fd-settings-ai__lead {
-    margin: 0 0 14px;
-    font: 400 0.8125rem/1.4 var(--font-body);
+/* AI connections (FigCraft 416967): the address to connect a new agent is a
+ * boxed read-only field with its copy button; the lists around it are Item rows. */
+/* A filtered Recent changes says what the list holds: one app's changes among the latest 50. */
+.fd-settings-ai__scope {
+    margin: 0 0 var(--space-sm);
     color: var(--text-secondary);
-}
-
-.fd-settings-ai__list {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    overflow: hidden;
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-settings-ai__row {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-12);
-    min-height: 63px;
-    padding: var(--fd-s-12) 16px;
-}
-
-.fd-settings-ai__row + .fd-settings-ai__row {
-    border-top: 1px solid var(--line);
-}
-
-.fd-settings-ai__logo {
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-sm);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-}
-
-.fd-settings-ai__icon {
-    flex: none;
-    color: var(--text-secondary);
-}
-
-.fd-settings-ai__text {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.fd-settings-ai__name,
-.fd-settings-ai__meta {
-    margin: 0;
+    font-size: var(--text-caption-size);
+    line-height: 1.3334;
     overflow-wrap: anywhere;
 }
-
-.fd-settings-ai__name {
-    font: 400 0.9375rem/1.3 var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-settings-ai__meta {
-    font: 400 0.75rem/1.35 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-settings-ai__name + .fd-settings-ai__meta {
-    margin-top: 2px;
-}
-
-.fd-settings-ai__disconnect {
-    flex: none;
-    min-height: 36px;
-    padding: 0 var(--fd-s-6);
-    border: 0;
-    background: transparent;
-    color: var(--status-over);
-    font: 400 0.8125rem/1 var(--font-body);
-    cursor: pointer;
-}
-
-.fd-settings-ai__disconnect:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
-.fd-settings-ai__empty {
-    margin: 0;
-    padding: var(--fd-s-14) 16px;
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    color: var(--text-secondary);
-    font-size: 0.9375rem;
-}
-
-.fd-settings-ai__connect-title {
-    margin-top: 22px;
-}
-
 .fd-settings-ai__address {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-sm);
+    box-sizing: border-box;
+    min-height: 48px;
     margin: 0;
-    padding: 13px 14px;
+    padding: 0 var(--space-lg);
     border: 1px solid var(--line);
     border-radius: var(--radius-md);
-    background: var(--surface-bg);
+    background: var(--surface-raised);
 }
 
 .fd-settings-ai__address code {
     flex: 1 1 auto;
     min-width: 0;
     font: 400 0.9375rem/1.3 var(--font-body);
-    color: var(--text-primary);
+    color: var(--text-secondary);
     overflow-wrap: anywhere;
     user-select: all;
 }
@@ -734,86 +534,18 @@
     border: 0;
     border-radius: var(--radius-sm, 8px);
     background: transparent;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     cursor: pointer;
 }
 
 .fd-settings-ai__copy:hover,
 .fd-settings-ai__copy:focus-visible {
-    color: var(--text-primary);
+    color: var(--accent-text);
 }
 
 .fd-settings-ai__copy .fd-icon {
     width: 24px;
     height: 24px;
-}
-
-.fd-settings-ai__help {
-    margin: 8px 0 0;
-    padding-left: 4px;
-    font: 400 0.75rem/1.35 var(--font-body);
-    color: var(--text-secondary);
-}
-
-/* The household switch and the agent activity list sit below the connect
- * block, in the same card language. The switch is the shared `.fd-switch`. */
-.fd-settings-ai__switch-form {
-    display: flex;
-    flex: 1 1 auto;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--fd-s-12);
-    min-width: 0;
-    margin: 0;
-}
-
-.fd-settings-ai__switch-form .fd-settings-ai__text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.fd-settings-ai__row > .fd-settings-ai__text {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.fd-settings-ai__status {
-    flex: none;
-    max-width: 45%;
-    font: 400 0.75rem/1.35 var(--font-body);
-    color: var(--text-secondary);
-    text-align: right;
-}
-
-.fd-settings-ai__undo-form {
-    flex: none;
-    margin: 0;
-}
-
-.fd-settings-ai__undo {
-    min-height: 36px;
-    padding: 0 var(--fd-s-6);
-    border: 0;
-    background: transparent;
-    color: var(--accent-text);
-    font: 600 0.8125rem/1 var(--font-body);
-    cursor: pointer;
-}
-
-.fd-settings-ai__undo:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
-.fd-settings-ai__activity-row {
-    align-items: flex-start;
-}
-
-.fd-settings-ai__activity-row .fd-settings-ai__undo-form,
-.fd-settings-ai__activity-row .fd-settings-ai__status {
-    align-self: center;
 }
 
 @media (min-width: 1024px) {
@@ -843,30 +575,6 @@
     .fd-settings[data-fd-settings-page="home"] .fd-settings-main {
         flex: 1 1 0;
     }
-
-    /* AI connections reads in a 680px column beside the menu (FigCraft 50224). */
-    .fd-settings[data-fd-settings-page="ai"] .fd-settings-main {
-        max-width: 680px;
-    }
-}
-
-/* Settings › Household › the nine-row group, and the pages behind its rows
- * (Restock, Recipe link readers, Dismissed notices). The rows are the stores
- * page's `fd-stores-pref`; the card is drawn here because the stores rules are
- * scoped to `.fd-stores`. */
-.fd-settings-hh .fd-list--card {
-    padding: 0;
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-settings-hh .fd-list--card > .fd-row:last-child {
-    border-bottom: 0;
-}
-
-.fd-settings-hh .fd-list--card > .fd-row > .fd-row__body {
-    padding-inline: 16px;
 }
 
 .fd-dismissed .fd-row--dismissed .fd-row__body {
@@ -884,31 +592,6 @@
 .fd-dismissed .fd-row--dismissed .fd-row__actions {
     flex: none;
     margin: 0;
-}
-
-@media (min-width: 1024px) {
-    .fd-settings-hh .fd-list--card > .fd-row > .fd-row__body {
-        padding-inline: 18px;
-    }
-}
-
-/* Long values (a household name, a time zone) shrink with an ellipsis; the
- * label keeps its full width. */
-.fd-settings-hh .fd-stores-pref__main {
-    flex: 1 0 auto;
-}
-
-.fd-settings-hh .fd-stores-pref__value {
-    flex: 0 1 auto;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* Settings › Nutrients shown: each row's switch is its own small form. */
-.fd-nutrients .fd-stores-pref .fd-switch {
-    margin-left: auto;
 }
 
 /* ---- Settings › Notifications (src/web/pages/v2/settings-notifications.ts)
@@ -1115,15 +798,4 @@
     .fd-segmented__segment {
     background: var(--text-primary);
     color: var(--surface-bg);
-}
-
-/* The caps label over a block of Settings › AI connections (that page keeps
-   the old goals card's label until it moves to the section header). */
-.fd-settings-goals-card__title {
-    margin: 22px 0 8px;
-    padding-left: 4px;
-    font: 600 0.6875rem/1.1 var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
 }

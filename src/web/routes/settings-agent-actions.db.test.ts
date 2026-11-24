@@ -23,6 +23,7 @@ import { resetFlagsForTests } from "../../flags.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
 import { nutritionRoutes } from "./nutrition.js";
 import { settingsRoutes } from "./settings.js";
+import { AI_ACTIVITY_LIMIT } from "../pages/v2/settings-ai.js";
 
 process.env.SESSION_SECRET ||= "01234567890123456789012345678901";
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret-thirty-two-chars-min";
@@ -167,6 +168,13 @@ describeDb(
             });
         }
 
+        function appPage(userId: string, encodedApp: string) {
+            return app.request(
+                `http://test/settings/ai-connections?app=${encodedApp}`,
+                { headers: { cookie: cookie(userId) } },
+            );
+        }
+
         function post(
             userId: string,
             path: string,
@@ -188,7 +196,7 @@ describeDb(
         test("the owner sees the household switch on, and turning it Off persists and makes the guard refuse", async () => {
             const html = await (await page(ownerId)).text();
             expect(html).toContain("Any agent can delete");
-            expect(html).toContain("HOUSEHOLD · OWNER ONLY");
+            expect(html).toContain("Household · owner only");
             expect(html).toContain('role="switch" aria-checked="true"');
             expect(html).toContain(`action="${SWITCH}"`);
             expect(html).not.toContain("agents can still read and add");
@@ -206,7 +214,7 @@ describeDb(
             ).toBe(false);
             const off = await (await page(ownerId)).text();
             expect(off).toMatch(
-                /aria-checked="false"[^>]*aria-label="Any agent can delete"/,
+                /aria-label="Any agent can delete"[^>]*aria-checked="false"/,
             );
             await expect(
                 withAgentAction(
@@ -236,7 +244,7 @@ describeDb(
         test("a member does not see the household switch, and posting it is a 403 that changes nothing", async () => {
             const html = await (await page(memberId)).text();
             expect(html).not.toContain("Any agent can delete");
-            expect(html).not.toContain("HOUSEHOLD · OWNER ONLY");
+            expect(html).not.toContain("Household · owner only");
             expect(html).not.toContain(`action="${SWITCH}"`);
             // Their own switch is there.
             expect(html).toContain("Your agents can delete");
@@ -267,7 +275,7 @@ describeDb(
             `;
             const offHtml = await (await page(fresh)).text();
             expect(offHtml).toMatch(
-                /aria-checked="false"[^>]*aria-label="Your agents can delete"/,
+                /aria-label="Your agents can delete"[^>]*aria-checked="false"/,
             );
             expect(offHtml).toContain(
                 "Off by default · only what you can delete",
@@ -304,7 +312,7 @@ describeDb(
             );
             await guard();
             expect(await (await page(fresh)).text()).toMatch(
-                /aria-checked="true"[^>]*aria-label="Your agents can delete"/,
+                /aria-label="Your agents can delete"[^>]*aria-checked="true"/,
             );
 
             expect((await post(fresh, OWN, { allowed: "0" })).status).toBe(303);
@@ -352,9 +360,13 @@ describeDb(
             await post(ownerId, SWITCH, { allowed: "0" });
             const html = await (await page(memberId)).text();
             expect(html).toContain("Turned off for the household by Owner");
-            expect(html).not.toMatch(
-                /<button[^>]*aria-label="Your agents can delete"/,
-            );
+            // The switch is shown off and disabled, with nothing to post.
+            const locked = html.match(
+                /<button[^>]*aria-label="Your agents can delete"[^>]*>/,
+            )?.[0];
+            expect(locked).toContain('role="switch" aria-checked="false"');
+            expect(locked).toContain("disabled");
+            expect(html).not.toContain(`action="${OWN}"`);
             // The owner sees no such line: they turned it off themselves.
             const ownerHtml = await (await page(ownerId)).text();
             expect(ownerHtml).not.toContain("Turned off for the household by");
@@ -388,7 +400,7 @@ describeDb(
             expect(await res.text()).toContain("Choose Allowed or Off.");
         });
 
-        test("the activity list shows when, connection, member and summary, newest first", async () => {
+        test("the activity list shows the summary, then the app and when, newest first", async () => {
             await agentClears({
                 name: "Eggs",
                 ago: 3 * 60 * 60 * 1000,
@@ -403,21 +415,275 @@ describeDb(
 
             const html = await (await page(ownerId)).text();
 
-            expect(html).toContain("Recent agent changes");
+            expect(html).toContain("Recent changes");
             expect(html).toContain("Deleted grocery line Eggs");
-            expect(html).toContain("Grok CLI · as Sam");
-            expect(html).toContain("3 hours ago");
-            expect(html).toContain("household token");
+            // The owner reads whose agent each one was.
+            expect(html).toContain(">Grok CLI for Sam · 3 hours ago<");
+            expect(html).not.toContain("as Sam");
+            expect(html).toContain(">Household token · Just now<");
             expect(html.indexOf("Deleted grocery line Milk")).toBeLessThan(
                 html.indexOf("Deleted grocery line Eggs"),
             );
-            expect(html.match(/class="fd-settings-ai__undo"/g)).toHaveLength(2);
+            expect(html.match(/>Undo</g)).toHaveLength(2);
+        });
+
+        test("a change only the owner may undo says so once, even when the agent acted as the owner", async () => {
+            await agentClears({ name: "Owners", as: ownerId });
+            await agentClears({ name: "Token", as: null });
+            await agentClears({ name: "Sams", as: memberId });
+
+            const html = await (await page(otherId)).text();
+
+            expect(html.match(/>The owner can undo</g)).toHaveLength(2);
+            expect(html).toContain(">Sam or the owner can undo<");
+            expect(html).not.toContain("Owner or the owner");
+            expect(html).not.toContain(">Undo<");
+        });
+
+        test("?app= narrows Recent changes to that app, on the same page, and nothing else", async () => {
+            await agentClears({
+                name: "Eggs",
+                connection: "Grok CLI",
+                as: ownerId,
+            });
+            await agentClears({
+                name: "Milk",
+                connection: "Claude",
+                as: ownerId,
+            });
+            await agentClears({
+                name: "Beans",
+                connection: "Grok CLI",
+                as: memberId,
+            });
+            const filtered = (userId: string, app: string) =>
+                app === ""
+                    ? page(userId)
+                    : app.startsWith("raw:")
+                      ? appPage(userId, app.slice(4))
+                      : appPage(userId, encodeURIComponent(app));
+
+            const claude = await (await filtered(ownerId, "Claude")).text();
+            expect(claude).toContain("Deleted grocery line Milk");
+            expect(claude).not.toContain("Deleted grocery line Eggs");
+            expect(claude).toContain(
+                'href="/settings/ai-connections#recent-changes">Show all<',
+            );
+            // The switches and the rest of the page are as ever.
+            expect(claude).toContain("Any agent can delete");
+
+            const all = await (await filtered(ownerId, "")).text();
+            expect(all).toContain("Deleted grocery line Milk");
+            expect(all).toContain("Deleted grocery line Eggs");
+            expect(all).not.toContain("Show all");
+
+            // A member's Grok CLI is theirs: the owner's Grok CLI, of the same name, stays out.
+            const member = await (await filtered(memberId, "Grok CLI")).text();
+            expect(member).toContain("Deleted grocery line Beans");
+            expect(member).not.toContain("Deleted grocery line Eggs");
+            expect(member).not.toContain("Deleted grocery line Milk");
+            // And the owner's own Grok CLI does not show Sam's.
+            const ownerGrok = await (
+                await filtered(ownerId, "Grok CLI")
+            ).text();
+            expect(ownerGrok).toContain("Deleted grocery line Eggs");
+            expect(ownerGrok).not.toContain("Deleted grocery line Beans");
+
+            // A malformed escape is just a name nobody has.
+            const broken = await appPage(ownerId, "%E0%A4%A");
+            expect(broken.status).toBe(200);
+            expect(await broken.text()).toContain("No changes by");
+            // An app nobody has, and hostile or junk values: still the page, never an error.
+            const unknown = await (await filtered(ownerId, "Nobody")).text();
+            expect(unknown).toContain(
+                "No changes by Nobody among the latest 50",
+            );
+            const hostile = await appPage(
+                ownerId,
+                encodeURIComponent('"><img src=x onerror=1>'),
+            );
+            expect(hostile.status).toBe(200);
+            const hostileHtml = await hostile.text();
+            expect(hostileHtml).not.toContain("<img src=x");
+            expect(hostileHtml).toContain(
+                "No changes by &quot;&gt;&lt;img src=x",
+            );
+            for (const junk of [
+                "raw:%00",
+                "raw:a%0Ab",
+                `raw:${"a".repeat(500)}`,
+                "raw:",
+            ]) {
+                const res = await filtered(ownerId, junk);
+                expect(res.status).toBe(200);
+                const junkHtml = await res.text();
+                // No filter at all: every change is listed.
+                expect(junkHtml, junk).toContain("Deleted grocery line Milk");
+                expect(junkHtml).toContain("Deleted grocery line Eggs");
+            }
+            // An app given by repeated params still resolves to one value.
+            const twice = await app.request(
+                "http://test/settings/ai-connections?app=Claude&app=Grok%20CLI",
+                { headers: { cookie: cookie(ownerId) } },
+            );
+            expect(twice.status).toBe(200);
+        });
+
+        test("each row says whose agent it was, per role, and the viewer's own say nothing extra", async () => {
+            await agentClears({ name: "Mine", as: memberId });
+            await agentClears({ name: "Alexs", as: otherId });
+            await agentClears({ name: "Owners", as: ownerId });
+            await agentClears({
+                name: "Token",
+                as: null,
+                connection: "household token",
+            });
+            const subtitles = (html: string) =>
+                [
+                    ...html.matchAll(
+                        /<span class="fd-item-row__subtitle">([^<]*ago|[^<]*now)</g,
+                    ),
+                ].map((m) => m[1]);
+
+            // Sam: his own row plain; everyone else's named.
+            const sam = subtitles(await (await page(memberId)).text());
+            expect(sam).toContain("Claude · Just now");
+            expect(sam).toContain("Claude for Alex · Just now");
+            expect(sam).toContain("Claude for Owner · Just now");
+            expect(sam).toContain("Household token · Just now");
+            // The owner: Sam's and Alex's named, the owner's own plain.
+            const owner = subtitles(await (await page(ownerId)).text());
+            expect(owner).toContain("Claude for Sam · Just now");
+            expect(owner).toContain("Claude for Alex · Just now");
+            expect(owner).toContain("Claude · Just now");
+            expect(owner).toContain("Household token · Just now");
+            expect(owner.filter((l) => l === "Claude · Just now")).toHaveLength(
+                1,
+            );
+        });
+
+        test("a connected app's Changes are the member's own agent's: another member's same-named app stays out", async () => {
+            await agentClears({
+                name: "Mine",
+                as: memberId,
+                connection: "Claude",
+            });
+            await agentClears({
+                name: "Alexs",
+                as: otherId,
+                connection: "Claude",
+            });
+            await agentClears({
+                name: "Owners",
+                as: ownerId,
+                connection: "Claude",
+            });
+            await agentClears({
+                name: "Token",
+                as: null,
+                connection: "household token",
+            });
+            const sam = await (await appPage(memberId, "Claude")).text();
+            expect(sam).toContain("Deleted grocery line Mine");
+            for (const other of ["Alexs", "Owners", "Token"]) {
+                expect(sam).not.toContain(`Deleted grocery line ${other}`);
+            }
+            expect(sam).not.toContain("Claude for ");
+            const owner = await (await appPage(ownerId, "Claude")).text();
+            expect(owner).toContain("Deleted grocery line Owners");
+            for (const other of ["Mine", "Alexs", "Token"]) {
+                expect(owner).not.toContain(`Deleted grocery line ${other}`);
+            }
+        });
+
+        test("a filtered view does not claim an app has no changes when the latest 50 hide them", async () => {
+            await agentClears({
+                name: "Old",
+                as: memberId,
+                connection: "Claude",
+                ago: 60 * 60 * 1000,
+            });
+            for (let i = 0; i < AI_ACTIVITY_LIMIT; i++) {
+                await agentClears({
+                    name: `G${i}`,
+                    as: memberId,
+                    connection: "Grok",
+                });
+            }
+            const filtered = await (await appPage(memberId, "Claude")).text();
+            // Nothing of Claude's within the 50 shown: said so, not "no changes".
+            expect(filtered).toContain(
+                "No changes by Claude among the latest 50",
+            );
+            expect(filtered).not.toContain("Deleted grocery line Old");
+            // The queries are as ever: the unfiltered list is still the 50 newest.
+            const all = await (await page(memberId)).text();
+            expect(all.match(/id="agent-action-/g)).toHaveLength(
+                AI_ACTIVITY_LIMIT,
+            );
+            expect(all).not.toContain("Deleted grocery line Old");
+            expect(all).not.toContain("among the latest");
+            // With a Claude change inside the window the line says what it holds.
+            await agentClears({
+                name: "New",
+                as: memberId,
+                connection: "Claude",
+            });
+            const within = await (await appPage(memberId, "Claude")).text();
+            expect(within).toContain("Deleted grocery line New");
+            expect(within).toContain("Changes by Claude among the latest 50");
+        });
+
+        test("a member cannot turn their own switch on while the household switch is off; the owner's own stays theirs", async () => {
+            const settings = liveSettingsStore();
+            await settings.setMemberAgentsCanDelete(
+                householdId,
+                memberId,
+                false,
+            );
+            await post(ownerId, SWITCH, { allowed: "0" });
+            const refused = await post(memberId, OWN, { allowed: "1" });
+            expect(refused.status).toBe(400);
+            expect(await refused.text()).toContain(
+                "Agents cannot delete while the household switch is off.",
+            );
+            expect(
+                await settings.getMemberAgentsCanDelete(householdId, memberId),
+            ).toBe(false);
+            // Turning it Off is still fine, and so is the owner's own switch.
+            expect((await post(memberId, OWN, { allowed: "0" })).status).toBe(
+                303,
+            );
+            expect((await post(ownerId, OWN, { allowed: "1" })).status).toBe(
+                303,
+            );
+            expect(
+                await settings.getMemberAgentsCanDelete(householdId, ownerId),
+            ).toBe(true);
+            // With the household switch back on, the member's own turns on.
+            await post(ownerId, SWITCH, { allowed: "1" });
+            expect((await post(memberId, OWN, { allowed: "1" })).status).toBe(
+                303,
+            );
+            expect(
+                await settings.getMemberAgentsCanDelete(householdId, memberId),
+            ).toBe(true);
+        });
+
+        test("signed out, a filtered page is the login redirect, not the changes", async () => {
+            await agentClears({ name: "Milk", connection: "Claude" });
+            const res = await app.request(
+                "http://test/settings/ai-connections?app=Claude",
+            );
+            const html = await res.text();
+            expect(html).not.toContain("Deleted grocery line Milk");
+            expect(html).not.toContain("Recent changes");
         });
 
         test("the activity list is empty-stated when agents have done nothing", async () => {
             const html = await (await page(ownerId)).text();
-            expect(html).toContain("Recent agent changes");
-            expect(html).toContain("Nothing yet.");
+            expect(html).toContain("Recent changes");
+            expect(html).toContain("No changes yet");
         });
 
         test("the owner undoes an agent change and the row is back", async () => {
@@ -433,7 +699,7 @@ describeDb(
             expect(await lineCount()).toBe(1);
             const html = await (await page(ownerId)).text();
             expect(html).toContain("Undone");
-            expect(html).not.toContain('class="fd-settings-ai__undo"');
+            expect(html).not.toContain(">Undo<");
         });
 
         test("the member the agent acted as undoes it too", async () => {
@@ -450,7 +716,7 @@ describeDb(
 
             const html = await (await page(otherId)).text();
             expect(html).toContain("Deleted grocery line Milk");
-            expect(html).not.toContain('class="fd-settings-ai__undo"');
+            expect(html).not.toContain(">Undo<");
             expect(html).toContain("Sam or the owner can undo");
 
             const res = await post(otherId, undoPath(actionId));
@@ -468,7 +734,7 @@ describeDb(
             const html = await (await page(ownerId)).text();
             expect(html).toContain("Deleted grocery line Milk");
             expect(html).toContain("Can no longer be undone");
-            expect(html).not.toContain('class="fd-settings-ai__undo"');
+            expect(html).not.toContain(">Undo<");
 
             const res = await post(ownerId, undoPath(actionId));
 
@@ -526,7 +792,7 @@ describeDb(
             }
         });
 
-        test("an undo from Today goes back to Today; any other back path goes to Settings", async () => {
+        test("an undo always goes back to AI connections, whatever back says", async () => {
             const first = await agentClears({ name: "Milk" });
             const second = await agentClears({ name: "Eggs" });
 
@@ -537,7 +803,9 @@ describeDb(
                 back: "https://evil.example/",
             });
 
-            expect(fromToday.headers.get("location")).toBe("/");
+            expect(fromToday.headers.get("location")).toBe(
+                "/settings/ai-connections",
+            );
             expect(elsewhere.headers.get("location")).toBe(
                 "/settings/ai-connections",
             );

@@ -315,31 +315,46 @@ function previewScoreView(
 const PREVIEW_AI_NOW = new Date("2026-11-10T15:00:00.000Z");
 
 /** The activity list: an undoable change, an undone one, one past its 24 hours. */
+const PREVIEW_AI_MEMBER_ID = "0b6c4d2e-7a1f-4c3b-9e5d-2f8a6b1c3d4e";
+
 const PREVIEW_AI_ACTIVITY = [
     {
         id: "a1000000-0000-4000-8000-000000000001",
         summary: "Cleared 20 grocery lines",
         connection: "Claude",
-        actingAs: "as Ethan",
-        when: "2 hours ago · Nov 10, 1:04 PM",
+        memberId: PREVIEW_AI_MEMBER_ID,
+        actor: { kind: "viewer" },
+        when: "2 hours ago",
         createdAt: "2026-11-10T13:04:00.000Z",
         state: { kind: "undo" },
     },
     {
         id: "a1000000-0000-4000-8000-000000000002",
+        summary: "Logged Chicken rice bowl",
+        connection: "Grok CLI",
+        memberId: PREVIEW_AI_MEMBER_ID,
+        actor: { kind: "viewer" },
+        when: "2 days ago",
+        createdAt: "2026-11-08T18:30:00.000Z",
+        state: { kind: "undo" },
+    },
+    {
+        id: "a1000000-0000-4000-8000-000000000003",
         summary: "Deleted fridge item Greek yogurt",
         connection: "Grok CLI",
-        actingAs: "as Sam",
-        when: "Yesterday · Nov 9, 6:30 PM",
+        memberId: PREVIEW_AI_MEMBER_ID,
+        actor: { kind: "viewer" },
+        when: "Yesterday",
         createdAt: "2026-11-09T18:30:00.000Z",
         state: { kind: "undone" },
     },
     {
-        id: "a1000000-0000-4000-8000-000000000003",
+        id: "a1000000-0000-4000-8000-000000000004",
         summary: "Removed Oat milk from the Usuals list",
         connection: "household token",
-        actingAs: "",
-        when: "3 days ago · Nov 7, 9:12 AM",
+        memberId: null,
+        actor: { kind: "household" },
+        when: "3 days ago",
         createdAt: "2026-11-07T09:12:00.000Z",
         state: { kind: "expired" },
     },
@@ -1541,6 +1556,19 @@ function withEveryMenuOpen(html: string): string {
         );
 }
 
+/** The first pull-down on a row open (its trigger is the row, so it has no empty attribute value). */
+function withFirstRowMenuOpen(html: string): string {
+    return html
+        .replace(
+            'data-fd-menu-trigger aria-haspopup="menu" aria-expanded="false"',
+            'data-fd-menu-trigger aria-haspopup="menu" aria-expanded="true"',
+        )
+        .replace(
+            /(<div class="fd-menu__panel" role="menu"[^>]*?) hidden>/,
+            "$1>",
+        );
+}
+
 /** Only the nth ⋯ menu on a Settings page open (0 is the first, the Detail bar's when it has one). */
 function withMenuOpen(html: string, nth: number): string {
     let at = html.indexOf("data-fd-settings-page");
@@ -2280,6 +2308,14 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             weightUnit: "lb",
             drinkUnit: "us",
         }),
+        // The Weight row's pull-down open.
+        "settings-units-menu": withFirstRowMenuOpen(
+            renderSettingsUnitsV2Page({
+                chrome,
+                weightUnit: "lb",
+                drinkUnit: "us",
+            }),
+        ),
         // Sugar and alcohol off, the rest on.
         "settings-nutrients": renderSettingsNutrientsV2Page({
             chrome,
@@ -2390,32 +2426,47 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             }),
             2,
         ),
+        // The owner: their own switch on and the household's under it.
         "settings-ai": renderSettingsAiV2Page({
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
             destructive: { allowed: true, canChange: true },
+            personal: { canDelete: true, householdOffBy: null },
             showCards: true,
-            activity: PREVIEW_AI_ACTIVITY,
+            activity: PREVIEW_AI_ACTIVITY.slice(0, 2),
             now: PREVIEW_AI_NOW,
             timezone: "UTC",
             mcpUrl: "https://food.flow.home/mcp",
         }),
-        // Switch Off, and a member: the switch is read-only, one change is theirs.
+        // A member: their own switch off, no household switch; one change is
+        // theirs to undo and one is another member's.
         "settings-ai-member": renderSettingsAiV2Page({
             chrome,
-            connections: PREVIEW_AI_CONNECTIONS,
-            destructive: { allowed: false, canChange: false },
-            showCards: false,
+            connections: PREVIEW_AI_CONNECTIONS.slice(0, 3),
+            destructive: { allowed: true, canChange: false },
+            personal: { canDelete: false, householdOffBy: null },
+            showCards: true,
             activity: [
                 PREVIEW_AI_ACTIVITY[0],
                 {
                     ...PREVIEW_AI_ACTIVITY[0],
-                    id: "a1000000-0000-4000-8000-000000000004",
+                    id: "a1000000-0000-4000-8000-000000000005",
                     summary: "Moved 4 grocery lines to Costco",
-                    actingAs: "as Alex",
                     state: { kind: "other", who: "Alex" },
                 },
             ],
+            now: PREVIEW_AI_NOW,
+            timezone: "UTC",
+            mcpUrl: "https://food.flow.home/mcp",
+        }),
+        // The owner turned the household switch off: the member's own is held Off.
+        "settings-ai-household-off": renderSettingsAiV2Page({
+            chrome,
+            connections: PREVIEW_AI_CONNECTIONS.slice(0, 3),
+            destructive: { allowed: false, canChange: false },
+            personal: { canDelete: false, householdOffBy: "Ethan" },
+            showCards: true,
+            activity: PREVIEW_AI_ACTIVITY.slice(0, 1),
             now: PREVIEW_AI_NOW,
             timezone: "UTC",
             mcpUrl: "https://food.flow.home/mcp",
@@ -2430,17 +2481,32 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             timezone: "UTC",
             mcpUrl: "https://food.flow.home/mcp",
         }),
-        "settings-ai-confirm": renderSettingsAiV2Page({
+        // Changes on one app's ⋯: Recent changes narrowed to Grok CLI, with Show all.
+        "settings-ai-changes": renderSettingsAiV2Page({
             chrome,
             connections: PREVIEW_AI_CONNECTIONS,
             destructive: { allowed: true, canChange: true },
             showCards: true,
             activity: PREVIEW_AI_ACTIVITY,
+            appFilter: "Grok CLI",
             now: PREVIEW_AI_NOW,
             timezone: "UTC",
             mcpUrl: "https://food.flow.home/mcp",
-            openClient: PREVIEW_AI_CONNECTIONS[0]!.clientId!,
         }),
+        // The first app's ⋯ open: Disconnect confirms in place.
+        "settings-ai-menu": withMenuOpen(
+            renderSettingsAiV2Page({
+                chrome,
+                connections: PREVIEW_AI_CONNECTIONS,
+                destructive: { allowed: true, canChange: true },
+                showCards: true,
+                activity: PREVIEW_AI_ACTIVITY,
+                now: PREVIEW_AI_NOW,
+                timezone: "UTC",
+                mcpUrl: "https://food.flow.home/mcp",
+            }),
+            0,
+        ),
         // The viewer is an owner who picked Balanced: the design's frame.
         "settings-score": renderSettingsScoreV2Page(previewScoreView(chrome)),
         // A member with no choice of their own: the household row is plain.
@@ -2675,6 +2741,12 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             });
         })(),
         help: renderSettingsHelpV2Page({ chrome }),
+        // A search with matches, and one with none.
+        "help-search": renderSettingsHelpV2Page({ chrome, query: "zip" }),
+        "help-search-empty": renderSettingsHelpV2Page({
+            chrome,
+            query: "zzzz",
+        }),
         // FigCraft Screens › Settings › Notifications (413107, desktop 601988):
         // the extras in their default (off) state, and a mix of choices.
         "settings-notifications": renderSettingsNotificationsV2Page({

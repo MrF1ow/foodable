@@ -1,9 +1,22 @@
+/**
+ * Settings › Help (FigCraft 421933, Light and desktop twins): a search field,
+ * then one row a topic. A row opens in place to its answer; typing in the
+ * search field and pressing Enter lists the topics that hold every typed word
+ * (a GET with `q`, so it works with no script). One-time explanations that a
+ * page no longer carries live here.
+ */
 import type { AppChromeBase } from "../../attention.js";
 import { escapeHtml } from "../../shell.js";
-import { field } from "../../components/ui.js";
 import { UNVERIFIED_RECIPES_PROMPT } from "../../../copy/agent-prompts.js";
-import { iconChevronRight } from "../../components/v2/icons.js";
-import { renderSettingsV2Page, settingsPageHeader } from "./settings-shared.js";
+import { button } from "../../components/v2/button.js";
+import { emptyState } from "../../components/v2/empty-state.js";
+import { field } from "../../components/v2/field.js";
+import { esc, raw, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { searchField } from "../../components/v2/search-field.js";
+import { APP_PATHS } from "../../route-map.js";
+import { renderSettingsV2Page } from "./settings-shared.js";
 
 type GlossaryCopy = {
     id: string;
@@ -35,6 +48,11 @@ const GLOSSARY_COPY: GlossaryCopy[] = [
         id: "stores-and-sections",
         title: "Stores and sections",
         body: "Grocery stores group your shopping list. Each store has sections (aisles) such as Produce or Dairy. Leave the section on Other and the app picks an aisle: where you already shop for that food, otherwise a guess from its name. If it can't tell, the line stays in Other.",
+    },
+    {
+        id: "store-pick-order",
+        title: "Which store a line goes to",
+        body: "A grocery line with no store of its own goes to its food's usual store. After that it depends on Settings › Household › Stores. With Use each food's usual store on, the default store comes next, then the store the food was last on the list. With it off, the store it was last on the list comes next, then the default store. New items go to the default store when Foodable has no better guess.",
     },
     {
         id: "expiry-levels",
@@ -89,7 +107,47 @@ const GLOSSARY_COPY: GlossaryCopy[] = [
     {
         id: "possible-duplicates",
         title: "Possible duplicates",
-        body: "Settings › Saved foods & recipes › Possible duplicates lists plain foods that may be the same thing: names with the same words up to plurals, or one name containing every word of the other. Scanned products and foods filed as products never appear. Each pair has a ⋯ menu: Merge into either food, Not the same, or More… to compare the two first, choose which one to keep and pick conflicting nutrition or unit values. A merge combines allergens, and the other name becomes another name for the food you keep. Not the same (Keep them separate on the compare page) hides the pair until a food is merged away.",
+        body: "Settings › Saved foods & recipes › Possible duplicates lists plain foods that may be the same thing: names with the same words up to plurals, or one name containing every word of the other. Scanned products and foods filed as products never appear. Each pair has a ⋯ menu: Compare and merge, or Keep apart. Compare shows both foods: pick the one to keep, and every fridge item, grocery line and recipe that uses the other moves over to it. Where the two disagree on a value, such as nutrition or units, pick which food it comes from; a value you leave unpicked comes from the food you keep. A merge combines allergens, and the other name becomes another name for the food you keep. Keep apart hides the pair until a food is merged away.",
+    },
+    {
+        id: "goals",
+        title: "Goals",
+        body: "Settings › Goals holds your daily targets. Tap a number to change it; it saves when you leave the field. A day can have its own goals, and clearing a day puts it back on your daily goals.",
+    },
+    {
+        id: "product-score",
+        title: "Product score",
+        body: "Settings › Product score sets how much each part counts when Foodable scores a packaged food: nutrition, processing, additives and environment. Pick a preset or move the weights; each shows its share of the whole. Yours applies to your scans. Members who have not chosen their own use the household default, which an owner or admin sets under Household default. The Allergies line on that page comes from your person rules.",
+    },
+    {
+        id: "units",
+        title: "Units",
+        body: "Settings › Units sets how Foodable shows amounts to you: your weight in kg or lb, and drinks as US drinks or UK units. Choosing one changes what you see from now on; what is already logged does not change.",
+    },
+    {
+        id: "nutrients-shown",
+        title: "Nutrients shown",
+        body: "Settings › Nutrients shown chooses what Today and the chat cards show besides calories and macros: fiber, sugar, caffeine and alcohol. Fiber is a minimum and the others are limits, from your goals. Turning alcohol off hides it; the drinks you logged stay.",
+    },
+    {
+        id: "ai-connections",
+        title: "AI connections",
+        body: "Agents you connect, such as Claude or ChatGPT, can log meals, read your fridge and plan groceries for this household. To connect one, add the address under Connect a new agent as a remote MCP server in your agent, then sign in when it asks. The ⋯ on a connected app disconnects it; you can connect it again later. Show cards in chat turns on the goal and meal cards agents show. Your agents can delete is off until you turn it on and covers only what you can delete yourself; the owner's Any agent can delete turns every member's agents off at once. Recent changes lists what agents deleted, cleared or overwrote; a connected app's ⋯ › Changes shows only that app's. You can undo your own agents' changes for 24 hours with ⋯ › Undo, and the owner can undo anyone's.",
+    },
+    {
+        id: "time-zone",
+        title: "Time zone",
+        body: "Your days and times count in your time zone: a meal logged late at night belongs to the day it is there. Change yours under Settings › Account › Time zone. The household's own time zone, in Settings › Household, sets when the household's day turns over: restock and notices.",
+    },
+    {
+        id: "add-member",
+        title: "Adding a member",
+        body: "Owners and admins add members under Settings › Household. A username has no @: 2–31 letters, digits, dots, dashes or underscores, starting with a letter or digit. They sign in with it on the same login page.",
+    },
+    {
+        id: "export-data",
+        title: "Export data",
+        body: "Export data on Settings builds a ZIP of what you have logged: your meals and their items, water, weight, goals and profile, with a README. The download link works for 60 minutes. The meals file can be imported again.",
     },
 ];
 
@@ -98,9 +156,20 @@ const PROMPT_FIELD_ID = "help-unverified-recipes-prompt";
 function promptBlockHtml(): string {
     return `${field({
         id: PROMPT_FIELD_ID,
+        name: PROMPT_FIELD_ID,
         label: "Prompt",
-        control: `<textarea id="${PROMPT_FIELD_ID}" readonly rows="14">${escapeHtml(UNVERIFIED_RECIPES_PROMPT)}</textarea>`,
-    })}<button type="button" class="btn-sm" data-copy-target="${PROMPT_FIELD_ID}" data-copy-status="${PROMPT_FIELD_ID}-status" aria-label="Copy prompt">Copy</button> <span id="${PROMPT_FIELD_ID}-status" class="muted" role="status" aria-live="polite"></span>`;
+        rows: 14,
+        readonly: true,
+        value: UNVERIFIED_RECIPES_PROMPT,
+    })}${button({
+        label: "Copy",
+        variant: "secondary",
+        size: "md",
+        attrs: {
+            "data-copy-target": PROMPT_FIELD_ID,
+            "data-copy-status": `${PROMPT_FIELD_ID}-status`,
+        },
+    })} <span id="${PROMPT_FIELD_ID}-status" class="fd-settings-help__status" role="status" aria-live="polite"></span>`;
 }
 
 /** The Help glossary: one entry per topic, rendered as the Help list rows. */
@@ -120,27 +189,89 @@ export const HELP_IDS: readonly string[] = GLOSSARY.map((e) => e.id);
 /** Stable anchors for tests and deep links. */
 export const HELP_GLOSSARY_IDS = GLOSSARY.map((entry) => entry.id);
 
-export type SettingsHelpV2View = {
-    chrome: AppChromeBase;
-};
+/** The most a search reads, so a pasted page cannot make a long query. */
+export const HELP_QUERY_MAX = 100;
+/** The most words a search counts. */
+const HELP_QUERY_WORDS = 8;
 
-function helpRow(entry: GlossaryEntry): string {
-    return `<li class="fd-settings-help__item"><details class="fd-settings-help__row" id="${escapeHtml(entry.id)}">
-<summary class="fd-settings-help__summary"><span class="fd-settings-help__label">${escapeHtml(entry.title)}</span><span class="fd-settings-help__chev" aria-hidden="true">${iconChevronRight()}</span></summary>
-<div class="fd-settings-help__answer">${entry.answer}</div>
-</details></li>`;
+const BODIES = new Map(GLOSSARY_COPY.map((entry) => [entry.id, entry.body]));
+
+function queryWords(query: string): string[] {
+    return query
+        .slice(0, HELP_QUERY_MAX)
+        .toLowerCase()
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, HELP_QUERY_WORDS);
 }
 
-export function renderSettingsHelpV2Body(): string {
-    const rows = GLOSSARY.map(helpRow).join("");
-    return `${String(settingsPageHeader("Help"))}<ul class="fd-settings-help" aria-label="Help topics">${rows}</ul>`;
+/** The topics whose title or text holds every typed word; all of them for none. */
+export function searchGlossary(query: string | undefined): GlossaryEntry[] {
+    const words = queryWords(query ?? "");
+    if (words.length === 0) return [...GLOSSARY];
+    return GLOSSARY.filter((entry) => {
+        const text =
+            `${entry.title} ${BODIES.get(entry.id) ?? ""}`.toLowerCase();
+        return words.every((word) => text.includes(word));
+    });
+}
+
+export type SettingsHelpV2View = {
+    chrome: AppChromeBase;
+    /** What the search field holds. */
+    query?: string;
+};
+
+function helpRow(entry: GlossaryEntry): Html {
+    return itemRow({
+        id: entry.id,
+        title: entry.title,
+        disclosure: { answer: raw(entry.answer) },
+    });
+}
+
+/** The search field draws the page's one search landmark; the form around it is none. */
+function searchForm(query: string): Html {
+    return raw(
+        `<form class="fd-settings-help-search" method="get" action="${esc(APP_PATHS.settingsHelp)}" data-turbo-action="replace">${searchField(
+            {
+                label: "Search help",
+                placeholder: "Search help",
+                name: "q",
+                value: query,
+                clear: false,
+            },
+        )}</form>`,
+    );
+}
+
+export function renderSettingsHelpV2Body(query = ""): string {
+    const entries = searchGlossary(query);
+    if (entries.length === 0) {
+        return String(
+            emptyState({
+                title: "No topics match",
+                body: `Nothing in Help has “${query.trim().slice(0, HELP_QUERY_MAX)}”.`,
+            }),
+        );
+    }
+    return String(
+        listGroup({
+            rows: entries.map(helpRow),
+            label: "Help topics",
+            className: "fd-settings-help",
+        }),
+    );
 }
 
 export function renderSettingsHelpV2Page(view: SettingsHelpV2View): string {
+    const query = view.query ?? "";
     return renderSettingsV2Page({
         chrome: view.chrome,
         page: "help",
         title: "Help",
-        body: renderSettingsHelpV2Body(),
+        headerExtra: searchForm(query.slice(0, HELP_QUERY_MAX)),
+        className: "fd-settings--help fd-settings--flat",
+        body: renderSettingsHelpV2Body(query),
     });
 }
