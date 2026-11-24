@@ -371,10 +371,12 @@ describe("the page", () => {
 
     test("in the shell: phone nav marks nothing, no cluster over the Detail bar, the bell stays in the top bar", () => {
         const html = renderNotificationsPage(view({ today: [row()] }));
-        const tabs = html.slice(html.indexOf('<nav class="fd-tabs"'));
+        const tabs = html.slice(
+            html.indexOf('<nav class="fd-tabs fd-nav-bar"'),
+        );
         expect(tabs.split("</nav>")[0]).not.toContain("aria-current");
         expect(html).not.toContain('class="fd-cluster"');
-        expect(html).toContain('<header class="fd-topbar">');
+        expect(html).toContain('<header class="fd-top-bar">');
         expect(html).toContain('class="fd-bell"');
         expect(html).toContain("<title>Notifications</title>");
     });

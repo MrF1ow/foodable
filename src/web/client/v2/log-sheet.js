@@ -477,8 +477,25 @@ function rebuildUnitChips(form, units, selected) {
 
 let lastLogOpener = null;
 
+// The Top bar's search field is a wrapper around the input that takes focus;
+// focus returns to the input, not to the wrapper.
+const LOG_TRIGGER_FIELD = ".fd-top-bar .fd-search-field[data-fd-open-sheet]";
+
+function focusableOpener(opener) {
+    if (opener instanceof HTMLElement && opener.matches?.(LOG_TRIGGER_FIELD))
+        return opener.querySelector(".fd-search-field__input") ?? opener;
+    return opener;
+}
+
+function isLogTriggerInput(el) {
+    return (
+        el instanceof HTMLInputElement &&
+        Boolean(el.closest?.(LOG_TRIGGER_FIELD))
+    );
+}
+
 function openSheet(id, opener) {
-    if (opener) lastLogOpener = opener;
+    if (opener) lastLogOpener = focusableOpener(opener);
     const d = document.getElementById(id);
     if (d instanceof HTMLDialogElement && typeof d.showModal === "function") {
         if (!d.open) d.showModal();
@@ -497,14 +514,14 @@ function focusLogSearchInput(dialog, query) {
 }
 
 function visibleLogOpener() {
-    const desktop = document.querySelector("a.fd-search[data-fd-open-sheet]");
+    const desktop = document.querySelector(LOG_TRIGGER_FIELD);
     if (desktop instanceof HTMLElement && desktop.offsetParent !== null)
-        return desktop;
+        return focusableOpener(desktop);
     const phone = document.querySelector("a.fd-log[data-fd-open-sheet]");
     if (phone instanceof HTMLElement && phone.offsetParent !== null)
         return phone;
     return (
-        document.querySelector("a.fd-logfood[data-fd-open-sheet]") ??
+        document.querySelector(".fd-top-bar a[data-fd-open-sheet]") ??
         document.querySelector("[data-fd-open-sheet]")
     );
 }
@@ -1075,7 +1092,7 @@ function bindOpeners() {
         "click",
         (event) => {
             const open = event.target.closest?.(
-                "a.fd-log[data-fd-open-sheet], a.fd-search[data-fd-open-sheet], a.fd-scan[data-fd-open-sheet], a.fd-logfood[data-fd-open-sheet]",
+                "a.fd-log[data-fd-open-sheet], .fd-top-bar [data-fd-open-sheet]",
             );
             if (
                 !open ||
@@ -1096,6 +1113,31 @@ function bindOpeners() {
         },
         true,
     );
+    // The Top bar's search field is a trigger: typing into it (reached by Tab)
+    // moves what was typed into the sheet's search and opens it.
+    document.addEventListener("input", (event) => {
+        const input = event.target;
+        if (!isLogTriggerInput(input)) return;
+        const query = input.value;
+        input.value = "";
+        openLogSearchSheet(input, query);
+    });
+    // Enter and ArrowDown on the focused field open the sheet, as they did on
+    // the link this field replaced.
+    document.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" && event.key !== "ArrowDown") return;
+        if (
+            event.defaultPrevented ||
+            event.altKey ||
+            event.ctrlKey ||
+            event.metaKey ||
+            event.shiftKey ||
+            !isLogTriggerInput(event.target)
+        )
+            return;
+        event.preventDefault();
+        openLogSearchSheet(event.target);
+    });
 }
 
 let logShortcutsBound = false;
@@ -1105,7 +1147,8 @@ function bindLogShortcuts() {
     logShortcutsBound = true;
     document.addEventListener("keydown", (event) => {
         if (!isLogSearchShortcut(event)) return;
-        if (isEditableTarget(document.activeElement)) return;
+        const active = document.activeElement;
+        if (isEditableTarget(active) && !isLogTriggerInput(active)) return;
         if (!document.querySelector(".fd-shell")) return;
         event.preventDefault();
         openLogSearchSheet(visibleLogOpener());

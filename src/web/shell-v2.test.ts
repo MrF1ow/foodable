@@ -6,7 +6,6 @@ import { FD_ICON_PATHS } from "./components/fd-icons.js";
 import {
     FD_LOG_HREF,
     FD_LOG_MEAL_HASH,
-    FD_TABS,
     FD_TRENDS_HASH,
     FD_TRENDS_HREF,
     householdInitial,
@@ -15,6 +14,7 @@ import {
     v2ActiveFor,
 } from "./shell-v2.js";
 import { FD_BARCODE_SCAN_SHEET_ID } from "./pages/v2/log-sheet.js";
+import { NAV_BAR_TABS } from "./components/v2/nav-bar.js";
 import {
     renderAppShell,
     renderBarePage,
@@ -56,9 +56,9 @@ function between(html: string, open: RegExp, close: string): string {
 }
 
 const tabsNav = (html: string) =>
-    between(html, /<nav class="fd-tabs"/, "</nav>");
+    between(html, /<nav class="fd-tabs fd-nav-bar"/, "</nav>");
 const sideNav = (html: string) =>
-    between(html, /<nav class="fd-sidenav"/, "</nav>");
+    between(html, /<nav class="fd-sidebar__nav"/, "</nav>");
 
 /** hrefs of the links marked aria-current="page" in a nav's markup. */
 function currentHrefs(nav: string): string[] {
@@ -81,14 +81,14 @@ describe("the shell", () => {
         expect(new Set(navs).size).toBe(navs.length);
         // The desktop top bar is the only page-level header; log sheets add
         // `<header class="fd-sheet-head">` inside their dialogs.
-        expect(html).toContain('<header class="fd-topbar">');
+        expect(html).toContain('<header class="fd-top-bar">');
         const pageHeaders = [...html.matchAll(/<header class="([^"]+)"/g)]
             .map((m) => m[1])
-            .filter((cls) => cls === "fd-topbar");
-        expect(pageHeaders).toEqual(["fd-topbar"]);
+            .filter((cls) => cls === "fd-top-bar");
+        expect(pageHeaders).toEqual(["fd-top-bar"]);
         expect(html).not.toContain("fd-phonebar");
         expect(html).not.toContain("<aside");
-        expect(html).toContain('<div class="fd-sidebar">');
+        expect(html).toContain('<div class="fd-sidebar fd-sidebar--design">');
         expect(html).toContain(
             '<main class="app-main native fd-main"><div class="fd-cluster">',
         );
@@ -122,20 +122,19 @@ describe("the shell", () => {
             "fd-shell",
             "fd-column",
             "fd-sidebar",
-            "fd-household",
-            "fd-sidenav",
-            "fd-sidelink",
-            "fd-sidelink-settings",
-            "fd-side-dot",
-            "fd-account",
+            "fd-sidebar__household",
+            "fd-sidebar__nav",
+            "fd-side-link",
+            "fd-sidebar__settings",
+            "fd-sidebar__account",
             "fd-account-chip",
             "fd-cluster",
             "fd-bell",
-            "fd-topbar",
-            "fd-search",
-            "fd-scan",
-            "fd-logfood",
+            "fd-top-bar",
+            "fd-search-field",
+            "fd-btn",
             "fd-tabs",
+            "fd-nav-bar",
             "fd-tab",
             "fd-tab-dot",
             "fd-log",
@@ -168,6 +167,13 @@ describe("the shell", () => {
         ]);
         expect(nav).toContain('class="fd-log"');
         expect(nav.match(/class="fd-tab"/g)?.length).toBe(4);
+        // The tabs are the Nav bar component's, which the shell does not copy.
+        expect(NAV_BAR_TABS.map((t) => t.href)).toEqual([
+            "/",
+            "/kitchen/fridge",
+            "/recipes",
+            FD_TRENDS_HREF,
+        ]);
     });
 
     test("the nav icons are the design's geometry", () => {
@@ -257,7 +263,7 @@ describe("the shell", () => {
         const phoneBell = (html: string) =>
             between(html, /<div class="fd-cluster">/, "</div>");
         const topBar = (html: string) =>
-            between(html, /<header class="fd-topbar"/, "</header>");
+            between(html, /<header class="fd-top-bar"/, "</header>");
 
         test("a link to the inbox in the phone cluster, beside the account chip", () => {
             const cluster = phoneBell(v2Html());
@@ -284,10 +290,12 @@ describe("the shell", () => {
             const top = topBar(v2Html());
             expect(top).toContain('href="/notifications"');
             expect(top.indexOf("fd-bell")).toBeLessThan(
-                top.indexOf("fd-logfood"),
+                top.indexOf("Log food"),
             );
-            // After the search field and the scan button.
-            expect(top.indexOf("fd-scan")).toBeLessThan(top.indexOf("fd-bell"));
+            // After the search field.
+            expect(top.indexOf("fd-search-field")).toBeLessThan(
+                top.indexOf("fd-bell"),
+            );
         });
 
         test("no dot until something is new, then a dot and ', new' on both bells", () => {
@@ -340,9 +348,9 @@ describe("the shell", () => {
         const subs = (html: string) =>
             [
                 ...sideNav(html).matchAll(
-                    /<a class="fd-sidesub" href="([^"]+)"( aria-current="page")?>([^<]+)</g,
+                    /<a class="fd-side-link fd-side-link--sub( fd-side-link--current)?" href="([^"]+)"( aria-current="page")?>[^]*?<span class="fd-side-link__label">([^<]+)</g,
                 ),
-            ].map((m) => [m[1], m[3], m[2] ? "current" : ""]);
+            ].map((m) => [m[2], m[4], m[3] ? "current" : ""]);
         expect(subs(v2Html({ active: "nutrition" }))).toEqual([]);
         expect(subs(v2Html({ active: "recipes" }))).toEqual([]);
         expect(subs(v2Html({ active: "fridge" }))).toEqual([
@@ -366,40 +374,47 @@ describe("the shell", () => {
         ).toEqual(["/kitchen/usuals", "Usuals", "current"]);
         // Kitchen is the current group, not the current page.
         expect(sideNav(v2Html({ active: "grocery" }))).toContain(
-            '<a class="fd-sidelink" href="/kitchen/fridge" aria-current="true">',
+            '<a class="fd-side-link fd-side-link--main fd-side-link--current" href="/kitchen/fridge" aria-current="true">',
         );
         // Directly after the Kitchen link, before Recipes.
         expect(sideNav(v2Html({ active: "fridge" }))).toMatch(
-            />Kitchen<\/span>[^]*?<\/a><a class="fd-sidesub"[^]*?Usuals<\/a><a class="fd-sidelink" href="\/recipes"/,
+            />Kitchen<\/span><\/a><a class="fd-side-link fd-side-link--sub[^]*?Usuals<\/span><\/a><a class="fd-side-link fd-side-link--main" href="\/recipes"/,
         );
     });
 
     test("sidebar: household block, nav, Settings, account", () => {
         const html = v2Html();
-        const household = between(html, /<a class="fd-household"/, "</a>");
+        const household = between(
+            html,
+            /<a class="fd-sidebar__household"/,
+            "</a>",
+        );
         expect(household).toContain('href="/settings/household"');
-        expect(household).toContain("The Flow household, 3 members");
-        expect(html).toContain('class="fd-household-name">The Flow household<');
-        expect(html).toContain('class="fd-household-meta">3 members<');
-        expect(html).toContain('class="fd-avatar" aria-hidden="true">F<');
+        expect(household).toContain(
+            'class="fd-sidebar__title">The Flow household<',
+        );
+        expect(household).toContain('class="fd-sidebar__meta">3 members<');
+        expect(household).toContain(
+            'class="fd-avatar-initials" aria-hidden="true">F<',
+        );
         const side = sideNav(html);
         expect(
-            [...side.matchAll(/class="fd-sidelink-label">([^<]+)</g)].map(
+            [...side.matchAll(/class="fd-side-link__label">([^<]+)</g)].map(
                 (m) => m[1],
             ),
         ).toEqual(["Today", "Kitchen", "Recipes", "Trends", "Settings"]);
         const settings = between(
             side,
-            /<a class="fd-sidelink fd-sidelink-settings"/,
+            /<a class="fd-side-link fd-side-link--main fd-sidebar__settings"/,
             "</a>",
         );
         expect(settings).toContain('href="/settings"');
         expect(settings).toContain('data-turbo="false"');
-        const account = between(html, /<a class="fd-account"/, "</a>");
+        const account = between(html, /<a class="fd-sidebar__account"/, "</a>");
         expect(account).toContain('href="/settings"');
         expect(account).toContain('data-turbo="false"');
-        expect(account).toContain('class="fd-account-name">Ethan Flow<');
-        expect(account).toContain('class="fd-account-role">Owner<');
+        expect(account).toContain('class="fd-sidebar__title">Ethan Flow<');
+        expect(account).toContain('class="fd-sidebar__meta">Owner<');
         expect(account).toContain(">EF<");
     });
 
@@ -411,39 +426,51 @@ describe("the shell", () => {
         ).toContain(">1 member<");
         expect(
             v2Html({ identity: { ...IDENTITY, viewerRole: "member" } }),
-        ).toContain('class="fd-account-role">Member<');
+        ).toContain('class="fd-sidebar__meta">Member<');
     });
 
-    test("top bar omits scan when barcode-camera is off", () => {
-        const html = v2Html({
-            flags: {
-                ...FIXTURE_APP_CHROME_FLAGS,
-                barcodeCamera: false,
-            },
+    test("no identity: the sidebar has no account row", () => {
+        const html = v2Html({ identity: undefined });
+        expect(html).not.toContain("fd-sidebar__account");
+        expect(html).toContain("fd-sidebar__household");
+    });
+
+    // The shell has no scan button: scanning is a phone action (rule 25), so
+    // the barcode-camera flag changes the scan sheet only, never the top bar.
+    for (const barcodeCamera of [true, false]) {
+        test(`top bar has no scan with barcode-camera ${barcodeCamera ? "on" : "off"}`, () => {
+            const html = v2Html({
+                flags: { ...FIXTURE_APP_CHROME_FLAGS, barcodeCamera },
+            });
+            const top = between(
+                html,
+                /<header class="fd-top-bar"/,
+                "</header>",
+            );
+            expect(top).not.toContain("Scan");
+            expect(top).not.toContain("fd-icon--scan");
+            expect(top).not.toContain(FD_BARCODE_SCAN_SHEET_ID);
+            // The scan sheet stays for pages that open it, camera or not.
+            expect(html).toContain(`id="${FD_BARCODE_SCAN_SHEET_ID}"`);
+            // No menu of the shell can come out empty: there is none.
+            expect(html).not.toContain("fd-menu");
         });
-        const top = between(html, /<header class="fd-topbar"/, "</header>");
-        expect(top).not.toContain("fd-scan");
-    });
+    }
 
-    test("top bar: search, scan and Log food are plain links", () => {
+    test("top bar: the search field and Log food open the search sheet, ⌘K hinted", () => {
         const html = v2Html();
-        const top = between(html, /<header class="fd-topbar"/, "</header>");
-        const search = between(top, /<a class="fd-search"/, "</a>");
-        expect(search).toContain(`href="${FD_LOG_HREF}"`);
-        expect(search).toContain("Search foods, recipes, barcodes");
+        const top = between(html, /<header class="fd-top-bar"/, "</header>");
+        const search = between(top, /<div class="fd-search-field/, "</div>");
+        expect(search).toContain('data-fd-open-sheet="fd-log-search"');
         expect(search).toContain(
-            '<kbd class="fd-kbd" aria-hidden="true">⌘K</kbd>',
+            'placeholder="Search foods, recipes, barcodes"',
         );
-        const scan = between(top, /<a class="fd-scan"/, "</a>");
-        expect(scan).toContain(`href="${FD_LOG_HREF}"`);
-        expect(scan).toContain('aria-label="Scan a barcode"');
-        expect(scan).toContain(
-            `data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"`,
-        );
-        const log = between(top, /<a class="fd-logfood"/, "</a>");
+        expect(search).toContain(">⌘K</kbd>");
+        expect(search).toContain('aria-keyshortcuts="Control+K Meta+K"');
+        const log = between(top, /<a class="fd-btn[^"]*"/, "</a>");
         expect(log).toContain(`href="${FD_LOG_HREF}"`);
         expect(log).toContain('data-fd-open-sheet="fd-log-search"');
-        expect(log).toContain("<span>Log food</span>");
+        expect(log).toContain("Log food");
         expect(top).not.toContain("disabled");
         expect(top).not.toContain("aria-disabled");
     });
@@ -561,7 +588,7 @@ describe("the shell", () => {
     test("fragments name real targets on the nutrition page", () => {
         expect(FD_LOG_MEAL_HASH).toBe("nutrition-log-meal");
         expect(FD_TRENDS_HASH).toBe("trends");
-        expect(FD_TABS.find((t) => t.id === "trends")?.href).toBe(
+        expect(NAV_BAR_TABS.find((t) => t.id === "trends")?.href).toBe(
             FD_TRENDS_HREF,
         );
     });
@@ -576,6 +603,7 @@ describe("the shell", () => {
         expect(html).not.toContain("needs-attention");
         expect(tabsNav(html)).not.toContain("fd-tab-dot-");
         expect(sideNav(html)).not.toContain("fd-side-dot-");
+        expect(sideNav(html)).not.toContain("dot");
         // The bell is the one place a new notification shows.
         expect(html).toContain("fd-bell");
     });

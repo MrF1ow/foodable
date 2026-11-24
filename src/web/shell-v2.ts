@@ -1,12 +1,11 @@
-// The household shell, drawn from the FigCraft design:
-// Components › Nav bar, Screens › Today (Header, Account chip) and
-// Desktop › Today (Sidebar, Top bar). Phones get a floating four-tab nav with
-// the green search button in the middle and the account chip top right;
-// from 1024 px the sidebar and the top bar replace both. The switch is one CSS
-// media query in public/app/v2/shell.css, so the server renders both layouts
-// and the stylesheet hides the one that does not apply.
+// The household shell, built from the design's components: the Nav bar
+// (components/v2/nav-bar.ts) on phones, with the bell and the account chip top
+// right; from 1024 px the Sidebar and the Top bar (components/v2/sidebar.ts,
+// top-bar.ts, with the Side link and the Bell) replace both. The switch is one
+// CSS media query in public/app/v2/shell.css, so the server renders both
+// layouts and the stylesheet hides the one that does not apply.
 //
-// Pages that are not redesigned yet render their current body inside it: the
+// Pages that are not switched yet render their current body inside it: the
 // old /app.css loads first and /app-v2.css after it. Every class here starts
 // with `fd-`.
 
@@ -20,11 +19,18 @@ import {
     scannerZxingScriptHref,
 } from "../widgets.js";
 import type { HouseholdMember } from "../household.js";
-import { fdIcon, type FdIconName } from "./components/fd-icons.js";
 import { APP_PATHS } from "./route-map.js";
 import { initialsOf } from "./initials.js";
 import { memberAvatar } from "./components/v2/avatar.js";
-import { bell } from "./components/v2/bell.js";
+import { bell, type BellOptions } from "./components/v2/bell.js";
+import {
+    NAV_BAR_TABS,
+    navBar,
+    type NavBarActive,
+} from "./components/v2/nav-bar.js";
+import { sidebar, type SidebarLink } from "./components/v2/sidebar.js";
+import { topBar } from "./components/v2/top-bar.js";
+import type { IconName } from "./components/v2/icon.js";
 import { NOTIFICATIONS_PAGE } from "../copy/notifications.js";
 import {
     appHeadMeta,
@@ -36,14 +42,13 @@ import {
     type V2NavId,
 } from "./shell.js";
 import {
-    FD_BARCODE_SCAN_SHEET_ID,
     FD_LOG_SEARCH_SHEET_ID,
     renderLogSheets,
 } from "./pages/v2/log-sheet.js";
 
 /** The log-meal fragment (`#nutrition-log-meal`) and the Trends card key
- *  (`trends`). Search, Scan and Log food link to the
- *  log-meal fragment; the Trends tab links to `FD_TRENDS_PATH` (`/trends`).
+ *  (`trends`). Search and Log food link to the log-meal fragment; the Trends
+ *  tab links to `FD_TRENDS_PATH` (`/trends`).
  *  v2/shell.js acts on the log-meal fragment only. A test pins both. */
 export const FD_LOG_MEAL_HASH = "nutrition-log-meal";
 export const FD_TRENDS_HASH = "trends";
@@ -52,38 +57,15 @@ export const FD_LOG_HREF = `${APP_PATHS.nutrition}#${FD_LOG_MEAL_HASH}`;
 export const FD_TRENDS_PATH = "/trends";
 export const FD_TRENDS_HREF = FD_TRENDS_PATH;
 
-type FdTab = {
-    id: Exclude<V2NavId, "settings" | "none">;
-    label: string;
-    href: string;
-    icon: FdIconName;
-};
-
-export const FD_TABS: readonly FdTab[] = [
-    {
-        id: "today",
-        label: "Today",
-        href: APP_PATHS.nutrition,
-        icon: "cal",
-    },
-    {
-        id: "kitchen",
-        label: "Kitchen",
-        href: APP_PATHS.kitchenFridge,
-        icon: "fridge",
-    },
-    {
-        id: "recipes",
-        label: "Recipes",
-        href: APP_PATHS.recipes,
-        icon: "book",
-    },
-    {
-        id: "trends",
-        label: "Trends",
-        href: FD_TRENDS_HREF,
-        icon: "trend",
-    },
+/** The sidebar's main links, in the design's order. */
+const SIDEBAR_LINKS: readonly {
+    id: Exclude<NavBarActive, "none">;
+    icon: IconName;
+}[] = [
+    { id: "today", icon: "calendar" },
+    { id: "kitchen", icon: "fridge" },
+    { id: "recipes", icon: "book" },
+    { id: "trends", icon: "trend" },
 ];
 
 /** The Kitchen text tabs (design: Kitchen tabs). Open grocery line count comes
@@ -107,19 +89,19 @@ const SIDEBAR_KITCHEN_LABELS: Record<V2KitchenTab, string> = {
     usuals: "Usuals",
 };
 
-/** Desktop Kitchen sections: sub-items under the sidebar's Kitchen link while
+/** Desktop Kitchen sections: sub-links under the sidebar's Kitchen link while
  *  Kitchen is active (design: Sidebar › Sub/Overview, Sub/Groceries,
  *  Sub/Usuals). They replace the text tabs from 1024 px. */
-function sidebarKitchenSubs(chrome: AppChrome): string {
+function sidebarKitchenSubs(chrome: AppChrome) {
     const current = kitchenTabFor(chrome);
-    return FD_KITCHEN_TABS.map((t) => {
-        const on = t.id === current ? ' aria-current="page"' : "";
-        const label =
+    return FD_KITCHEN_TABS.map((t) => ({
+        label:
             t.id === "groceries" && chrome.v2KitchenGroceriesCount != null
                 ? `${SIDEBAR_KITCHEN_LABELS[t.id]} · ${chrome.v2KitchenGroceriesCount}`
-                : SIDEBAR_KITCHEN_LABELS[t.id];
-        return `<a class="fd-sidesub" href="${escapeHtml(t.href)}"${on}>${escapeHtml(label)}</a>`;
-    }).join("");
+                : SIDEBAR_KITCHEN_LABELS[t.id],
+        href: t.href,
+        current: t.id === current,
+    }));
 }
 
 const SETTINGS_LABEL = "Settings";
@@ -190,48 +172,64 @@ function memberCountLabel(count: number): string {
     return count === 1 ? "1 member" : `${count} members`;
 }
 
-function phoneTabs(chrome: AppChrome, active: V2NavId): string {
-    const tab = (t: FdTab) => {
-        const current = t.id === active ? ' aria-current="page"' : "";
-        return `<a class="fd-tab" href="${escapeHtml(t.href)}"${current} aria-label="${escapeHtml(t.label)}">${fdIcon(t.icon)}<span class="fd-tab-dot" aria-hidden="true"></span></a>`;
-    };
-    const [today, kitchen, recipes, trends] = FD_TABS;
-    const log = `<a class="fd-log" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Search" title="Search">${fdIcon("search", 2)}</a>`;
-    return `<nav class="fd-tabs" aria-label="Main tabs">${tab(today!)}${tab(kitchen!)}${log}${tab(recipes!)}${tab(trends!)}</nav>`;
+/** Nav bar's current tab: Settings and the pages outside the four have none. */
+function navBarActive(active: V2NavId): NavBarActive {
+    return active === "settings" ? "none" : active;
 }
 
-function sidebar(chrome: AppChrome, active: V2NavId): string {
+function desktopSidebar(chrome: AppChrome, active: V2NavId): string {
     const identity = chrome.identity;
     const householdName = identity?.householdName ?? "Household";
-    const household = `<a class="fd-household" href="${APP_PATHS.settingsHousehold}" aria-label="${escapeHtml(identity ? `${householdName}, ${memberCountLabel(identity.memberCount)}` : householdName)}"><span class="fd-avatar" aria-hidden="true">${escapeHtml(householdInitial(householdName))}</span><span class="fd-household-text"><span class="fd-household-name">${escapeHtml(householdName)}</span>${
-        identity
-            ? `<span class="fd-household-meta">${memberCountLabel(identity.memberCount)}</span>`
-            : ""
-    }</span></a>`;
-
-    const link = (t: FdTab) => {
+    const links: SidebarLink[] = NAV_BAR_TABS.map((t) => {
+        const icon = SIDEBAR_LINKS.find((l) => l.id === t.id)!.icon;
         // With Kitchen's sections listed, the section link below is the page
-        // and Kitchen is the current group ("true", not "page").
-        const current =
-            t.id !== active
-                ? ""
-                : t.id === "kitchen"
-                  ? ' aria-current="true"'
-                  : ' aria-current="page"';
-        return `<a class="fd-sidelink" href="${escapeHtml(t.href)}"${current}>${fdIcon(t.icon)}<span class="fd-sidelink-label">${escapeHtml(t.label)}</span><span class="fd-side-dot" aria-hidden="true"></span></a>`;
-    };
-    const settings = `<a class="fd-sidelink fd-sidelink-settings" href="${APP_PATHS.settings}" data-turbo="false"${active === "settings" ? ' aria-current="page"' : ""}>${fdIcon("sun")}<span class="fd-sidelink-label">${SETTINGS_LABEL}</span><span class="fd-side-dot" aria-hidden="true"></span></a>`;
-    const links = FD_TABS.map((t) =>
-        t.id === "kitchen" && active === "kitchen"
-            ? `${link(t)}${sidebarKitchenSubs(chrome)}`
-            : link(t),
-    ).join("");
-    const nav = `<nav class="fd-sidenav" aria-label="Main navigation">${links}${settings}</nav>`;
-
+        // and Kitchen is the current group.
+        const kitchenOpen = t.id === "kitchen" && active === "kitchen";
+        return {
+            label: t.label,
+            href: t.href,
+            icon,
+            current: kitchenOpen ? ("group" as const) : t.id === active,
+            subs: kitchenOpen ? sidebarKitchenSubs(chrome) : undefined,
+        };
+    });
     const account = identity
-        ? `<a class="fd-account" href="${APP_PATHS.settings}" data-turbo="false" aria-label="${escapeHtml(`Account: ${identity.viewerName}, ${roleLabel(identity.viewerRole)}`)}">${String(memberAvatar({ name: identity.viewerName, userId: identity.viewerUserId, version: identity.viewerUserId ? identity.avatarVersions?.get(identity.viewerUserId) : null, enabled: true }))}<span class="fd-account-text"><span class="fd-account-name">${escapeHtml(identity.viewerName)}</span><span class="fd-account-role">${roleLabel(identity.viewerRole)}</span></span>${fdIcon("chevR")}</a>`
-        : "";
-    return `<div class="fd-sidebar">${household}${nav}${account}</div>`;
+        ? {
+              name: identity.viewerName,
+              role: roleLabel(identity.viewerRole),
+              href: APP_PATHS.settings,
+              data: { turbo: "false" },
+              avatar: memberAvatar({
+                  name: identity.viewerName,
+                  userId: identity.viewerUserId,
+                  version: identity.viewerUserId
+                      ? identity.avatarVersions?.get(identity.viewerUserId)
+                      : null,
+                  enabled: true,
+                  className: "fd-avatar-initials",
+              }),
+          }
+        : undefined;
+    return String(
+        sidebar({
+            household: {
+                name: householdName,
+                meta: identity
+                    ? memberCountLabel(identity.memberCount)
+                    : undefined,
+                href: APP_PATHS.settingsHousehold,
+                initials: householdInitial(householdName),
+            },
+            links,
+            settings: {
+                label: SETTINGS_LABEL,
+                href: APP_PATHS.settings,
+                current: active === "settings",
+                data: { turbo: "false" },
+            },
+            account,
+        }),
+    );
 }
 
 /** The bell (design: Bell, with the green dot when something is new). It opens
@@ -239,15 +237,17 @@ function sidebar(chrome: AppChrome, active: V2NavId): string {
  *  Turbo's hover prefetch is off for it: opening the inbox marks what it shows
  *  as read, so a GET from a mouse passing over the bell would clear the dot
  *  without the person opening anything. */
+function notificationsBellOptions(chrome: AppChrome): BellOptions {
+    return {
+        href: APP_PATHS.notifications,
+        label: NOTIFICATIONS_PAGE.bellLabel,
+        unread: chrome.notificationsUnread === true,
+        data: { "turbo-prefetch": "false" },
+    };
+}
+
 function notificationsBell(chrome: AppChrome): string {
-    return String(
-        bell({
-            href: APP_PATHS.notifications,
-            label: NOTIFICATIONS_PAGE.bellLabel,
-            unread: chrome.notificationsUnread === true,
-            data: { "turbo-prefetch": "false" },
-        }),
-    );
+    return String(bell(notificationsBellOptions(chrome)));
 }
 
 /** The phone's top-right cluster (design: Header, the bell beside the account
@@ -297,11 +297,20 @@ function withKitchenTabs(body: string, chrome: AppChrome): string {
     return head ? `${head}${tabs}${body.slice(head.length)}` : `${tabs}${body}`;
 }
 
-function topBar(chrome: AppChrome): string {
-    const scan = chrome.flags.barcodeCamera
-        ? `<a class="fd-scan" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}" aria-label="Scan a barcode" title="Scan a barcode">${fdIcon("scan")}</a>`
-        : "";
-    return `<header class="fd-topbar"><a class="fd-search" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-keyshortcuts="Control+K Meta+K">${fdIcon("search")}<span class="fd-search-text">Search foods, recipes, barcodes</span><kbd class="fd-kbd" aria-hidden="true">⌘K</kbd></a><span class="fd-topbar-fill"></span>${scan}${notificationsBell(chrome)}<a class="fd-logfood" href="${FD_LOG_HREF}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${fdIcon("plus")}<span>Log food</span></a></header>`;
+/** The desktop Top bar: the search field opens the log search sheet (the
+ *  shell script wires `data-fd-open-sheet`), then the bell and Log food. There
+ *  is no scan button: scanning is a phone action. */
+function desktopTopBar(chrome: AppChrome): string {
+    return String(
+        topBar({
+            search: { data: { "fd-open-sheet": FD_LOG_SEARCH_SHEET_ID } },
+            bell: notificationsBellOptions(chrome),
+            logFood: {
+                href: FD_LOG_HREF,
+                attrs: { "data-fd-open-sheet": FD_LOG_SEARCH_SHEET_ID },
+            },
+        }),
+    );
 }
 
 /** Head for the shell: the shared meta, then the base stylesheet and script
@@ -328,12 +337,12 @@ ${appHeadV2(chrome.title, chrome.theme)}
 </head>
 <body class="fd-body">
 <div class="fd-shell">
-${sidebar(chrome, active)}
+${desktopSidebar(chrome, active)}
 <div class="fd-column">
-${topBar(chrome)}
+${desktopTopBar(chrome)}
 <main class="app-main native fd-main">${active === "settings" || chrome.v2Detail ? "" : phoneCluster(chrome)}${active === "kitchen" ? withKitchenTabs(chrome.body, chrome) : chrome.body}</main>
 </div>
-${phoneTabs(chrome, active)}
+${navBar({ active: navBarActive(active), logHref: FD_LOG_HREF })}
 </div>
 ${renderLogSheets({ timezone: chrome.v2Timezone ?? "UTC", barcodeCamera: chrome.flags.barcodeCamera, scannerZxingHref: scannerZxingScriptHref(), scannerWasmHref: scannerWasmHref(), ...chrome.v2LogSheet })}
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>

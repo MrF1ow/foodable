@@ -4,9 +4,8 @@
  * is a 24 px icon over a 4 px dot; the current one's dot is green and its icon
  * brighter. `none` marks no tab (a page outside the four). No notice dots.
  *
- * This builder emits the live shell's markup (`.fd-tabs`, `.fd-tab`,
- * `.fd-tab-dot`, `.fd-log`, styled in `shell.css`), so the shell can move onto
- * it without a pixel changing. `inline` adds `fd-tabs--inline`
+ * It is the shell's phone nav (`.fd-tabs`, `.fd-tab`, `.fd-tab-dot`, `.fd-log`,
+ * styled in `shell.css`). `inline` adds `fd-tabs--inline`
  * (`public/app/v2/tab-row.css`) to let the bar sit in the page flow, as the
  * gallery needs it; the live bar is fixed to the screen.
  *

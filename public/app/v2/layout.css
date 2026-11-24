@@ -1,13 +1,19 @@
 /* The desktop shell components (src/web/components/v2/): Keyboard hint, Side
  * link, the Sidebar's parts, Top bar, Selection bar and Page layout. Sizes
  * come from the scale in tokens.css; the fixed widths are the --fd-* locals at
- * the top of each component. The Sidebar block itself is the live .fd-sidebar
- * in shell.css; its two modifiers are the marked part at the end of that
- * file. */
+ * the top of each component. The Sidebar block itself is `.fd-sidebar` in
+ * shell.css, which also hides it below 1024 px; its two modifiers are the
+ * marked part at the end of that file. */
 
 /* ---- Keyboard hint ---- */
 
 .fd-keyboard-hint {
+    /* The design's chip (590349) is 35 px wide around "⌘K"; the key glyphs
+       are narrower in the browser's fonts, so the width is held. */
+    --fd-keyboard-hint-min-w: 35px;
+    box-sizing: border-box;
+    min-width: var(--fd-keyboard-hint-min-w);
+    text-align: center;
     flex: none;
     padding: var(--space-2xs) var(--space-sm);
     border-radius: var(--radius-xs);
@@ -115,7 +121,7 @@
     font-family: var(--font-body);
     font-size: var(--text-body-size);
     font-weight: 600;
-    line-height: 20px;
+    line-height: var(--text-label-line);
 }
 .fd-sidebar__account .fd-sidebar__title {
     font-weight: 500;
@@ -128,7 +134,8 @@
     font-family: var(--font-body);
     font-size: var(--text-caption-size);
     font-weight: 400;
-    line-height: var(--text-caption-line);
+    /* 15 px, as in the design's Sidebar text (593979); the scale has none. */
+    line-height: 15px;
 }
 .fd-sidebar__nav {
     flex: 1;

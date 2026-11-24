@@ -11,8 +11,7 @@
  * `current: true` marks the page (`aria-current="page"`); `"group"` marks a
  * Main link whose section below is the page (`aria-current="true"`).
  *
- * Styles: `public/app/v2/layout.css`. The live shell's `.fd-sidelink` rows
- * are not touched.
+ * Styles: `public/app/v2/layout.css`.
  */
 import { cls, dataAttrs, esc, raw, safeHref, type Html } from "./html.js";
 import { icon, type IconName } from "./icon.js";

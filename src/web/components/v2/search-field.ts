@@ -27,6 +27,8 @@ export type SearchFieldOptions = {
     placeholder?: string;
     /** The shortcut hint chip ("⌘K"), desktop only by the caller's choice. */
     shortcut?: string;
+    /** The input's `aria-keyshortcuts` ("Control+K Meta+K"): the real shortcut the hint names. */
+    keyShortcuts?: string;
     /** Draws the Clear button. */
     clear?: boolean;
     /** Draws the Barcode button; with `href` it is a link. */
@@ -65,6 +67,9 @@ export function searchField(opts: SearchFieldOptions): Html {
             : "",
         opts.value != null ? `value="${esc(opts.value)}"` : "",
         `autocomplete="off"`,
+        opts.keyShortcuts != null
+            ? `aria-keyshortcuts="${esc(opts.keyShortcuts)}"`
+            : "",
     ]
         .filter(Boolean)
         .join(" ");

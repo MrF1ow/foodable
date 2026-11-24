@@ -13,7 +13,9 @@
     padding: var(--space-sm) var(--space-md) var(--space-sm) var(--space-lg);
     border-radius: var(--control-lg-radius);
     background: var(--surface-raised);
-    box-shadow: inset 0 0 0 1px var(--line);
+    /* A real border: the design's padding runs inside its stroke, so the lead
+       icon and the hint sit 1 px further in than the padding alone. */
+    border: 1px solid var(--line);
 }
 .fd-search-field--line {
     gap: var(--space-sm);
