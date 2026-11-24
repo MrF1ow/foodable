@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { detailBar } from "./detail-bar.js";
+import { raw } from "./html.js";
 import { injectedAttributes, XSS } from "./test-helpers.js";
 
 test("back, centred title and a trailing icon button", () => {
@@ -41,6 +42,20 @@ test("a trailing control wins over the balance, and the title may be left out", 
     expect(html).toContain("fd-icon--share");
     expect(html).not.toContain("fd-detail-bar__balance");
     expect(html).not.toContain("<h1");
+});
+
+test("a trailing slot is a control the page built, in the end cell", () => {
+    const html = detailBar({
+        title: "Invite codes",
+        back: { href: "/settings/household" },
+        trailing: { slot: raw('<button type="submit">New</button>') },
+        balance: true,
+    });
+    expect(html).toContain(
+        '<div class="fd-detail-bar__end"><button type="submit">New</button></div>',
+    );
+    expect(html).not.toContain("fd-detail-bar__balance");
+    expect(html).not.toContain("fd-icon--more");
 });
 
 test("every string is escaped", async () => {

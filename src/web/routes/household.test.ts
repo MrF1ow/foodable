@@ -235,6 +235,17 @@ mock.module("../../db/household.js", () => ({
     },
     listHouseholdMembers: async (householdId: string) =>
         db.members.filter((member) => member.householdId === householdId),
+    setHouseholdMemberRole: async (
+        householdId: string,
+        userId: string,
+        role: "admin" | "member",
+    ) => {
+        db.members = db.members.map((member) =>
+            member.householdId === householdId && member.userId === userId
+                ? { ...member, role }
+                : member,
+        );
+    },
     getPluralsSameFood: async () => db.pluralsSameFood,
     setPluralsSameFood: async (_householdId: string, enabled: boolean) => {
         db.pluralsSameFood = enabled;
@@ -3361,7 +3372,7 @@ describe("household settings sub-pages", () => {
             expect(member.status).toBe(403);
         });
 
-        test("an empty value clears it; an unknown zone re-renders Household with the sheet open", async () => {
+        test("an empty value clears it; an unknown zone re-renders the Time zone page with the reason", async () => {
             db.household.preferences.timezone = "America/Denver";
             const cleared = await post(
                 "/settings/household/timezone",
@@ -3379,8 +3390,33 @@ describe("household settings sub-pages", () => {
             expect(bad.status).toBe(400);
             const html = await bad.text();
             expect(html).toContain("Enter a valid IANA timezone.");
-            expect(html).toContain("data-sheet-open-on-load");
+            expect(html).toContain("fd-settings-tz-form");
             expect(db.household.preferences.timezone).toBe("America/Denver");
+        });
+
+        test("the page lists zones with the owner's first, search narrows, and it is for managers only", async () => {
+            db.household.preferences.timezone = "America/Denver";
+            const owner = await get("/settings/household/timezone", ALICE);
+            expect(owner.status).toBe(200);
+            const html = await owner.text();
+            expect(html).toContain('data-fd-settings-page="household"');
+            expect(html).toContain(
+                'aria-label="Back" href="/settings/household"',
+            );
+            expect(html).toContain('action="/settings/household/timezone"');
+            expect(html).toMatch(/Use the owner(&#39;|'|&apos;)s time zone/);
+            expect(html).toMatch(
+                /name="timezone" value="America\/Denver"[^>]*checked/,
+            );
+            expect(html).not.toContain('name="group"');
+            const found = await (
+                await get("/settings/household/timezone?q=kyiv", ADMIN)
+            ).text();
+            expect(found).toContain('value="Europe/Kyiv"');
+            expect(found).not.toContain('value="America/Denver"');
+            expect(found).not.toContain("Use the owner");
+            const member = await get("/settings/household/timezone", BOB);
+            expect(member.status).toBe(403);
         });
     });
 
@@ -3685,24 +3721,195 @@ describe("household settings sub-pages", () => {
         });
     });
 
-    test("Household shows the eight rows and no longer the store list, plurals or readers", async () => {
-        const html = await (await get("/settings/household", ALICE)).text();
-        for (const label of [
-            "Household name",
-            "Location",
-            "Time zone",
-            "Stores",
-            "Restock day",
-            "Recipe link readers",
-            "Unverified recipes",
-            "Rotate join token",
-        ]) {
-            expect(html).toContain(
-                `<span class="fd-row__title">${label}</span>`,
+    describe("the Household page and a member's page, by role", () => {
+        const items = (html: string) =>
+            [...html.matchAll(/fd-menu__label">([^<]*)</g)].map((m) => m[1]);
+        const titles = (html: string, label: string) => {
+            const at = html.indexOf(`aria-label="${label}"><li`);
+            return [
+                ...html
+                    .slice(at, html.indexOf("</ul>", at))
+                    .matchAll(/fd-item-row__title" title="([^"]*)"/g),
+            ].map((m) => m[1]);
+        };
+
+        test("the owner sees every control: add a member, rename, rotate the token, Invite codes", async () => {
+            const html = await (await get("/settings/household", ALICE)).text();
+            expect(titles(html, "Members")).toEqual([
+                "Alice",
+                "Admin",
+                "Bob",
+                "Add a member",
+            ]);
+            expect(titles(html, "Household")).toEqual([
+                "Location",
+                "Time zone",
+                "Stores",
+                "Restock day",
+                "Invite codes",
+                "Recipe link readers",
+                "Unverified recipes",
+            ]);
+            expect(items(html)).toEqual([
+                "Rename household",
+                "Rotate join token",
+                "Rename household",
+                "Rotate join token",
+            ]);
+            expect(html).toContain('action="/settings/household/rotate-token"');
+            expect(html).not.toContain("Dismissed notices");
+            expect(html).not.toContain("plurals-same-food");
+            expect(html).not.toContain("Social post readers");
+        });
+
+        test("an admin adds members and edits the rows, but never sees the owner's controls", async () => {
+            const html = await (await get("/settings/household", ADMIN)).text();
+            expect(titles(html, "Members")).toContain("Add a member");
+            expect(titles(html, "Household")).not.toContain("Invite codes");
+            expect(items(html)).toEqual([
+                "Rename household",
+                "Rename household",
+            ]);
+            expect(html).toContain('action="/settings/household/location"');
+            expect(html).not.toContain("Rotate join token");
+            expect(html).not.toContain("household-rotate-token");
+            expect(html).not.toContain("/settings/household/invites");
+        });
+
+        test("a member sees the values only: no add, no menu, no invite, no edit forms", async () => {
+            const html = await (await get("/settings/household", BOB)).text();
+            expect(titles(html, "Members")).toEqual(["Alice", "Admin", "Bob"]);
+            expect(html).not.toContain("data-fd-menu");
+            expect(html).not.toContain("Add a member");
+            expect(html).not.toContain("/settings/household/invites");
+            expect(html).not.toContain("household-rotate-token");
+            expect(html).not.toContain('action="/settings/household/');
+            expect(html).toContain("Not set");
+        });
+
+        test("the owner's page for another person has role, ownership and removal; for themselves, nothing", async () => {
+            const other = await (
+                await get(`/settings/household/members/${BOB}`, ALICE)
+            ).text();
+            expect(items(other).slice(0, 3)).toEqual([
+                "Make admin",
+                "Make owner",
+                "Remove Bob",
+            ]);
+            expect(other).toContain(
+                `action="/settings/household/members/${BOB}/role"`,
             );
-        }
-        expect(html).not.toContain("Dismissed notices");
-        expect(html).not.toContain("plurals-same-food");
-        expect(html).not.toContain("Social post readers");
+            expect(other).toContain("fd-member-make-owner");
+            const admin = await (
+                await get(`/settings/household/members/${ADMIN}`, ALICE)
+            ).text();
+            expect(items(admin)[0]).toBe("Make member");
+            const self = await (
+                await get(`/settings/household/members/${ALICE}`, ALICE)
+            ).text();
+            expect(self).not.toContain("data-fd-menu");
+            expect(self).not.toContain("fd-member-make-owner");
+        });
+
+        test("an admin and a member see a person's page without any menu", async () => {
+            for (const who of [ADMIN, BOB]) {
+                const html = await (
+                    await get(`/settings/household/members/${ALICE}`, who)
+                ).text();
+                expect(html).toContain('data-fd-settings-page="household"');
+                expect(html).toContain("Alice");
+                expect(html).not.toContain("data-fd-menu");
+                expect(html).not.toContain("Make owner");
+                expect(html).not.toContain("Remove Alice");
+            }
+        });
+
+        test("the member actions stay the owner's: 403 for an admin and a member", async () => {
+            for (const who of [ADMIN, BOB]) {
+                for (const [path, body] of [
+                    [`/settings/household/members/${BOB}/role`, "role=admin"],
+                    [`/settings/household/members/${BOB}/make-owner`, ""],
+                    [
+                        `/settings/household/members/${BOB}/remove`,
+                        "confirm=yes",
+                    ],
+                ] as const) {
+                    expect([
+                        path,
+                        (await post(path, who, body)).status,
+                    ]).toEqual([path, 403]);
+                }
+            }
+        });
+
+        test("the owner changes a role and lands on that person's page, which shows it, with no toast", async () => {
+            const up = await post(
+                `/settings/household/members/${BOB}/role`,
+                ALICE,
+                "role=admin",
+            );
+            expect(up.status).toBe(303);
+            expect(up.headers.get("location")).toBe(
+                `/settings/household/members/${BOB}`,
+            );
+            expect(up.headers.get("set-cookie") ?? "").not.toContain("toast");
+            const page = await (
+                await get(`/settings/household/members/${BOB}`, ALICE)
+            ).text();
+            expect(page).toContain('fd-item-row__value">Admin<');
+            expect(items(page)[0]).toBe("Make member");
+            const down = await post(
+                `/settings/household/members/${BOB}/role`,
+                ALICE,
+                "role=member",
+            );
+            expect(down.status).toBe(303);
+            expect(db.members.find((m) => m.userId === BOB)?.role).toBe(
+                "member",
+            );
+        });
+
+        test("a refused role change shows its reason on the person's page", async () => {
+            const bad = await post(
+                `/settings/household/members/${BOB}/role`,
+                ALICE,
+                "role=owner",
+            );
+            expect(bad.status).toBe(400);
+            const html = await bad.text();
+            expect(html).toContain("Choose admin or member.");
+            expect(html).toContain("fd-settings-member-head");
+            const self = await post(
+                `/settings/household/members/${ALICE}/role`,
+                ALICE,
+                "role=admin",
+            );
+            expect(self.status).toBe(400);
+            expect(await self.text()).toContain("fd-settings-member-head");
+        });
+
+        test("a person outside the household is refused on the Household page, which shows why", async () => {
+            const r = await post(
+                `/settings/household/members/${OUTSIDER}/remove`,
+                ALICE,
+                "confirm=yes",
+            );
+            expect(r.status).toBe(400);
+            const html = await r.text();
+            expect(html).toContain("That person is not in this household.");
+            expect(html).toContain("fd-settings-hh-card");
+        });
+
+        test("no success toast: the household routes answer 303 without a flash cookie", async () => {
+            const added = await post(
+                "/settings/household/name",
+                ALICE,
+                "name=New%20name",
+            );
+            expect(added.status).toBe(303);
+            expect(added.headers.get("set-cookie") ?? "").not.toContain(
+                "toast",
+            );
+        });
     });
 });

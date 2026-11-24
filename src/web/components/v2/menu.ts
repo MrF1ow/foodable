@@ -10,7 +10,7 @@
  * buttons and links, not `role="menu"`: that form has no arrow-key or Esc
  * handling.
  *
- * With `anchor` ("more" or "filter"), or any `checked` or `destructive` item,
+ * With `anchor` ("more" or "filter"), or any `checked`, `destructive` or `opens` item,
  * it is the redesign's menu: anchored to a visible control (the ⋯ Icon button
  * or the Filter button), `role="menu"`, closed with Escape or a tap outside,
  * arrow keys between items, focus back on the trigger. A `destructive` item
@@ -50,6 +50,14 @@ export type MenuItem =
           checked: boolean;
           /** Where choosing it goes; without one the item is a button the page script reads (`fd-menu-select`). */
           href?: string;
+      }
+    /** Opens a sheet or dialog on the page (Make owner opens its confirm sheet). */
+    | {
+          kind: "opens";
+          label: string;
+          hint?: string;
+          /** The `id` of the `<dialog>` it opens. */
+          sheetId: string;
       }
     /** Deletes, clears or overwrites: confirms in place as Cancel + the same verb. */
     | {
@@ -117,6 +125,8 @@ function anchoredItem(item: MenuItem, checks: boolean): string {
             return `<a class="fd-menu__item" role="menuitem" href="${safeHref(item.href)}">${anchoredBody(item, checks)}</a>`;
         case "post":
             return `<form class="fd-menu__form" method="post" action="${esc(item.action)}">${hiddenFields(item.fields)}<button type="submit" class="fd-menu__item" role="menuitem">${anchoredBody(item, checks)}</button></form>`;
+        case "opens":
+            return `<button type="button" class="fd-menu__item" role="menuitem" command="show-modal" commandfor="${esc(item.sheetId)}">${anchoredBody(item, checks)}</button>`;
         case "checked": {
             const state = `role="menuitemcheckbox" aria-checked="${item.checked ? "true" : "false"}"`;
             const body = anchoredBody(item, checks, item.checked);
@@ -133,7 +143,7 @@ function anchoredItem(item: MenuItem, checks: boolean): string {
 
 /**
  * Draws a menu. Which form you get follows from the items: `anchor`, or any
- * `checked` or `destructive` item, selects the anchored form (script-driven,
+ * `checked`, `destructive` or `opens` item, selects the anchored form (script-driven,
  * `role="menu"`); otherwise it is the `<details>` menu. A `post` item with
  * `danger` has no confirm step, so an anchored menu refuses it: use a
  * `destructive` item, which confirms in place.
@@ -147,7 +157,7 @@ export function menu(opts: {
     /**
      * Anchors the menu to the design's ⋯ Icon button ("more") or Filter button
      * ("filter"). Without it, a menu of only separator, link and post items is
-     * the `<details>` menu; any `checked` or `destructive` item makes it "more".
+     * the `<details>` menu; any `checked`, `destructive` or `opens` item makes it "more".
      */
     anchor?: MenuAnchor;
     /** How many filters are on (the Filter button's badge). */
@@ -156,7 +166,10 @@ export function menu(opts: {
     const anchor =
         opts.anchor ??
         (opts.items.some(
-            (i) => i.kind === "checked" || i.kind === "destructive",
+            (i) =>
+                i.kind === "checked" ||
+                i.kind === "destructive" ||
+                i.kind === "opens",
         )
             ? "more"
             : undefined);

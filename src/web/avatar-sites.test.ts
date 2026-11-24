@@ -3,7 +3,6 @@
 import { describe, expect, test } from "bun:test";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import type { HouseholdMember } from "../household.js";
-import type { NoticesForResult } from "../domain/notices-for.js";
 import { memberCheckRow } from "./components/v2/rows.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
 import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
@@ -16,24 +15,6 @@ import {
 import { newFood } from "../domain/foods.js";
 import { renderAppShell, type AppChrome, type ShellIdentity } from "./shell.js";
 import type { AppChromeBase } from "./attention.js";
-
-const EMPTY_NOTICES: NoticesForResult = {
-    notices: [],
-    dismissals: [],
-    subjectNames: new Map(),
-    subjectTimes: new Map(),
-    noticeFoods: new Map(),
-    catalogFoods: [],
-    aliasMap: new Map(),
-    barcodedIds: new Set(),
-    possibleDuplicatePairs: [],
-    recipesListPrefetch: {
-        recipes: [],
-        allIngredients: [],
-        fridgeItems: [],
-        foodsById: new Map(),
-    },
-};
 
 const ME = "11111111-1111-4111-8111-111111111111";
 const PEER = "22222222-2222-4222-8222-222222222222";
@@ -167,8 +148,8 @@ describe("Household member rows", () => {
             unverifiedRecipeExpiryDays: null,
             isOwner: true,
             canManage: true,
+            canInvite: true,
             viewerUserId: ME,
-            noticeResult: EMPTY_NOTICES,
         });
 
     test("each member with a picture shows it; others keep initials", () => {
@@ -177,14 +158,14 @@ describe("Household member rows", () => {
         expect(html).toContain(`${imgFor(PEER)}1700000001000"`);
         expect(html).not.toContain(imgFor(ME));
         expect(html).toContain(
-            '<span class="fd-avatar fd-settings-member-avatar" aria-hidden="true">EF</span>',
+            '<span class="fd-item-row__lead fd-item-row__avatar" aria-hidden="true">EF</span>',
         );
     });
     test("pictures not loaded: initials for everyone", () => {
         const html = view(false);
         expect(html).not.toContain("/avatars/");
         expect(html).toContain(
-            '<span class="fd-avatar fd-settings-member-avatar" aria-hidden="true">S</span>',
+            '<span class="fd-item-row__lead fd-item-row__avatar" aria-hidden="true">S</span>',
         );
     });
 });
@@ -302,6 +283,14 @@ describe("Settings > Account", () => {
         expect(remove).toContain("fd-btn fd-btn--danger fd-btn--sm");
         expect(remove).not.toContain("fd-btn--primary");
         expect(html).not.toContain("fd-settings-submit--quiet");
+    });
+    test("the fresh invite code is drawn in the muted tone, as the design has it", async () => {
+        const css = await Bun.file("public/app/v2/settings.css").text();
+        const rule = css.match(
+            /\.fd-settings-invite-code__box code \{[^}]*\}/,
+        )?.[0];
+        expect(rule).toContain("color: var(--text-secondary)");
+        expect(rule).not.toContain("--text-primary");
     });
     test("the Photo card keeps the gap other Account cards have", async () => {
         const css = await Bun.file("public/app/v2/settings.css").text();

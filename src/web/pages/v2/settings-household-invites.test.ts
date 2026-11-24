@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import {
-    INVITE_CREATE_MODAL_ID,
     renderHouseholdInvitesPage,
     type HouseholdInvitesPageView,
 } from "./settings-household-invites.js";
@@ -44,46 +43,58 @@ function invite(over: Partial<HouseholdInvite>): HouseholdInvite {
     };
 }
 
-test("a new code is shown once in its own panel with a copy button", () => {
+test("the page is the household's Settings layout: Invite codes, back to the household", () => {
+    const html = renderHouseholdInvitesPage(view());
+    expect(html).toContain('data-fd-settings-page="household"');
+    expect(html).toContain(
+        '<h1 class="fd-detail-bar__title">Invite codes</h1>',
+    );
+    expect(html).toContain(
+        '<h1 class="fd-settings-page-title">Invite codes</h1>',
+    );
+    expect(html).toContain('aria-label="Back" href="/settings/household"');
+    expect(html).toContain('<h2 class="fd-section-header__label">Invites</h2>');
+    // No old sub-nav, panel, page header or intro line.
+    expect(html).not.toContain("dash-head");
+    expect(html).not.toContain('class="panel');
+    expect(html).not.toContain("Let one person sign up into this household");
+});
+
+test("a page reached from elsewhere goes back there", () => {
+    const html = renderHouseholdInvitesPage(view({ backHref: "/settings" }));
+    expect(html).toContain('aria-label="Back" href="/settings"');
+    expect(html).toContain('name="from" value="/settings"');
+});
+
+test("a new code is shown once in a card with a copy button and its note", () => {
     const html = renderHouseholdInvitesPage(
         view({ createdCode: "plain-code-<123>" }),
     );
+    expect(html).toContain("New invite code");
     expect(html).toContain(
-        '<code id="household-invite-code">plain-code-&lt;123&gt;</code>',
+        '<code id="household-invite-code" data-fd-copy-source>plain-code-&lt;123&gt;</code>',
     );
-    expect(html).toContain('data-copy-target="household-invite-code"');
-    expect(html).toContain('class="panel invite-code-once"');
-    expect(renderHouseholdInvitesPage(view())).not.toContain(
-        "invite-code-once",
-    );
+    expect(html).toContain('data-fd-copy-trigger aria-label="Copy code"');
+    expect(html).toContain("Works once · expires in 7 days · shown only now");
+    expect(html).toContain("data-fd-copy-address");
+    expect(renderHouseholdInvitesPage(view())).not.toContain("New invite code");
 });
 
-test("the page opens with its header, then the household sub-nav", () => {
+test("+ creates an invite from a form that opts out of Turbo, on the bar and in the header", () => {
     const html = renderHouseholdInvitesPage(view());
-    const header = html.indexOf('<header class="dash-head">');
-    const nav = html.indexOf('aria-label="Household sections"');
-    expect(header).toBeGreaterThan(-1);
-    expect(nav).toBeGreaterThan(header);
-    expect(html).toContain("<h1>Invite codes</h1>");
-    // The page body, not the shell around it (the shell's log sheet uses fd-btn).
-    const body = html.slice(header, html.indexOf("</main>"));
-    expect(body).not.toMatch(
-        /fd-(page-title|panel|mono|banner|btn|invite-row)/,
+    const forms = html.match(
+        /<form method="post" action="\/settings\/household\/invites" class="fd-settings-invite-create" data-turbo="false">/g,
     );
+    expect(forms).toHaveLength(2);
+    expect(html).toContain('aria-label="Create invite"');
+    expect(html).toContain("fd-icon--plus");
+    // No confirm modal: + makes the code.
+    expect(html).not.toContain("household-invite-create");
+    expect(html).not.toContain("Create a single-use code");
+    expect(html).not.toContain('<dialog class="modal"');
 });
 
-test("create opens a modal whose form opts out of Turbo", () => {
-    const html = renderHouseholdInvitesPage(view());
-    expect(html).toContain(`commandfor="${INVITE_CREATE_MODAL_ID}"`);
-    expect(html).toMatch(
-        /<form method="post" action="\/settings\/household\/invites" class="invite-create" data-turbo="false">/,
-    );
-    expect(html).toContain(
-        '<button type="submit" class="btn-primary">Create invite</button>',
-    );
-});
-
-test("only an active invite can be revoked", () => {
+test("only an active invite has a menu, and Revoke confirms in place", () => {
     const html = renderHouseholdInvitesPage(
         view({
             invites: [
@@ -97,26 +108,30 @@ test("only an active invite can be revoked", () => {
             ],
         }),
     );
-    expect(html).toContain('commandfor="household-invite-revoke-active"');
-    // The same red trash as shared links, named after the invite, no text button.
-    expect(html).toContain("fd-icon-btn--danger");
-    expect(html).toContain(
-        'aria-label="Revoke invite code (expires 2026-11-16)"',
-    );
-    expect(html).not.toContain("btn-sm btn-danger");
-    expect(html).toContain('id="household-invite-revoke-active"');
-    expect(html).not.toContain("household-invite-revoke-used");
-    expect(html).not.toContain("household-invite-revoke-old");
-    expect(html).toContain("Expires 2026-11-16");
-    expect(html).toContain("Used 2026-11-09");
-    expect(html).toContain("Expired 2026-11-01");
-    expect(html).toContain('name="invite_id" value="active"');
+    expect(html.match(/data-fd-menu-trigger/g)).toHaveLength(1);
+    const menu = html.match(
+        /<div class="fd-menu[^>]*data-fd-menu[^]*?<\/form><\/div><\/div><\/div>/,
+    )![0];
+    expect(menu).toContain('action="/settings/household/invites/revoke"');
+    expect(menu).toContain('name="invite_id" value="active"');
+    expect(menu).toContain("data-fd-menu-confirm");
+    expect(menu).toContain("Revoke invite");
+    expect(html).not.toContain('value="used"');
+    expect(html).not.toContain('value="old"');
+    expect(html).toContain("Expires Nov 16");
+    expect(html).toContain("Used Nov 9");
+    expect(html).toContain("Expired Nov 1");
+    // No sheet or modal for it.
+    expect(html).not.toContain("household-invite-revoke");
 });
 
-test("an error reopens the create modal", () => {
+test("an invite list with none says so", () => {
+    expect(renderHouseholdInvitesPage(view())).toContain("No invite codes yet");
+});
+
+test("a failed create shows its reason as a banner", () => {
     const html = renderHouseholdInvitesPage(view({ error: "Nope" }));
     expect(html).toContain(
-        `id="${INVITE_CREATE_MODAL_ID}" aria-labelledby="${INVITE_CREATE_MODAL_ID}-title" data-modal-open-on-load`,
+        '<p class="fd-settings-error" role="alert">Nope</p>',
     );
-    expect(html).toContain('<p class="error-banner">Nope</p>');
 });

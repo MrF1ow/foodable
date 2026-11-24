@@ -69,16 +69,16 @@ bun run db:dev status   # "stopped", exit 1
 ## Which tool fits which change
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
-- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off). Page loads sync `notifications`; db-less route tests log `sync failed` (fine).
-- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" = a run holds them; `ss -ltn`). No database.
+- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off). Page loads sync `notifications`; db-less route tests log `sync failed`.
+- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs Chromium (`CHROME_BIN`). Fixed ports :4791 and :9223, one run at a time ("harness crashed" = a run holds them; `ss -ltn`). No database; fixtures: `scripts/nav-check-fixture.ts`.
 - **Flicker:** `bun scripts/flicker-check.ts --base http://<tailscale ip -4>:$APP_PORT` on an isolated stack: remote browserless Chromium, 390 px, both themes.
 - **App look:** `bun run preview:app --shots`: `-390.png`/`-1440.png` per page in tmp/app-preview (slow; clear it first). Without `--shots`: serves :4787 (`PREVIEW_PORT`), pages `/<name>-<light|dark>.html`; clock, caret pinned.
-- **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`) compares base and branch; exit 1 on a diff. Clean commits are cached in `~/.cache/foodable/preview-diff`, never pruned: `rm -rf` old.
+- **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`) compares base and branch; exit 1 on a diff. Clean commits are cached in `~/.cache/foodable/preview-diff`: `rm -rf` old.
 - **WebKit (Safari-class):** WPE `MiniBrowser` needs a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH`, `WEBKIT_FORCE_COMPLEX_TEXT=1` and `LD_LIBRARY_PATH` (its `lib`, `sys/lib`, ICU 74).
-- **Barcode scans on a running server** hit live Open Food Facts; unit tests stub it.
+- **Barcode scans** hit live Open Food Facts; unit tests stub it.
 - **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
 - **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`; `attention` paints a populated inbox. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
-- **App-wide middleware (body limit, CORS):** import `app` from `src/index.ts`, as `src/index.test.ts` does.
+- **App-wide middleware (body limit, CORS):** import `app` from `src/index.ts` (`src/index.test.ts`).
 - **MCP tools and both protocol eras:** `bun --no-env-file test src/mcp.test.ts`; the `/mcp` describes (`-t "/mcp"`) drive both eras in-process.
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked.
 - **Migrations:** `bun run db:dryrun` (throwaway Postgres; needs `initdb`). `bun run db:rehearse` (production copy via `railway ssh`): only when asked.

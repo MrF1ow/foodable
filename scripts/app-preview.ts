@@ -34,9 +34,8 @@ import {
     pinServerClock,
     pinTimeZone,
 } from "./preview-clock.js";
-import { fridgeNotices, utcTodayFromDate } from "../src/domain/stock.js";
+import { utcTodayFromDate } from "../src/domain/stock.js";
 import { groceryRestockNotices } from "../src/domain/restock.js";
-import { sortNotices, type Notice } from "../src/domain/notices.js";
 import { renderShareViewPage } from "../src/web/pages/share-view.js";
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import {
@@ -1290,45 +1289,6 @@ function previewKitchenUsualsView(
     });
 }
 
-/** The household-wide notices the preview pages share: the real fridge
- *  producer over the fridge fixture, plus one recipe gap. The top-bar count
- *  and the tab dots are computed from them, as the loaders do. */
-function previewNotices(): Notice[] {
-    const { catalog } = previewFoodCatalog();
-    const recipeGap: Notice = {
-        code: "recipe.no_nutrition",
-        severity: "warn",
-        subject: { kind: "recipe_ingredient", id: "ing0", recipeId: RECIPE.id },
-        related: [],
-        params: { name: "Buttermilk", foodId: "f-buttermilk" },
-    };
-    const duplicateNotices = possibleDuplicateNotices(
-        catalog.filter((f) => !f.archivedAt && !f.genericFoodId),
-        new Map(),
-        new Set(),
-        new Set(),
-    );
-    return sortNotices([
-        recipeGap,
-        ...duplicateNotices,
-        ...(() => {
-            const items = fridgeView(null).items;
-            // Nothing is on the grocery list, so each food item offers
-            // "Add to grocery list", as on the fridge page.
-            const foodsById = new Map(
-                items.map((row) => [
-                    row.foodId,
-                    { id: row.foodId, genericFoodId: null },
-                ]),
-            );
-            return fridgeNotices(items as never, utcTodayFromDate(), {
-                lines: [],
-                foodsById,
-            });
-        })(),
-    ]);
-}
-
 // The viewer's flags, read the way the server reads them on a deploy without a
 // Railway token: FOODABLE_FLAGS switches flagged features on (for example
 // FOODABLE_FLAGS=mcp-share-links:all to see the Share buttons and sheets).
@@ -1550,6 +1510,19 @@ function withFirstMenuOpen(html: string): string {
         );
 }
 
+/** Every ⋯ menu open: a Household page draws its menu in the phone's Detail bar and in the desktop header. */
+function withEveryMenuOpen(html: string): string {
+    return html
+        .replaceAll(
+            'data-fd-menu-trigger="" aria-haspopup="menu" aria-expanded="false"',
+            'data-fd-menu-trigger="" aria-haspopup="menu" aria-expanded="true"',
+        )
+        .replaceAll(
+            /(<div class="fd-menu__panel" role="menu"[^>]*?) hidden>/g,
+            "$1>",
+        );
+}
+
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     const chrome = previewChrome(theme);
     const { catalog, usual } = previewFoodCatalog();
@@ -1701,22 +1674,18 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         macrosPerPortion: MACROS as never,
         submitKey: "preview",
     };
-    const settingsHouseholdV2 = (sharedLinks: SharedLinkRow[]) => {
+    const settingsHouseholdV2 = (
+        sharedLinks: SharedLinkRow[],
+        openModalId?: string,
+    ) => {
         return renderSettingsHouseholdV2Page({
             chrome,
             householdName: "The Flow household",
             members: [ME, SAM, JORDAN, RILEY, ALEX] as never,
-            now: PREVIEW_NOW,
-            lastSeen: new Map<string, Date | null>([
-                [ME.userId, new Date("2026-11-12T16:20:00Z")],
-                [SAM.userId, new Date("2026-11-11T20:05:00Z")],
-                [JORDAN.userId, new Date("2026-11-09T17:40:00Z")],
-                [RILEY.userId, new Date("2026-10-21T15:00:00Z")],
-                [ALEX.userId, null],
-            ]),
             storeCount: PREVIEW_STORES.length,
             isOwner: true,
             canManage: true,
+            canInvite: true,
             viewerUserId: ME.userId,
             socialReaders: { tiktok: true, facebook: false },
             location: "Denver, CO",
@@ -1730,27 +1699,21 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 lastRunAdded: 3,
             },
             unverifiedRecipeExpiryDays: 30,
-            timezone: "America/Los_Angeles",
-            noticeResult: {
-                notices: previewNotices(),
-                dismissals: [],
-                subjectNames: new Map(),
-                subjectTimes: new Map(),
-                noticeFoods: new Map(),
-                catalogFoods: catalog,
-                aliasMap: new Map(),
-                barcodedIds: new Set(),
-                possibleDuplicatePairs: [],
-                recipesListPrefetch: {
-                    recipes: [],
-                    allIngredients: [],
-                    fridgeItems: [],
-                    foodsById: new Map(),
-                },
-            },
+            openModalId,
             sharedLinks,
         } as never);
     };
+    const settingsMemberV2 = () =>
+        renderSettingsMemberV2Page({
+            chrome,
+            member: SAM as never,
+            viewer: ME as never,
+            todayHref: `/?member=${SAM.userId}`,
+            manage: { role: true, transfer: true, remove: true },
+            lastSeen: new Date("2026-11-12T16:20:00Z"),
+            now: PREVIEW_NOW,
+            timezone: "America/Los_Angeles",
+        });
     const recipeV2 = (
         cook: CookSheetView,
         planOpen = false,
@@ -2259,6 +2222,14 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             email: "ethan@example.com",
             timezone: "America/Los_Angeles",
         }),
+        "settings-account-photo": renderSettingsAccountV2Page({
+            chrome,
+            backHref: "/kitchen/fridge",
+            displayName: "Ethan Flow",
+            email: "ethan@example.com",
+            timezone: "America/Los_Angeles",
+            photo: { userId: "u-ethan", version: new Date(1700000000000) },
+        }),
         "settings-timezone": renderSettingsTimezoneV2Page({
             chrome,
             backHref: "/kitchen/fridge",
@@ -2278,12 +2249,20 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         "settings-household-v2": settingsHouseholdV2(PREVIEW_SHARED_LINKS),
         "settings-household-v2-empty": settingsHouseholdV2([]),
-        "settings-household-v2-member": renderSettingsMemberV2Page({
+        "settings-household-v2-add-member": settingsHouseholdV2(
+            [],
+            "fd-household-add-member",
+        ),
+        "settings-household-v2-timezone": renderSettingsTimezoneV2Page({
             chrome,
-            member: SAM as never,
-            viewer: ME as never,
-            todayHref: `/?member=${SAM.userId}`,
+            household: true,
+            backHref: "/settings/household",
+            timezone: "",
+            now: new Date("2026-11-10T12:00:00Z"),
         }),
+        "settings-household-v2-member": settingsMemberV2(),
+        "settings-household-v2-member-menu":
+            withEveryMenuOpen(settingsMemberV2()),
         "settings-goals": renderSettingsGoalsV2Page({
             chrome,
             goals: PREVIEW_NAMED_GOALS,

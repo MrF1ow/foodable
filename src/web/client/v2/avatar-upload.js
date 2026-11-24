@@ -1,7 +1,8 @@
 // Settings › Account › Photo: shrink the chosen picture in the browser before
 // it is posted. On submit it centre-crops a square, draws it to 256 by 256,
 // encodes WebP (JPEG where the browser cannot) at a quality that fits 64 KB,
-// swaps that file into the input and submits again. Anything it cannot do
+// swaps that file into the input and submits again. Choosing a file submits
+// at once (the input is hidden; the picture and a button open it). Anything it cannot do
 // (undecodable file, no DataTransfer) posts the original: the server checks
 // everything again and says what is wrong. Idempotent per form (a WeakSet).
 
@@ -104,6 +105,19 @@ function initAvatarUpload(scope) {
     root.querySelectorAll("form[data-fd-avatar-upload]").forEach((form) => {
         if (bound.has(form)) return;
         bound.add(form);
+        // The input is hidden and opened through the picture or the button, so
+        // choosing a file is what sends it.
+        const picker = form.querySelector('input[type="file"]');
+        const open = form.querySelector("[data-fd-photo-pick]");
+        if (picker && open)
+            open.addEventListener("click", () => picker.click());
+        if (picker) {
+            picker.addEventListener("change", () => {
+                if (picker.files && picker.files.length > 0) {
+                    form.requestSubmit();
+                }
+            });
+        }
         form.addEventListener("submit", (event) => {
             if (resized.has(form)) {
                 resized.delete(form);

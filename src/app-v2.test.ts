@@ -290,7 +290,8 @@ describe("/app-v2.js", () => {
         // +~0.5 KB Recipes: typing in the search box hides the cards whose name misses it.
         // +~0.5 KB Top bar: the search field is a trigger, so typing into it moves the text into the log search and opens it.
         // +~1.3 KB Top bar: Enter, ArrowDown and ⌘K work from the field, and focus returns to its input.
-        expect(js.length).toBeLessThan(199_000);
+        // +~1.1 KB Settings: a menu item that opens a sheet closes the menu and the sheet hands focus back to the ⋯; choosing a photo sends it and Change photo opens the picker.
+        expect(js.length).toBeLessThan(201_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

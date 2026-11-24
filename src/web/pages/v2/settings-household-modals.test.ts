@@ -1,282 +1,29 @@
 import { expect, test } from "bun:test";
-import type { HouseholdMember } from "../../../household.js";
-import { modalTrigger } from "../../components/ui.js";
 import {
-    HOUSEHOLD_ADD_MEMBER_MODAL_ID,
-    HOUSEHOLD_MANAGE_ID,
     HOUSEHOLD_ROTATE_TOKEN_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID,
     HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
-    manageFill,
-    memberActionsTemplate,
-    renderHouseholdV2OwnerModals,
+    renderRotateTokenModal,
     renderSocialReaderModals,
 } from "./settings-household-modals.js";
 
-const alice: HouseholdMember = {
-    householdId: "hh-1",
-    userId: "u1",
-    role: "owner",
-    displayName: "Alice",
-};
-const bob: HouseholdMember = {
-    householdId: "hh-1",
-    userId: "u2",
-    role: "member",
-    displayName: "Bob",
-};
-
-const ownerView = {
-    members: [alice, bob],
-    isOwner: true,
-    canManage: true,
-};
-
-function dialogHtml(html: string, id: string): string {
-    const dialog = html.match(
-        new RegExp(`<dialog class="modal" id="${id}"[\\s\\S]*?</dialog>`),
-    )?.[0];
-    expect(dialog).toBeDefined();
-    return dialog!;
-}
-
-function expectErrorOnceInModal(
-    html: string,
-    modalId: string,
-    message: string,
-): void {
-    expect(html.match(new RegExp(message, "g"))?.length).toBe(1);
-    const dialog = dialogHtml(html, modalId);
-    expect(dialog).toContain(message);
-    expect(dialog.match(/error-banner/g)?.length).toBe(1);
-}
-
-test("the owner dialogs are modals: add member and one shared dialog per member action", () => {
-    const html = renderHouseholdV2OwnerModals(ownerView);
-    expect(html).toContain(`id="${HOUSEHOLD_ADD_MEMBER_MODAL_ID}"`);
-    // Stores are added on the Stores page now.
-    expect(html).not.toContain("household-add-store");
-    expect(html).not.toContain('action="/settings/household/stores"');
-    expect(html).toContain('action="/settings/household"');
-    expect(html).toContain('class="add-member"');
-    expect(html).not.toContain('id="household-manage-u2"');
-    expect(html).not.toContain('id="household-remove-u2"');
-    expect(html).not.toContain('id="household-make-owner-u2"');
-    expect(html.match(/name="confirm" value="yes" required/g)?.length).toBe(1);
-    const remove = dialogHtml(html, "household-remove");
-    expect(remove).toContain(
-        '<button type="submit" class="btn-danger" data-fill-slot="remove-label" disabled>',
-    );
-    expect(remove).not.toContain("Bob");
-    expect(dialogHtml(html, "household-manage")).toContain("disabled");
-    expect(dialogHtml(html, "household-make-owner")).toContain("disabled");
-});
-
-test("a member who cannot manage gets no add dialogs, and only the owner gets member actions", () => {
-    const admin = renderHouseholdV2OwnerModals({
-        members: [alice, bob],
-        isOwner: false,
-        canManage: true,
-    });
-    expect(admin).toContain(`id="${HOUSEHOLD_ADD_MEMBER_MODAL_ID}"`);
-    expect(admin).not.toContain('id="household-manage"');
-    const plain = renderHouseholdV2OwnerModals({
-        members: [alice, bob],
-        isOwner: false,
-        canManage: false,
-    });
-    expect(plain).not.toContain(`id="${HOUSEHOLD_ADD_MEMBER_MODAL_ID}"`);
-    expect(plain).not.toContain('id="household-manage"');
-});
-
-test("only the owner gets the rotate-token confirm, and it opts out of Turbo", () => {
-    const owner = renderHouseholdV2OwnerModals(ownerView);
-    const dialog = dialogHtml(owner, HOUSEHOLD_ROTATE_TOKEN_MODAL_ID);
-    expect(dialog).toMatch(
+test("the rotate-token confirm opts out of Turbo and says what it does", () => {
+    const html = renderRotateTokenModal({ open: false });
+    expect(html).toContain(`id="${HOUSEHOLD_ROTATE_TOKEN_MODAL_ID}"`);
+    expect(html).toMatch(
         /<form[^>]*method="post"[^>]*action="\/settings\/household\/rotate-token"[^>]*data-turbo="false"/,
     );
-    expect(dialog).toContain(
+    expect(html).toContain(
         "Issue a new household bot token? The old token stops working immediately.",
     );
-    expect(dialog).toContain(">Rotate token</button>");
-    for (const view of [
-        { members: [alice, bob], isOwner: false, canManage: true },
-        { members: [alice, bob], isOwner: false, canManage: false },
-    ]) {
-        const html = renderHouseholdV2OwnerModals(view);
-        expect(html).not.toContain(HOUSEHOLD_ROTATE_TOKEN_MODAL_ID);
-        expect(html).not.toContain("/settings/household/rotate-token");
-    }
+    expect(html).toContain(">Rotate token</button>");
+    expect(html).not.toContain("data-modal-open-on-load");
 });
 
-test("household server error reopens add-member and remove confirm modals", () => {
-    const addHtml = renderHouseholdV2OwnerModals({
-        ...ownerView,
-        error: "Password must be at least 12 characters.",
-        openModalId: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
-    });
-    expect(addHtml).toMatch(
-        new RegExp(
-            `<dialog class="modal" id="${HOUSEHOLD_ADD_MEMBER_MODAL_ID}"[^>]*data-modal-open-on-load`,
-        ),
+test("the rotate-token confirm reopens when asked", () => {
+    expect(renderRotateTokenModal({ open: true })).toContain(
+        "data-modal-open-on-load",
     );
-    const removeHtml = renderHouseholdV2OwnerModals({
-        ...ownerView,
-        error: "Tick the box to confirm removing Bob.",
-        openModalId: "household-remove-u2",
-    });
-    expect(removeHtml).toMatch(
-        /<dialog class="modal" id="household-remove"[^>]*data-modal-open-on-load/,
-    );
-    expect(removeHtml).not.toContain('id="household-remove-u2"');
-    const removeDialog = dialogHtml(removeHtml, "household-remove");
-    expect(removeDialog).toContain(
-        "Delete Bob's login and their meals, water, weight and goals. This can't be undone.",
-    );
-    expect(removeDialog).toContain(">Remove Bob</button>");
-    expect(removeDialog).toContain('name="confirm" value="yes" required');
-    expect(removeDialog).toContain("Tick the box to confirm removing Bob.");
-    expect(
-        removeHtml.match(/Tick the box to confirm removing Bob\./g)?.length,
-    ).toBe(1);
-    expect(removeDialog).toContain(
-        '<button type="submit" class="btn-danger" data-fill-slot="remove-label">',
-    );
-    expect(removeDialog).not.toContain("disabled");
-});
-
-test("household modal errors render inside the reopening dialog", () => {
-    const addMember = renderHouseholdV2OwnerModals({
-        ...ownerView,
-        error: "Enter a name.",
-        openModalId: HOUSEHOLD_ADD_MEMBER_MODAL_ID,
-    });
-    expectErrorOnceInModal(
-        addMember,
-        HOUSEHOLD_ADD_MEMBER_MODAL_ID,
-        "Enter a name.",
-    );
-    const makeOwner = renderHouseholdV2OwnerModals({
-        ...ownerView,
-        error: "Cannot transfer ownership.",
-        openModalId: "household-make-owner-u2",
-    });
-    expectErrorOnceInModal(
-        makeOwner,
-        "household-make-owner",
-        "Cannot transfer ownership.",
-    );
-    const ownerDialog = dialogHtml(makeOwner, "household-make-owner");
-    expect(ownerDialog).toContain(
-        "Bob becomes the owner. You stay in the household as a member and lose the owner settings.",
-    );
-    expect(ownerDialog).toContain(">Make Bob the owner</button>");
-    expect(ownerDialog).not.toContain("disabled");
-    const manage = renderHouseholdV2OwnerModals({
-        ...ownerView,
-        error: "Could not change the role.",
-        openModalId: "household-manage-u2",
-    });
-    expectErrorOnceInModal(
-        manage,
-        "household-manage",
-        "Could not change the role.",
-    );
-    const manageDialog = dialogHtml(manage, "household-manage");
-    expect(manageDialog).toContain(">Manage Bob</h2>");
-    expect(manageDialog).toContain(
-        'action="/settings/household/members/u2/role"',
-    );
-    expect(manageDialog).toContain('name="role" value="admin"');
-    expect(manageDialog).toContain("Make Bob an admin");
-    expect(manageDialog).toContain(">Make admin</button>");
-    expect(manageDialog).toContain('class="btn-primary"');
-    expect(manageDialog).toContain('commandfor="household-remove"');
-    expect(manageDialog).toContain(
-        'data-filled-template="household-member-actions-u2"',
-    );
-    expect(manageDialog).toContain("Delete Bob's login");
-    expect(manage).not.toContain('id="household-manage-u2"');
-});
-
-test("an unknown open modal id opens nothing and shows no error in a dialog", () => {
-    const html = renderHouseholdV2OwnerModals({
-        ...ownerView,
-        error: "Could not remove that member.",
-        openModalId: "household-remove-missing",
-    });
-    expect(html).not.toMatch(/data-modal-open-on-load/);
-    expect(dialogHtml(html, "household-remove")).not.toContain("Bob");
-});
-
-test("member dialog count does not grow with the household", () => {
-    function modals(count: number) {
-        const members: HouseholdMember[] = [
-            alice,
-            ...Array.from({ length: count }, (_, index) => ({
-                householdId: "hh-1",
-                userId: `u-${index + 2}`,
-                role: index === 0 ? ("member" as const) : ("admin" as const),
-                displayName: `Member ${index + 2}`,
-            })),
-        ];
-        return renderHouseholdV2OwnerModals({ ...ownerView, members });
-    }
-    const one = modals(1);
-    const six = modals(6);
-    const dialogs = (html: string) => html.match(/<dialog\b/g)?.length ?? 0;
-    expect(dialogs(one)).toBe(dialogs(six));
-    // Add member, rotate token, manage, make owner and remove (the readers' dialogs moved to their own page).
-    expect(dialogs(six)).toBe(5);
-    expect(six.match(/id="household-manage"/g)?.length).toBe(1);
-    expect(six.match(/id="household-remove"/g)?.length).toBe(1);
-    expect(six.match(/id="household-make-owner"/g)?.length).toBe(1);
-    expect(six).not.toContain('id="household-manage-u-2"');
-    expect(six).not.toContain('id="household-remove-u-2"');
-    expect(six).not.toContain('id="household-make-owner-u-2"');
-    expect(dialogHtml(six, "household-manage")).toContain("disabled");
-    expect(dialogHtml(six, "household-remove")).toContain(
-        'name="confirm" value="yes" required',
-    );
-    expect(dialogHtml(six, "household-remove")).not.toContain("Member 7");
-    expect(dialogHtml(six, "household-make-owner")).toContain("disabled");
-});
-
-test("member action template and trigger fill escape a hostile display name", () => {
-    const hostile = `"><img src=x onerror=alert(1)>`;
-    const member: HouseholdMember = {
-        householdId: "hh-1",
-        userId: "u-hostile",
-        role: "member",
-        displayName: hostile,
-    };
-    const html =
-        memberActionsTemplate(member) +
-        modalTrigger({
-            target: HOUSEHOLD_MANAGE_ID,
-            label: "Manage",
-            fill: manageFill(member),
-        });
-    expect(html).toContain(
-        "Make &quot;&gt;&lt;img src=x onerror=alert(1)&gt; the owner",
-    );
-    expect(html).toContain(
-        'data-fill-title="Manage &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
-    );
-    expect(html).toContain(
-        '<template id="household-member-actions-u-hostile">',
-    );
-    expect(html).toContain(
-        'data-fill-template-member-actions="household-member-actions-u-hostile"',
-    );
-    expect(html).not.toContain('"><img src=x');
-    expect(html).not.toContain("onerror=alert(1)>");
-});
-
-test("the household dialogs no longer carry the reader dialogs", () => {
-    const html = renderHouseholdV2OwnerModals(ownerView);
-    expect(html).not.toContain(HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID);
-    expect(html).not.toContain(HOUSEHOLD_SOCIAL_READER_FACEBOOK_MODAL_ID);
 });
 
 test("the social reader dialogs carry the risk text and the research link", () => {
@@ -292,4 +39,12 @@ test("the social reader dialogs carry the risk text and the research link", () =
     expect(
         html.match(/recipe-import-terms-2026-11\.md/g)?.length,
     ).toBeGreaterThanOrEqual(2);
+});
+
+test("a social reader error shows inside the dialog it belongs to", () => {
+    const html = renderSocialReaderModals({
+        error: "Confirm the terms.",
+        openModalId: HOUSEHOLD_SOCIAL_READER_TIKTOK_MODAL_ID,
+    });
+    expect(html.match(/Confirm the terms\./g)).toHaveLength(1);
 });

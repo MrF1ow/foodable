@@ -18,12 +18,15 @@ export type DetailBarOptions = {
         label?: string;
         href?: string;
     };
-    trailing?: {
-        label: string;
-        /** Default `more` (the three dots). */
-        icon?: IconName;
-        href?: string;
-    };
+    trailing?:
+        | {
+              label: string;
+              /** Default `more` (the three dots). */
+              icon?: IconName;
+              href?: string;
+          }
+        /** A control the page built: a ⋯ `menu()`, or a form button (create). */
+        | { slot: Html };
     /** Keep an empty cell where the trailing button would be. */
     balance?: boolean;
     className?: string;
@@ -38,12 +41,14 @@ export function detailBar(opts: DetailBarOptions): Html {
         href: opts.back.href,
     });
     const trailing = opts.trailing
-        ? button({
-              round: true,
-              icon: opts.trailing.icon ?? "more",
-              label: opts.trailing.label,
-              href: opts.trailing.href,
-          })
+        ? "slot" in opts.trailing
+            ? opts.trailing.slot
+            : button({
+                  round: true,
+                  icon: opts.trailing.icon ?? "more",
+                  label: opts.trailing.label,
+                  href: opts.trailing.href,
+              })
         : opts.balance
           ? '<span class="fd-detail-bar__balance" aria-hidden="true"></span>'
           : "";

@@ -1,6 +1,7 @@
 import { peekSiteMembership } from "../db/actor.js";
 import {
     canManageHousehold,
+    checkManagedMember,
     dashboardAccess,
     householdTimezone,
     type HouseholdMember,
@@ -976,6 +977,32 @@ export async function renderSettingsTimezoneV2Route(
     };
 }
 
+/** Settings › Household › Time zone: the household's zone, for a manager. */
+export async function renderHouseholdTimezoneRoute(
+    viewerUserId: string,
+    opts: { error?: string; q?: string } = {},
+): Promise<{ status: 200 | 403; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    if (!canManageHousehold(gate.viewer)) {
+        return { status: 403, html: forbiddenDashboardHtml() };
+    }
+    const profile = await getProfile(viewerUserId);
+    const config = await getHouseholdConfig(gate.viewer.householdId);
+    const chrome = await viewerChromeWithAttention(profile, gate.viewer);
+    return {
+        status: 200,
+        html: renderSettingsTimezoneV2Page({
+            chrome,
+            household: true,
+            backHref: "/settings/household",
+            timezone: config.preferences.timezone ?? "",
+            query: opts.q,
+            error: opts.error,
+        }),
+    };
+}
+
 export async function renderSettingsUnitsV2Route(
     viewerUserId: string,
     opts: { error?: string; openSheet?: SettingsUnitsV2View["openSheet"] } = {},
@@ -1424,6 +1451,16 @@ async function loadSharedLinkRows(
     );
 }
 
+/** The owner first, then everyone else in the order given. */
+export function ownerFirst<T extends { role: string }>(
+    members: readonly T[],
+): T[] {
+    // oxlint-disable-next-line foodable/no-raw-role-check -- orders the list for display; a data lookup, not a permission decision
+    const owners = members.filter((m) => m.role === "owner");
+    // oxlint-disable-next-line foodable/no-raw-role-check -- orders the list for display; a data lookup, not a permission decision
+    return [...owners, ...members.filter((m) => m.role !== "owner")];
+}
+
 export async function renderHouseholdSettingsRoute(
     viewerUserId: string,
     opts: {
@@ -1436,12 +1473,13 @@ export async function renderHouseholdSettingsRoute(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const [config, members, stores, location] = await Promise.all([
+    const [config, listed, stores, location] = await Promise.all([
         getHouseholdConfig(householdId),
         listHouseholdMembers(householdId),
         liveSettingsStore().listStores(householdId),
         liveSettingsStore().getLocation(householdId),
     ]);
+    const members = ownerFirst(listed);
     // oxlint-disable-next-line foodable/no-raw-role-check -- finds the owner's row; a data lookup, not a permission decision
     const ownerId = members.find((m) => m.role === "owner")?.userId;
     const ownerProfile =
@@ -1474,20 +1512,16 @@ export async function renderHouseholdSettingsRoute(
     const sharedLinks = chrome.flags.mcpShareLinks
         ? await loadSharedLinkRows(householdId, members)
         : undefined;
-    // The Last active column is a nicety: if the read fails the page still renders.
-    const lastSeen = await listMembersLastSeen(householdId).catch(
-        () => undefined,
-    );
     return {
         status: 200,
         html: renderSettingsHouseholdV2Page({
             chrome,
             householdName: config.name,
-            lastSeen,
             members,
             storeCount: stores.length,
             isOwner: can(gate.viewer, "household.owner_only").ok,
             canManage: canManageHousehold(gate.viewer),
+            canInvite: can(gate.viewer, "member.manage").ok,
             viewerUserId: gate.viewer.userId,
             error: opts.error,
             issuedToken: opts.issuedToken,
@@ -1500,8 +1534,6 @@ export async function renderHouseholdSettingsRoute(
             restock: config.preferences.restock,
             unverifiedRecipeExpiryDays:
                 config.preferences.unverifiedRecipeExpiryDays,
-            timezone: profile?.timezone ?? "UTC",
-            noticeResult,
             sharedLinks,
         }),
     };
@@ -1714,6 +1746,16 @@ export async function renderHouseholdMemberRoute(
         access.subject.userId === gate.viewer.userId
             ? "/"
             : `/?member=${encodeURIComponent(access.subject.userId)}`;
+    // Last active is a nicety: if the read fails the page still renders.
+    const lastSeen = await listMembersLastSeen(gate.viewer.householdId)
+        .then((seen) => seen.get(target.userId) ?? null)
+        .catch(() => undefined);
+    // What the viewer may do to this person, decided as the routes decide it.
+    const manage = {
+        role: checkManagedMember(gate.viewer, target, "role").ok,
+        transfer: checkManagedMember(gate.viewer, target, "transfer").ok,
+        remove: checkManagedMember(gate.viewer, target, "remove").ok,
+    };
     return {
         status: 200,
         html: renderSettingsMemberV2Page({
@@ -1722,6 +1764,9 @@ export async function renderHouseholdMemberRoute(
             viewer: gate.viewer,
             todayHref,
             error: opts.error,
+            manage,
+            lastSeen,
+            timezone: profile?.timezone ?? "UTC",
         }),
     };
 }

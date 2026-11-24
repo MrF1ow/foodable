@@ -79,11 +79,14 @@ function hiddenFrom(backHref: string): string {
     return `<input type="hidden" name="from" value="${esc(backHref)}" />`;
 }
 
-/** "Photo": the member's own picture and the forms to change or remove it.
- *  The file input posts straight to the server; `data-fd-avatar-upload` lets
- *  the browser shrink the picture first (app-v2.js), and without it the raw
- *  file is posted and the server enforces the same limits. Both forms are
- *  Turbo forms: each answers 303 back here, or 4xx with this page. */
+/** "Photo": the member's own picture. Tapping the picture, or the Change
+ *  photo button, opens the device's picker through a file input that is
+ *  visually hidden, so no native control shows. The browser then
+ *  shrinks the chosen picture and posts it (`data-fd-avatar-upload`,
+ *  app-v2.js); with no script a Save button posts the raw file and the server
+ *  enforces the same limits. Remove photo is its own form, only with a
+ *  picture. Both forms are Turbo forms: each answers 303 back here, or 4xx
+ *  with this page. */
 function photoSection(view: SettingsAccountV2View, fromField: string): string {
     const photo = view.photo;
     if (!photo) return "";
@@ -96,8 +99,9 @@ function photoSection(view: SettingsAccountV2View, fromField: string): string {
     });
     const change = `<form method="POST" action="/settings/account/photo" enctype="multipart/form-data" class="fd-settings-photo__form" data-fd-avatar-upload>
 ${fromField}
-<input type="file" id="photo" name="photo" class="fd-settings-photo__input" accept="image/jpeg,image/png,image/webp" aria-label="Choose a photo" required />
-${button({ label: "Change photo", variant: "primary", size: "md", type: "submit" })}
+<label class="fd-settings-photo__pick"><input type="file" id="photo" name="photo" class="fd-visually-hidden" accept="image/jpeg,image/png,image/webp" aria-label="Choose a photo" required />${String(avatar)}</label>
+${button({ label: "Change photo", variant: "primary", size: "md", type: "button", attrs: { "data-fd-photo-pick": "" } })}
+<noscript>${button({ label: "Save photo", variant: "secondary", size: "md", type: "submit" })}</noscript>
 </form>`;
     const remove = photo.version
         ? `<form method="POST" action="/settings/account/photo/remove" class="fd-settings-photo__remove">
@@ -105,7 +109,7 @@ ${fromField}
 ${button({ label: "Remove photo", variant: "danger", size: "md", type: "submit" })}
 </form>`
         : "";
-    return `<div class="fd-settings-photo">${String(avatar)}<div class="fd-settings-photo__forms">${change}${remove}</div></div>`;
+    return `<div class="fd-settings-photo"><div class="fd-settings-photo__forms">${change}${remove}</div></div>`;
 }
 
 /** The Name sheet: one text field, saved with the rest of the profile post.

@@ -965,6 +965,367 @@ try {
         { exportNav, exportPosts, ex: drain() },
     );
 
+    // Settings › Household on the phone: a member's row opens their page over
+    // Turbo, the ⋯ menu holds the member actions, Remove confirms inside the
+    // menu (no dialog) and posts over Turbo, and Make owner opens a bottom sheet.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/household");
+    await setMarker();
+    await clickSel('.fd-settings a[href="/settings/household/members/u2"]');
+    await sleep(500);
+    const memberPage = await ev<{
+        path: string;
+        marker: string | null;
+        page: string | null;
+        rows: string[];
+        back: string | null;
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        page: document.querySelector(".fd-settings")?.getAttribute("data-fd-settings-page") ?? null,
+        rows: [...document.querySelectorAll(".fd-settings .fd-item-row__title")].map((e) => e.textContent),
+        back: document.querySelector(".fd-settings-detail a[aria-label='Back']")?.getAttribute("href") ?? null,
+    })`);
+    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
+    await sleep(200);
+    const memberMenu = await ev<{
+        open: boolean;
+        items: string[];
+        dialogs: number;
+    }>(`({
+        open: !document.querySelector(".fd-settings-detail .fd-menu__panel").hidden,
+        items: [...document.querySelectorAll(".fd-settings-detail .fd-menu__panel > .fd-menu__form .fd-menu__label, .fd-settings-detail .fd-menu__panel > button .fd-menu__label, .fd-settings-detail .fd-menu__panel > .fd-menu__confirm > [data-fd-menu-arm] .fd-menu__label")].map((e) => e.textContent),
+        dialogs: document.querySelectorAll("dialog[open]").length,
+    })`);
+    await clickSel(".fd-settings-detail [data-fd-menu-arm]");
+    await sleep(150);
+    const removeArmed = await ev<{
+        confirm: string[];
+        dialogs: number;
+    }>(`({
+        confirm: [...document.querySelectorAll(".fd-settings-detail .fd-menu__confirm-row:not([hidden]) .fd-menu__label")].map((e) => e.textContent),
+        dialogs: document.querySelectorAll("dialog[open]").length,
+    })`);
+    await control("reset=posts");
+    await clickSel(
+        ".fd-settings-detail .fd-menu__confirm-row:not([hidden]) button[type=submit]",
+    );
+    await sleep(500);
+    const removePosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/members/u2/remove",
+    );
+    const afterRemove = await ev<{ marker: string | null; path: string }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+    })`);
+    record(
+        "Settings › Household: a member row opens their page over Turbo; the ⋯ menu has Make admin, Make owner and Remove, which confirms in the menu and posts over Turbo",
+        memberPage.path === "/settings/household/members/u2" &&
+            memberPage.marker === "stay" &&
+            memberPage.page === "household" &&
+            memberPage.rows.join() === "Name,Role,Last active,Today" &&
+            memberPage.back === "/settings/household" &&
+            memberMenu.open &&
+            memberMenu.items.join() === "Make admin,Make owner,Remove Sam" &&
+            memberMenu.dialogs === 0 &&
+            removeArmed.confirm.join() === "Cancel,Remove Sam" &&
+            removeArmed.dialogs === 0 &&
+            removePosts.length === 1 &&
+            removePosts[0]!.entries.some(
+                ([k, v]) => k === "confirm" && v === "yes",
+            ) &&
+            afterRemove.marker === "stay",
+        {
+            memberPage,
+            memberMenu,
+            removeArmed,
+            removePosts,
+            afterRemove,
+            ex: drain(),
+        },
+    );
+
+    await goto("/settings/household/members/u2");
+    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
+    await sleep(200);
+    await clickSel(
+        '.fd-settings-detail button[commandfor="fd-member-make-owner"]',
+    );
+    await sleep(500);
+    const makeOwner = await ev<{
+        open: boolean;
+        width: number;
+        bottomGap: number;
+        viewport: number;
+        text: string;
+    }>(`(() => {
+        const d = document.getElementById("fd-member-make-owner");
+        const r = d.getBoundingClientRect();
+        return {
+            open: d.open,
+            width: Math.round(r.width),
+            bottomGap: Math.round(window.innerHeight - r.bottom),
+            viewport: window.innerWidth,
+            text: d.querySelector(".fd-sheet__text")?.textContent ?? "",
+        };
+    })()`);
+    // Choosing the item closed the ⋯ menu behind the sheet; one Escape closes
+    // the sheet, and focus goes back to the ⋯.
+    const menuBehind = await ev<{ panelHidden: boolean }>(`({
+        panelHidden: document.querySelector(".fd-settings-detail .fd-menu__panel").hidden,
+    })`);
+    await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await sleep(300);
+    const afterEscape = await ev<{
+        open: boolean;
+        focusOnTrigger: boolean;
+    }>(`({
+        open: document.getElementById("fd-member-make-owner").open,
+        focusOnTrigger: document.activeElement === document.querySelector(".fd-settings-detail [data-fd-menu-trigger]"),
+    })`);
+    record(
+        "Settings › Household: Make owner opens a bottom sheet, not a centred dialog",
+        makeOwner.open &&
+            makeOwner.width === makeOwner.viewport &&
+            makeOwner.bottomGap === 0 &&
+            /Sam becomes the owner/.test(makeOwner.text),
+        { makeOwner, ex: drain() },
+    );
+    record(
+        "Settings › Household: choosing a menu item that opens a sheet closes the menu, one Escape closes the sheet and focus returns to the ⋯",
+        menuBehind.panelHidden &&
+            !afterEscape.open &&
+            afterEscape.focusOnTrigger,
+        { menuBehind, afterEscape, ex: drain() },
+    );
+
+    await goto("/settings/household");
+    await clickSel('.fd-settings button[commandfor="fd-household-add-member"]');
+    await sleep(500);
+    const addMember = await ev<{
+        open: boolean;
+        width: number;
+        bottomGap: number;
+        viewport: number;
+        fields: string[];
+        modals: number;
+    }>(`(() => {
+        const d = document.getElementById("fd-household-add-member");
+        const r = d.getBoundingClientRect();
+        return {
+            open: d.open,
+            width: Math.round(r.width),
+            bottomGap: Math.round(window.innerHeight - r.bottom),
+            viewport: window.innerWidth,
+            fields: [...d.querySelectorAll("input")].map((i) => i.name),
+            modals: document.querySelectorAll("dialog.modal[open]").length,
+        };
+    })()`);
+    record(
+        "Settings › Household: Add a member opens a bottom sheet with name, login, password and, for the owner, a Member or Admin role",
+        addMember.open &&
+            addMember.width === addMember.viewport &&
+            addMember.bottomGap === 0 &&
+            addMember.fields.join() ===
+                "display_name,login,password,role,role" &&
+            addMember.modals === 0,
+        { addMember, ex: drain() },
+    );
+
+    // Household › Time zone: a page with search, like Account's; a choice saves
+    // the household's zone and the 303 comes back to Household with no toast.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/household");
+    await setMarker();
+    await clickSel(
+        ".fd-settings .fd-item-row a[href='/settings/household/timezone']",
+    );
+    await sleep(400);
+    const hhTz = await ev<{
+        path: string;
+        marker: string | null;
+        page: string | null;
+        search: string | null;
+        first: string | null;
+        checked: string | null;
+        sheets: number;
+        back: string | null;
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        page: document.querySelector(".fd-settings")?.getAttribute("data-fd-settings-page") ?? null,
+        search: document.querySelector("form.fd-settings-tz-search")?.getAttribute("action") ?? null,
+        first: document.querySelector(".fd-settings-tz-form input[type=radio]")?.value ?? null,
+        checked: document.querySelector(".fd-settings-tz-form input[type=radio]:checked")?.value ?? null,
+        sheets: document.querySelectorAll("dialog").length,
+        back: document.querySelector(".fd-settings-detail a[aria-label='Back']")?.getAttribute("href") ?? null,
+    })`);
+    await ev(`(() => {
+        const radio = document.querySelector('.fd-settings-tz-form input[name="timezone"][value="Europe/London"]');
+        radio.checked = true;
+        radio.form.requestSubmit();
+    })()`);
+    await sleep(700);
+    const hhTzSaved = await ev<{
+        path: string;
+        marker: string | null;
+        toasts: number;
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    const hhTzPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/timezone",
+    );
+    record(
+        "Settings › Household › Time zone: a Turbo page with search and the owner's zone as the first choice; a pick saves and returns to Household with no toast",
+        hhTz.path === "/settings/household/timezone" &&
+            hhTz.marker === "stay" &&
+            hhTz.page === "household" &&
+            hhTz.search === "/settings/household/timezone" &&
+            hhTz.first === "" &&
+            hhTz.checked === "" &&
+            hhTz.back === "/settings/household" &&
+            hhTzPosts.length === 1 &&
+            hhTzPosts[0]!.entries.some(
+                ([k, v]) => k === "timezone" && v === "Europe/London",
+            ) &&
+            hhTzSaved.path === "/settings/household" &&
+            hhTzSaved.marker === "stay" &&
+            hhTzSaved.toasts === 0,
+        { hhTz, hhTzSaved, hhTzPosts, ex: drain() },
+    );
+
+    // Invite codes: the + makes a code, and the answer carries the code once, so
+    // that form is a full page load while the rest of Settings is Turbo.
+    await control("reset=posts");
+    await goto("/settings/household/invites");
+    await setMarker();
+    await clickSel(
+        '.fd-settings-detail form[action="/settings/household/invites"] button',
+    );
+    await sleep(600);
+    const invitePost = await ev<{ marker: string | null; path: string }>(`({
+        marker: window.__marker ?? null,
+        path: location.pathname,
+    })`);
+    const invitePosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/invites",
+    );
+    record(
+        "Settings › Household › Invite codes: + is a full page load (no Turbo), the code response cannot be a Turbo visit",
+        invitePost.marker == null &&
+            invitePost.path === "/settings/household/invites" &&
+            invitePosts.length === 1,
+        { invitePost, invitePosts, ex: drain() },
+    );
+
+    // From 1024 px the Detail bar is gone and the same ⋯ menu ends the page
+    // header, in line with the title: it opens on top of the page, in view.
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 900,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await goto("/settings/household/members/u2");
+    await clickSel(".fd-settings-page-head__actions [data-fd-menu-trigger]");
+    await sleep(250);
+    const desktopMenu = await ev<{
+        barShown: boolean;
+        items: string[];
+        inView: boolean;
+        onTop: boolean;
+    }>(`(() => {
+        const panel = document.querySelector(".fd-settings-page-head__actions .fd-menu__panel");
+        const r = panel.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + 12);
+        return {
+            barShown: getComputedStyle(document.querySelector(".fd-settings-detail")).display !== "none",
+            items: [...panel.querySelectorAll(".fd-menu__label")].slice(0, 3).map((e) => e.textContent),
+            inView: !panel.hidden && r.width > 0 && r.left >= 0 && r.right <= window.innerWidth && r.bottom <= window.innerHeight,
+            onTop: !!hit && panel.contains(hit),
+        };
+    })()`);
+    record(
+        "Settings › Household: on desktop the ⋯ menu ends the page header (no Detail bar) and opens in view, over the page",
+        !desktopMenu.barShown &&
+            desktopMenu.items.join() === "Make admin,Make owner,Remove Sam" &&
+            desktopMenu.inView &&
+            desktopMenu.onTop,
+        { desktopMenu, ex: drain() },
+    );
+    // The same sheets are the 480 px panel from the right at 1440: Add member,
+    // Rename household (the value sheets) and Transfer ownership.
+    type Panel = {
+        open: boolean;
+        width: number;
+        right: number;
+        viewport: number;
+    };
+    const sidePanel = async (path: string, clicks: string[], id: string) => {
+        await goto(path);
+        for (const sel of clicks) {
+            await clickSel(sel);
+            await sleep(250);
+        }
+        await sleep(200);
+        return ev<Panel>(`(() => {
+            const d = document.getElementById(${JSON.stringify(id)});
+            const r = (d.querySelector(".fd-sheet-panel") || d).getBoundingClientRect();
+            return { open: d.open, width: Math.round(r.width), right: Math.round(r.right), viewport: window.innerWidth };
+        })()`);
+    };
+    const headMenu = ".fd-settings-page-head__actions [data-fd-menu-trigger]";
+    const sideAdd = await sidePanel(
+        "/settings/household",
+        ['.fd-settings button[commandfor="fd-household-add-member"]'],
+        "fd-household-add-member",
+    );
+    const sideName = await sidePanel(
+        "/settings/household",
+        [
+            headMenu,
+            '.fd-settings-page-head__actions button[commandfor="fd-household-name"]',
+        ],
+        "fd-household-name",
+    );
+    const sideOwner = await sidePanel(
+        "/settings/household/members/u2",
+        [
+            headMenu,
+            '.fd-settings-page-head__actions button[commandfor="fd-member-make-owner"]',
+        ],
+        "fd-member-make-owner",
+    );
+    const isSide = (p: Panel) =>
+        p.open && p.width === 480 && p.right === p.viewport;
+    record(
+        "Settings › Household: at 1440 Add member, Rename household and Transfer ownership open as the 480 px side panel",
+        isSide(sideAdd) && isSide(sideName) && isSide(sideOwner),
+        { sideAdd, sideName, sideOwner, ex: drain() },
+    );
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 430,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+
     // The entrance fade belongs to a full load: the head script sets html.fx
     // and html.fx-enter before first paint, shell.js ends fx-enter, and a page
     // Turbo swaps in is never faded.

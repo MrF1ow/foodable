@@ -19,6 +19,8 @@ import {
 } from "../src/web/pages/v2/kitchen-groceries.js";
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
+import { renderHouseholdInvitesPage } from "../src/web/pages/v2/settings-household-invites.js";
+import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
@@ -241,24 +243,8 @@ function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
         unverifiedRecipeExpiryDays: null,
         isOwner: true,
         canManage: true,
+        canInvite: true,
         viewerUserId: ME.userId,
-        noticeResult: {
-            notices: [],
-            dismissals: [],
-            subjectNames: new Map(),
-            subjectTimes: new Map(),
-            noticeFoods: new Map(),
-            catalogFoods: [],
-            aliasMap: new Map(),
-            barcodedIds: new Set(),
-            possibleDuplicatePairs: [],
-            recipesListPrefetch: {
-                recipes: [],
-                allIngredients: [],
-                fridgeItems: [],
-                foodsById: new Map(),
-            },
-        },
         duplicatePairs: [],
         refCounts: new Map(),
     } as never);
@@ -308,6 +294,40 @@ async function pages(
         help: renderSettingsHelpV2Page({ chrome: chrome as never }),
         "dev-gallery-v2": renderDevGalleryV2Page(chrome as never),
         household: householdPage(chrome),
+        "household-timezone": renderSettingsTimezoneV2Page({
+            chrome: chrome as never,
+            household: true,
+            backHref: "/settings/household",
+            timezone: "",
+            now: new Date("2026-11-10T12:00:00Z"),
+        }),
+        "household-member": renderSettingsMemberV2Page({
+            chrome: chrome as never,
+            member: SAM as never,
+            viewer: ME as never,
+            todayHref: `/?member=${SAM.userId}`,
+            manage: { role: true, transfer: true, remove: true },
+            lastSeen: new Date("2026-11-10T09:00:00Z"),
+            now: new Date("2026-11-10T12:00:00Z"),
+            timezone: "UTC",
+        }),
+        "household-invites": renderHouseholdInvitesPage({
+            chrome: chrome as never,
+            backHref: "/",
+            member: ME as never,
+            invites: [
+                {
+                    id: "i-active",
+                    householdId: H,
+                    createdBy: ME.userId,
+                    createdAt: "2026-11-09T12:00:00Z",
+                    expiresAt: "2026-11-16T12:00:00Z",
+                    usedAt: null,
+                    usedBy: null,
+                },
+            ],
+            now: new Date("2026-11-10T12:00:00Z"),
+        }),
         notifications: notificationsPage(chrome),
         "settings-notifications": renderSettingsNotificationsV2Page({
             chrome: chrome as never,
@@ -352,6 +372,9 @@ const ROUTE_BASE: Record<string, string> = {
     "/settings/help": "help",
     "/dev/gallery-v2": "dev-gallery-v2",
     "/settings/household": "household",
+    "/settings/household/timezone": "household-timezone",
+    [`/settings/household/members/${SAM.userId}`]: "household-member",
+    "/settings/household/invites": "household-invites",
     "/notifications": "notifications",
     "/settings/notifications": "settings-notifications",
     "/create-household": "create-household",
@@ -598,6 +621,10 @@ const server = Bun.serve({
             if (path === "/settings/display") {
                 // Like the route: the control on Settings comes back to it.
                 destKey = "/settings";
+            }
+            if (path === "/settings/household/timezone") {
+                // The household's time zone page comes back to Household.
+                destKey = "/settings/household";
             }
             if (
                 path === "/settings" &&

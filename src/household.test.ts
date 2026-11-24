@@ -12,6 +12,8 @@ import {
     getHouseholdId,
     HouseholdAlreadyExistsError,
     listMembers,
+    MEMBER_NAME_MAX_LENGTH,
+    parseMemberInput,
     requireMember,
     requireMemberOfHousehold,
     requireOwner,
@@ -96,6 +98,19 @@ test("createHousehold inserts the owner and fails if a household exists", () => 
     );
     expect(getHouseholdId(store, bob)).toBe(null);
     expect(store.getHousehold()?.id).toBe(householdId);
+});
+
+test("a member's name may be 80 characters and no more", () => {
+    const base = { login: "jo@example.com", password: "password1234" };
+    expect(MEMBER_NAME_MAX_LENGTH).toBe(80);
+    expect(parseMemberInput({ ...base, display_name: "a".repeat(80) }).ok).toBe(
+        true,
+    );
+    const long = parseMemberInput({ ...base, display_name: "a".repeat(81) });
+    expect(long).toEqual({
+        ok: false,
+        error: "Name must be at most 80 characters.",
+    });
 });
 
 test("addHouseholdMember after createHousehold inserts a member", async () => {

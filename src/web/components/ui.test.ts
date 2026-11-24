@@ -1,14 +1,12 @@
 import { test, expect } from "bun:test";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { sharedDialogItem } from "./shared-dialog.js";
 import {
     confirmModal,
     disclosure,
     emptyState,
     errorBanner,
     modal,
-    modalTrigger,
     pageHeader,
     panel,
     row,
@@ -158,7 +156,7 @@ test("errorBanner, emptyState, disclosure, panel, and row markup", () => {
     );
 });
 
-test("modal, modalTrigger, and confirmModal markup", () => {
+test("modal and confirmModal markup", () => {
     const m = modal({
         id: "add-food",
         title: "Add food",
@@ -179,17 +177,6 @@ test("modal, modalTrigger, and confirmModal markup", () => {
     expect(modal({ id: "x", title: "A & B", body: "<p>y</p>" })).toContain(
         '<h2 class="modal-title" id="x-title">A &amp; B</h2>',
     );
-
-    expect(modalTrigger({ target: "add-food", label: "Add food" })).toBe(
-        '<button type="button" class="btn-primary" commandfor="add-food" command="show-modal">Add food</button>',
-    );
-    expect(
-        modalTrigger({
-            target: "del",
-            label: "Remove",
-            className: "btn-sm btn-danger",
-        }),
-    ).toContain('class="btn-sm btn-danger"');
 
     const confirm = confirmModal({
         id: "del-item",
@@ -227,139 +214,6 @@ test("modal, modalTrigger, and confirmModal markup", () => {
     ).toMatch(
         /<dialog class="modal" id="del-open"[^>]*data-modal-open-on-load/,
     );
-
-    expect(
-        modalTrigger({
-            target: "edit-1",
-            label: "Edit Eggs",
-            className: "btn-sm btn-icon",
-            icon: "<svg></svg>",
-        }),
-    ).toContain('aria-label="Edit Eggs"');
-    expect(
-        modalTrigger({
-            target: "edit-1",
-            label: "Edit Eggs",
-            className: "btn-sm btn-icon",
-            icon: "<svg></svg>",
-        }),
-    ).toContain("<svg></svg>");
-
-    expect(
-        modalTrigger({
-            target: "edit-1",
-            label: "Edit",
-            data: {
-                "item-name": `"><img src=x onerror=alert(1)>`,
-                'a"b': "c&d",
-            },
-        }),
-    ).toContain(
-        'data-item-name="&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
-    );
-    expect(
-        modalTrigger({
-            target: "edit-1",
-            label: "Edit",
-            data: { 'a"b': "c&d" },
-        }),
-    ).toContain('data-a&quot;b="c&amp;d"');
-
-    const hostile = `"><img src=x onerror=alert(1)>`;
-    const filled = modalTrigger({
-        target: "fridge-edit-food",
-        label: "Edit",
-        fill: {
-            action: "/kitchen/fridge/items/1",
-            title: `Edit ${hostile}`,
-            message: "Remove it?",
-            fields: { qty_amount: 6, archived: true, note: null },
-        },
-    });
-    expect(filled).toContain('data-fill-action="/kitchen/fridge/items/1"');
-    expect(filled).toContain(
-        'data-fill-title="Edit &quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
-    );
-    expect(filled).toContain('data-fill-message="Remove it?"');
-    expect(filled).toContain('data-fill-field-qty_amount="6"');
-    expect(filled).toContain('data-fill-field-archived="true"');
-    expect(filled).toContain('data-fill-field-note=""');
-    expect(filled).not.toContain("<img");
-
-    const slotted = modalTrigger({
-        target: "household-manage",
-        label: "Manage",
-        fill: {
-            text: { "role-blurb": `Make ${hostile} an admin` },
-            classes: { "role-submit": "btn-primary" },
-            templates: {
-                "member-actions": `tpl-"><img src=x onerror=alert(1)>`,
-            },
-        },
-    });
-    expect(slotted).toContain(
-        'data-fill-text-role-blurb="Make &quot;&gt;&lt;img src=x onerror=alert(1)&gt; an admin"',
-    );
-    expect(slotted).toContain('data-fill-class-role-submit="btn-primary"');
-    expect(slotted).toContain(
-        'data-fill-template-member-actions="tpl-&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"',
-    );
-    expect(slotted).not.toContain("<img");
-    expect(slotted).not.toContain("<button>Remove");
-    expect(
-        modalTrigger({
-            target: "household-manage",
-            label: "Manage",
-            fill: { classes: { "role-submit": "" } },
-        }),
-    ).toContain('data-fill-class-role-submit=""');
-
-    const owned = confirmModal({
-        id: "household-make-owner",
-        title: "Transfer ownership",
-        message: "Bob becomes the owner.",
-        action: "/settings/household/members/u2/make-owner",
-        confirmLabel: "Make Bob the owner",
-        submitSlot: "owner-label",
-        submitDisabled: true,
-    });
-    expect(owned).toContain(
-        '<button type="submit" class="btn-danger" data-fill-slot="owner-label" disabled>Make Bob the owner</button>',
-    );
-
-    expect(
-        modal({
-            id: "shared",
-            title: "Edit item",
-            submitDisabled: true,
-            body: `<form><button type="submit" class="btn-primary">Save</button></form>`,
-        }),
-    ).toContain('<button type="submit" class="btn-primary" disabled>');
-});
-
-test("sharedDialogItem maps a per-item reopen id onto the item", () => {
-    const eggs = { id: "it-1", name: "Eggs" };
-    expect(
-        sharedDialogItem({
-            openModalId: "fridge-edit-it-1",
-            prefix: "fridge-edit-",
-            lookup: (id) => (id === eggs.id ? eggs : null),
-        }),
-    ).toEqual({ item: eggs, openModalId: "fridge-edit-it-1" });
-    expect(
-        sharedDialogItem({
-            openModalId: "fridge-edit-gone",
-            prefix: "fridge-edit-",
-            lookup: () => null,
-        }),
-    ).toBeNull();
-    expect(
-        sharedDialogItem({
-            openModalId: "fridge-add-location",
-            prefix: "fridge-edit-",
-            lookup: () => eggs,
-        }),
-    ).toBeNull();
 });
 
 test("no page module contains a raw <h1", () => {
