@@ -370,6 +370,45 @@ test("the Restock Time input is the Day value's size, and a row's ⋯ dots sit o
     );
 });
 
+const storesCss = readFileSync(
+    join(import.meta.dir, "../../../../public/app/v2/stores.css"),
+    "utf8",
+);
+
+/** The declarations of the first stores.css rule that starts at `selector`. */
+function storesRule(selector: string): string {
+    const at = storesCss.indexOf(selector);
+    expect(at).toBeGreaterThanOrEqual(0);
+    return storesCss.slice(
+        storesCss.indexOf("{", at),
+        storesCss.indexOf("}", at),
+    );
+}
+
+test("stores.css: the read-only store name is secondary text at full strength", () => {
+    const body = storesRule(".fd-stores-page .fd-field__input:disabled");
+    expect(body).toContain("color: var(--text-secondary)");
+    expect(body).toContain("opacity: 1");
+});
+
+test("stores.css: a section row's ⋯ is a 24 px glyph in the secondary tone", () => {
+    const body = storesRule(
+        ".fd-stores-page .fd-item-row__control > .fd-menu > .fd-btn--icon",
+    );
+    expect(body).toContain("--fd-btn-icon: var(--space-2xl)");
+    expect(body).toContain("color: var(--text-secondary)");
+});
+
+test("stores.css: a store's ⋯ menu hangs where frame 659671 draws it, on desktop only", () => {
+    const at = storesCss.indexOf(".fd-store-page");
+    expect(storesCss.slice(storesCss.lastIndexOf("@media", at), at)).toContain(
+        "(min-width: 1024px)",
+    );
+    const body = storesRule(".fd-menu__panel {\n        top:");
+    expect(body).toContain("top: calc(100% + var(--space-4xl))");
+    expect(body).toContain("right: 116px");
+});
+
 test("a partial outside the legacy list, and the marked part of a legacy one, have no literal size, space, radius or font size", () => {
     const found: Record<string, ReturnType<typeof scaleViolations>> = {};
     for (const file of partials) {

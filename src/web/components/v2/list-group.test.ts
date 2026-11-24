@@ -30,3 +30,10 @@ test("a label names the list and every string is escaped", () => {
     expect(html).toContain(`aria-label="${XSS_ESCAPED}"`);
     expect(html).not.toContain("<script>");
 });
+
+test("data attributes land on the list", () => {
+    const html = listGroup({ rows, data: { "fd-order-list": "" } });
+    expect(html).toStartWith(
+        `<ul class="fd-list-group" data-fd-order-list="">`,
+    );
+});

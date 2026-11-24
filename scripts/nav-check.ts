@@ -1338,6 +1338,385 @@ try {
         },
     );
 
+    // Settings › Household › Stores: a Turbo page; the default store is a
+    // pull-down on the row; Reorder (the Detail bar's ⋯) turns the list into an
+    // inline edit mode with a handle per row, a drag posts the whole order, and
+    // Done leaves the mode, all with no document load and no toast. A store's
+    // page renames in place, adds a section inline and deletes with a confirm
+    // in the menu.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/household");
+    await setMarker();
+    await clickSel('.fd-settings a[href="/settings/household/stores"]');
+    await sleep(500);
+    const storesPage = await ev<{
+        path: string;
+        marker: string | null;
+        title: string | null;
+        rows: string[];
+        intro: boolean;
+        optOuts: number;
+        dialogs: number;
+    }>(`({
+        path: location.pathname + location.search,
+        marker: window.__marker ?? null,
+        title: document.querySelector(".fd-settings-detail .fd-detail-bar__title")?.textContent ?? null,
+        rows: [...document.querySelectorAll(".fd-settings .fd-item-row__title")].map((e) => e.textContent),
+        intro: document.body.innerText.includes("Groceries are grouped"),
+        optOuts: document.querySelectorAll('.fd-settings [data-turbo="false"]').length,
+        dialogs: document.querySelectorAll(".fd-settings dialog").length,
+    })`);
+    await clickSel(".fd-settings .fd-menu--row [data-fd-menu-trigger]");
+    await sleep(200);
+    const defaultMenu = await ev<{
+        open: boolean;
+        items: string[];
+        checked: string | null;
+    }>(`(() => {
+        const panel = document.querySelector(".fd-settings .fd-menu--row .fd-menu__panel");
+        return {
+            open: !panel.hidden,
+            items: [...panel.querySelectorAll(".fd-menu__label")].map((e) => e.textContent),
+            checked: panel.querySelector('[aria-checked="true"] .fd-menu__label')?.textContent ?? null,
+        };
+    })()`);
+    await control("reset=posts");
+    await clickSel(
+        '.fd-settings .fd-menu--row .fd-menu__panel form:has(input[value="s-trader"]) button',
+    );
+    await sleep(600);
+    const defaultPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/stores/preferences",
+    );
+    const afterDefault = await ev<{ marker: string | null; toasts: number }>(`({
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    // Reorder: the ⋯ item is a link, so it is a Turbo visit into the mode.
+    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
+    await sleep(200);
+    const barMenu = await ev<string[]>(
+        `[...document.querySelectorAll(".fd-settings-detail .fd-menu__panel .fd-menu__label")].map((e) => e.textContent)`,
+    );
+    await clickSel('.fd-settings-detail .fd-menu__panel a[href$="?reorder=1"]');
+    await sleep(600);
+    const reorderState = () =>
+        ev<{
+            path: string;
+            marker: string | null;
+            handles: number;
+            names: string[];
+            done: string | null;
+            prefs: boolean;
+            menus: number;
+        }>(`({
+            path: location.pathname + location.search,
+            marker: window.__marker ?? null,
+            handles: document.querySelectorAll("[data-fd-order-handle]").length,
+            names: [...document.querySelectorAll("[data-fd-order-item] .fd-item-row__title")].map((e) => e.textContent),
+            done: document.querySelector('.fd-settings-detail a[aria-label="Done"]')?.getAttribute("href") ?? null,
+            prefs: document.body.innerText.toLowerCase().includes("when adding to the list"),
+            menus: document.querySelectorAll(".fd-settings-detail [data-fd-menu]").length,
+        })`);
+    const inReorder = await reorderState();
+    // Drag the first handle below the last row, as a finger would.
+    await control("reset=posts");
+    await ev(`(() => {
+        const handle = document.querySelector("[data-fd-order-handle]");
+        const rows = [...document.querySelectorAll("[data-fd-order-item]")];
+        const last = rows[rows.length - 1].getBoundingClientRect();
+        const at = handle.getBoundingClientRect();
+        const fire = (target, type, y) =>
+            target.dispatchEvent(
+                new PointerEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: at.left + 4, clientY: y }),
+            );
+        fire(handle, "pointerdown", at.top + 4);
+        fire(window, "pointermove", last.bottom + 10);
+        fire(window, "pointerup", last.bottom + 10);
+    })()`);
+    await sleep(700);
+    const orderPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/stores/order",
+    );
+    const afterDrag = await reorderState();
+    await clickSel('.fd-settings-detail a[aria-label="Done"]');
+    await sleep(600);
+    const afterDone = await ev<{
+        path: string;
+        marker: string | null;
+        handles: number;
+        prefs: boolean;
+    }>(`({
+        path: location.pathname + location.search,
+        marker: window.__marker ?? null,
+        handles: document.querySelectorAll("[data-fd-order-handle]").length,
+        prefs: document.body.innerText.toLowerCase().includes("when adding to the list"),
+    })`);
+    record(
+        "Settings › Household › Stores: a Turbo page with the default store as a pull-down; Reorder (⋯) is an inline mode with a handle per row, a drag posts the whole order and Done leaves it, all over Turbo with no toast",
+        storesPage.path === "/settings/household/stores" &&
+            storesPage.marker === "stay" &&
+            storesPage.title === "Stores" &&
+            storesPage.rows.join("|") ===
+                "Costco|Trader Joe's|Farmers market|Add a store|Default store|Use each food's usual store" &&
+            !storesPage.intro &&
+            storesPage.optOuts === 0 &&
+            storesPage.dialogs === 0 &&
+            defaultMenu.open &&
+            defaultMenu.items.join("|") ===
+                "None|Costco|Trader Joe's|Farmers market" &&
+            defaultMenu.checked === "Costco" &&
+            defaultPosts.length === 1 &&
+            defaultPosts[0]!.entries.some(
+                ([k, v]) => k === "default_store_id" && v === "s-trader",
+            ) &&
+            afterDefault.marker === "stay" &&
+            afterDefault.toasts === 0 &&
+            barMenu.join("|") === "Reorder" &&
+            inReorder.path === "/settings/household/stores?reorder=1" &&
+            inReorder.marker === "stay" &&
+            inReorder.handles === 3 &&
+            inReorder.names.join("|") ===
+                "Costco|Trader Joe's|Farmers market" &&
+            inReorder.done === "/settings/household/stores" &&
+            !inReorder.prefs &&
+            inReorder.menus === 0 &&
+            orderPosts.length === 1 &&
+            orderPosts[0]!.entries
+                .filter(([k]) => k === "order")
+                .map(([, v]) => v)
+                .join("|") === "s-trader|s-market|s-costco" &&
+            afterDrag.marker === "stay" &&
+            afterDrag.path === "/settings/household/stores?reorder=1" &&
+            afterDone.path === "/settings/household/stores" &&
+            afterDone.marker === "stay" &&
+            afterDone.handles === 0 &&
+            afterDone.prefs,
+        {
+            storesPage,
+            defaultMenu,
+            defaultPosts,
+            afterDefault,
+            barMenu,
+            inReorder,
+            orderPosts,
+            afterDrag,
+            afterDone,
+            ex: drain(),
+        },
+    );
+
+    await control("reset=posts");
+    await clickSel(
+        '.fd-settings a[href="/settings/household/stores/s-costco"]',
+    );
+    await sleep(500);
+    const storeState = () =>
+        ev<{
+            path: string;
+            marker: string | null;
+            title: string | null;
+            sections: string[];
+            nameDisabled: boolean;
+            dialogs: number;
+            optOuts: number;
+        }>(`({
+            path: location.pathname + location.search,
+            marker: window.__marker ?? null,
+            title: document.querySelector(".fd-settings-detail .fd-detail-bar__title")?.textContent ?? null,
+            sections: [...document.querySelectorAll(".fd-settings .fd-item-row__title")].map((e) => e.textContent),
+            nameDisabled: !!document.querySelector('.fd-settings #fd-store-name[disabled]'),
+            dialogs: document.querySelectorAll(".fd-settings dialog").length,
+            optOuts: document.querySelectorAll('.fd-settings [data-turbo="false"]').length,
+        })`);
+    const storePage = await storeState();
+    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
+    await sleep(200);
+    const storeMenuItems = await ev<string[]>(
+        `[...document.querySelectorAll(".fd-settings-detail .fd-menu__panel > a .fd-menu__label, .fd-settings-detail .fd-menu__panel > .fd-menu__confirm > [data-fd-menu-arm] .fd-menu__label")].map((e) => e.textContent)`,
+    );
+    await clickSel('.fd-settings-detail .fd-menu__panel a[href$="?rename=1"]');
+    await sleep(600);
+    const renaming = await ev<{
+        path: string;
+        marker: string | null;
+        editable: boolean;
+        focused: boolean;
+    }>(`({
+        path: location.pathname + location.search,
+        marker: window.__marker ?? null,
+        editable: !!document.querySelector('.fd-settings #fd-store-name:not([disabled])'),
+        focused: document.activeElement?.id === "fd-store-name",
+    })`);
+    // Add a section: the row opens a field in place and posts over Turbo.
+    await clickSel(".fd-settings details[data-fd-add-row] summary");
+    await sleep(200);
+    const addOpen = await ev<{ open: boolean; focused: boolean }>(`({
+        open: !!document.querySelector(".fd-settings details[data-fd-add-row][open]"),
+        focused: document.activeElement?.closest("details[data-fd-add-row]") != null,
+    })`);
+    await control("reset=posts");
+    await ev(`(() => {
+        const input = document.querySelector(".fd-settings details[data-fd-add-row][open] input");
+        input.value = "Deli";
+        input.form.requestSubmit();
+    })()`);
+    await sleep(600);
+    const sectionPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/stores/s-costco/sections",
+    );
+    const afterAdd = await ev<{ marker: string | null; toasts: number }>(`({
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    // Delete confirms in the menu: arm, Cancel + the verb, then the post.
+    await control("reset=posts");
+    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
+    await sleep(200);
+    await clickSel(".fd-settings-detail [data-fd-menu-arm]");
+    await sleep(100);
+    const armed = await ev<string[]>(
+        `[...document.querySelectorAll(".fd-settings-detail .fd-menu__confirm-row:not([hidden]) .fd-menu__label")].map((e) => e.textContent)`,
+    );
+    await clickSel(
+        ".fd-settings-detail .fd-menu__confirm-row:not([hidden]) button[type=submit]",
+    );
+    await sleep(600);
+    const deletePosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/stores/s-costco/delete",
+    );
+    const afterDelete = await ev<{ marker: string | null; toasts: number }>(`({
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    record(
+        "Settings › Household › a store: a Turbo page; the ⋯ has Rename and Delete; Rename opens the name field in place, Add a section is an inline row, Delete confirms in the menu, all over Turbo with no sheet and no toast",
+        storePage.path === "/settings/household/stores/s-costco" &&
+            storePage.marker === "stay" &&
+            storePage.title === "Costco" &&
+            storePage.sections.join("|") ===
+                "Produce|Meat|Dairy|Other|Add a section|Add a rule" &&
+            storePage.nameDisabled &&
+            storePage.dialogs === 0 &&
+            storePage.optOuts === 0 &&
+            storeMenuItems.join("|") === "Rename|Delete" &&
+            renaming.path === "/settings/household/stores/s-costco?rename=1" &&
+            renaming.marker === "stay" &&
+            renaming.editable &&
+            renaming.focused &&
+            addOpen.open &&
+            addOpen.focused &&
+            sectionPosts.length === 1 &&
+            sectionPosts[0]!.entries.some(
+                ([k, v]) => k === "name" && v === "Deli",
+            ) &&
+            afterAdd.marker === "stay" &&
+            afterAdd.toasts === 0 &&
+            armed.join("|") === "Cancel|Delete store" &&
+            deletePosts.length === 1 &&
+            deletePosts[0]!.entries.some(
+                ([k, v]) => k === "lines" && v === "0",
+            ) &&
+            afterDelete.marker === "stay" &&
+            afterDelete.toasts === 0,
+        {
+            storePage,
+            storeMenuItems,
+            renaming,
+            addOpen,
+            sectionPosts,
+            afterAdd,
+            armed,
+            deletePosts,
+            afterDelete,
+            ex: drain(),
+        },
+    );
+
+    // A section's ⋯ by keyboard only: Move down twice, and each time focus is
+    // back on that section's ⋯ and the stored order has moved.
+    {
+        await control("reset=sections");
+        await goto("/settings/household/stores/s-costco");
+        await setMarker();
+        const trigger = "#fd-section-sec-produce [data-fd-menu-trigger]";
+        const pressEnter = async () => {
+            for (const type of ["keyDown", "keyUp"]) {
+                await send("Input.dispatchKeyEvent", {
+                    type,
+                    key: "Enter",
+                    code: "Enter",
+                    text: type === "keyDown" ? "\r" : undefined,
+                    windowsVirtualKeyCode: 13,
+                    nativeVirtualKeyCode: 13,
+                });
+            }
+            await sleep(700);
+        };
+        const order = () =>
+            ev<string[]>(
+                `[...document.querySelectorAll(".fd-settings .fd-item-row[id^='fd-section-'] .fd-item-row__title")].map((e) => e.textContent)`,
+            );
+        const focusState = () =>
+            ev<{ onTrigger: boolean; path: string; marker: string | null }>(`({
+                onTrigger: document.activeElement === document.querySelector(${JSON.stringify(trigger)}),
+                path: location.pathname + location.search,
+                marker: window.__marker ?? null,
+            })`);
+        async function moveDown() {
+            await ev(
+                `document.querySelector(${JSON.stringify(trigger)}).focus()`,
+            );
+            await pressKey("ArrowDown", "ArrowDown", 40);
+            for (let i = 0; i < 5; i++) {
+                const label = await ev<string>(
+                    `document.activeElement?.textContent?.trim() ?? ""`,
+                );
+                if (label === "Move down") break;
+                await pressKey("ArrowDown", "ArrowDown", 40);
+            }
+            await control("reset=posts");
+            await pressEnter();
+        }
+        const start = await order();
+        await moveDown();
+        const once = await focusState();
+        const afterOnce = await order();
+        await moveDown();
+        const twice = await focusState();
+        const afterTwice = await order();
+        const movePosts = (await stats()).posts.filter(
+            (p) =>
+                p.path === "/settings/household/stores/s-costco/sections/order",
+        );
+        record(
+            "Settings › Household › a store: a section's ⋯ by keyboard, Move down twice, focus stays on that section's ⋯ and the order changed twice",
+            start.join("|") === "Produce|Meat|Dairy|Other" &&
+                afterOnce.join("|") === "Meat|Produce|Dairy|Other" &&
+                afterTwice.join("|") === "Meat|Dairy|Produce|Other" &&
+                once.onTrigger &&
+                twice.onTrigger &&
+                // The focus hint is dropped from the URL once it is used.
+                once.path === "/settings/household/stores/s-costco" &&
+                twice.path === "/settings/household/stores/s-costco" &&
+                twice.marker === "stay" &&
+                movePosts.length === 1 &&
+                movePosts[0]!.entries.some(
+                    ([k, v]) => k === "move" && v === "sec-produce:down",
+                ),
+            {
+                start,
+                afterOnce,
+                afterTwice,
+                once,
+                twice,
+                movePosts,
+                ex: drain(),
+            },
+        );
+        await control("reset=sections");
+    }
+
     // Settings › Household › Recipe link readers: Turbo page; an off reader's
     // switch opens its terms in place (no dialog) and the confirm posts over
     // Turbo; Blocked links has a ⋯ that clears in place.
@@ -1604,6 +1983,7 @@ try {
             tokenShown.noCache === "no-cache" &&
             tokenDone.marker === "stay" &&
             tokenDone.path === "/settings/household" &&
+            tokenBack.path === "/settings/household" &&
             !tokenBack.token &&
             !tokenBack.field,
         { tokenShown, tokenDone, tokenBack, ex: drain() },

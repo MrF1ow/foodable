@@ -26,6 +26,8 @@ import {
 } from "../src/web/pages/v2/settings-household-shared-links.js";
 import { renderHouseholdTokenPage } from "../src/web/pages/v2/settings-household-token.js";
 import { renderSettingsRestockV2Page } from "../src/web/pages/v2/settings-restock.js";
+import { renderSettingsStoresV2Page } from "../src/web/pages/v2/settings-stores.js";
+import { renderSettingsStoreV2Page } from "../src/web/pages/v2/settings-stores-detail.js";
 import { renderSettingsReadersV2Page } from "../src/web/pages/v2/settings-readers.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import {
@@ -262,6 +264,78 @@ const FIXTURE_RESTOCK = {
     lastRunAdded: 3,
 };
 
+const FIXTURE_STORES = [
+    { id: "s-costco", name: "Costco", sectionCount: 4, lineCount: 5 },
+    { id: "s-trader", name: "Trader Joe's", sectionCount: 2, lineCount: 3 },
+    { id: "s-market", name: "Farmers market", sectionCount: 0, lineCount: 0 },
+];
+
+function storesFixture(
+    chrome: ReturnType<typeof fixtureChrome>,
+    over: { reorder?: boolean } = {},
+) {
+    return renderSettingsStoresV2Page({
+        chrome: chrome as never,
+        stores: FIXTURE_STORES,
+        defaultStoreId: "s-costco",
+        useUsualStore: true,
+        canManage: true,
+        ...over,
+    });
+}
+
+const COSTCO_SECTIONS = [
+    ["sec-produce", "Produce"],
+    ["sec-meat", "Meat"],
+    ["sec-dairy", "Dairy"],
+] as const;
+
+/** Costco's section order, which a section's ⋯ Move up and Move down change. */
+let costcoOrder: string[] = COSTCO_SECTIONS.map(([id]) => id);
+
+/** What the route does with a bare move: the section swaps with its neighbour; the ends stay. */
+function moveCostcoSection(move: string) {
+    const at = move.lastIndexOf(":");
+    const id = move.slice(0, at);
+    const from = costcoOrder.indexOf(id);
+    const to = move.slice(at + 1) === "up" ? from - 1 : from + 1;
+    if (from < 0 || to < 0 || to >= costcoOrder.length) return;
+    const next = [...costcoOrder];
+    [next[from], next[to]] = [next[to]!, next[from]!];
+    costcoOrder = next;
+}
+
+function storeFixture(
+    chrome: ReturnType<typeof fixtureChrome>,
+    over: { rename?: boolean } = {},
+) {
+    const section = (id: string, name: string, other = false) => ({
+        id,
+        householdId: H,
+        storeId: "s-costco",
+        name,
+        sortOrder: 0,
+        hidden: false,
+        isOther: other,
+    });
+    return renderSettingsStoreV2Page({
+        chrome: chrome as never,
+        store: { id: "s-costco", householdId: H, name: "Costco", sortOrder: 0 },
+        sections: [
+            ...costcoOrder.map((id) =>
+                section(id, COSTCO_SECTIONS.find(([key]) => key === id)![1]),
+            ),
+            section("sec-other", "Other", true),
+        ],
+        sectionLineCounts: new Map([["sec-meat", 1]]),
+        lineCount: 0,
+        rules: [],
+        moveTarget: null,
+        canManage: true,
+        ...over,
+    } as never);
+}
+
 function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
     return renderSettingsHouseholdV2Page({
         chrome,
@@ -376,6 +450,10 @@ async function pages(
             restock: FIXTURE_RESTOCK,
             canManage: true,
         }),
+        "household-stores": storesFixture(chrome),
+        "household-stores-reorder": storesFixture(chrome, { reorder: true }),
+        "household-store": storeFixture(chrome),
+        "household-store-rename": storeFixture(chrome, { rename: true }),
         "household-readers": renderSettingsReadersV2Page({
             chrome: chrome as never,
             socialReaders: { tiktok: true, facebook: false },
@@ -445,6 +523,10 @@ const ROUTE_BASE: Record<string, string> = {
     [`/settings/household/members/${SAM.userId}`]: "household-member",
     "/settings/household/invites": "household-invites",
     "/settings/household/restock": "household-restock",
+    "/settings/household/stores": "household-stores",
+    "/settings/household/stores?reorder=1": "household-stores-reorder",
+    "/settings/household/stores/s-costco": "household-store",
+    "/settings/household/stores/s-costco?rename=1": "household-store-rename",
     "/settings/household/readers": "household-readers",
     "/settings/household/readers?turn_on=facebook": "household-readers-terms",
     "/settings/household/shared-links": "household-shared-links",
@@ -570,6 +652,9 @@ const server = Bun.serve({
             if (url.searchParams.has("unread"))
                 inboxUnread = url.searchParams.get("unread") !== "0";
             if (url.searchParams.get("reset") === "posts") posts.length = 0;
+            if (url.searchParams.get("reset") === "sections") {
+                costcoOrder = COSTCO_SECTIONS.map(([id]) => id);
+            }
             if (url.searchParams.get("reset") === "search")
                 searchHits.length = 0;
             if (url.searchParams.get("reset") === "approve") approveCount = 0;
@@ -689,6 +774,26 @@ const server = Bun.serve({
             const entries: [string, string][] = [];
             for (const [k, v] of form.entries()) entries.push([k, String(v)]);
             posts.push({ path, entries });
+            if (path === "/settings/household/stores/s-costco/sections/order") {
+                // Like the route: only a section's ⋯ posts a bare move, and it
+                // comes back to the store page with `focus=<section id>`.
+                const move = entries.find(([k]) => k === "move")?.[1] ?? "";
+                moveCostcoSection(move);
+                const key = `/settings/household/stores/s-costco?focus=${encodeURIComponent(move.slice(0, move.lastIndexOf(":")))}`;
+                const html = stamp(
+                    applyAccountTheme(
+                        storeFixture(
+                            fixtureChrome(themeFileSuffix(), inboxUnread),
+                        ),
+                    ),
+                    key,
+                );
+                pending.set(key, { html, status: 200 });
+                return new Response(null, {
+                    status: 303,
+                    headers: { Location: key },
+                });
+            }
             // The Display control on Settings home saves
             // the appearance, as the real route does; the saved theme is what
             // the next page renders.
@@ -733,7 +838,10 @@ const server = Bun.serve({
                 // The time zone page and the name sheet come back to Account.
                 destKey = "/settings/account";
             }
-            const file = routeHtmlFile(destKey.split("?")[0]!);
+            // A page the query changes (reorder mode) has its own entry.
+            const file = routeHtmlFile(
+                ROUTE_BASE[destKey] ? destKey : destKey.split("?")[0]!,
+            );
             let html = applyAccountTheme(
                 await fileHtml(file, destKey + "#post"),
             );
@@ -791,7 +899,17 @@ const server = Bun.serve({
             }
             if (stallMs) await sleep(stallMs);
             const html = applyAccountTheme(
-                await fileHtml(routeHtmlFile(routeKey), path + url.search),
+                routeKey === "/settings/household/stores/s-costco"
+                    ? stamp(
+                          storeFixture(
+                              fixtureChrome(themeFileSuffix(), inboxUnread),
+                          ),
+                          path + url.search,
+                      )
+                    : await fileHtml(
+                          routeHtmlFile(routeKey),
+                          path + url.search,
+                      ),
             );
             return new Response(html, {
                 headers: { "content-type": "text/html; charset=utf-8" },

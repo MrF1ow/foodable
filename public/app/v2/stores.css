@@ -1,6 +1,7 @@
-/* Settings › Household › Stores and a store's page. Phone first;
- * the single desktop block is last. Built from components.css rows, so only
- * what the design adds is here: the card, the switch, the drag list. */
+/* The `fd-stores` card list, the pref rows, the switch and the sheet form that
+ * Units, Nutrients shown and the Household row partials still draw. The Stores
+ * pages themselves are components (item-row.css, menu.css); what is here for
+ * them is the store rule text and the delete sheet's extra button. */
 
 .fd-stores {
     display: flex;
@@ -8,24 +9,10 @@
     gap: var(--space-gap);
 }
 
-.fd-stores-intro,
-.fd-stores-hint,
-.fd-stores-empty {
+.fd-stores-intro {
     margin: 0;
     font: 400 13px/18px var(--font-body);
     color: var(--text-secondary);
-}
-
-.fd-stores-hint {
-    padding: 0 4px;
-}
-
-.fd-stores-empty {
-    padding: var(--fd-s-12) 0;
-}
-
-.fd-stores-back {
-    display: none;
 }
 
 /* ---- card list (the stores, and the two preferences) ----
@@ -44,91 +31,14 @@
     border-bottom: 0;
 }
 
-.fd-stores .fd-list--card > .fd-row > :is(.fd-row__body, .fd-stores-action) {
+.fd-stores .fd-list--card > .fd-row > .fd-row__body {
     padding-inline: 16px;
 }
 
-.fd-stores .fd-list--stores {
-    margin-top: var(--space-gap);
-}
-
-.fd-stores .fd-list--plain {
-    margin: 0;
-}
-
-.fd-stores .fd-row--store .fd-row__body {
-    gap: 14px;
-    padding-block: 12px;
-}
-
-.fd-stores .fd-row--store .fd-row__main {
-    gap: 2px;
-}
-
-.fd-stores .fd-row--store .fd-row__lead {
-    color: var(--text-secondary);
-}
-
-.fd-stores .fd-row--store .fd-row__sub {
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-/* "+ Add a store", "+ Add a section": a quiet accent row. */
-.fd-stores-action {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    width: 100%;
-    min-height: 50px;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: none;
-    color: var(--accent-text);
-    font: 400 15px/20px var(--font-body);
-    text-align: left;
-    cursor: pointer;
-}
-
-.fd-stores-action__icon {
-    display: flex;
-    flex: none;
-    width: 24px;
-    height: 24px;
-}
-
-.fd-stores-action:focus-visible,
-.fd-order-name--button:focus-visible,
 .fd-stores-pref:focus-visible,
-.fd-stores-link:focus-visible,
-.fd-stores-delete:focus-visible,
-.fd-order-move:focus-visible,
 .fd-switch:focus-visible {
     outline: 2px solid var(--accent-text);
     outline-offset: 2px;
-}
-
-.fd-stores-reorder {
-    margin: 0;
-    padding: 0 4px;
-}
-
-.fd-stores-link {
-    margin: 0;
-    padding: 6px 0;
-    border: 0;
-    background: none;
-    color: var(--accent-text);
-    font: 500 13px/18px var(--font-body);
-    cursor: pointer;
-}
-
-/* "When adding to the list": no hairline under the label on this page. */
-.fd-stores[data-fd-stores="list"] .fd-stores-head {
-    margin-top: var(--space-gutter);
-    padding: 0 4px var(--space-gap);
-    border-bottom: 0;
 }
 
 .fd-row--stores-pref {
@@ -224,222 +134,6 @@ button.fd-stores-pref {
     transform: translateX(20px);
 }
 
-/* ---- name field ---- */
-
-.fd-stores-name {
-    margin: 0;
-}
-
-.fd-stores-name .fd-settings-input {
-    height: 48px;
-    padding: 0 var(--fd-s-14);
-    border-radius: var(--radius-md);
-    background: transparent;
-    font-size: 15px;
-}
-
-.fd-stores-name-static {
-    margin: 0;
-    font: 600 17px/24px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-sr-submit {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    padding: 0;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    border: 0;
-    white-space: nowrap;
-}
-
-.fd-stores[data-fd-stores="store"] .fd-stores-head {
-    margin-top: var(--space-gap);
-}
-
-/* ---- drag order list ---- */
-
-.fd-order-form {
-    margin: 0;
-}
-
-.fd-order-list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-}
-
-.fd-order-item {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 49px;
-    border-bottom: 1px solid var(--line);
-    background: transparent;
-}
-
-.fd-order-item[data-fd-dragging] {
-    z-index: 2;
-    background: var(--surface-raised);
-    box-shadow: 0 6px 18px var(--overlay-scrim);
-}
-
-.fd-order-handle {
-    display: flex;
-    flex: none;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 32px;
-    color: var(--text-secondary);
-    cursor: grab;
-    touch-action: none;
-    user-select: none;
-}
-
-.fd-order-handle--none {
-    cursor: default;
-}
-
-.fd-order-item[data-fd-dragging] .fd-order-handle {
-    cursor: grabbing;
-}
-
-.fd-order-name {
-    flex: 1 1 auto;
-    min-width: 0;
-    font: 400 15px/20px var(--font-body);
-    color: var(--text-primary);
-    overflow-wrap: anywhere;
-}
-
-.fd-order-name--button {
-    min-height: 44px;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: none;
-    text-align: left;
-    cursor: pointer;
-}
-
-.fd-order-count {
-    flex: none;
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-/* Up and down buttons: the keyboard and no-script path. In a section list they
- * stay out of sight until the row is hovered or holds focus, so the rows read
- * as in the design; the store sheet always shows them. */
-.fd-order-moves {
-    display: flex;
-    flex: none;
-}
-
-.fd-order-list:not(.fd-order-list--moves) .fd-order-moves {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-}
-
-.fd-order-list:not(.fd-order-list--moves)
-    .fd-order-item:is(:hover, :focus-within)
-    .fd-order-moves {
-    position: static;
-    width: auto;
-    height: auto;
-    margin: 0;
-    overflow: visible;
-    clip: auto;
-    background: var(--surface-bg);
-}
-
-.fd-order-move {
-    display: grid;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: none;
-    color: var(--text-secondary);
-    cursor: pointer;
-}
-
-.fd-order-move:disabled {
-    opacity: 0.3;
-    cursor: default;
-}
-
-.fd-order-list--other {
-    margin-top: 0;
-}
-
-.fd-order-item--fixed .fd-order-name {
-    color: var(--text-primary);
-}
-
-.fd-row--hidden-section .fd-row__title {
-    color: var(--text-secondary);
-}
-
-.fd-stores-inline {
-    display: contents;
-}
-
-.fd-stores-rule {
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-primary);
-    overflow-wrap: anywhere;
-}
-
-.fd-row--section-add,
-.fd-row--rule-add {
-    border-bottom: 0;
-}
-
-/* ---- delete ---- */
-
-.fd-stores-delete {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 52px;
-    margin: var(--space-gutter) 0 0;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font: 600 15px/1 var(--font-body);
-    cursor: pointer;
-}
-
-/* The move-or-delete dialog stacks its choices; Cancel goes last. */
-.fd-sheet-actions:has(> .fd-btn[name="mode"]) {
-    flex-direction: column;
-}
-
-.fd-sheet-actions:has(> .fd-btn[name="mode"]) > .fd-btn {
-    flex: none;
-}
-
-.fd-sheet-actions:has(> .fd-btn[name="mode"]) > .fd-btn:not([name]) {
-    order: 3;
-}
-
 /* ---- sheets ---- */
 
 .fd-stores-form {
@@ -449,54 +143,80 @@ button.fd-stores-pref {
     margin: 0;
 }
 
-.fd-stores-radios {
-    display: flex;
-    flex-direction: column;
-}
-
-.fd-stores-radio {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-12);
-    min-height: 48px;
-    border-bottom: 1px solid var(--line);
-    font: 400 15px/20px var(--font-body);
-    color: var(--text-primary);
-    cursor: pointer;
-}
-
-.fd-stores-radio input {
-    flex: none;
-    width: 20px;
-    height: 20px;
-    margin: 0;
-    accent-color: var(--accent-fill);
-}
-
 @media (min-width: 1024px) {
     .fd-stores {
         max-width: 680px;
-    }
-
-    .fd-stores-back {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        align-self: flex-start;
-        margin-bottom: var(--space-gap);
-        color: var(--text-secondary);
-        font: 400 14px/20px var(--font-body);
-        text-decoration: none;
-    }
-
-    .fd-stores {
         gap: var(--fd-s-10);
     }
 
-    .fd-stores
-        .fd-list--card
-        > .fd-row
-        > :is(.fd-row__body, .fd-stores-action) {
+    .fd-stores .fd-list--card > .fd-row > .fd-row__body {
         padding-inline: 18px;
+    }
+}
+
+/* ---- Stores pages (item rows) ---- */
+
+/* A store rule is a sentence the person wrote: it wraps instead of cutting off. */
+.fd-store-rule .fd-item-row__title {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+/* "Delete the store and its N lines" sits under the message of the choice sheet. */
+.fd-store-delete {
+    display: flex;
+    margin-top: var(--space-md);
+}
+
+.fd-store-delete > .fd-btn {
+    flex: 1;
+}
+
+/* The name field's label is a caps label like the section headers under it. */
+.fd-stores-page .fd-field__label {
+    font-size: var(--text-micro-size);
+    letter-spacing: 0.1em;
+    line-height: 1.2727;
+    text-transform: uppercase;
+}
+
+/* A section row is 56 high with its ⋯ in it: the 40 px round box hangs past the row's padding like the dots' 24 px. The design's More is a 24 px glyph in the secondary tone. */
+.fd-stores-page .fd-item-row__control > .fd-menu > .fd-btn--icon {
+    --fd-btn-icon: var(--space-2xl);
+    margin-block: calc((var(--control-md-height) - 24px) / -2);
+    color: var(--text-secondary);
+}
+
+/* The store's name reads at the secondary tone until Rename opens it; a disabled field's own tone (tertiary) and the app's dimming of a disabled control are too faint to read. */
+.fd-stores-page .fd-field__input:disabled {
+    color: var(--text-secondary);
+    opacity: 1;
+}
+
+/* The design sets each section header 8 px lower than the rows above it... */
+.fd-stores-page .fd-section-header {
+    margin-top: var(--space-sm);
+}
+/* ...but the first one sits right under the name field (a header with no rule has 20 px above its label), and 12 px lower on desktop. */
+.fd-stores-page .fd-field + .fd-section-header {
+    margin-top: 0;
+}
+
+@media (min-width: 1024px) {
+    .fd-stores-page .fd-field + .fd-section-header {
+        margin-top: var(--space-md);
+    }
+}
+
+@media (min-width: 1024px) {
+    /* A store's ⋯ menu hangs 40 px under the bar's round control with its right edge 116 px left of the control's, as the design places it. */
+    .fd-store-page
+        .fd-settings-page-head__actions
+        .fd-menu--anchored
+        .fd-menu__panel {
+        top: calc(100% + var(--space-4xl));
+        right: 116px;
     }
 }

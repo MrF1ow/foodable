@@ -11,6 +11,12 @@
  *             in the subtitle or value; colour never carries it alone)
  *   swipe     left reveals Delete (trash, red bed), right reveals Again
  *             (repeat, green bed); icons only, phone only
+ *   reorder   the row of an inline reorder list: a handle at the start
+ *             (`data-fd-order-handle`, dragged by `client/v2/stores.js`), the
+ *             row's id in a hidden field the form posts, and up and down
+ *             buttons for the keyboard and for no script
+ *   edit      the row as a rename: the title becomes a field with Save and
+ *             Cancel, posting one form
  *   select    the pick box of a list in select mode: always in the markup of a
  *             selectable row, shown only while the list root carries
  *             `[data-fd-selecting]` (`client/v2/select-mode.js`); it combines
@@ -35,6 +41,7 @@ import {
     type ActionForm,
     type Html,
 } from "./html.js";
+import { field } from "./field.js";
 import { icon, type IconName } from "./icon.js";
 import { memberAvatar } from "./avatar.js";
 import { macroLine, type Macros, type Text } from "./rows.js";
@@ -102,6 +109,32 @@ export type ItemRowSelect = {
     checked?: boolean;
 };
 
+/** The row of a reorder list; its list posts every row's field, in DOM order. */
+export type ItemRowReorder = {
+    /** Field each row posts its id under (`order`). */
+    name: string;
+    value: string;
+    /** What the move buttons are named after ("Move Costco up"). */
+    label: string;
+    canUp: boolean;
+    canDown: boolean;
+};
+
+/** The row as a rename: one form, a field and the two ways out. */
+export type ItemRowEdit = {
+    action: string;
+    name: string;
+    value: string;
+    /** Accessible name of the field. */
+    label: string;
+    maxlength?: number;
+    /** Where Cancel goes. */
+    cancelHref: string;
+    /** The refusal the server sent back; shown under the field. */
+    error?: string;
+    fields?: Readonly<Record<string, string>>;
+};
+
 export type ItemRowOptions = {
     title: Text;
     meta?: Text;
@@ -125,6 +158,8 @@ export type ItemRowOptions = {
     /** Whole-row button that opens the sheet with this id (Name on Account). */
     opens?: string;
     swipe?: ItemRowSwipe;
+    reorder?: ItemRowReorder;
+    edit?: ItemRowEdit;
     /** The pick box of a list in select mode. */
     select?: boolean | ItemRowSelect;
     id?: string;
@@ -275,7 +310,66 @@ function selectBox(
     );
 }
 
+function moveButton(
+    reorder: ItemRowReorder,
+    dir: "up" | "down",
+    enabled: boolean,
+): string {
+    return `<button type="submit" class="fd-item-row__move fd-item-row__move--${dir}" name="move" value="${esc(reorder.value)}:${dir}" aria-label="Move ${esc(reorder.label)} ${dir}"${enabled ? "" : " disabled"}>${icon("chevron-right")}</button>`;
+}
+
+function reorderRow(opts: ItemRowOptions, reorder: ItemRowReorder): Html {
+    const subtitle = present(opts.subtitle)
+        ? `<span class="fd-item-row__subtitle">${esc(opts.subtitle)}</span>`
+        : "";
+    return raw(
+        `<li class="${cls("fd-item-row fd-item-row--reorder", opts.className)}" data-fd-order-item><div class="fd-item-row__face"><input type="hidden" name="${esc(reorder.name)}" value="${esc(reorder.value)}"><span class="fd-item-row__lead fd-item-row__handle" data-fd-order-handle aria-hidden="true">${icon("filter")}</span><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="${esc(opts.title)}">${esc(opts.title)}</span></span>${subtitle}</span><span class="fd-item-row__moves">${moveButton(reorder, "up", reorder.canUp)}${moveButton(reorder, "down", reorder.canDown)}</span></div></li>`,
+    );
+}
+
+function editRow(opts: ItemRowOptions, edit: ItemRowEdit): Html {
+    if (opts.id == null) throw new Error("itemRow: an edit row needs an id");
+    const input = field({
+        id: `${opts.id}-field`,
+        label: edit.label,
+        labelHidden: true,
+        name: edit.name,
+        value: edit.value,
+        maxlength: edit.maxlength,
+        required: true,
+        autocomplete: "off",
+        autofocus: true,
+        inputData: { "fd-autofocus": "" },
+        error: edit.error,
+        className: "fd-item-row__edit-field",
+    });
+    return raw(
+        `<li class="${cls("fd-item-row fd-item-row--edit", opts.className)}" id="${esc(opts.id)}"><form class="fd-item-row__face fd-item-row__edit" method="post" action="${esc(edit.action)}">${hiddenFieldsOf(edit.fields)}${input}<button type="submit" class="fd-item-row__edit-btn" aria-label="Save">${icon("check")}</button><a class="fd-item-row__edit-btn" href="${safeHref(edit.cancelHref)}" aria-label="Cancel">${icon("close")}</a></form></li>`,
+    );
+}
+
 export function itemRow(opts: ItemRowOptions): Html {
+    if (opts.reorder != null || opts.edit != null) {
+        const mode = opts.reorder != null ? "reorder" : "edit";
+        if (
+            opts.href != null ||
+            opts.submit != null ||
+            opts.opens != null ||
+            opts.lead != null ||
+            opts.trailing != null ||
+            opts.swipe != null ||
+            opts.select != null ||
+            opts.value != null ||
+            (opts.reorder != null && opts.edit != null)
+        ) {
+            throw new Error(
+                `itemRow: a ${mode} row is only a title (and a subtitle on reorder)`,
+            );
+        }
+        return opts.reorder != null
+            ? reorderRow(opts, opts.reorder)
+            : editRow(opts, opts.edit!);
+    }
     const state = opts.state ?? "default";
     const disabled = state === "disabled";
     // A disabled row draws no beds: they would stay live buttons under it.

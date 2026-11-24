@@ -445,3 +445,19 @@ test("a row menu needs its row, and escapes it", async () => {
     );
     expect(await injectedAttributes(html)).toEqual([]);
 });
+
+test("an opens item can be marked danger: red label, the sheet is the confirm step", () => {
+    const html = menu({
+        label: "Actions",
+        items: [
+            { kind: "opens", label: "Delete", sheetId: "fd-del", danger: true },
+            { kind: "opens", label: "Other", sheetId: "fd-other" },
+        ],
+    });
+    expect(html).toContain(
+        `<button type="button" class="fd-menu__item fd-menu__item--danger" role="menuitem" command="show-modal" commandfor="fd-del">`,
+    );
+    expect(html).toContain(
+        `<button type="button" class="fd-menu__item" role="menuitem" command="show-modal" commandfor="fd-other">`,
+    );
+});

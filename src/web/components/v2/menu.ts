@@ -62,6 +62,8 @@ export type MenuItem =
           hint?: string;
           /** The `id` of the `<dialog>` it opens. */
           sheetId: string;
+          /** Colours the label as a destructive action (the sheet is the confirm step). */
+          danger?: boolean;
       }
     /** Deletes, clears or overwrites: confirms in place as Cancel + the same verb. */
     | {
@@ -135,7 +137,7 @@ function anchoredItem(item: MenuItem, checks: boolean): string {
         case "post":
             return `<form class="fd-menu__form" method="post" action="${esc(item.action)}">${hiddenFields(item.fields)}<button type="submit" class="fd-menu__item" role="menuitem">${anchoredBody(item, checks)}</button></form>`;
         case "opens":
-            return `<button type="button" class="fd-menu__item" role="menuitem" command="show-modal" commandfor="${esc(item.sheetId)}">${anchoredBody(item, checks)}</button>`;
+            return `<button type="button" class="${cls("fd-menu__item", item.danger && "fd-menu__item--danger")}" role="menuitem" command="show-modal" commandfor="${esc(item.sheetId)}">${anchoredBody(item, checks)}</button>`;
         case "checked": {
             const state = `role="menuitemcheckbox" aria-checked="${item.checked ? "true" : "false"}"`;
             const body = anchoredBody(item, checks, item.checked);
