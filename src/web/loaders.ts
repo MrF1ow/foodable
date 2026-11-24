@@ -253,12 +253,11 @@ export async function weighInPrefillForUser(
     };
 }
 
-export function forbiddenDashboardHtml(theme: ThemePref = "system"): string {
-    return renderBarePage(
-        "Household",
-        emptyState("You need a household membership to view this dashboard."),
-        theme,
-    );
+export function forbiddenDashboardHtml(
+    theme: ThemePref = "system",
+    message = "You need a household membership to view this dashboard.",
+): string {
+    return renderBarePage("Household", emptyState(message), theme);
 }
 
 export function createHouseholdFormHtml(
@@ -1092,6 +1091,7 @@ export async function renderSettingsSavedV2Route(
     opts: {
         error?: string;
         openModalId?: string;
+        typed?: Record<string, string | string[]>;
         q?: string;
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
@@ -1141,6 +1141,7 @@ export async function renderSettingsSavedV2Route(
             searchQuery: q,
             error: opts.error,
             openModalId: opts.openModalId,
+            typed: opts.typed,
         }),
     };
 }

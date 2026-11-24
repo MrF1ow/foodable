@@ -54,6 +54,8 @@ export type MenuItem =
           action?: string;
           /** Hidden fields posted with `action`. */
           fields?: Readonly<Record<string, string>>;
+          /** The value already chosen: picking it again only closes the menu, posting nothing. */
+          current?: boolean;
       }
     /** Opens a sheet or dialog on the page (Make owner opens its confirm sheet). */
     | {
@@ -64,6 +66,24 @@ export type MenuItem =
           sheetId: string;
           /** Colours the label as a destructive action (the sheet is the confirm step). */
           danger?: boolean;
+          /**
+           * What the shared sheet holds when this item opens it, for a sheet
+           * that serves every row of a long list: control `name` → value (an
+           * array ticks a checkbox group), and `@action` sets the sheet form's
+           * action. `client/v2/menu.js` applies it as the sheet opens.
+           */
+          set?: Readonly<Record<string, string | readonly string[]>>;
+      }
+    /**
+     * A button the page's script reads, closing the menu as it is pressed
+     * (Select, which `client/v2/select-mode.js` picks up from its `data`).
+     */
+    | {
+          kind: "button";
+          label: string;
+          hint?: string;
+          /** `data-*` the script finds the button by. */
+          data: Readonly<Record<string, string>>;
       }
     /** Deletes, clears or overwrites: confirms in place as Cancel + the same verb. */
     | {
@@ -137,10 +157,15 @@ function anchoredItem(item: MenuItem, checks: boolean): string {
         case "post":
             return `<form class="fd-menu__form" method="post" action="${esc(item.action)}">${hiddenFields(item.fields)}<button type="submit" class="fd-menu__item" role="menuitem">${anchoredBody(item, checks)}</button></form>`;
         case "opens":
-            return `<button type="button" class="${cls("fd-menu__item", item.danger && "fd-menu__item--danger")}" role="menuitem" command="show-modal" commandfor="${esc(item.sheetId)}">${anchoredBody(item, checks)}</button>`;
+            return `<button type="button" class="${cls("fd-menu__item", item.danger && "fd-menu__item--danger")}" role="menuitem" command="show-modal" commandfor="${esc(item.sheetId)}"${item.set ? ` data-fd-menu-set="${esc(JSON.stringify(item.set))}"` : ""}>${anchoredBody(item, checks)}</button>`;
+        case "button":
+            return `<button type="button" class="fd-menu__item" role="menuitem" data-fd-menu-close${dataAttrs(item.data)}>${anchoredBody(item, checks)}</button>`;
         case "checked": {
             const state = `role="menuitemcheckbox" aria-checked="${item.checked ? "true" : "false"}"`;
             const body = anchoredBody(item, checks, item.checked);
+            if (item.current) {
+                return `<button type="button" class="fd-menu__item" ${state} data-fd-menu-close>${body}</button>`;
+            }
             if (item.action != null) {
                 return `<form class="fd-menu__form" method="post" action="${esc(item.action)}">${hiddenFields(item.fields)}<button type="submit" class="fd-menu__item" ${state}>${body}</button></form>`;
             }
@@ -156,8 +181,15 @@ function anchoredItem(item: MenuItem, checks: boolean): string {
 }
 
 /** The trigger of a row menu: the face of an Item row, reading title, value and a chevron. */
-function rowTrigger(row: { title: string; value: string }): string {
-    return `<button type="button" class="fd-item-row__face fd-item-row__face--link fd-menu__row" data-fd-menu-trigger aria-haspopup="menu" aria-expanded="false"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="${esc(row.title)}">${esc(row.title)}</span></span></span><span class="fd-item-row__value">${esc(row.value)}</span><span class="fd-item-row__trail fd-item-row__chevron" aria-hidden="true">${icon("chevron-right")}</span></button>`;
+function rowTrigger(row: {
+    title: string;
+    value: string;
+    subtitle?: string;
+}): string {
+    const subtitle = row.subtitle
+        ? `<span class="fd-item-row__subtitle">${esc(row.subtitle)}</span>`
+        : "";
+    return `<button type="button" class="fd-item-row__face fd-item-row__face--link fd-menu__row" data-fd-menu-trigger aria-haspopup="menu" aria-expanded="false"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="${esc(row.title)}">${esc(row.title)}</span></span>${subtitle}</span><span class="fd-item-row__value">${esc(row.value)}</span><span class="fd-item-row__trail fd-item-row__chevron" aria-hidden="true">${icon("chevron-right")}</span></button>`;
 }
 
 /**
@@ -176,13 +208,13 @@ export function menu(opts: {
     /**
      * Anchors the menu to the design's ⋯ Icon button ("more") or Filter button
      * ("filter"). Without it, a menu of only separator, link and post items is
-     * the `<details>` menu; any `checked`, `destructive` or `opens` item makes it "more".
+     * the `<details>` menu; any `checked`, `destructive`, `button` or `opens` item makes it "more".
      */
     anchor?: MenuAnchor;
     /** How many filters are on (the Filter button's badge). */
     filterCount?: number;
     /** The row a `row` menu's trigger draws (required with `anchor: "row"`). */
-    row?: { title: string; value: string };
+    row?: { title: string; value: string; subtitle?: string };
 }): Html {
     const anchor =
         opts.anchor ??
@@ -190,6 +222,7 @@ export function menu(opts: {
             (i) =>
                 i.kind === "checked" ||
                 i.kind === "destructive" ||
+                i.kind === "button" ||
                 i.kind === "opens",
         )
             ? "more"

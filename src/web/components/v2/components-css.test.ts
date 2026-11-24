@@ -103,25 +103,6 @@ test("a row's name is one line ending in an ellipsis; its neighbours keep their 
     expect(block(".fd-row__actions")).toContain("flex: none");
 });
 
-test("the row delete button is a 32px circle in the danger token", () => {
-    const danger =
-        rules.match(/\.fd-icon-btn--danger\s*\{([^}]*)\}/)?.[1] ?? "";
-    expect(danger).toContain("width: 32px");
-    expect(danger).toContain("height: 32px");
-    expect(danger).toContain("var(--status-over)");
-});
-
-test("the row delete button has a 44px hit area that does not change its 32px look", () => {
-    const hit =
-        rules.match(/\.fd-icon-btn--danger::before\s*\{([^}]*)\}/)?.[1] ?? "";
-    expect(hit).toContain("width: 44px");
-    expect(hit).toContain("height: 44px");
-    expect(hit).toContain("content:");
-    const danger =
-        rules.match(/\.fd-icon-btn--danger\s*\{([^}]*)\}/)?.[1] ?? "";
-    expect(danger).toContain("position: relative");
-});
-
 test("a title line fills its row's text column, so the inline meta cap measures the column", () => {
     // .fd-row__main aligns to flex-start: without stretch the line is sized to
     // its content and the meta's max-width: 45% truncates short real names
@@ -139,7 +120,7 @@ const settingsRules = readFileSync(
     "utf8",
 ).replace(/\/\*[\s\S]*?\*\//g, "");
 
-test("a wrapping action group can shrink, and the dup row puts it under the names on a phone", () => {
+test("a wrapping action group can shrink", () => {
     const block = (selector: string) =>
         settingsRules.match(
             new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`),
@@ -148,8 +129,6 @@ test("a wrapping action group can shrink, and the dup row puts it under the name
     expect(wrap).toMatch(/flex:\s*0 1 auto/);
     expect(wrap).toContain("flex-wrap: wrap");
     expect(wrap).toContain("min-width: 0");
-    expect(block(".fd-row--dup .fd-row__body")).toContain("flex-wrap: wrap");
-    expect(block(".fd-row--dup .fd-row__main")).toMatch(/flex:\s*1 1 100%/);
 });
 
 const planted = (decl: string) => scaleViolations(`.fd-x { ${decl} }`);
@@ -419,4 +398,19 @@ test("a partial outside the legacy list, and the marked part of a legacy one, ha
         if (violations.length > 0) found[file] = violations;
     }
     expect(found).toEqual({});
+});
+
+test("the compare page's buttons wrap inside their box and its value segments are equal fixed widths", () => {
+    const settings = readFileSync(
+        join(import.meta.dir, "../../../../public/app/v2/settings.css"),
+        "utf8",
+    );
+    const buttons = settings.match(/\.fd-dup-actions \.fd-btn \{[^}]*\}/)![0];
+    expect(buttons).toContain("min-width: 0");
+    expect(buttons).toContain("white-space: normal");
+    const segment = settings.match(/\.fd-dup-segment \{[^}]*\}/)![0];
+    expect(segment).toMatch(/width:\s*168px/);
+    expect(settings).toMatch(
+        /\.fd-dup-segment \.fd-segmented__option \{[^}]*flex:\s*1 1 0/,
+    );
 });

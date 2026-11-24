@@ -46,6 +46,11 @@ export type FieldOptions = {
     data?: Readonly<Record<string, string>>;
     /** `data-*` on the `<input>` itself (what a script watching the field reads). */
     inputData?: Readonly<Record<string, string>>;
+    /**
+     * A box that takes several lines (one value per line, so a value may hold a
+     * comma). `rows` is how many lines show; it takes `value` as its text.
+     */
+    rows?: number;
 };
 
 export function field(opts: FieldOptions): Html {
@@ -54,12 +59,13 @@ export function field(opts: FieldOptions): Html {
         : opts.hint
           ? `${opts.id}-hint`
           : null;
-    const input = [
-        `class="fd-field__input"`,
+    const multiline = opts.rows != null;
+    const attrs = [
+        `class="${cls("fd-field__input", multiline && "fd-field__input--multi")}"`,
         `id="${esc(opts.id)}"`,
         `name="${esc(opts.name)}"`,
-        `type="${opts.type ?? "text"}"`,
-        opts.value != null ? `value="${esc(opts.value)}"` : "",
+        multiline ? `rows="${opts.rows}"` : `type="${opts.type ?? "text"}"`,
+        !multiline && opts.value != null ? `value="${esc(opts.value)}"` : "",
         opts.placeholder != null
             ? `placeholder="${esc(opts.placeholder)}"`
             : "",
@@ -81,6 +87,9 @@ export function field(opts: FieldOptions): Html {
     ]
         .filter(Boolean)
         .join(" ");
+    const input = multiline
+        ? `<textarea ${attrs}>${esc(opts.value ?? "")}</textarea>`
+        : `<input ${attrs}>`;
     const trailing = opts.trailingIcon
         ? `<span class="fd-field__icon" aria-hidden="true">${icon(opts.trailingIcon, 20)}</span>`
         : "";
@@ -93,6 +102,6 @@ export function field(opts: FieldOptions): Html {
         ? `<span class="fd-visually-hidden">${esc(opts.label)}</span>`
         : `<span class="fd-field__label">${esc(opts.label)}</span>`;
     return raw(
-        `<div class="${cls("fd-field", opts.error && "fd-field--invalid", opts.className)}"${dataAttrs(opts.data)}><label class="fd-field__control">${label}<span class="fd-field__box"><input ${input}>${trailing}</span></label>${note}</div>`,
+        `<div class="${cls("fd-field", opts.error && "fd-field--invalid", opts.className)}"${dataAttrs(opts.data)}><label class="fd-field__control">${label}<span class="fd-field__box">${input}${trailing}</span></label>${note}</div>`,
     );
 }

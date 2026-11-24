@@ -17,6 +17,9 @@
  *             buttons for the keyboard and for no script
  *   edit      the row as a rename: the title becomes a field with Save and
  *             Cancel, posting one form
+ *   input     the row as a value that saves itself: the title beside an input
+ *             (and a unit), one autosaving form (`autosave-input.ts`), with the
+ *             refusal under it
  *   select    the pick box of a list in select mode: always in the markup of a
  *             selectable row, shown only while the list root carries
  *             `[data-fd-selecting]` (`client/v2/select-mode.js`); it combines
@@ -41,6 +44,7 @@ import {
     type ActionForm,
     type Html,
 } from "./html.js";
+import { autosaveInput, type AutosaveInputOptions } from "./autosave-input.js";
 import { field } from "./field.js";
 import { icon, type IconName } from "./icon.js";
 import { memberAvatar } from "./avatar.js";
@@ -135,6 +139,15 @@ export type ItemRowEdit = {
     fields?: Readonly<Record<string, string>>;
 };
 
+/** The row as a value that saves itself: the title is the input's label. */
+export type ItemRowInput = Omit<
+    AutosaveInputOptions,
+    "label" | "className" | "data"
+> & {
+    /** A chevron at the end: the row reads as a link into the value. */
+    chevron?: boolean;
+};
+
 export type ItemRowOptions = {
     title: Text;
     meta?: Text;
@@ -160,6 +173,7 @@ export type ItemRowOptions = {
     swipe?: ItemRowSwipe;
     reorder?: ItemRowReorder;
     edit?: ItemRowEdit;
+    input?: ItemRowInput;
     /** The pick box of a list in select mode. */
     select?: boolean | ItemRowSelect;
     id?: string;
@@ -348,7 +362,34 @@ function editRow(opts: ItemRowOptions, edit: ItemRowEdit): Html {
     );
 }
 
+function inputRow(opts: ItemRowOptions, input: ItemRowInput): Html {
+    if (
+        opts.href != null ||
+        opts.submit != null ||
+        opts.opens != null ||
+        opts.lead != null ||
+        opts.trailing != null ||
+        opts.swipe != null ||
+        opts.select != null ||
+        opts.value != null ||
+        opts.reorder != null ||
+        opts.edit != null
+    ) {
+        throw new Error("itemRow: an input row is only a title and its input");
+    }
+    const { chevron, ...rest } = input;
+    const face = autosaveInput({
+        ...rest,
+        label: String(opts.title),
+        className: "fd-item-row__face",
+    });
+    return raw(
+        `<li class="${cls("fd-item-row fd-item-row--input", chevron && "fd-item-row--input-chevron", opts.className)}">${face}${chevron ? `<span class="fd-item-row__trail fd-item-row__chevron" aria-hidden="true">${icon("chevron-right")}</span>` : ""}</li>`,
+    );
+}
+
 export function itemRow(opts: ItemRowOptions): Html {
+    if (opts.input != null) return inputRow(opts, opts.input);
     if (opts.reorder != null || opts.edit != null) {
         const mode = opts.reorder != null ? "reorder" : "edit";
         if (

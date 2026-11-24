@@ -1152,6 +1152,7 @@ async function foodsFormError(
     userId: string,
     err: unknown,
     openModalId?: string,
+    typed?: Record<string, string | string[]>,
 ) {
     const message =
         err instanceof FoodsInputError
@@ -1162,6 +1163,7 @@ async function foodsFormError(
     const page = await renderSettingsSavedV2Route(userId, {
         error: message,
         openModalId,
+        typed,
     });
     return { html: page.html, status: 400 as const };
 }
@@ -1174,6 +1176,11 @@ householdRoutes.post(
         const member = siteMember(c);
         const body = await c.req.parseBody();
         try {
+            // The sheet opens with no Keep chosen, so a merge sent without one
+            // is refused in place rather than merged into a food nobody picked.
+            if (formText(body, "keep_id") === "") {
+                throw new FoodsInputError("Choose the food to keep.");
+            }
             await mergeLiveFoods(
                 member.householdId,
                 formText(body, "keep_id"),
@@ -1185,6 +1192,10 @@ householdRoutes.post(
                 userId,
                 err,
                 FOODS_MERGE_MODAL_ID,
+                {
+                    keep_id: formText(body, "keep_id"),
+                    drop_id: formText(body, "drop_id"),
+                },
             );
             return c.html(page.html, page.status);
         }
@@ -1218,6 +1229,39 @@ householdRoutes.post(
     },
 );
 
+/**
+ * The aliases a food form posts. `alias_lines` is one alias per line, so an
+ * alias may hold a comma ("salt, kosher"); the older `aliases` field is
+ * comma-separated. A form that posts neither leaves the food's aliases alone.
+ */
+function postedAliases(
+    body: Record<string, string | File>,
+): string[] | undefined {
+    const split = (raw: string, on: RegExp) =>
+        raw
+            .split(on)
+            .map((part) => part.trim())
+            .filter(Boolean);
+    if ("alias_lines" in body) {
+        return split(formText(body, "alias_lines"), /\r?\n/);
+    }
+    if ("aliases" in body) return split(formText(body, "aliases"), /,/);
+    return undefined;
+}
+
+/** What an edit posted, for a refused save to reopen the sheet with. */
+function typedFoodForm(
+    body: Record<string, string | File | (string | File)[]>,
+): Record<string, string | string[]> {
+    const typed: Record<string, string | string[]> = {};
+    for (const key of Object.keys(body)) {
+        if (key === "allergens") continue;
+        typed[key] = formText(body, key);
+    }
+    typed.allergens = formAllergens(body);
+    return typed;
+}
+
 householdRoutes.post(
     "/settings/household/items/:id",
     requireMember,
@@ -1231,10 +1275,7 @@ householdRoutes.post(
         const patch = {
             name: formText(asText, "name"),
             brand: formText(asText, "brand"),
-            aliases: formText(asText, "aliases")
-                .split(",")
-                .map((part) => part.trim())
-                .filter(Boolean),
+            aliases: postedAliases(asText),
             defaultUnit: formText(asText, "default_unit"),
             gramsPerEach: formOptionalNutrient(asText, "grams_per_each"),
             gramsPerMl: formOptionalNutrient(asText, "grams_per_ml"),
@@ -1319,6 +1360,7 @@ householdRoutes.post(
                 userId,
                 err,
                 `food-edit-${foodId}`,
+                typedFoodForm(body),
             );
             return c.html(page.html, page.status);
         }

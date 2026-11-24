@@ -601,7 +601,7 @@ function postClearDay(fields: Record<string, string>) {
 function fieldInput(html: string, field: string): string {
     const form = html.match(
         new RegExp(
-            `<form[^>]*data-fd-autosave[^>]*><input type="hidden" name="field" value="${field}" />[\\s\\S]*?</form>`,
+            `<form[^>]*data-fd-autosave[^>]*><input type="hidden" name="field" value="${field}">[\\s\\S]*?</form>`,
         ),
     );
     expect(form).not.toBeNull();
@@ -622,14 +622,15 @@ describe("settings goals field routes", () => {
         });
         expect(res.status).toBe(200);
         const html = await res.text();
-        expect(fieldInput(html, "daily_calories")).toContain('value="2200"');
+        expect(fieldInput(html, "daily_calories")).toContain('value="2,200"');
         // No Edit sheet: the numbers are the fields.
         expect(html).not.toContain("Edit goals");
         expect(html).not.toContain("fd-goals-edit");
-        expect(html).toContain("Since Oct 2");
-        // The per-day list stays, with Clear.
+        expect(html).toContain("since Oct 2");
+        // The per-day list stays, with a ⋯ that clears the day.
         expect(html).toContain("Sat, Nov 14");
-        expect(html).toContain("Clear day");
+        expect(html).toContain('action="/settings/goals/days/clear"');
+        expect(html).not.toContain('data-turbo="false"');
         // Past days and other members' days are not listed.
         expect(html).not.toContain("Tue, Nov 10");
         expect(html).not.toContain("1999");
@@ -754,7 +755,7 @@ describe("settings goals field routes", () => {
         expect(calories).toContain('value="99999"');
         expect(calories).toContain('aria-invalid="true"');
         expect(html).toContain("Calories must be at most 20000.");
-        expect(html.split("fd-settings-goals-field__error")).toHaveLength(2);
+        expect(html.split("fd-autosave-input__error")).toHaveLength(2);
         // Every other field still shows what is stored.
         expect(fieldInput(html, "daily_protein_g")).toContain('value="140"');
         expect(goalUpserts).toHaveLength(0);

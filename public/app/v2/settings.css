@@ -580,161 +580,6 @@
     justify-content: flex-end;
 }
 
-/*
- * Possible duplicates: the two food names stay readable. The row wraps, the
- * names take the full width of the first line and "Merge…" / "Keep separate"
- * sit under them; on a wide screen the actions sit beside the names again.
- */
-.fd-row--dup .fd-row__body {
-    flex-wrap: wrap;
-}
-.fd-row--dup .fd-row__main {
-    flex: 1 1 100%;
-}
-.fd-row--dup .fd-row__actions--wrap {
-    flex: 1 1 100%;
-    justify-content: flex-start;
-}
-@media (min-width: 640px) {
-    .fd-row--dup .fd-row__main {
-        flex: 1 1 0;
-    }
-    .fd-row--dup .fd-row__actions--wrap {
-        flex: 0 1 auto;
-        justify-content: flex-end;
-    }
-}
-
-.fd-settings-member-dl {
-    margin: 0;
-    padding: var(--fd-s-12);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--line);
-    background: var(--surface-raised);
-}
-
-.fd-settings-member-dl__row {
-    display: flex;
-    justify-content: space-between;
-    gap: var(--fd-s-12);
-    padding: var(--fd-s-6) 0;
-}
-
-.fd-settings-member-dl__row + .fd-settings-member-dl__row {
-    border-top: 1px solid var(--line);
-}
-
-.fd-settings-member-dl dt {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 0.875rem;
-}
-
-.fd-settings-member-dl dd {
-    margin: 0;
-    font-weight: 500;
-    color: var(--text-primary);
-}
-
-.fd-settings-goals-date,
-.fd-settings-goals-note {
-    margin: 0 0 var(--fd-s-12);
-    font-size: 0.875rem;
-}
-
-.fd-settings-goals-empty,
-.fd-settings-saved-empty {
-    margin: 0;
-    color: var(--text-secondary);
-    font-size: 0.9375rem;
-}
-
-/* FigCraft 23562: a section label above one flat white card of rows. */
-.fd-settings-goals-card {
-    margin: 0 0 var(--fd-s-12);
-}
-
-.fd-settings-goals-card__title {
-    margin: 22px 0 8px;
-    padding-left: 4px;
-    font: 600 0.6875rem/1.1 var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-settings-goals-dl {
-    padding: 0 16px;
-    border: 0;
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-settings-goals-dl .fd-settings-member-dl__row {
-    align-items: center;
-    min-height: 52px;
-    padding: var(--fd-s-10) 0;
-}
-
-.fd-settings-goals-dl dt {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-14);
-    color: var(--text-primary);
-    font-size: 1rem;
-}
-
-.fd-settings-goals-dl dd {
-    font-weight: 400;
-}
-
-/* Calories, water and the limits carry the frame's 24px row icon; the
-   macros keep their dot, centred in the same 24px column. */
-.fd-settings-goals-icon {
-    display: inline-flex;
-    flex: none;
-    color: var(--text-secondary);
-}
-
-.fd-settings-goals-icon .fd-icon {
-    width: 24px;
-    height: 24px;
-}
-
-.fd-settings-goals-dl dt > .fd-dot {
-    margin-left: 8px;
-}
-
-.fd-settings-saved-search {
-    display: flex;
-    gap: var(--fd-s-6);
-    align-items: stretch;
-    margin-bottom: var(--fd-s-12);
-}
-
-.fd-settings-saved-search .fd-search {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-/* Linked products sit under the parent food, indented behind a hairline. */
-.fd-settings-saved-products {
-    list-style: none;
-    margin: 0 0 var(--fd-s-6) var(--fd-s-6);
-    padding: 0 0 0 var(--fd-s-12);
-    border-left: 2px solid var(--line);
-}
-.fd-settings-saved-products .fd-row {
-    border-bottom: 0;
-}
-
-.fd-settings-saved-merge-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-12);
-}
-
 .fd-settings-form--inline {
     margin-top: var(--fd-s-6);
 }
@@ -750,250 +595,11 @@
     display: none;
 }
 
-/* The goals page edits in place: the name and note under the title (FigCraft
-   23562), then cards whose rows are tap-to-edit fields. Each row is its own
-   form, saved when the field is left. */
-.fd-settings-goals-field {
-    margin: 0;
-}
-
-.fd-settings-goals-name,
-.fd-settings-goals-note-input {
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-primary);
-    outline: none;
-}
-
-.fd-settings-goals-name {
-    width: 100%;
-    font: 600 22px/26px var(--font-display);
-    letter-spacing: -0.35px;
-}
-
-.fd-settings-goals-note-input {
-    width: 100%;
-    margin-top: var(--fd-s-4);
-    /* 16px keeps iOS from zooming the page on focus. */
-    font: 400 16px/22px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-settings-goals-since {
-    margin: var(--fd-s-4) 0 var(--fd-s-12);
-    font: 400 13px/17px var(--font-body);
-    color: var(--text-secondary);
-    overflow-wrap: anywhere;
-}
-
-.fd-settings-goals-name::placeholder,
-.fd-settings-goals-note-input::placeholder,
-.fd-settings-goals-input::placeholder {
-    color: var(--text-tertiary);
-}
-
-.fd-settings-goals-name:focus-visible,
-.fd-settings-goals-note-input:focus-visible {
-    border-color: var(--accent-text);
-}
-
-.fd-settings-goals-name[aria-invalid="true"],
-.fd-settings-goals-note-input[aria-invalid="true"] {
-    border-color: var(--status-over);
-}
-
-.fd-settings-goals-fields {
-    padding: 0 16px;
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-settings-goals-fields .fd-settings-goals-field + .fd-settings-goals-field {
-    border-top: 1px solid var(--line);
-}
-
-.fd-settings-goals-field__row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--fd-s-14);
-    min-height: 52px;
-    /* 32px chip + 13px: the frame's 59px row with its hairline. */
-    padding: 13px 0;
-    cursor: text;
-}
-
-.fd-settings-goals-field__label {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-14);
-    color: var(--text-primary);
-    font-size: 15px;
-    font-weight: 400;
-}
-
-.fd-settings-goals-field__label > .fd-dot {
-    margin-left: 8px;
-}
-
-/* The value is a chip that hugs its text, the unit inside it (FigCraft 23562):
-   a 1px line, a 1.5px accent outline on the field being edited. */
-.fd-settings-goals-field__entry {
-    display: inline-flex;
-    flex: 0 1 auto;
-    align-items: center;
-    justify-content: flex-end;
-    gap: var(--fd-s-4);
-    min-width: 0;
-    max-width: 60%;
-    padding: 6px 10px;
-    border: 1px solid var(--line);
-    border-radius: 10px;
-    background: var(--surface-bg);
-    font-size: 14px;
-    line-height: 18px;
-}
-
-.fd-settings-goals-field__entry:focus-within {
-    border-color: var(--accent-text);
-    box-shadow: inset 0 0 0 0.5px var(--accent-text);
-}
-
-.fd-settings-goals-field__entry:has([aria-invalid="true"]) {
-    border-color: var(--status-over);
-}
-
-.fd-settings-goals-input {
-    /* Hugs its text where field-sizing exists (below), else a fixed width. */
-    width: 7ch;
-    min-width: 2ch;
-    max-width: 100%;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    color: var(--text-primary);
-    outline: none;
-    box-shadow: none;
-    text-align: right;
-    font: 400 14px/18px var(--font-body);
-    /* Not the 44px touch height of a bare input: the chip is the target. */
-    min-height: 0;
-}
-
-/* The chip carries the focus outline, not the input inside it. */
-.fd-settings-goals-input:focus-visible {
-    box-shadow: none;
-}
-
 @supports (field-sizing: content) {
     .fd-settings-goals-input {
         field-sizing: content;
         width: auto;
     }
-}
-
-.fd-settings-goals-unit {
-    flex: none;
-    color: var(--text-primary);
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 18px;
-}
-
-/* The line under the Limits card (FigCraft 23562). */
-.fd-settings-goals-hint {
-    margin: 10px 0 var(--fd-s-12);
-    padding-left: 4px;
-    color: var(--text-secondary);
-    font: 400 12px/16px var(--font-body);
-}
-
-.fd-settings-goals-field__error {
-    margin: 0 0 var(--fd-s-10);
-    color: var(--status-over);
-    font-size: 0.8125rem;
-    line-height: 1.35;
-    text-align: right;
-}
-
-.fd-settings-goals-field--text .fd-settings-goals-field__error {
-    margin: var(--fd-s-4) 0 0;
-    text-align: left;
-}
-
-.fd-settings-goaldays__clear:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
-/* Per-day overrides: one card, each day with a Clear that posts on its own. */
-.fd-settings-goaldays {
-    margin: 0 0 var(--fd-s-12);
-}
-
-.fd-settings-goaldays__list {
-    margin: 0;
-    padding: 0 var(--fd-s-14);
-    list-style: none;
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-settings-goaldays .fd-settings-goals-note {
-    margin: var(--fd-s-10) 0 0;
-    padding-left: 4px;
-}
-
-.fd-settings-goaldays__row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--fd-s-12);
-    min-height: 52px;
-    padding: var(--fd-s-10) 0;
-}
-
-.fd-settings-goaldays__row + .fd-settings-goaldays__row {
-    border-top: 1px solid var(--line);
-}
-
-.fd-settings-goaldays__text {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.fd-settings-goaldays__date,
-.fd-settings-goaldays__what {
-    margin: 0;
-    overflow-wrap: anywhere;
-}
-
-.fd-settings-goaldays__date {
-    font: 400 1rem/1.3 var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-settings-goaldays__what {
-    font: 400 0.8125rem/1.35 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-settings-goaldays__clear {
-    min-height: 36px;
-    padding: 0 var(--fd-s-14);
-    border: none;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font: 600 0.875rem/1 var(--font-body);
-    cursor: pointer;
 }
 
 /* AI connections (FigCraft 23638): one card of apps, each with a Disconnect,
@@ -1210,260 +816,6 @@
     align-self: center;
 }
 
-/* Product score (FigCraft 23689): a preset, four weight sliders, two switches
- * and the household default. Rows are hairline-separated, not carded. */
-.fd-scoreset {
-    display: flex;
-    flex-direction: column;
-}
-
-.fd-scoreset__lead {
-    margin: 0 0 14px;
-    font: 400 0.8125rem/1.4 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-scoreset__label {
-    margin: 22px 0 8px;
-    font: 600 0.6875rem/1.1 var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-scoreset__form {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-}
-
-.fd-scoreset__choice .fd-choice-group {
-    margin: 0;
-}
-
-.fd-scoreset__weights-head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--fd-s-12);
-    border-bottom: 1px solid var(--line);
-    padding-bottom: 8px;
-}
-
-.fd-scoreset__weights-head .fd-scoreset__label {
-    margin: 22px 0 0;
-}
-
-.fd-scoreset__total {
-    font: 400 0.75rem/1.3 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-scoreset__weight {
-    padding: 12px 0 9px;
-    border-bottom: 1px solid var(--line);
-}
-
-.fd-scoreset__weight-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--fd-s-12);
-    margin-bottom: 4px;
-}
-
-.fd-scoreset__weight-label {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-}
-
-.fd-scoreset__weight-title {
-    font: 400 0.9375rem/1.3 var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-scoreset__weight-source {
-    font: 400 0.75rem/1.2 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-scoreset__weight-value {
-    font: 600 0.9375rem/1.3 var(--font-body);
-    font-variant-numeric: tabular-nums;
-    color: var(--text-primary);
-}
-
-.fd-scoreset__range {
-    appearance: none;
-    -webkit-appearance: none;
-    display: block;
-    width: 100%;
-    height: 22px;
-    min-height: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    border-radius: 0;
-    box-shadow: none;
-    background: transparent;
-    cursor: pointer;
-}
-
-.fd-scoreset__range::-webkit-slider-runnable-track {
-    height: 4px;
-    border-radius: var(--radius-pill);
-    background: linear-gradient(
-        to right,
-        var(--accent-fill) var(--fd-fill, 0%),
-        var(--surface-track) var(--fd-fill, 0%)
-    );
-}
-
-.fd-scoreset__range::-moz-range-track {
-    height: 4px;
-    border-radius: var(--radius-pill);
-    background: linear-gradient(
-        to right,
-        var(--accent-fill) var(--fd-fill, 0%),
-        var(--surface-track) var(--fd-fill, 0%)
-    );
-}
-
-.fd-scoreset__range::-webkit-slider-thumb {
-    -webkit-appearance: none;
-    width: 22px;
-    height: 22px;
-    margin-top: -9px;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--text-primary);
-    box-shadow: 0 1px 4px var(--overlay-shadow);
-}
-
-.fd-scoreset__range::-moz-range-thumb {
-    width: 22px;
-    height: 22px;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--text-primary);
-    box-shadow: 0 1px 4px var(--overlay-shadow);
-}
-
-.fd-scoreset__range:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 4px;
-    border-radius: var(--radius-pill);
-}
-
-.fd-scoreset__note {
-    margin: 12px 0 0;
-    font: 400 0.8125rem/1.4 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-scoreset__reset {
-    align-self: flex-start;
-    margin: 12px 0 0;
-}
-
-.fd-scoreset__use-default {
-    margin: 0;
-    padding: 6px 0;
-    border: 0;
-    background: none;
-    text-align: left;
-    color: var(--accent-text);
-    font: 500 0.8125rem/1.3 var(--font-body);
-    cursor: pointer;
-}
-
-.fd-scoreset__rows {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.fd-scoreset__row {
-    min-height: 63px;
-    border-top: 1px solid var(--line);
-}
-
-.fd-scoreset__rows .fd-scoreset__row:last-child {
-    border-bottom: 1px solid var(--line);
-}
-
-.fd-scoreset__switch-form,
-.fd-scoreset__link {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--fd-s-12);
-    min-height: 62px;
-    margin: 0;
-    color: inherit;
-    text-decoration: none;
-}
-
-.fd-scoreset__row-text {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
-    min-width: 0;
-}
-
-.fd-scoreset__row-title {
-    font: 400 0.9375rem/1.3 var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-scoreset__row-sub {
-    font: 400 0.75rem/1.3 var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-scoreset__chev {
-    display: flex;
-    flex: none;
-    color: var(--text-secondary);
-}
-
-.fd-scoreset__link:focus-visible,
-.fd-scoreset__household:focus-visible,
-.fd-scoreset__use-default:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
-.fd-scoreset__household {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    min-height: 51px;
-    padding: 0 16px;
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    color: var(--text-primary);
-    text-decoration: none;
-}
-
-.fd-scoreset__household-icon {
-    display: flex;
-    flex: none;
-    color: var(--text-secondary);
-}
-
-.fd-scoreset__household-title {
-    flex: 1 1 auto;
-    font: 400 0.9375rem/1.3 var(--font-body);
-}
-
-.fd-scoreset__household-value {
-    font: 400 0.8125rem/1.3 var(--font-body);
-    color: var(--text-tertiary);
-}
-
 @media (min-width: 1024px) {
     .fd-settings {
         flex-direction: column;
@@ -1492,15 +844,9 @@
         flex: 1 1 0;
     }
 
-    /* Goals and AI connections read in a 680px column beside the menu
-     * (FigCraft 49849, 50224). */
-    .fd-settings[data-fd-settings-page="goals"] .fd-settings-main,
+    /* AI connections reads in a 680px column beside the menu (FigCraft 50224). */
     .fd-settings[data-fd-settings-page="ai"] .fd-settings-main {
         max-width: 680px;
-    }
-
-    .fd-scoreset {
-        max-width: 42.5rem;
     }
 }
 
@@ -1563,171 +909,6 @@
 /* Settings › Nutrients shown: each row's switch is its own small form. */
 .fd-nutrients .fd-stores-pref .fd-switch {
     margin-left: auto;
-}
-
-/* Settings › Saved foods & recipes › Possible duplicates, and its compare page
- * (FigCraft 62847, 63301, 63177). The card is the Household one. */
-.fd-settings-saved-dups {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-12);
-    min-height: 48px;
-    margin-bottom: var(--fd-s-12);
-    padding: 0 16px;
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    color: var(--text-primary);
-    font: 400 15px/20px var(--font-body);
-    text-decoration: none;
-}
-
-.fd-settings-saved-dups__label {
-    flex: 1 1 auto;
-}
-
-.fd-settings-saved-dups .fd-settings-menu__chev {
-    flex: none;
-    color: var(--text-tertiary);
-}
-
-.fd-dups__lead {
-    margin: 0 0 var(--fd-s-12);
-    font: 400 13px/18px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-dups .fd-row--dup .fd-row__main {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-/* Row bodies are stacking contexts (z-index 1), so an open menu's row rises
- * above the rows after it instead of showing their ⋯ through its panel. */
-.fd-dups .fd-row--dup:has(.fd-menu[open]) > .fd-row__body {
-    z-index: 3;
-}
-
-.fd-dups .fd-row--dup .fd-row__title {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-/* The whole row of the keep radio is the label, so the tap target is the row. */
-.fd-dup-choice {
-    cursor: pointer;
-}
-
-.fd-dup-radio {
-    flex: none;
-    width: 22px;
-    height: 22px;
-    margin: 0;
-    accent-color: var(--accent-fill);
-}
-
-.fd-dup-compare .fd-dup-merge-form,
-.fd-dup-compare .fd-dup-separate-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-12);
-    margin: 0;
-}
-
-.fd-dup-compare .fd-dup-separate-form {
-    margin-top: var(--fd-s-12);
-}
-
-.fd-dup-differ {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-10);
-}
-
-.fd-dup-differ__title {
-    margin: 0;
-    font: 600 15px/20px var(--font-body);
-}
-
-.fd-dup-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    margin: 0;
-    padding: 10px 16px;
-    border: 0;
-    border-radius: var(--radius-md);
-    background: var(--surface-panel);
-}
-
-.fd-dup-field__legend {
-    padding: 0;
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-dup-pick {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-10);
-    min-height: 32px;
-    font: 400 15px/20px var(--font-body);
-    cursor: pointer;
-}
-
-.fd-dup-pick input {
-    flex: none;
-    width: 20px;
-    height: 20px;
-    margin: 0;
-    accent-color: var(--accent-fill);
-}
-
-.fd-dup-btn {
-    width: 100%;
-    min-height: 52px;
-    padding: 0 20px;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font: 600 15px/20px var(--font-body);
-    cursor: pointer;
-}
-
-.fd-dup-btn--primary {
-    background: var(--accent-fill);
-    color: var(--accent-on);
-}
-
-/* The primary button names the radio's choice: both names are in the markup and
- * the unchosen one is hidden, so it reads right with no script. */
-.fd-dup-btn__b,
-.fd-dup-merge-form:has(input[data-fd-dup-keep="b"]:checked) .fd-dup-btn__a {
-    display: none;
-}
-
-.fd-dup-merge-form:has(input[data-fd-dup-keep="b"]:checked) .fd-dup-btn__b {
-    display: inline;
-}
-
-@media (min-width: 1024px) {
-    .fd-dups {
-        max-width: 680px;
-    }
-
-    .fd-dup-choices {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-    }
-
-    .fd-dup-choices > .fd-row {
-        border-bottom: 0;
-    }
-
-    .fd-dup-choices > .fd-row + .fd-row {
-        border-left: 1px solid var(--line);
-    }
 }
 
 /* ---- Settings › Notifications (src/web/pages/v2/settings-notifications.ts)
@@ -1825,4 +1006,124 @@
 }
 .fd-readers__terms-actions > * {
     flex: 1 1 0;
+}
+
+/* Goals: the name and note card (FigCraft 414420) holds two bare inputs, the
+   name as the card's title and the note, then "· since Oct 2", as its caption. */
+.fd-goals-card .fd-card__content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+.fd-goals-title .fd-autosave-input__field {
+    font-family: var(--font-display);
+    font-size: var(--text-title-section-size);
+    font-weight: 600;
+    line-height: var(--text-title-section-line);
+}
+.fd-goals-caption {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: var(--space-xs);
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+}
+.fd-goals-note {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+.fd-goals-note .fd-autosave-input__entry {
+    flex: 0 1 auto;
+}
+.fd-goals-note .fd-autosave-input__field {
+    field-sizing: content;
+    width: auto;
+    min-width: 8ch;
+    max-width: 100%;
+    color: var(--text-secondary);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+}
+
+/* Saved foods & recipes: a row's ⋯ gives way to the pick box in select mode. */
+[data-fd-selecting] .fd-saved-row .fd-item-row__control {
+    display: none;
+}
+
+/* Product score: the preset chips are one autosaving form. */
+.fd-score-form {
+    margin: 0;
+}
+
+/* Possible duplicates: the compare page is one form, from the food to keep to
+   the two buttons. The primary button names the food kept: both names are in
+   the markup and the unchosen one is hidden, so it reads right with no script.
+   A long name wraps inside its button, so the page never scrolls sideways. */
+.fd-dup-merge-form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    margin: 0;
+}
+.fd-dup-actions {
+    display: flex;
+    gap: var(--space-md);
+    margin-top: var(--space-md);
+}
+.fd-dup-actions .fd-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    height: auto;
+    min-height: var(--control-lg-height);
+    padding-block: var(--space-sm);
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.fd-dup-merge-a,
+.fd-dup-merge-b {
+    display: contents;
+}
+.fd-dup-merge-b,
+.fd-dup-merge-form:has(.fd-dup-keep--b .fd-item-row__check-input:checked)
+    .fd-dup-merge-a {
+    display: none;
+}
+.fd-dup-merge-form:has(.fd-dup-keep--b .fd-item-row__check-input:checked)
+    .fd-dup-merge-b {
+    display: contents;
+}
+/* The two values of a row are equal fixed segments, as the design draws them. */
+.fd-dup-segment {
+    flex: none;
+    width: 168px;
+}
+.fd-dup-segment .fd-segmented__option {
+    flex: 1 1 0;
+}
+/* A value row nobody has picked yet shows the value of the food kept as the
+   current one, and follows the Keep choice with no script. A checked pick
+   always wins (it is drawn by the segmented control itself). */
+.fd-dup-merge-form:has(.fd-dup-keep--a .fd-item-row__check-input:checked)
+    .fd-dup-segment:not(:has(.fd-segmented__input:checked))
+    .fd-segmented__option:nth-child(1)
+    .fd-segmented__segment,
+.fd-dup-merge-form:has(.fd-dup-keep--b .fd-item-row__check-input:checked)
+    .fd-dup-segment:not(:has(.fd-segmented__input:checked))
+    .fd-segmented__option:nth-child(2)
+    .fd-segmented__segment {
+    background: var(--text-primary);
+    color: var(--surface-bg);
+}
+
+/* The caps label over a block of Settings › AI connections (that page keeps
+   the old goals card's label until it moves to the section header). */
+.fd-settings-goals-card__title {
+    margin: 22px 0 8px;
+    padding-left: 4px;
+    font: 600 0.6875rem/1.1 var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
 }

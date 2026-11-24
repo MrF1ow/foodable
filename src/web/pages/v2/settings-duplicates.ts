@@ -1,13 +1,15 @@
 /**
- * Settings › Saved foods & recipes › Possible duplicates (FigCraft 62847,
- * 63301) and its compare page (63177).
+ * Settings › Saved foods & recipes › Possible duplicates (FigCraft 415958,
+ * 416211) and its compare page (416488).
  *
- * The list shows each pair once with a "⋯" menu: Merge into A, Merge into B,
- * Not the same, More…. More… opens the compare page: both foods, a radio for
- * the one to keep, Merge and "Keep them separate". Nothing here merges on its
- * own: every action posts to the household routes
- * (`/settings/household/possible-duplicates/{merge,keep-separate}`), which
- * carry an optional `back` that this module validates (`duplicatesBackFrom`).
+ * The list shows each pair once as an Item row with a ⋯: Compare and merge
+ * opens the compare page, Keep apart dismisses the pair. The compare page picks
+ * the food to keep (a radio row each), shows the values that differ with a
+ * segmented choice per value, and ends with Keep apart and Merge into the kept
+ * food. Nothing here merges on its own: every action posts to the household
+ * routes (`/settings/household/possible-duplicates/{merge,keep-separate}`),
+ * which carry an optional `back` that this module validates
+ * (`duplicatesBackFrom`).
  */
 import type { AppChromeBase } from "../../attention.js";
 import {
@@ -19,15 +21,16 @@ import {
     type PossibleDuplicatePair,
 } from "../../../domain/foods.js";
 import { ALLERGEN_LABELS, isAllergenCode } from "../../../domain/rules.js";
-import { esc, raw, type Html } from "../../components/v2/html.js";
-import { iconChevronRight } from "../../components/v2/icons.js";
+import { button } from "../../components/v2/button.js";
+import { emptyState } from "../../components/v2/empty-state.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
 import { menu, type MenuItem } from "../../components/v2/menu.js";
-import { rowList } from "../../components/v2/rows.js";
-import {
-    renderSettingsV2Page,
-    settingsErrorBanner,
-    settingsPageHeader,
-} from "./settings-shared.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
+import { segmented } from "../../components/v2/segmented.js";
+import { renderHouseholdLayout } from "./settings-household-layout.js";
+import { settingsErrorBanner } from "./settings-shared.js";
 
 export const DUPLICATES_PATH = "/settings/saved/duplicates";
 export const DUPLICATES_MERGE_ACTION =
@@ -118,41 +121,22 @@ function pairTitle(pair: PossibleDuplicatePair): string {
     return `${foodDisplayName(pair.subject)} · ${foodDisplayName(pair.related)}`;
 }
 
-function menuItems(
-    pair: PossibleDuplicatePair,
-    refCounts: ReadonlyMap<string, number>,
-): MenuItem[] {
-    const pairFields = {
-        food_a: pair.subject.id,
-        food_b: pair.related.id,
-        back: DUPLICATES_PATH,
-    };
-    const mergeInto = (food: Food): MenuItem => ({
-        kind: "post",
-        label: `Merge into ${foodDisplayName(food)}`,
-        hint: `Keeps ${foodDisplayName(food)} · ${usesLabel(usesOf(refCounts, food))}`,
-        action: DUPLICATES_MERGE_ACTION,
-        fields: { ...pairFields, keep_id: food.id },
-    });
+function menuItems(pair: PossibleDuplicatePair): MenuItem[] {
     return [
-        mergeInto(pair.subject),
-        mergeInto(pair.related),
+        {
+            kind: "link",
+            label: "Compare and merge",
+            href: duplicateComparePath(pair.subject.id, pair.related.id),
+        },
         {
             kind: "post",
-            label: "Not the same",
+            label: "Keep apart",
             action: DUPLICATES_KEEP_SEPARATE_ACTION,
             fields: {
                 subject_id: pair.subject.id,
                 related_id: pair.related.id,
                 back: DUPLICATES_PATH,
             },
-        },
-        { kind: "separator" },
-        {
-            kind: "link",
-            label: "More…",
-            hint: "Compare details first",
-            href: duplicateComparePath(pair.subject.id, pair.related.id),
         },
     ];
 }
@@ -162,41 +146,47 @@ function pairRow(
     refCounts: ReadonlyMap<string, number>,
 ): Html {
     const title = pairTitle(pair);
-    const sub = `${usesLabel(usesOf(refCounts, pair.subject))} and ${usesLabel(usesOf(refCounts, pair.related))}`;
-    return raw(
-        `<li class="fd-row fd-row--dup" id="${esc(duplicateRowId(pair))}"><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title" title="${esc(title)}">${esc(title)}</span></span><span class="fd-row__sub">${esc(sub)}</span></div>${String(menu({ label: `Actions for ${title}`, items: menuItems(pair, refCounts), className: "fd-dup-menu" }))}</div></li>`,
-    );
+    return itemRow({
+        id: duplicateRowId(pair),
+        title,
+        subtitle: `${usesLabel(usesOf(refCounts, pair.subject))} and ${usesLabel(usesOf(refCounts, pair.related))}`,
+        trailing: {
+            kind: "control",
+            html: menu({
+                label: `Actions for ${title}`,
+                anchor: "more",
+                items: menuItems(pair),
+            }),
+        },
+    });
 }
 
 export function renderSettingsDuplicatesV2Body(
     view: SettingsDuplicatesV2View,
 ): string {
-    const lead =
-        "Foods that look like the same thing. Use ⋯ to merge or keep them apart.";
-    const list =
-        view.pairs.length === 0
-            ? `<p class="fd-settings-household-empty">No possible duplicates.</p>`
-            : String(
-                  rowList(
-                      view.pairs.map((p) => pairRow(p, view.refCounts)),
-                      {
-                          label: "Possible duplicates",
-                          className: "fd-list--card",
-                      },
-                  ),
-              );
-    return `${String(settingsPageHeader("Possible duplicates"))}${String(settingsErrorBanner(view.error))}<div class="fd-settings-hh fd-dups" data-fd-duplicates><p class="fd-dups__lead">${esc(lead)}</p>${list}</div>`;
+    return String(
+        join([
+            settingsErrorBanner(view.error),
+            view.pairs.length === 0
+                ? emptyState({ title: "No possible duplicates" })
+                : listGroup({
+                      label: "Possible duplicates",
+                      rows: view.pairs.map((p) => pairRow(p, view.refCounts)),
+                  }),
+        ]),
+    );
 }
 
 export function renderSettingsDuplicatesV2Page(
     view: SettingsDuplicatesV2View,
 ): string {
-    return renderSettingsV2Page({
+    return renderHouseholdLayout({
         chrome: view.chrome,
         page: "saved",
         title: "Possible duplicates",
         backHref: "/settings/saved",
         backLabel: "Saved foods & recipes",
+        className: "fd-dups-page",
         body: renderSettingsDuplicatesV2Body(view),
     });
 }
@@ -243,41 +233,63 @@ function allergenLabel(code: string): string {
     return isAllergenCode(code) ? ALLERGEN_LABELS[code] : code;
 }
 
-function choiceRow(
+const SEPARATE_FORM_ID = "fd-dup-separate";
+
+/** The food to keep: a radio row each; the one chosen names the Merge button. */
+function keepRow(
     food: Food,
     refCounts: ReadonlyMap<string, number>,
     checked: boolean,
     slot: "a" | "b",
-): string {
-    const meta = [food.brand, usesLabel(usesOf(refCounts, food))]
+): Html {
+    const subtitle = [food.brand, usesLabel(usesOf(refCounts, food))]
         .filter(Boolean)
         .join(" · ");
-    return `<li class="fd-row fd-row--dup-choice"><label class="fd-row__body fd-dup-choice"><span class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(food.name)}</span></span><span class="fd-row__sub">${esc(meta)}</span></span><input type="radio" class="fd-dup-radio" name="keep_id" value="${esc(food.id)}" data-fd-dup-keep="${slot}"${checked ? " checked" : ""}></label></li>`;
+    return itemRow({
+        title: food.name,
+        subtitle,
+        lead: {
+            kind: "radio",
+            label: `Keep ${foodDisplayName(food)}`,
+            name: "keep_id",
+            value: food.id,
+            checked,
+        },
+        className: `fd-dup-keep fd-dup-keep--${slot}`,
+    });
 }
 
-function conflictFields(
+/**
+ * The values the two foods disagree on, one row each with the foods' values as
+ * a segmented choice. No radio starts checked: a value nobody picks comes from
+ * the food kept, whichever one that is when the form posts, and the stylesheet
+ * draws that food's value as the current one until a pick is made. Only a
+ * refused post's own picks come back checked.
+ */
+function differRows(
     pair: PossibleDuplicatePair,
     post: DuplicateMergePost | undefined,
-): string {
-    const conflicts = foodPairMergeConflicts(pair.subject, pair.related);
-    if (conflicts.length === 0) return "";
+): Html[] {
     const picks = post?.picks ?? {};
-    const sets = conflicts
-        .map((wire) => {
-            // Checked only when a refused post carried this pick: a default would
-            // not follow the keep radio, and the server already takes the kept
-            // food's value for any pick not posted.
-            const chosen = picks[wire];
-            const radios = [pair.subject, pair.related]
-                .map(
-                    (food) =>
-                        `<label class="fd-dup-pick"><input type="radio" name="pick_${esc(wire)}" value="${esc(food.id)}"${chosen === food.id ? " checked" : ""}><span>${esc(foodDisplayName(food))}: ${esc(pickValue(food, wire))}</span></label>`,
-                )
-                .join("");
-            return `<fieldset class="fd-dup-field"><legend class="fd-dup-field__legend">${esc(PICK_LABELS[wire])}</legend>${radios}</fieldset>`;
-        })
-        .join("");
-    return `<section class="fd-dup-differ" aria-label="Values that differ"><h2 class="fd-dup-differ__title">Values that differ</h2><p class="fd-dups__lead">Pick which food each value comes from. A value you leave unpicked comes from the food you keep.</p>${sets}</section>`;
+    return foodPairMergeConflicts(pair.subject, pair.related).map((wire) =>
+        itemRow({
+            title: PICK_LABELS[wire],
+            className: "fd-dup-differ-row",
+            trailing: {
+                kind: "control",
+                html: segmented({
+                    label: PICK_LABELS[wire],
+                    name: `pick_${wire}`,
+                    className: "fd-dup-segment",
+                    segments: [pair.subject, pair.related].map((food) => ({
+                        label: pickValue(food, wire),
+                        value: food.id,
+                        selected: picks[wire] === food.id,
+                    })),
+                }),
+            },
+        }),
+    );
 }
 
 export function renderSettingsDuplicateCompareV2Body(
@@ -292,36 +304,71 @@ export function renderSettingsDuplicateCompareV2Body(
     const allergens = [
         ...new Set([...pair.subject.allergens, ...pair.related.allergens]),
     ];
-    const allergenNote =
-        allergens.length > 0
-            ? `<p class="fd-dups__lead">Allergens are combined: ${esc(allergens.map(allergenLabel).join(", "))}.</p>`
-            : "";
-    const choices = `<ul class="fd-list fd-list--card fd-dup-choices" aria-label="Food to keep">${choiceRow(pair.subject, refCounts, keepId === pair.subject.id, "a")}${choiceRow(pair.related, refCounts, keepId === pair.related.id, "b")}</ul>`;
-    const mergeForm = `<form method="post" action="${DUPLICATES_MERGE_ACTION}" class="fd-dup-merge-form"><input type="hidden" name="food_a" value="${esc(pair.subject.id)}"><input type="hidden" name="food_b" value="${esc(pair.related.id)}"><input type="hidden" name="back" value="${DUPLICATES_PATH}"><input type="hidden" name="view" value="${DUPLICATES_VIEW_COMPARE}">${choices}${conflictFields(pair, mergePost)}${allergenNote}<button type="submit" class="fd-dup-btn fd-dup-btn--primary"><span class="fd-dup-btn__a">Merge into ${esc(subjectName)}</span><span class="fd-dup-btn__b">Merge into ${esc(relatedName)}</span></button></form>`;
-    const separateForm = `<form method="post" action="${DUPLICATES_KEEP_SEPARATE_ACTION}" class="fd-dup-separate-form"><input type="hidden" name="subject_id" value="${esc(pair.subject.id)}"><input type="hidden" name="related_id" value="${esc(pair.related.id)}"><input type="hidden" name="back" value="${DUPLICATES_PATH}"><input type="hidden" name="view" value="${DUPLICATES_VIEW_COMPARE}"><button type="submit" class="fd-dup-btn">Keep them separate</button></form>`;
-    return `${String(settingsPageHeader(`${subjectName} or ${relatedName}?`))}${String(settingsErrorBanner(view.error))}<div class="fd-settings-hh fd-dups fd-dup-compare" data-fd-duplicate-compare><p class="fd-dups__lead">Pick the one to keep. Every fridge item, grocery line and recipe that uses the other moves over to it.</p>${mergeForm}${separateForm}</div>`;
+    const differ = differRows(pair, mergePost);
+    const hidden = (name: string, value: string) =>
+        `<input type="hidden" name="${esc(name)}" value="${esc(value)}">`;
+    const mergeButton = (name: string, cls: string) =>
+        `<span class="${cls}">${button({ label: `Merge into ${name}`, variant: "primary", type: "submit" })}</span>`;
+    const mergeForm = `<form method="post" action="${DUPLICATES_MERGE_ACTION}" class="fd-dup-merge-form">${hidden("food_a", pair.subject.id)}${hidden("food_b", pair.related.id)}${hidden("back", DUPLICATES_PATH)}${hidden("view", DUPLICATES_VIEW_COMPARE)}${join(
+        [
+            sectionHeader({ label: "Keep", rule: false }),
+            raw(
+                `<div role="radiogroup" aria-label="Food to keep">${String(
+                    listGroup({
+                        rows: [
+                            keepRow(
+                                pair.subject,
+                                refCounts,
+                                keepId === pair.subject.id,
+                                "a",
+                            ),
+                            keepRow(
+                                pair.related,
+                                refCounts,
+                                keepId === pair.related.id,
+                                "b",
+                            ),
+                        ],
+                    }),
+                )}</div>`,
+            ),
+            differ.length > 0
+                ? join([
+                      sectionHeader({
+                          label: "Values that differ",
+                          rule: false,
+                      }),
+                      listGroup({ label: "Values that differ", rows: differ }),
+                  ])
+                : raw(""),
+            allergens.length > 0
+                ? listGroup({
+                      label: "Allergens",
+                      rows: [
+                          itemRow({
+                              title: "Allergens combined",
+                              value: allergens.map(allergenLabel).join(", "),
+                          }),
+                      ],
+                  })
+                : raw(""),
+        ],
+    )}<div class="fd-dup-actions">${button({ label: "Keep apart", type: "submit", attrs: { form: SEPARATE_FORM_ID } })}${mergeButton(subjectName, "fd-dup-merge-a")}${mergeButton(relatedName, "fd-dup-merge-b")}</div></form>`;
+    const separateForm = `<form id="${SEPARATE_FORM_ID}" method="post" action="${DUPLICATES_KEEP_SEPARATE_ACTION}">${hidden("subject_id", pair.subject.id)}${hidden("related_id", pair.related.id)}${hidden("back", DUPLICATES_PATH)}${hidden("view", DUPLICATES_VIEW_COMPARE)}</form>`;
+    return `${String(settingsErrorBanner(view.error))}${mergeForm}${separateForm}`;
 }
 
 export function renderSettingsDuplicateCompareV2Page(
     view: SettingsDuplicateCompareV2View,
 ): string {
-    return renderSettingsV2Page({
+    const title = `${foodDisplayName(view.pair.subject)} or ${foodDisplayName(view.pair.related)}?`;
+    return renderHouseholdLayout({
         chrome: view.chrome,
         page: "saved",
-        title: `${foodDisplayName(view.pair.subject)} or ${foodDisplayName(view.pair.related)}?`,
+        title,
         backHref: DUPLICATES_PATH,
         backLabel: "Possible duplicates",
+        className: "fd-dups-page fd-dup-compare",
         body: renderSettingsDuplicateCompareV2Body(view),
     });
-}
-
-/** The "Possible duplicates" link at the top of Saved foods & recipes. */
-export function duplicatesLink(count: number): Html {
-    const badge =
-        count > 0
-            ? `<span class="fd-settings-menu__badge">${esc(String(count))}</span>`
-            : "";
-    return raw(
-        `<a class="fd-settings-saved-dups" href="${DUPLICATES_PATH}"><span class="fd-settings-saved-dups__label">Possible duplicates</span>${badge}<span class="fd-settings-menu__chev" aria-hidden="true">${String(iconChevronRight())}</span></a>`,
-    );
 }

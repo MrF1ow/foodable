@@ -119,6 +119,11 @@
 }
 
 .fd-menu--anchored .fd-menu__panel {
+    /* Above the phone Nav bar (z-index 50); menu.js caps the height to the
+     * screen, and the panel scrolls inside when it is longer. */
+    z-index: 60;
+    overflow-y: auto;
+    overscroll-behavior: contain;
     box-sizing: border-box;
     width: var(--fd-menu-width);
     min-width: 0;
@@ -201,4 +206,9 @@
 .fd-menu--row {
     display: block;
     width: 100%;
+}
+
+/* Select leaves the menu while a list is being picked from. */
+.fd-menu__item[hidden] {
+    display: none;
 }

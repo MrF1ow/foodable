@@ -4,6 +4,7 @@ import type { NutritionGoals } from "../../../db/nutrition.js";
 import type { GoalDayOverride } from "../../../domain/insights.js";
 import {
     alcoholLimitText,
+    renderSettingsGoalsV2Body,
     renderSettingsGoalsV2Page,
     type SettingsGoalsV2View,
 } from "./settings-goals.js";
@@ -78,7 +79,7 @@ function input(html: string, name: string): string {
 function fieldForm(html: string, name: string): string {
     const m = html.match(
         new RegExp(
-            `<form[^>]*data-fd-autosave[^>]*><input type="hidden" name="field" value="${name}" />[\\s\\S]*?</form>`,
+            `<form[^>]*data-fd-autosave[^>]*><input type="hidden" name="field" value="${name}">[\\s\\S]*?</form>`,
         ),
     );
     expect(m).not.toBeNull();
@@ -95,87 +96,79 @@ describe("settings goals v2 in-place fields", () => {
         for (const [name, value] of [
             ["goal_name", "Recomp"],
             ["goal_note", "maintenance minus 5%"],
-            ["daily_calories", "2200"],
+            ["daily_calories", "2,200"],
             ["daily_protein_g", "140"],
             ["daily_carbs_g", "200"],
             ["daily_fat_g", "70"],
-            ["daily_water_ml", "2000"],
+            ["daily_water_ml", "2,000"],
             ["daily_fiber_g", "30"],
             ["daily_sugar_g", "50"],
             ["daily_alcohol_g", "0"],
             ["daily_caffeine_mg", "200"],
         ] as const) {
             const form = fieldForm(html, name);
-            expect(form).toContain('method="POST"');
+            expect(form).toContain('method="post"');
             expect(form).toContain('action="/settings/goals/field"');
             expect(input(form, "value")).toContain(`value="${value}"`);
         }
         expect(html).toContain("Limits and minimums");
     });
 
-    test("the field forms keep Turbo on, so the 303 back is morphed", () => {
+    test("no goals form opts out of Turbo, so every 303 back is morphed", () => {
         const html = renderSettingsGoalsV2Page(
             view({ days: [day("2026-11-14", { daily_calories: 1800 })] }),
         );
         for (const name of GOALS_FORM_FIELDS) {
             expect(fieldForm(html, name)).not.toContain("data-turbo");
         }
-        // Only the Clear confirmation, a destructive one-off, opts out.
-        const optedOut = html.match(/<form[^>]*data-turbo="false"[^>]*>/g);
-        expect(optedOut).toHaveLength(1);
-        expect(optedOut![0]).toContain("/settings/goals/days/clear");
+        expect(html).not.toContain('data-turbo="false"');
+        expect(html).not.toContain("turbo-false");
     });
 
-    test("there is no Edit sheet; the rows are labelled, tap-to-edit inputs", () => {
+    test("the rows are Item rows whose label names the input, the number and its unit after it", () => {
         const html = renderSettingsGoalsV2Page(view());
         expect(html).not.toContain("Edit goals");
-        expect(html).not.toContain("fd-goals-edit");
-        expect(html).not.toContain("fd-settings-goals-edit");
         const calories = fieldForm(html, "daily_calories");
         // The row is the label, so a tap anywhere on it focuses the input.
         expect(calories).toMatch(
-            /<label class="fd-settings-goals-field__row"><span/,
+            /<label class="fd-autosave-input__control"><span class="fd-autosave-input__label">Calories<\/span>/,
         );
-        expect(calories).toContain("Calories");
-        expect(calories).toContain("kcal");
+        expect(calories).toContain(
+            '<span class="fd-autosave-input__unit">kcal',
+        );
         expect(calories).toContain("data-fd-autosave-input");
-        expect(calories).toMatch(/<svg/);
-        expect(fieldForm(html, "daily_protein_g")).toContain(
-            '<span class="fd-dot fd-dot--protein"',
-        );
-        expect(fieldForm(html, "goal_name")).toContain(
-            'aria-label="Goal name"',
-        );
-        expect(fieldForm(html, "goal_note")).toContain('aria-label="Note"');
+        expect(calories).toContain('value="2,200"');
+        // The design's rows carry no icon or dot.
+        expect(renderSettingsGoalsV2Body(view())).not.toContain("fd-dot");
+        expect(fieldForm(html, "goal_name")).toContain("Goal name</span>");
+        expect(fieldForm(html, "goal_note")).toContain("Note</span>");
+        // Items in flat List groups, the section label in caps.
+        expect(html).toContain("fd-list-group");
+        expect(html).toContain("Limits and minimums</h2>");
     });
 
-    test("the value is a chip with its unit inside, and the hint sits under the limits card (F26)", () => {
+    test("the explaining lines are cut", () => {
         const html = renderSettingsGoalsV2Page(view());
-        const calories = fieldForm(html, "daily_calories");
-        const entry = calories.match(
-            /<span class="fd-settings-goals-field__entry">(.*?)<\/span><\/label>/s,
-        );
-        expect(entry).not.toBeNull();
-        // Input and unit share the one chip; the input holds a plain number.
-        expect(entry![1]).toContain("data-fd-autosave-input");
-        expect(entry![1]).toContain(
-            '<span class="fd-settings-goals-unit">kcal',
-        );
-        expect(calories).toContain('value="2200"');
-        const hint = html.indexOf("fd-settings-goals-hint");
-        expect(hint).toBeGreaterThan(html.indexOf("goals-daily-caffeine-mg"));
-        expect(html).toContain(
-            "Tap a number to change it. It saves when you leave the field.",
-        );
+        expect(html).not.toContain("Tap a number to change it");
+        expect(html).not.toContain("No nutrition goals set yet");
+        expect(
+            renderSettingsGoalsV2Page(
+                view({ days: [day("2026-11-14", { daily_calories: 1800 })] }),
+            ),
+        ).not.toContain("Clearing a day puts it back");
     });
 
-    test("no saved goals: blank fields and a hint, no heading line", () => {
+    test("no saved goals: the Name this goal row and blank fields", () => {
         const html = renderSettingsGoalsV2Page(view({ goals: null }));
-        expect(html).toContain("No nutrition goals set yet.");
         const calories = input(fieldForm(html, "daily_calories"), "value");
         expect(calories).toContain('value=""');
         expect(calories).toContain('placeholder="Not set"');
-        expect(html).not.toContain("Since ");
+        const name = fieldForm(html, "goal_name");
+        expect(name).toContain('placeholder="Name this goal"');
+        expect(html).toContain("fd-item-row--input-chevron");
+        // No note field, card or since line until the goal has a name.
+        expect(html).not.toContain('value="goal_note"');
+        expect(html).not.toContain("since ");
         expect(html).not.toContain("Target weight");
     });
 
@@ -186,7 +179,9 @@ describe("settings goals v2 in-place fields", () => {
         expect(input(fieldForm(us, "daily_alcohol_g"), "value")).toContain(
             'value="2"',
         );
-        expect(us).toContain("US drinks");
+        expect(us).toContain(
+            '<span class="fd-autosave-input__unit">drinks</span>',
+        );
         expect(us).not.toContain("28 g");
         const uk = renderSettingsGoalsV2Page(
             view({
@@ -197,7 +192,9 @@ describe("settings goals v2 in-place fields", () => {
         expect(input(fieldForm(uk, "daily_alcohol_g"), "value")).toContain(
             'value="2"',
         );
-        expect(uk).toContain("UK units");
+        expect(uk).toContain(
+            '<span class="fd-autosave-input__unit">units</span>',
+        );
         expect(uk).not.toContain("15.8 g");
     });
 
@@ -241,7 +238,7 @@ describe("settings goals v2 in-place fields", () => {
         const protein = fieldForm(html, "daily_protein_g");
         expect(input(protein, "value")).toContain('value="140"');
         expect(protein).not.toContain("aria-invalid");
-        expect(html.split("fd-settings-goals-field__error")).toHaveLength(2);
+        expect(html.split("fd-autosave-input__error")).toHaveLength(2);
     });
 
     test("typed text is escaped", () => {
@@ -259,21 +256,22 @@ describe("settings goals v2 in-place fields", () => {
         expect(html).not.toContain("<b>x</b>");
     });
 
-    test("a page-level error sits under the header", () => {
+    test("a page-level error is a banner", () => {
         const html = renderSettingsGoalsV2Page(
             view({ error: "Choose a valid day." }),
         );
         expect(html).toContain("Choose a valid day.");
     });
 
-    test("the set day heads the page", () => {
+    test("the card shows the name and the note, then the day the goals were set", () => {
         const html = renderSettingsGoalsV2Page(view());
-        expect(html).toContain("Since Oct 2");
+        expect(html).toContain("fd-goals-card");
+        expect(html).toContain("· since Oct 2");
         expect(
             renderSettingsGoalsV2Page(
                 view({ goals: { ...goals, goals_set_on: null } }),
             ),
-        ).not.toContain("Since ");
+        ).not.toContain("since ");
     });
 
     test("target weight stays visible, read-only", () => {
@@ -285,7 +283,7 @@ describe("settings goals v2 in-place fields", () => {
 });
 
 describe("settings goals v2 per-day list", () => {
-    test("lists each day with what it overrides and a clear action", () => {
+    test("lists each day with what it overrides and a ⋯ that clears it, confirmed in the menu", () => {
         const html = renderSettingsGoalsV2Page(
             view({
                 days: [
@@ -299,34 +297,44 @@ describe("settings goals v2 per-day list", () => {
         );
         expect(html).toContain("Days with their own goals");
         expect(html).toContain("Sat, Nov 14");
-        expect(html).toContain("Calories 1,800 kcal");
-        expect(html).toContain("Protein 150 g");
+        expect(html).toContain("1,800 kcal");
+        expect(html).toContain("protein 150 g");
         expect(html).toContain("Fri, Nov 20");
-        expect(html).toContain("Water 3 L");
-        // One tap on Clear only opens a confirmation; nothing posts from the row.
-        const rows = [
-            ...html.matchAll(
-                /<li class="fd-settings-goaldays__row">[\s\S]*?<\/li>/g,
+        expect(html).toContain("water 3 L");
+        // No sheet: Clear is a destructive menu item that confirms in place.
+        expect(
+            renderSettingsGoalsV2Body(
+                view({ days: [day("2026-11-14", { daily_calories: 1800 })] }),
             ),
-        ].map((m) => m[0]);
-        expect(rows).toHaveLength(2);
-        for (const row of rows) {
-            expect(row).not.toContain("<form");
-            expect(row).toMatch(
-                /<button type="button"[^>]*command="show-modal"/,
-            );
-        }
-        expect(rows[0]).toContain('commandfor="fd-goals-clear-2026-11-14"');
-        expect(rows[0]).toContain('aria-label="Clear goals for Sat, Nov 14"');
-        // The confirm sheet holds the form that does.
-        const confirm = html.match(
-            /<dialog[^>]*id="fd-goals-clear-2026-11-14"[^>]*>[\s\S]*?<\/dialog>/,
+        ).not.toContain("<dialog");
+        expect(html).not.toContain("fd-goals-clear-");
+        expect(html).toContain('aria-label="Actions for Sat, Nov 14"');
+        const body = renderSettingsGoalsV2Body(
+            view({
+                days: [
+                    day("2026-11-14", { daily_calories: 1800 }),
+                    day("2026-11-20", { daily_water_ml: 3000 }),
+                ],
+            }),
+        );
+        const clear = body.match(
+            /<div class="fd-menu__confirm-row"[\s\S]*?<\/form>/,
         )![0];
-        expect(confirm).toContain("Clear Sat, Nov 14?");
-        expect(confirm).toContain('action="/settings/goals/days/clear"');
-        expect(confirm).toContain('name="date" value="2026-11-14"');
-        expect(confirm).toContain("Clear day");
-        expect(html).toContain('id="fd-goals-clear-2026-11-20"');
+        expect(clear).toContain("Cancel");
+        expect(clear).toContain('action="/settings/goals/days/clear"');
+        expect(clear).toContain('name="date" value="2026-11-14"');
+        expect(body.match(/data-fd-menu-confirm/g)).toHaveLength(2);
+    });
+
+    test("the header ⋯ (phone Detail bar and desktop header) holds Clear all goals, confirmed in the menu", () => {
+        const html = renderSettingsGoalsV2Page(view());
+        // One ⋯ in each of the two places the layout draws its actions.
+        expect(html.match(/data-fd-menu-confirm/g)).toHaveLength(2);
+        const confirm = html.match(
+            /<div class="fd-menu__confirm-row"[\s\S]*?<\/form>/,
+        )![0];
+        expect(confirm).toContain('aria-label="Confirm Clear all goals"');
+        expect(confirm).toContain('action="/settings/goals/clear-all"');
     });
 
     test("no overrides, no section", () => {
@@ -371,7 +379,7 @@ describe("per-day summaries share the card's thousands separator", () => {
                 ],
             }),
         );
-        expect(html).toContain("Calories 2,100 kcal");
-        expect(html).toContain("Alcohol 2 US drinks");
+        expect(html).toContain("2,100 kcal");
+        expect(html).toContain("alcohol 2 US drinks");
     });
 });

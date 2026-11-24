@@ -1,10 +1,10 @@
-import { afterEach, beforeEach, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import { getNutritionGoals, upsertNutritionGoals } from "../../db/nutrition.js";
 import { upsertProfile } from "../../db/profiles.js";
 import { setSqlForTests } from "../../db/sql.js";
 import { describeDb } from "../../db/testing/pg.js";
-import { seedHousehold } from "../../db/testing/fixtures.js";
+import { seedHousehold, seedMember } from "../../db/testing/fixtures.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
 import { settingsRoutes } from "./settings.js";
@@ -144,7 +144,7 @@ describeDb(pgAvailable !== null, "settings goals fields", (getCtx) => {
         expect(after).toEqual(before);
         // The page itself still shows the stored value.
         const page = await (await getPage(userId)).text();
-        expect(page).toContain('value="2200"');
+        expect(page).toContain('value="2,200"');
         expect(page).not.toContain("99999");
     });
 
@@ -178,6 +178,107 @@ describeDb(pgAvailable !== null, "settings goals fields", (getCtx) => {
         expect(await getNutritionGoals(userId)).toMatchObject({
             daily_calories: 2000,
             daily_protein_g: null,
+        });
+    });
+
+    describe("Clear all goals", () => {
+        const clearAll = (who: string) =>
+            app.request("http://test/settings/goals/clear-all", {
+                method: "POST",
+                headers: { cookie: cookie(who) },
+            });
+        const dayCount = async (who: string) =>
+            Number(
+                (
+                    await getCtx().sql`
+                        select count(*)::int as n from public.nutrition_goal_days
+                        where user_id = ${who}
+                    `
+                )[0]!.n,
+            );
+        async function withDays(who: string, householdId: string) {
+            for (const date of ["2020-02-01", "2026-12-01", "2099-01-01"]) {
+                await getCtx().sql`
+                    insert into public.nutrition_goal_days (
+                        household_id, user_id, date, daily_calories
+                    ) values (${householdId}, ${who}, ${date}::date, ${2400})
+                `;
+            }
+        }
+
+        for (const role of ["owner", "admin", "member"] as const) {
+            test(`${role} clears their own targets, name, note and every override, with a 303 and no toast; another person's goals stay`, async () => {
+                const { sql } = getCtx();
+                const [row] = await sql`
+                    select household_id from public.household_members
+                    where user_id = ${userId}
+                `;
+                const householdId = row!.household_id as string;
+                const who =
+                    role === "owner"
+                        ? userId
+                        : await seedMember(sql, householdId, { role });
+                const other =
+                    role === "owner"
+                        ? await seedMember(sql, householdId, { role: "member" })
+                        : userId;
+                if (who !== userId) {
+                    await upsertNutritionGoals(who, {
+                        daily_calories: 1900,
+                        goal_name: "Mine",
+                        goal_note: "note",
+                    });
+                }
+                await withDays(who, householdId);
+                await withDays(other, householdId);
+                const othersBefore = await getNutritionGoals(other);
+
+                const res = await clearAll(who);
+                expect(res.status).toBe(303);
+                expect(res.headers.get("location")).toBe("/settings/goals");
+                expect(res.headers.get("set-cookie") ?? "").not.toContain(
+                    "foodable_toast",
+                );
+                expect(await dayCount(who)).toBe(0);
+                expect(await getNutritionGoals(who)).toMatchObject({
+                    daily_calories: null,
+                    daily_protein_g: null,
+                    daily_carbs_g: null,
+                    daily_fat_g: null,
+                    daily_water_ml: null,
+                    target_weight_g: null,
+                    goal_name: null,
+                    goal_note: null,
+                    goals_set_on: null,
+                });
+                expect(await dayCount(other)).toBe(3);
+                expect(await getNutritionGoals(other)).toEqual(othersBefore);
+            });
+        }
+
+        test("someone with no household gets the membership refusal and nothing changes", async () => {
+            const res = await clearAll(crypto.randomUUID());
+            expect(res.status).toBe(403);
+            expect((await getNutritionGoals(userId))?.daily_calories).toBe(
+                2200,
+            );
+        });
+
+        test("with no goals stored it answers 303 and does not create a row", async () => {
+            const { sql } = getCtx();
+            await sql`delete from public.nutrition_goals where user_id = ${userId}`;
+            expect((await clearAll(userId)).status).toBe(303);
+            expect(await getNutritionGoals(userId)).toBeNull();
+        });
+
+        test("the page's header ⋯ holds Clear all goals, confirmed in the menu, posting to the route", async () => {
+            const html = await (await getPage(userId)).text();
+            expect(html).toContain('aria-label="Goals actions"');
+            expect(html).toMatch(
+                /data-fd-menu-arm[^>]*>[\s\S]*?Clear all goals/,
+            );
+            expect(html).toContain('action="/settings/goals/clear-all"');
+            expect(html).toContain('aria-label="Confirm Clear all goals"');
         });
     });
 });

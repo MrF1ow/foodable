@@ -750,3 +750,62 @@ test("a reorder or edit row is only a title, so any other option throws", () => 
     );
     expect(() => itemRow({ id: "e", title: "A", edit, reorder })).toThrow();
 });
+
+test("an input row is the title as the label of one autosaving input, with its unit", () => {
+    const html = itemRow({
+        title: "Calories",
+        input: {
+            id: "goals-daily-calories",
+            action: "/settings/goals/field",
+            fields: { field: "daily_calories" },
+            value: "2200",
+            unit: "kcal",
+            placeholder: "Not set",
+        },
+    });
+    expect(html).toStartWith(`<li class="fd-item-row fd-item-row--input">`);
+    expect(html).toContain(
+        `<form class="fd-autosave-input fd-item-row__face" method="post" action="/settings/goals/field" data-fd-autosave>`,
+    );
+    expect(html).toContain(
+        `<span class="fd-autosave-input__label">Calories</span>`,
+    );
+    expect(html).toContain(`data-fd-autosave-input`);
+    expect(html).toContain(`<span class="fd-autosave-input__unit">kcal</span>`);
+    expect(html).not.toContain("fd-item-row__chevron");
+});
+
+test("an input row can end in a chevron, hide its label and show a refusal", () => {
+    const html = itemRow({
+        title: "Goal name",
+        input: {
+            id: "n",
+            action: "/x",
+            value: "",
+            labelHidden: true,
+            chevron: true,
+            error: "Too long.",
+        },
+    });
+    expect(html).toContain("fd-item-row--input fd-item-row--input-chevron");
+    expect(html).toContain("fd-autosave-input--bare");
+    expect(html).toContain(`<span class="fd-visually-hidden">Goal name</span>`);
+    expect(html).toContain("fd-item-row__chevron");
+    expect(html).toContain(`aria-invalid="true"`);
+    expect(html).toContain(`role="alert">Too long.</p>`);
+});
+
+test("an input row is only a title and its input, so any other option throws", () => {
+    const input = { id: "n", action: "/x", value: "1" };
+    for (const extra of [
+        { href: "/a" },
+        { trailing: { kind: "chevron" as const } },
+        { value: "v" },
+        { lead: { kind: "icon" as const, name: "plus" as const } },
+        { select: true },
+    ]) {
+        expect(() => itemRow({ title: "A", input, ...extra })).toThrow(
+            /only a title and its input/,
+        );
+    }
+});

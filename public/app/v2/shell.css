@@ -348,28 +348,6 @@ body.fd-body .toast-region {
         padding: var(--space-sm) var(--space-3xl) var(--space-3xl);
     }
 
-    /* Settings › Saved foods' search box, which has not switched yet. */
-    .fd-settings-saved-search .fd-search {
-        box-sizing: border-box;
-        height: 48px;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 11px 14px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-md);
-        background: var(--surface-panel);
-        color: var(--text-tertiary);
-        font: 400 15px/20px var(--font-body);
-    }
-    .fd-settings-saved-search .fd-search-text {
-        flex: 1;
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-    }
-
     body.fd-body .toast-region {
         bottom: calc(24px + env(safe-area-inset-bottom, 0px));
     }

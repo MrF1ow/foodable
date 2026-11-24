@@ -1,4 +1,5 @@
 import { Hono, type Context } from "hono";
+import { createMiddleware } from "hono/factory";
 import { parseAppearanceInput } from "../shell.js";
 
 import { parseNutritionPrefsInput } from "../pages/v2/settings-account.js";
@@ -59,7 +60,10 @@ import {
     requireSiteUser,
     siteMember,
 } from "../middleware.js";
-import { HouseholdAlreadyExistsError } from "../../household.js";
+import {
+    canManageHousehold,
+    HouseholdAlreadyExistsError,
+} from "../../household.js";
 import {
     createHouseholdForCaller,
     getHouseholdMembership,
@@ -92,6 +96,7 @@ import { isDrinkUnit } from "../../alcohol.js";
 import { isWeightUnit } from "../../domain/units.js";
 import {
     clearGoalDays,
+    getAllGoalDays,
     getNutritionGoals,
     upsertNutritionGoals,
     type NutritionGoalsInput,
@@ -257,6 +262,40 @@ settingsRoutes.post("/settings/goals/days/clear", requireMember, async (c) => {
     return c.redirect("/settings/goals", 303);
 });
 
+// Clear all goals: the person's own standing targets, goal name and note, and
+// every per-day override, in one step (the MCP twin is set_nutrition_goals with
+// clear: true and the standing fields null). Only ever the caller's rows: the
+// id comes from the session, never the form.
+settingsRoutes.post("/settings/goals/clear-all", requireMember, async (c) => {
+    const userId = c.get("userId");
+    const member = siteMember(c);
+    const days = await getAllGoalDays(userId);
+    await clearGoalDays(
+        userId,
+        member.householdId,
+        days.map((day) => day.date),
+    );
+    if ((await getNutritionGoals(userId)) != null) {
+        await upsertNutritionGoals(userId, {
+            daily_calories: null,
+            daily_protein_g: null,
+            daily_carbs_g: null,
+            daily_fat_g: null,
+            daily_fiber_g: null,
+            daily_sugar_g: null,
+            daily_alcohol_g: null,
+            daily_caffeine_mg: null,
+            daily_water_ml: null,
+            target_weight_g: null,
+            goal_name: null,
+            goal_note: null,
+            goals_set_on: null,
+        });
+    }
+    // toast: none
+    return c.redirect("/settings/goals", 303);
+});
+
 settingsRoutes.get(SCORE_PATH, requireSiteUser, async (c) => {
     const page = await renderSettingsScoreV2Route(c.get("userId"));
     return c.html(page.html, page.status);
@@ -324,9 +363,28 @@ async function refusedScorePage(
     return c.html(page.html, page.status === 200 ? 400 : page.status);
 }
 
+/**
+ * A member who is not an owner or admin is told what they cannot do here, not
+ * that they need a membership (requireManager's answer for anyone refused).
+ */
+const explainManagerOnly = createMiddleware(async (c, next) => {
+    const member = c.get("siteMembership");
+    if (member != null && !canManageHousehold(member)) {
+        return c.html(
+            forbiddenDashboardHtml(
+                "system",
+                "Only an owner or admin can change the household default.",
+            ),
+            403,
+        );
+    }
+    await next();
+});
+
 settingsRoutes.get(
     SCORE_HOUSEHOLD_PATH,
     requireSiteUser,
+    explainManagerOnly,
     requireManager,
     async (c) => {
         const page = await renderSettingsScoreHouseholdV2Route(c.get("userId"));
@@ -339,6 +397,7 @@ settingsRoutes.get(
 settingsRoutes.post(
     SCORE_HOUSEHOLD_PATH,
     requireSiteUser,
+    explainManagerOnly,
     requireManager,
     async (c) => {
         const userId = c.get("userId");

@@ -6,6 +6,7 @@ import {
     upsertGoalDays,
     getGoalsForDate,
     getNutritionGoals,
+    getAllGoalDays,
     getWaterByDate,
     getLatestWeight,
     type NutritionGoalDayInput,
@@ -252,7 +253,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Set Nutrition Goals",
             description:
-                "Set the user's daily calorie and macro targets, and optionally a target body weight. Pass only the fields you want to update — omitted fields keep their previous value. Pass null to clear a target. Calories, protein, carbs, fat, fiber and water are targets to REACH; sugar, alcohol and caffeine are limits to STAY UNDER, and progress against them is worded accordingly. Gram targets are in grams, the caffeine limit in MILLIGRAMS. For a limit, 0 is a real value ('none at all'), not 'unset'. Omit date, from and to to change the standing defaults; pass date for one calendar day, or from and to (inclusive, YYYY-MM-DD) for a per-day override on each day in the range, at most 92 days per call. Per-day overrides do not accept target_weight — set that on the defaults instead. Pass clear: true with a date or range to remove those overrides and fall back to the defaults; clearing overrides (clear) or a set target (null) is recorded and undoable for 24 hours, and refused when agent deletes are off for the household or the person, or aimed at another person's goals. goal_name (at most 40 characters) and goal_note (at most 280) label the standing goals, for example Recomp; they apply to the defaults only, an omitted one keeps its stored value, and null or blank clears it. Saving any target also records today (in the user's timezone) as the day the goals were set; changing only the name or note leaves that day alone. Targets are the user's own choice; this is not medical or dietary advice.",
+                "Set the user's daily calorie and macro targets and target body weight. Pass only the fields you want to update — omitted fields keep their previous value. Pass null to clear a target. Calories, protein, carbs, fat, fiber and water are targets to REACH; sugar, alcohol and caffeine are limits to STAY UNDER, and progress against them is worded accordingly. For a limit, 0 is a real value ('none at all'), not 'unset'. Omit date, from and to to change the standing defaults; pass date for one calendar day, or from and to (inclusive, YYYY-MM-DD) for a per-day override on each day in the range, at most 92 days per call. Pass clear: true with a date or range to remove those overrides and fall back to the defaults. With clear: true and no date, from or to, every per-day override goes, on any day (targets, name and note only by null). Clearing overrides (clear) or a set target (null) is recorded and undoable for 24 hours, and refused when agent deletes are off for the household or the person, or aimed at another person's goals. goal_name (at most 40 characters) and goal_note (at most 280) label the standing goals; they apply to the defaults only, an omitted one keeps its stored value, and null or blank clears it. Saving any target also records today (in the user's timezone) as the day the goals were set; changing only the name or note leaves that day alone. Targets are the user's own choice; this is not medical or dietary advice.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -370,7 +371,7 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                     .boolean()
                     .optional()
                     .describe(
-                        "When true, remove per-day overrides for date or from/to and fall back to the defaults.",
+                        "When true, remove per-day overrides for date or from/to and fall back to the defaults. With no date, from or to: every override, on any day.",
                     ),
                 // Length is checked in the handler, not here: a schema-level
                 // rejection is a bare protocol error, while the handler's is a
@@ -417,14 +418,111 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         await Promise.all([
                             getNutritionGoals(userId),
                             getPreferredWeightUnit(userId),
-                            dayScoped ? callerHouseholdId() : null,
+                            dayScoped || args.clear
+                                ? callerHouseholdId()
+                                : null,
                         ]);
                     const displayUnit = args.unit ?? preferredUnit ?? "kg";
 
-                    if (args.clear && !dayScoped) {
-                        throw new Error(
-                            "clear requires date or from and to for per-day overrides.",
+                    // The defaults half of the call is checked before anything
+                    // is written, so a call it refuses has cleared nothing and
+                    // recorded no undo. Only demand a unit when actually
+                    // writing a numeric target.
+                    let target_weight_g: number | null = null;
+                    if (!dayScoped) {
+                        if (args.target_weight === undefined) {
+                            target_weight_g = existing?.target_weight_g ?? null;
+                        } else if (args.target_weight === null) {
+                            target_weight_g = null;
+                        } else {
+                            const writeUnit = await resolveWriteWeightUnit(
+                                userId,
+                                args.unit,
+                            );
+                            target_weight_g = toGrams(
+                                args.target_weight,
+                                writeUnit,
+                            );
+                            assertPlausibleWeight(target_weight_g, writeUnit);
+                        }
+                    }
+
+                    // clear: true with no date or range removes every per-day
+                    // override this person has, on any day, and only those:
+                    // the standing targets, name and note are cleared as ever,
+                    // by passing them as null in the same call.
+                    let clearAllUndo = "";
+                    let clearedAll = 0;
+                    const clearAll = async (hh: string) =>
+                        runDestructive(
+                            "set_nutrition_goals",
+                            async (rec) => {
+                                const dates = (
+                                    await getAllGoalDays(userId)
+                                ).map((row) => row.date);
+                                const found = await goalDayRows().list(
+                                    userId,
+                                    hh,
+                                    dates,
+                                );
+                                const ids = found.map((row) => row.id);
+                                await rec.captureByIds(
+                                    "nutrition_goal_days",
+                                    ids,
+                                    "deleted",
+                                );
+                                // Exactly the rows recorded, so what undo puts
+                                // back is what went.
+                                const removed = await goalDayRows().remove(
+                                    userId,
+                                    hh,
+                                    ids,
+                                );
+                                return {
+                                    value: removed,
+                                    summary: `Cleared ${overrides(removed)} on every day`,
+                                    changed: removed > 0,
+                                };
+                            },
+                            { target: userId },
                         );
+                    // A call that also writes the defaults clears the overrides
+                    // in the same guarded step as that write (below), so a
+                    // refusal, by the switch or the database, changes nothing.
+                    const clearHousehold =
+                        args.clear === true && !dayScoped ? householdId : null;
+                    if (clearHousehold != null) {
+                        const writesDefaults =
+                            GOAL_TARGET_ARGS.some(
+                                (f) => args[f] !== undefined,
+                            ) ||
+                            args.goal_name !== undefined ||
+                            args.goal_note !== undefined;
+                        if (!writesDefaults) {
+                            const run = await clearAll(clearHousehold);
+                            if (run.refused) return run.result;
+                            clearAllUndo = run.undo;
+                            clearedAll = run.value;
+                            const defaults =
+                                existing ?? (await getNutritionGoals(userId));
+                            const text = `${withUndo(`Cleared ${overrides(clearedAll)} on every day.`, clearAllUndo)}\n\n${formatGoals(defaults, displayUnit, alcohol)}`;
+                            return {
+                                content: [{ type: "text", text }],
+                                structuredContent: {
+                                    scope: "days",
+                                    days: [],
+                                    goals: goalsPayloadOf(defaults, alcohol),
+                                    target_weight:
+                                        defaults?.target_weight_g != null
+                                            ? fromGrams(
+                                                  defaults.target_weight_g,
+                                                  displayUnit,
+                                              )
+                                            : null,
+                                    weight_unit: displayUnit,
+                                },
+                            };
+                        }
                     }
 
                     if (dayScoped && householdId != null) {
@@ -640,23 +738,6 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         };
                     }
 
-                    // Only demand a unit when actually writing a numeric target.
-                    let target_weight_g: number | null;
-                    if (args.target_weight === undefined) {
-                        target_weight_g = existing?.target_weight_g ?? null;
-                    } else if (args.target_weight === null) {
-                        target_weight_g = null;
-                    } else {
-                        const writeUnit = await resolveWriteWeightUnit(
-                            userId,
-                            args.unit,
-                        );
-                        target_weight_g = toGrams(
-                            args.target_weight,
-                            writeUnit,
-                        );
-                        assertPlausibleWeight(target_weight_g, writeUnit);
-                    }
                     const merged = {
                         daily_calories:
                             args.daily_calories === undefined
@@ -717,7 +798,63 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                     });
                     let goals: NutritionGoals;
                     let undoNote = "";
-                    if (cleared.length > 0) {
+                    if (clearHousehold != null) {
+                        // Clearing every override and writing the defaults are
+                        // one guarded step: the switch refuses both or neither,
+                        // and a write the database refuses rolls back the
+                        // clear with it, so a refused call changes nothing.
+                        const hh = clearHousehold;
+                        const run = await runDestructive(
+                            "set_nutrition_goals",
+                            async (rec) => {
+                                const dates = (
+                                    await getAllGoalDays(userId)
+                                ).map((row) => row.date);
+                                const found = await goalDayRows().list(
+                                    userId,
+                                    hh,
+                                    dates,
+                                );
+                                const ids = found.map((row) => row.id);
+                                await rec.captureByIds(
+                                    "nutrition_goal_days",
+                                    ids,
+                                    "deleted",
+                                );
+                                await rec.captureByKeys(
+                                    "nutrition_goals",
+                                    [{ user_id: userId }],
+                                    "updated",
+                                );
+                                const saved = await upsertNutritionGoals(
+                                    userId,
+                                    merged,
+                                );
+                                const removed = await goalDayRows().remove(
+                                    userId,
+                                    hh,
+                                    ids,
+                                );
+                                const parts = [
+                                    `Cleared ${overrides(removed)} on every day`,
+                                    ...(cleared.length > 0
+                                        ? [
+                                              `cleared ${cleared.join(", ")} from the default goals`,
+                                          ]
+                                        : []),
+                                ];
+                                return {
+                                    value: { saved, removed },
+                                    summary: parts.join("; "),
+                                };
+                            },
+                            { target: userId },
+                        );
+                        if (run.refused) return run.result;
+                        goals = run.value.saved;
+                        clearedAll = run.value.removed;
+                        clearAllUndo = run.undo;
+                    } else if (cleared.length > 0) {
                         const run = await runDestructive(
                             "set_nutrition_goals",
                             async (rec) => {
@@ -750,11 +887,18 @@ export function registerGoalsTools(server: McpServer, ctx: ToolContext) {
                         alcohol,
                         "Alcohol target saved",
                     );
+                    const undoAll = [clearAllUndo, undoNote]
+                        .filter(Boolean)
+                        .join(" ");
+                    const clearedNote =
+                        clearedAll > 0
+                            ? `Cleared ${overrides(clearedAll)} on every day. `
+                            : "";
                     return {
                         content: [
                             {
                                 type: "text",
-                                text: `${withUndo("Goals updated.", undoNote)}\n\n${formatGoals(goals, displayUnit, alcohol)}${alcoholNote}`,
+                                text: `${clearedNote}${withUndo("Goals updated.", undoAll)}\n\n${formatGoals(goals, displayUnit, alcohol)}${alcoholNote}`,
                             },
                         ],
                         structuredContent: {

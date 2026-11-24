@@ -10,6 +10,7 @@
  * `data-fd-select-form` form), so the same form serves any selection.
  */
 import { esc } from "../../components/v2/html.js";
+import type { MenuItem } from "../../components/v2/menu.js";
 import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
 
 export type BulkActionSpec =
@@ -31,6 +32,11 @@ export type BulkActionSpec =
           one: string;
           /** "Discard {n} items?" */
           many: string;
+          /**
+           * What to say instead when any picked box posts under `name` (the
+           * recipes among foods): the same two forms, with the extra warning.
+           */
+          ifPicked?: { name: string; one: string; many: string };
           confirmLabel: string;
       };
 
@@ -39,6 +45,8 @@ export type SelectMode = {
     rootAttrs: string;
     /** The Select button. */
     toggle: string;
+    /** Select as an item of a page's ⋯ menu (the Detail bar's), in place of the button. */
+    menuItem: Extract<MenuItem, { kind: "button" }>;
     /** The Select button alone on a right-aligned row, for a list's top. */
     tools: string;
     /** The count and actions bar. Hidden until the list enters select mode. */
@@ -85,7 +93,7 @@ function confirmSheet(
     const formId = `${id}-form`;
     // Until the client counts, the message names no number.
     const message = spec.many.replace("{n}", () => "the selected");
-    const body = `<form id="${esc(formId)}" method="post" action="${esc(spec.action)}" data-fd-select-form>${returnField(returnTo)}<p class="fd-sheet-message" data-fd-select-message data-one="${esc(spec.one)}" data-many="${esc(spec.many)}">${esc(message)}</p></form>`;
+    const body = `<form id="${esc(formId)}" method="post" action="${esc(spec.action)}" data-fd-select-form>${returnField(returnTo)}<p class="fd-sheet-message" data-fd-select-message data-one="${esc(spec.one)}" data-many="${esc(spec.many)}"${spec.ifPicked ? ` data-if-name="${esc(spec.ifPicked.name)}" data-if-one="${esc(spec.ifPicked.one)}" data-if-many="${esc(spec.ifPicked.many)}"` : ""}>${esc(message)}</p></form>`;
     const actions = `<button type="button" class="fd-btn" command="close" commandfor="${esc(id)}">Cancel</button>
 <button type="submit" class="fd-btn fd-btn--danger" form="${esc(formId)}">${esc(spec.confirmLabel)}</button>`;
     return sheet({
@@ -127,6 +135,11 @@ export function selectMode(opts: {
     return {
         rootAttrs: ` data-fd-select="${esc(opts.scope)}"`,
         toggle,
+        menuItem: {
+            kind: "button",
+            label: "Select",
+            data: { "fd-select-toggle": opts.scope },
+        },
         tools: `<div class="fd-select-tools">${toggle}</div>`,
         bar,
         sheets,

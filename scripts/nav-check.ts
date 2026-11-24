@@ -3413,6 +3413,401 @@ try {
         },
     );
 
+    // Settings › Goals: a Turbo page whose numbers save themselves. A number
+    // left with a new value posts alone (no document load, no toast) and the
+    // focus stays where the person put it; a refused one stays as typed with
+    // the refusal under that number. Day ⋯ clears in place (a confirm in the
+    // menu, no sheet).
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings");
+    await setMarker();
+    await clickSel('a[href="/settings/goals"]');
+    await sleep(500);
+    // (a destructive item's confirm row is in the markup, hidden, after it)
+    const goalsPage = await ev<{
+        path: string;
+        marker: string | null;
+        title: string | null;
+        optOuts: number;
+        dialogs: number;
+        rows: string[];
+        dayMenu: string[];
+    }>(`({
+        path: location.pathname,
+        marker: window.__marker ?? null,
+        title: document.querySelector("h1")?.textContent?.trim() ?? null,
+        optOuts: document.querySelectorAll('.fd-settings [data-turbo="false"]').length,
+        dialogs: document.querySelectorAll(".fd-settings dialog").length,
+        rows: [...document.querySelectorAll(".fd-settings-content .fd-autosave-input__label")].map((e) => e.textContent),
+        dayMenu: [...document.querySelectorAll(".fd-settings-content .fd-menu__panel .fd-menu__label")].map((e) => e.textContent),
+    })`);
+    await control("reset=posts");
+    // Type a new calories value, then move to Protein: leaving the field saves.
+    await ev(`(() => {
+        const calories = document.getElementById("goals-daily-calories");
+        calories.focus();
+        calories.value = "2400";
+        calories.dispatchEvent(new Event("input", { bubbles: true }));
+        document.getElementById("goals-daily-protein-g").focus();
+    })()`);
+    await sleep(900);
+    const goalPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/goals/field",
+    );
+    const afterGoal = await ev<{
+        marker: string | null;
+        focus: string | null;
+        toasts: number;
+        path: string;
+    }>(`({
+        marker: window.__marker ?? null,
+        focus: document.activeElement?.id ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+        path: location.pathname,
+    })`);
+    // A refused value (the fixture answers 422 for 30000, as the route does for
+    // anything out of bounds): the page stays, the typed text stays, the
+    // refusal sits under that number.
+    await ev(`(() => {
+        const calories = document.getElementById("goals-daily-calories");
+        calories.focus();
+        calories.value = "30000";
+        calories.dispatchEvent(new Event("input", { bubbles: true }));
+        document.getElementById("goals-daily-protein-g").focus();
+    })()`);
+    await sleep(900);
+    const refused = await ev<{
+        marker: string | null;
+        path: string;
+        value: string | null;
+        invalid: string | null;
+        error: string | null;
+        errorInRow: boolean;
+        errors: number;
+    }>(`(() => {
+        const calories = document.getElementById("goals-daily-calories");
+        const error = document.getElementById("goals-daily-calories-error");
+        return {
+            marker: window.__marker ?? null,
+            path: location.pathname,
+            value: calories?.value ?? null,
+            invalid: calories?.getAttribute("aria-invalid") ?? null,
+            error: error?.textContent ?? null,
+            errorInRow: !!error && !!calories && error.closest("li") === calories.closest("li"),
+            errors: document.querySelectorAll(".fd-autosave-input__error").length,
+        };
+    })()`);
+    // The day's ⋯: Clear confirms in the menu and posts from there.
+    await control("reset=posts");
+    await goto("/settings/goals");
+    await setMarker();
+    await clickSel(".fd-settings-content .fd-menu [data-fd-menu-trigger]");
+    await sleep(150);
+    await clickSel(".fd-settings-content [data-fd-menu-arm]");
+    await sleep(150);
+    const clearConfirm = await ev<{ open: boolean; verbs: string[] }>(`({
+        open: !document.querySelector(".fd-settings-content .fd-menu__confirm-row")?.hidden,
+        verbs: [...document.querySelectorAll(".fd-settings-content .fd-menu__confirm-row .fd-menu__label")].map((e) => e.textContent),
+    })`);
+    await clickSel(
+        '.fd-settings-content .fd-menu__confirm-row form[action="/settings/goals/days/clear"] button',
+    );
+    await sleep(600);
+    const clearPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/goals/days/clear",
+    );
+    const afterClear = await ev<{ marker: string | null; toasts: number }>(`({
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+    })`);
+    // The header ⋯: Clear all goals confirms in the menu and posts from there.
+    await control("reset=posts");
+    await goto("/settings/goals");
+    await setMarker();
+    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
+    await sleep(150);
+    await clickSel(".fd-settings-detail [data-fd-menu-arm]");
+    await sleep(150);
+    const clearAllConfirm = await ev<{ open: boolean; verbs: string[] }>(`({
+        open: !document.querySelector(".fd-settings-detail .fd-menu__confirm-row")?.hidden,
+        verbs: [...document.querySelectorAll(".fd-settings-detail .fd-menu__confirm-row .fd-menu__label")].map((e) => e.textContent),
+    })`);
+    await clickSel(
+        '.fd-settings-detail .fd-menu__confirm-row form[action="/settings/goals/clear-all"] button',
+    );
+    await sleep(600);
+    const clearAllPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/goals/clear-all",
+    );
+    const afterClearAll = await ev<{
+        marker: string | null;
+        toasts: number;
+        path: string;
+    }>(`({
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+        path: location.pathname,
+    })`);
+    record(
+        "Settings › Goals autosave: a Turbo page; a number left with a new value posts alone with no document load or toast and keeps the focus; a refused value keeps its text with the error under that number; a day's ⋯ clears it with a confirm in place; the header ⋯ has Clear all goals, confirmed in place, posting over Turbo with no toast",
+        goalsPage.path === "/settings/goals" &&
+            goalsPage.marker === "stay" &&
+            goalsPage.title === "Goals" &&
+            goalsPage.optOuts === 0 &&
+            goalsPage.dialogs === 0 &&
+            goalsPage.rows.slice(0, 4).join("|") ===
+                "Calories|Protein|Carbs|Fat" &&
+            goalsPage.dayMenu.join("|") === "Clear|Cancel|Clear" &&
+            goalPosts.length === 1 &&
+            goalPosts[0]!.entries.some(
+                ([k, v]) => k === "field" && v === "daily_calories",
+            ) &&
+            goalPosts[0]!.entries.some(
+                ([k, v]) => k === "value" && v === "2400",
+            ) &&
+            afterGoal.marker === "stay" &&
+            afterGoal.focus === "goals-daily-protein-g" &&
+            afterGoal.toasts === 0 &&
+            afterGoal.path === "/settings/goals" &&
+            refused.marker === "stay" &&
+            refused.path === "/settings/goals" &&
+            refused.value === "30000" &&
+            refused.invalid === "true" &&
+            refused.error === "Calories must be at most 20000." &&
+            refused.errorInRow &&
+            refused.errors === 1 &&
+            clearConfirm.open &&
+            clearConfirm.verbs.join("|") === "Cancel|Clear" &&
+            clearPosts.length === 1 &&
+            clearPosts[0]!.entries.some(
+                ([k, v]) => k === "date" && v === "2026-11-14",
+            ) &&
+            afterClear.marker === "stay" &&
+            afterClear.toasts === 0 &&
+            clearAllConfirm.open &&
+            clearAllConfirm.verbs.join("|") === "Cancel|Clear all goals" &&
+            clearAllPosts.length === 1 &&
+            afterClearAll.marker === "stay" &&
+            afterClearAll.toasts === 0 &&
+            afterClearAll.path === "/settings/goals",
+        {
+            goalsPage,
+            goalPosts,
+            afterGoal,
+            refused,
+            clearConfirm,
+            clearPosts,
+            afterClear,
+            clearAllConfirm,
+            clearAllPosts,
+            afterClearAll,
+            ex: drain(),
+        },
+    );
+
+    // Settings › Saved foods & recipes: Select lives in the Detail bar's ⋯ and
+    // starts select mode from there (the menu closes, the row ⋯ steps aside);
+    // a food's ⋯ has Edit, Merge and Delete, and Edit and Merge open the one
+    // shared sheet filled for that food; saving posts every field of the sheet.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/saved");
+    await setMarker();
+    await clickSel(".fd-settings-detail [data-fd-menu-trigger]");
+    await sleep(150);
+    const barItems = await ev<string[]>(
+        `[...document.querySelectorAll(".fd-settings-detail .fd-menu__panel .fd-menu__label")].map((e) => e.textContent)`,
+    );
+    await clickSel(".fd-settings-detail [data-fd-select-toggle]");
+    await sleep(200);
+    const selecting = await ev<{
+        on: boolean;
+        barShown: boolean;
+        menuClosed: boolean;
+        rowMenuShown: boolean;
+        picks: number;
+    }>(`({
+        on: !!document.querySelector("[data-fd-select][data-fd-selecting]"),
+        barShown: !document.querySelector("[data-fd-select-bar]")?.hidden,
+        menuClosed: document.querySelector(".fd-settings-detail .fd-menu__panel")?.hidden === true,
+        rowMenuShown: [...document.querySelectorAll(".fd-saved-row .fd-item-row__control")].some((e) => getComputedStyle(e).display !== "none"),
+        picks: document.querySelectorAll("input[data-fd-select-item]").length,
+    })`);
+    await clickSel("[data-fd-select-cancel]");
+    await sleep(200);
+    const cancelled = await ev<{ on: boolean; focus: boolean }>(`({
+        on: !!document.querySelector("[data-fd-select][data-fd-selecting]"),
+        focus: !!document.activeElement?.closest(".fd-settings-detail [data-fd-menu]"),
+    })`);
+    // Edit: the row's ⋯, then Edit; the shared sheet holds that food.
+    const rowMenu =
+        '.fd-saved-row:has([name="food_ids[]"][value="f-eggs"]) [data-fd-menu]';
+    await clickSel(`${rowMenu} [data-fd-menu-trigger]`);
+    await sleep(150);
+    const foodItems = await ev<string[]>(
+        `[...document.querySelectorAll('.fd-saved-row:has([name="food_ids[]"][value="f-eggs"]) .fd-menu__panel .fd-menu__label')].map((e) => e.textContent)`,
+    );
+    await clickSel(`${rowMenu} [commandfor="fd-saved-edit"]`);
+    await sleep(300);
+    const editSheet = await ev<{
+        open: boolean;
+        action: string | null;
+        name: string | null;
+        calories: string | null;
+        egg: boolean;
+        milk: boolean;
+    }>(`(() => {
+        const d = document.getElementById("fd-saved-edit");
+        const f = d.querySelector("form");
+        return {
+            open: d.open,
+            action: f.getAttribute("action"),
+            name: f.elements["name"].value,
+            calories: f.elements["calories"].value,
+            egg: f.querySelector('input[name="allergens"][value="egg"]').checked,
+            milk: f.querySelector('input[name="allergens"][value="milk"]').checked,
+        };
+    })()`);
+    await ev(`(() => {
+        const f = document.querySelector("#fd-saved-edit form");
+        f.elements["name"].value = "Large eggs";
+    })()`);
+    await control("reset=posts");
+    await clickSel('#fd-saved-edit button[type="submit"][form]');
+    await sleep(700);
+    const editPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/household/items/f-eggs",
+    );
+    const afterEdit = await ev<{ marker: string | null; open: number }>(`({
+        marker: window.__marker ?? null,
+        open: document.querySelectorAll("dialog[open]").length,
+    })`);
+    // Merge: the same kind of item, the other shared sheet, filled with the food.
+    await clickSel(
+        '.fd-saved-row:has([name="food_ids[]"][value="f-milk"]) [data-fd-menu-trigger]',
+    );
+    await sleep(150);
+    await clickSel(
+        '.fd-saved-row:has([name="food_ids[]"][value="f-milk"]) [commandfor="foods-merge"]',
+    );
+    await sleep(300);
+    const mergeSheet = await ev<{
+        open: boolean;
+        drop: string | null;
+        keep: string | null;
+        dropHidden: boolean;
+    }>(`({
+        open: document.getElementById("foods-merge").open,
+        drop: document.querySelector('#foods-merge input[name="drop_id"]').value,
+        keep: document.querySelector('#foods-merge input[name="keep_id"]:checked')?.value ?? null,
+        dropHidden: !!document.querySelector('#foods-merge input[name="keep_id"][value="f-milk"]')?.closest("li")?.hidden,
+    })`);
+    record(
+        "Settings › Saved foods & recipes: Select in the Detail bar's ⋯ starts select mode (menu closed, row ⋯ out of the way) and Cancel puts focus back on the ⋯; a food's ⋯ is Edit, Merge, Delete; Edit and Merge open one shared sheet filled for that food, and Save posts every field, over Turbo",
+        barItems.join("|") === "Select" &&
+            selecting.on &&
+            selecting.barShown &&
+            selecting.menuClosed &&
+            !selecting.rowMenuShown &&
+            selecting.picks === 2 &&
+            !cancelled.on &&
+            cancelled.focus &&
+            foodItems.join("|") === "Edit|Merge|Delete|Cancel|Delete" &&
+            editSheet.open &&
+            editSheet.action === "/settings/household/items/f-eggs" &&
+            editSheet.name === "Eggs" &&
+            editSheet.calories === "155" &&
+            editSheet.egg &&
+            !editSheet.milk &&
+            editPosts.length === 1 &&
+            editPosts[0]!.entries.some(
+                ([k, v]) => k === "name" && v === "Large eggs",
+            ) &&
+            editPosts[0]!.entries.some(
+                ([k, v]) => k === "allergens" && v === "egg",
+            ) &&
+            editPosts[0]!.entries.some(
+                ([k, v]) => k === "archived" && v === "0",
+            ) &&
+            afterEdit.marker === "stay" &&
+            afterEdit.open === 0 &&
+            mergeSheet.open &&
+            mergeSheet.drop === "f-milk" &&
+            mergeSheet.keep === null &&
+            mergeSheet.dropHidden,
+        {
+            barItems,
+            selecting,
+            cancelled,
+            foodItems,
+            editSheet,
+            editPosts,
+            afterEdit,
+            mergeSheet,
+            ex: drain(),
+        },
+    );
+
+    // Settings › Product score: the preset chips save themselves; a weight is a
+    // pull-down on its row that saves the whole choice as Custom.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    await goto("/settings/product-score");
+    await setMarker();
+    await ev(
+        `document.querySelector('input[name="preset"][value="planet"]').click()`,
+    );
+    await sleep(800);
+    const presetPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/product-score",
+    );
+    await control("reset=posts");
+    await clickSel(
+        '[aria-label="Nutrition weight"] [data-fd-menu-trigger], .fd-menu--row:has([aria-label="Nutrition weight"]) [data-fd-menu-trigger]',
+    );
+    await sleep(150);
+    const weightMenu = await ev<{ open: boolean; items: number }>(`(() => {
+        const panel = document.querySelector('.fd-menu__panel[aria-label="Nutrition weight"]');
+        return { open: !panel.hidden, items: panel.querySelectorAll('[role="menuitemcheckbox"]').length };
+    })()`);
+    await clickSel(
+        '.fd-menu__panel[aria-label="Nutrition weight"] form:has(input[name="weight_nutrition"][value="60"]) button',
+    );
+    await sleep(700);
+    const weightPosts = (await stats()).posts.filter(
+        (p) => p.path === "/settings/product-score",
+    );
+    const afterScore = await ev<{
+        marker: string | null;
+        toasts: number;
+        path: string;
+    }>(`({
+        marker: window.__marker ?? null,
+        toasts: document.querySelectorAll(".toast-item").length,
+        path: location.pathname,
+    })`);
+    record(
+        "Settings › Product score autosave: picking a preset chip saves the choice, a weight's pull-down saves Custom with that weight, each as a Turbo form post with no document load or toast",
+        presetPosts.length === 1 &&
+            presetPosts[0]!.entries.some(
+                ([k, v]) => k === "preset" && v === "planet",
+            ) &&
+            presetPosts[0]!.entries.some(
+                ([k, v]) => k === "intent" && v === "choice",
+            ) &&
+            weightMenu.open &&
+            weightMenu.items === 11 &&
+            weightPosts.length === 1 &&
+            weightPosts[0]!.entries.some(
+                ([k, v]) => k === "preset" && v === "custom",
+            ) &&
+            weightPosts[0]!.entries.some(
+                ([k, v]) => k === "weight_nutrition" && v === "60",
+            ) &&
+            afterScore.marker === "stay" &&
+            afterScore.toasts === 0 &&
+            afterScore.path === "/settings/product-score",
+        { presetPosts, weightMenu, weightPosts, afterScore, ex: drain() },
+    );
+
     await send("Emulation.setDeviceMetricsOverride", {
         width: 430,
         height: 800,
