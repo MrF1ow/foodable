@@ -1,7 +1,7 @@
 // Shell behaviour. Loaded after /app.js, so FoodableApp and
 // Turbo are already there.
 //
-// 1. The log-meal dialog is reached by fragment. Search, Scan and Log food link
+// 1. The log-meal dialog is reached by fragment. Search and Log food link
 //    to `/#nutrition-log-meal`. The Trends tab goes to `/trends`. On the
 //    nutrition page the fragment opens the dialog (then drops it so a morph
 //    does not reopen it). On any other page that link navigates to `/`, and the
@@ -64,7 +64,7 @@ window.addEventListener("hashchange", handleFragment);
 // entry and no hashchange, so act here and leave the URL alone.
 document.addEventListener("click", (event) => {
     const link = event.target.closest?.(
-        "a.fd-tab[href*='#'], a.fd-log, a.fd-search, a.fd-scan, a.fd-logfood",
+        "a.fd-tab[href*='#'], a.fd-log, .fd-top-bar a[href*='#']",
     );
     if (
         !link ||
@@ -90,7 +90,7 @@ document.addEventListener("click", (event) => {
 
 document.addEventListener("click", (event) => {
     const link = event.target.closest?.(
-        ".fd-tabs a.fd-tab[href]:not([href*='#']), .fd-sidenav a.fd-sidelink[href]:not([href*='#']):not([data-turbo='false'])",
+        ".fd-tabs a.fd-tab[href]:not([href*='#']), .fd-sidebar__nav a.fd-side-link[href]:not([href*='#']):not([data-turbo='false'])",
     );
     if (
         !link ||
@@ -102,9 +102,17 @@ document.addEventListener("click", (event) => {
         event.altKey
     )
         return;
-    for (const a of link.closest("nav").querySelectorAll("a[aria-current]"))
+    // A Kitchen section link keeps its group (aria-current="true") marked: the
+    // section is the page, Kitchen stays the current group.
+    const isSub = link.classList.contains("fd-side-link--sub");
+    for (const a of link.closest("nav").querySelectorAll("a[aria-current]")) {
+        if (isSub && a.getAttribute("aria-current") === "true") continue;
         a.removeAttribute("aria-current");
+        a.classList.remove("fd-side-link--current");
+    }
     link.setAttribute("aria-current", "page");
+    if (link.classList.contains("fd-side-link"))
+        link.classList.add("fd-side-link--current");
 });
 
 document.addEventListener("turbo:before-render", (event) => {

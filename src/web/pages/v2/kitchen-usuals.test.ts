@@ -219,11 +219,9 @@ describe("renderKitchenUsualsV2Page", () => {
         expect(html).toContain("fd-kitchen-overview-seg");
         expect(html).toContain("Groceries · 8");
         expect(html).toContain('href="/kitchen/usuals"');
-        expect(html).not.toMatch(
-            /fd-sidelink fd-sidelink-settings[^>]*aria-current/,
-        );
+        expect(html).not.toMatch(/fd-sidebar__settings[^>]*aria-current/);
         expect(html).toMatch(
-            /fd-sidesub[^>]*href="\/kitchen\/usuals"[^>]*aria-current="page"/,
+            /fd-side-link--sub[^>]*href="\/kitchen\/usuals"[^>]*aria-current="page"/,
         );
         const kitchenTab = html.match(
             /<nav class="fd-kitchen-tabs"[\s\S]*?<\/nav>/,

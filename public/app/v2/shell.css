@@ -233,9 +233,6 @@ html:has(body.fd-body) {
     border-radius: 50%;
     background: transparent;
 }
-.fd-tab .fd-tab-dot-attention {
-    background: var(--status-warn);
-}
 .fd-tab[aria-current="page"] .fd-tab-dot {
     background: var(--accent-fill);
 }
@@ -264,16 +261,10 @@ body.fd-body .toast-region {
 /* Keyboard focus on every fd- control. */
 :is(
     .fd-account-chip,
-    .fd-household,
     .fd-kitchen-tab,
     .fd-utab,
     .fd-tab,
-    .fd-log,
-    .fd-sidelink,
-    .fd-account,
-    .fd-search,
-    .fd-scan,
-    .fd-logfood
+    .fd-log
 ):focus-visible {
     outline: 2px solid var(--accent-text);
     outline-offset: 2px;
@@ -285,9 +276,12 @@ body.fd-body .toast-region {
     }
 }
 
-/* Desktop chrome is in the markup but hidden below the breakpoint. */
-.fd-sidebar,
-.fd-topbar {
+/* Desktop chrome is in the markup but hidden below the breakpoint. The two
+   selectors are scoped to the shell so they win over the components' own
+   display (`.fd-sidebar--design` and `.fd-top-bar` show at every width where
+   the gallery draws them). */
+.fd-shell > .fd-sidebar,
+.fd-column > .fd-top-bar {
     display: none;
 }
 
@@ -308,30 +302,18 @@ body.fd-body .toast-region {
         align-items: flex-start;
     }
 
-    /* Sidebar: 248 wide, right border, padding 28 / 16 / 24 / 16, gap 2. It
-       stays put while the page scrolls. */
-    .fd-sidebar {
+    /* Sidebar (design: Desktop shell): the Sidebar component's column, 248
+       wide, kept in view while the page scrolls. Its parts and padding are
+       in layout.css and the `--design` modifier below. */
+    .fd-shell > .fd-sidebar {
+        display: flex;
         position: sticky;
         top: 0;
-        box-sizing: border-box;
         flex: none;
-        width: 248px;
         height: 100dvh;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-        padding: 28px 16px 24px;
-        border-right: 1px solid var(--line);
-        font-family: var(--font-body);
     }
-    .fd-household {
-        color: inherit;
-        text-decoration: none;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 4px 8px 22px;
-    }
+    /* The member avatar's own circle (.fd-avatar, a picture over initials)
+       on the pages that draw one. */
     .fd-avatar {
         box-sizing: border-box;
         flex: none;
@@ -345,124 +327,17 @@ body.fd-body .toast-region {
         color: var(--text-primary);
         font: 600 13px/17px var(--font-body);
     }
-    .fd-household-text,
-    .fd-account-text {
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 1px;
-    }
-    .fd-household-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: var(--text-primary);
-        font: 600 14px/18px var(--font-body);
-    }
-    .fd-household-meta,
-    .fd-account-role {
-        color: var(--text-secondary);
-        font: 400 12px/16px var(--font-body);
-    }
 
-    .fd-sidenav {
-        flex: 1;
-        min-height: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-    .fd-sidelink {
-        box-sizing: border-box;
-        display: flex;
-        align-items: center;
-        gap: 12px;
-        padding: 10px 12px;
-        border-radius: var(--radius-sm);
-        color: var(--text-secondary);
-        font: 400 15px/20px var(--font-body);
-        text-decoration: none;
-    }
-    .fd-sidelink-label {
-        flex: 1;
-        min-width: 0;
-    }
-    .fd-sidelink[aria-current] {
-        background: var(--surface-panel);
-        color: var(--text-primary);
-        font-weight: 500;
-    }
-    .fd-side-dot {
-        flex: none;
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        background: transparent;
-    }
-    .fd-sidelink .fd-side-dot-attention {
-        background: var(--status-warn);
-    }
-    .fd-sidelink[aria-current] .fd-side-dot {
-        background: var(--accent-fill);
-    }
-    /* Kitchen sections under the active Kitchen link: 32 high, padding
-       7 / 12 / 7 / 48, Geist 14; the current one Medium text/primary. */
-    .fd-sidesub {
-        box-sizing: border-box;
-        display: flex;
-        align-items: center;
-        padding: 7px 12px 7px 48px;
-        border-radius: var(--radius-sm);
-        color: var(--text-secondary);
-        font: 400 14px/18px var(--font-body);
-        text-decoration: none;
-    }
-    .fd-sidesub[aria-current="page"] {
-        color: var(--text-primary);
-        font-weight: 500;
-    }
-    /* Settings sits at the bottom, above the account row. */
-    .fd-sidelink-settings {
-        margin-top: auto;
-    }
-    .fd-account {
-        box-sizing: border-box;
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 12px 8px 4px;
-        border-top: 1px solid var(--line);
-        color: var(--text-tertiary);
-        text-decoration: none;
-    }
-    .fd-account .fd-avatar {
-        width: 36px;
-        height: 36px;
-    }
-    .fd-account-text {
-        flex: 1;
-    }
-    .fd-account-name {
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        color: var(--text-primary);
-        font: 400 14px/18px var(--font-body);
-    }
-    @media (hover: hover) and (pointer: fine) {
-        .fd-sidelink:not([aria-current]):hover,
-        .fd-sidesub:not([aria-current="page"]):hover {
-            background: var(--surface-raised);
-            color: var(--text-primary);
-        }
-    }
-
-    /* Main: padding 28 / 40 / 48 / 40, gap 24. */
+    /* Main: the Top bar over the page, which has the design's content padding
+       (8 / 32 / 32 / 32). */
     .fd-column {
         box-sizing: border-box;
         flex: 1;
-        gap: 24px;
-        padding: 28px 40px 48px;
+        gap: 0;
+        padding: 0;
+    }
+    .fd-column > .fd-top-bar {
+        display: flex;
     }
     .fd-main.app-main {
         flex: none;
@@ -470,24 +345,12 @@ body.fd-body .toast-region {
            desktop column fills the space beside the sidebar instead. */
         max-inline-size: none;
         margin: 0;
-        padding: 0;
+        padding: var(--space-sm) var(--space-3xl) var(--space-3xl);
     }
 
-    /* Top bar: search field (520 wide), scan, Log food. */
-    .fd-topbar {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding-bottom: 28px;
-        font-family: var(--font-body);
-    }
-    .fd-topbar-fill {
-        flex: 1;
-    }
-    .fd-search {
+    /* Settings › Saved foods' search box, which has not switched yet. */
+    .fd-settings-saved-search .fd-search {
         box-sizing: border-box;
-        flex: 0 1 520px;
-        min-width: 0;
         height: 48px;
         display: flex;
         align-items: center;
@@ -498,52 +361,13 @@ body.fd-body .toast-region {
         background: var(--surface-panel);
         color: var(--text-tertiary);
         font: 400 15px/20px var(--font-body);
-        text-decoration: none;
     }
-    .fd-search-text {
+    .fd-settings-saved-search .fd-search-text {
         flex: 1;
         min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
-    }
-    .fd-kbd {
-        box-sizing: border-box;
-        flex: none;
-        padding: 2px 7px;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-sm);
-        color: var(--text-secondary);
-        font: 400 12px/16px var(--font-body);
-    }
-    .fd-scan {
-        box-sizing: border-box;
-        flex: none;
-        width: 42px;
-        height: 42px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        border: 1px solid var(--line);
-        border-radius: var(--radius-pill);
-        background: var(--surface-panel);
-        color: var(--text-primary);
-        text-decoration: none;
-    }
-    .fd-logfood {
-        box-sizing: border-box;
-        flex: none;
-        height: 42px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        gap: 8px;
-        padding: 0 18px;
-        border-radius: var(--radius-pill);
-        background: var(--accent-fill);
-        color: var(--accent-on);
-        font: 600 14px/18px var(--font-body);
-        text-decoration: none;
     }
 
     body.fd-body .toast-region {
@@ -553,14 +377,11 @@ body.fd-body .toast-region {
 
 /* scale-guard: checked */
 
-/* The design's Sidebar (src/web/components/v2/sidebar.ts) is the .fd-sidebar
- * block above with its own parts inside (layout.css). These two modifiers are
- * all it changes; the live sidebar, which never carries them, renders as
- * before. --design is a column at every width (the live one is hidden below
- * 1024, and its column, width and border sit in the media rule), 248 wide at
- * most and never wider than its box, with the design's padding; --inline lets
- * it sit in the page flow, as tall as its box, instead of sticking to the
- * window. */
+/* The Sidebar component (src/web/components/v2/sidebar.ts) is the .fd-sidebar
+ * block with its parts inside (layout.css). --design is a column at every
+ * width (the shell hides it below 1024 above), 248 wide at most and never
+ * wider than its box, with the design's padding; --inline lets it sit in the
+ * page flow, as tall as its box, instead of sticking to the window. */
 .fd-sidebar--design {
     --fd-sidebar-w: 248px;
     box-sizing: border-box;

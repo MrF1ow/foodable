@@ -411,9 +411,9 @@ try {
             return {
                 tabs: disp(".fd-tabs"),
                 sidebar: disp(".fd-sidebar"),
-                topbar: disp(".fd-topbar"),
+                topbar: disp(".fd-top-bar"),
                 active: q(".fd-tabs a[aria-current='page']")?.getAttribute("aria-label") ?? null,
-                side: q(".fd-sidenav a.fd-sidelink[aria-current] .fd-sidelink-label")?.textContent ?? null,
+                side: q(".fd-sidebar__nav a.fd-side-link[aria-current] .fd-side-link__label")?.textContent ?? null,
                 h1: q("h1")?.textContent?.trim() ?? null,
                 marker: window.__marker ?? null,
                 themeColor: q("meta[name='theme-color']")?.getAttribute("content") ?? null,
@@ -499,9 +499,9 @@ try {
         `Math.round(document.querySelector(".fd-sidebar").getBoundingClientRect().width)`,
     );
     const exposedNavs = await ev<number>(
-        `[...document.querySelectorAll("nav.fd-tabs, nav.fd-sidenav")].filter((n) => getComputedStyle(n).display !== "none").length`,
+        `[...document.querySelectorAll("nav.fd-tabs, nav.fd-sidebar__nav")].filter((n) => getComputedStyle(n).display !== "none").length`,
     );
-    await clickSel('.fd-sidenav a[href="/kitchen/fridge"]');
+    await clickSel('.fd-sidebar__nav a[href="/kitchen/fridge"]');
     await sleep(250);
     const v2DesktopKitchen = await v2Snap();
     record(
@@ -586,13 +586,204 @@ try {
     });
     await sleep(200);
 
+    // The top bar is the Top bar component: the search field (⌘K hinted) and
+    // Log food open the search sheet, there is no scan button, and the current
+    // sidebar link is told by type alone (no fill).
+    const topBarShape = await ev<{
+        scan: number;
+        hint: string | null;
+        searchData: string | null;
+        logFood: string | null;
+        currentFill: string | null;
+        currentWeight: string | null;
+        sidebarDots: number;
+        hintBox: { w: number; h: number; gapRight: number } | null;
+    }>(`(() => {
+        const top = document.querySelector(".fd-top-bar");
+        const cur = document.querySelector(".fd-sidebar__nav a.fd-side-link[aria-current]");
+        return {
+            scan: top.querySelectorAll('[aria-label*="can"], .fd-icon--scan').length,
+            hint: top.querySelector(".fd-search-field__shortcut")?.textContent ?? null,
+            searchData: top.querySelector(".fd-search-field")?.getAttribute("data-fd-open-sheet") ?? null,
+            logFood: top.querySelector("a[data-fd-open-sheet]")?.textContent?.trim() ?? null,
+            currentFill: cur ? getComputedStyle(cur).backgroundColor : null,
+            currentWeight: cur ? getComputedStyle(cur).fontWeight : null,
+            sidebarDots: document.querySelectorAll(".fd-sidebar [class*='dot']").length,
+            hintBox: (() => {
+                const chip = top.querySelector(".fd-search-field__shortcut");
+                const field = top.querySelector(".fd-search-field");
+                if (!chip || !field) return null;
+                const c = chip.getBoundingClientRect();
+                const f = field.getBoundingClientRect();
+                return { w: c.width, h: c.height, gapRight: f.right - c.right };
+            })(),
+        };
+    })()`);
+    await clickSel(".fd-top-bar .fd-search-field__input");
+    await sleep(400);
+    const topBarSearchOpen = await ev<string[]>(
+        `[...document.querySelectorAll("dialog[open]")].map((d) => d.id)`,
+    );
+    await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await sleep(300);
+    await clickSel(".fd-top-bar a[data-fd-open-sheet]");
+    await sleep(400);
+    const topBarLogOpen = await ev<string[]>(
+        `[...document.querySelectorAll("dialog[open]")].map((d) => d.id)`,
+    );
+    await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+        nativeVirtualKeyCode: 27,
+    });
+    await sleep(300);
+    record(
+        "v2 top bar: search field and Log food open the search sheet, ⌘K hint, no scan; sidebar current link has no fill and no dot",
+        topBarShape.scan === 0 &&
+            topBarShape.hint === "⌘K" &&
+            // The design's Shortcut (593979 › 594028): 35 × 18, 13 px in from the field's right edge.
+            topBarShape.hintBox?.w === 35 &&
+            topBarShape.hintBox.h === 18 &&
+            topBarShape.hintBox.gapRight === 13 &&
+            topBarShape.searchData === "fd-log-search" &&
+            topBarShape.logFood === "Log food" &&
+            topBarShape.currentFill === "rgba(0, 0, 0, 0)" &&
+            Number(topBarShape.currentWeight) >= 500 &&
+            topBarShape.sidebarDots === 0 &&
+            topBarSearchOpen.includes("fd-log-search") &&
+            topBarLogOpen.includes("fd-log-search"),
+        { topBarShape, topBarSearchOpen, topBarLogOpen, ex: drain() },
+    );
+
+    // The search field is a trigger an input stands in for: Enter, ArrowDown
+    // and ⌘K/Ctrl+K open the sheet from it, it carries the shortcut, and
+    // Escape returns focus to the input (not to its wrapper or the body).
+    const tap = async (
+        key: string,
+        code: string,
+        vk: number,
+        modifiers = 0,
+    ) => {
+        for (const type of ["rawKeyDown", "keyUp"]) {
+            await send("Input.dispatchKeyEvent", {
+                type,
+                key,
+                code,
+                modifiers,
+                windowsVirtualKeyCode: vk,
+                nativeVirtualKeyCode: vk,
+            });
+        }
+        await sleep(350);
+    };
+    const FIELD = ".fd-top-bar .fd-search-field__input";
+    const fieldState = () =>
+        ev<{ open: string[]; onField: boolean }>(`({
+            open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
+            onField: document.activeElement === document.querySelector(${JSON.stringify(FIELD)}),
+        })`);
+    const focusField = () =>
+        ev(`document.querySelector(${JSON.stringify(FIELD)}).focus()`);
+    await goto("/");
+    const fieldKeys = await ev<string | null>(
+        `document.querySelector(${JSON.stringify(FIELD)})?.getAttribute("aria-keyshortcuts") ?? null`,
+    );
+    await focusField();
+    await tap("Enter", "Enter", 13);
+    const afterEnter = await fieldState();
+    await tap("Escape", "Escape", 27);
+    const escapeAfterEnter = await fieldState();
+    await tap("ArrowDown", "ArrowDown", 40);
+    const afterArrowDown = await fieldState();
+    await tap("Escape", "Escape", 27);
+    await focusField();
+    await tap("k", "KeyK", 75, modK);
+    const afterCtrlKOnField = await fieldState();
+    await tap("Escape", "Escape", 27);
+    await ev(`document.activeElement?.blur()`);
+    await tap("k", "KeyK", 75, modK);
+    const afterCtrlKOnBody = await fieldState();
+    await tap("Escape", "Escape", 27);
+    const escapeAfterCtrlK = await fieldState();
+    record(
+        "v2 top bar search field: Enter, ArrowDown and ⌘K open the sheet, it names the shortcut, Escape returns focus to the input",
+        fieldKeys === "Control+K Meta+K" &&
+            afterEnter.open.includes("fd-log-search") &&
+            escapeAfterEnter.open.length === 0 &&
+            escapeAfterEnter.onField &&
+            afterArrowDown.open.includes("fd-log-search") &&
+            afterCtrlKOnField.open.includes("fd-log-search") &&
+            afterCtrlKOnBody.open.includes("fd-log-search") &&
+            escapeAfterCtrlK.open.length === 0 &&
+            escapeAfterCtrlK.onField,
+        {
+            fieldKeys,
+            afterEnter,
+            escapeAfterEnter,
+            afterArrowDown,
+            afterCtrlKOnField,
+            afterCtrlKOnBody,
+            escapeAfterCtrlK,
+            ex: drain(),
+        },
+    );
+
+    // A Kitchen section link keeps the Kitchen group marked the moment it is
+    // clicked, before the visit renders (no flash of nothing current).
+    await goto("/kitchen/fridge");
+    const kitchenMark = () =>
+        ev<
+            string[]
+        >(`[...document.querySelectorAll(".fd-sidebar__nav a")].map((a) =>
+            a.querySelector(".fd-side-link__label")?.textContent + "|" + (a.getAttribute("aria-current") ?? "-") + "|" + (a.classList.contains("fd-side-link--current") ? "cur" : "")
+        ).filter((row) => /^(Kitchen|Fridge|Groceries|Usuals)\\b/.test(row))`);
+    const kitchenBefore = await kitchenMark();
+    // Stop the visit after the shell's own listener has run.
+    await ev(
+        `window.addEventListener("click", (e) => e.preventDefault(), { once: true })`,
+    );
+    await clickSel(".fd-sidebar__nav a.fd-side-link--sub[href*='groceries']");
+    const kitchenAfter = await kitchenMark();
+    const groupRow = (rows: string[]) =>
+        rows.find((r) => r.startsWith("Kitchen|"));
+    record(
+        "v2 sidebar: clicking a Kitchen section keeps the Kitchen group current",
+        groupRow(kitchenBefore) === "Kitchen|true|cur" &&
+            groupRow(kitchenAfter) === "Kitchen|true|cur" &&
+            kitchenAfter.some((r) => /^Groceries[^|]*\|page\|cur/.test(r)) &&
+            !kitchenAfter.some((r) => r.startsWith("Fridge|page")),
+        { kitchenBefore, kitchenAfter, ex: drain() },
+    );
+
     await goto("/recipes");
     await setMarker();
-    await clickSel("a.fd-household");
+    await clickSel("a.fd-sidebar__household");
     await sleep(500);
     const sidebarHousehold = await ev<{ path: string; side: string | null }>(`({
         path: location.pathname,
-        side: document.querySelector(".fd-sidenav a.fd-sidelink[aria-current] .fd-sidelink-label")?.textContent ?? null,
+        side: document.querySelector(".fd-sidebar__nav a.fd-side-link[aria-current] .fd-side-link__label")?.textContent ?? null,
     })`);
     record(
         "v2 sidebar Household block opens the members page",
@@ -600,7 +791,7 @@ try {
             sidebarHousehold.side === "Settings",
         { sidebarHousehold, ex: drain() },
     );
-    await clickSel('.fd-sidenav a[href="/settings"]');
+    await clickSel('.fd-sidebar__nav a[href="/settings"]');
     await sleep(400);
     const v2SidebarSettings = await v2Snap();
     record(
@@ -1643,13 +1834,13 @@ try {
             const bells = [...document.querySelectorAll(".fd-bell")].filter(shown);
             const bell = bells[0];
             const dot = bell?.querySelector(".fd-bell__dot");
-            const logFood = document.querySelector(".fd-logfood");
+            const logFood = document.querySelector(".fd-top-bar a[data-fd-open-sheet]");
             return {
                 visible: bells.length,
                 unread: bells.filter((b) => b.classList.contains("fd-bell--unread")).length,
                 dotWidth: dot ? Math.round(dot.getBoundingClientRect().width) : 0,
                 inCluster: !!bell?.closest(".fd-cluster"),
-                inTopBar: !!bell?.closest(".fd-topbar"),
+                inTopBar: !!bell?.closest(".fd-top-bar"),
                 leftOfLogFood: !!bell && shown(logFood)
                     ? bell.getBoundingClientRect().right <= logFood.getBoundingClientRect().left
                     : false,
@@ -1715,7 +1906,7 @@ try {
     // shows as read, so the dot would be gone without a visit. (The page is
     // still the desktop one from above.)
     const bellPt = await ev<{ x: number; y: number }>(`(() => {
-        const r = document.querySelector(".fd-topbar .fd-bell").getBoundingClientRect();
+        const r = document.querySelector(".fd-top-bar .fd-bell").getBoundingClientRect();
         return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
     })()`);
     await send("Input.dispatchMouseEvent", { type: "mouseMoved", x: 5, y: 5 });

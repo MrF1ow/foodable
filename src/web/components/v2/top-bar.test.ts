@@ -22,6 +22,13 @@ test("the search is the boxed Search field with the placeholder and a ⌘K hint"
     expect(html).toContain(">⌘K</kbd>");
 });
 
+test("the field's input carries the shortcut its hint names", () => {
+    expect(topBar(BASE)).toContain('aria-keyshortcuts="Control+K Meta+K"');
+    expect(topBar({ ...BASE, search: { shortcut: false } })).not.toContain(
+        "aria-keyshortcuts",
+    );
+});
+
 test("there is no scan button: scanning is a phone thing (rule 25)", () => {
     const html = topBar(BASE);
     expect(html).not.toContain("fd-icon--scan");

@@ -288,7 +288,9 @@ describe("/app-v2.js", () => {
         // +~0.6 KB Log search: a past meal with several items has an Add button that logs it again whole.
         // +~1.2 KB Log link: a past meal with no single food shows its own row first in the search sheet, never twice.
         // +~0.5 KB Recipes: typing in the search box hides the cards whose name misses it.
-        expect(js.length).toBeLessThan(196_800);
+        // +~0.5 KB Top bar: the search field is a trigger, so typing into it moves the text into the log search and opens it.
+        // +~1.3 KB Top bar: Enter, ArrowDown and ⌘K work from the field, and focus returns to its input.
+        expect(js.length).toBeLessThan(199_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { raw } from "./html.js";
 import { sidebar, type SidebarOptions } from "./sidebar.js";
 import { injectedAttributes, XSS, XSS_ESCAPED } from "./test-helpers.js";
 
@@ -89,12 +90,14 @@ test("sub links sit under their Main link as Sub side links", () => {
     expect(html).toContain('aria-current="true"');
 });
 
-test("the account row has the avatar, name, role and a chevron", () => {
+test("the account row has the avatar, name, role, a chevron and an accessible name", () => {
     const html = sidebar(BASE);
     expect(html).toContain('<span class="fd-sidebar__title">Ethan Flow</span>');
     expect(html).toContain('<span class="fd-sidebar__meta">Owner</span>');
     expect(html).toContain(">EF</span>");
     expect(html).toContain("fd-icon--chevron-right");
+    // The row's name says what it is, with the person and role.
+    expect(html).toContain('aria-label="Account: Ethan Flow, Owner"');
 });
 
 test("inline sits in the page flow (the gallery); the default is the live sticky column", () => {
@@ -117,7 +120,26 @@ test("every string is escaped and a javascript: link is refused", async () => {
     expect(() =>
         sidebar({
             ...BASE,
-            account: { ...BASE.account, href: "javascript:1" },
+            account: { name: "A", role: "B", href: "javascript:1" },
         }),
     ).toThrow();
+});
+
+test("the account row can carry its own circle and attributes, or be left out", () => {
+    const html = sidebar({
+        ...BASE,
+        account: {
+            name: "Ethan Flow",
+            role: "Owner",
+            href: "/s",
+            avatar: raw('<span class="mine">EF</span>'),
+            data: { turbo: "false" },
+        },
+    });
+    expect(html).toContain(
+        '<a class="fd-sidebar__account" href="/s" aria-label="Account: Ethan Flow, Owner" data-turbo="false"><span class="mine">EF</span>',
+    );
+    const without = sidebar({ ...BASE, account: undefined });
+    expect(without).not.toContain("fd-sidebar__account");
+    expect(without).toContain("fd-sidebar__household");
 });

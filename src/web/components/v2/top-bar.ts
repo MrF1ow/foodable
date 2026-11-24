@@ -4,8 +4,8 @@
  * primary Log food button. There is no scan button: scanning is a phone
  * action (rule 25).
  *
- * Built from the Search field, Bell and Button components. The live shell's
- * `.fd-topbar` is untouched.
+ * Built from the Search field, Bell and Button components. It is the shell's
+ * top bar from 1024 px (`shell.css` hides it below).
  *
  * Styles: `public/app/v2/layout.css`.
  */
@@ -43,6 +43,11 @@ export function topBar(opts: TopBarOptions): Html {
         placeholder: search.placeholder ?? SEARCH_TEXT,
         shortcut:
             search.shortcut === false ? undefined : (search.shortcut ?? "⌘K"),
+        // The hint is the Command/Control+K shortcut the page script binds.
+        keyShortcuts:
+            search.shortcut === false || search.shortcut != null
+                ? undefined
+                : "Control+K Meta+K",
         name: search.name,
         data: search.data,
         style: "boxed",

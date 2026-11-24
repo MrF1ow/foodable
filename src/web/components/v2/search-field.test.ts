@@ -25,6 +25,12 @@ test("boxed is the default: a lead icon, a search input and nothing else", () =>
     }
 });
 
+test("keyShortcuts is written on the input", () => {
+    expect(searchField({ label: "S", keyShortcuts: "Control+K" })).toContain(
+        'autocomplete="off" aria-keyshortcuts="Control+K">',
+    );
+});
+
 test("line is the same field without a box", () => {
     expect(searchField({ ...base, style: "line" })).toContain(
         "fd-search-field fd-search-field--line",
