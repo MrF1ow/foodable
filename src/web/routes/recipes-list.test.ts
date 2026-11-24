@@ -24,7 +24,10 @@ import {
     createMemoryRecipesStore,
     createRecipe,
 } from "../../domain/recipes.js";
-import { createMemoryVariantsStore } from "../../domain/recipe-variants.js";
+import {
+    createMemoryVariantsStore,
+    setRecipeVariant,
+} from "../../domain/recipe-variants.js";
 import { recheckRecipe } from "../../domain/recipe-import.js";
 import * as actualAttention from "../attention.js";
 import * as actualNoticeDismissals from "../../db/notice-dismissals.js";
@@ -93,6 +96,8 @@ const db = {
     plansStore: createMemoryPlansStore(),
     /** The household owner's timezone, which is the household's calendar. */
     ownerTimezone: "UTC",
+    /** Bob's role; Alice is the owner. */
+    bobRole: "member" as "member" | "admin",
     recipeId: "",
     flourId: "",
     /** Makes the next insertMeal throw, like a db outage. */
@@ -127,6 +132,8 @@ mock.module("../../db/recipes.js", () => ({
     ...realRecipesDb,
     liveRecipesStore: () => db.recipesStore,
     liveRecipeVariantsStore: () => db.variantsStore,
+    // No database here: the memory stores are the "transaction".
+    recipeAlignTransaction: () => (fn: () => Promise<unknown>) => fn(),
 }));
 mock.module("../../db/grocery.js", () => ({
     ...realGrocery,
@@ -219,7 +226,7 @@ mock.module("../../db/household.js", () => ({
               ? {
                     userId: BOB,
                     householdId: HH,
-                    role: "member" as const,
+                    role: db.bobRole,
                     displayName: "Bob",
                 }
               : null,
@@ -233,7 +240,7 @@ mock.module("../../db/household.js", () => ({
         {
             userId: BOB,
             householdId: HH,
-            role: "member" as const,
+            role: db.bobRole,
             displayName: "Bob",
         },
     ],
@@ -295,6 +302,7 @@ beforeEach(async () => {
     db.settingsStore = createMemorySettingsStore();
     db.plansStore = createMemoryPlansStore();
     db.ownerTimezone = "UTC";
+    db.bobRole = "member";
     db.meals = [];
     db.failInsert = false;
     db.fridgeStore.linkDismissals(db.dismissalsStore);
@@ -2512,5 +2520,448 @@ describe("GET /recipes with ?filter and ?q", () => {
         expect(res.headers.get("location")).toBe(
             `/recipes?q=pan&filter=quick,favourites#recipe-${db.recipeId}`,
         );
+    });
+});
+
+describe("recipe versions: compare and align (admin)", () => {
+    const OTHER_HOUSEHOLD_RECIPE = "33333333-3333-4333-8333-333333333333";
+
+    async function twoVersions() {
+        const [flour] = await db.recipesStore.listIngredients(HH, db.recipeId);
+        for (const [userId, amount] of [
+            [ALICE, 60],
+            [BOB, 80],
+        ] as const) {
+            await setRecipeVariant(
+                db.recipesStore,
+                db.foodsStore,
+                db.variantsStore,
+                {
+                    householdId: HH,
+                    recipeId: db.recipeId,
+                    userId,
+                    action: "amount",
+                    ingredientId: flour!.id,
+                    amount,
+                    unit: "g",
+                },
+            );
+        }
+        return flour!;
+    }
+
+    const form = (fields: Record<string, string | string[]>) => ({
+        method: "POST",
+        headers: {
+            "content-type": "application/x-www-form-urlencoded",
+        } as Record<string, string>,
+        body: new URLSearchParams(
+            Object.entries(fields).flatMap(([key, value]) =>
+                [value].flat().map((one): [string, string] => [key, one]),
+            ),
+        ).toString(),
+    });
+    function post(
+        as: string,
+        path: string,
+        fields: Record<string, string | string[]>,
+        id = db.recipeId,
+    ) {
+        const init = form(fields);
+        init.headers.cookie = cookieFor(as);
+        return recipesApp().request(`http://x/recipes/${id}/${path}`, init);
+    }
+    /** The rows the reset preview shows for a person, as the confirm posts them back. */
+    const shownRows = async (who: string) =>
+        (
+            (await (
+                await post(ALICE, "versions/reset", { user_id: who })
+            ).json()) as { rowKeys: string[] }
+        ).rowKeys;
+    /** The key the compare read gives for one person's change. */
+    const alignKey = async (who: string, ref: string) => {
+        const res = await recipesApp().request(
+            `http://x/recipes/${db.recipeId}/versions`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        const json = (await res.json()) as {
+            versions: {
+                userId: string;
+                differences: { ref: string; rowKey: string }[];
+            }[];
+        };
+        return (
+            json.versions
+                .find((v) => v.userId === who)
+                ?.differences.find((d) => d.ref === ref)?.rowKey ?? ""
+        );
+    };
+    const flourQty = async () =>
+        (await db.recipesStore.listIngredients(HH, db.recipeId))[0]!.quantity;
+    const rowCount = async () =>
+        (await db.variantsStore.listOverrides(HH, db.recipeId)).length;
+
+    test("the owner pushes one person's change into the base; the other differing version stays", async () => {
+        const flour = await twoVersions();
+        const res = await post(ALICE, "versions/align", {
+            user_id: ALICE,
+            ingredient_id: flour.id,
+            row_key: await alignKey(ALICE, flour.id),
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+        // No success toast: the page shows the change.
+        expect(toastOf(res)).toBeNull();
+        expect(await flourQty()).toEqual({ amount: 60, unit: "g" });
+        const left = await db.variantsStore.listOverrides(HH, db.recipeId);
+        expect(left.map((row) => [row.userId, row.amount])).toEqual([
+            [BOB, 80],
+        ]);
+    });
+
+    test("an admin can align too", async () => {
+        db.bobRole = "admin";
+        const flour = await twoVersions();
+        const res = await post(BOB, "versions/align", {
+            user_id: ALICE,
+            ingredient_id: flour.id,
+            row_key: await alignKey(ALICE, flour.id),
+        });
+        expect(res.status).toBe(303);
+        expect(await flourQty()).toEqual({ amount: 60, unit: "g" });
+    });
+
+    test("a member is refused align, reset and the compare read, and nothing changes", async () => {
+        const flour = await twoVersions();
+        const align = await post(BOB, "versions/align", {
+            user_id: ALICE,
+            ingredient_id: flour.id,
+            row_key: await alignKey(ALICE, flour.id),
+        });
+        expect(align.status).toBe(403);
+        const reset = await post(BOB, "versions/reset", {
+            user_id: ALICE,
+            confirm: "1",
+        });
+        expect(reset.status).toBe(403);
+        const read = await recipesApp().request(
+            `http://x/recipes/${db.recipeId}/versions`,
+            { headers: { cookie: cookieFor(BOB) } },
+        );
+        expect(read.status).toBe(403);
+        expect(await flourQty()).toEqual({ amount: 100, unit: "g" });
+        expect(await rowCount()).toBe(2);
+    });
+
+    test("compare answers the base lines, each version's differences and who uses the base", async () => {
+        const flour = await twoVersions();
+        await db.variantsStore.clearVariant(HH, db.recipeId, BOB);
+        const res = await recipesApp().request(
+            `http://x/recipes/${db.recipeId}/versions`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(res.status).toBe(200);
+        const json = (await res.json()) as any;
+        expect(json.recipeId).toBe(db.recipeId);
+        expect(json.base[0]).toMatchObject({
+            ingredientId: flour.id,
+            displayName: "Flour",
+        });
+        expect(json.versions).toHaveLength(1);
+        expect(json.versions[0]).toMatchObject({
+            userId: ALICE,
+            displayName: "Alice",
+        });
+        expect(json.versions[0].differences[0]).toMatchObject({
+            kind: "amount",
+            ref: flour.id,
+            version: { amount: 60, unit: "g" },
+        });
+        expect(json.usingBase).toEqual([{ userId: BOB, displayName: "Bob" }]);
+    });
+
+    test("align refuses a change the person saved again since the compare read, and the base stays", async () => {
+        const flour = await twoVersions();
+        const row_key = await alignKey(ALICE, flour.id);
+        // Alice changes her mind before the admin posts.
+        await setRecipeVariant(
+            db.recipesStore,
+            db.foodsStore,
+            db.variantsStore,
+            {
+                householdId: HH,
+                recipeId: db.recipeId,
+                userId: ALICE,
+                action: "amount",
+                ingredientId: flour.id,
+                amount: 500,
+                unit: "g",
+            },
+        );
+        const res = await post(ALICE, "versions/align", {
+            user_id: ALICE,
+            ingredient_id: flour.id,
+            row_key,
+        });
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain("Their change changed; look again.");
+        expect(await flourQty()).toEqual({ amount: 100, unit: "g" });
+        expect(await rowCount()).toBe(2);
+        // The key of what is stored now is accepted.
+        const again = await post(ALICE, "versions/align", {
+            user_id: ALICE,
+            ingredient_id: flour.id,
+            row_key: await alignKey(ALICE, flour.id),
+        });
+        expect(again.status).toBe(303);
+        expect(await flourQty()).toEqual({ amount: 500, unit: "g" });
+    });
+
+    test("align of a change that is gone is a 400 and changes nothing", async () => {
+        const flour = await twoVersions();
+        const row_key = await alignKey(ALICE, flour.id);
+        await db.variantsStore.clearVariant(HH, db.recipeId, ALICE);
+        const res = await post(ALICE, "versions/align", {
+            user_id: ALICE,
+            ingredient_id: flour.id,
+            row_key,
+        });
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain("That change no longer exists.");
+        expect(await flourQty()).toEqual({ amount: 100, unit: "g" });
+        expect(await rowCount()).toBe(1);
+    });
+
+    test("reset without confirm changes nothing and says what would go", async () => {
+        await twoVersions();
+        const res = await post(ALICE, "versions/reset", { user_id: BOB });
+        expect(res.status).toBe(200);
+        const json = (await res.json()) as any;
+        expect(json).toMatchObject({
+            confirmRequired: true,
+            userId: BOB,
+            overrideCount: 1,
+        });
+        expect(json.rowKeys).toHaveLength(1);
+        expect(json.differences[0]).toMatchObject({
+            kind: "amount",
+            version: { amount: 80, unit: "g" },
+        });
+        expect(await rowCount()).toBe(2);
+        // Anything but 1 is not a confirmation.
+        const no = await post(ALICE, "versions/reset", {
+            user_id: BOB,
+            confirm: "0",
+        });
+        expect(no.status).toBe(200);
+        expect(await rowCount()).toBe(2);
+    });
+
+    test("reset with confirm clears that person's version and no one else's", async () => {
+        await twoVersions();
+        const res = await post(ALICE, "versions/reset", {
+            user_id: BOB,
+            confirm: "1",
+            row_keys: await shownRows(BOB),
+        });
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+        expect(toastOf(res)).toBeNull();
+        const left = await db.variantsStore.listOverrides(HH, db.recipeId);
+        expect(left.map((row) => row.userId)).toEqual([ALICE]);
+    });
+
+    test("reset of a person with no version is a 400 and changes nothing", async () => {
+        await twoVersions();
+        const keys = await shownRows(BOB);
+        await db.variantsStore.clearVariant(HH, db.recipeId, BOB);
+        const res = await post(ALICE, "versions/reset", {
+            user_id: BOB,
+            confirm: "1",
+            row_keys: keys,
+        });
+        expect(res.status).toBe(400);
+        expect(await rowCount()).toBe(1);
+    });
+
+    test("a confirm takes the rows the preview showed and refuses when the person's version changed since", async () => {
+        const flour = await twoVersions();
+        const keys = await shownRows(BOB);
+        // Bob saves another change after the admin opened the confirm.
+        await setRecipeVariant(
+            db.recipesStore,
+            db.foodsStore,
+            db.variantsStore,
+            {
+                householdId: HH,
+                recipeId: db.recipeId,
+                userId: BOB,
+                action: "add",
+                foodId: flour.foodId!,
+                amount: 5,
+                unit: "g",
+            },
+        );
+        const stale = await post(ALICE, "versions/reset", {
+            user_id: BOB,
+            confirm: "1",
+            row_keys: keys,
+        });
+        expect(stale.status).toBe(400);
+        expect(await stale.text()).toContain("Their version changed");
+        expect(await rowCount()).toBe(3);
+        // No keys at all takes nothing either.
+        const none = await post(ALICE, "versions/reset", {
+            user_id: BOB,
+            confirm: "1",
+        });
+        expect(none.status).toBe(400);
+        expect(await rowCount()).toBe(3);
+        // Looking again and confirming that takes both of Bob's rows, and no one else's.
+        const fresh = await post(ALICE, "versions/reset", {
+            user_id: BOB,
+            confirm: "1",
+            row_keys: await shownRows(BOB),
+        });
+        expect(fresh.status).toBe(303);
+        const left = await db.variantsStore.listOverrides(HH, db.recipeId);
+        expect(left.map((row) => row.userId)).toEqual([ALICE]);
+    });
+
+    const baseNow = async () =>
+        (await db.recipesStore.listIngredients(HH, db.recipeId)).map((row) => ({
+            ...row,
+        }));
+
+    test("a refused align or reset leaves the base ingredients as they were", async () => {
+        const flour = await twoVersions();
+        const before = await baseNow();
+        const aliceKey = await alignKey(ALICE, flour.id);
+        // A member, a change that is gone, a person with no version and
+        // another person's id: each is refused, and the base is untouched.
+        const refused = [
+            await post(BOB, "versions/align", {
+                user_id: ALICE,
+                ingredient_id: flour.id,
+                row_key: aliceKey,
+            }),
+            await post(ALICE, "versions/align", {
+                user_id: ALICE,
+                ingredient_id: "44444444-4444-4444-8444-444444444444",
+                row_key: aliceKey,
+            }),
+            await post(ALICE, "versions/align", {
+                user_id: "not-an-id",
+                ingredient_id: flour.id,
+                row_key: aliceKey,
+            }),
+            await post(BOB, "versions/reset", {
+                user_id: ALICE,
+                confirm: "1",
+            }),
+        ];
+        const aliceKeys = await shownRows(ALICE);
+        await db.variantsStore.clearVariant(HH, db.recipeId, ALICE);
+        refused.push(
+            await post(ALICE, "versions/align", {
+                user_id: ALICE,
+                ingredient_id: flour.id,
+                row_key: aliceKey,
+            }),
+            await post(ALICE, "versions/reset", {
+                user_id: ALICE,
+                confirm: "1",
+                row_keys: aliceKeys,
+            }),
+        );
+        expect(refused.map((res) => res.status)).toEqual([
+            403, 400, 400, 403, 400, 400,
+        ]);
+        expect(await baseNow()).toEqual(before);
+        // Only Bob's own row is left; none of this touched it.
+        expect(await rowCount()).toBe(1);
+    });
+
+    test("the compare read and the reset preview answer errors as JSON", async () => {
+        await twoVersions();
+        const asJson = async (res: Response, status: number) => {
+            expect(res.status).toBe(status);
+            expect(res.headers.get("content-type")).toContain(
+                "application/json",
+            );
+            const json = (await res.json()) as { error?: string };
+            expect(typeof json.error).toBe("string");
+            return json.error!;
+        };
+        const read = (as: string, id = db.recipeId) =>
+            recipesApp().request(`http://x/recipes/${id}/versions`, {
+                headers: { cookie: cookieFor(as) },
+            });
+        await asJson(await read(BOB), 403);
+        await asJson(await read(ALICE, OTHER_HOUSEHOLD_RECIPE), 404);
+        await asJson(await read(ALICE, "not-an-id"), 404);
+        await asJson(
+            await post(BOB, "versions/reset", { user_id: ALICE }),
+            403,
+        );
+        await asJson(
+            await post(ALICE, "versions/reset", { user_id: "not-an-id" }),
+            400,
+        );
+        await db.variantsStore.clearVariant(HH, db.recipeId, BOB);
+        expect(
+            await asJson(
+                await post(ALICE, "versions/reset", { user_id: BOB }),
+                400,
+            ),
+        ).toContain("no version");
+        // The confirmed form post is a form: its errors stay the recipe page.
+        const confirmed = await post(ALICE, "versions/reset", {
+            user_id: BOB,
+            confirm: "1",
+        });
+        expect(confirmed.status).toBe(400);
+        expect(confirmed.headers.get("content-type")).toContain("text/html");
+    });
+
+    test("another household's recipe or person is refused", async () => {
+        const flour = await twoVersions();
+        await db.recipesStore.insertRecipe({
+            ...(await db.recipesStore.getRecipe(HH, db.recipeId))!,
+            id: OTHER_HOUSEHOLD_RECIPE,
+            householdId: "hh-2",
+        });
+        for (const [path, fields] of [
+            [
+                "versions/align",
+                {
+                    user_id: ALICE,
+                    ingredient_id: flour.id,
+                    row_key: await alignKey(ALICE, flour.id),
+                },
+            ],
+            ["versions/reset", { user_id: ALICE, confirm: "1" }],
+        ] as const) {
+            const res = await post(ALICE, path, fields, OTHER_HOUSEHOLD_RECIPE);
+            expect(res.status).toBe(400);
+        }
+        const stranger = "44444444-4444-4444-8444-444444444444";
+        const res = await post(ALICE, "versions/reset", {
+            user_id: stranger,
+            confirm: "1",
+        });
+        expect(res.status).toBe(400);
+        const notId = await post(ALICE, "versions/reset", {
+            user_id: "not-an-id",
+            confirm: "1",
+        });
+        expect(notId.status).toBe(400);
+        const read = await recipesApp().request(
+            `http://x/recipes/${OTHER_HOUSEHOLD_RECIPE}/versions`,
+            { headers: { cookie: cookieFor(ALICE) } },
+        );
+        expect(read.status).toBe(404);
+        expect(await flourQty()).toEqual({ amount: 100, unit: "g" });
+        expect(await rowCount()).toBe(2);
     });
 });

@@ -1334,6 +1334,11 @@ export function registerRecipesTools(server: McpServer, ctx: ToolContext) {
                         "clear_recipe_variant",
                         async (rec, householdId) => {
                             const store = liveRecipeVariantsStore();
+                            // Before the rows are recorded: an align of this
+                            // recipe lands before this reads, or after it
+                            // commits, never between, so what is recorded
+                            // (and undone) is what is deleted.
+                            await store.lockVersions(args.recipe_id);
                             const ref = args.ingredient_id
                                 ?.trim()
                                 .toLowerCase();

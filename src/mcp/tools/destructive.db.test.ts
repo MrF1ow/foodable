@@ -9,6 +9,7 @@ import {
     Client,
     StreamableHTTPClientTransport,
 } from "@modelcontextprotocol/client";
+import { SQL } from "bun";
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Hono } from "hono";
 import { liveAgentActionDeps } from "../../db/agent-actions.js";
@@ -17,7 +18,7 @@ import * as groceryDb from "../../db/grocery.js";
 import { liveFridgeStore } from "../../db/fridge.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
-import { setSqlForTests } from "../../db/sql.js";
+import { pairAppSqlForTests, setSqlForTests } from "../../db/sql.js";
 import {
     asUser,
     seedFridgeLocation,
@@ -25,6 +26,7 @@ import {
     seedHousehold,
     seedMember,
 } from "../../db/testing/fixtures.js";
+import { waitForLockWaiters } from "../../db/testing/lock-race.js";
 import { describeDb } from "../../db/testing/pg.js";
 import { findPgBin } from "../../db/testing/pg-temp.js";
 import { undoAgentAction } from "../../domain/agent-actions.js";
@@ -1618,6 +1620,68 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             });
             expect((await undo(entry!.id)).status).toBe("undone");
             expect(await count("recipe_variant_overrides")).toBe(1);
+        });
+
+        test("clear_recipe_variant records the rows it deletes: an align landing first is waited for, so undo restores what was there", async () => {
+            const soup = await recipe();
+            const set = await call("set_recipe_variant", {
+                recipe_id: soup.id,
+                member_id: ownerId,
+                action: "amount",
+                ingredient_id: soup.ingredient,
+                amount: 50,
+                unit: "g",
+            });
+            expect(set.isError).toBeFalsy();
+            const url = getCtx().pg.url;
+            const appUrl = new URL(url);
+            appUrl.username = "foodable_app";
+            const wide = new SQL(url, { prepare: false, max: 4 });
+            const wideApp = new SQL(appUrl.toString(), {
+                prepare: false,
+                max: 4,
+            });
+            const align = new SQL(url, { prepare: false, max: 1 });
+            pairAppSqlForTests(wide, wideApp);
+            setSqlForTests(wide);
+            try {
+                // An align of the recipe is mid-flight: it holds the recipe's
+                // align lock and has changed the person's row (the way it
+                // replaces one it converts).
+                let finish: () => void = () => {};
+                const finished = new Promise<void>((r) => (finish = r));
+                let started: () => void = () => {};
+                const hasChanged = new Promise<void>((r) => (started = r));
+                const aligning = align.begin(async (tx) => {
+                    await tx`select pg_advisory_xact_lock(hashtextextended(${`recipe-align:${soup.id}`}, 0))`;
+                    await tx`update public.recipe_variant_overrides set amount = 70 where recipe_id = ${soup.id}::uuid`;
+                    started();
+                    await finished;
+                });
+                await hasChanged;
+                const clearing = call("clear_recipe_variant", {
+                    recipe_id: soup.id,
+                    member_id: ownerId,
+                });
+                await waitForLockWaiters(getCtx().sql, 1);
+                finish();
+                await aligning;
+                const done = await clearing;
+                expect(done.isError).toBeFalsy();
+                expect(await count("recipe_variant_overrides")).toBe(0);
+                const [entry] = await actions();
+                expect((await undo(entry!.id)).status).toBe("undone");
+                expect(
+                    await rows(
+                        "select amount::float as amount from public.recipe_variant_overrides",
+                    ),
+                ).toEqual([{ amount: 70 }]);
+            } finally {
+                setSqlForTests(getCtx().sql);
+                await align.close();
+                await wide.close();
+                await wideApp.close();
+            }
         });
 
         test("clear_recipe_variant on an id that is not a recipe says so", async () => {
