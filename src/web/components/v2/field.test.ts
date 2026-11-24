@@ -143,3 +143,19 @@ test("every string is escaped", async () => {
     const withError = field({ id: "a", label: "A", name: "a", error: XSS });
     expect(withError).not.toContain("<script>");
 });
+
+test("autofocus and input data land on the input, not the wrapper", () => {
+    const html = field({
+        id: "n",
+        label: "Name",
+        name: "name",
+        autofocus: true,
+        inputData: { "fd-autosave-input": "" },
+        data: { x: "1" },
+    });
+    expect(html).toMatch(/<input [^>]*autofocus data-fd-autosave-input=""/);
+    expect(html).toStartWith('<div class="fd-field" data-x="1">');
+    expect(field({ id: "n", label: "Name", name: "name" })).not.toContain(
+        "autofocus",
+    );
+});

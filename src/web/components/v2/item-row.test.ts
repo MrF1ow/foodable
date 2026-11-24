@@ -618,3 +618,135 @@ test("a swipe face takes the card's colour inside a card list group", () => {
         /\.fd-list-group--card \{[^}]*--fd-item-row-face: var\(--surface-panel\)/,
     );
 });
+
+test("a reorder row has a handle, its id in a hidden field and the two arrows", () => {
+    const html = itemRow({
+        title: "Costco",
+        subtitle: "6 sections",
+        reorder: {
+            name: "order",
+            value: "s1",
+            label: "Costco",
+            canUp: false,
+            canDown: true,
+        },
+    });
+    expect(html).toContain(`fd-item-row--reorder" data-fd-order-item>`);
+    expect(html).toContain(`<input type="hidden" name="order" value="s1">`);
+    expect(html).toContain(
+        `<span class="fd-item-row__lead fd-item-row__handle" data-fd-order-handle aria-hidden="true">`,
+    );
+    expect(html).toContain(`<span class="fd-item-row__subtitle">6 sections`);
+    // The end of the list has no arrow past it.
+    expect(html).toMatch(
+        /name="move" value="s1:up"[^>]*aria-label="Move Costco up" disabled/,
+    );
+    expect(html).toMatch(
+        /name="move" value="s1:down"[^>]*aria-label="Move Costco down">/,
+    );
+    expect(html).not.toMatch(/value="s1:down"[^>]*disabled/);
+});
+
+test("a reorder row escapes what it prints", () => {
+    const html = itemRow({
+        title: XSS,
+        reorder: {
+            name: "order",
+            value: XSS,
+            label: XSS,
+            canUp: true,
+            canDown: true,
+        },
+    });
+    expect(html).not.toContain(XSS);
+    expect(html).toContain(XSS_ESCAPED);
+});
+
+test("an edit row is a form with a field, Save and Cancel", () => {
+    const html = itemRow({
+        id: "sec-1",
+        title: "Bakery",
+        edit: {
+            action: "/s/1/rename",
+            name: "name",
+            value: "Bakery",
+            label: "Section name",
+            maxlength: 80,
+            cancelHref: "/s/1",
+            fields: { a: "b" },
+        },
+    });
+    expect(html).toContain(`fd-item-row--edit`);
+    expect(html).toContain(`method="post" action="/s/1/rename"`);
+    expect(html).toContain(`<input type="hidden" name="a" value="b">`);
+    // The field is field(): the label is hidden but names the input.
+    expect(html).toContain(
+        `<span class="fd-visually-hidden">Section name</span>`,
+    );
+    expect(html).toMatch(
+        /<input[^>]*id="sec-1-field" name="name" type="text" value="Bakery" autocomplete="off" maxlength="80" required autofocus data-fd-autofocus="">/,
+    );
+    expect(html).not.toContain("aria-invalid");
+    expect(html).toContain(`aria-label="Save"`);
+    expect(html).toContain(`href="/s/1" aria-label="Cancel"`);
+});
+
+test("a refused edit row marks its field aria-invalid with the error tied to it", () => {
+    const html = itemRow({
+        id: "sec-1",
+        title: "Bakery",
+        edit: {
+            action: "/x",
+            name: "name",
+            value: "Bakery",
+            label: "Section name",
+            cancelHref: "/s/1",
+            error: "That section already exists.",
+        },
+    });
+    expect(html).toContain(`aria-invalid="true"`);
+    expect(html).toContain(`aria-describedby="sec-1-field-error"`);
+    expect(html).toContain(
+        `<span class="fd-field__error" id="sec-1-field-error">That section already exists.</span>`,
+    );
+});
+
+test("an edit row needs an id for its field", () => {
+    expect(() =>
+        itemRow({
+            title: "A",
+            edit: {
+                action: "/x",
+                name: "n",
+                value: "v",
+                label: "L",
+                cancelHref: "/",
+            },
+        }),
+    ).toThrow(/needs an id/);
+});
+
+test("a reorder or edit row is only a title, so any other option throws", () => {
+    const reorder = {
+        name: "order",
+        value: "a",
+        label: "A",
+        canUp: true,
+        canDown: true,
+    };
+    expect(() =>
+        itemRow({ title: "A", reorder, trailing: { kind: "chevron" } }),
+    ).toThrow(/reorder row is only a title/);
+    expect(() => itemRow({ title: "A", reorder, href: "/a" })).toThrow();
+    const edit = {
+        action: "/x",
+        name: "n",
+        value: "v",
+        label: "L",
+        cancelHref: "/",
+    };
+    expect(() => itemRow({ id: "e", title: "A", edit, value: "1" })).toThrow(
+        /edit row is only a title/,
+    );
+    expect(() => itemRow({ id: "e", title: "A", edit, reorder })).toThrow();
+});

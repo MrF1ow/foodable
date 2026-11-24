@@ -3,7 +3,7 @@
  * the page with hairlines between rows; Card is one standout list on a panel
  * with rounded corners. The rows are `itemRow()` output (`<li>` elements).
  */
-import { cls, esc, join, raw, type Html } from "./html.js";
+import { cls, dataAttrs, esc, join, raw, type Html } from "./html.js";
 
 export type ListGroupOptions = {
     style?: "flat" | "card";
@@ -12,6 +12,8 @@ export type ListGroupOptions = {
     label?: string;
     id?: string;
     className?: string;
+    /** `data-*` on the list (the hook of a script that reads its rows). */
+    data?: Readonly<Record<string, string>>;
 };
 
 export function listGroup(opts: ListGroupOptions): Html {
@@ -22,6 +24,6 @@ export function listGroup(opts: ListGroupOptions): Html {
             "fd-list-group",
             opts.style === "card" && "fd-list-group--card",
             opts.className,
-        )}"${id}${aria}>${join(opts.rows)}</ul>`,
+        )}"${id}${aria}${dataAttrs(opts.data)}>${join(opts.rows)}</ul>`,
     );
 }

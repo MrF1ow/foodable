@@ -38,7 +38,7 @@ Flows that opt out of Turbo (each answers with something Turbo cannot render as 
 - the Share sheet form (`share-sheet.ts`, the one-time link on a 200 page);
 - Export data on Settings home (the 303 goes to a download link, not a page);
 - the logout link, on the Account page and the gate app bar;
-- the Settings forms still waiting for their page to switch: goals, AI connections and stores (each drops its opt-out with its page).
+- the Settings forms still waiting for their page to switch: goals and AI connections (each drops its opt-out with its page).
 
 Everything else in Settings is Turbo: the sidebar item, the account row and chip, every Settings back link, the account forms (name, time zone, photo) and the Display control on Settings home. iOS Safari's toolbar tint is synced in place on the visit (see Theme sync below), so a theme change no longer needs a full load; the tint on a real iPhone is what the user's audit checks.
 

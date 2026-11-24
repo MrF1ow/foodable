@@ -215,6 +215,7 @@ a.fd-item-row__face:focus-visible,
 .fd-item-row__subtitle {
     color: var(--text-secondary);
     font-size: var(--text-label-size);
+    font-weight: 400;
     line-height: 1.3077;
 }
 .fd-item-row .fd-macros {
@@ -505,4 +506,126 @@ a.fd-item-row__face:focus-visible,
 .fd-section-header__action:focus-visible {
     outline: 2px solid var(--accent-fill);
     outline-offset: 2px;
+}
+
+/* ---- reorder row (Settings › Stores, reorder mode) ---- */
+
+.fd-item-row__handle {
+    display: inline-flex;
+    color: var(--text-secondary);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+}
+.fd-item-row--reorder[data-fd-dragging] {
+    z-index: 2;
+    background: var(--surface-raised);
+    box-shadow: 0 6px 18px var(--overlay-scrim);
+}
+.fd-item-row--reorder[data-fd-dragging] .fd-item-row__handle {
+    cursor: grabbing;
+}
+/* The arrows are the keyboard and no-script path: out of sight until the row
+ * is hovered or holds focus, so the rows read as the design draws them. */
+.fd-item-row__moves {
+    display: flex;
+    flex: none;
+}
+.fd-item-row--reorder:not(:hover, :focus-within) .fd-item-row__moves {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+.fd-item-row__move {
+    display: grid;
+    place-items: center;
+    width: var(--control-md-height);
+    height: var(--control-md-height);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.fd-item-row__move:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+.fd-item-row__move--up .fd-icon {
+    transform: rotate(-90deg);
+}
+.fd-item-row__move--down .fd-icon {
+    transform: rotate(90deg);
+}
+.fd-item-row__move:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+/* ---- edit row (a rename in place) ---- */
+
+.fd-item-row__edit {
+    margin: 0;
+}
+.fd-item-row__edit-field {
+    flex: 1;
+    min-width: 0;
+}
+.fd-item-row__edit-btn {
+    display: grid;
+    flex: none;
+    place-items: center;
+    width: var(--control-md-height);
+    height: var(--control-md-height);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-pill);
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+.fd-item-row__edit-btn:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
+/* ---- add row ("+ Add a store": opens a field in place) ---- */
+
+.fd-add-row__details > summary {
+    list-style: none;
+    cursor: pointer;
+}
+.fd-add-row__details > summary::-webkit-details-marker {
+    display: none;
+}
+.fd-add-row__summary .fd-item-row__title {
+    color: var(--text-primary);
+}
+.fd-add-row__summary:focus-visible {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+.fd-add-row__form {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-md);
+    margin: 0;
+    padding: 0 0 var(--space-md);
+}
+.fd-add-row__field {
+    flex: 1;
+    min-width: 0;
+}
+/* The Add button sits level with the 48 px box, not with an error under it. */
+.fd-add-row__form > .fd-btn {
+    margin-block: calc(
+        (var(--control-lg-height) - var(--control-md-height)) / 2
+    );
 }

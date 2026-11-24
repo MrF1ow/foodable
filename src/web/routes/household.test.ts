@@ -1,5 +1,13 @@
 import { PRODUCT_DEFAULT_BACK } from "../pages/v2/product.js";
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+    afterAll,
+    beforeEach,
+    describe,
+    expect,
+    mock,
+    spyOn,
+    test,
+} from "bun:test";
 import { Hono } from "hono";
 import { legacyRedirects } from "../legacy-redirects.js";
 import { legacyRedirectTarget } from "../route-map.js";
@@ -34,7 +42,9 @@ import {
     addGroceryFoodById,
     addGroceryManualFood,
     createMemoryGroceryStore,
+    listGrocery,
 } from "../../domain/grocery.js";
+import { readStoreLayout } from "../../domain/grocery-lines.js";
 import { createGroceryStore } from "../../domain/settings.js";
 import { createMemoryStoreManagement } from "../../domain/grocery-stores.js";
 import { createMemoryRecipesStore } from "../../domain/recipes.js";
@@ -2827,10 +2837,10 @@ describe("settings stores routes", () => {
         expect(html).toContain(
             `href="/settings/household/stores/${costco.id}"`,
         );
-        expect(html).toContain('class="fd-stores-pref__value">Costco<');
+        expect(html).toContain('class="fd-item-row__value">Costco</span>');
     });
 
-    test("add a store, and a repeated name is an error in the sheet", async () => {
+    test("add a store, and a repeated name is an error on the open add row", async () => {
         await seed();
         const ok = await post("/add", ALICE, "name=Aldi");
         expect(ok.status).toBe(303);
@@ -2840,7 +2850,7 @@ describe("settings stores routes", () => {
         expect(dup.status).toBe(400);
         const html = await dup.text();
         expect(html).toContain("That store already exists.");
-        expect(html).toContain("data-sheet-open-on-load");
+        expect(html).toMatch(/<details[^>]*data-fd-add-row[^>]* open/);
     });
 
     test("rename a store, refusing a repeated or empty name", async () => {
@@ -2890,7 +2900,7 @@ describe("settings stores routes", () => {
         );
         expect(down.status).toBe(303);
         expect(await storeNames()).toEqual(["Costco", "Aldi", "Trader Joe's"]);
-        // An arrow press comes back to the same arrow, with the sheet open.
+        // An arrow press comes back to the same arrow, in reorder mode.
         expect(down.headers.get("location")).toBe(
             `/settings/household/stores?reorder=1&focus=${aldi.id}%3Adown`,
         );
@@ -2902,7 +2912,8 @@ describe("settings stores routes", () => {
         expect(res.status).toBe(400);
         const html = await res.text();
         expect(html).toContain("List every store once.");
-        expect(html).toContain("data-sheet-open-on-load");
+        // The error shows in reorder mode, where the person was.
+        expect(html).toContain("data-fd-order-form");
         expect(await storeNames()).toEqual(["Costco", "Trader Joe's"]);
         const gone = await post(
             "/order",
@@ -3036,7 +3047,7 @@ describe("settings stores routes", () => {
             headers: { cookie: cookieFor(ALICE) },
         });
         const html = await page.text();
-        expect(html).toContain("Move 3 lines to Trader Joe's");
+        expect(html).toContain("Move 3 lines<");
         expect(html).toContain("Delete the store and its 3 lines");
         const res = await post(`/${trader.id}/delete`, ALICE, "mode=delete");
         expect(res.status).toBe(303);
@@ -3113,26 +3124,209 @@ describe("settings stores routes", () => {
         ).toBe(false);
     });
 
-    test("a section arrow press redirects back to the same arrow", async () => {
+    test("a section's Move up and Move down post only the move, and the stored order is moved", async () => {
         const { costco } = await seed();
-        const movable = (await db.settingsStore.listSections(costco.id))
-            .filter((s) => !s.isOther)
-            .map((s) => s.id);
-        const first = movable[0]!;
-        const ids = movable.map((id) => `order=${id}`).join("&");
-        const press = await post(
+        const ids = async () =>
+            (await db.settingsStore.listSections(costco.id))
+                .filter((s) => !s.isOther)
+                .map((s) => s.id);
+        const before = await ids();
+        const down = await post(
             `/${costco.id}/sections/order`,
             ALICE,
-            `${ids}&move=${first}%3Adown`,
+            `move=${before[0]}%3Adown`,
         );
-        expect(press.status).toBe(303);
-        expect(press.headers.get("location")).toBe(
-            `/settings/household/stores/${costco.id}?focus=${first}%3Adown`,
+        expect(down.status).toBe(303);
+        // Focus comes back to that section's ⋯ after the page renders.
+        expect(down.headers.get("location")).toBe(
+            `/settings/household/stores/${costco.id}?focus=${before[0]}`,
         );
-        const drag = await post(`/${costco.id}/sections/order`, ALICE, ids);
+        expect(await ids()).toEqual([
+            before[1]!,
+            before[0]!,
+            ...before.slice(2),
+        ]);
+        const up = await post(
+            `/${costco.id}/sections/order`,
+            ALICE,
+            `move=${before[0]}%3Aup`,
+        );
+        expect(up.status).toBe(303);
+        expect(await ids()).toEqual(before);
+        // The ends stay where they are; the Other section is always last.
+        const top = await post(
+            `/${costco.id}/sections/order`,
+            ALICE,
+            `move=${before[0]}%3Aup`,
+        );
+        expect(top.status).toBe(303);
+        expect(await ids()).toEqual(before);
+        expect(
+            (await db.settingsStore.listSections(costco.id)).at(-1)!.isOther,
+        ).toBe(true);
+        // A drag posts a whole order, so there is no ⋯ to focus.
+        // A whole posted order still wins: a drag posts it with no move.
+        const drag = await post(
+            `/${costco.id}/sections/order`,
+            ALICE,
+            [...before]
+                .reverse()
+                .map((id) => `order=${id}`)
+                .join("&"),
+        );
+        expect(drag.status).toBe(303);
         expect(drag.headers.get("location")).toBe(
             `/settings/household/stores/${costco.id}`,
         );
+        expect(await ids()).toEqual([...before].reverse());
+    });
+
+    test("a bare section move checks the store is the household's before reading its sections", async () => {
+        const { costco } = await seed();
+        const section = (await db.settingsStore.listSections(costco.id))[0]!;
+        const foreign = "00000000-0000-4000-8000-000000000000";
+        const read = spyOn(db.settingsStore, "listSections");
+        try {
+            const res = await post(
+                `/${foreign}/sections/order`,
+                ALICE,
+                `move=${section.id}%3Adown`,
+            );
+            expect(res.status).toBe(400);
+            expect(await res.text()).toContain("Unknown store.");
+            // (The list that carries the message reads its own stores' sections.)
+            expect(read.mock.calls.map(([id]) => id)).not.toContain(foreign);
+        } finally {
+            read.mockRestore();
+        }
+    });
+
+    test("the store page opens Rename and a section rename from the URL, for managers", async () => {
+        const { costco } = await seed();
+        const section = (await db.settingsStore.listSections(costco.id))[0]!;
+        const get = async (query: string, user: string) =>
+            (
+                await app().request(`${STORES}/${costco.id}${query}`, {
+                    headers: { cookie: cookieFor(user) },
+                })
+            ).text();
+        expect(await get("", ALICE)).not.toContain(
+            `action="/settings/household/stores/${costco.id}/rename"`,
+        );
+        expect(await get("?rename=1", ALICE)).toContain(
+            `action="/settings/household/stores/${costco.id}/rename"`,
+        );
+        expect(await get(`?rename_section=${section.id}`, ALICE)).toContain(
+            `/sections/${section.id}/rename"`,
+        );
+        // A member asking for the edit state gets the read-only page.
+        const member = await get(`?rename=1&rename_section=${section.id}`, BOB);
+        expect(member).not.toContain('/rename"');
+        expect(member).not.toContain("data-fd-autosave");
+    });
+
+    test("the stores list goes into reorder mode from the URL, for managers with two stores", async () => {
+        await seed();
+        const get = async (user: string) =>
+            (
+                await app().request(`${STORES}?reorder=1`, {
+                    headers: { cookie: cookieFor(user) },
+                })
+            ).text();
+        const owner = await get(ALICE);
+        expect(owner).toContain("data-fd-order-form");
+        expect(owner).toContain('name="order"');
+        expect(await get(BOB)).not.toContain("data-fd-order-form");
+        const plain = await (
+            await app().request(STORES, {
+                headers: { cookie: cookieFor(ALICE) },
+            })
+        ).text();
+        expect(plain).not.toContain("data-fd-order-form");
+        expect(plain).toContain("?reorder=1");
+    });
+
+    test("a member cannot post a section move or a rule either", async () => {
+        const { costco } = await seed();
+        const section = (await db.settingsStore.listSections(costco.id))[0]!;
+        for (const [path, body] of [
+            [`/${costco.id}/sections/order`, `move=${section.id}%3Adown`],
+            [`/${costco.id}/sections/${section.id}/rename`, "name=Nope"],
+            [`/${costco.id}/sections/${section.id}/visibility`, "hidden=1"],
+        ] as const) {
+            const res = await post(path, BOB, body);
+            expect([path, res.status]).toEqual([path, 403]);
+        }
+    });
+
+    test("every save answers 303 with no toast", async () => {
+        const { costco, trader } = await seed();
+        const section = (await db.settingsStore.listSections(costco.id))[0]!;
+        for (const [path, body] of [
+            ["/add", "name=Aldi"],
+            ["/preferences", `default_store_id=${trader.id}`],
+            ["/preferences", "use_usual_store=1"],
+            [`/${costco.id}/rename`, "name=Costco+2"],
+            [`/${costco.id}/sections`, "name=Deli"],
+            [`/${costco.id}/sections/${section.id}/rename`, "name=Fruit"],
+            [`/${costco.id}/sections/${section.id}/visibility`, "hidden=1"],
+            [`/${costco.id}/sections/order`, `move=${section.id}%3Adown`],
+            [`/${costco.id}/rules/add`, "body=Bags"],
+        ] as const) {
+            const res = await post(path, ALICE, body);
+            expect([path, res.status]).toEqual([path, 303]);
+            expect(res.headers.get("set-cookie") ?? "").not.toContain("toast");
+        }
+    });
+
+    test("the grocery list and list_stores read the order and sections the app set", async () => {
+        const { costco, trader } = await seed();
+        const aldi = await createGroceryStore(db.settingsStore, HH, "Aldi");
+        await post(
+            "/order",
+            ALICE,
+            `order=${aldi.id}&order=${trader.id}&order=${costco.id}`,
+        );
+        const sections = await db.settingsStore.listSections(costco.id);
+        await post(
+            `/${costco.id}/sections/order`,
+            ALICE,
+            `move=${sections[0]!.id}%3Adown`,
+        );
+        await post(
+            `/${costco.id}/sections/${sections[2]!.id}/visibility`,
+            ALICE,
+            "hidden=1",
+        );
+        await post(`/${costco.id}/sections`, ALICE, "name=Deli");
+        // list_stores reads the layout through readStoreLayout; the grocery
+        // page reads the same stores and sections through listGrocery.
+        const layout = await readStoreLayout(db.settingsStore, HH);
+        const snapshot = await listGrocery(
+            db.groceryStore,
+            db.settingsStore,
+            HH,
+        );
+        expect(layout.stores.map((row) => row.name)).toEqual([
+            "Aldi",
+            "Trader Joe's",
+            "Costco",
+        ]);
+        expect(snapshot.stores.map((row) => row.id)).toEqual(
+            layout.stores.map((row) => row.id),
+        );
+        for (const store of layout.stores) {
+            expect(
+                snapshot.sections
+                    .filter((row) => row.storeId === store.id)
+                    .map((row) => [row.id, row.hidden]),
+            ).toEqual(
+                (layout.sectionsByStore.get(store.id) ?? []).map((row) => [
+                    row.id,
+                    row.hidden,
+                ]),
+            );
+        }
     });
 
     test("a stale section order is an error banner and writes nothing", async () => {

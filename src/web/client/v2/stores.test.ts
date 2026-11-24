@@ -88,11 +88,16 @@ function makeForm(ids: string[]) {
 type MoveButton = { value: string; disabled: boolean };
 
 type Helpers = {
+    sectionTrigger(
+        rows: { id: string; querySelector(sel: string): unknown }[],
+        id: string,
+    ): unknown;
     moveFocusTarget(buttons: MoveButton[], wanted: string): MoveButton | null;
     restoreMoveFocus(
         root: { querySelectorAll(sel: string): unknown[] },
         win: unknown,
     ): void;
+    focusAutofocus(root: { querySelector(sel: string): unknown }): void;
     reorderByPointer(
         ids: string[],
         id: string,
@@ -102,7 +107,10 @@ type Helpers = {
 };
 
 /** Runs the script against a window whose onLoad hook runs at once on `page`. */
-async function load(page: { querySelectorAll(sel: string): unknown[] }) {
+async function load(
+    page: { querySelectorAll(sel: string): unknown[] },
+    doc: unknown = undefined,
+) {
     let helpers: Helpers | null = null;
     const events = new Node("window");
     const window = {
@@ -116,7 +124,7 @@ async function load(page: { querySelectorAll(sel: string): unknown[] }) {
     const src = await Bun.file("./src/web/client/v2/stores.js").text();
     new Function("window", "document", "WeakSet", "Map", src)(
         window,
-        undefined,
+        doc,
         WeakSet,
         Map,
     );
@@ -215,28 +223,30 @@ describe("dragging a handle", () => {
     });
 });
 
-describe("name field", () => {
-    async function field(defaultValue: string, value: string) {
-        const input = new Node("input") as Node & Record<string, any>;
-        const submits: number[] = [];
-        input.defaultValue = defaultValue;
-        input.value = value;
-        input.form = { requestSubmit: () => submits.push(1) };
+describe("add row", () => {
+    async function row(open: boolean) {
+        const details = new Node("details") as Node & Record<string, any>;
+        const focused: string[] = [];
+        details.open = open;
+        details.querySelector = (sel: string) =>
+            sel === "input" ? { focus: () => focused.push("input") } : null;
         await load({
             querySelectorAll: (sel: string) =>
-                sel === "input[data-fd-autosubmit]" ? [input] : [],
+                sel === "details[data-fd-add-row]" ? [details] : [],
         });
-        input.dispatch("change");
-        return submits.length;
+        return { details, focused };
     }
 
-    test("a changed name submits its form", async () => {
-        expect(await field("Costco", "Costco Wholesale")).toBe(1);
+    test("opening it puts focus in its field", async () => {
+        const { details, focused } = await row(true);
+        details.dispatch("toggle");
+        expect(focused).toEqual(["input"]);
     });
 
-    test("an unchanged or emptied name does not", async () => {
-        expect(await field("Costco", " Costco ")).toBe(0);
-        expect(await field("Costco", "  ")).toBe(0);
+    test("closing it does not", async () => {
+        const { details, focused } = await row(false);
+        details.dispatch("toggle");
+        expect(focused).toEqual([]);
     });
 });
 
@@ -301,7 +311,7 @@ describe("focus after an arrow press", () => {
         return { win, root, focused, replaced };
     }
 
-    test("focuses the pressed arrow, then drops focus and reorder from the URL", async () => {
+    test("focuses the pressed arrow, then drops focus from the URL and keeps the mode", async () => {
         const { helpers } = await load(EMPTY_PAGE);
         const p = page(
             "http://x/settings/household/stores?reorder=1&focus=b%3Adown#top",
@@ -309,17 +319,54 @@ describe("focus after an arrow press", () => {
         );
         helpers.restoreMoveFocus(p.root, p.win);
         expect(p.focused).toEqual(["b:down"]);
-        expect(p.replaced).toEqual(["/settings/household/stores#top"]);
+        expect(p.replaced).toEqual([
+            "/settings/household/stores?reorder=1#top",
+        ]);
     });
 
-    test("a drag that only reopened the sheet still drops reorder, focusing nothing", async () => {
+    test("a reorder page with no focus asked for is left alone", async () => {
         const { helpers } = await load(EMPTY_PAGE);
         const p = page("http://x/settings/household/stores?reorder=1", [
             btn("a:down"),
         ]);
         helpers.restoreMoveFocus(p.root, p.win);
         expect(p.focused).toEqual([]);
-        expect(p.replaced).toEqual(["/settings/household/stores"]);
+        expect(p.replaced).toEqual([]);
+    });
+
+    test("a section's ⋯ move comes back to that section's ⋯ trigger", async () => {
+        const { helpers } = await load(EMPTY_PAGE);
+        const focused: string[] = [];
+        const row = (id: string) => ({
+            id: `fd-section-${id}`,
+            querySelector: (sel: string) =>
+                sel === "[data-fd-menu-trigger]"
+                    ? { focus: () => focused.push(id) }
+                    : null,
+        });
+        const rows = [row("a"), row("b")];
+        const replaced: string[] = [];
+        const win = {
+            location: {
+                href: "http://x/settings/household/stores/s1?focus=b",
+            },
+            history: {
+                state: null,
+                replaceState(_s: unknown, _t: string, next: string) {
+                    replaced.push(next);
+                },
+            },
+        };
+        helpers.restoreMoveFocus(
+            {
+                querySelectorAll: (sel: string) =>
+                    sel === '[id^="fd-section-"]' ? rows : [],
+            },
+            win,
+        );
+        expect(focused).toEqual(["b"]);
+        expect(replaced).toEqual(["/settings/household/stores/s1"]);
+        expect(helpers.sectionTrigger(rows, "zzz")).toBeNull();
     });
 
     test("a plain page load leaves the URL and focus alone", async () => {
@@ -330,5 +377,48 @@ describe("focus after an arrow press", () => {
         helpers.restoreMoveFocus(p.root, p.win);
         expect(p.focused).toEqual([]);
         expect(p.replaced).toEqual([]);
+    });
+});
+
+describe("autofocus", () => {
+    function field() {
+        const focused: string[] = [];
+        return {
+            focused,
+            root: {
+                querySelectorAll: () => [],
+                querySelector: (sel: string) =>
+                    sel === "[data-fd-autofocus]:not([disabled])"
+                        ? { focus: () => focused.push("field") }
+                        : null,
+            },
+        };
+    }
+
+    test("focuses the field the server asked for when nothing has focus", async () => {
+        const f = field();
+        const body = {};
+        const { helpers } = await load(f.root, {
+            body,
+            activeElement: body,
+        });
+        helpers.focusAutofocus(f.root);
+        expect(f.focused).toEqual(["field", "field"]);
+    });
+
+    test("leaves focus where the person put it", async () => {
+        const f = field();
+        await load(f.root, {
+            body: {},
+            activeElement: { matches: () => true },
+        });
+        expect(f.focused).toEqual([]);
+    });
+
+    test("does nothing without a document", async () => {
+        const f = field();
+        const { helpers } = await load(f.root);
+        helpers.focusAutofocus(f.root);
+        expect(f.focused).toEqual([]);
     });
 });

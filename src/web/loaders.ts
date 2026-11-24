@@ -1675,7 +1675,7 @@ export async function renderHouseholdReadersRoute(
 
 export async function renderSettingsStoresV2Route(
     viewerUserId: string,
-    opts: { error?: string; openModalId?: string } = {},
+    opts: { error?: string; open?: string; reorder?: boolean } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -1710,8 +1710,9 @@ export async function renderSettingsStoresV2Route(
             defaultStoreId: prefs.defaultStoreId,
             useUsualStore: prefs.useUsualStore,
             canManage: canManageHousehold(gate.viewer),
+            reorder: opts.reorder,
             error: opts.error,
-            openModalId: opts.openModalId,
+            open: opts.open,
         }),
     };
 }
@@ -1719,7 +1720,12 @@ export async function renderSettingsStoresV2Route(
 export async function renderSettingsStoreV2Route(
     viewerUserId: string,
     storeId: string,
-    opts: { error?: string; openModalId?: string } = {},
+    opts: {
+        error?: string;
+        open?: string;
+        rename?: boolean;
+        renameSectionId?: string;
+    } = {},
 ): Promise<{ status: 200 | 403 | 404; html: string }> {
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
@@ -1761,8 +1767,10 @@ export async function renderSettingsStoreV2Route(
                 prefs.defaultStoreId,
             ),
             canManage: canManageHousehold(gate.viewer),
+            rename: opts.rename,
+            renameSectionId: opts.renameSectionId,
             error: opts.error,
-            openModalId: opts.openModalId,
+            open: opts.open,
         }),
     };
 }

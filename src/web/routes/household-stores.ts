@@ -31,16 +31,14 @@ import {
 } from "../loaders.js";
 import { requireManager, requireMember, siteMember } from "../middleware.js";
 import {
-    STORES_ADD_SHEET_ID,
-    STORES_DEFAULT_SHEET_ID,
+    STORES_ADD_ID,
     STORES_PATH,
-    STORES_REORDER_SHEET_ID,
+    STORES_REORDER_PATH,
 } from "../pages/v2/settings-stores.js";
 import {
-    STORE_ADD_RULE_SHEET_ID,
-    STORE_ADD_SECTION_SHEET_ID,
+    STORE_ADD_RULE_ID,
+    STORE_ADD_SECTION_ID,
     STORE_DELETE_SHEET_ID,
-    storeSectionSheetId,
 } from "../pages/v2/settings-stores-detail.js";
 
 /**
@@ -61,11 +59,11 @@ function errorMessage(err: unknown): string {
 async function listError(
     c: Context,
     err: unknown,
-    openModalId?: string,
+    opts: { open?: string; reorder?: boolean } = {},
 ): Promise<Response> {
     const page = await renderSettingsStoresV2Route(c.get("userId"), {
         error: errorMessage(err),
-        openModalId,
+        ...opts,
     });
     return c.html(page.html, page.status === 200 ? 400 : page.status);
 }
@@ -78,11 +76,11 @@ async function storeError(
     c: Context,
     storeId: string,
     err: unknown,
-    openModalId?: string,
+    opts: { open?: string; rename?: boolean; renameSectionId?: string } = {},
 ): Promise<Response> {
     const page = await renderSettingsStoreV2Route(c.get("userId"), storeId, {
         error: errorMessage(err),
-        openModalId,
+        ...opts,
     });
     if (page.status === 404) return listError(c, err);
     return c.html(page.html, page.status === 200 ? 400 : page.status);
@@ -92,7 +90,7 @@ function storePath(storeId: string): string {
     return `${STORES_PATH}/${encodeURIComponent(storeId)}`;
 }
 
-/** `?focus=` for a redirect after an up/down press; stores.js puts focus back on that arrow. */
+/** `focus=` for a redirect after an up/down press; stores.js puts focus back on that arrow. */
 function focusParam(move: string): string {
     return move === "" ? "" : `focus=${encodeURIComponent(move)}`;
 }
@@ -134,10 +132,7 @@ async function sectionOfStore(
 
 householdStoresRoutes.get(STORES_PATH, requireMember, async (c) => {
     const page = await renderSettingsStoresV2Route(c.get("userId"), {
-        openModalId:
-            c.req.query("reorder") === "1"
-                ? STORES_REORDER_SHEET_ID
-                : undefined,
+        reorder: c.req.query("reorder") === "1",
     });
     return c.html(page.html, page.status);
 });
@@ -146,6 +141,10 @@ householdStoresRoutes.get(`${STORES_PATH}/:id`, requireMember, async (c) => {
     const page = await renderSettingsStoreV2Route(
         c.get("userId"),
         c.req.param("id"),
+        {
+            rename: c.req.query("rename") === "1",
+            renameSectionId: c.req.query("rename_section") || undefined,
+        },
     );
     return c.html(page.html, page.status);
 });
@@ -164,7 +163,7 @@ householdStoresRoutes.post(
                 formText(body, "name"),
             );
         } catch (err) {
-            return listError(c, err, STORES_ADD_SHEET_ID);
+            return listError(c, err, { open: STORES_ADD_ID });
         }
         // toast: none
         return c.redirect(STORES_PATH, 303);
@@ -195,12 +194,12 @@ householdStoresRoutes.post(
                 ordered,
             );
         } catch (err) {
-            return listError(c, err, STORES_REORDER_SHEET_ID);
+            return listError(c, err, { reorder: true });
         }
         const focus = focusParam(move);
         // toast: none
         return c.redirect(
-            `${STORES_PATH}?reorder=1${focus ? `&${focus}` : ""}`,
+            `${STORES_REORDER_PATH}${focus ? `&${focus}` : ""}`,
             303,
         );
     },
@@ -228,7 +227,7 @@ householdStoresRoutes.post(
                 patch,
             );
         } catch (err) {
-            return listError(c, err, STORES_DEFAULT_SHEET_ID);
+            return listError(c, err);
         }
         // toast: none
         return c.redirect(STORES_PATH, 303);
@@ -251,7 +250,7 @@ householdStoresRoutes.post(
                 formText(body, "name"),
             );
         } catch (err) {
-            return storeError(c, storeId, err);
+            return storeError(c, storeId, err, { rename: true });
         }
         // toast: none
         return c.redirect(storePath(storeId), 303);
@@ -308,7 +307,7 @@ householdStoresRoutes.post(
                 { moveTo: mode === "move" ? moveTo : null },
             );
         } catch (err) {
-            return storeError(c, storeId, err, STORE_DELETE_SHEET_ID);
+            return storeError(c, storeId, err, { open: STORE_DELETE_SHEET_ID });
         }
         // toast: none
         return c.redirect(STORES_PATH, 303);
@@ -331,7 +330,7 @@ householdStoresRoutes.post(
                 formText(body, "name"),
             );
         } catch (err) {
-            return storeError(c, storeId, err, STORE_ADD_SECTION_SHEET_ID);
+            return storeError(c, storeId, err, { open: STORE_ADD_SECTION_ID });
         }
         // toast: none
         return c.redirect(storePath(storeId), 303);
@@ -347,10 +346,23 @@ householdStoresRoutes.post(
         const storeId = c.req.param("id");
         const body = await c.req.parseBody({ all: true });
         const move = formText(body, "move");
-        const ordered = move
-            ? applyOrderMove(orderIds(body), move)
-            : orderIds(body);
+        // A section's ⋯ posts only the move; the order it applies to is the
+        // one stored now, in walking order.
+        const posted = orderIds(body);
+        const bare = move !== "" && posted.length === 0;
         try {
+            if (
+                bare &&
+                !(await storeInHousehold(manager.householdId, storeId))
+            ) {
+                throw new SettingsInputError("Unknown store.");
+            }
+            const current = bare
+                ? (await liveSettingsStore().listSections(storeId))
+                      .filter((row) => !row.hidden && !row.isOther)
+                      .map((row) => row.id)
+                : posted;
+            const ordered = move ? applyOrderMove(current, move) : current;
             await reorderSections(
                 liveSettingsStore(),
                 manager.householdId,
@@ -360,10 +372,12 @@ householdStoresRoutes.post(
         } catch (err) {
             return storeError(c, storeId, err);
         }
-        const focus = focusParam(move);
+        // After a section's ⋯ the menu closes with the page: stores.js puts
+        // focus back on that section's ⋯.
+        const section = bare ? move.slice(0, move.lastIndexOf(":")) : "";
         // toast: none
         return c.redirect(
-            `${storePath(storeId)}${focus ? `?${focus}` : ""}`,
+            `${storePath(storeId)}${section ? `?focus=${encodeURIComponent(section)}` : ""}`,
             303,
         );
     },
@@ -387,7 +401,9 @@ householdStoresRoutes.post(
                 formText(body, "name"),
             );
         } catch (err) {
-            return storeError(c, storeId, err, storeSectionSheetId(sectionId));
+            return storeError(c, storeId, err, {
+                renameSectionId: sectionId,
+            });
         }
         // toast: none
         return c.redirect(storePath(storeId), 303);
@@ -413,7 +429,7 @@ householdStoresRoutes.post(
                 hide,
             );
         } catch (err) {
-            return storeError(c, storeId, err, storeSectionSheetId(sectionId));
+            return storeError(c, storeId, err);
         }
         // toast: none
         return c.redirect(storePath(storeId), 303);
@@ -438,7 +454,7 @@ householdStoresRoutes.post(
                 body: formText(body, "body"),
             });
         } catch (err) {
-            return storeError(c, storeId, err, STORE_ADD_RULE_SHEET_ID);
+            return storeError(c, storeId, err, { open: STORE_ADD_RULE_ID });
         }
         // toast: none
         return c.redirect(storePath(storeId), 303);

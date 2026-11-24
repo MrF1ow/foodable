@@ -124,10 +124,11 @@ import { goalsDraftFrom } from "../src/web/pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
 import {
     renderSettingsStoresV2Page,
-    STORES_REORDER_SHEET_ID,
+    STORES_ADD_ID,
 } from "../src/web/pages/v2/settings-stores.js";
 import {
     renderSettingsStoreV2Page,
+    STORE_ADD_SECTION_ID,
     STORE_DELETE_SHEET_ID,
 } from "../src/web/pages/v2/settings-stores-detail.js";
 import { renderSettingsAiV2Page } from "../src/web/pages/v2/settings-ai.js";
@@ -1518,6 +1519,11 @@ function withFirstMenuOpen(html: string): string {
         );
 }
 
+/** The Detail bar's ⋯ and its desktop header twin open (the first two menus on the page). */
+function withBarMenusOpen(html: string): string {
+    return withFirstMenuOpen(withFirstMenuOpen(html));
+}
+
 /** Every ⋯ menu open: a Household page draws its menu in the phone's Detail bar and in the desktop header. */
 function withEveryMenuOpen(html: string): string {
     return html
@@ -2518,26 +2524,83 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             useUsualStore: true,
             canManage: true,
         }),
+        "settings-stores-menu": withBarMenusOpen(
+            renderSettingsStoresV2Page({
+                chrome,
+                stores: PREVIEW_STORE_SUMMARIES,
+                defaultStoreId: "s-costco",
+                useUsualStore: true,
+                canManage: true,
+            }),
+        ),
+        "settings-stores-default-menu": withEveryMenuOpen(
+            renderSettingsStoresV2Page({
+                chrome,
+                stores: PREVIEW_STORE_SUMMARIES,
+                defaultStoreId: "s-costco",
+                useUsualStore: true,
+                canManage: true,
+            }),
+        ),
+        "settings-stores-add": renderSettingsStoresV2Page({
+            chrome,
+            stores: PREVIEW_STORE_SUMMARIES,
+            defaultStoreId: "s-costco",
+            useUsualStore: true,
+            canManage: true,
+            open: STORES_ADD_ID,
+        }),
         "settings-stores-reorder": renderSettingsStoresV2Page({
             chrome,
             stores: PREVIEW_STORE_SUMMARIES,
             defaultStoreId: "s-costco",
             useUsualStore: true,
             canManage: true,
-            openModalId: STORES_REORDER_SHEET_ID,
+            reorder: true,
+        }),
+        "settings-stores-member": renderSettingsStoresV2Page({
+            chrome,
+            stores: PREVIEW_STORE_SUMMARIES,
+            defaultStoreId: "s-costco",
+            useUsualStore: true,
+            canManage: false,
         }),
         "settings-store": renderSettingsStoreV2Page(
-            previewStoreView(chrome) as never,
+            previewStoreView(chrome, { lineCount: 0 }) as never,
+        ),
+        // FigCraft 421271: the Detail bar's ⋯ open.
+        "settings-store-menu": withBarMenusOpen(
+            renderSettingsStoreV2Page(previewStoreView(chrome) as never),
+        ),
+        "settings-store-rename": renderSettingsStoreV2Page(
+            previewStoreView(chrome, { rename: true }) as never,
+        ),
+        "settings-store-rename-section": renderSettingsStoreV2Page(
+            previewStoreView(chrome, { renameSectionId: "sec-1" }) as never,
+        ),
+        "settings-store-add-section": renderSettingsStoreV2Page(
+            previewStoreView(chrome, { open: STORE_ADD_SECTION_ID }) as never,
+        ),
+        "settings-store-rules": renderSettingsStoreV2Page(
+            previewStoreView(chrome, {
+                rules: [
+                    { id: "r1", body: "Bring your own bags" },
+                    { id: "r2", body: "Closed on Sundays" },
+                ],
+            }) as never,
+        ),
+        "settings-store-member": renderSettingsStoreV2Page(
+            previewStoreView(chrome, { canManage: false }) as never,
         ),
         "settings-store-delete": renderSettingsStoreV2Page(
             previewStoreView(chrome, {
-                openModalId: STORE_DELETE_SHEET_ID,
+                open: STORE_DELETE_SHEET_ID,
             }) as never,
         ),
-        "settings-store-delete-empty": renderSettingsStoreV2Page(
+        "settings-store-delete-only": renderSettingsStoreV2Page(
             previewStoreView(chrome, {
-                lineCount: 0,
-                openModalId: STORE_DELETE_SHEET_ID,
+                moveTarget: null,
+                open: STORE_DELETE_SHEET_ID,
             }) as never,
         ),
         // FigCraft 62847 / 63301 (the list, its first menu open) and 63177.
@@ -3016,9 +3079,8 @@ for (const theme of ["light", "dark"] as const) {
         `grocery-put-away-${theme}`,
         `kitchen-usual-edit-${theme}`,
         `kitchen-usual-restock-${theme}`,
-        `settings-stores-reorder-${theme}`,
         `settings-store-delete-${theme}`,
-        `settings-store-delete-empty-${theme}`,
+        `settings-store-delete-only-${theme}`,
     );
 }
 

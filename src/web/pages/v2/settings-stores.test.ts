@@ -1,11 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import {
-    DEFAULT_STORE_HINT,
     renderSettingsStoresV2Page,
-    SETTINGS_STORES_V2_MARKER,
-    STORES_ADD_SHEET_ID,
-    STORES_REORDER_SHEET_ID,
+    STORES_ADD_ID,
     type SettingsStoresV2View,
 } from "./settings-stores.js";
 
@@ -32,148 +29,139 @@ function view(over: Partial<SettingsStoresV2View> = {}): SettingsStoresV2View {
 describe("settings stores page", () => {
     test("lists each store with its sections and lines, linked to its page", () => {
         const html = renderSettingsStoresV2Page(view());
-        expect(html).toContain(SETTINGS_STORES_V2_MARKER);
-        expect(html).toContain('data-fd-settings-page="stores"');
+        expect(html).toContain('data-fd-settings-page="household"');
         // The desktop menu has no Stores row (the design's list of ten): the
         // page belongs to Household, which it keeps current.
         expect(html).toContain(
             'href="/settings/household" aria-current="page"',
         );
-        expect(html).not.toContain(
-            'href="/settings/household/stores" aria-current="page"',
-        );
         expect(html).toContain('href="/settings/household/stores/s1"');
-        expect(html).toContain("6 sections");
-        expect(html).toContain("5 on the list");
-        expect(html).toContain("1 section<");
-        expect(html).toContain("No sections");
+        expect(html).toContain("6 sections · 5 on the list");
+        expect(html).toContain("1 section · 0 on the list");
+        // A store with no sections leaves the sections part out.
+        expect(html).toContain(">0 on the list<");
+        expect(html).not.toContain("No sections");
         // The phone back arrow goes to the household, not Settings home.
         expect(html).toMatch(
             /fd-settings-detail[\s\S]*?aria-label="Back" href="\/settings\/household"/,
         );
     });
 
-    test("managers get add, reorder, default store and the switch", () => {
+    test("is built from components: no intro, no hints, no sheets, no Turbo opt-out", () => {
         const html = renderSettingsStoresV2Page(view());
-        expect(html).toContain(`commandfor="${STORES_ADD_SHEET_ID}"`);
-        expect(html).toContain('action="/settings/household/stores/add"');
-        expect(html).toContain(`commandfor="${STORES_REORDER_SHEET_ID}"`);
-        expect(html).toContain('action="/settings/household/stores/order"');
-        expect(html).toContain(
-            'action="/settings/household/stores/preferences"',
-        );
-        expect(html).toContain(DEFAULT_STORE_HINT);
-        expect(html).toContain('role="switch" aria-checked="true"');
-        expect(html).toContain('name="use_usual_store" value="0"');
-        expect(html).toContain('class="fd-stores-pref__value">Costco<');
+        expect(html).not.toContain("fd-stores-intro");
+        expect(html).not.toContain("fd-stores-hint");
+        expect(html).not.toContain("Groceries are grouped by store");
+        expect(html).not.toMatch(/<dialog[^>]*id="fd-stores/);
+        expect(html).not.toContain('data-turbo="false"');
+        expect(html).toContain("When adding to the list");
     });
 
-    test("the reorder sheet has a hidden order field, up and down buttons per store", () => {
+    test("managers get an inline add row, the ⋯ with Reorder, the default pull-down and the switch", () => {
         const html = renderSettingsStoresV2Page(view());
+        expect(html).toContain("fd-add-row");
+        expect(html).toContain('action="/settings/household/stores/add"');
+        expect(html).toContain('name="name"');
+        expect(html).toMatch(
+            /role="menuitem" href="\/settings\/household\/stores\?reorder=1"/,
+        );
+        // Default store is a pull-down on the row: the trigger reads the
+        // current store; None and each store post their id.
+        expect(html).toContain('data-anchor="row"');
+        expect(html).toContain('class="fd-item-row__value">Costco</span>');
+        expect(html).toContain('name="default_store_id" value=""');
+        for (const id of ["s1", "s2", "s3"]) {
+            expect(html).toContain(`name="default_store_id" value="${id}"`);
+        }
+        expect(html).toContain('role="menuitemcheckbox" aria-checked="true"');
+        // The switch posts the opposite of what it shows.
+        expect(html).toContain('role="switch" aria-checked="true"');
+        expect(html).toContain('name="use_usual_store" value="0"');
+    });
+
+    test("the add row reopens with the form's error", () => {
+        const closed = renderSettingsStoresV2Page(view());
+        expect(closed).not.toMatch(/<details[^>]*data-fd-add-row[^>]* open/);
+        const open = renderSettingsStoresV2Page(
+            view({ open: STORES_ADD_ID, error: "Name is required." }),
+        );
+        expect(open).toMatch(/<details[^>]*data-fd-add-row[^>]* open/);
+        expect(open).toContain("Name is required.");
+    });
+
+    test("a member reads: no add row, no ⋯, no pull-down, no switch", () => {
+        const html = renderSettingsStoresV2Page(view({ canManage: false }));
+        expect(html).not.toContain("fd-add-row");
+        expect(html).not.toContain("data-fd-menu");
+        expect(html).not.toContain("?reorder=1");
+        expect(html).not.toContain('role="switch"');
+        expect(html).not.toContain("/stores/preferences");
+        expect(html).toContain('class="fd-item-row__value">Costco</span>');
+        expect(html).toContain('class="fd-item-row__value">On</span>');
+    });
+
+    test("with no default store the row reads None", () => {
+        const html = renderSettingsStoresV2Page(view({ defaultStoreId: null }));
+        expect(html).toContain('class="fd-item-row__value">None</span>');
+        expect(html).toMatch(
+            /name="default_store_id" value=""[^>]*>[\s\S]*?role="menuitemcheckbox" aria-checked="true"/,
+        );
+    });
+
+    test("one store has nothing to reorder, so no ⋯", () => {
+        const html = renderSettingsStoresV2Page(
+            view({ stores: [view().stores[0]!], reorder: true }),
+        );
+        expect(html).not.toContain("?reorder=1");
+        expect(html).not.toContain("data-fd-order-form");
+        expect(html).toContain("fd-add-row");
+    });
+
+    test("no stores shows an empty state, and an owner still gets the add row", () => {
+        const html = renderSettingsStoresV2Page(
+            view({ stores: [], defaultStoreId: null }),
+        );
+        expect(html).toContain("fd-add-row");
+        const member = renderSettingsStoresV2Page(
+            view({ stores: [], defaultStoreId: null, canManage: false }),
+        );
+        expect(member).toContain("No stores yet");
+    });
+
+    test("reorder mode: a handle, a hidden order field and arrows per store, a check ends it", () => {
+        const html = renderSettingsStoresV2Page(view({ reorder: true }));
+        expect(html).toContain('action="/settings/household/stores/order"');
+        expect(html).toContain("data-fd-order-form");
+        expect(html).toContain("data-fd-order-list");
         for (const id of ["s1", "s2", "s3"]) {
             expect(html).toContain(`name="order" value="${id}"`);
             expect(html).toContain(`name="move" value="${id}:up"`);
             expect(html).toContain(`name="move" value="${id}:down"`);
         }
-        // The sheet reopens from the URL after a full load, so no Turbo visit.
-        expect(html).toMatch(
-            /action="\/settings\/household\/stores\/order" class="fd-order-form" data-fd-order-form data-turbo="false"/,
-        );
-        // The first store cannot go up, the last cannot go down.
+        expect(html.match(/data-fd-order-handle/g)).toHaveLength(3);
+        // The subtitle is the sections alone (the design's reorder frame).
+        expect(html).toContain("6 sections<");
+        expect(html).toContain("No sections<");
+        expect(html).not.toContain("on the list");
+        // The ends have no arrow past them.
         expect(html).toMatch(/name="move" value="s1:up"[^>]*disabled/);
         expect(html).toMatch(/name="move" value="s3:down"[^>]*disabled/);
-        expect(html).not.toMatch(/name="move" value="s2:up"[^>]*disabled/);
-    });
-
-    test("the copy spells out the pick order for each state of the switch", () => {
-        const on = renderSettingsStoresV2Page(view({ useUsualStore: true }));
-        expect(on).toContain("Falls back to the default<");
-        expect(on).toContain(
-            "its usual store, then the default store, then the store it was last on the list.",
-        );
-        const off = renderSettingsStoresV2Page(view({ useUsualStore: false }));
-        expect(off).toContain("Falls back to the store it was last on<");
-        expect(off).toContain(
-            "its usual store, then the store it was last on the list, then the default store.",
-        );
-        expect(off).toContain(
-            "New items go here when Foodable has no better guess.",
-        );
-        expect(off).toContain('role="switch" aria-checked="false"');
-        expect(off).toContain('name="use_usual_store" value="1"');
-    });
-
-    test("no default store reads None", () => {
-        const html = renderSettingsStoresV2Page(view({ defaultStoreId: null }));
-        expect(html).toContain('class="fd-stores-pref__value">None<');
-        expect(html).toContain('name="default_store_id" value="" checked');
-    });
-
-    test("a member sees the stores and settings but no controls", () => {
-        const html = renderSettingsStoresV2Page(view({ canManage: false }));
-        expect(html).toContain("Costco");
-        expect(html).toContain(">On<");
-        for (const hidden of [
-            STORES_ADD_SHEET_ID,
-            "/stores/add",
-            "/stores/order",
-            "/stores/preferences",
-            'role="switch"',
-            "Reorder stores",
-        ]) {
-            expect(html).not.toContain(hidden);
-        }
-    });
-
-    test("one store has no reorder, an empty household says so", () => {
-        const one = renderSettingsStoresV2Page(
-            view({
-                stores: [
-                    { id: "s1", name: "Costco", sectionCount: 1, lineCount: 0 },
-                ],
-            }),
-        );
-        expect(one).not.toContain(`commandfor="${STORES_REORDER_SHEET_ID}"`);
-        const none = renderSettingsStoresV2Page(
-            view({ stores: [], defaultStoreId: null }),
-        );
-        expect(none).toContain("No grocery stores yet.");
-    });
-
-    test("an error shows as a banner and reopens the sheet that was open", () => {
-        const html = renderSettingsStoresV2Page(
-            view({
-                error: "That store already exists.",
-                openModalId: STORES_ADD_SHEET_ID,
-            }),
-        );
-        expect(html).toContain('role="alert">That store already exists.');
+        expect(html).not.toMatch(/name="move" value="s1:down"[^>]*disabled/);
+        // Done is the round check at the end of the bar, back to the list.
         expect(html).toMatch(
-            new RegExp(
-                `id="${STORES_ADD_SHEET_ID}"[^>]*data-sheet-open-on-load`,
-            ),
+            /<a[^>]*aria-label="Done"[^>]*href="\/settings\/household\/stores"/,
         );
-        expect(html).not.toMatch(
-            new RegExp(
-                `id="${STORES_REORDER_SHEET_ID}"[^>]*data-sheet-open-on-load`,
-            ),
-        );
+        // Reorder mode shows only the list.
+        expect(html).not.toContain("When adding to the list");
+        expect(html).not.toContain("fd-add-row");
+        expect(html).not.toContain('data-turbo="false"');
     });
 
-    test("store names are escaped", () => {
+    test("reorder mode is for managers only", () => {
         const html = renderSettingsStoresV2Page(
-            view({
-                stores: [
-                    {
-                        id: "s1",
-                        name: "<img src=x onerror=alert(1)>",
-                        sectionCount: 1,
-                        lineCount: 0,
-                    },
-                ],
-            }),
+            view({ reorder: true, canManage: false }),
         );
-        expect(html).not.toContain("<img src=x");
-        expect(html).toContain("&lt;img src=x");
+        expect(html).not.toContain("data-fd-order-form");
+        expect(html).toContain("When adding to the list");
     });
 });

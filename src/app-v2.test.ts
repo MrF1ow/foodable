@@ -292,7 +292,8 @@ describe("/app-v2.js", () => {
         // +~1.3 KB Top bar: Enter, ArrowDown and ⌘K work from the field, and focus returns to its input.
         // +~1.4 KB Settings: a menu item that opens a sheet closes the menu and the sheet hands focus back to the ⋯; choosing a photo sends it and Change photo opens the picker.
         // +~0.1 KB Menu: a tick that posts a form (a pull-down on a row) just submits.
-        expect(js.length).toBeLessThan(201_000);
+        // +~0.2 KB Stores: after a section's ⋯ Move up or down, focus goes back to that section's ⋯.
+        expect(js.length).toBeLessThan(201_500);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

@@ -31,6 +31,8 @@ export type FieldOptions = {
     maxlength?: number;
     required?: boolean;
     disabled?: boolean;
+    /** Takes focus when the page renders (a field the person asked to edit). */
+    autofocus?: boolean;
     /** A decorative icon at the end of the box (the eye of a password). */
     trailingIcon?: IconName;
     hint?: string;
@@ -42,6 +44,8 @@ export type FieldOptions = {
     labelHidden?: boolean;
     className?: string;
     data?: Readonly<Record<string, string>>;
+    /** `data-*` on the `<input>` itself (what a script watching the field reads). */
+    inputData?: Readonly<Record<string, string>>;
 };
 
 export function field(opts: FieldOptions): Html {
@@ -70,6 +74,8 @@ export function field(opts: FieldOptions): Html {
         opts.maxlength != null ? `maxlength="${opts.maxlength}"` : "",
         opts.required ? "required" : "",
         opts.disabled ? "disabled" : "",
+        opts.autofocus ? "autofocus" : "",
+        opts.inputData ? dataAttrs(opts.inputData).trim() : "",
         opts.error ? `aria-invalid="true"` : "",
         describedBy != null ? `aria-describedby="${esc(describedBy)}"` : "",
     ]

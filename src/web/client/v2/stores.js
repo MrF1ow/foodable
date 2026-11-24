@@ -1,10 +1,10 @@
 // Settings › Stores: drag a row's handle to reorder (the order form submits on
-// release), save a store's name on change, and put focus back on an up/down
-// arrow after its press reloaded the page. Without this script the arrows
-// still work through the server.
+// release), put focus back on an up/down arrow after its press reloaded the
+// page, and focus the field of an add row when it opens. Without this script
+// the arrows and the add rows still work through the server.
 
 const dragForms = new WeakSet();
-const nameFields = new WeakSet();
+const addRows = new WeakSet();
 
 // Pure: where `id` lands when dropped at `y`; `mids` are the items' midpoints.
 function reorderByPointer(ids, id, y, mids) {
@@ -32,21 +32,29 @@ function moveFocusTarget(buttons, wanted) {
     return null;
 }
 
-// The server redirects an arrow press to `?focus=<id>:<dir>` (+ `reorder=1` for the sheet): refocus, then drop both so a refresh does neither.
+// Pure: the ⋯ of section row `fd-section-<id>`, or null.
+function sectionTrigger(rows, id) {
+    const row = rows.find((el) => el.id === "fd-section-" + id);
+    return row ? row.querySelector("[data-fd-menu-trigger]") : null;
+}
+
+// The server redirects an arrow press to `?reorder=1&focus=<id>:<dir>` and a section's ⋯ move to `?focus=<section id>`: refocus that, then drop `focus` (`reorder` is the mode and stays).
 function restoreMoveFocus(root, win) {
     const url = new URL(win.location.href);
     const params = url.searchParams;
     const wanted = params.get("focus");
-    if (wanted === null && !params.has("reorder")) return;
+    if (wanted === null) return;
     const hit =
-        wanted !== null &&
         moveFocusTarget(
             Array.from(root.querySelectorAll('button[name="move"]')),
+            wanted,
+        ) ||
+        sectionTrigger(
+            Array.from(root.querySelectorAll('[id^="fd-section-"]')),
             wanted,
         );
     if (hit) hit.focus();
     params.delete("focus");
-    params.delete("reorder");
     win.history.replaceState(
         win.history.state,
         "",
@@ -58,7 +66,9 @@ if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_STORES) {
     window.FOODABLE_EXPOSE_STORES({
         reorderByPointer,
         moveFocusTarget,
+        sectionTrigger,
         restoreMoveFocus,
+        focusAutofocus,
     });
 }
 
@@ -141,25 +151,38 @@ function initDragForm(form) {
     });
 }
 
-function initNameField(input) {
-    if (nameFields.has(input)) return;
-    nameFields.add(input);
-    input.addEventListener("change", () => {
-        const value = String(input.value || "").trim();
-        if (value === "" || value === String(input.defaultValue || "").trim()) {
-            return;
-        }
-        const form = input.form || (input.closest && input.closest("form"));
-        if (!form) return;
-        if (typeof form.requestSubmit === "function") form.requestSubmit();
-        else form.submit();
+function initAddRow(details) {
+    if (addRows.has(details)) return;
+    addRows.add(details);
+    details.addEventListener("toggle", () => {
+        if (!details.open) return;
+        const input = details.querySelector("input");
+        if (input) input.focus();
     });
+}
+
+// A field the server asked to be focused (Rename, a row being renamed): Turbo
+// drops `autofocus` from a page it renders, so the field also carries `data-fd-autofocus` and the page does, unless the person is
+// already typing in a field (a menu item or link that led here may still hold focus).
+function focusAutofocus(root) {
+    if (typeof document === "undefined") return;
+    const active = document.activeElement;
+    if (
+        active &&
+        active.matches &&
+        active.matches("input, textarea, select, [contenteditable]")
+    ) {
+        return;
+    }
+    const field = root.querySelector("[data-fd-autofocus]:not([disabled])");
+    if (field) field.focus();
 }
 
 function initStores(scope) {
     const root = scope && scope.querySelectorAll ? scope : document;
+    if (typeof root.querySelector === "function") focusAutofocus(root);
     root.querySelectorAll("[data-fd-order-form]").forEach(initDragForm);
-    root.querySelectorAll("input[data-fd-autosubmit]").forEach(initNameField);
+    root.querySelectorAll("details[data-fd-add-row]").forEach(initAddRow);
     if (window.location) restoreMoveFocus(root, window);
 }
 
