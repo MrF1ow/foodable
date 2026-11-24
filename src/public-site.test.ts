@@ -160,7 +160,7 @@ describe("runtime surfaces that stay", () => {
         );
         expect(r.headers.get("cache-control")).toBe("no-cache");
         const js = await r.text();
-        expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(8);
+        expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(7);
         // The entrance is ended here; it is begun by the head script.
         expect(js).toContain('classList.remove("fx-enter")');
         expect(js).not.toContain('classList.add("fx")');
