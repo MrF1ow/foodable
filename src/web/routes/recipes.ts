@@ -181,9 +181,17 @@ async function recipeFormError(
     opts: {
         openModalId?: string;
         servings?: number;
-        plan?: { date?: string; slot?: string; servings?: number };
+        plan?: {
+            date?: string;
+            slot?: string;
+            servings?: number;
+            repeat?: string;
+            days?: number[];
+        };
         /** The member whose version the page shows again (a cook that failed). */
         version?: string;
+        /** A refused Save on the importer's landing keeps the leave guard. */
+        imported?: boolean;
     } = {},
 ) {
     const message =
@@ -200,6 +208,7 @@ async function recipeFormError(
         cookServings: opts.servings,
         plan: opts.plan,
         member: opts.version,
+        imported: opts.imported,
     });
     const status = err instanceof RecipeForbiddenError ? 403 : (400 as const);
     return { html: page.html, status: status as 400 | 403 };
@@ -305,7 +314,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
             outcome.status === "unverified_needs_review"
         ) {
             // toast: none — the recipe page shows what came in
-            return c.redirect(`/recipes/${outcome.recipeId!}`, 303);
+            return c.redirect(`/recipes/${outcome.recipeId!}?imported=1`, 303);
         }
         const page = await renderRecipesListPage(userId, {
             ...importErrorOf(outcome),
@@ -407,7 +416,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
         outcome.status === "unverified_needs_review"
     ) {
         // toast: none — the recipe page shows what came in
-        return c.redirect(`/recipes/${outcome.recipeId!}`, 303);
+        return c.redirect(`/recipes/${outcome.recipeId!}?imported=1`, 303);
     }
     if (outcome.status === "duplicate") {
         const page = await renderRecipesListPage(userId, {
@@ -461,6 +470,7 @@ recipesRoutes.get("/recipes/:id", requireSiteUser, async (c) => {
         {
             member: c.req.query("member"),
             openCook: c.req.query("cook") === "1",
+            imported: c.req.query("imported") === "1",
             plan: {
                 open: c.req.query("plan") === "1",
                 date: c.req.query("date"),
@@ -1052,6 +1062,8 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
                 date,
                 slot,
                 servings: servingsInput,
+                repeat,
+                days,
             },
         });
         return c.html(page.html, page.status);
@@ -1553,6 +1565,8 @@ recipesRoutes.post("/recipes/:id/save", requireMember, async (c) => {
     const member = siteMember(c);
     const recipeId = c.req.param("id");
     if (!UUID_SHAPE.test(recipeId)) return c.text("Not found", 404);
+    // The importer's landing carries its marker through a refused Save.
+    const imported = formText(await c.req.parseBody(), "imported") === "1";
     try {
         const refusal = can(member, "recipe.edit");
         if (!refusal.ok) throw new RecipeForbiddenError(refusal.reason);
@@ -1563,6 +1577,7 @@ recipesRoutes.post("/recipes/:id/save", requireMember, async (c) => {
         );
         if (!result.saved) {
             const page = await renderRecipeDetailRoute(userId, recipeId, {
+                imported,
                 // The draft card lists what is left; the banner only says so.
                 error: "Not saved yet. Fix what is listed below, then save it again.",
             });
@@ -1578,7 +1593,7 @@ recipesRoutes.post("/recipes/:id/save", requireMember, async (c) => {
         if (err.message === "Unknown recipe.") {
             return c.text("Not found", 404);
         }
-        const page = await recipeFormError(userId, recipeId, err);
+        const page = await recipeFormError(userId, recipeId, err, { imported });
         return c.html(page.html, page.status);
     }
     // toast: none — the page reloads as a saved recipe

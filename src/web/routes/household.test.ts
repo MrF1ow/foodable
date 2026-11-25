@@ -3621,7 +3621,7 @@ describe("household settings sub-pages", () => {
         });
     });
 
-    describe("location and recipe settings", () => {
+    describe("location", () => {
         test("location: 303 for an owner and an admin, 403 for a member", async () => {
             for (const who of [ALICE, ADMIN]) {
                 const r = await post(
@@ -3642,47 +3642,17 @@ describe("household settings sub-pages", () => {
             expect(await db.settingsStore.getLocation(HH)).toBe("Denver, CO");
         });
 
-        test("recipe-settings: 303 for an owner and an admin, 403 for a member", async () => {
-            for (const who of [ALICE, ADMIN]) {
+        test("the recipe expiry route is gone: nothing answers it and nothing is saved", async () => {
+            const before = JSON.stringify(db.household.preferences);
+            for (const who of [ALICE, ADMIN, BOB]) {
                 const r = await post(
                     "/settings/household/recipe-settings",
                     who,
                     "unverified_recipe_expiry_days=45",
                 );
-                expect(r.status).toBe(303);
-                expect(r.headers.get("location")).toBe("/settings/household");
+                expect(r.status).toBe(404);
             }
-            expect(db.household.preferences.unverifiedRecipeExpiryDays).toBe(
-                45,
-            );
-            const refused = await post(
-                "/settings/household/recipe-settings",
-                BOB,
-                "unverified_recipe_expiry_days=1",
-            );
-            expect(refused.status).toBe(403);
-            expect(db.household.preferences.unverifiedRecipeExpiryDays).toBe(
-                45,
-            );
-        });
-
-        test("empty keeps unverified recipes; a bad number reopens its sheet", async () => {
-            db.household.preferences.unverifiedRecipeExpiryDays = 30;
-            await post(
-                "/settings/household/recipe-settings",
-                ALICE,
-                "unverified_recipe_expiry_days=",
-            );
-            expect(
-                db.household.preferences.unverifiedRecipeExpiryDays,
-            ).toBeNull();
-            const bad = await post(
-                "/settings/household/recipe-settings",
-                ALICE,
-                "unverified_recipe_expiry_days=0",
-            );
-            expect(bad.status).toBe(400);
-            expect(await bad.text()).toContain("data-sheet-open-on-load");
+            expect(JSON.stringify(db.household.preferences)).toBe(before);
         });
     });
 
@@ -3965,7 +3935,6 @@ describe("household settings sub-pages", () => {
                 "Restock day",
                 "Invite codes",
                 "Recipe link readers",
-                "Unverified recipes",
             ]);
             expect(items(html)).toEqual([
                 "Rename household",

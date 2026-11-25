@@ -26,7 +26,7 @@ watches:
 
 ## Isolated stack (one-off verification)
 
-Shell variables do not survive tool calls: begin **every** block with `STACK=<path printed by the first block>; . "$STACK/env"`. `init` creates the cluster, starts it, creates the database and migrates.
+Shell variables do not survive tool calls: begin **every** block with `STACK=<path printed by the first block>; . "$STACK/env"`. `init` makes the cluster and its database, starts it and migrates.
 
 ```bash
 free_port() { bun -e 'const s=Bun.listen({hostname:"127.0.0.1",port:0,socket:{open(){},data(){}}});console.log(s.port);s.stop(true)'; }
@@ -70,10 +70,10 @@ bun run db:dev status   # "stopped", exit 1
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
 - **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off). Page loads sync `notifications`; db-less route tests log `sync failed`.
-- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs `CHROME_BIN`. Ports :4791, :9223, one at a time ("harness crashed" = port held). No DB: `scripts/nav-check-fixture.ts` keys pages by path and query, flags on, POSTs 303 back. Recipe page: `?member=base|u-mia`, `?role=member`. Swipe, select: touch emulation.
+- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs `CHROME_BIN`. Ports :4791, :9223, one run ("harness crashed" = port held). No DB: `scripts/nav-check-fixture.ts` keys pages by path and query, flags on, POSTs 303 back. Recipe: `?member=base|u-mia`, `?role=member`; draft: `/recipes/r-draft`, `?imported=1` after import. Swipe, select: touch.
 - **Flicker:** `bun scripts/flicker-check.ts --base http://<tailscale ip -4>:$APP_PORT` on an isolated stack: remote browserless Chromium, 390 px, both themes.
 - **App look:** `bun run preview:app --shots [--only=recipe]`: `-390.png`/`-1440.png` per page in tmp/app-preview. Without it: serves :4787 (`PREVIEW_PORT`), pages `/<name>-<light|dark>.html`; clock, caret pinned.
-- **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`) compares base and branch; exit 1 on a diff. Clean commits are cached in `~/.cache/foodable/preview-diff` (`rm -rf` old).
+- **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`) compares base and branch; exit 1 on a diff. Clean commits cache in `~/.cache/foodable/preview-diff` (`rm -rf` old).
 - **WebKit:** WPE `MiniBrowser` needs a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH`, `WEBKIT_FORCE_COMPLEX_TEXT=1` and `LD_LIBRARY_PATH` (its `lib`, `sys/lib`, ICU 74).
 - **Barcode scans** hit live Open Food Facts (tests stub it); `barcode-camera` off: check:nav fixture pages take `?camera=off`, a real server `FOODABLE_FLAGS=barcode-camera:off`; `*-camera-off` previews.
 - **A flag for one run:** an isolated stack has every temporary flag off; `FOODABLE_FLAGS=<flag>:all` turns one on, `<flag>:off` off (`internal`, lists).
@@ -97,4 +97,4 @@ bun run db:dev status   # "stopped", exit 1
 
 ## When this skill is out of date
 
-The frontmatter `watches:` lists the files this skill describes: change one and update this skill in the same PR, or **skill-drift** fails (`bun scripts/conventions/skill-drift.ts`). Skills and CLAUDE.md have a size budget (`bun scripts/conventions/context-budget.ts`); growing past it needs the `agent-context-increase` label.
+`watches:` lists the files this skill describes: change one and update this skill in the same PR, or **skill-drift** fails (`bun scripts/conventions/skill-drift.ts`). Skills and CLAUDE.md have a size cap (`bun scripts/conventions/context-budget.ts`); growing past it needs the `agent-context-increase` label.

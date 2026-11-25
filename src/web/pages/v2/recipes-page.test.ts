@@ -6,6 +6,7 @@ import type { Recipe, RecipeMacros } from "../../../domain/recipes.js";
 import {
     groupRecipeIngredientsByPlace,
     ingredientVersionNote,
+    leaveMessage,
     RECIPE_NOT_IN_STOCK_ID,
     renderRecipeDetailBody,
     type RecipeVersionPicker,
@@ -283,6 +284,7 @@ describe("renderRecipeDetailBody", () => {
                 expiresOn: null,
                 canSave: false,
                 canDiscard: false,
+                leaveGuard: false,
             },
         });
         const draftBar = first(
@@ -499,6 +501,7 @@ describe("renderRecipeDetailBody", () => {
                 expiresOn: null,
                 canSave: true,
                 canDiscard: true,
+                leaveGuard: false,
             },
         });
         const menu = first(
@@ -595,6 +598,7 @@ describe("a draft's page", () => {
         expiresOn: "2026-12-01",
         canSave: true,
         canDiscard: true,
+        leaveGuard: true,
     };
     const draftRecipe: Recipe = { ...RECIPE, verification: "unverified" };
 
@@ -676,6 +680,84 @@ describe("a draft's page", () => {
         });
         expect(theirs).not.toContain("Discard");
         expect(theirs).not.toContain("/recipes/r1/discard");
+    });
+
+    test("the leave guard asks Discard this recipe? with Keep editing and Discard, and Discard posts the discard route (FigCraft 403448)", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft,
+        });
+        const sheet = first(
+            html,
+            /<dialog[^>]*id="fd-recipe-leave-sheet"[\s\S]*?<\/dialog>/,
+        );
+        expect(sheet).toContain(">Discard this recipe?<");
+        // The words hold for every way off the page, the back button and a
+        // closed tab included: Discard deletes now, an unsaved draft on its day.
+        expect(sheet).toContain(
+            "Discard deletes it now. A draft you leave unsaved is deleted on Tue 1 Dec.",
+        );
+        expect(sheet).not.toContain("Leaving deletes the draft");
+        // It starts closed: the page script opens it when a link would leave.
+        expect(sheet).not.toContain("data-sheet-open-on-load");
+        // Keep editing only closes the sheet; Discard submits the discard form.
+        expect(sheet).toMatch(
+            /<button[^>]*command="close" commandfor="fd-recipe-leave-sheet"[^>]*>[\s\S]*?Keep editing/,
+        );
+        expect(sheet).toMatch(
+            /<button type="submit" class="fd-btn fd-btn--danger"[^>]*form="fd-recipe-leave-form"[^>]*>[\s\S]*?>Discard</,
+        );
+        expect(sheet).toContain(
+            '<form id="fd-recipe-leave-form" method="post" action="/recipes/r1/discard"></form>',
+        );
+        // The guard is a sheet, not a centred modal of the old kind.
+        expect(sheet).toContain("fd-sheet--dialog");
+    });
+
+    test("the leave guard is only for the importer's landing: no marker, no sheet, even for who may discard", () => {
+        const later = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft: { ...draft, leaveGuard: false },
+        });
+        expect(later).not.toContain("fd-recipe-leave-sheet");
+        expect(later).not.toContain("Discard this recipe?");
+        expect(later).not.toContain('name="imported"');
+        // The draft is still discardable from the menu and still saves.
+        expect(later).toContain("Discard draft");
+        expect(later).toContain('action="/recipes/r1/save"');
+        const saved = renderRecipeDetailBody({
+            ...viewBase,
+            cook: COOK,
+            plan: PLAN,
+        });
+        expect(saved).not.toContain("fd-recipe-leave-sheet");
+        expect(saved).not.toContain("Discard this recipe?");
+    });
+
+    test("the landing's Save carries the marker so a refused Save keeps the guard", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft,
+        });
+        const bar = first(
+            html,
+            /<div class="fd-recipe-bar fd-recipe-bar--draft"[\s\S]*?<\/form><\/div>/,
+        );
+        expect(bar).toContain(
+            '<input type="hidden" name="imported" value="1">',
+        );
+    });
+
+    test("the sheet says when a draft goes, and says it without a day when none is known", () => {
+        expect(leaveMessage("2026-12-01")).toBe(
+            "Discard deletes it now. A draft you leave unsaved is deleted on Tue 1 Dec.",
+        );
+        expect(leaveMessage(null)).toBe(
+            "Discard deletes it now. A draft you leave unsaved is deleted when it expires.",
+        );
     });
 
     test("someone who may not save sees no Save", () => {

@@ -116,3 +116,14 @@ test("a chip can submit the form around it", () => {
         '<button type="button" class="fd-pill-chip"',
     );
 });
+
+test("an aria label names a chip whose label is a letter", () => {
+    const toggle = chip({ label: "M", ariaLabel: "Monday", value: "1" });
+    expect(toggle).toContain('aria-label="Monday"');
+    expect(toggle).toContain('<span class="fd-pill-chip__label">M</span>');
+    const link = chip({ label: "T", ariaLabel: "Tuesday", href: "/x" });
+    expect(link).toContain('aria-label="Tuesday"');
+    expect(chip({ label: "T" })).not.toContain("aria-label");
+    const hostile = chip({ label: "x", ariaLabel: XSS });
+    expect(hostile).not.toContain("<script>");
+});

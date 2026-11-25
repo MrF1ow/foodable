@@ -528,7 +528,6 @@ function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
             time: "07:00",
             lastRunOn: null,
         },
-        unverifiedRecipeExpiryDays: null,
         isOwner: true,
         canManage: true,
         canInvite: true,
@@ -1269,6 +1268,8 @@ function fixtureRecipePage(
         open?: "plan" | "cook";
         share?: boolean;
         draft?: boolean;
+        /** The draft is the importer's first landing after the import (`?imported=1`): the leave guard is on. */
+        landing?: boolean;
         saved?: boolean;
         error?: string;
         /** Whose version is shown: Ethan's own (default), the base, or Mia's. */
@@ -1449,6 +1450,7 @@ function fixtureRecipePage(
             expiresOn: "2026-12-01",
             canSave: true,
             canDiscard: true,
+            leaveGuard: opts.landing === true,
         };
     } else {
         view.cook = {
@@ -1684,7 +1686,13 @@ async function pages(
         "recipe-mia": fixtureRecipePage(chrome, { version: "mia" }),
         "recipe-member": fixtureRecipePage(chrome, { member: true }),
         "recipe-compare": fixtureComparePage(chrome),
+        // A later visit to the draft (and the owner on a member's draft): no guard.
         "recipe-draft": fixtureRecipePage(chrome, { draft: true }),
+        // The importer's first landing straight after the import: the guard.
+        "recipe-draft-landing": fixtureRecipePage(chrome, {
+            draft: true,
+            landing: true,
+        }),
         "recipe-draft-refused": fixtureRecipePage(chrome, {
             draft: true,
             error: "Not saved yet. Fix what is listed below, then save it again.",
@@ -1883,6 +1891,8 @@ const ROUTE_BASE: Record<string, string> = {
     "/recipes/r-alfredo?role=member": "recipe-member",
     "/recipes/r-alfredo/compare": "recipe-compare",
     "/recipes/r-draft": "recipe-draft",
+    "/recipes/r-draft?imported=1": "recipe-draft-landing",
+    "/recipes/r-draft?theirs=1": "recipe-draft",
     "/recipes/r-draft?saved=1": "recipe-saved",
     "/recipes/r-alfredo?plan=1": "recipe-plan",
     "/recipes/r-alfredo?plan=1&date=2026-11-12": "recipe-plan",
@@ -2338,6 +2348,10 @@ const server = Bun.serve({
             if (path === "/settings/display") {
                 // Like the route: the control on Settings comes back to it.
                 destKey = "/settings";
+            }
+            if (path === "/recipes/r-draft/discard") {
+                // Like the route: a discarded draft is gone, and Recipes is next.
+                destKey = "/recipes";
             }
             if (path === "/settings/household/timezone") {
                 // The household's time zone page comes back to Household.

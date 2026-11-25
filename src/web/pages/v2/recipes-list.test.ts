@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
+import { IMPORT_MESSAGES } from "../../../copy/recipe-import.js";
 import type { Recipe } from "../../../domain/recipes.js";
 import {
     recipesListV2Href,
@@ -743,5 +744,34 @@ describe("recipes list: mcp-share-links", () => {
                 expect(items.length).toBeGreaterThan(0);
             }
         }
+    });
+});
+
+describe("the import flow's copy", () => {
+    test("an import that worked says it is a draft and to save it; no message says unverified", () => {
+        expect(IMPORT_MESSAGES.imported.headline).toContain("as a draft");
+        expect(IMPORT_MESSAGES.imported.reason).toBe("Save it to keep it.");
+        for (const key of [
+            "unverified_needs_review",
+            "unverified_needs_review_one",
+        ] as const) {
+            expect(IMPORT_MESSAGES[key].headline).toContain(
+                "Imported as a draft",
+            );
+        }
+        for (const message of Object.values(IMPORT_MESSAGES)) {
+            const text = `${message.headline} ${"reason" in message ? message.reason : ""}`;
+            expect(text.toLowerCase()).not.toContain("unverified");
+        }
+    });
+
+    test("the import sheet on the page says nothing of unverified", () => {
+        const html = renderRecipesListBody(
+            base({
+                importError: "Imported as a draft: 2 need checking.",
+                importErrorReason: "Save it to keep it.",
+            }),
+        );
+        expect(html.toLowerCase()).not.toContain("unverified");
     });
 });

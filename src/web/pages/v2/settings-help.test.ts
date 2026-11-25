@@ -69,7 +69,7 @@ describe("settings help v2", () => {
         expect(html).not.toContain("Glossary");
         // The agent prompt and its copy button survive inside their row, built
         // from the Field and Button components.
-        const prompt = rows.find((m) => m[1] === "unverified-recipes")!;
+        const prompt = rows.find((m) => m[1] === "recipe-drafts")!;
         expect(prompt[3]).toContain("<textarea");
         expect(prompt[3]).toContain("readonly");
         expect(prompt[3]).toContain("fd-field__input");
@@ -189,10 +189,10 @@ describe("settings help v2", () => {
 
     test("the entries earlier work wrote are kept as written", () => {
         const text = (id: string) => GLOSSARY.find((e) => e.id === id)!.answer;
-        expect(text("unverified-recipes")).toContain(
+        expect(text("recipe-drafts")).toContain(
             "An imported recipe is a draft until you save it.",
         );
-        expect(text("unverified-recipes")).toContain(
+        expect(text("recipe-drafts")).toContain(
             "it saves a draft only when you tell it to.",
         );
         expect(text("needs-attention")).toContain(
@@ -207,6 +207,25 @@ describe("settings help v2", () => {
                 expect(entry.answer).not.toContain(gone);
             }
         }
+    });
+
+    test("the recipe entry speaks of drafts and Save, and no title or answer says unverified", () => {
+        const entry = GLOSSARY.find((e) => e.id === "recipe-drafts")!;
+        expect(entry.title).toBe("How do I finish an imported recipe?");
+        const paragraph = entry.answer.slice(0, entry.answer.indexOf("</p>"));
+        expect(paragraph).toContain("draft");
+        expect(paragraph).toContain("Save checks the recipe first");
+        for (const one of GLOSSARY) {
+            expect(one.title.toLowerCase()).not.toContain("unverified");
+            expect(
+                one.answer.slice(0, one.answer.indexOf("</p>")).toLowerCase(),
+            ).not.toContain("unverified");
+        }
+        // The prompt block carries the agent prompt, which is about drafts too.
+        expect(entry.answer).toContain(
+            "Help me finish my Foodable recipe drafts.",
+        );
+        expect(entry.answer).toContain('id="help-recipe-drafts-prompt"');
     });
 
     test("no entry describes a control the new app does not have", () => {
@@ -275,6 +294,6 @@ describe("settings help v2", () => {
             GLOSSARY.filter((e) => e.answer.includes("<textarea")).map(
                 (e) => e.id,
             ),
-        ).toEqual(["unverified-recipes"]);
+        ).toEqual(["recipe-drafts"]);
     });
 });

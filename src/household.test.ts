@@ -37,7 +37,6 @@ function extraHousehold(id: string): Household {
         preferences: {
             ...EMPTY_HOUSEHOLD_PREFERENCES,
             restock: { ...DEFAULT_RESTOCK },
-            unverifiedRecipeExpiryDays: null,
             socialReaders: { tiktok: false, facebook: false },
         },
     };
@@ -72,7 +71,6 @@ test("createHousehold inserts the owner and fails if a household exists", () => 
         preferences: {
             ...EMPTY_HOUSEHOLD_PREFERENCES,
             restock: { ...DEFAULT_RESTOCK },
-            unverifiedRecipeExpiryDays: null,
             socialReaders: { tiktok: false, facebook: false },
         },
     } satisfies Household);

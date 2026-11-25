@@ -26,6 +26,7 @@ import { menu, type MenuItem } from "../../components/v2/menu.js";
 import { pageHeader } from "../../components/v2/page-header.js";
 import { pageLayout } from "../../components/v2/page-layout.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
+import { sheet, sheetSection } from "../../components/v2/sheet.js";
 import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
 import { APP_PATHS } from "../../route-map.js";
 import { renderAppShell } from "../../shell.js";
@@ -49,6 +50,67 @@ import {
 import { RECIPE_SHARE_SHEET_ID, renderShareSheet } from "./share-sheet.js";
 
 export const RECIPE_NOT_IN_STOCK_ID = "__not_in_stock__";
+
+/** The "Discard this recipe?" sheet the importer's landing opens before a link or form leaves it. */
+export const RECIPE_LEAVE_SHEET_ID = "fd-recipe-leave-sheet";
+const RECIPE_LEAVE_FORM_ID = "fd-recipe-leave-form";
+
+/**
+ * What the sheet says besides its question. Discard deletes the draft now; a
+ * draft left unsaved goes on its expiry day, the one the draft card names
+ * (the browser's back button and a closed tab are not held, so the words hold
+ * for every way off the page).
+ */
+export function leaveMessage(expiresOn: string | null): string {
+    const day = draftDayLabel(expiresOn);
+    return day
+        ? `Discard deletes it now. A draft you leave unsaved is deleted on ${day}.`
+        : "Discard deletes it now. A draft you leave unsaved is deleted when it expires.";
+}
+
+/** An expiry day as the draft card names it. */
+function draftDayLabel(expiresOn: string | null): string | null {
+    if (!expiresOn) return null;
+    return /^\d{4}-\d{2}-\d{2}$/.test(expiresOn)
+        ? planDayLabel(expiresOn)
+        : expiresOn;
+}
+
+/**
+ * The leave guard of a draft's first landing after an import: Keep editing
+ * stays on the page, Discard posts the discard route (which deletes the draft,
+ * and answers where it always does). `client/v2/recipes.js` opens it when a
+ * link, a Turbo visit or a form would leave the page.
+ */
+function leaveSheet(recipeId: string, expiresOn: string | null): string {
+    return sheet({
+        id: RECIPE_LEAVE_SHEET_ID,
+        placement: "dialog",
+        header: { kind: "title", title: "Discard this recipe?" },
+        body: join([
+            raw(
+                `<form id="${RECIPE_LEAVE_FORM_ID}" method="post" action="/recipes/${esc(recipeId)}/discard"></form>`,
+            ),
+            sheetSection({
+                kind: "message",
+                text: leaveMessage(expiresOn),
+            }),
+        ]),
+        actions: {
+            kind: "destructive",
+            cancel: {
+                label: "Keep editing",
+                attrs: { command: "close", commandfor: RECIPE_LEAVE_SHEET_ID },
+            },
+            danger: {
+                label: "Discard",
+                type: "submit",
+                form: RECIPE_LEAVE_FORM_ID,
+            },
+        },
+        focus: "panel",
+    });
+}
 
 export type RecipeIngredientPlaceLine = {
     ingredientId: string;
@@ -131,6 +193,13 @@ export type RecipeDetailV2View = {
         canSave: boolean;
         /** The viewer imported it, or is the owner. */
         canDiscard: boolean;
+        /**
+         * The page is the importer's first landing after the app import
+         * (`?imported=1`, and the draft is theirs): it asks "Discard this
+         * recipe?" before anything leaves it. Never on a later visit or on
+         * another person's draft.
+         */
+        leaveGuard: boolean;
     };
     error?: string;
 };
@@ -581,11 +650,7 @@ function servingsMeta(portions: number): string {
  * check still finds. The draft bar's Save answers it.
  */
 function draftCard(draft: NonNullable<RecipeDetailV2View["draft"]>): string {
-    const day = draft.expiresOn
-        ? /^\d{4}-\d{2}-\d{2}$/.test(draft.expiresOn)
-            ? planDayLabel(draft.expiresOn)
-            : draft.expiresOn
-        : null;
+    const day = draftDayLabel(draft.expiresOn);
     const expires = day ? ` It is deleted on ${day} unless you save it.` : "";
     const left =
         draft.problems.length > 0
@@ -613,7 +678,7 @@ function actionBar(view: RecipeDetailV2View, recipeId: string): Html {
                   ? "1 thing to fix"
                   : `${left} things to fix`;
         return raw(
-            `<div class="fd-recipe-bar fd-recipe-bar--draft" id="fd-recipe-draft-bar"><p class="fd-recipe-bar__status">${esc(status)}</p><form method="post" action="/recipes/${esc(recipeId)}/save" class="fd-recipe-bar__form">${button({ label: "Save", variant: "primary", type: "submit" })}</form></div>`,
+            `<div class="fd-recipe-bar fd-recipe-bar--draft" id="fd-recipe-draft-bar"><p class="fd-recipe-bar__status">${esc(status)}</p><form method="post" action="/recipes/${esc(recipeId)}/save" class="fd-recipe-bar__form">${view.draft.leaveGuard ? '<input type="hidden" name="imported" value="1">' : ""}${button({ label: "Save", variant: "primary", type: "submit" })}</form></div>`,
         );
     }
     const buttons = [
@@ -723,6 +788,7 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
 ${String(layout)}
 ${view.cook && !view.draft ? renderCookSheet(view.cook) : ""}
 ${view.plan && !view.draft ? renderPlanSheet(view.plan) : ""}
+${view.draft?.leaveGuard && view.draft.canDiscard ? leaveSheet(recipe.id, view.draft.expiresOn) : ""}
 ${
     view.share && !view.draft
         ? renderShareSheet({

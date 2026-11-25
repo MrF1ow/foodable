@@ -1,0 +1,108 @@
+/* Month picker (src/web/components/v2/month-picker.ts): the month and its
+ * previous and next buttons (the one button, button.css), the weekday letters
+ * and a grid of round dates, seven to a row. The Starts row that opens it is
+ * the Item row. A picked date is filled with the primary text colour, as the
+ * chips and the week strip draw it. */
+
+.fd-month-picker {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    padding-block: var(--space-sm);
+    font-family: var(--font-body);
+}
+.fd-month-picker[hidden] {
+    display: none;
+}
+.fd-month-picker__head {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    min-height: var(--control-md-height);
+}
+/* The previous and next buttons are the round Icon button, as the sheet's
+ * Close is: the old `.fd-sheet .fd-btn` rule (flexing, 52 high) must not reach them. */
+.fd-sheet .fd-month-picker__head > .fd-btn[data-fd-btn] {
+    flex: none;
+    width: var(--control-md-height);
+    height: var(--control-md-height);
+    padding: 0;
+    border-radius: var(--radius-pill);
+    background: var(--surface-raised);
+    color: var(--text-secondary);
+}
+.fd-sheet .fd-month-picker__head > .fd-btn[data-fd-btn]:disabled {
+    color: var(--text-tertiary);
+}
+.fd-month-picker__label {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    color: var(--text-primary);
+    font-size: var(--text-label-size);
+    line-height: var(--text-label-line);
+}
+.fd-month-picker__weekdays,
+.fd-month-picker__grid {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+.fd-month-picker__weekdays span {
+    color: var(--text-tertiary);
+    font-size: var(--text-micro-size);
+    line-height: var(--text-micro-line);
+    text-align: center;
+}
+.fd-month-picker__blank {
+    height: var(--control-md-height);
+}
+.fd-month-picker__day {
+    appearance: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+    height: var(--control-md-height);
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--text-primary);
+    cursor: pointer;
+    font: inherit;
+    font-size: var(--text-label-size);
+    line-height: var(--text-label-line);
+    /* The round date inside the cell: the cell is the tap target. */
+    --fd-month-date: var(--control-sm-height);
+}
+.fd-month-picker__day {
+    position: relative;
+    isolation: isolate;
+}
+.fd-month-picker__day::after {
+    content: "";
+    position: absolute;
+    inset: 50% auto auto 50%;
+    z-index: -1;
+    width: var(--fd-month-date);
+    height: var(--fd-month-date);
+    border-radius: var(--radius-pill);
+    transform: translate(-50%, -50%);
+}
+.fd-month-picker__day--today:not(.fd-month-picker__day--picked)::after {
+    box-shadow: inset 0 0 0 1px var(--line);
+}
+.fd-month-picker__day--picked {
+    color: var(--surface-bg);
+}
+.fd-month-picker__day--picked::after {
+    background: var(--text-primary);
+}
+.fd-month-picker__day:disabled {
+    color: var(--text-tertiary);
+    cursor: default;
+}
+.fd-month-picker__day:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: calc(var(--space-2xs) * -1);
+}

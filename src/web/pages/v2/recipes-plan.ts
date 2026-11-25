@@ -29,11 +29,13 @@ import {
 } from "../../../domain/plan-week.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { button } from "../../components/v2/button.js";
-import { esc, raw, type Html } from "../../components/v2/html.js";
+import { chipGroup } from "../../components/v2/chip.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
 import { itemRow } from "../../components/v2/item-row.js";
 import { listGroup } from "../../components/v2/list-group.js";
 import { menu, menuRow, type MenuItem } from "../../components/v2/menu.js";
 import { miniCard } from "../../components/v2/mini-card.js";
+import { monthPicker } from "../../components/v2/month-picker.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import { sheet, sheetSection } from "../../components/v2/sheet.js";
 import { stepper } from "../../components/v2/stepper.js";
@@ -235,48 +237,8 @@ function hidden(name: string, value: string): string {
     return `<input type="hidden" name="${esc(name)}" value="${esc(value)}" />`;
 }
 
-function slotOptions(selected: string): string {
-    return PLAN_SLOTS.map(
-        (slot) =>
-            `<option value="${slot}"${slot === selected ? " selected" : ""}>${PLAN_SLOT_LABEL[slot]}</option>`,
-    ).join("");
-}
-
 function servingsUnit(servings: number): string {
     return servings === 1 ? "serving" : "servings";
-}
-
-/** The day, meal and servings fields the add and move forms share. */
-function planFields(opts: {
-    idPrefix: string;
-    today: string;
-    date: string;
-    slot: string;
-    servings: number;
-    yieldPortions: number;
-    /** A plan for named people has no servings to set: it follows their portions. */
-    named?: boolean;
-}): string {
-    const servingsField = opts.named
-        ? `<p class="fd-plan-field__label">Servings</p>
-<p class="fd-plan-named">${esc(`${opts.servings} ${servingsUnit(opts.servings)}: the portions of the people it is for. Change their portions to change it.`)}</p>`
-        : `<p class="fd-plan-field__label">Servings</p>
-${String(
-    stepper({
-        name: "servings",
-        label: "Servings",
-        value: opts.servings,
-        step: 1,
-        inputStep: "any",
-        min: Math.min(1, opts.yieldPortions),
-        unit: servingsUnit(opts.servings),
-        id: `${opts.idPrefix}-servings`,
-        className: "fd-plan-stepper",
-    }),
-)}`;
-    return `<label class="fd-plan-field"><span class="fd-plan-field__label">Day</span><input type="date" name="date" value="${esc(opts.date)}" min="${esc(opts.today)}" required /></label>
-<label class="fd-plan-field"><span class="fd-plan-field__label">Meal</span><span class="fd-plan-select"><select name="slot">${slotOptions(opts.slot)}</select></span></label>
-${servingsField}`;
 }
 
 export type PlanSheetView = {
@@ -288,33 +250,137 @@ export type PlanSheetView = {
     date: string;
     slot: string;
     servings: number;
+    /** How it repeats from `date` (`once` when absent). */
+    repeat?: string;
+    /** The weekdays of a "pick days" repeat, 0 = Sunday. */
+    days?: readonly number[];
     /** A failed add re-renders the page with the sheet open. */
     open?: boolean;
     error?: string;
 };
 
-/** The recipe page's "Add to plan" sheet. */
+/** The repeat choices, in the order the Repeat pull-down lists them. */
+const REPEAT_CHOICES = [
+    { value: "once", label: "Once" },
+    { value: "weekly", label: "Every week" },
+    { value: "daily", label: "Every day" },
+    { value: "weekdays", label: "Weekdays" },
+    { value: "days", label: "Pick days" },
+] as const;
+
+/** The meal choices the Plan sheet's pull-down lists. */
+const MEAL_CHOICES = [
+    { value: "breakfast", label: "Breakfast" },
+    { value: "lunch", label: "Lunch" },
+    { value: "dinner", label: "Dinner" },
+    { value: "snack", label: "Snacks" },
+] as const;
+
+const WEEKDAY_NAMES = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+] as const;
+
+/**
+ * The recipe page's "Plan <recipe>" sheet: Starts (a row that opens a month
+ * picker), Meal and Repeat (pull-downs; "Pick days" shows a row of weekday
+ * chips), then the servings, and Plan. The form posts the day (`date`), `slot`,
+ * `repeat`, one `days` per picked weekday and `servings` to the recipe's plan
+ * route. `client/v2/recipes.js` runs the picker, the chips and the Repeat row.
+ */
 export function renderPlanSheet(view: PlanSheetView): string {
     const err = view.error
         ? `<p class="fd-plan-error" role="alert">${esc(view.error)}</p>`
         : "";
-    const body = `<form id="${PLAN_FORM_ID}" class="fd-plan-form" method="post" action="/recipes/${esc(view.recipeId)}/plan">
-${err}${planFields({
-        idPrefix: "fd-recipe-plan",
+    const repeat = REPEAT_CHOICES.some((c) => c.value === view.repeat)
+        ? view.repeat!
+        : "once";
+    const days = (view.days ?? []).filter(
+        (d) => Number.isInteger(d) && d >= 0 && d <= 6,
+    );
+    const starts = monthPicker({
+        id: "fd-recipe-plan-starts",
+        name: "date",
+        title: "Starts",
+        value: view.date,
         today: view.today,
-        date: view.date,
-        slot: view.slot,
-        servings: view.servings,
-        yieldPortions: view.yieldPortions,
-    })}
+        min: view.today,
+    });
+    const mealRow = pickRow({
+        title: "Meal",
+        name: "slot",
+        options: MEAL_CHOICES,
+        selected: view.slot,
+    });
+    const repeatRow = pickRow({
+        title: "Repeat",
+        name: "repeat",
+        options: REPEAT_CHOICES,
+        // "Pick days" stays the row's word while the weekday chips are showing
+        // (frame 409279); the chips hold the days.
+        selected: repeat,
+    });
+    const dayChips = chipGroup({
+        label: "Repeat on",
+        select: "multiple",
+        className: "fd-plan-days__chips",
+        chips: WEEKDAY_NAMES.map((name, day) => ({
+            label: name.slice(0, 1),
+            ariaLabel: name,
+            value: String(day),
+            selected: days.includes(day),
+        })),
+    });
+    // One hidden `days` per picked weekday: the chips are buttons, so the
+    // script keeps these in step with them.
+    const dayFields = days
+        .map((d) => `<input type="hidden" name="days" value="${d}">`)
+        .join("");
+    const when = join([
+        listGroup({ rows: [starts.row], label: "Starts" }),
+        starts.picker,
+        listGroup({ rows: [mealRow, repeatRow], label: "Meal and repeat" }),
+        raw(
+            `<div class="fd-plan-days" data-fd-plan-days${repeat === "days" ? "" : " hidden"}>${dayChips}<span data-fd-plan-days-fields>${repeat === "days" ? dayFields : ""}</span></div>`,
+        ),
+    ]);
+    const servings = sheetSection({
+        kind: "amount",
+        label: "Servings",
+        content: stepper({
+            name: "servings",
+            label: "Servings",
+            value: view.servings,
+            step: 1,
+            inputStep: "any",
+            min: Math.min(1, view.yieldPortions),
+            unit: servingsUnit(view.servings),
+            id: "fd-recipe-plan-servings",
+            className: "fd-plan-stepper",
+        }),
+    });
+    const body = `<form id="${PLAN_FORM_ID}" class="fd-plan-form" method="post" action="/recipes/${esc(view.recipeId)}/plan" data-fd-plan-form>
+${err}${String(sheetSection({ kind: "rows", content: when }))}
+${String(servings)}
 </form>`;
     return sheet({
         id: PLAN_SHEET_ID,
-        kind: "confirm",
-        title: "Add to plan",
-        subtitle: view.recipeName,
-        body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${PLAN_FORM_ID}">Add to plan</button>`,
+        placement: "dialog",
+        header: { kind: "title", title: `Plan ${view.recipeName}` },
+        body: raw(body),
+        actions: {
+            kind: "single",
+            primary: {
+                label: "Plan",
+                type: "submit",
+                form: PLAN_FORM_ID,
+            },
+        },
         openOnLoad: view.open,
         focus: "panel",
     });
@@ -348,12 +414,14 @@ function pickRow(opts: {
     name: string;
     options: readonly { value: string; label: string }[];
     selected: string;
+    /** What the row reads instead of the chosen label (the picked weekdays). */
+    value?: string;
 }): Html {
     const chosen =
         opts.options.find((o) => o.value === opts.selected) ?? opts.options[0]!;
     return menuRow({
         label: opts.title,
-        row: { title: opts.title, value: chosen.label },
+        row: { title: opts.title, value: opts.value ?? chosen.label },
         field: { name: opts.name, value: chosen.value },
         items: opts.options.map((o) => ({
             kind: "checked" as const,

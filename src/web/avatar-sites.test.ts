@@ -144,7 +144,6 @@ describe("Household member rows", () => {
                 time: "07:00",
                 lastRunOn: null,
             },
-            unverifiedRecipeExpiryDays: null,
             isOwner: true,
             canManage: true,
             canInvite: true,

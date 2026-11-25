@@ -4,6 +4,7 @@ import {
     EMPTY_HOUSEHOLD_PREFERENCES,
     householdConfigFromRow,
     householdConfigToColumns,
+    householdConfigToWire,
     householdTimezone,
     isRestockTime,
     isRestockWeekday,
@@ -12,7 +13,6 @@ import {
     parseHouseholdSettingsForm,
     RESTOCK_ENABLED_ERROR,
     RESTOCK_WEEKDAY_ERROR,
-    parseUnverifiedRecipeExpiryDays,
     type HouseholdConfig,
 } from "./household.js";
 
@@ -30,7 +30,6 @@ const current: HouseholdConfig = {
             time: "07:00",
             lastRunOn: "2026-11-01",
         },
-        unverifiedRecipeExpiryDays: null,
         socialReaders: { tiktok: false, facebook: false },
     },
 };
@@ -73,7 +72,6 @@ test("preference merge keeps unspecified fields", () => {
             shoppingCadence: "monthly",
             timezone: "Europe/Kyiv",
             restock: current.preferences.restock,
-            unverifiedRecipeExpiryDays: null,
             socialReaders: { tiktok: false, facebook: false },
         },
     });
@@ -110,17 +108,56 @@ test("preferences patch ignores socialReaders", () => {
     ).toEqual({ tiktok: false, facebook: false });
 });
 
-test("unverified recipe expiry defaults null and validates range", () => {
-    expect(parseUnverifiedRecipeExpiryDays(undefined, true)).toEqual({
-        ok: true,
-        value: null,
+test("the retired recipe expiry key is an unknown preference: a patch that carries it changes nothing, whatever its value", () => {
+    const unknown = parseHouseholdConfigPatch({
+        preferences: { someOtherKey: 7 },
     });
-    expect(parseUnverifiedRecipeExpiryDays(30, false)).toEqual({
-        ok: true,
-        value: 30,
-    });
-    expect(parseUnverifiedRecipeExpiryDays(0, false).ok).toBe(false);
-    expect(parseUnverifiedRecipeExpiryDays("nope", false).ok).toBe(false);
+    expect(unknown.ok).toBe(true);
+    if (!unknown.ok) return;
+    for (const value of [30, 0, "nope", null]) {
+        for (const key of [
+            "unverifiedRecipeExpiryDays",
+            "unverified_recipe_expiry_days",
+        ]) {
+            // Exactly what any other unknown key does: no error, no change.
+            const patch = parseHouseholdConfigPatch({
+                preferences: { [key]: value },
+            });
+            expect(patch).toEqual(unknown);
+            if (!patch.ok) return;
+            expect(mergeHouseholdConfig(current, patch.value)).toEqual(current);
+        }
+    }
+});
+
+test("a stored row that still carries the retired expiry key reads without it", () => {
+    for (const key of [
+        "unverifiedRecipeExpiryDays",
+        "unverified_recipe_expiry_days",
+    ]) {
+        const parsed = householdConfigFromRow({
+            name: "Home",
+            recipe_search_places: [],
+            household_preferences: { constraints: ["no nuts"], [key]: 30 },
+        });
+        expect(parsed.ok).toBe(true);
+        if (!parsed.ok) return;
+        expect(Object.keys(parsed.value.preferences).sort()).toEqual([
+            "budget",
+            "constraints",
+            "restock",
+            "shoppingCadence",
+            "socialReaders",
+            "timezone",
+        ]);
+        expect(parsed.value.preferences.constraints).toEqual(["no nuts"]);
+        expect(householdConfigToWire(parsed.value, "UTC").preferences).toEqual({
+            constraints: ["no nuts"],
+            budget: null,
+            shopping_cadence: null,
+            social_readers: { tiktok: false, facebook: false },
+        });
+    }
 });
 
 test("a missing preferences object on a row becomes empty preferences", () => {
@@ -287,7 +324,7 @@ test("householdTimezone resolution", () => {
     ).toBe("UTC");
 });
 
-test("parseHouseholdSettingsForm coerces on/off, the weekday, HH:MM, empties and expiry days", () => {
+test("parseHouseholdSettingsForm coerces on/off, the weekday, HH:MM and empties, and carries no recipe expiry field", () => {
     expect(
         parseHouseholdSettingsForm({
             restock_enabled: "on",
@@ -301,20 +338,13 @@ test("parseHouseholdSettingsForm coerces on/off, the weekday, HH:MM, empties and
         restock_weekday: 2,
         restock_time: "08:30",
         timezone: "US/Pacific",
-        preferences: { unverified_recipe_expiry_days: "45" },
     });
     expect(parseHouseholdSettingsForm({ restock_enabled: "off" })).toEqual({
         restock_enabled: false,
     });
     // Empty fields become null; a field the form did not carry is left out.
-    expect(
-        parseHouseholdSettingsForm({
-            timezone: " ",
-            unverified_recipe_expiry_days: "",
-        }),
-    ).toEqual({
+    expect(parseHouseholdSettingsForm({ timezone: " " })).toEqual({
         timezone: null,
-        preferences: { unverified_recipe_expiry_days: null },
     });
     expect(parseHouseholdSettingsForm({})).toEqual({});
     // Anything that does not coerce passes through so the patch parser names it.
@@ -332,7 +362,6 @@ test("a coerced form goes through parseHouseholdConfigPatch and merges without t
             restock_enabled: "off",
             restock_weekday: "0",
             timezone: "US/Pacific",
-            unverified_recipe_expiry_days: "30",
         }),
     );
     expect(form.ok).toBe(true);
@@ -358,7 +387,6 @@ test("a coerced form goes through parseHouseholdConfigPatch and merges without t
         lastRunAdded: 4,
     });
     expect(merged.preferences.timezone).toBe("US/Pacific");
-    expect(merged.preferences.unverifiedRecipeExpiryDays).toBe(30);
     expect(
         parseHouseholdConfigPatch(
             parseHouseholdSettingsForm({ restock_weekday: "9" }),

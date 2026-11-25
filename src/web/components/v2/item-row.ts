@@ -237,6 +237,16 @@ export type ItemRowOptions = {
     submit?: ActionForm & { formData?: Readonly<Record<string, string>> };
     /** Whole-row button that opens the sheet with this id (Name on Account). */
     opens?: string;
+    /**
+     * Whole-row button that shows or hides the element with id `controls`
+     * (the Plan sheet's Starts opens its month picker). A script flips
+     * `aria-expanded`; `data` is `data-*` on the button, what that script finds.
+     */
+    toggles?: {
+        controls: string;
+        expanded: boolean;
+        data?: Readonly<Record<string, string>>;
+    };
     swipe?: ItemRowSwipe;
     reorder?: ItemRowReorder;
     edit?: ItemRowEdit;
@@ -563,7 +573,9 @@ export function itemRow(opts: ItemRowOptions): Html {
         );
     }
     if (
-        [opts.href, opts.submit, opts.opens].filter((x) => x != null).length > 1
+        [opts.href, opts.submit, opts.opens, opts.toggles].filter(
+            (x) => x != null,
+        ).length > 1
     ) {
         throw new Error("itemRow: a row is a link or a button, not both");
     }
@@ -586,7 +598,12 @@ export function itemRow(opts: ItemRowOptions): Html {
             "itemRow: a link row with controls beside it is not selectable and has no plus",
         );
     }
-    if (opts.href != null || opts.submit != null || opts.opens != null) {
+    if (
+        opts.href != null ||
+        opts.submit != null ||
+        opts.opens != null ||
+        opts.toggles != null
+    ) {
         const control =
             opts.lead?.kind === "checkbox" ||
             opts.lead?.kind === "radio" ||
@@ -638,22 +655,28 @@ export function itemRow(opts: ItemRowOptions): Html {
         opts.opens != null
             ? `<button type="button" class="fd-item-row__face fd-item-row__face--link" commandfor="${esc(opts.opens)}" command="show-modal">${content}</button>`
             : null;
+    const togglesEl =
+        opts.toggles != null
+            ? `<button type="button" class="fd-item-row__face fd-item-row__face--link"${dataAttrs(opts.toggles.data)} aria-expanded="${opts.toggles.expanded ? "true" : "false"}" aria-controls="${esc(opts.toggles.controls)}">${content}</button>`
+            : null;
     const faceEl =
         submitEl != null && !disabled
             ? submitEl
             : opensEl != null && !disabled
               ? opensEl
-              : href == null
-                ? opts.lead?.kind === "radio" && !opts.select
-                    ? `<label class="fd-item-row__face fd-item-row__face--choice">${content}</label>`
-                    : `<div class="fd-item-row__face">${pick}${content}</div>`
-                : opts.beside != null
-                  ? `<div class="fd-item-row__face fd-item-row__face--link">${opts.beside.lead ?? ""}<a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>${opts.beside.trailing ?? ""}</div>`
-                  : opts.add != null
-                    ? `<div class="fd-item-row__face fd-item-row__face--link"><a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>${trailingSlot(opts.add, disabled)}</div>`
-                    : opts.select
-                      ? `<div class="fd-item-row__face fd-item-row__face--link">${pick}<a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a></div>`
-                      : `<a class="fd-item-row__face fd-item-row__face--link" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>`;
+              : togglesEl != null && !disabled
+                ? togglesEl
+                : href == null
+                  ? opts.lead?.kind === "radio" && !opts.select
+                      ? `<label class="fd-item-row__face fd-item-row__face--choice">${content}</label>`
+                      : `<div class="fd-item-row__face">${pick}${content}</div>`
+                  : opts.beside != null
+                    ? `<div class="fd-item-row__face fd-item-row__face--link">${opts.beside.lead ?? ""}<a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>${opts.beside.trailing ?? ""}</div>`
+                    : opts.add != null
+                      ? `<div class="fd-item-row__face fd-item-row__face--link"><a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>${trailingSlot(opts.add, disabled)}</div>`
+                      : opts.select
+                        ? `<div class="fd-item-row__face fd-item-row__face--link">${pick}<a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a></div>`
+                        : `<a class="fd-item-row__face fd-item-row__face--link" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>`;
 
     const attrs = [
         opts.id != null ? ` id="${esc(opts.id)}"` : "",

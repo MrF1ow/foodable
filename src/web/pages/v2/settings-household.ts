@@ -34,7 +34,6 @@ import { settingsErrorBanner } from "./settings-shared.js";
 
 export const HOUSEHOLD_NAME_SHEET_ID = "fd-household-name";
 export const HOUSEHOLD_LOCATION_SHEET_ID = "fd-household-location";
-export const HOUSEHOLD_EXPIRY_SHEET_ID = "fd-household-expiry";
 
 export const HOUSEHOLD_INVITES_PATH = "/settings/household/invites";
 
@@ -63,7 +62,6 @@ export type SettingsHouseholdV2View = {
     /** True when neither the household nor its owner has a zone, so UTC is only the fallback. */
     effectiveTimezoneDefaulted?: boolean;
     restock: RestockPreferences;
-    unverifiedRecipeExpiryDays: number | null;
     /** The household's active share links; absent (the flag is off) leaves the row out. */
     sharedLinks?: readonly SharedLinkRow[];
 };
@@ -81,7 +79,6 @@ const SHEET_IDS: readonly string[] = [
     HOUSEHOLD_ADD_MEMBER_SHEET_ID,
     HOUSEHOLD_NAME_SHEET_ID,
     HOUSEHOLD_LOCATION_SHEET_ID,
-    HOUSEHOLD_EXPIRY_SHEET_ID,
 ];
 
 function errorFor(view: SettingsHouseholdV2View, id: string) {
@@ -107,10 +104,6 @@ function memberRow(
         trailing: { kind: "chevron" },
         href: `/settings/household/members/${encodeURIComponent(member.userId)}`,
     });
-}
-
-function expiryLabel(days: number | null): string {
-    return days == null ? "Never" : `${days} ${days === 1 ? "day" : "days"}`;
 }
 
 /** The Household rows. A viewer who cannot change a setting sees its value only. */
@@ -179,11 +172,6 @@ function householdRows(view: SettingsHouseholdV2View): Html[] {
             ),
             trailing: { kind: "chevron" },
             href: READERS_PATH,
-        }),
-        itemRow({
-            title: "Unverified recipes",
-            value: expiryLabel(view.unverifiedRecipeExpiryDays),
-            ...editable(HOUSEHOLD_EXPIRY_SHEET_ID),
         }),
     );
     return rows;
@@ -257,22 +245,6 @@ function editSheets(view: SettingsHouseholdV2View): string {
                 value: view.location ?? "",
                 autocomplete: "off",
                 error: errorFor(view, HOUSEHOLD_LOCATION_SHEET_ID),
-            }),
-        ),
-        sheetFor(
-            HOUSEHOLD_EXPIRY_SHEET_ID,
-            "Unverified recipes",
-            "/settings/household/recipe-settings",
-            field({
-                id: "unverified_recipe_expiry_days",
-                label: "Remove after (days)",
-                name: "unverified_recipe_expiry_days",
-                value:
-                    view.unverifiedRecipeExpiryDays == null
-                        ? ""
-                        : String(view.unverifiedRecipeExpiryDays),
-                autocomplete: "off",
-                error: errorFor(view, HOUSEHOLD_EXPIRY_SHEET_ID),
             }),
         ),
     ].join("");

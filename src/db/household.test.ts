@@ -17,6 +17,7 @@ import {
     getHouseholdMembership,
     getPluralsSameFood,
     householdExists,
+    listHouseholdsForRecipeSweep,
     listHouseholdMembers,
     removeHouseholdMemberAccount,
     rotateHouseholdMcpToken,
@@ -26,6 +27,7 @@ import {
     updateHouseholdConfig,
     updateMemberDisplayName,
 } from "./household.js";
+import { runAsSystem } from "./actor.js";
 import { describeDb } from "./testing/pg.js";
 import { asUser, seedHousehold, seedMember } from "./testing/fixtures.js";
 import { findPgBin } from "./testing/pg-temp.js";
@@ -384,6 +386,50 @@ describeDb(pgAvailable !== null, "household db", (getCtx) => {
             name: "Renamed",
         });
         expect(updated.name).toBe("Renamed");
+    });
+
+    test("a household whose stored preferences still carry the retired recipe expiry key reads without it, and a save drops it", async () => {
+        const { sql } = getCtx();
+        await sql`
+            update public.households
+            set household_preferences = household_preferences
+                || ${sql.json({ unverifiedRecipeExpiryDays: 30, unverified_recipe_expiry_days: 30 })}
+            where id = ${householdId}
+        `;
+        const config = await getHouseholdConfig(householdId);
+        expect(config.preferences).toEqual(EMPTY_HOUSEHOLD_PREFERENCES);
+        expect(Object.keys(config.preferences)).not.toContain(
+            "unverifiedRecipeExpiryDays",
+        );
+        await updateHouseholdConfig(householdId, {
+            ...config,
+            name: "Renamed",
+        });
+        const [stored] = await sql`
+            select household_preferences as prefs
+            from public.households
+            where id = ${householdId}
+        `;
+        expect(Object.keys(stored.prefs as object)).not.toContain(
+            "unverifiedRecipeExpiryDays",
+        );
+        expect(Object.keys(stored.prefs as object)).not.toContain(
+            "unverified_recipe_expiry_days",
+        );
+    });
+
+    test("listHouseholdsForRecipeSweep lists every household's id, and nothing else", async () => {
+        const { sql } = getCtx();
+        const second = await seedHousehold(sql);
+        const listed = await runAsSystem("test", () =>
+            listHouseholdsForRecipeSweep(),
+        );
+        expect(listed.map((h) => h.id).sort()).toEqual(
+            [householdId, second.householdId].sort(),
+        );
+        for (const household of listed) {
+            expect(Object.keys(household)).toEqual(["id"]);
+        }
     });
 
     test("rotateHouseholdMcpToken", async () => {
