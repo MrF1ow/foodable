@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { selectMode } from "./select-mode.js";
+import { selectMode, selectionBars } from "./select-mode.js";
 
 const THINGS = selectMode({
     scope: "things",
@@ -222,4 +222,77 @@ test("the Select item of a page's ⋯ finds its list by the same scope as the bu
         data: { "fd-select-toggle": "saved" },
     });
     expect(mode.toggle).toContain('data-fd-select-toggle="saved"');
+});
+
+describe("selectionBars", () => {
+    const bars = selectionBars({
+        scope: "fridge",
+        returnTo: "/kitchen/fridge",
+        actions: [
+            {
+                kind: "confirm",
+                key: "discard",
+                label: "Discard",
+                action: "/kitchen/fridge/bulk/discard",
+            },
+        ],
+    });
+
+    test("marks the list, and the Select item finds it by the scope", () => {
+        expect(bars.rootAttrs).toBe(' data-fd-select="fridge"');
+        expect(bars.menuItem).toEqual({
+            kind: "button",
+            label: "Select",
+            data: { "fd-select-toggle": "fridge" },
+        });
+    });
+
+    test("the head is the caps count with Cancel, hidden", () => {
+        expect(String(bars.head)).toBe(
+            '<div class="fd-select-head" data-fd-select-head="fridge" hidden><div class="fd-section-header"><h2 class="fd-section-header__label">0 selected</h2><button type="button" class="fd-section-header__action" data-fd-select-cancel="">Cancel</button></div></div>',
+        );
+    });
+
+    test("one floating and one inline Selection bar, each hidden, with one form between them", () => {
+        const html = String(bars.bars);
+        expect(html.match(/fd-selection-bar--floating/g)).toHaveLength(1);
+        expect(html.match(/fd-selection-bar--inline/g)).toHaveLength(1);
+        expect(html.match(/data-fd-select-bar="fridge" hidden/g)).toHaveLength(
+            2,
+        );
+        expect(html.match(/<form /g)).toHaveLength(1);
+        expect(html).toContain(
+            '<form id="fd-select-fridge-discard" method="post" action="/kitchen/fridge/bulk/discard" data-fd-select-form hidden><input type="hidden" name="return_to" value="/kitchen/fridge"></form>',
+        );
+    });
+
+    test("a confirm asks first, then offers Cancel and the danger submit", () => {
+        const phone = String(bars.bars).split(
+            "fd-select-bar-slot--desktop",
+        )[0]!;
+        const buttons = [...phone.matchAll(/<button [^>]*>/g)].map((m) => m[0]);
+        expect(buttons).toHaveLength(3);
+        expect(buttons[0]).toContain("fd-btn--danger");
+        expect(buttons[0]).toContain("data-fd-select-ask");
+        expect(buttons[0]).toContain('data-fd-select-when="idle"');
+        expect(buttons[1]).toContain("data-fd-select-unask");
+        expect(buttons[1]).toContain('data-fd-select-when="ask"');
+        expect(buttons[2]).toContain('type="submit"');
+        expect(buttons[2]).toContain('form="fd-select-fridge-discard"');
+        expect(buttons[2]).toContain('data-fd-select-when="ask"');
+        expect(buttons[2]).toContain('data-fd-select-verb="Discard"');
+    });
+
+    test("a plain action is one submit with no question", () => {
+        const plain = selectionBars({
+            scope: "x",
+            returnTo: "/x",
+            actions: [
+                { kind: "submit", key: "go", label: "Go", action: "/x/go" },
+            ],
+        });
+        const html = String(plain.bars);
+        expect(html).not.toContain("data-fd-select-ask");
+        expect(html.match(/type="submit"/g)).toHaveLength(2);
+    });
 });

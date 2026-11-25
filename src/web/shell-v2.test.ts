@@ -354,7 +354,7 @@ describe("the shell", () => {
         expect(subs(v2Html({ active: "nutrition" }))).toEqual([]);
         expect(subs(v2Html({ active: "recipes" }))).toEqual([]);
         expect(subs(v2Html({ active: "fridge" }))).toEqual([
-            ["/kitchen/fridge", "Overview", "current"],
+            ["/kitchen/fridge", "Fridge", "current"],
             ["/kitchen/groceries", "Groceries", ""],
             ["/kitchen/usuals", "Usuals", ""],
         ]);
@@ -572,6 +572,13 @@ describe("the shell", () => {
                 '<h1>Groceries</h1><nav class="fd-kitchen-tabs"',
             );
             expect(bareH1).toContain("</nav><section>x</section></main>");
+            const pageHeaderBody = v2Html({
+                active: "fridge",
+                body: '<header class="fd-page-header fd-x"><div class="fd-page-header__titles"><h1 class="fd-page-header__title">Kitchen</h1></div></header><p>rest</p>',
+            });
+            expect(pageHeaderBody).toMatch(
+                /<\/h1><\/div><\/header><nav class="fd-kitchen-tabs"[\s\S]*<\/nav><p>rest<\/p><\/main>/,
+            );
             const none = v2Html({ active: "fridge", body: "<p>x</p>" });
             expect(none).toContain('</a></div><nav class="fd-kitchen-tabs"');
         });

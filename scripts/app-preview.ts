@@ -78,7 +78,6 @@ import {
     buildPreviewKitchenFridgeView,
     renderKitchenFridgeV2Page,
 } from "../src/web/pages/v2/kitchen-fridge.js";
-import { buildKitchenFridgeGroceryOverview } from "../src/web/pages/v2/kitchen-overview.js";
 import {
     buildPreviewKitchenGroceriesView,
     renderKitchenGroceriesV2Page,
@@ -2004,41 +2003,78 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                     ]),
                 ),
                 freezeDefaultExpiry: defaultFreezeExpiry(snap.today),
+                scores: new Map([
+                    ["f-i3", 74],
+                    ["f-i5", 52],
+                    ["f-milk", 81],
+                ]),
+                usuals: [
+                    {
+                        foodId: "p-milk",
+                        kind: "food",
+                        name: "Milk",
+                        subtitle: "Kirkland 2% · 1 gal",
+                        amount: 1,
+                        unit: "gal",
+                    },
+                    {
+                        foodId: "f-i3",
+                        kind: "food",
+                        name: "Eggs",
+                        subtitle: "Vital Farms Large · 24",
+                        amount: 24,
+                        unit: "each",
+                    },
+                    {
+                        foodId: "p-yogurt",
+                        kind: "food",
+                        name: "Greek Yogurt",
+                        subtitle: "Fage Total 2% · 1 tub",
+                        amount: 1,
+                        unit: "tub",
+                    },
+                    {
+                        foodId: "p-chicken",
+                        kind: "food",
+                        name: "Chicken Thighs",
+                        subtitle: "Kirkland Boneless · 4 lb",
+                        amount: 4,
+                        unit: "lb",
+                    },
+                ],
                 ...extra,
-                groceryLines: previewGroceryLines(),
-                groceryOverview: buildKitchenFridgeGroceryOverview(
-                    previewGrocerySnapshot(),
-                ),
             }),
         );
     };
+    // The Fridge's own states are driven by a script after load, as a person
+    // would: Select with two rows picked, a row's menu open.
+    const fridgeDriven = (
+        steps: string,
+        extra: Parameters<typeof fridgePage>[0] = {},
+    ) =>
+        fridgePage(extra).replace(
+            "</body>",
+            () =>
+                `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
+        );
     return {
         nutrition,
         "nutrition-edit-sheet": nutritionEditSheet,
         fridge: fridgePage(),
-        "kitchen-fridge-item": renderKitchenFridgeV2Page(
-            buildPreviewKitchenFridgeView(
-                chrome as never,
-                fridgeView(chrome).today,
-                {
-                    locations: fridgeView(chrome).locations,
-                    items: fridgeView(chrome)
-                        .items as import("../src/domain/fridge.js").FridgeItem[],
-                    foodsById: new Map(
-                        [...fridgeView(chrome).foodsById.entries()].map(
-                            ([id, row]) => [id, { ...row, usualAmount: null }],
-                        ),
-                    ),
-                    openItemId: "i2",
-                    freezeDefaultExpiry: defaultFreezeExpiry(
-                        fridgeView(chrome).today,
-                    ),
-                    groceryLines: previewGroceryLines(),
-                    groceryOverview: buildKitchenFridgeGroceryOverview(
-                        previewGrocerySnapshot(),
-                    ),
-                },
-            ),
+        // Cheese (frame 393340): amount, the four actions, Kept in and Expires.
+        "kitchen-fridge-item": fridgePage({ openItemId: "i5" }),
+        // Add to fridge (frame 393163): the usuals first.
+        "kitchen-fridge-add": fridgePage({ openAdd: true }),
+        // A row's menu (frame 392957).
+        "kitchen-fridge-menu": fridgeDriven(
+            `document.querySelector("#fd-fridge-row-i3 .fd-menu [data-fd-menu-trigger]").click()`,
+        ),
+        // Select mode (frame 400622) and its Discard asking in place (401198).
+        "kitchen-fridge-select": fridgeDriven(
+            `document.querySelector('[data-fd-select-toggle="fridge"]').click();for(const id of ["i2","i1"])document.querySelector("#fd-fridge-row-"+id+" .fd-item-row__face").click()`,
+        ),
+        "kitchen-fridge-discard": fridgeDriven(
+            `document.querySelector('[data-fd-select-toggle="fridge"]').click();for(const id of ["i2","i1"])document.querySelector("#fd-fridge-row-"+id+" .fd-item-row__face").click();for(const b of document.querySelectorAll("[data-fd-select-ask]"))b.click()`,
         ),
         grocery: renderKitchenGroceriesV2Page(
             buildPreviewKitchenGroceriesView(chrome as never, {
@@ -2883,43 +2919,28 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             view: buildPreviewTodayViewWithSuggestions("2026-11-10"),
         }),
         "kitchen-fridge-use-in": (() => {
-            const snap = fridgeView(chrome);
-            const items =
-                snap.items as import("../src/domain/fridge.js").FridgeItem[];
-            return renderKitchenFridgeV2Page(
-                buildPreviewKitchenFridgeView(chrome as never, snap.today, {
-                    locations: snap.locations,
-                    items,
-                    foodsById: new Map(
-                        [...snap.foodsById.entries()].map(([id, row]) => [
-                            id,
-                            { ...row, usualAmount: null },
-                        ]),
-                    ),
-                    freezeDefaultExpiry: defaultFreezeExpiry(snap.today),
-                    // Every other expiring item has a recipe.
-                    useSoonUses: listExpiring(items, snap.today, 7)
-                        .filter((_, index) => index % 2 === 0)
-                        .map((item) => ({
-                            item: {
-                                id: item.id,
-                                displayName: item.displayName,
-                                expiresOn: item.expiresOn ?? "",
+            const items = fridgeView(chrome)
+                .items as import("../src/domain/fridge.js").FridgeItem[];
+            return fridgePage({
+                openItemId: "i1",
+                // The expiring items but the milk have a recipe.
+                useSoonUses: listExpiring(items, fridgeView(chrome).today, 7)
+                    .filter((item) => item.id !== "i2")
+                    .map((item) => ({
+                        item: {
+                            id: item.id,
+                            displayName: item.displayName,
+                            expiresOn: item.expiresOn ?? "",
+                        },
+                        recipes: [
+                            {
+                                recipeId: "r-salmon-rice",
+                                name: "Salmon & rice",
+                                incomplete: false,
                             },
-                            recipes: [
-                                {
-                                    recipeId: "r-salmon-rice",
-                                    name: "Salmon & rice",
-                                    incomplete: false,
-                                },
-                            ],
-                        })),
-                    groceryLines: previewGroceryLines(),
-                    groceryOverview: buildKitchenFridgeGroceryOverview(
-                        previewGrocerySnapshot(),
-                    ),
-                }),
-            );
+                        ],
+                    })),
+            });
         })(),
         "nutrition-log-results": await logSheetPreview(theme, "results"),
         "nutrition-log-amount": await logSheetPreview(theme, "amount"),

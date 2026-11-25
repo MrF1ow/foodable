@@ -565,6 +565,126 @@ function fixtureWeekPlan(moved = false) {
     });
 }
 
+/**
+ * Kitchen › Fridge with enough in it to drive: three places, a low usual, an
+ * expired and an expiring item, scores, a use-soon recipe and the Add sheet's
+ * usuals. The day is 2026-11-10.
+ */
+function fixtureFridgeView(chrome: unknown) {
+    const row = (
+        id: string,
+        displayName: string,
+        locationId: string,
+        amount: number,
+        unit: string,
+        expiresOn: string | null,
+        foodId: string,
+    ) => ({
+        id,
+        householdId: H,
+        locationId,
+        kind: "food" as const,
+        displayName,
+        quantity: { amount, unit },
+        foodId,
+        expiresOn,
+    });
+    const items = [
+        row(
+            "it-cheese",
+            "Cheese",
+            "l-fridge",
+            200,
+            "g",
+            "2026-11-23",
+            "f-cheese",
+        ),
+        row("it-eggs", "Eggs", "l-fridge", 2, "each", "2026-11-11", "f-eggs"),
+        row(
+            "it-milk",
+            "Expired milk",
+            "l-fridge",
+            1,
+            "l",
+            "2026-11-09",
+            "f-milk",
+        ),
+        row("it-lime", "Lime", "l-fridge", 3, "each", "2026-11-23", "f-lime"),
+        row(
+            "it-cremini",
+            "Cremini mushrooms",
+            "l-fridge",
+            250,
+            "g",
+            "2026-11-09",
+            "f-cremini",
+        ),
+        row(
+            "it-towels",
+            "Paper towels",
+            "l-pantry",
+            3,
+            "roll",
+            null,
+            "f-towels",
+        ),
+    ];
+    const uses = ["it-cremini", "it-milk"].map((id) => ({
+        item: {
+            id,
+            displayName: items.find((i) => i.id === id)!.displayName,
+            expiresOn: "2026-11-09",
+        },
+        recipes: [
+            {
+                recipeId: "r-salmon-rice",
+                name: "Salmon & rice",
+                incomplete: false,
+            },
+        ],
+    }));
+    return buildPreviewKitchenFridgeView(chrome as never, "2026-11-10", {
+        locations: [
+            { id: "l-fridge", householdId: H, name: "Fridge", sortOrder: 0 },
+            { id: "l-freezer", householdId: H, name: "Freezer", sortOrder: 1 },
+            { id: "l-pantry", householdId: H, name: "Pantry", sortOrder: 2 },
+        ],
+        items,
+        lowStock: new Map([["f-eggs", "6"]]),
+        scores: new Map([
+            ["f-cheese", 52],
+            ["f-eggs", 74],
+        ]),
+        useSoonUses: uses,
+        usuals: [
+            {
+                foodId: "p-milk",
+                kind: "food",
+                name: "Milk",
+                subtitle: "Kirkland 2% · 1 gal",
+                amount: 1,
+                unit: "gal",
+            },
+            {
+                foodId: "f-eggs",
+                kind: "food",
+                name: "Eggs",
+                subtitle: "Vital Farms Large · 24",
+                amount: 24,
+                unit: "each",
+            },
+            {
+                foodId: "f-towels",
+                kind: "supply",
+                name: "Paper towels",
+                subtitle: "1 each",
+                amount: 1,
+                unit: "each",
+            },
+        ],
+    });
+}
+
 async function pages(
     theme: "light" | "dark",
     unread: boolean,
@@ -620,9 +740,7 @@ async function pages(
                 },
             ),
         ),
-        fridge: renderKitchenFridgeV2Page(
-            buildPreviewKitchenFridgeView(chrome as never, "2026-11-10"),
-        ),
+        fridge: renderKitchenFridgeV2Page(fixtureFridgeView(chrome)),
         grocery: renderKitchenGroceriesV2Page(
             buildPreviewKitchenGroceriesView(chrome as never),
         ),

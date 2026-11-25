@@ -81,17 +81,15 @@ export const FD_KITCHEN_TABS: readonly {
     { id: "usuals", label: "Usuals", href: APP_PATHS.kitchenUsuals },
 ];
 
-/** Desktop names the fridge page "Overview" (Desktop › Kitchen › Sidebar ›
- *  Sub/Overview); the phone's text tab says "Fridge". */
+/** The sidebar's section links read as the phone's text tabs do. */
 const SIDEBAR_KITCHEN_LABELS: Record<V2KitchenTab, string> = {
-    fridge: "Overview",
+    fridge: "Fridge",
     groceries: "Groceries",
     usuals: "Usuals",
 };
 
 /** Desktop Kitchen sections: sub-links under the sidebar's Kitchen link while
- *  Kitchen is active (design: Sidebar › Sub/Overview, Sub/Groceries,
- *  Sub/Usuals). They replace the text tabs from 1024 px. */
+ *  Kitchen is active (design: Sidebar › Sub). They replace the text tabs from 1024 px. */
 function sidebarKitchenSubs(chrome: AppChrome) {
     const current = kitchenTabFor(chrome);
     return FD_KITCHEN_TABS.map((t) => ({
@@ -282,10 +280,11 @@ function accountChip(chrome: AppChrome): string {
     return `<a class="fd-account-chip" href="${APP_PATHS.settings}" aria-label="${escapeHtml(label)}" title="Settings">${escapeHtml(name ? initialsOf(name) : "Me")}</a>`;
 }
 
-/** The page's own header is what `pageHeader` (components/ui.ts) writes first:
- *  a bare <h1>, or a <header class="dash-head">. */
+/** The page's own header is what its first element writes: a bare <h1>, a
+ *  <header class="dash-head"> (`pageHeader` in components/ui.ts) or the
+ *  design's Page header (`components/v2/page-header.ts`). */
 const LEADING_PAGE_HEADER =
-    /^\s*(?:<h1(?:\s[^>]*)?>[\s\S]*?<\/h1>|<header class="dash-head">[\s\S]*?<\/header>)/;
+    /^\s*(?:<h1(?:\s[^>]*)?>[\s\S]*?<\/h1>|<header class="dash-head">[\s\S]*?<\/header>|<header class="fd-page-header(?:\s[^"]*)?"[^>]*>[\s\S]*?<\/header>)/;
 
 /** The Kitchen text tabs go directly under the page header, as in the design.
  *  A body that does not start with one gets them first. */

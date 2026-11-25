@@ -1,9 +1,9 @@
 // Select several rows, act once (Groceries, Fridge, Usuals, Saved foods &
 // recipes). The markup is src/web/pages/v2/select-mode.ts and the row's
-// checkbox (components/v2/rows.ts); this is the behaviour. A list root
-// `[data-fd-select="<scope>"]` holds the rows, the "N selected" bar and the
-// confirm sheets; its Select button `[data-fd-select-toggle="<scope>"]` may sit
-// outside it.
+// checkbox (components/v2/rows.ts, item-row.ts); this is the behaviour. A list
+// root `[data-fd-select="<scope>"]` holds the rows, the "N selected" bar (or the
+// Selection bars) and the confirm sheets; its Select button or menu item
+// `[data-fd-select-toggle="<scope>"]` may sit outside it.
 //
 // In select mode (`data-fd-selecting` on the root) a tap on a row ticks its
 // box and nothing else (no sheet opens, no link follows, no swipe action
@@ -55,14 +55,44 @@ function messageFor(root, el, n) {
           );
 }
 
+// A bar whose destructive action confirms in place (`data-fd-select-ask`)
+// shows Cancel and the verb with the count in place of the action; the bar
+// carries `data-fd-select-asking` while it does.
+function setAsking(root, on) {
+    root.querySelectorAll("[data-fd-select-bar]").forEach((bar) => {
+        if (on) bar.setAttribute("data-fd-select-asking", "");
+        else bar.removeAttribute("data-fd-select-asking");
+    });
+}
+
+// Move focus to a button of the same bar as `from`: the bar swaps its buttons
+// when it asks or stops asking, and the one that was focused is hidden.
+function focusIn(from, selector) {
+    const bar = from.closest("[data-fd-select-bar]");
+    const next = bar && bar.querySelector(selector);
+    if (next) next.focus();
+}
+
 function sync(root) {
     const n = picked(root).length;
     root.querySelectorAll("[data-fd-select-count]").forEach((el) => {
         el.textContent = `${n} selected`;
     });
+    // The Selection bar's own count and the caps row above the list.
+    root.querySelectorAll(
+        ".fd-selection-bar__count, [data-fd-select-head] .fd-section-header__label",
+    ).forEach((el) => {
+        el.textContent = `${n} selected`;
+    });
+    root.querySelectorAll("[data-fd-select-verb]").forEach((el) => {
+        const label = el.querySelector(".fd-btn__label");
+        const verb = el.getAttribute("data-fd-select-verb") || "";
+        if (label) label.textContent = n > 0 ? `${verb} ${n}` : verb;
+    });
     root.querySelectorAll("[data-fd-select-action]").forEach((el) => {
         el.disabled = n === 0;
     });
+    if (n === 0) setAsking(root, false);
     root.querySelectorAll("[data-fd-select-message]").forEach((el) => {
         el.textContent = messageFor(root, el, n);
     });
@@ -112,8 +142,12 @@ function focusToggle(scope) {
 function setSelecting(root, on) {
     if (on) root.setAttribute("data-fd-selecting", "");
     else root.removeAttribute("data-fd-selecting");
-    const bar = root.querySelector("[data-fd-select-bar]");
-    if (bar) bar.hidden = !on;
+    root.querySelectorAll(
+        "[data-fd-select-bar], [data-fd-select-head]",
+    ).forEach((el) => {
+        el.hidden = !on;
+    });
+    if (!on) setAsking(root, false);
     togglesFor(root.getAttribute("data-fd-select")).forEach((el) =>
         setToggle(el, on),
     );
@@ -146,6 +180,25 @@ document.addEventListener(
             setSelecting(root, true);
             const first = boxes(root).find((box) => !box.disabled);
             if (first) first.focus();
+            return;
+        }
+        const ask = target.closest("[data-fd-select-ask]");
+        if (ask) {
+            const root = ask.closest(ROOT);
+            if (root && picked(root).length > 0) {
+                setAsking(root, true);
+                // The button that had focus is hidden now: the question has it.
+                focusIn(ask, "[data-fd-select-unask]");
+            }
+            return;
+        }
+        const unask = target.closest("[data-fd-select-unask]");
+        if (unask) {
+            const root = unask.closest(ROOT);
+            if (root) {
+                setAsking(root, false);
+                focusIn(unask, "[data-fd-select-ask]");
+            }
             return;
         }
         const cancel = target.closest("[data-fd-select-cancel]");
@@ -192,9 +245,11 @@ document.addEventListener(
                 const panel = menu.querySelector(".fd-menu__panel");
                 if (panel && !panel.hidden) return;
             }
-            document
-                .querySelectorAll("[data-fd-selecting]")
-                .forEach((root) => setSelecting(root, false));
+            document.querySelectorAll("[data-fd-selecting]").forEach((root) => {
+                setSelecting(root, false);
+                // Where Cancel would have left focus.
+                focusToggle(root.getAttribute("data-fd-select"));
+            });
             return;
         }
         if (event.key !== "Enter" && event.key !== " ") return;

@@ -348,12 +348,11 @@ describe("renderKitchenGroceriesV2Page", () => {
             baseView({ shareEnabled: true }),
         );
         expect(body).toMatch(
-            /^<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">[^<]+<\/span><\/h1>\n<header class="fd-kitchen-overview-head">\n<div class="fd-kitchen-overview-head__title">\n<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--phone">[^<]+<\/span><span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--desktop">[^<]+<\/span><\/h1>\n<\/div>\n<div class="fd-kitchen-overview-head__tools">\n<nav class="fd-seg fd-kitchen-overview-seg" aria-label="Kitchen sections">/,
+            /^<header class="fd-page-header fd-kitchen-head" data-fd-kitchen-tab="groceries"><div class="fd-page-header__titles"><h1 class="fd-page-header__title">Kitchen<\/h1><p class="fd-page-header__subtitle">[^<]+<\/p><\/div>/,
         );
-        expect(body).toContain("Kitchen<span");
-        // Share: a desktop tool in the head, and a phone row under the tabs.
+        // Share: a tool in the header's Actions slot, and a phone row under the tabs.
         expect(body).toMatch(
-            /fd-kitchen-overview-head__tools">\n<nav[\s\S]*?<\/nav>\n<button[^>]*fd-kitchen-grocery-share/,
+            /fd-page-header__actions">\n?<button[^>]*fd-kitchen-grocery-share/,
         );
         expect(body).toMatch(
             /<div class="fd-kitchen-groceries-page">\n<div class="fd-kitchen-fridge-top"><button[^>]*fd-kitchen-grocery-share[^>]*>[\s\S]*?<\/button><button[^>]*fd-kitchen-fridge-add/,

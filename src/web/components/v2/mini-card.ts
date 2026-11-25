@@ -5,7 +5,7 @@
  *
  * Styles: `public/app/v2/cards.css`.
  */
-import { cls, esc, raw, safeHref, type Html } from "./html.js";
+import { cls, dataAttrs, esc, raw, safeHref, type Html } from "./html.js";
 
 export type MiniCardTone = "over" | "warn" | "muted";
 
@@ -19,6 +19,8 @@ export type MiniCardOptions = {
     tone?: MiniCardTone;
     href?: string;
     className?: string;
+    /** `data-*` on the card (what a script that opens something reads). */
+    data?: Readonly<Record<string, string>>;
 };
 
 export function miniCard(opts: MiniCardOptions): Html {
@@ -31,7 +33,7 @@ export function miniCard(opts: MiniCardOptions): Html {
     const classes = cls("fd-mini-card", opts.className);
     return raw(
         opts.href != null
-            ? `<a class="${classes}" href="${safeHref(opts.href)}">${inner}</a>`
-            : `<div class="${classes}">${inner}</div>`,
+            ? `<a class="${classes}" href="${safeHref(opts.href)}"${dataAttrs(opts.data)}>${inner}</a>`
+            : `<div class="${classes}"${dataAttrs(opts.data)}>${inner}</div>`,
     );
 }

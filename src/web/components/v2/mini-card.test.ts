@@ -46,4 +46,19 @@ describe("miniCard (FigCraft 172377)", () => {
         expect(html).not.toContain("<script>");
         expect(html.split(XSS_ESCAPED).length - 1).toBe(4);
     });
+
+    test("data attributes go on the card, link or not", () => {
+        const link = String(
+            miniCard({
+                label: "x",
+                title: "y",
+                href: "/a",
+                data: { "fd-open-item": "sheet-1" },
+            }),
+        );
+        expect(link).toContain('href="/a" data-fd-open-item="sheet-1">');
+        expect(
+            String(miniCard({ label: "x", title: "y", data: { "fd-a": "1" } })),
+        ).toContain('<div class="fd-mini-card" data-fd-a="1">');
+    });
 });

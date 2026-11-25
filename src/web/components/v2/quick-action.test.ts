@@ -113,3 +113,18 @@ test("a submit button posts the form around it, and data hooks reach the element
     );
     expect(link).toContain(' data-fd-x="1"');
 });
+
+test("a submit can post a form it is not inside", () => {
+    const html = String(
+        quickAction({
+            label: "Discard",
+            icon: "trash",
+            caption: false,
+            submit: true,
+            form: "fd-toss",
+        }),
+    );
+    expect(html).toContain(
+        '<button type="submit" class="fd-quick-action" aria-label="Discard" form="fd-toss">',
+    );
+});

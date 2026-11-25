@@ -6,7 +6,6 @@ import {
 } from "../../../domain/fridge.js";
 import { usualLowLevel, type Food } from "../../../domain/foods.js";
 import type { Notice } from "../../../domain/notices.js";
-import type { GroceryLine } from "../../../domain/grocery.js";
 import type { ExpiringUse } from "../../../domain/suggestions.js";
 import {
     daysUntilExpiry,
@@ -15,32 +14,30 @@ import {
 } from "../../../domain/stock.js";
 import type { AppChromeBase } from "../../attention.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
-import { esc, raw, type Html } from "../../components/v2/html.js";
-import { sheet } from "../../components/v2/sheet.js";
-import { stepper } from "../../components/v2/stepper.js";
-import { fridgeRow, rowList, sectionHeader } from "../../components/v2/rows.js";
-import {
-    iconChevronRight,
-    iconMinus,
-    iconPlus,
-} from "../../components/v2/icons.js";
 import {
     type DidYouMeanModal,
     renderDidYouMeanBlock,
 } from "../../components/did-you-mean.js";
-import { settingsErrorBanner } from "./settings-shared.js";
+import { button } from "../../components/v2/button.js";
+import { choiceGroup } from "../../components/v2/chips.js";
+import { emptyState } from "../../components/v2/empty-state.js";
+import { field } from "../../components/v2/field.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { miniCard, type MiniCardTone } from "../../components/v2/mini-card.js";
+import { pageLayout } from "../../components/v2/page-layout.js";
+import { quickAction } from "../../components/v2/quick-action.js";
+import { searchField } from "../../components/v2/search-field.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
+import { sheet, sheetSection } from "../../components/v2/sheet.js";
+import { stepperControl } from "../../components/v2/stepper-control.js";
 import { renderAppShell } from "../../shell.js";
-import { fdIcon } from "../../components/fd-icons.js";
-import { formatExpiryWhen, expiryToneClass } from "./expiry-format.js";
-import { kitchenAddButton, kitchenTopTools } from "./kitchen-head.js";
-import { selectMode } from "./select-mode.js";
-import {
-    type KitchenFridgeGroceryOverview,
-    kitchenFridgeItemCountLabel,
-    renderKitchenOverviewHead,
-    renderKitchenOverviewGroceriesCard,
-    wrapKitchenOverviewColumns,
-} from "./kitchen-overview.js";
+import { formatExpiryWhen } from "./expiry-format.js";
+import { renderKitchenHead, kitchenTopTools } from "./kitchen-head.js";
+import { selectionBars } from "./select-mode.js";
+import { settingsErrorBanner } from "./settings-shared.js";
 
 export const FD_FRIDGE_ADD_SHEET_ID = "fd-fridge-add";
 
@@ -48,6 +45,19 @@ export type KitchenFridgeFoodMeta = Pick<
     Food,
     "id" | "genericFoodId" | "usualAmount"
 >;
+
+/** A usual the Add sheet offers first: one tap puts its usual amount away. */
+export type FridgeAddUsual = {
+    /** The food the item is added as (the usual product, else the plain food). */
+    foodId: string;
+    /** A supply posts as one: the fridge add route refuses it as a food. */
+    kind: "food" | "supply";
+    name: string;
+    /** "Kirkland 2% · 1 gal": the product and the amount that goes in. */
+    subtitle: string;
+    amount: number;
+    unit: string;
+};
 
 export type KitchenFridgeV2View = FridgeSnapshot & {
     chrome: AppChromeBase;
@@ -61,13 +71,15 @@ export type KitchenFridgeV2View = FridgeSnapshot & {
     openModalId?: string;
     didYouMean?: DidYouMeanModal;
     freezeDefaultExpiry: string;
-    groceryLines?: readonly GroceryLine[];
-    groceryOverview?: KitchenFridgeGroceryOverview;
     /**
      * The usuals running low, by the usual's food id, with the level they are
      * below ("6"): their rows in the fridge say so in the warning colour.
      */
     lowStock?: ReadonlyMap<string, string>;
+    /** The 0-100 product score of a food, by food id: a badge on its row. */
+    scores?: ReadonlyMap<string, number>;
+    /** The Add sheet's "Your usuals". */
+    usuals?: readonly FridgeAddUsual[];
 };
 
 export type FridgeLocationGroup = {
@@ -75,8 +87,15 @@ export type FridgeLocationGroup = {
     items: FridgeItem[];
 };
 
+const FRIDGE_RETURN_TO = "/kitchen/fridge";
+const ADD_ITEM_ACTION = "/kitchen/fridge/items";
+
 export function fridgeItemSheetId(itemId: string): string {
     return `fd-fridge-item-${itemId}`;
+}
+
+export function kitchenFridgeItemCountLabel(count: number): string {
+    return count === 1 ? "1 item" : `${count} items`;
 }
 
 export function formatFridgeExpiryLabel(iso: string): string {
@@ -112,39 +131,6 @@ export function groupFridgeItemsByLocation(
     }));
 }
 
-function expiryDateTone(
-    expiresOn: string | null | undefined,
-    today: string,
-): string {
-    const level = expiresOn
-        ? (expiryLevel(expiresOn, today) ?? undefined)
-        : undefined;
-    if (level === "expired" || level === "high") return "fd-row__date--high";
-    if (level === "medium") return "fd-row__date--medium";
-    if (level === "low") return "fd-row__date--low";
-    return "";
-}
-
-function expiryDateHtml(
-    expiresOn: string | null | undefined,
-    today: string,
-): { label: string; dateTime?: string; className: string } {
-    if (!expiresOn?.trim()) {
-        return { label: "No date", className: "" };
-    }
-    const level = expiryLevel(expiresOn, today);
-    const urgent =
-        level === "expired" || level === "high" || level === "medium";
-    const label = urgent
-        ? formatExpiryWhen(today, expiresOn)
-        : formatFridgeExpiryLabel(expiresOn);
-    return {
-        label,
-        dateTime: urgent ? undefined : expiresOn,
-        className: expiryDateTone(expiresOn, today),
-    };
-}
-
 export function eatPortionAmount(
     item: FridgeItem,
     food: KitchenFridgeFoodMeta | undefined,
@@ -163,8 +149,7 @@ export function eatPortionAmount(
     return Math.min(1, item.quantity.amount);
 }
 
-const FRIDGE_RETURN_TO = "/kitchen/fridge";
-
+/** "expired", "expires today", "expires in 3 days": the sheet's subtitle. */
 export function formatSheetExpiryLine(
     today: string,
     expiresOn: string,
@@ -183,55 +168,11 @@ function locationName(
     return locations.find((loc) => loc.id === locationId)?.name ?? "Fridge";
 }
 
-function itemSheetSubtitle(
-    item: FridgeItem,
-    view: KitchenFridgeV2View,
-): string {
-    const place = locationName(view.locations, item.locationId);
-    if (item.purchasedOn) {
-        return `${place} · bought ${formatFridgeExpiryLabel(item.purchasedOn)}`;
-    }
-    return place;
-}
-
-function useSoonStrip(view: KitchenFridgeV2View): string {
-    const primary = listExpiring(view.items, view.today, 3);
-    const extra = listExpiring(view.items, view.today, 7)
-        .filter((item) => !primary.some((row) => row.id === item.id))
-        .slice(0, Math.max(0, 5 - primary.length));
-    const items = [...primary, ...extra];
-    if (items.length === 0) return "";
-    const usesByItem = new Map(
-        (view.useSoonUses ?? []).map((use) => [use.item.id, use.recipes[0]]),
-    );
-    const cards = items
-        .map((item, index) => {
-            const desktopOnly =
-                index >= primary.length
-                    ? " fd-kitchen-use-card--desktop-only"
-                    : "";
-            const expiresOn = item.expiresOn ?? "";
-            const level = expiryLevel(expiresOn, view.today) ?? "medium";
-            const when = formatExpiryWhen(view.today, expiresOn);
-            const sheetId = fridgeItemSheetId(item.id);
-            const qty = formatQuantityDisplayParts(
-                item.quantity.amount,
-                item.quantity.unit,
-            );
-            const recipe = usesByItem.get(item.id);
-            const useIn = recipe
-                ? `<span class="fd-kitchen-use-card__use">Use in: ${esc(recipe.name)}</span>`
-                : "";
-            return `<button type="button" class="fd-kitchen-use-card${desktopOnly}" commandfor="${esc(sheetId)}" command="show-modal" data-sheet-id="${esc(sheetId)}">
-<span class="fd-kitchen-use-card__when ${expiryToneClass(level)}">${esc(when)}</span>
-<span class="fd-kitchen-use-card__title">${esc(item.displayName)}</span>
-<span class="fd-kitchen-use-card__meta">${esc(qty)}</span>${useIn}
-</button>`;
-        })
-        .join("");
-    return `<section class="fd-kitchen-use-soon" aria-label="Use soon">${String(
-        sectionHeader({ title: "Use soon", count: items.length, level: 3 }),
-    )}<div class="fd-kitchen-use-soon__scroll">${cards}</div></section>`;
+/** Whether an expiry is near enough that its words are a warning. */
+function isUrgent(expiresOn: string | null | undefined, today: string) {
+    if (!expiresOn?.trim()) return false;
+    const level = expiryLevel(expiresOn, today);
+    return level === "expired" || level === "high" || level === "medium";
 }
 
 /**
@@ -275,252 +216,356 @@ function lowStockLevel(
     return view.lowStock.get(food?.genericFoodId ?? item.foodId) ?? null;
 }
 
-function fridgeItemRowMarkup(
-    item: FridgeItem,
-    view: KitchenFridgeV2View,
-): Html {
-    const qty = formatQuantityDisplayParts(
-        item.quantity.amount,
-        item.quantity.unit,
+const MINI_TONE: Record<string, MiniCardTone> = {
+    expired: "over",
+    high: "over",
+    medium: "warn",
+};
+
+function useSoonStrip(view: KitchenFridgeV2View): Html {
+    const primary = listExpiring(view.items, view.today, 3);
+    const extra = listExpiring(view.items, view.today, 7)
+        .filter((item) => !primary.some((row) => row.id === item.id))
+        .slice(0, Math.max(0, 5 - primary.length));
+    const items = [...primary, ...extra];
+    if (items.length === 0) return raw("");
+    const cards = items.map((item, index) => {
+        const expiresOn = item.expiresOn ?? "";
+        const level = expiryLevel(expiresOn, view.today) ?? "medium";
+        const sheetId = fridgeItemSheetId(item.id);
+        return String(
+            miniCard({
+                label: formatExpiryWhen(view.today, expiresOn),
+                title: item.displayName,
+                meta: formatQuantityDisplayParts(
+                    item.quantity.amount,
+                    item.quantity.unit,
+                ),
+                tone: MINI_TONE[level] ?? "muted",
+                href: `${FRIDGE_RETURN_TO}?item=${encodeURIComponent(item.id)}`,
+                className:
+                    index >= primary.length
+                        ? "fd-kitchen-use-card fd-kitchen-use-card--desktop-only"
+                        : "fd-kitchen-use-card",
+                data: { "fd-open-item": sheetId },
+            }),
+        );
+    });
+    return raw(
+        `<section class="fd-kitchen-use-soon" aria-label="Use soon">${String(sectionHeader({ label: "Use soon", count: items.length, rule: false }))}<div class="fd-kitchen-use-soon__scroll">${cards.join("")}</div></section>`,
     );
-    const date = expiryDateHtml(item.expiresOn, view.today);
-    const sheetId = fridgeItemSheetId(item.id);
+}
+
+function fridgeItemRow(item: FridgeItem, view: KitchenFridgeV2View): Html {
     const food = item.foodId ? view.foodsById?.get(item.foodId) : undefined;
-    const eatAmount = eatPortionAmount(item, food);
-    const swipe = {
-        lead: {
-            label: "Ate some",
-            form: {
-                action: `/kitchen/fridge/items/${item.id}/eat`,
-                fields: {
-                    qty_amount: String(eatAmount),
-                    return_to: FRIDGE_RETURN_TO,
+    const sheetId = fridgeItemSheetId(item.id);
+    const eatFields = {
+        qty_amount: String(eatPortionAmount(item, food)),
+        return_to: FRIDGE_RETURN_TO,
+    };
+    const discard = {
+        action: `/kitchen/fridge/items/${item.id}/discard`,
+        fields: { return_to: FRIDGE_RETURN_TO },
+    };
+    const eat = {
+        action: `/kitchen/fridge/items/${item.id}/eat`,
+        fields: eatFields,
+    };
+    const items: MenuItem[] = [
+        { kind: "post", label: "Eat", ...eat },
+        {
+            kind: "post",
+            label: "Add to grocery list",
+            action: `/kitchen/fridge/items/${item.id}/add-to-grocery`,
+            fields: { from: FRIDGE_RETURN_TO },
+        },
+        { kind: "opens", label: "Edit amount or expiry", sheetId },
+        { kind: "destructive", label: "Discard", ...discard },
+    ];
+    const lowBelow = lowStockLevel(item, food, view);
+    const hasDate = !!item.expiresOn?.trim();
+    const urgent = isUrgent(item.expiresOn, view.today);
+    const when = !hasDate
+        ? null
+        : urgent
+          ? formatExpiryWhen(view.today, item.expiresOn!)
+          : formatFridgeExpiryLabel(item.expiresOn!);
+    // The words of a warning go under the title; a plain date sits at the end.
+    const warning = urgent || lowBelow != null;
+    const subtitle =
+        lowBelow != null ? fridgeLowSubtitle(when, lowBelow) : (when ?? "");
+    const score = item.foodId ? view.scores?.get(item.foodId) : undefined;
+    const rowHtml = String(
+        itemRow({
+            title: item.displayName,
+            meta: formatQuantityDisplayParts(
+                item.quantity.amount,
+                item.quantity.unit,
+            ),
+            score,
+            ...(warning
+                ? { state: "warning" as const, subtitle }
+                : { value: when ?? undefined }),
+            trailing: {
+                kind: "control",
+                html: menu({
+                    label: `Actions for ${item.displayName}`,
+                    anchor: "more",
+                    items,
+                }),
+            },
+            swipe: {
+                left: { label: "Discard", form: discard },
+                right: {
+                    label: "Ate some",
+                    icon: "check",
+                    form: eat,
                 },
             },
-        },
-        trail: {
-            label: "Toss",
-            form: {
-                action: `/kitchen/fridge/items/${item.id}/discard`,
-                fields: { return_to: FRIDGE_RETURN_TO },
-            },
-        },
-        sheetId,
-    };
-    const lowBelow = lowStockLevel(item, food, view);
-    const rowHtml = String(
-        fridgeRow({
-            title: item.displayName,
-            qty,
-            date: date.label,
-            dateTime: date.dateTime,
-            dateClass: date.className || undefined,
-            ...(lowBelow == null
-                ? {}
-                : {
-                      subtitle: fridgeLowSubtitle(
-                          item.expiresOn?.trim() ? date.label : null,
-                          lowBelow,
-                      ),
-                      subtitleTone: "warn" as const,
-                  }),
-            swipe,
-            select: {
-                name: "ids[]",
-                value: item.id,
-                label: item.displayName,
-            },
+            select: { name: "ids[]", value: item.id },
+            id: `fd-fridge-row-${item.id}`,
+            data: { "fd-sheet-row": "", "sheet-id": sheetId },
         }),
     );
-    const attrs = ` data-fd-fridge-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
         // A function replacement: a string would read `$` in an id as a pattern.
-        rowHtml.replace(
-            "<li ",
-            () => `<li id="fd-fridge-row-${esc(item.id)}"${attrs} `,
-        ),
+        rowHtml.replace("<li ", () => `<li tabindex="0" `),
     );
 }
 
 function locationSection(
     group: FridgeLocationGroup,
     view: KitchenFridgeV2View,
-    emptyOnOverview = false,
-): string {
+): Html {
     const locId = `fd-kitchen-loc-${group.location.id}`;
-    const header = String(
-        sectionHeader({
-            title: group.location.name,
-            count: group.items.length,
-            id: locId,
-        }),
+    const head = sectionHeader({
+        label: group.location.name,
+        count: group.items.length,
+        rule: false,
+        id: locId,
+    });
+    const rows = group.items.map((item) => fridgeItemRow(item, view));
+    return raw(
+        `<section class="fd-kitchen-loc" aria-labelledby="${esc(locId)}">${String(head)}${String(listGroup({ rows, label: group.location.name }))}</section>`,
     );
-    if (group.items.length === 0) {
-        if (!emptyOnOverview) return "";
-        return `<section class="fd-kitchen-fridge-loc fd-kitchen-overview-loc fd-kitchen-overview-loc--empty" aria-labelledby="${esc(locId)}">${header}<p class="fd-kitchen-overview-loc-empty">Nothing here</p></section>`;
-    }
-    const rows = group.items.map((item) => fridgeItemRowMarkup(item, view));
-    return `<section class="fd-kitchen-fridge-loc fd-kitchen-overview-loc" aria-labelledby="${esc(locId)}">${header}${String(rowList(rows, { label: group.location.name }))}</section>`;
 }
 
+/** The locations that hold something, as their sections, in order. */
 export function renderFridgeLocationSections(
     view: KitchenFridgeV2View,
-    opts: { includeEmptyLocations?: boolean } = {},
-): string {
-    const groups = groupFridgeItemsByLocation(view.locations, view.items);
-    return groups
-        .map((group) =>
-            locationSection(group, view, !!opts.includeEmptyLocations),
-        )
-        .join("");
+): Html[] {
+    return groupFridgeItemsByLocation(view.locations, view.items)
+        .filter((group) => group.items.length > 0)
+        .map((group) => locationSection(group, view));
 }
 
-function roundAction(
-    label: string,
-    opts: {
-        form?: string;
-        type?: "submit" | "button";
-        danger?: boolean;
-        icon: string;
-        /** Reveals this panel instead of submitting (button type). */
-        controls?: string;
-    },
-): string {
-    const danger = opts.danger ? " fd-kitchen-round-action--danger" : "";
-    const type = opts.type ?? "button";
-    const form = opts.form ? ` form="${esc(opts.form)}"` : "";
-    const controls = opts.controls
-        ? ` aria-controls="${esc(opts.controls)}" aria-expanded="false" data-fd-reveal="${esc(opts.controls)}"`
-        : "";
-    return `<button type="${type}" class="fd-kitchen-round-action${danger}"${form}${controls} aria-label="${esc(label)}"><span class="fd-kitchen-round-action__icon" aria-hidden="true">${opts.icon}</span><span class="fd-kitchen-round-action__label">${esc(label)}</span></button>`;
-}
-
-function itemSheetExpiryStatus(
+function itemSheetSubtitle(
     item: FridgeItem,
     view: KitchenFridgeV2View,
 ): string {
-    if (!item.expiresOn) return "";
-    const level = expiryLevel(item.expiresOn, view.today) ?? "low";
-    const label = formatSheetExpiryLine(view.today, item.expiresOn);
-    return `<p class="fd-kitchen-item-expiry ${expiryToneClass(level)}"><span class="fd-kitchen-item-expiry__dot" aria-hidden="true"></span>${esc(label)}</p>`;
+    const place = locationName(view.locations, item.locationId);
+    if (item.expiresOn && isUrgent(item.expiresOn, view.today)) {
+        return `${place} · ${formatSheetExpiryLine(view.today, item.expiresOn).toLowerCase()}`;
+    }
+    if (item.purchasedOn) {
+        return `${place} · bought ${formatFridgeExpiryLabel(item.purchasedOn)}`;
+    }
+    return place;
 }
 
-function sheetNavRow(
-    label: string,
-    value: string,
-    control: string,
-    icon: string,
-): string {
-    return `<div class="fd-kitchen-sheet-row"><span class="fd-kitchen-sheet-row__icon" aria-hidden="true">${icon}</span><span class="fd-kitchen-sheet-row__label">${esc(label)}</span><span class="fd-kitchen-sheet-row__value">${control}<span class="fd-kitchen-sheet-row__meta">${esc(value)}</span><span class="fd-kitchen-sheet-row__chev" aria-hidden="true">${String(iconChevronRight())}</span></span></div>`;
+/** The recipe that uses an expiring item, and how many expiring things it uses. */
+function useIn(
+    item: FridgeItem,
+    view: KitchenFridgeV2View,
+): { recipeId: string; name: string; count: number } | null {
+    const uses = view.useSoonUses ?? [];
+    const recipe = uses.find((use) => use.item.id === item.id)?.recipes[0];
+    if (!recipe) return null;
+    const count = uses.filter((use) =>
+        use.recipes.some((r) => r.recipeId === recipe.recipeId),
+    ).length;
+    return { recipeId: recipe.recipeId, name: recipe.name, count };
+}
+
+function formRow(id: string, action: string, fields: Record<string, string>) {
+    const hidden = Object.entries(fields)
+        .map(
+            ([name, value]) =>
+                `<input type="hidden" name="${esc(name)}" value="${esc(value)}" />`,
+        )
+        .join("");
+    return `<form id="${esc(id)}" method="post" action="${esc(action)}" class="fd-visually-hidden" aria-hidden="true">${hidden}</form>`;
 }
 
 function itemSheet(item: FridgeItem, view: KitchenFridgeV2View): string {
     const open = view.openItemId === item.id;
     const sheetId = fridgeItemSheetId(item.id);
     const food = item.foodId ? view.foodsById?.get(item.foodId) : undefined;
-    const eatAmount = eatPortionAmount(item, food);
-    const subtitle = itemSheetSubtitle(item, view);
+    const eatId = `${sheetId}-eat`;
+    const groceryId = `${sheetId}-grocery`;
+    const freezeId = `${sheetId}-freeze`;
+    const tossId = `${sheetId}-toss`;
+    const qtyId = `${sheetId}-qty-form`;
     const error =
         open && view.error
             ? `<p class="fd-kitchen-sheet-error" role="alert">${esc(view.error)}</p>`
             : "";
-    const eatFormId = `${sheetId}-eat-form`;
-    const qtyFormId = `${sheetId}-qty-form`;
-    const freezeFormId = `${sheetId}-freeze-form`;
-    const groceryFormId = `${sheetId}-grocery-form`;
-    const tossFormId = `${sheetId}-toss-form`;
-    const locationOptions = view.locations
-        .map(
-            (loc) =>
-                `<option value="${esc(loc.id)}"${loc.id === item.locationId ? " selected" : ""}>${esc(loc.name)}</option>`,
-        )
-        .join("");
-    const expiresValue = item.expiresOn ?? "";
-    const usualBuy =
+    const amount = sheetSection({
+        kind: "amount",
+        label: "How much is left",
+        content: join([
+            stepperControl({
+                name: "qty_amount",
+                label: "Quantity",
+                value: item.quantity.amount,
+                min: 0,
+                step: item.quantity.amount >= 1 ? 1 : 0.1,
+                inputStep: "any",
+                unit: item.quantity.unit,
+                id: `${sheetId}-qty-amt`,
+            }),
+            raw(
+                `<input type="hidden" name="qty_unit" value="${esc(item.quantity.unit)}" />`,
+            ),
+        ]),
+    });
+    const quick = (
+        label: string,
+        icon: "check" | "cart" | "snowflake" | "trash",
+        form: string,
+    ) => quickAction({ label, icon, caption: false, submit: true, form });
+    const actions = sheetSection({
+        kind: "custom",
+        content: raw(
+            `<div class="fd-kitchen-item-actions" role="group" aria-label="Item actions">${join(
+                [
+                    quick("Ate some", "check", eatId),
+                    quick("Add to grocery list", "cart", groceryId),
+                    quick("Freeze", "snowflake", freezeId),
+                    quick("Discard", "trash", tossId),
+                ],
+            )}</div>`,
+        ),
+    });
+    const use = useIn(item, view);
+    const useRows = use
+        ? sheetSection({
+              kind: "rows",
+              label: "Use in",
+              content: listGroup({
+                  label: "Use in",
+                  rows: [
+                      itemRow({
+                          title: use.name,
+                          subtitle: `Uses ${use.count} ${use.count === 1 ? "thing" : "things"} expiring`,
+                          href: `/recipes/${use.recipeId}`,
+                          trailing: { kind: "chevron" },
+                      }),
+                  ],
+              }),
+          })
+        : "";
+    const keptIn = sheetSection({
+        kind: "chips",
+        label: "Kept in",
+        content: choiceGroup({
+            name: "location_id",
+            legend: "Kept in",
+            required: true,
+            options: view.locations.map((loc) => ({
+                value: loc.id,
+                label: loc.name,
+                selected: loc.id === item.locationId,
+            })),
+        }),
+    });
+    const expiresOn = item.expiresOn ?? "";
+    const expiryChoices = expiresOn
+        ? [
+              {
+                  value: "keep",
+                  label: formatFridgeExpiryLabel(expiresOn),
+                  selected: true,
+              },
+              { value: "none", label: "No date" },
+              { value: "pick", label: "Pick a date" },
+          ]
+        : [
+              { value: "none", label: "No date", selected: true },
+              { value: "pick", label: "Pick a date" },
+          ];
+    const expires = sheetSection({
+        kind: "chips",
+        label: "Expires",
+        content: raw(
+            `<div class="fd-kitchen-item-expires" data-fd-expires data-fd-expires-keep="${esc(expiresOn)}">${String(
+                choiceGroup({
+                    name: "expires_mode",
+                    legend: "Expires",
+                    required: true,
+                    options: expiryChoices,
+                }),
+            )}<div class="fd-kitchen-item-expires__field">${String(
+                field({
+                    id: `${sheetId}-expires`,
+                    label: "Expires on",
+                    labelHidden: true,
+                    name: "expires_on",
+                    type: "date",
+                    value: expiresOn,
+                }),
+            )}</div></div>`,
+        ),
+    });
+    const usual =
         item.foodId != null
-            ? `<a class="fd-kitchen-sheet-row fd-kitchen-sheet-row--link" href="/kitchen/usuals/${esc(item.foodId)}"><span class="fd-kitchen-sheet-row__label">Usually buy</span><span class="fd-kitchen-sheet-row__value"><span class="fd-kitchen-sheet-row__meta">Usuals</span><span class="fd-kitchen-sheet-row__chev" aria-hidden="true">${String(iconChevronRight())}</span></span></a>`
+            ? listGroup({
+                  label: "Usuals",
+                  rows: [
+                      itemRow({
+                          title: "Usually buy",
+                          value: "Usuals",
+                          href: `/kitchen/usuals/${item.foodId}`,
+                          trailing: { kind: "chevron" },
+                      }),
+                  ],
+              })
             : "";
-    const body = `${error}
-<div class="fd-kitchen-item-sheet">
-${itemSheetExpiryStatus(item, view)}
-<div class="fd-kitchen-round-actions" role="group" aria-label="Item actions">
-${roundAction("Ate some", {
-    form: eatFormId,
-    type: "submit",
-    icon: String(iconMinus()),
-})}
-${roundAction("Add to list", {
-    form: groceryFormId,
-    type: "submit",
-    icon: `<svg class="fd-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6 6h15l-1.5 9h-12z"/><path d="M6 6l-1-2H3"/><circle cx="9" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></svg>`,
-})}
-${roundAction("Freeze", {
-    controls: freezeFormId,
-    icon: `<svg class="fd-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M12 2v20M2 12h20M5 5l14 14M19 5L5 19"/></svg>`,
-})}
-${roundAction("Toss", {
-    form: tossFormId,
-    type: "submit",
-    danger: true,
-    icon: `<svg class="fd-icon" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M9 7V5h6v2"/><path d="M7 7l1 13h8l1-13"/></svg>`,
-})}
-</div>
-<form id="${eatFormId}" method="post" action="/kitchen/fridge/items/${esc(item.id)}/eat" class="fd-visually-hidden" aria-hidden="true">
+    const body = `${error}<form id="${esc(qtyId)}" method="post" action="/kitchen/fridge/items/${esc(item.id)}">
 <input type="hidden" name="return_to" value="${esc(FRIDGE_RETURN_TO)}" />
-<input type="hidden" name="qty_amount" value="${esc(String(eatAmount))}" />
+${amount}
+${actions}
+${useRows}
+${keptIn}
+${expires}
+${usual}
 </form>
-<form id="${groceryFormId}" method="post" action="/kitchen/fridge/items/${esc(item.id)}/add-to-grocery" class="fd-visually-hidden" aria-hidden="true">
-<input type="hidden" name="from" value="${esc(FRIDGE_RETURN_TO)}" />
-</form>
-<form id="${freezeFormId}" method="post" action="/kitchen/fridge/items/${esc(item.id)}/freeze" class="fd-kitchen-freeze" hidden>
-<input type="hidden" name="return_to" value="${esc(FRIDGE_RETURN_TO)}" />
-<label class="fd-kitchen-freeze__field"><span class="fd-kitchen-sheet-label">Freeze until</span><input type="date" name="expires_on" value="${esc(view.freezeDefaultExpiry)}" required /></label>
-<button type="submit" class="fd-btn fd-btn--primary fd-kitchen-freeze__submit">Freeze</button>
-</form>
-<form id="${tossFormId}" method="post" action="/kitchen/fridge/items/${esc(item.id)}/discard" class="fd-visually-hidden" aria-hidden="true">
-<input type="hidden" name="return_to" value="${esc(FRIDGE_RETURN_TO)}" />
-</form>
-<form id="${qtyFormId}" method="post" action="/kitchen/fridge/items/${esc(item.id)}">
-<input type="hidden" name="return_to" value="${esc(FRIDGE_RETURN_TO)}" />
-<p class="fd-kitchen-sheet-label">How much is left</p>
-${String(
-    stepper({
-        name: "qty_amount",
-        label: "Quantity",
-        value: item.quantity.amount,
-        min: 0,
-        step: item.quantity.amount >= 1 ? 1 : 0.1,
-        inputStep: "any",
-        unit: item.quantity.unit,
-        id: `${sheetId}-qty-amt`,
-    }),
-)}
-<input type="hidden" name="qty_unit" value="${esc(item.quantity.unit)}" />
-<div class="fd-kitchen-sheet-rows">
-${sheetNavRow(
-    "Expires",
-    expiresValue ? formatFridgeExpiryLabel(expiresValue) : "No date",
-    `<input type="date" class="fd-kitchen-sheet-row__control" name="expires_on" value="${esc(expiresValue)}" />`,
-    fdIcon("cal"),
-)}
-${sheetNavRow(
-    "Kept in",
-    locationName(view.locations, item.locationId),
-    `<select class="fd-kitchen-sheet-row__control" name="location_id" aria-label="Location">${locationOptions}</select>`,
-    fdIcon("fridge"),
-)}
-</div>
-${usualBuy}
-</form>
-</div>`;
+${formRow(eatId, `/kitchen/fridge/items/${item.id}/eat`, {
+    qty_amount: String(eatPortionAmount(item, food)),
+    return_to: FRIDGE_RETURN_TO,
+})}
+${formRow(groceryId, `/kitchen/fridge/items/${item.id}/add-to-grocery`, { from: FRIDGE_RETURN_TO })}
+${formRow(freezeId, `/kitchen/fridge/items/${item.id}/freeze`, {
+    expires_on: view.freezeDefaultExpiry,
+    return_to: FRIDGE_RETURN_TO,
+})}
+${formRow(tossId, `/kitchen/fridge/items/${item.id}/discard`, { return_to: FRIDGE_RETURN_TO })}`;
     return sheet({
         id: sheetId,
-        kind: "edit",
-        title: item.displayName,
-        subtitle,
-        body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${qtyFormId}">Save</button>`,
+        placement: "side",
+        className: "fd-kitchen-sheet",
+        header: {
+            kind: "title",
+            title: item.displayName,
+            subtitle: itemSheetSubtitle(item, view),
+        },
+        body: raw(body),
+        actions: {
+            kind: "single",
+            primary: { label: "Save", type: "submit", form: qtyId },
+        },
         openOnLoad: open,
+        focus: "panel",
     });
 }
 
@@ -535,25 +580,90 @@ function didYouMeanBlock(view: KitchenFridgeV2View): string {
     }).replaceAll("did-you-mean-", "fd-did-you-mean-");
 }
 
+function usualRow(usual: FridgeAddUsual, locationId: string): Html {
+    return itemRow({
+        title: usual.name,
+        subtitle: usual.subtitle,
+        trailing: {
+            kind: "add",
+            label: `Add ${usual.name}`,
+            form: {
+                action: ADD_ITEM_ACTION,
+                fields: {
+                    kind: usual.kind,
+                    ...(usual.kind === "supply" ? { name: usual.name } : {}),
+                    food_id: usual.foodId,
+                    location_id: locationId,
+                    qty_amount: String(usual.amount),
+                    qty_unit: usual.unit,
+                },
+            },
+        },
+        data: { "fd-fridge-usual": usual.name.toLowerCase() },
+    });
+}
+
 function addItemSheet(view: KitchenFridgeV2View): string {
     if (view.locations.length === 0) return "";
     const defaultLoc = view.locations[0]!.id;
-    const locationOptions = view.locations
-        .map(
-            (loc) =>
-                `<option value="${esc(loc.id)}"${loc.id === defaultLoc ? " selected" : ""}>${esc(loc.name)}</option>`,
-        )
-        .join("");
     const addError =
         view.openAdd && view.error
             ? `<p class="fd-kitchen-sheet-error" role="alert">${esc(view.error)}</p>`
             : "";
-    const body = `${addError}${didYouMeanBlock(view)}<form id="fd-fridge-add-form" method="post" action="/kitchen/fridge/items">
+    const usuals = view.usuals ?? [];
+    const usualsSection =
+        usuals.length > 0
+            ? String(
+                  sheetSection({
+                      kind: "results",
+                      label: "Your usuals",
+                      content: listGroup({
+                          label: "Your usuals",
+                          rows: usuals.map((u) => usualRow(u, defaultLoc)),
+                      }),
+                  }),
+              ) +
+              `<p class="fd-kitchen-add__none" data-fd-fridge-none hidden>No usual matches.</p>`
+            : "";
+    const searchSection = sheetSection({
+        kind: "fields",
+        content: searchField({
+            name: "q",
+            id: "fd-fridge-add-q",
+            label: "Search foods",
+            placeholder: "Search foods",
+        }),
+    });
+    // A failed add (a 4xx re-render) or a did-you-mean opens the hand form.
+    const handOpen =
+        (view.openAdd && view.error) || view.didYouMean != null ? " open" : "";
+    const hand = `<details class="fd-kitchen-hand"${handOpen}><summary class="fd-kitchen-hand__summary">Not here? Add it by hand</summary>
+<form id="fd-fridge-add-form" class="fd-kitchen-hand__form" method="post" action="${ADD_ITEM_ACTION}">
 <input type="hidden" name="kind" value="food" />
-<label class="fd-kitchen-sheet-label">Location<select name="location_id" required>${locationOptions}</select></label>
-<label class="fd-kitchen-sheet-label">Name<input name="food_name" type="text" required autocomplete="off" /></label>
 ${String(
-    stepper({
+    field({
+        id: "fd-fridge-add-name",
+        label: "Name",
+        name: "food_name",
+        required: true,
+        autocomplete: "off",
+    }),
+)}
+${String(
+    choiceGroup({
+        name: "location_id",
+        legend: "Kept in",
+        showLegend: true,
+        required: true,
+        options: view.locations.map((loc) => ({
+            value: loc.id,
+            label: loc.name,
+            selected: loc.id === defaultLoc,
+        })),
+    }),
+)}
+${String(
+    stepperControl({
         name: "qty_amount",
         label: "Amount",
         value: 1,
@@ -565,46 +675,47 @@ ${String(
     }),
 )}
 <input type="hidden" name="qty_unit" value="each" />
-</form>`;
+${String(button({ label: "Add", variant: "primary", type: "submit" }))}
+</form></details>`;
     return sheet({
         id: FD_FRIDGE_ADD_SHEET_ID,
-        kind: "edit",
-        title: "Add item",
-        body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="fd-fridge-add-form">Add</button>`,
+        placement: "side",
+        className: "fd-kitchen-sheet",
+        header: { kind: "title", title: "Add to fridge" },
+        body: raw(
+            `${addError}${didYouMeanBlock(view)}${String(searchSection)}${usualsSection}${hand}`,
+        ),
         openOnLoad: view.openAdd,
+        focus: "panel",
     });
 }
 
-function allItemSheets(view: KitchenFridgeV2View): string {
-    return view.items.map((item) => itemSheet(item, view)).join("");
+function addButton(): string {
+    return String(
+        button({
+            label: "Add item",
+            round: true,
+            icon: "plus",
+            attrs: {
+                command: "show-modal",
+                commandfor: FD_FRIDGE_ADD_SHEET_ID,
+            },
+        }),
+    );
+}
+
+function tabMenu(select: ReturnType<typeof selectionBars>): string {
+    return String(
+        menu({
+            label: "Fridge options",
+            anchor: "more",
+            items: [select.menuItem],
+        }),
+    );
 }
 
 export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
-    const sections = renderFridgeLocationSections(view, {
-        includeEmptyLocations: true,
-    });
-    const groceriesCard = view.groceryOverview
-        ? renderKitchenOverviewGroceriesCard(view.groceryOverview)
-        : "";
-    const columns = wrapKitchenOverviewColumns(sections, groceriesCard);
-    const empty =
-        view.locations.length === 0
-            ? `<p class="fd-kitchen-fridge-empty">Add a location, then add items with the button above.</p>`
-            : view.items.length === 0
-              ? `<p class="fd-kitchen-fridge-empty">Nothing in the fridge yet.</p>`
-              : "";
-    const addBtn = kitchenAddButton({
-        target: FD_FRIDGE_ADD_SHEET_ID,
-        label: "Add item",
-    }).phone;
-    const groceryOpen =
-        view.groceryOverview?.openLineCount ??
-        (view.groceryLines
-            ? view.groceryLines.filter((row) => !row.checked).length
-            : 0);
-    const head = renderKitchenOverviewHead(view.items.length, groceryOpen);
-    const select = selectMode({
+    const select = selectionBars({
         scope: "fridge",
         returnTo: FRIDGE_RETURN_TO,
         actions: [
@@ -613,24 +724,44 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
                 key: "discard",
                 label: "Discard",
                 action: "/kitchen/fridge/bulk/discard",
-                title: "Discard items",
-                one: "Discard 1 item?",
-                many: "Discard {n} items?",
-                confirmLabel: "Discard",
             },
         ],
     });
     const selectable = view.items.length > 0;
+    const tools = selectable ? tabMenu(select) : "";
+    const head = renderKitchenHead({
+        active: "fridge",
+        phoneSubtitle: kitchenFridgeItemCountLabel(view.items.length),
+        desktopTools: `${tools}${addButton()}`,
+    });
+    const sections = renderFridgeLocationSections(view);
+    const useSoon = useSoonStrip(view);
+    const [first, ...rest] = sections;
+    const left = raw(`${String(useSoon)}${first ? String(first) : ""}`);
+    const right = raw(rest.map(String).join(""));
+    const empty =
+        view.locations.length === 0
+            ? emptyState({
+                  title: "No places yet",
+                  body: "Add a location, then add items with the button above.",
+              })
+            : view.items.length === 0
+              ? emptyState({ title: "Nothing in the fridge yet" })
+              : raw("");
+    const layout = pageLayout({
+        layout: "two-columns",
+        left,
+        right,
+        className: "fd-kitchen-fridge-layout",
+    });
     return `${head}
 <div class="fd-kitchen-fridge-page"${select.rootAttrs}>
-${kitchenTopTools(addBtn)}
+${kitchenTopTools(tools, addButton())}
 ${view.error && !view.openItemId && !view.openAdd ? String(settingsErrorBanner(view.error)) : ""}
-${useSoonStrip(view)}
-${selectable ? select.tools + select.bar : ""}
-${columns}
-${empty}
-${allItemSheets(view)}
-${selectable ? select.sheets : ""}
+${selectable ? `${String(select.bars)}${String(select.head)}` : ""}
+${String(layout)}
+${String(empty)}
+${view.items.map((item) => itemSheet(item, view)).join("")}
 ${addItemSheet(view)}
 </div>`;
 }
