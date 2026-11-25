@@ -308,7 +308,8 @@ describe("/app-v2.js", () => {
         // +~0.9 KB Today: the edit sheet's Time chips put the meal's time back, and a plan sheet's pull-down row shows the list's choice.
         // +~1.2 KB Log sheet: a search row is the Item row (open link, plus), a pasted recipe link shows Go, the unit is a Segmented (a piece names its weight) and the macro tiles are the Macro tiles.
         // +~1.1 KB Log sheet: a meal's plus opens the search with that meal checked, and Quick calories and Weigh in replace the search sheet.
-        expect(js.length).toBeLessThan(211_100);
+        // +~0.4 KB Log sheet: a row's own link is followed only when it stays on this site.
+        expect(js.length).toBeLessThan(211_500);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
