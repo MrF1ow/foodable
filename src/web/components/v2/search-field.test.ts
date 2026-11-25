@@ -122,3 +122,13 @@ test("a lead icon other than the magnifier and a numeric keypad", () => {
         String(searchField({ label: "x", lead: "scan", linkDetected: true })),
     ).toContain("fd-icon--link");
 });
+
+test("clear: auto draws Clear out of sight while the field is empty, and in sight with a value", () => {
+    const empty = String(searchField({ label: "Search", clear: "auto" }));
+    expect(empty).toMatch(/<button[^>]*data-fd-search-clear[^>]*hidden/);
+    const filled = String(
+        searchField({ label: "Search", clear: "auto", value: "oat" }),
+    );
+    expect(filled).toContain("data-fd-search-clear");
+    expect(filled).not.toMatch(/<button[^>]*data-fd-search-clear[^>]*hidden/);
+});

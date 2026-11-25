@@ -1,3 +1,14 @@
+/**
+ * The Recipes list, built from the design's components: a Page header, the
+ * Search field with its filter pull-down (and, for a pasted link, Go), the
+ * week's planned recipes as Mini cards, and the recipes as Item rows in a
+ * flat List group.
+ *
+ * What the search field does depends on what is typed. Text filters the list
+ * (a GET of this page); a recipe link shows the link icon and Go, and posts
+ * the import (`client/v2/recipes.js`). A failed import shows its reason in a
+ * Card under the field and keeps the link in the field.
+ */
 import {
     recipeTimeLabel,
     type Recipe,
@@ -10,19 +21,26 @@ import {
 } from "../../../domain/recipe-filters.js";
 import { formatLogMacroGrams } from "../../../domain/log-macro-format.js";
 import type { RecipeSourceKind } from "../../../domain/recipe-import.js";
-import type { Notice } from "../../../domain/notices.js";
 import type { AppChromeBase } from "../../attention.js";
-import { fdIcon } from "../../components/fd-icons.js";
-import { chipLink, chipNav } from "../../components/v2/chips.js";
-import { esc, srOnly } from "../../components/v2/html.js";
+import { button } from "../../components/v2/button.js";
+import { card } from "../../components/v2/card.js";
+import { emptyState } from "../../components/v2/empty-state.js";
+import { field } from "../../components/v2/field.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { pageHeader } from "../../components/v2/page-header.js";
+import { pageLayout } from "../../components/v2/page-layout.js";
+import { searchField } from "../../components/v2/search-field.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
 import { renderAppShell } from "../../shell.js";
-import { noticeStrip, stripNotices } from "./notice-strip.js";
 import { favouriteStarForm } from "./recipes-favourite.js";
 import {
     planDayLabel,
     renderMissingSheet,
     renderPlanEditSheets,
-    renderWeekStrip,
+    renderPlannedWeek,
     type WeekPlanView,
 } from "./recipes-plan.js";
 
@@ -41,15 +59,10 @@ export type RecipesListV2View = {
     /** The filters in force (`?filter=a,b`), known ids only. */
     filters?: string[];
     cards: V2RecipeCard[];
-    cookableCount?: number;
     totalCount: number;
-    /** This week's plan: the strip, and the sheets its buttons open. */
+    /** This week's plan: the planned cards, and the sheets they open. */
     week?: WeekPlanView;
-    /** The household's open notices; what the plan is missing shows under the week. */
-    notices?: readonly Notice[];
-    /** Whether the viewer may dismiss a notice for the household. */
-    canDismissNotices?: boolean;
-    /** Picking a recipe for this day (`?plan_date=`): each card's Plan goes to it. */
+    /** Picking a recipe for this day (`?plan_date=`): each row's plus goes to it. */
     planDate?: string;
     /** The headline of the inline import error card. */
     importError?: string;
@@ -70,12 +83,21 @@ export type RecipesListV2View = {
     importSourceLabel?: string;
     /**
      * A recipe pasted from another Foodable (its share link or its JSON) that
-     * could not be imported: what was pasted, and why. Reopens the import panel.
+     * could not be imported: what was pasted, and why.
      */
-    sharedImport?: { error?: string; reason?: string; input?: string };
+    sharedImport?: {
+        error?: string;
+        reason?: string;
+        input?: string;
+        /**
+         * Where the input was typed: the search field (the link shows there
+         * once) or the shared-recipe form (it shows there once). Absent is the form.
+         */
+        via?: "field" | "form";
+    };
     /**
-     * Whether the import panel offers pasting a recipe from another Foodable
-     * (the `mcp-share-links` flag). Absent or false leaves that form out.
+     * Whether the page offers pasting a recipe from another Foodable (the
+     * `mcp-share-links` flag). Absent or false leaves that form out.
      */
     sharedImportEnabled?: boolean;
     /**
@@ -86,27 +108,14 @@ export type RecipesListV2View = {
     drafts?: readonly { id: string; name: string; expiresOn: string | null }[];
 };
 
-/** The viewer's drafts: each opens its recipe page, where Save is. */
-function draftsSection(view: RecipesListV2View): string {
-    const drafts = view.drafts ?? [];
-    if (drafts.length === 0) return "";
-    const rows = drafts
-        .map(
-            (d) =>
-                `<li><a href="/recipes/${esc(d.id)}">${esc(d.name)}</a>${d.expiresOn ? ` <span class="fd-recipes-empty">deleted ${esc(d.expiresOn)} unless saved</span>` : ""}</li>`,
-        )
-        .join("");
-    return `<section class="fd-recipes-all" id="fd-recipes-drafts" aria-labelledby="fd-recipes-drafts-heading">
-<div class="fd-recipes-section-head"><h2 class="fd-recipes-section-head__title" id="fd-recipes-drafts-heading">Drafts</h2></div>
-<ul>${rows}</ul>
-</section>`;
-}
-
 export function recipesListV2Href(opts: {
     q?: string;
     filters?: readonly string[];
+    /** Keeps picking a recipe for this day (`?plan_date=`). */
+    planDate?: string;
 }): string {
     const params = new URLSearchParams();
+    if (opts.planDate) params.set("plan_date", opts.planDate);
     const q = opts.q?.trim() ?? "";
     if (q) params.set("q", q);
     const filter = filterParamValue(opts.filters ?? []);
@@ -116,95 +125,77 @@ export function recipesListV2Href(opts: {
     return query ? `/recipes?${query}` : "/recipes";
 }
 
-/** A chip toggles its filter: on adds it to the ones in force, on again removes it. */
-function activeFilters(view: RecipesListV2View): string[] {
-    return view.filters ?? [];
-}
-
-function filterChip(
-    id: string,
-    view: RecipesListV2View,
-    count?: number,
-): ReturnType<typeof chipLink> {
-    const entry = RECIPE_FILTERS.find((filter) => filter.id === id)!;
-    const on = activeFilters(view).includes(id);
-    return chipLink({
-        label: entry.label,
-        href: recipesListV2Href({
-            q: view.query,
-            filters: on
-                ? activeFilters(view).filter((other) => other !== id)
-                : [...activeFilters(view), id],
-        }),
-        selected: on,
-        count: count != null && count > 0 ? count : undefined,
-        title:
-            id === "quick"
-                ? "Only recipes with a known total time; unknown time is excluded."
-                : undefined,
-    });
+/** The same test `client/v2/recipes.js` makes on what is typed. */
+function looksLikeLink(text: string): boolean {
+    return /^https?:\/\/\S+$/i.test(text.trim());
 }
 
 function servingsLabel(portions: number): string {
     return portions === 1 ? "1 serving" : `${portions} servings`;
 }
 
-function stockLabel(flags: RecipeFilterFlags, missingNames: string[]): string {
-    if (!flags.hasIngredients) return "No ingredients yet";
-    if (flags.missingCount === 0) return "You have everything";
-    const names =
-        missingNames.length > 0
-            ? ` · ${missingNames.slice(0, 4).join(", ")}`
-            : "";
-    return `Missing ${flags.missingCount}${names}`;
+/** "Missing 2 · Avocado, Lime": the row's words when the kitchen falls short. */
+function missingLabel(
+    flags: RecipeFilterFlags,
+    names: string[],
+): string | null {
+    if (!flags.hasIngredients || flags.missingCount === 0) return null;
+    const list = names.length > 0 ? ` · ${names.slice(0, 4).join(", ")}` : "";
+    return `Missing ${flags.missingCount}${list}`;
 }
 
-function listMacroLine(macros: RecipeMacros): string {
-    const one = (
-        key: "protein" | "carbs" | "fat",
-        letter: string,
-        name: string,
-        value: number | null,
-    ) => {
-        if (value == null) return "";
-        return `<span class="fd-macro fd-macro--${key}"><span aria-hidden="true">${letter} </span>${srOnly(`${name} `)}${esc(formatLogMacroGrams(value))}</span>`;
+/** P / C / F for a row; a macro nobody knows is a dash, never a zero. */
+function rowMacros(macros: RecipeMacros) {
+    if (
+        macros.protein_g == null &&
+        macros.carbs_g == null &&
+        macros.fat_g == null
+    ) {
+        return undefined;
+    }
+    const grams = (value: number | null) =>
+        value == null ? "–" : formatLogMacroGrams(value);
+    return {
+        protein: grams(macros.protein_g),
+        carbs: grams(macros.carbs_g),
+        fat: grams(macros.fat_g),
     };
-    const parts = [
-        one("protein", "P", "Protein", macros.protein_g),
-        one("carbs", "C", "Carbs", macros.carbs_g),
-        one("fat", "F", "Fat", macros.fat_g),
-    ].filter(Boolean);
-    return parts.length > 0
-        ? `<span class="fd-macros">${parts.join("")}</span>`
-        : "";
 }
 
-function recipeCard(card: V2RecipeCard, view: RecipesListV2View): string {
+function planHref(recipeId: string, date?: string): string {
+    const day = date ? `&date=${encodeURIComponent(date)}` : "";
+    return `/recipes/${encodeURIComponent(recipeId)}?plan=1${day}`;
+}
+
+function recipeRow(card: V2RecipeCard, view: RecipesListV2View): Html {
     const { recipe, flags, macrosPerPortion, missingNames } = card;
+    const missing = missingLabel(flags, missingNames);
     const minutes = recipeTimeLabel(recipe);
-    const metaParts = [servingsLabel(recipe.yieldPortions)];
-    if (minutes) metaParts.push(minutes);
-    const macroHtml = listMacroLine(macrosPerPortion);
-    const metaRow = macroHtml
-        ? `${esc(metaParts.join(" · "))}<span class="fd-recipes-card__meta-sep" aria-hidden="true"> · </span>${macroHtml}`
-        : esc(metaParts.join(" · "));
-    const stock = stockLabel(flags, missingNames);
-    const stockClass = !flags.hasIngredients
-        ? "fd-recipes-card__stock--empty"
-        : flags.missingCount === 0
-          ? "fd-recipes-card__stock--ok"
-          : "fd-recipes-card__stock--miss";
-    const dot =
-        flags.hasIngredients && flags.missingCount === 0
-            ? `<span class="fd-recipes-card__dot" aria-hidden="true"></span>`
-            : flags.hasIngredients && flags.missingCount > 0
-              ? `<span class="fd-recipes-card__dot fd-recipes-card__dot--warn" aria-hidden="true"></span>`
-              : "";
-    const kcal =
-        macrosPerPortion.calories != null
-            ? `<span class="fd-recipes-card__kcal">${esc(String(Math.round(macrosPerPortion.calories)))} kcal</span>`
-            : "";
-    // The star is a form, so it sits beside the card's link, not inside it.
+    const subtitle =
+        missing ??
+        [servingsLabel(recipe.yieldPortions), minutes]
+            .filter(Boolean)
+            .join(" · ");
+    const common = {
+        title: recipe.name,
+        subtitle,
+        macros: rowMacros(macrosPerPortion),
+        state: missing ? ("warning" as const) : ("default" as const),
+        href: `/recipes/${recipe.id}`,
+        id: `recipe-${recipe.id}`,
+        className: "fd-recipes-row",
+    };
+    // Picking a day: the plus plans the recipe for it, nothing else on the row.
+    if (view.planDate) {
+        return itemRow({
+            ...common,
+            add: {
+                kind: "add",
+                label: `Plan ${recipe.name}`,
+                href: planHref(recipe.id, view.planDate),
+            },
+        });
+    }
     const star = favouriteStarForm({
         recipeId: recipe.id,
         recipeName: recipe.name,
@@ -212,246 +203,430 @@ function recipeCard(card: V2RecipeCard, view: RecipesListV2View): string {
         back: {
             kind: "list",
             query: view.query.trim(),
-            filter: filterParamValue(activeFilters(view)),
+            filter: filterParamValue(view.filters ?? []),
         },
-        className: "fd-recipes-card__star",
+        className: "fd-recipes-row__star",
     });
-    const planDay = view.planDate
-        ? `&date=${encodeURIComponent(view.planDate)}`
-        : "";
-    const plan = view.week
-        ? `<a class="fd-recipes-card__plan" href="/recipes/${esc(recipe.id)}?plan=1${esc(planDay)}" aria-label="Plan ${esc(recipe.name)}">Plan</a>`
-        : "";
-    return `<li class="fd-row fd-row--recipe" id="recipe-${esc(recipe.id)}"><a class="fd-recipes-card" href="/recipes/${esc(recipe.id)}"><span class="fd-recipes-card__title">${esc(recipe.name)}</span><span class="fd-recipes-card__meta">${metaRow}</span>${kcal}${
-        stock
-            ? `<span class="fd-recipes-card__stock ${stockClass}">${dot}<span class="fd-recipes-card__stock-text">${esc(stock)}</span></span>`
-            : ""
-    }</a>${star}${plan}</li>`;
+    // Every row's ⋯ has Plan, which opens the recipe's Add to plan sheet.
+    const items: MenuItem[] = [
+        { kind: "link", label: "Plan", href: planHref(recipe.id) },
+    ];
+    return itemRow({
+        ...common,
+        beside: {
+            lead: raw(star),
+            trailing: menu({
+                label: `Actions for ${recipe.name}`,
+                anchor: "more",
+                items,
+                className: "fd-recipes-row__menu",
+            }),
+        },
+    });
 }
 
-function importPasteBlock(view: RecipesListV2View): string {
-    if (!view.importPasteStep) return "";
-    const url = esc(view.importUrl ?? "");
-    const text = esc(view.importPasteText ?? "");
-    const website = esc(view.importWebsiteUrl ?? "");
-    const websiteErr = view.importWebsiteError
-        ? `<p class="fd-recipes-import-error" role="alert">${esc(view.importWebsiteError)}</p>`
-        : "";
-    const textOrigin =
-        view.importTextOrigin === "shared"
-            ? `<input type="hidden" name="text_origin" value="shared" />`
-            : "";
-    const creditValue = esc(view.importCredit ?? "");
-    const creditField =
-        view.importSourceKind === "website" || view.importTextOnly
-            ? ""
-            : `<label class="fd-recipes-import-credit-label">Creator<input class="fd-recipes-import-input" name="credit" type="text" maxlength="120" autocomplete="off" value="${creditValue}" /></label>`;
-    const retry = view.importShowRetry
-        ? `<button type="submit" name="retry" value="1" formnovalidate class="fd-recipes-import-retry"${view.importRetryDisabled ? " disabled" : ""}>Check again</button>`
-        : "";
-    if (view.importTextOnly) {
-        return `<section class="fd-recipes-import-paste" aria-label="Paste recipe">
-<form method="post" action="/recipes/import" data-busy-form>
-<input type="hidden" name="import_step" value="paste" />
-<input type="hidden" name="text_only" value="1" />
-${textOrigin}
-<input class="fd-recipes-import-input" name="url" type="url" inputmode="url" autocomplete="off" placeholder="https://… (optional)" aria-label="Recipe link" value="${url}" />
-<textarea class="fd-recipes-import-text" name="text" rows="8" required aria-label="Recipe text">${text}</textarea>
-<button type="submit" class="fd-recipes-import-submit">Import</button>
-${retry}
-</form></section>`;
+/** The filter pull-down on the search field: a tick per filter in force, and Clear. */
+function filterMenu(view: RecipesListV2View, filters: string[]): Html {
+    const items: MenuItem[] = RECIPE_FILTERS.map((entry) => {
+        const on = filters.includes(entry.id);
+        return {
+            kind: "checked" as const,
+            label: entry.label,
+            checked: on,
+            href: recipesListV2Href({
+                q: view.query,
+                planDate: view.planDate,
+                filters: on
+                    ? filters.filter((other) => other !== entry.id)
+                    : [...filters, entry.id],
+            }),
+        };
+    });
+    if (filters.length > 0) {
+        items.push({
+            kind: "link",
+            label: "Clear",
+            href: recipesListV2Href({
+                q: view.query,
+                planDate: view.planDate,
+            }),
+        });
     }
-    const kind = view.importSourceKind ?? "website";
-    const textRequired = kind === "pinterest" ? "" : " required";
-    const websiteFields =
-        kind === "pinterest"
-            ? `${websiteErr}<input class="fd-recipes-import-input" name="website_url" type="url" inputmode="url" autocomplete="off" value="${website}" placeholder="https://… recipe page" aria-label="Recipe website" />
-<p class="fd-recipes-import-note">Pins usually lead to the recipe website. Paste that link here.</p>`
-            : "";
-    return `<section class="fd-recipes-import-paste" aria-label="Paste recipe">
-<form method="post" action="/recipes/import" data-busy-form>
-<input type="hidden" name="import_step" value="paste" />
-<input type="hidden" name="url" value="${url}" />
-${textOrigin}
-${websiteFields}
-<textarea class="fd-recipes-import-text" name="text" rows="8" aria-label="Recipe text"${textRequired}>${text}</textarea>
-${creditField}
-<button type="submit" class="fd-recipes-import-submit">Import</button>
-${retry}
-</form></section>`;
+    return menu({
+        label: "Filter recipes",
+        anchor: "filter",
+        filterCount: filters.length,
+        items,
+        data: {
+            "fd-search-filter": "",
+            "fd-recipes-filter-count": String(filters.length),
+        },
+    });
 }
 
+function hiddenInput(name: string, value: string): string {
+    return `<input type="hidden" name="${esc(name)}" value="${esc(value)}" />`;
+}
+
+/** What the search field holds: the search, else the link whose import failed. */
 function searchFieldValue(view: RecipesListV2View): string {
     const q = view.query.trim();
     if (q) return q;
-    if (!view.importPasteStep && view.importUrl?.trim()) {
+    // Also on the paste step (a page that would not give its recipe up): the
+    // link stays, so the person can fix it or try another. The text-only step
+    // has a link box of its own.
+    if (!view.importTextOnly && view.importUrl?.trim()) {
         return view.importUrl.trim();
     }
+    const shared = view.sharedImportEnabled ? view.sharedImport : undefined;
+    if (shared?.via === "field" && shared.input && looksLikeLink(shared.input))
+        return shared.input.trim();
     return "";
 }
 
-/** The inline import error: a card with the headline and, when there is one, the reason under it. */
+function searchBlock(view: RecipesListV2View, filters: string[]): Html {
+    const value = searchFieldValue(view);
+    const link = looksLikeLink(value);
+    const picking = view.planDate != null;
+    const fieldHtml = searchField({
+        label: picking ? "Search recipes" : "Search recipes or paste a link",
+        placeholder: picking
+            ? "Search recipes"
+            : "Search recipes or paste a link",
+        value,
+        id: "fd-recipes-q",
+        clear: "auto",
+        filterMenu: filterMenu(view, filters),
+        leadSwap: !picking,
+        go: picking
+            ? undefined
+            : {
+                  label: "Import recipe",
+                  hidden: !link,
+                  attrs: { "data-fd-recipes-import-go": "" },
+              },
+        linkDetected: link && !picking,
+        data: { "fd-recipes-field": "" },
+    });
+    const importForm = picking
+        ? ""
+        : `<form method="post" action="/recipes/import" data-fd-recipes-import data-busy-form hidden>${hiddenInput("url", "")}</form>`;
+    return raw(
+        `<form class="fd-recipes-search" id="fd-recipes-search-form" method="get" action="/recipes" data-fd-recipes-search>${fieldHtml}${view.planDate ? hiddenInput("plan_date", view.planDate) : ""}${filters.length > 0 ? hiddenInput("filter", filterParamValue(filters)) : ""}<button type="submit" class="fd-sr">Search</button></form>${importForm}`,
+    );
+}
+
+/** The inline import error: a Card with the headline and, when there is one, the reason under it. */
 function importErrorCard(parts: {
     headline: string;
     reason?: string;
     /** A reason that is already markup (the duplicate's Open link). */
     reasonHtml?: string;
     className?: string;
-}): string {
+}): Html {
     const reason = parts.reasonHtml ?? (parts.reason ? esc(parts.reason) : "");
-    return `<div class="fd-card fd-recipes-import-error${parts.className ? ` ${parts.className}` : ""}" role="alert"><p class="fd-recipes-import-error__headline">${esc(parts.headline)}</p>${reason ? `<p class="fd-recipes-import-error__reason">${reason}</p>` : ""}</div>`;
+    return card({
+        className: `fd-recipes-import-error${parts.className ? ` ${parts.className}` : ""}`,
+        children: raw(
+            `<div role="alert"><p class="fd-recipes-import-error__headline">${esc(parts.headline)}</p>${reason ? `<p class="fd-recipes-import-error__reason">${reason}</p>` : ""}</div>`,
+        ),
+    });
+}
+
+/** The paste step of an import that needs the caption or the page text. */
+function importPasteBlock(view: RecipesListV2View): Html {
+    if (!view.importPasteStep) return raw("");
+    const retry = view.importShowRetry
+        ? button({
+              variant: "secondary",
+              type: "submit",
+              label: "Check again",
+              disabled: view.importRetryDisabled,
+              attrs: { name: "retry", value: "1", formnovalidate: "" },
+          })
+        : "";
+    const origin =
+        view.importTextOrigin === "shared"
+            ? hiddenInput("text_origin", "shared")
+            : "";
+    const submit = button({
+        variant: "primary",
+        type: "submit",
+        label: "Import",
+    });
+    if (view.importTextOnly) {
+        return card({
+            label: "Paste recipe",
+            className: "fd-recipes-import-paste",
+            children: raw(
+                `<form method="post" action="/recipes/import" data-busy-form>${hiddenInput("import_step", "paste")}${hiddenInput("text_only", "1")}${origin}${field(
+                    {
+                        id: "fd-recipes-paste-url",
+                        label: "Recipe link",
+                        name: "url",
+                        type: "url",
+                        autocomplete: "off",
+                        placeholder: "https://… (optional)",
+                        value: view.importUrl ?? "",
+                        labelHidden: true,
+                    },
+                )}${field({
+                    id: "fd-recipes-paste-text",
+                    label: "Recipe text",
+                    name: "text",
+                    rows: 8,
+                    required: true,
+                    value: view.importPasteText ?? "",
+                    labelHidden: true,
+                })}<div class="fd-recipes-import-actions">${submit}${retry}</div></form>`,
+            ),
+        });
+    }
+    const kind = view.importSourceKind ?? "website";
+    const website =
+        kind === "pinterest"
+            ? `${view.importWebsiteError ? `<p class="fd-recipes-import-error__reason" role="alert">${esc(view.importWebsiteError)}</p>` : ""}${field(
+                  {
+                      id: "fd-recipes-paste-website",
+                      label: "Recipe website",
+                      name: "website_url",
+                      type: "url",
+                      autocomplete: "off",
+                      placeholder: "https://… recipe page",
+                      value: view.importWebsiteUrl ?? "",
+                      labelHidden: true,
+                  },
+              )}`
+            : "";
+    const credit =
+        view.importSourceKind === "website"
+            ? ""
+            : field({
+                  id: "fd-recipes-paste-credit",
+                  label: "Creator",
+                  name: "credit",
+                  maxlength: 120,
+                  autocomplete: "off",
+                  value: view.importCredit ?? "",
+              });
+    return card({
+        label: "Paste recipe",
+        className: "fd-recipes-import-paste",
+        children: raw(
+            `<form method="post" action="/recipes/import" data-busy-form>${hiddenInput("import_step", "paste")}${hiddenInput("url", view.importUrl ?? "")}${origin}${website}${field(
+                {
+                    id: "fd-recipes-paste-text",
+                    label: "Recipe text",
+                    name: "text",
+                    rows: 8,
+                    required: kind !== "pinterest",
+                    value: view.importPasteText ?? "",
+                    labelHidden: true,
+                },
+            )}${credit}<div class="fd-recipes-import-actions">${submit}${retry}</div></form>`,
+        ),
+    });
+}
+
+/** Pasting a recipe from another Foodable (the `mcp-share-links` flag). */
+function sharedImportBlock(view: RecipesListV2View): Html {
+    // Picking a day has nothing to import.
+    if (!view.sharedImportEnabled || view.planDate) return raw("");
+    // What came through the search field shows there, not here: the box stays
+    // closed and empty.
+    const shared =
+        view.sharedImport?.via === "field" ? undefined : view.sharedImport;
+    // Its failure shows inside the open box, above the field it is about.
+    const failure = shared?.error
+        ? String(
+              importErrorCard({
+                  headline: shared.error,
+                  reason: shared.reason,
+                  className: "fd-recipes-import-shared-error",
+              }),
+          )
+        : "";
+    return raw(
+        `<details class="fd-recipes-shared"${shared ? " open" : ""}><summary class="fd-recipes-shared__summary">Import from another Foodable</summary>${failure}<form method="post" action="/recipes/import-shared" data-fd-recipes-shared data-busy-form>${field(
+            {
+                id: "fd-recipes-shared",
+                label: "Shared recipe link or JSON",
+                name: "shared",
+                rows: 4,
+                required: true,
+                spellcheck: false,
+                autocomplete: "off",
+                placeholder: "https://…/s/… or {…}",
+                value: shared?.input ?? "",
+                labelHidden: true,
+            },
+        )}${button({ variant: "primary", type: "submit", label: "Import recipe" })}</form></details>`,
+    );
+}
+
+/** "Wed 11 Nov", as the app's other days read; anything else as it came. */
+function dayLabel(day: string): string {
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) ? planDayLabel(day) : day;
+}
+
+/** The viewer's drafts: each opens its recipe page, where Save is. */
+function draftsSection(view: RecipesListV2View): Html {
+    const drafts = view.drafts ?? [];
+    if (drafts.length === 0) return raw("");
+    const rows = drafts.map((draft) =>
+        itemRow({
+            title: draft.name,
+            subtitle: draft.expiresOn
+                ? `Draft · deleted ${dayLabel(draft.expiresOn)} unless saved`
+                : "Draft",
+            href: `/recipes/${draft.id}`,
+            trailing: { kind: "chevron" },
+            id: `draft-${draft.id}`,
+        }),
+    );
+    return raw(
+        `<section class="fd-recipes-drafts" id="fd-recipes-drafts" aria-label="Drafts">${sectionHeader({ label: "Drafts", count: drafts.length, rule: false })}${listGroup({ rows, label: "Drafts" })}</section>`,
+    );
+}
+
+function allRecipes(view: RecipesListV2View, filters: string[]): Html {
+    // Typing narrows "All recipes" to "N of M"; a filter alone keeps the heading.
+    const searching = view.query.trim() !== "";
+    if (view.totalCount === 0) {
+        // Picking a day with nothing to pick still offers the way out.
+        if (view.planDate) {
+            return raw(
+                `${sectionHeader({
+                    label: "All recipes",
+                    rule: false,
+                    action: { label: "Cancel", href: "/recipes" },
+                })}${emptyState({
+                    title: "No recipes yet",
+                    body: "Import a recipe first, then pick it for a day.",
+                })}`,
+            );
+        }
+        // Drafts alone make the page not empty.
+        if ((view.drafts ?? []).length > 0) return raw("");
+        return emptyState({
+            title: "No recipes yet",
+            body: "Paste a recipe link in the search field to import one.",
+        });
+    }
+    const label = searching
+        ? `${view.cards.length} of ${view.totalCount} recipes`
+        : "All recipes";
+    const head = sectionHeader({
+        label,
+        count: searching ? undefined : view.cards.length,
+        rule: false,
+        id: "fd-recipes-all-heading",
+        action: view.planDate
+            ? { label: "Cancel", href: "/recipes" }
+            : undefined,
+    });
+    if (view.cards.length === 0) {
+        const onlyFavourites =
+            filters.length === 1 &&
+            filters[0] === "favourites" &&
+            !view.query.trim();
+        return raw(
+            `${head}${emptyState(
+                onlyFavourites
+                    ? {
+                          title: "No favourites yet",
+                          body: "Tap the star on a recipe to keep it here.",
+                      }
+                    : { title: "No recipes match" },
+            )}`,
+        );
+    }
+    return raw(
+        `<section class="fd-recipes-all" aria-labelledby="fd-recipes-all-heading" data-fd-recipes-total="${view.totalCount}">${head}${listGroup(
+            {
+                rows: view.cards.map((c) => recipeRow(c, view)),
+                label: "Recipes",
+                className: "fd-recipes-list",
+            },
+        )}</section>`,
+    );
 }
 
 export function renderRecipesListBody(view: RecipesListV2View): string {
-    const q = esc(searchFieldValue(view));
-    const filters = activeFilters(view);
-    const filterValue = filterParamValue(filters);
-    const filterHidden = filterValue
-        ? `<input type="hidden" name="filter" value="${esc(filterValue)}" />`
-        : "";
+    const filters = view.filters ?? [];
     const importDuplicate =
         view.importDuplicateRecipeId != null
             ? importErrorCard({
                   headline: "You already have this recipe.",
                   reasonHtml: `<a href="/recipes/${esc(view.importDuplicateRecipeId)}">Open it</a>`,
               })
-            : "";
+            : raw("");
     const importErr =
         view.importError && view.importDuplicateRecipeId == null
             ? importErrorCard({
                   headline: view.importError,
                   reason: view.importErrorReason,
               })
-            : "";
-    const chips = String(
-        chipNav(
-            RECIPE_FILTERS.map((filter) =>
-                filterChip(
-                    filter.id,
-                    view,
-                    filter.id === "cookable" ? view.cookableCount : undefined,
-                ),
-            ),
-            {
-                label:
-                    filters.length > 0
-                        ? `Recipe filters, ${filters.length} on`
-                        : "Recipe filters",
-                className: "fd-recipes-chips",
-            },
-        ),
-    ).replace(
-        "<nav ",
-        () => `<nav data-fd-recipes-filter-count="${filters.length}" `,
-    );
-    const chipsHtml = chips;
-    // Drafts are not counted as saved, but with some listed above the page
-    // is not empty.
-    const emptyAll =
-        view.totalCount === 0 && (view.drafts ?? []).length === 0
-            ? `<p class="fd-recipes-empty">No recipes yet. Paste a link above to import one.</p>`
-            : "";
-    const emptyFilter =
-        view.totalCount > 0 && view.cards.length === 0
-            ? filters.length === 1 &&
-              filters[0] === "favourites" &&
-              !view.query.trim()
-                ? `<p class="fd-recipes-empty">No favourites yet. Tap the star on a recipe to keep it here.</p>`
-                : `<p class="fd-recipes-empty">No recipes match this search.</p>`
-            : "";
-    const grid =
-        view.cards.length > 0
-            ? `<section class="fd-recipes-all" aria-labelledby="fd-recipes-all-heading">
-<div class="fd-recipes-section-head"><h2 class="fd-recipes-section-head__title" id="fd-recipes-all-heading">All recipes</h2></div>
-<ul class="fd-list fd-recipes-list${view.planDate ? " fd-recipes-list--planning" : ""}">${view.cards.map((card) => recipeCard(card, view)).join("")}</ul>
-</section>`
-            : "";
-    const shared = view.sharedImportEnabled ? view.sharedImport : undefined;
+            : raw("");
+    // A link that failed from the search field answers under the field; one
+    // that failed in the shared-recipe box answers in that box.
+    const shared =
+        view.sharedImportEnabled && view.sharedImport?.via === "field"
+            ? view.sharedImport
+            : undefined;
     const sharedError = shared?.error
         ? importErrorCard({
               headline: shared.error,
               reason: shared.reason,
               className: "fd-recipes-import-shared-error",
           })
-        : "";
-    const importLinkBlock = `<details class="fd-recipes-import-link"${shared ? " open" : ""}>
-<summary class="fd-recipes-import-link__summary">Import a link</summary>
-<form class="fd-recipes-import-link__form" method="post" action="/recipes/import" data-fd-recipes-import data-busy-form>
-<input class="fd-recipes-import-input" name="url" type="url" inputmode="url" autocomplete="off" required placeholder="https://…" aria-label="Recipe link" value="${esc(view.importUrl ?? "")}" />
-<button type="submit" class="fd-recipes-import-submit">Import</button>
-</form>
-${
-    view.sharedImportEnabled
-        ? `<form class="fd-recipes-import-link__form fd-recipes-import-shared" method="post" action="/recipes/import-shared" data-fd-recipes-shared data-busy-form>
-<p class="fd-recipes-import-note">Got a recipe from another Foodable? Paste its share link, or the recipe's JSON.</p>
-${sharedError}
-<textarea class="fd-recipes-import-text" name="shared" rows="4" required spellcheck="false" autocomplete="off" placeholder="https://…/s/… or {…}" aria-label="Shared recipe link or JSON">${esc(shared?.input ?? "")}</textarea>
-<button type="submit" class="fd-recipes-import-submit">Import recipe</button>
-</form>`
-        : ""
-}
-</details>`;
-    const planPick = view.planDate
-        ? `<p class="fd-plan-pick" role="status">Pick a recipe for ${esc(planDayLabel(view.planDate))}. <a href="/recipes">Cancel</a></p>`
-        : "";
-    const weekStrip = view.week
-        ? `${renderWeekStrip(view.week)}${String(
-              noticeStrip(
-                  stripNotices(
-                      view.notices ?? [],
-                      ["plan.missing_ingredient"],
-                      undefined,
+        : raw("");
+    const notices = join([
+        importDuplicate,
+        importErr,
+        sharedError,
+        importPasteBlock(view),
+    ]);
+    const planned =
+        view.week && !view.planDate ? renderPlannedWeek(view.week) : "";
+    const header = pageHeader({
+        title: "Recipes",
+        subtitle: view.planDate
+            ? `Pick one for ${planDayLabel(view.planDate)}`
+            : `${view.totalCount} saved`,
+        className: "fd-recipes-head",
+    });
+    const head = raw(`${header}${searchBlock(view, filters)}`);
+    const list = join([allRecipes(view, filters)]);
+    // A draft cannot be planned, so picking a day leaves them out.
+    const drafts = view.planDate ? raw("") : draftsSection(view);
+    // An import answer takes a column of its own beside the list (the design's
+    // Two columns); otherwise the page is one column.
+    const layout =
+        notices !== ""
+            ? pageLayout({
+                  layout: "two-columns",
+                  header: head,
+                  left: raw(`${notices}${planned}`),
+                  right: raw(
+                      `${drafts}${list}${String(sharedImportBlock(view))}`,
                   ),
-                  {
-                      back: "/recipes",
-                      label: "Missing for the plan",
-                      canDismiss: view.canDismissNotices === true,
-                  },
-              ),
-          )}`
-        : "";
-    const weekSheets = view.week
+                  className: "fd-recipes-layout",
+              })
+            : pageLayout({
+                  layout: "single",
+                  header: head,
+                  content: raw(
+                      `${planned}${drafts}${list}${String(sharedImportBlock(view))}`,
+                  ),
+                  className: "fd-recipes-layout",
+              });
+    const sheets = view.week
         ? `${renderPlanEditSheets(view.week, "recipes")}\n${renderMissingSheet(view.week, "recipes")}`
         : "";
-    const savedLabel =
-        view.totalCount === 1 ? "1 saved" : `${view.totalCount} saved`;
-    const cookableSuffix =
-        view.cookableCount != null && view.cookableCount > 0
-            ? `<span class="fd-recipes-subtitle__cookable"> · ${esc(String(view.cookableCount))} cookable now</span>`
-            : "";
-    const recipesLinkIcon = `<svg class="fd-icon fd-recipes-search-link__icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 13a5 5 0 0 1 7.07 0l1.42 1.42a5 5 0 0 1-7.08 7.07l-1.41-1.41"/><path d="M14 11a5 5 0 0 1-7.07 0L5.51 9.59a5 5 0 1 1 7.07-7.07l1.42 1.41"/></svg>`;
-    return `<div class="fd-recipes-page">
-<header class="fd-recipes-header">
-<div class="fd-recipes-header__top">
-<div class="fd-recipes-header__titles">
-<h1 class="fd-recipes-title">Recipes</h1>
-<p class="fd-recipes-subtitle">${esc(savedLabel)}${cookableSuffix}</p>
-</div>
-<button type="button" class="fd-recipes-add-link" data-fd-recipes-add-link>${recipesLinkIcon}<span>Add from link</span></button>
-</div>
-</header>
-${importDuplicate}
-${importErr}
-${importPasteBlock(view)}
-<div class="fd-recipes-toolbar">
-<form class="fd-recipes-search-form" id="fd-recipes-search-form" method="get" action="/recipes" data-fd-recipes-search>
-<div class="fd-recipes-search-field">
-${fdIcon("search")}
-<input class="fd-recipes-search-input fd-recipes-search-input--phone" name="q" type="search" inputmode="search" autocomplete="off" spellcheck="false" placeholder="Search or paste a link" value="${q}" aria-label="Search or paste a recipe link" />
-<input class="fd-recipes-search-input fd-recipes-search-input--desk" type="search" inputmode="search" autocomplete="off" spellcheck="false" placeholder="Search recipes or paste a link" value="${q}" aria-label="Search recipes or paste a link" disabled />
-<button type="button" class="fd-recipes-search-link" data-fd-recipes-add-link aria-label="Add from link">${recipesLinkIcon}</button>
-</div>
-${filterHidden}
-<button type="submit" class="fd-sr">Search</button>
-</form>
-${chipsHtml}
-</div>
-${planPick}${weekStrip}${importLinkBlock}
-${draftsSection(view)}
-${emptyAll}
-${emptyFilter}
-${grid}
-${weekSheets}
+    return `<div class="fd-recipes-page"${view.planDate ? " data-fd-recipes-picking" : ""}>
+${String(layout)}
+${sheets}
 </div>`;
 }
 

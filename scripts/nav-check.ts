@@ -810,14 +810,18 @@ try {
         { timeBefore, timePicking, timeKept, ex: drain() },
     );
 
-    // A plan entry's edit sheet: titled with the day, the meal under it, Day
-    // and Meal as rows with pull-downs (the row's value follows the choice).
+    // A plan entry's edit sheet: titled with the recipe, the day and meal under
+    // it, Day and Meal as rows with pull-downs (the row's value follows the choice).
     await clickSel(".fd-plan-week [data-fd-sheet-row] [data-fd-menu-trigger]");
     await sleep(150);
     await clickSel(
         '.fd-plan-week [data-fd-sheet-row] [commandfor^="fd-plan-edit-"]',
     );
     await sleep(300);
+    await clickSel(
+        "dialog[id^='fd-plan-edit-'][open] [data-anchor='row'] [data-fd-menu-trigger]",
+    );
+    await sleep(200);
     const planSheet = await ev<{
         open: boolean;
         side: boolean;
@@ -826,39 +830,36 @@ try {
         rows: string[];
         dayChoices: number;
         valueAfter: string | null;
+        fieldAfter: string | null;
     }>(`(() => {
         const d = document.querySelector("dialog[id^='fd-plan-edit-'][open]");
-        const rows = [...(d?.querySelectorAll(".fd-plan-edit-row") ?? [])];
-        const select = rows[0]?.querySelector("select");
-        if (select) {
-            select.selectedIndex = select.options.length - 1;
-            select.dispatchEvent(new Event("change", { bubbles: true }));
-        }
+        const rows = [...(d?.querySelectorAll("[data-anchor='row']") ?? [])];
+        const items = [...(rows[0]?.querySelectorAll("[data-fd-menu-value]") ?? [])];
+        items[items.length - 1]?.click();
         return {
             open: !!d,
             side: d?.classList.contains("fd-sheet--side") ?? false,
             title: d?.querySelector(".fd-sheet__title")?.textContent ?? null,
             subtitle: d?.querySelector(".fd-sheet__subtitle")?.textContent ?? null,
             rows: rows.map((r) => r.querySelector(".fd-item-row__title")?.textContent ?? ""),
-            dayChoices: select?.options.length ?? 0,
+            dayChoices: items.length,
             valueAfter: rows[0]?.querySelector(".fd-item-row__value")?.textContent ?? null,
+            fieldAfter: rows[0]?.querySelector("[data-fd-menu-field]")?.value ?? null,
         };
     })()`);
     await pressEsc();
     record(
-        "v2 today: a plan entry's edit sheet is a side sheet titled with the day and the meal, with Day and Meal as rows with pull-downs whose value follows the choice",
+        "v2 today: a plan entry's edit sheet is a side sheet titled with the recipe and the day and meal under it, with Day and Meal as pull-down rows whose value follows the choice",
         planSheet.open &&
             planSheet.side &&
-            /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}$/.test(
-                planSheet.title ?? "",
-            ) &&
-            ["Breakfast", "Lunch", "Dinner", "Snacks"].includes(
+            (planSheet.title ?? "") !== "" &&
+            /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2} · (breakfast|lunch|dinner|snack)$/.test(
                 planSheet.subtitle ?? "",
             ) &&
             planSheet.rows.join("|") === "Day|Meal" &&
             planSheet.dayChoices >= 14 &&
             planSheet.valueAfter != null &&
-            planSheet.valueAfter !== planSheet.title,
+            /^\d{4}-\d{2}-\d{2}$/.test(planSheet.fieldAfter ?? ""),
         { planSheet, ex: drain() },
     );
 
@@ -916,6 +917,465 @@ try {
             ex: drain(),
         },
     );
+    await goto("/");
+    await setMarker();
+
+    // ---- Recipes: the list, its filters, link import and the plan sheets ----
+    // Run at both widths: the page is never wider than the screen, the
+    // buttons of each sheet measure as buttons, and every pull-down item is
+    // the topmost thing at its centre once scrolled to.
+    const recipesAt = async (width: number) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 600 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: false,
+        });
+        await control("reset=posts");
+        await goto("/recipes");
+        await setMarker();
+    };
+    // Every item of the open pull-down is reachable: scrolled into its panel,
+    // it is the topmost thing at its own centre and on the screen.
+    const reachItems = (menuSel: string) =>
+        ev<{ n: number; bad: string[] }>(`(() => {
+            const panel = document.querySelector(${JSON.stringify(menuSel)} + " .fd-menu__panel");
+            const bad = [];
+            const items = [...panel.querySelectorAll(".fd-menu__item")].filter((i) => i.getClientRects().length > 0);
+            for (const i of items) {
+                i.scrollIntoView({ block: "nearest" });
+                const r = i.getBoundingClientRect();
+                const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                const inView = r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth;
+                if (!(hit && i.contains(hit) && inView)) bad.push(i.textContent.trim());
+            }
+            return { n: items.length, bad };
+        })()`);
+    // The buttons in an open sheet's action row: real tap targets inside the
+    // screen, their words not clipped, none over another.
+    const sheetButtons = () =>
+        ev<{ n: number; ok: boolean; boxes: string[] }>(`(() => {
+            const d = document.querySelector("dialog[open]");
+            const bs = [...(d?.querySelectorAll(".fd-sheet__actions .fd-btn, .fd-sheet-actions .fd-btn") ?? [])].filter((b) => b.getClientRects().length > 0);
+            const rs = bs.map((b) => b.getBoundingClientRect());
+            const fits = rs.every((r, i) => r.height >= 40 && r.height <= 60 && r.width >= 64 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && bs[i].scrollWidth <= bs[i].clientWidth + 1);
+            const apart = rs.every((r, i) => rs.every((o, j) => i === j || r.right <= o.left + 1 || o.right <= r.left + 1 || r.bottom <= o.top + 1 || o.bottom <= r.top + 1));
+            return { n: bs.length, ok: bs.length > 0 && fits && apart, boxes: rs.map((r) => Math.round(r.width) + "x" + Math.round(r.height)) };
+        })()`);
+    const recipesRes: Record<string, unknown> = {};
+    let recipesOk = true;
+    for (const width of [390, 1440]) {
+        // The width asked for, not innerWidth: a phone's layout viewport grows
+        // with content that overflows, so innerWidth would follow it.
+        await recipesAt(width);
+        const page = await ev<{
+            h1: string | null;
+            subtitle: string | null;
+            rows: number;
+            stars: number;
+            rowMenus: number;
+            cards: number;
+            missing: string | null;
+            fits: boolean;
+            chips: number;
+            noticeStrip: number;
+        }>(`(() => ({
+            h1: document.querySelector("h1")?.textContent ?? null,
+            subtitle: document.querySelector(".fd-page-header__subtitle")?.textContent ?? null,
+            rows: document.querySelectorAll(".fd-recipes-row").length,
+            stars: document.querySelectorAll(".fd-recipes-row .fd-star").length,
+            rowMenus: document.querySelectorAll(".fd-recipes-row [data-fd-menu-trigger]").length,
+            cards: document.querySelectorAll(".fd-plan-planned .fd-mini-card").length,
+            missing: document.querySelector(".fd-plan-planned > .fd-btn")?.textContent?.trim() ?? null,
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+            chips: document.querySelectorAll(".fd-recipes-page .fd-chip").length,
+            noticeStrip: document.querySelectorAll(".fd-notice-strip").length,
+        }))()`);
+        // The filter pull-down: ticks, reachable items, a filter is a Turbo visit.
+        await clickSel('[data-anchor="filter"] [data-fd-menu-trigger]');
+        await sleep(250);
+        const open = await reachItems('[data-anchor="filter"]');
+        const labels = await ev<string[]>(
+            `[...document.querySelectorAll('[data-anchor="filter"] .fd-menu__label')].map((e) => e.textContent)`,
+        );
+        await clickSel(
+            '[data-anchor="filter"] a[href="/recipes?filter=protein"]',
+        );
+        await sleep(500);
+        const filtered = await ev<{
+            href: string;
+            marker: string | null;
+            count: string | null;
+            rows: number;
+            ticked: string[];
+            fits: boolean;
+        }>(`({
+            href: location.pathname + location.search,
+            marker: window.__marker ?? null,
+            count: document.querySelector("[data-fd-recipes-filter-count]")?.getAttribute("data-fd-recipes-filter-count") ?? null,
+            rows: document.querySelectorAll(".fd-recipes-row").length,
+            ticked: [...document.querySelectorAll('[data-anchor="filter"] [aria-checked="true"] .fd-menu__label')].map((e) => e.textContent),
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+        })`);
+        // The search field: text filters the rows on the page; a link shows
+        // Go and posts the import.
+        await goto("/recipes");
+        await setMarker();
+        await control("reset=posts");
+        const clearShown = `(() => { const b = document.querySelector(".fd-recipes-search [data-fd-search-clear]"); return !!b && b.getClientRects().length > 0; })()`;
+        const headingOf = `(document.querySelector("#fd-recipes-all-heading .fd-section-header__label")?.textContent ?? "") + "|" + (document.querySelector("#fd-recipes-all-heading .fd-section-header__count")?.getClientRects().length ?? 0)`;
+        const beforeTyping = await ev<{ heading: string; clear: boolean }>(
+            `({ heading: ${headingOf}, clear: ${clearShown} })`,
+        );
+        const typed = await ev<{
+            hidden: number;
+            link: boolean;
+            goShown: boolean;
+            heading: string;
+            clear: boolean;
+        }>(`(() => {
+            const input = document.querySelector(".fd-recipes-search .fd-search-field__input");
+            input.value = "tacos";
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            return {
+                hidden: [...document.querySelectorAll(".fd-recipes-row")].filter((r) => r.hidden).length,
+                link: !!document.querySelector(".fd-search-field[data-link-detected]"),
+                goShown: !document.querySelector("[data-fd-recipes-import-go]").hidden,
+                heading: ${headingOf},
+                clear: ${clearShown},
+            };
+        })()`);
+        // Emptying the field puts the heading back and hides the X.
+        const emptied = await ev<{ heading: string; clear: boolean }>(`(() => {
+            const input = document.querySelector(".fd-recipes-search .fd-search-field__input");
+            input.value = "";
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            return { heading: ${headingOf}, clear: ${clearShown} };
+        })()`);
+        const pasted = await ev<{
+            link: boolean;
+            goShown: boolean;
+            filterShown: boolean;
+        }>(`(() => {
+            const input = document.querySelector(".fd-recipes-search .fd-search-field__input");
+            input.value = "https://www.instagram.com/reel/C8xYz1AbCdE/";
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            const filter = document.querySelector("[data-fd-search-filter]");
+            return {
+                link: !!document.querySelector(".fd-search-field[data-link-detected]"),
+                goShown: !document.querySelector("[data-fd-recipes-import-go]").hidden,
+                filterShown: !!filter && filter.getClientRects().length > 0,
+            };
+        })()`);
+        await clickSel("[data-fd-recipes-import-go]");
+        await sleep(500);
+        const importPosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/import",
+        );
+        // Add to plan from the list: a row's ⋯ has Plan, which opens the
+        // recipe's sheet; its Add to plan posts day, meal and servings.
+        await goto("/recipes");
+        await setMarker();
+        await control("reset=posts");
+        await clickSel(".fd-recipes-row .fd-menu [data-fd-menu-trigger]");
+        await sleep(250);
+        const rowMenu = await reachItems(".fd-recipes-row .fd-menu");
+        await clickSel(
+            '.fd-recipes-row .fd-menu a[href="/recipes/r-alfredo?plan=1"]',
+        );
+        await sleep(600);
+        const planOpen = await ev<{
+            href: string;
+            marker: string | null;
+            sheet: boolean;
+        }>(`({
+            href: location.pathname + location.search,
+            marker: window.__marker ?? null,
+            sheet: !!document.querySelector("#fd-recipe-plan-sheet[open]"),
+        })`);
+        const addButtons = await sheetButtons();
+        await ev(
+            `document.querySelector('#fd-recipe-plan-sheet [type="submit"]').click()`,
+        );
+        await sleep(500);
+        const planPosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-alfredo/plan",
+        );
+        // Today's This week Plan starts picking a day: the first day with
+        // nothing planned (the fixture plans the 10th and the 11th).
+        await goto("/");
+        await clickSel(".fd-plan-week .fd-section-header__action");
+        await sleep(600);
+        const fromToday = await ev<{ at: string; subtitle: string | null }>(`({
+            at: location.pathname + location.search,
+            subtitle: document.querySelector(".fd-page-header__subtitle")?.textContent ?? null,
+        })`);
+        // Picking a day: each row's plus goes to the recipe's sheet for it.
+        await goto("/recipes?plan_date=2026-11-12");
+        const pick = await ev<{
+            subtitle: string | null;
+            plus: string[];
+            cancel: string | null;
+            stars: number;
+            filterLinks: string[];
+            fits: boolean;
+        }>(`({
+            filterLinks: [...document.querySelectorAll('[data-anchor="filter"] a[href]')].map((a) => a.getAttribute("href")),
+            subtitle: document.querySelector(".fd-page-header__subtitle")?.textContent ?? null,
+            plus: [...document.querySelectorAll(".fd-recipes-row .fd-item-row__add")].map((a) => a.getAttribute("href")),
+            cancel: document.querySelector(".fd-section-header__action")?.getAttribute("href") ?? null,
+            stars: document.querySelectorAll(".fd-star").length,
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+        })`);
+        await clickSel(".fd-recipes-row .fd-item-row__add");
+        await sleep(600);
+        const pickOpen = await ev<{ href: string; sheet: boolean }>(`({
+            href: location.pathname + location.search,
+            sheet: !!document.querySelector("#fd-recipe-plan-sheet[open]"),
+        })`);
+        // A planned card opens its edit sheet: Day and Meal pull-downs reach
+        // every item, Save posts the move, Remove asks in place and then posts.
+        await goto("/recipes");
+        await setMarker();
+        await control("reset=posts");
+        await clickSel('.fd-plan-planned [commandfor="fd-plan-edit-pl1"]');
+        await sleep(350);
+        const edit = await ev<{
+            title: string | null;
+            subtitle: string | null;
+            side: boolean;
+            gap: number;
+        }>(`(() => {
+            const d = document.querySelector("#fd-plan-edit-pl1[open]");
+            const actions = d?.querySelector(".fd-sheet__actions");
+            return {
+                gap: d && actions ? Math.round(d.getBoundingClientRect().bottom - actions.getBoundingClientRect().bottom) : -1,
+                title: d?.querySelector(".fd-sheet__title")?.textContent ?? null,
+                subtitle: d?.querySelector(".fd-sheet__subtitle")?.textContent ?? null,
+                side: d?.classList.contains("fd-sheet--side") ?? false,
+            };
+        })()`);
+        const editButtons = await sheetButtons();
+        const reach: { day: unknown; meal: unknown } = {
+            day: null,
+            meal: null,
+        };
+        for (const [name, key] of [
+            ["Day", "day"],
+            ["Meal", "meal"],
+        ] as const) {
+            await clickSel(
+                `#fd-plan-edit-pl1 [data-anchor="row"]:has([data-fd-menu-field][name="${name === "Day" ? "date" : "slot"}"]) [data-fd-menu-trigger]`,
+            );
+            await sleep(250);
+            reach[key] = await reachItems(
+                `#fd-plan-edit-pl1 [data-anchor="row"]:has([data-fd-menu-field][name="${name === "Day" ? "date" : "slot"}"])`,
+            );
+            await menuEsc();
+        }
+        await ev(
+            `[...document.querySelectorAll("#fd-plan-edit-pl1 .fd-sheet__actions .fd-btn")].find((b) => b.textContent.trim() === "Save").click()`,
+        );
+        await sleep(500);
+        const savePosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/plan/pl1/move",
+        );
+        await clickSel('.fd-plan-planned [commandfor="fd-plan-edit-pl1"]');
+        await sleep(350);
+        await ev(
+            `document.querySelector("#fd-plan-edit-pl1 [data-fd-confirm-arm]").click()`,
+        );
+        await sleep(200);
+        const armed = await ev<{ posts: number; labels: string[] }>(`({
+            posts: 0,
+            labels: [...document.querySelectorAll("#fd-plan-edit-pl1 .fd-sheet__actions .fd-btn")].filter((b) => b.getClientRects().length > 0).map((b) => b.textContent.trim()),
+        })`);
+        const beforeRemove = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/plan/pl1/remove",
+        ).length;
+        await ev(
+            `[...document.querySelectorAll("#fd-plan-edit-pl1 .fd-sheet__actions .fd-btn")].filter((b) => b.getClientRects().length > 0).find((b) => b.textContent.trim() === "Remove").click()`,
+        );
+        await sleep(500);
+        const removePosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/plan/pl1/remove",
+        );
+        // A failed link import (error card, shared form open) still fits.
+        await goto("/recipes?failed=1");
+        const failed = await ev<{
+            fits: boolean;
+            wide: string[];
+            errorCard: boolean;
+            sharedOpen: boolean;
+        }>(`({
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+            wide: [...document.querySelectorAll(".fd-recipes-page *")].filter((e) => e.getBoundingClientRect().right > ${width} + 1 && !e.closest(".fd-plan-planned__scroll")).slice(0, 6).map((e) => e.tagName + "." + String(e.className).slice(0, 40) + " " + Math.round(e.getBoundingClientRect().right)),
+            errorCard: !!document.querySelector("details.fd-recipes-shared[open] .fd-recipes-import-shared-error"),
+            sharedOpen: !!document.querySelector("details.fd-recipes-shared[open]"),
+        })`);
+        // The missing link opens the sheet that adds what the week lacks.
+        await goto("/recipes");
+        await setMarker();
+        await control("reset=posts");
+        await clickSel(
+            '.fd-plan-planned > [commandfor="fd-plan-missing-sheet"]',
+        );
+        await sleep(350);
+        const missingButtons = await sheetButtons();
+        await ev(
+            `[...document.querySelectorAll("#fd-plan-missing-sheet .fd-sheet__actions .fd-btn")].find((b) => /^Add \\d+ to groceries$/.test(b.textContent.trim())).click()`,
+        );
+        await sleep(500);
+        const missingPosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/plan/add-missing",
+        );
+        const entry = (
+            p: { entries: [string, string][] } | undefined,
+            k: string,
+        ) => p?.entries.find(([key]) => key === k)?.[1];
+        const ok =
+            page.h1 === "Recipes" &&
+            /saved$/.test(page.subtitle ?? "") &&
+            page.rows === 3 &&
+            page.stars === 3 &&
+            page.rowMenus === 3 &&
+            page.cards === 2 &&
+            /ingredient/.test(page.missing ?? "") &&
+            page.fits &&
+            page.chips === 0 &&
+            page.noticeStrip === 0 &&
+            open.n === 4 &&
+            open.bad.length === 0 &&
+            labels.join("|") ===
+                "Cookable now|High protein|Under 30 min|Favourites" &&
+            filtered.href === "/recipes?filter=protein" &&
+            filtered.marker === "stay" &&
+            filtered.count === "1" &&
+            filtered.rows === 1 &&
+            filtered.ticked.join("|") === "High protein" &&
+            filtered.fits &&
+            typed.hidden === 2 &&
+            beforeTyping.heading === "All recipes|1" &&
+            !beforeTyping.clear &&
+            typed.heading === "1 of 3 recipes|0" &&
+            typed.clear &&
+            emptied.heading === "All recipes|1" &&
+            !emptied.clear &&
+            !typed.link &&
+            !typed.goShown &&
+            pasted.link &&
+            pasted.goShown &&
+            !pasted.filterShown &&
+            importPosts.length === 1 &&
+            entry(importPosts[0], "url") ===
+                "https://www.instagram.com/reel/C8xYz1AbCdE/" &&
+            rowMenu.n === 1 &&
+            rowMenu.bad.length === 0 &&
+            planOpen.href === "/recipes/r-alfredo?plan=1" &&
+            planOpen.marker === "stay" &&
+            planOpen.sheet &&
+            addButtons.ok &&
+            planPosts.length === 1 &&
+            entry(planPosts[0], "date") != null &&
+            entry(planPosts[0], "slot") != null &&
+            entry(planPosts[0], "servings") != null &&
+            /^Pick one for /.test(pick.subtitle ?? "") &&
+            fromToday.at === "/recipes?plan_date=2026-11-12" &&
+            fromToday.subtitle === "Pick one for Thu 12 Nov" &&
+            pick.plus.length === 3 &&
+            pick.plus.every((h) =>
+                /^\/recipes\/r-[a-z]+\?plan=1&date=2026-11-12$/.test(h ?? ""),
+            ) &&
+            pick.filterLinks.length > 0 &&
+            pick.filterLinks.every((h) =>
+                (h ?? "").includes("plan_date=2026-11-12"),
+            ) &&
+            pick.cancel === "/recipes" &&
+            pick.stars === 0 &&
+            pick.fits &&
+            pickOpen.sheet &&
+            /plan_date|date=2026-11-12/.test(pickOpen.href) &&
+            edit.side &&
+            (edit.title ?? "") !== "" &&
+            // On desktop the side sheet pins Remove and Save to the panel's bottom.
+            (width < 1024 || (edit.gap >= 0 && edit.gap <= 32)) &&
+            editButtons.ok &&
+            editButtons.n === 2 &&
+            (reach.day as { n: number; bad: string[] }).n >= 14 &&
+            (reach.day as { bad: string[] }).bad.length === 0 &&
+            (reach.meal as { n: number }).n === 4 &&
+            (reach.meal as { bad: string[] }).bad.length === 0 &&
+            savePosts.length === 1 &&
+            entry(savePosts[0], "back") === "recipes" &&
+            entry(savePosts[0], "date") != null &&
+            armed.labels.join("|") === "Cancel|Remove" &&
+            beforeRemove === 0 &&
+            removePosts.length === 1 &&
+            entry(removePosts[0], "back") === "recipes" &&
+            failed.fits &&
+            failed.wide.length === 0 &&
+            failed.errorCard &&
+            failed.sharedOpen &&
+            missingButtons.ok &&
+            missingPosts.length === 1 &&
+            entry(missingPosts[0], "back") === "recipes";
+        recipesRes[String(width)] = {
+            page,
+            open,
+            labels,
+            filtered,
+            beforeTyping,
+            typed,
+            emptied,
+            pasted,
+            importPosts,
+            rowMenu,
+            planOpen,
+            addButtons,
+            planPosts,
+            fromToday,
+            pick,
+            pickOpen,
+            edit,
+            editButtons,
+            reach,
+            savePosts,
+            armed,
+            beforeRemove,
+            removePosts,
+            missingButtons,
+            missingPosts,
+            failed,
+        };
+        recipesOk = recipesOk && ok;
+    }
+    record(
+        "v2 recipes at 390 and 1440: the list, the filter pull-down (a Turbo visit), a pasted link's Go posting the import, a row's ⋯ Plan into the Add to plan sheet, Today's Plan into picking a day (its filter links keep the day), a planned card's edit sheet (Day and Meal items reachable, Save, Remove asking first) and the missing link; every sheet button measured and the page never wider than the screen",
+        recipesOk,
+        { ...recipesRes, ex: drain() },
+    );
+    // Both states of the shared-recipe form (mcp-share-links on and off), and
+    // no ⋯ with nothing in it.
+    await goto("/recipes");
+    const shareOn = await ev<number>(
+        `document.querySelectorAll(".fd-recipes-shared [data-fd-recipes-shared]").length`,
+    );
+    await goto("/recipes?share=off");
+    const shareOff = await ev<{ forms: number; emptyMenus: number }>(`({
+        forms: document.querySelectorAll("[data-fd-recipes-shared]").length,
+        emptyMenus: [...document.querySelectorAll(".fd-menu__panel")].filter((p) => p.querySelectorAll(".fd-menu__item").length === 0).length,
+    })`);
+    record(
+        "v2 recipes: the shared-recipe form is there with mcp-share-links on and gone with it off, and no ⋯ menu is empty",
+        shareOn === 1 && shareOff.forms === 0 && shareOff.emptyMenus === 0,
+        { shareOn, shareOff, ex: drain() },
+    );
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 960,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
     await goto("/");
     await setMarker();
 

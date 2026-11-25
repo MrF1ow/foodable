@@ -29,14 +29,38 @@ export type SearchFieldOptions = {
     shortcut?: string;
     /** The input's `aria-keyshortcuts` ("Control+K Meta+K"): the real shortcut the hint names. */
     keyShortcuts?: string;
-    /** Draws the Clear button. */
-    clear?: boolean;
+    /**
+     * Draws the Clear button. `"auto"` draws it for a page script to show and
+     * hide with what is typed: out of sight while the field is empty.
+     */
+    clear?: boolean | "auto";
     /** Draws the Barcode button; with `href` it is a link. */
     barcode?: { label?: string; href?: string } | true;
     /** Draws the Filter button. */
     filter?: { label: string; count?: number };
-    /** Draws the Go button (a submit button). */
-    go?: { label?: string } | true;
+    /**
+     * A Filter menu (`menu()` with `anchor: "filter"`) drawn in the Filter
+     * button's place, for a field whose filters are a pull-down.
+     */
+    filterMenu?: Html;
+    /**
+     * Draws the Go button (a submit button). `hidden` draws it out of sight for
+     * a page script to show with the link-detected state; `attrs` are the
+     * hooks that script finds it by.
+     */
+    go?:
+        | {
+              label?: string;
+              hidden?: boolean;
+              attrs?: Readonly<Record<string, string>>;
+          }
+        | true;
+    /**
+     * Draws both lead icons, the magnifier and the link, and lets the
+     * `data-link-detected` attribute pick one, for a field whose script
+     * detects a pasted link as it is typed.
+     */
+    leadSwap?: boolean;
     /** The link-detected state: link icon and Go. */
     linkDetected?: boolean;
     /** The lead icon when it is not the magnifier (the barcode's scan icon). */
@@ -81,18 +105,24 @@ export function searchField(opts: SearchFieldOptions): Html {
     ]
         .filter(Boolean)
         .join(" ");
+    const goOpts = opts.go === true ? {} : opts.go;
     const go =
         opts.go || opts.linkDetected
             ? button({
                   variant: "go",
                   type: "submit",
-                  label:
-                      (opts.go === true ? undefined : opts.go?.label) ??
-                      "Search",
+                  label: goOpts?.label ?? "Search",
+                  attrs: {
+                      ...goOpts?.attrs,
+                      ...(goOpts?.hidden ? { hidden: "" } : {}),
+                  },
               })
             : "";
+    const lead = opts.leadSwap
+        ? `<span class="fd-search-field__lead fd-search-field__lead--swap"><span class="fd-search-field__lead-search">${icon("search")}</span><span class="fd-search-field__lead-link">${icon("link")}</span></span>`
+        : `<span class="fd-search-field__lead">${icon(opts.linkDetected ? "link" : (opts.lead ?? "search"))}</span>`;
     const parts = [
-        `<span class="fd-search-field__lead">${icon(opts.linkDetected ? "link" : (opts.lead ?? "search"))}</span>`,
+        lead,
         `<input ${input}>`,
         opts.shortcut?.trim()
             ? keyboardHint({
@@ -101,15 +131,16 @@ export function searchField(opts: SearchFieldOptions): Html {
               })
             : "",
         opts.clear
-            ? `<button type="button" class="fd-search-field__action" data-fd-search-clear aria-label="Clear search">${icon("close")}</button>`
+            ? `<button type="button" class="fd-search-field__action" data-fd-search-clear aria-label="Clear search"${opts.clear === "auto" && !opts.value ? " hidden" : ""}>${icon("close")}</button>`
             : "",
         opts.barcode ? barcodeAction(opts.barcode) : "",
-        opts.filter
-            ? filterButton({
-                  label: opts.filter.label,
-                  count: opts.filter.count,
-              })
-            : "",
+        opts.filterMenu ??
+            (opts.filter
+                ? filterButton({
+                      label: opts.filter.label,
+                      count: opts.filter.count,
+                  })
+                : ""),
         go,
     ];
     return raw(

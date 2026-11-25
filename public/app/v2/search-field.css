@@ -92,3 +92,45 @@
     outline: var(--space-2xs) solid var(--accent-text);
     outline-offset: var(--space-2xs);
 }
+
+/* A field that detects a pasted link as it is typed draws both lead icons and
+   lets `data-link-detected` pick one. */
+.fd-search-field__lead--swap .fd-search-field__lead-link {
+    display: none;
+}
+.fd-search-field[data-link-detected]
+    .fd-search-field__lead--swap
+    .fd-search-field__lead-search {
+    display: none;
+}
+.fd-search-field[data-link-detected]
+    .fd-search-field__lead--swap
+    .fd-search-field__lead-link {
+    display: flex;
+}
+.fd-search-field__lead-search,
+.fd-search-field__lead-link {
+    display: flex;
+}
+/* A link is going to be imported, not filtered: the filter menu steps aside,
+   and the design shows Go alone, without Clear. */
+.fd-search-field[data-link-detected] [data-fd-search-filter],
+.fd-search-field[data-link-detected] [data-fd-search-clear] {
+    display: none;
+}
+
+/* The filter pull-down hangs from the field, not from its small button: the
+   panel's right edge is the field's and it clears the field by a gap. */
+.fd-search-field--boxed {
+    position: relative;
+}
+.fd-search-field--boxed .fd-menu--filter {
+    position: static;
+}
+.fd-search-field--boxed .fd-menu--filter .fd-menu__panel {
+    top: calc(100% + var(--space-sm));
+}
+.fd-search-field--boxed .fd-menu--filter .fd-menu__panel[data-side="top"] {
+    top: auto;
+    bottom: calc(100% + var(--space-sm));
+}

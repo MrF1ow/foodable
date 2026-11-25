@@ -12,8 +12,7 @@ import {
     renderMissingSheet,
     renderPlanEditSheets,
     renderPlanSheet,
-    renderWeekRows,
-    renderWeekStrip,
+    renderPlannedWeek,
     withPlanEditDraft,
     type PlanSheetView,
 } from "./recipes-plan.js";
@@ -151,25 +150,21 @@ function sampleView() {
 }
 
 describe("week renderers", () => {
-    test("rows list every day: planned recipes, and a plan link on an empty day", () => {
-        const html = renderWeekRows(sampleView());
-        expect(html.match(/<li class="fd-plan-day/g)?.length).toBe(7);
-        expect(html).toContain("Pancakes");
-        expect(html).toContain("Nothing planned");
-        expect(html).toContain('href="/recipes?plan_date=2026-11-13"');
-        // A planned row opens that plan's edit sheet.
+    test("the planned week is one Mini card per planned entry, opening its edit sheet, and the missing link", () => {
+        const html = renderPlannedWeek(sampleView());
+        expect(html).toContain("Planned this week");
+        expect(html.match(/<button[^>]*class="fd-mini-card/g)?.length).toBe(2);
         expect(html).toContain(`commandfor="${planEditSheetId("p1")}"`);
-    });
-
-    test("the strip shows seven tiles, planned or open, and the missing link", () => {
-        const html = renderWeekStrip(sampleView());
-        expect(html.match(/<li class="fd-plan-tile/g)?.length).toBe(7);
-        expect(html).toContain("fd-plan-tile--empty");
+        expect(html).toContain(`commandfor="${planEditSheetId("p2")}"`);
+        expect(html).toContain(">Thu<");
+        expect(html).toContain(">Sat<");
         expect(html).toContain(`commandfor="${PLAN_MISSING_SHEET_ID}"`);
         expect(html).toContain("2 ingredients missing");
+        // Empty days are not tiles: nothing to plan from here.
+        expect(html).not.toContain("+ Plan");
     });
 
-    test("an empty week says so and offers no missing link", () => {
+    test("an empty week draws nothing", () => {
         const view = buildWeekPlanView({
             today: TODAY,
             plans: [],
@@ -177,12 +172,10 @@ describe("week renderers", () => {
             stock: [],
             foodsById: new Map(),
         });
-        const html = renderWeekStrip(view);
-        expect(html).toContain("Nothing planned yet");
-        expect(html).not.toContain(PLAN_MISSING_SHEET_ID);
+        expect(renderPlannedWeek(view)).toBe("");
     });
 
-    test("a covered week says nothing is missing", () => {
+    test("a covered week has its cards and no missing link", () => {
         const view = buildWeekPlanView({
             today: TODAY,
             plans: [plan({ id: "p1", date: TODAY, servings: 2 })],
@@ -193,9 +186,25 @@ describe("week renderers", () => {
             ],
             foodsById: new Map(),
         });
-        const html = renderWeekStrip(view);
-        expect(html).toContain("You have everything");
+        const html = renderPlannedWeek(view);
+        expect(html).toContain("fd-mini-card");
         expect(html).not.toContain(PLAN_MISSING_SHEET_ID);
+        expect(html).not.toContain("missing");
+    });
+
+    test("two identical entries show as two cards: nothing is merged or summed", () => {
+        const view = buildWeekPlanView({
+            today: TODAY,
+            plans: [
+                plan({ id: "p1", date: TODAY, servings: 2 }),
+                plan({ id: "p2", date: TODAY, slot: "lunch", servings: 3 }),
+            ],
+            recipes: [pancakes],
+            stock: [],
+            foodsById: new Map(),
+        });
+        const html = renderPlannedWeek(view);
+        expect(html.match(/<button[^>]*class="fd-mini-card/g)?.length).toBe(2);
     });
 
     test("edit sheets move or remove a plan and carry the page to return to", () => {
@@ -210,35 +219,45 @@ describe("week renderers", () => {
         expect(html).toContain('data-fd-sheet-focus="panel"');
     });
 
-    test("the edit sheet is a side sheet titled with the day and the meal under it, with Day and Meal as rows with pull-downs (FigCraft 386041)", () => {
+    test("the plan edit sheet carries the class that pins Remove and Save to the bottom on desktop", () => {
+        const html = renderPlanEditSheets(sampleView(), "today");
+        const sheet = html.match(/<dialog[^>]*id="fd-plan-edit-p2"[^>]*>/)![0];
+        expect(sheet).toContain("fd-sheet--side fd-plan-edit-sheet");
+    });
+
+    test("the edit sheet is a side sheet titled with the recipe, the day and meal under it, with Day and Meal as pull-down rows (FigCraft 405435)", () => {
         const html = renderPlanEditSheets(sampleView(), "today");
         const sheet = html.match(
             /<dialog[^>]*id="fd-plan-edit-p2"[\s\S]*?<\/dialog>/,
         )![0];
-        expect(sheet).toContain("fd-sheet--side");
-        expect(sheet).toContain(">Sat 14 Nov<");
-        expect(sheet).toContain(">Lunch<");
-        // Day and Meal: an Item row each, the form's select over it.
+        expect(sheet).toContain("fd-sheet--side fd-plan-edit-sheet");
+        expect(sheet).toContain(">Pancakes<");
+        expect(sheet).toContain(">Sat 14 Nov · lunch<");
+        // Day and Meal: an Item row each that opens a pull-down; the pick rides in the form.
         const rows = [
             ...sheet.matchAll(
-                /<li class="fd-item-row fd-plan-edit-row">[\s\S]*?<\/li>/g,
+                /<li class="fd-item-row"><div class="fd-menu[^"]*"[\s\S]*?<\/li>/g,
             ),
         ].map((m) => m[0]);
         expect(rows).toHaveLength(2);
         expect(rows[0]).toContain('fd-item-row__title" title="Day"');
         expect(rows[0]).toContain('fd-item-row__value">Sat 14 Nov<');
-        expect(rows[0]).toContain('<option value="2026-11-14" selected>');
-        expect(rows[0]).toContain('<option value="2026-11-12">Thu 12 Nov<');
+        expect(rows[0]).toContain('name="date" value="2026-11-14"');
+        expect(rows[0]).toContain('data-fd-menu-value="2026-11-12"');
+        expect(rows[0]).toContain("Thu 12 Nov");
         expect(rows[1]).toContain('fd-item-row__title" title="Meal"');
-        expect(rows[1]).toContain('<option value="lunch" selected>');
+        expect(rows[1]).toContain('name="slot" value="lunch"');
+        expect(rows[1]).toContain('data-fd-menu-value="dinner"');
         // The same fields go to the same routes: Save moves, Remove removes.
         expect(sheet).toContain('name="date"');
         expect(sheet).toContain('name="slot"');
         expect(sheet).toContain('name="servings"');
         expect(sheet).toMatch(/<button[^>]*form="fd-plan-edit-p2-move"/);
+        // Remove asks in place: it arms, then Cancel and Remove take the row.
         expect(sheet).toMatch(
-            /<button[^>]*form="fd-plan-edit-p2-remove"[^>]*>\s*(<[^>]*>\s*)*Remove/,
+            /<button[^>]*data-fd-confirm-arm[^>]*>[\s\S]*?Remove/,
         );
+        expect(sheet).toMatch(/<button[^>]*form="fd-plan-edit-p2-remove"/);
         // The recipe cannot be changed by the route, so it has no row.
         expect(sheet).not.toContain('title="Recipe"');
         expect(sheet).not.toContain('type="date"');
@@ -335,7 +354,7 @@ describe("week renderers", () => {
         expect(sheet).toContain("Pick today or a later day.");
         expect(sheet).toContain('value="2026-11-01"');
         expect(sheet).toContain('value="7"');
-        expect(sheet).toContain('<option value="lunch" selected>');
+        expect(sheet).toContain('name="slot" value="lunch"');
         // Other plans' sheets stay closed and untouched.
         const others = html.replace(sheet, "");
         expect(others).not.toContain("data-sheet-open-on-load");
@@ -369,6 +388,7 @@ describe("week renderers", () => {
         // The warning dot is the only mark: no class for CSS that is gone.
         expect(html).not.toContain("fd-plan-missing-row");
         expect(html).toMatch(/Add \d+ to groceries/);
+        expect(html).toContain("next 7 days");
     });
 });
 

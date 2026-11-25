@@ -48,12 +48,15 @@ function sharedImportErrorParts(failure: { code: string; message: string }): {
 
 /**
  * Imports `input` for the signed-in member and answers the request: a 303 to
- * the new recipe, or the Recipes page with the reason beside the paste box
- * (also when the link was pasted into the link form instead).
+ * the new recipe, or the Recipes page with the reason shown once: beside the
+ * paste box when the form was used, in the search field when the link came
+ * through it.
  */
 export async function answerSharedRecipeImport(
     c: Context,
     input: string,
+    /** Where the input came from: the search field (a pasted link) or the shared-recipe form. */
+    via: "field" | "form" = "form",
 ): Promise<Response> {
     const userId = c.get("userId") as string;
     const member = siteMember(c);
@@ -72,6 +75,7 @@ export async function answerSharedRecipeImport(
             sharedImport: {
                 ...sharedImportErrorParts(failure),
                 input: input.length <= SHARED_IMPORT_ECHO_LIMIT ? input : "",
+                via,
             },
         });
         return c.html(page.html, page.status === 200 ? 422 : page.status);

@@ -18,6 +18,8 @@ export type MiniCardOptions = {
     /** The label's colour; the design's default is `over`. */
     tone?: MiniCardTone;
     href?: string;
+    /** Instead of `href`: the card is a button that opens the sheet with this id. */
+    opens?: string;
     className?: string;
     /** `data-*` on the card (what a script that opens something reads). */
     data?: Readonly<Record<string, string>>;
@@ -31,6 +33,11 @@ export function miniCard(opts: MiniCardOptions): Html {
             ? `<span class="fd-mini-card__meta">${esc(opts.meta)}</span>`
             : "");
     const classes = cls("fd-mini-card", opts.className);
+    if (opts.opens != null) {
+        return raw(
+            `<button type="button" class="${classes}" commandfor="${esc(opts.opens)}" command="show-modal"${dataAttrs(opts.data)}>${inner}</button>`,
+        );
+    }
     return raw(
         opts.href != null
             ? `<a class="${classes}" href="${safeHref(opts.href)}"${dataAttrs(opts.data)}>${inner}</a>`

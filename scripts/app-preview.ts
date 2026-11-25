@@ -867,53 +867,6 @@ function previewMoveError() {
 const PREVIEW_VIEWER_ID = "preview-viewer";
 const PREVIEW_SARAH_ID = "preview-sarah";
 
-/** The three one-tap notices as the preview household has them. */
-function previewOneTapNotices(): import("../src/domain/notices.js").Notice[] {
-    return [
-        {
-            code: "grocery.running_low",
-            severity: "warn",
-            subject: { kind: "food", id: "u-eggs" },
-            related: [],
-            params: {
-                name: "Eggs",
-                foodId: "u-eggs",
-                reason: "2 left, below 6",
-                dismissScope: "2026-11-02",
-            },
-        },
-        {
-            code: "plan.missing_ingredient",
-            severity: "warn",
-            subject: { kind: "food", id: "f-lemon" },
-            related: [{ kind: "recipe", id: "r1", name: "Lemon chicken" }],
-            params: {
-                name: "Lemon",
-                foodId: "f-lemon",
-                unknown: "no",
-                recipeName: "Lemon chicken",
-                recipeCount: 1,
-                plannedOn: "2026-11-11",
-                daysLeft: 1,
-                amounts: "2 each",
-                dismissScope: "plan-1",
-            },
-        },
-        {
-            code: "nutrition.weigh_in_due",
-            severity: "info",
-            subject: { kind: "member", id: PREVIEW_VIEWER_ID },
-            related: [{ kind: "member", id: PREVIEW_VIEWER_ID, name: "Ethan" }],
-            params: {
-                name: "Ethan",
-                days: 9,
-                lastWeighedOn: "2026-11-01",
-                dismissScope: "2026-11-01",
-            },
-        },
-    ];
-}
-
 function previewWeekPlan(openSheet?: "missing" | "plan") {
     const today = "2026-11-10";
     const plan = (
@@ -1965,7 +1918,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             query: "",
             filters: [],
             totalCount: 2,
-            cookableCount: 1,
             cards: [
                 {
                     recipe: RECIPE,
@@ -1995,6 +1947,15 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ],
             ...extra,
         });
+    const recipesDriven = (
+        steps: string,
+        extra: Partial<Parameters<typeof renderRecipesListV2Page>[0]> = {},
+    ) =>
+        recipesListV2(extra).replace(
+            "</body>",
+            () =>
+                `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
+        );
     const fridgePage = (
         extra: Partial<
             Parameters<typeof buildPreviewKitchenFridgeView>[2]
@@ -2344,17 +2305,45 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ) as import("../src/domain/fridge.js").FridgeItem[],
             lowStock: new Map([["f-i3", "6"]]),
         }),
-        "recipes-plan-notices": recipesListV2({
-            week: previewWeekPlan(),
-            notices: previewOneTapNotices(),
-        }),
+        // The week's planned recipes and the missing link (frame 404251).
+        "recipes-plan-notices": recipesListV2({ week: previewWeekPlan() }),
         recipes: recipesListV2({ week: previewWeekPlan() }),
+        // Empty search (401811), typing with two filters on (401943), the
+        // filter pull-down open (402075) and a pasted link (402324).
+        "recipes-empty-search": recipesListV2({ totalCount: 42 }),
+        "recipes-typing": recipesListV2({
+            query: "chick",
+            filters: ["cookable", "protein"],
+            totalCount: 42,
+        }),
+        "recipes-filter-menu": recipesDriven(
+            `document.querySelector('[data-anchor="filter"] [data-fd-menu-trigger]').click()`,
+            {
+                query: "chick",
+                filters: ["cookable", "protein"],
+                totalCount: 42,
+            },
+        ),
+        "recipes-link": recipesListV2({
+            query: "https://www.instagram.com/reel/C8xYz1AbCdE/",
+            totalCount: 42,
+        }),
+        // mcp-share-links off: no import from another Foodable.
+        "recipes-share-off": recipesListV2({
+            week: previewWeekPlan(),
+            sharedImportEnabled: false,
+        }),
+        // A row's ⋯: Plan.
+        "recipes-row-menu": recipesDriven(
+            `document.querySelector(".fd-recipes-row .fd-menu [data-fd-menu-trigger]").click()`,
+            { week: previewWeekPlan() },
+        ),
         "recipes-favourites": renderRecipesListV2Page({
             chrome,
             query: "",
             filters: ["favourites"],
             totalCount: 3,
-            cookableCount: 1,
+            week: previewWeekPlan(),
             cards: [
                 {
                     recipe: RECIPE,

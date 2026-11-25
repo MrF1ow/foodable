@@ -59,7 +59,10 @@ import {
     buildPreviewTodayPageData,
     renderTodayV2Page,
 } from "../src/web/pages/v2/today.js";
-import { buildWeekPlanView } from "../src/web/pages/v2/recipes-plan.js";
+import {
+    buildWeekPlanView,
+    renderPlanSheet,
+} from "../src/web/pages/v2/recipes-plan.js";
 import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
@@ -84,7 +87,7 @@ import { renderSettingsNutrientsV2Page } from "../src/web/pages/v2/settings-nutr
 import { renderSettingsUnitsV2Page } from "../src/web/pages/v2/settings-units.js";
 import { renderSettingsScoreV2Page } from "../src/web/pages/v2/settings-score.js";
 import { legacyRedirectTarget } from "../src/web/route-map.js";
-import { viewerChromeFromProfile } from "../src/web/shell.js";
+import { renderAppShell, viewerChromeFromProfile } from "../src/web/shell.js";
 
 const OUT = "./tmp/app-preview";
 const PORT = 4791;
@@ -534,7 +537,7 @@ function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
 /** This week on Today: a one-off dinner and a day of a weekly repeat. Moved,
  * the one-off sits on the day after the repeat's day, so a save re-orders the
  * two rows and each row ends up under the other's sheet. */
-function fixtureWeekPlan(moved = false) {
+function fixtureWeekPlan(moved = false, three = false) {
     const plan = (
         id: string,
         recipeId: string,
@@ -568,10 +571,12 @@ function fixtureWeekPlan(moved = false) {
         plans: [
             plan("pl1", "r-salmon", moved ? "2026-11-12" : "2026-11-10"),
             plan("rule:rl1:2026-11-11", "r-chili", "2026-11-11", "rl1"),
+            ...(three ? [plan("pl3", "r-tacos", "2026-11-12")] : []),
         ],
         recipes: [
             recipe("r-salmon", "Salmon, rice & spinach"),
             recipe("r-chili", "Beef chili"),
+            recipe("r-tacos", "Chicken thigh tacos"),
         ],
         stock: [],
         foodsById: new Map(),
@@ -1040,6 +1045,68 @@ function fixtureUsualsView(
     });
 }
 
+/** The saved recipes the Recipes list pages show: one cookable, one short of two foods. */
+function fixtureRecipeCards() {
+    const macros = {
+        calories: 320,
+        protein_g: 26,
+        carbs_g: 0,
+        fat_g: 11,
+        fiber_g: null,
+        sugar_g: null,
+        alcohol_g: null,
+        incomplete: false,
+        incompleteReasons: [] as string[],
+        gaps: [],
+    };
+    const card = (
+        id: string,
+        name: string,
+        missing: string[],
+        favourite = false,
+    ) => ({
+        recipe: {
+            id,
+            householdId: "hh",
+            name,
+            yieldPortions: 4,
+            prepMinutes: 10,
+            cookMinutes: 20,
+        } as never,
+        flags: {
+            cookable: missing.length === 0,
+            highProtein: id === "r-alfredo",
+            quick: true,
+            missingCount: missing.length,
+            hasIngredients: true,
+        },
+        macrosPerPortion: macros,
+        missingNames: missing,
+        favourite,
+    });
+    return [
+        card("r-alfredo", "Chicken alfredo", [], true),
+        card("r-chili", "Beef chili", ["Kidney beans", "Cumin"]),
+        card("r-tacos", "Chicken thigh tacos", []),
+    ];
+}
+
+function fixtureRecipesList(
+    chrome: unknown,
+    extra: Partial<Parameters<typeof renderRecipesListV2Page>[0]> = {},
+) {
+    return renderRecipesListV2Page({
+        chrome: chrome as never,
+        query: "",
+        filters: [],
+        totalCount: 3,
+        cards: fixtureRecipeCards(),
+        week: fixtureWeekPlan(),
+        sharedImportEnabled: true,
+        ...extra,
+    });
+}
+
 async function pages(
     theme: "light" | "dark",
     unread: boolean,
@@ -1206,13 +1273,46 @@ async function pages(
                 flags: { ...chrome.flags, barcodeCamera: false },
             }),
         ),
-        recipes: renderRecipesListV2Page({
-            chrome,
-            query: "",
-            filter: "",
-            totalCount: 0,
-            cards: [],
-        } as never),
+        recipes: fixtureRecipesList(chrome),
+        "recipes-protein": fixtureRecipesList(chrome, {
+            filters: ["protein"],
+            cards: fixtureRecipeCards().filter(
+                (c) => (c.recipe as { id: string }).id === "r-alfredo",
+            ),
+        }),
+        "recipes-pick": fixtureRecipesList(chrome, { planDate: "2026-11-12" }),
+        "recipes-failed-link": fixtureRecipesList(chrome, {
+            // Three planned cards are wider than the phone: the row scrolls
+            // inside its own box, never the page.
+            week: fixtureWeekPlan(false, true),
+            importUrl:
+                "https://kitchen.example/s/q7Wm4xTz2LpR9vYb1KcN8dFhJ3sGaE5uOiXt6ZeBnVw",
+            sharedImport: {
+                error: "That share link doesn't work any more",
+                reason: "Revoked, expired, or not a recipe link",
+                input: "https://kitchen.example/s/q7Wm4xTz2LpR9vYb1KcN8dFhJ3sGaE5uOiXt6ZeBnVw",
+            },
+        }),
+        "recipes-share-off": fixtureRecipesList(chrome, {
+            sharedImportEnabled: false,
+        }),
+        // The recipe page the list's Plan leads to, reduced to its Add to plan
+        // sheet (the page itself is not under test here).
+        "recipe-plan": renderAppShell({
+            ...(chrome as never as Parameters<typeof renderAppShell>[0]),
+            title: "Chicken alfredo",
+            active: "recipes",
+            body: `<div class="fd-recipe-detail">${renderPlanSheet({
+                recipeId: "r-alfredo",
+                recipeName: "Chicken alfredo",
+                yieldPortions: 4,
+                today: "2026-11-10",
+                date: "2026-11-10",
+                slot: "dinner",
+                servings: 4,
+                open: true,
+            })}</div>`,
+        }),
         trends: previewTrendsPage(chrome),
         settings: renderSettingsHomeV2Page({
             chrome: chrome as never,
@@ -1384,6 +1484,12 @@ const ROUTE_BASE: Record<string, string> = {
     "/kitchen/usuals?q=but": "usuals-search",
     "/kitchen/usuals?camera=off": "usuals-camera-off",
     "/recipes": "recipes",
+    "/recipes?filter=protein": "recipes-protein",
+    "/recipes?plan_date=2026-11-12": "recipes-pick",
+    "/recipes?failed=1": "recipes-failed-link",
+    "/recipes?share=off": "recipes-share-off",
+    "/recipes/r-alfredo?plan=1": "recipe-plan",
+    "/recipes/r-alfredo?plan=1&date=2026-11-12": "recipe-plan",
     "/trends": "trends",
     "/settings": "settings",
     "/settings/account": "settings-account",
