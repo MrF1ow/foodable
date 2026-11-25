@@ -3145,11 +3145,11 @@ describe("recipe versions on the recipe page", () => {
         });
     /** The hidden fields of the first form posting to `action`, as a browser would post them. */
     const formFields = (html: string, action: string) => {
-        const form = html.match(
-            new RegExp(
-                `<form[^>]*action="${action.replace(/[/.]/g, "\\$&")}"[^>]*>[\\s\\S]*?</form>`,
-            ),
-        )?.[0];
+        // Plain string search: no pattern is built from `action`.
+        const at = html.indexOf(`action="${action}"`);
+        const start = at < 0 ? -1 : html.lastIndexOf("<form", at);
+        const end = start < 0 ? -1 : html.indexOf("</form>", at);
+        const form = end < 0 ? undefined : html.slice(start, end + 7);
         expect(form).toBeDefined();
         return new URLSearchParams(
             [
