@@ -52,6 +52,11 @@ export type CookSheetView = {
     slot: CookSlot;
     /** The viewer's name: the portion is logged for them. */
     viewerName: string;
+    /**
+     * The member whose version of the recipe is cooked (and logged); absent
+     * cooks the base. The sheet carries it back to the preview and the confirm.
+     */
+    version?: string;
     /** Where each fridge item the cook takes from is kept, by item id. */
     places?: ReadonlyMap<string, string>;
     /** One per render; the confirm turns it into the meal's idempotency key. */
@@ -328,12 +333,12 @@ export function renderCookSheet(view: CookSheetView): string {
             ),
         ]),
     });
-    const body = `<form id="${COOK_FORM_ID}" class="fd-recipe-cook-form" method="post" action="/recipes/${recipeId}/cook/confirm" data-fd-cook-form data-fd-cook-preview-url="/recipes/${recipeId}/cook/preview">
+    const body = `<form id="${COOK_FORM_ID}" class="fd-recipe-cook-form" method="post" action="/recipes/${recipeId}/cook/confirm" data-fd-cook-form data-fd-cook-preview-url="/recipes/${recipeId}/cook/preview${view.version ? `/${esc(encodeURIComponent(view.version))}` : ""}">
 ${err}${String(servings)}
 ${renderCookPreviewRegion(view.preview, view.previewError, view.places)}
 <input type="hidden" name="meal_type" value="${esc(view.slot)}">
 <input type="hidden" name="submit_key" value="${esc(view.submitKey)}">
-${String(logFor)}
+${view.version ? `<input type="hidden" name="version" value="${esc(view.version)}">` : ""}${String(logFor)}
 </form>`;
     // Focus parks on the panel: the first field is the stepper, and a focus
     // ring around the number is not in the design.

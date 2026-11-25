@@ -50,7 +50,8 @@ import {
 import { formatQuantityDisplayParts } from "./display-quantity.js";
 import { liveScoreSettingsStore } from "../db/score-settings.js";
 import { liveGroceryStore } from "../db/grocery.js";
-import { liveRecipesStore } from "../db/recipes.js";
+import { liveRecipesStore, liveRecipeVariantsStore } from "../db/recipes.js";
+import { compareVersions, previewReset } from "../domain/recipe-variants.js";
 import { liveRulesStore } from "../db/rules.js";
 import { liveSettingsStore } from "../db/settings.js";
 import {
@@ -84,6 +85,7 @@ import {
     gapFromNotice,
     getRecipeView,
     isRecipeDraft,
+    type RecipeIngredient,
     type RecipeView,
     listRecipes,
     macrosForPerson,
@@ -146,8 +148,11 @@ import { recipeMentionWarnings } from "../domain/recipe-mentions-check.js";
 import type { MentionWarning } from "../domain/recipe-mentions.js";
 import {
     groupRecipeIngredientsByPlace,
+    ingredientVersionNote,
     renderRecipeDetailV2Page,
+    type RecipeVersionPicker,
 } from "./pages/v2/recipes-page.js";
+import { renderRecipeCompareV2Page } from "./pages/v2/recipes-page-compare.js";
 import {
     COOK_SHEET_ID,
     type CookSheetView,
@@ -2110,6 +2115,8 @@ export async function loadCookPreview(
     householdId: string,
     recipeId: string,
     servings: number,
+    /** The member whose version is cooked; absent cooks the base. */
+    version?: string,
 ): Promise<{
     preview: CookPreview | null;
     error?: string;
@@ -2121,7 +2128,19 @@ export async function loadCookPreview(
             liveRecipesStore(),
             liveFridgeStore(),
             liveFoodsStore(),
-            { householdId, recipeId, totalPortions: servings },
+            {
+                householdId,
+                recipeId,
+                totalPortions: servings,
+                ...(version
+                    ? {
+                          memberPortions: [
+                              { userId: version, portions: servings },
+                          ],
+                          variants: liveRecipeVariantsStore(),
+                      }
+                    : {}),
+            },
         );
         const places = new Map<string, string>();
         if (preview.lines.length > 0) {
@@ -2226,6 +2245,39 @@ async function recipeMentionsForPage(
     }
 }
 
+/**
+ * The whose-version pull-down's data. A household of one with no changes of
+ * their own has nothing to pick, so the caption stays plain; viewing the base
+ * always keeps the way back.
+ */
+function versionPicker(input: {
+    viewerId: string;
+    viewing: string;
+    viewingName: string;
+    changeCount: number;
+    members: readonly { userId: string; displayName: string }[];
+    canCompare: boolean;
+}): RecipeVersionPicker | undefined {
+    if (
+        input.members.length < 2 &&
+        input.changeCount === 0 &&
+        input.viewing !== "base"
+    ) {
+        return undefined;
+    }
+    return {
+        viewerId: input.viewerId,
+        viewing: input.viewing,
+        viewingName: input.viewingName,
+        changeCount: input.changeCount,
+        people: input.members.map((member) => ({
+            userId: member.userId,
+            name: member.displayName,
+        })),
+        canCompare: input.canCompare,
+    };
+}
+
 export async function renderRecipeDetailRoute(
     viewerUserId: string,
     recipeId: string,
@@ -2252,17 +2304,21 @@ export async function renderRecipeDetailRoute(
     const householdId = gate.viewer.householdId;
     const profile = await getProfile(viewerUserId);
     const members = await listHouseholdMembers(householdId);
-    const filterUserId =
-        opts.member && members.some((member) => member.userId === opts.member)
-            ? opts.member
-            : viewerUserId;
+    // Whose version is shown: the viewer's own unless the address names
+    // another member, or `base` for the recipe as everyone starts from it.
+    const asked = (opts.member ?? "").toLowerCase();
+    const named = members.find(
+        (member) => member.userId.toLowerCase() === asked,
+    );
+    const viewing = asked === "base" ? "base" : (named?.userId ?? viewerUserId);
     let view;
     try {
         view = await getRecipeView(
             liveRecipesStore(),
             householdId,
             recipeId,
-            filterUserId,
+            viewing === "base" ? viewerUserId : viewing,
+            viewing === "base" ? undefined : liveRecipeVariantsStore(),
         );
     } catch (err) {
         if (err instanceof RecipeInputError) {
@@ -2292,16 +2348,41 @@ export async function renderRecipeDetailRoute(
     );
     const allFoods = await liveFoodsStore().listFoods(householdId);
     const notices = recipeNotices(recipeId, view.ingredients, catalog);
+    // What a line of the shown version says about the base: the person who
+    // changed it, and what it was.
+    const baseLines = view.variant
+        ? new Map(
+              (
+                  await liveRecipesStore().listIngredients(
+                      householdId,
+                      recipeId,
+                  )
+              ).map((row) => [row.id, row]),
+          )
+        : new Map<string, RecipeIngredient>();
+    const viewingName =
+        viewing === "base"
+            ? "Base"
+            : (members.find((member) => member.userId === viewing)
+                  ?.displayName ?? "");
     const ingredientRows = view.ingredients.map((row) => {
         const effective = row.foodId ? catalog.get(row.foodId) : null;
         let displayName = row.displayName;
         if (effective?.product) {
             displayName = `${row.displayName} · ${effective.product.name}`;
         }
+        const versionNote = row.change
+            ? ingredientVersionNote(
+                  viewing === viewerUserId ? "Yours" : `${viewingName}'s`,
+                  row.change,
+                  baseLines.get(row.id),
+              )
+            : undefined;
         return {
             ...row,
             displayName,
             defaultUnit: effective?.defaultUnit ?? "g",
+            ...(versionNote ? { versionNote } : {}),
         };
     });
     const noticeResult = await loadViewerNotices(gate.viewer);
@@ -2345,6 +2426,9 @@ export async function renderRecipeDetailRoute(
         return covered ? [id] : [];
     });
     let cook: CookSheetView | undefined;
+    // The cook follows the version shown: that person's amounts come off the
+    // kitchen, and the portion logged is worked out from them too.
+    const cookVersion = viewing === "base" ? undefined : viewing;
     if (view.verification !== "unverified") {
         const servings =
             opts.cookServings != null &&
@@ -2356,7 +2440,7 @@ export async function renderRecipeDetailRoute(
             preview,
             error: previewError,
             places,
-        } = await loadCookPreview(householdId, recipeId, servings);
+        } = await loadCookPreview(householdId, recipeId, servings, cookVersion);
         const open =
             opts.openCook === true || opts.openModalId === COOK_SHEET_ID;
         cook = {
@@ -2374,6 +2458,7 @@ export async function renderRecipeDetailRoute(
             viewerName:
                 members.find((member) => member.userId === viewerUserId)
                     ?.displayName ?? "You",
+            version: cookVersion,
             places,
             submitKey: crypto.randomUUID(),
             open,
@@ -2390,6 +2475,19 @@ export async function renderRecipeDetailRoute(
             onList,
             macrosPerPortion: macrosPerPortion ?? macros,
             portionCount: view.portionCount,
+            versions: isRecipeDraft(view)
+                ? undefined
+                : versionPicker({
+                      viewerId: viewerUserId,
+                      viewing,
+                      viewingName,
+                      changeCount: view.variant?.overrideCount ?? 0,
+                      members,
+                      canCompare: can(
+                          gate.viewer,
+                          "household.align_recipe_versions",
+                      ).ok,
+                  }),
             gapReasons: [
                 ...new Set(
                     notices.map((notice) => gapFromNotice(notice).message),
@@ -2431,6 +2529,92 @@ export async function renderRecipeDetailRoute(
                 opts.openModalId === PLAN_SHEET_ID,
             ),
             error: opts.error,
+        }),
+    };
+}
+
+const UUID_ID =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Compare versions: how each member's version of a recipe differs from the
+ * base, for the owner and admins (`household.align_recipe_versions`). A member
+ * who asks anyway is refused on the recipe's own page.
+ */
+export async function renderRecipeCompareRoute(
+    viewerUserId: string,
+    recipeId: string,
+    opts: {
+        error?: string;
+        /** Whose Make-theirs-the-base sheet opens, when they still have changes to use. */
+        openFor?: string;
+    } = {},
+): Promise<{ status: 200 | 403 | 404; html: string }> {
+    const gate = await memberGate(viewerUserId);
+    if ("html" in gate) return { status: gate.status, html: gate.html };
+    const allowed = can(gate.viewer, "household.align_recipe_versions");
+    if (!allowed.ok) {
+        const page = await renderRecipeDetailRoute(viewerUserId, recipeId, {
+            error: allowed.reason,
+        });
+        return {
+            status: page.status === 200 ? 403 : page.status,
+            html: page.html,
+        };
+    }
+    const householdId = gate.viewer.householdId;
+    const recipes = liveRecipesStore();
+    const recipe = UUID_ID.test(recipeId)
+        ? await recipes.getRecipe(householdId, recipeId)
+        : null;
+    if (!recipe) {
+        const page = await renderRecipesListPage(viewerUserId, {
+            error: "Unknown recipe.",
+        });
+        return { status: 404, html: page.html };
+    }
+    const variants = liveRecipeVariantsStore();
+    const [ingredients, overrides, members, profile] = await Promise.all([
+        recipes.listIngredients(householdId, recipe.id),
+        variants.listOverrides(householdId, recipe.id),
+        listHouseholdMembers(householdId),
+        getProfile(viewerUserId),
+    ]);
+    const compare = compareVersions(
+        { id: recipe.id, ingredients },
+        overrides,
+        members.map((member) => member.userId),
+    );
+    const noticeResult = await loadViewerNotices(gate.viewer);
+    const chrome = await viewerChromeWithAttention(
+        profile,
+        gate.viewer,
+        noticeResult,
+    );
+    const resetKeys = new Map<string, readonly string[]>();
+    for (const version of compare.versions) {
+        const preview = await previewReset(recipes, variants, {
+            householdId,
+            recipeId: recipe.id,
+            userId: version.userId,
+        });
+        resetKeys.set(version.userId, preview.rowKeys);
+    }
+    return {
+        status: 200,
+        html: renderRecipeCompareV2Page({
+            chrome,
+            recipeId: recipe.id,
+            recipeName: recipe.name,
+            compare,
+            people: members.map((member) => ({
+                userId: member.userId,
+                name: member.displayName,
+                picture: chrome.identity?.avatarVersions?.get(member.userId),
+                resetRowKeys: resetKeys.get(member.userId),
+            })),
+            error: opts.error,
+            openFor: opts.error ? undefined : opts.openFor?.toLowerCase(),
         }),
     };
 }

@@ -22,7 +22,10 @@
  */
 import { button, filterButton } from "./button.js";
 import { cls, dataAttrs, esc, raw, safeHref, type Html } from "./html.js";
-import { icon } from "./icon.js";
+import { icon, type IconName } from "./icon.js";
+
+/** Hidden fields a menu item posts; an array posts the name once per value. */
+export type MenuFields = Readonly<Record<string, string | readonly string[]>>;
 
 export type MenuItem =
     | { kind: "separator" }
@@ -38,7 +41,7 @@ export type MenuItem =
           hint?: string;
           action: string;
           /** Hidden fields posted with the button. */
-          fields?: Readonly<Record<string, string>>;
+          fields?: MenuFields;
           /** Colours the label as a destructive action. */
           danger?: boolean;
       }
@@ -53,7 +56,7 @@ export type MenuItem =
           /** Instead of `href`: choosing it posts this form (a pull-down that saves its value). */
           action?: string;
           /** Hidden fields posted with `action`. */
-          fields?: Readonly<Record<string, string>>;
+          fields?: MenuFields;
           /** The value already chosen: picking it again only closes the menu, posting nothing. */
           current?: boolean;
           /** What choosing it puts in the menu's `field` (a pull-down inside a form). */
@@ -100,15 +103,22 @@ export type MenuItem =
           /** The verb on the confirming button ("Discard 3"); defaults to `label`. */
           confirmLabel?: string;
           action: string;
-          fields?: Readonly<Record<string, string>>;
+          fields?: MenuFields;
+          /**
+           * Still asks in place, but draws in the plain tone: for an action
+           * that changes what a person set without throwing it away (Align
+           * to base).
+           */
+          plain?: boolean;
       };
 
 /**
- * What the menu hangs from: the ⋯ Icon button, the Filter button, or a whole
+ * What the menu hangs from: the ⋯ Icon button, the Filter button, a whole
  * Item row ("row": a single-value pull-down, its trigger reads title, value
- * and a chevron).
+ * and a chevron) or a Link button ("link": a small accent button that reads
+ * its own label, the recipe's whose-version pull-down).
  */
-export type MenuAnchor = "more" | "filter" | "row";
+export type MenuAnchor = "more" | "filter" | "row" | "link";
 
 const DOTS = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true" focusable="false"><circle cx="5.5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="18.5" cy="12" r="1.6"/></svg>`;
 
@@ -135,11 +145,13 @@ function itemMarkup(item: PlainItem): string {
 const isPlain = (item: MenuItem): item is PlainItem =>
     item.kind === "separator" || item.kind === "link" || item.kind === "post";
 
-function hiddenFields(fields?: Readonly<Record<string, string>>): string {
+function hiddenFields(fields?: MenuFields): string {
     return Object.entries(fields ?? {})
-        .map(
-            ([name, value]) =>
-                `<input type="hidden" name="${esc(name)}" value="${esc(value)}">`,
+        .flatMap(([name, value]) =>
+            (typeof value === "string" ? [value] : value).map(
+                (one) =>
+                    `<input type="hidden" name="${esc(name)}" value="${esc(one)}">`,
+            ),
         )
         .join("");
 }
@@ -188,7 +200,8 @@ function anchoredItem(item: MenuItem, checks: boolean): string {
             return `<div class="fd-menu__item fd-menu__note" role="menuitem" aria-disabled="true" tabindex="-1">${anchoredBody(item, checks)}</div>`;
         case "destructive": {
             const verb = item.confirmLabel ?? item.label;
-            return `<div class="fd-menu__confirm" data-fd-menu-confirm><button type="button" class="fd-menu__item fd-menu__item--danger" role="menuitem" data-fd-menu-arm>${anchoredBody(item, checks)}</button><div class="fd-menu__confirm-row" role="group" aria-label="Confirm ${esc(verb)}" hidden><button type="button" class="fd-menu__item" role="menuitem" data-fd-menu-cancel>${anchoredBody({ label: "Cancel" }, checks)}</button><form class="fd-menu__form" method="post" action="${esc(item.action)}">${hiddenFields(item.fields)}<button type="submit" class="fd-menu__item fd-menu__item--danger" role="menuitem">${anchoredBody({ label: verb }, checks)}</button></form></div></div>`;
+            const tone = item.plain ? "" : " fd-menu__item--danger";
+            return `<div class="fd-menu__confirm" data-fd-menu-confirm><button type="button" class="fd-menu__item${tone}" role="menuitem" data-fd-menu-arm>${anchoredBody(item, checks)}</button><div class="fd-menu__confirm-row" role="group" aria-label="Confirm ${esc(verb)}" hidden><button type="button" class="fd-menu__item" role="menuitem" data-fd-menu-cancel>${anchoredBody({ label: "Cancel" }, checks)}</button><form class="fd-menu__form" method="post" action="${esc(item.action)}">${hiddenFields(item.fields)}<button type="submit" class="fd-menu__item${tone}" role="menuitem">${anchoredBody({ label: verb }, checks)}</button></form></div></div>`;
         }
     }
 }
@@ -228,6 +241,8 @@ export function menu(opts: {
     filterCount?: number;
     /** The row a `row` menu's trigger draws (required with `anchor: "row"`). */
     row?: { title: string; value: string; subtitle?: string };
+    /** The Link button a `link` menu's trigger draws (required with `anchor: "link"`). */
+    link?: { label: string; icon?: IconName };
     /**
      * Makes the menu a pull-down that sets a field of the form around it: a
      * hidden input of this `name` and `value` rides inside the menu, and a
@@ -266,21 +281,32 @@ export function menu(opts: {
     if (anchor === "row" && !opts.row) {
         throw new Error("menu: a row menu needs its row (title and value)");
     }
+    if (anchor === "link" && !opts.link) {
+        throw new Error("menu: a link menu needs its link (label)");
+    }
     const trigger =
         anchor === "row" && opts.row
             ? rowTrigger(opts.row)
-            : anchor === "filter"
-              ? filterButton({
-                    label: opts.label,
-                    count: opts.filterCount,
+            : anchor === "link" && opts.link
+              ? button({
+                    label: opts.link.label,
+                    variant: "link",
+                    size: "md",
+                    icon: opts.link.icon,
                     attrs,
                 })
-              : button({
-                    label: opts.label,
-                    icon: "more",
-                    round: true,
-                    attrs,
-                });
+              : anchor === "filter"
+                ? filterButton({
+                      label: opts.label,
+                      count: opts.filterCount,
+                      attrs,
+                  })
+                : button({
+                      label: opts.label,
+                      icon: "more",
+                      round: true,
+                      attrs,
+                  });
     const checks = opts.items.some((i) => i.kind === "checked");
     const field = opts.field
         ? `<input type="hidden" name="${esc(opts.field.name)}" value="${esc(opts.field.value)}" data-fd-menu-field>`

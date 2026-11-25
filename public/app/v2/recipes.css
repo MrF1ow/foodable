@@ -227,6 +227,26 @@
         var(--font-body);
     color: var(--text-secondary);
 }
+/* The whose-version pull-down over the macro tiles: a Link button that may
+   run long ("Per serving · Ethan · 1 change from base"), so it wraps inside
+   the column instead of widening the page. */
+.fd-recipe-version {
+    align-self: flex-start;
+    min-width: 0;
+}
+.fd-recipe-version [data-fd-btn] {
+    max-width: 100%;
+    height: auto;
+    min-height: 0;
+    text-align: left;
+    white-space: normal;
+}
+
+/* Compare versions: the recipe's name under the bar. */
+.fd-recipe-compare-name {
+    margin-bottom: var(--space-sm);
+}
+
 .fd-recipe-portions {
     margin-top: var(--space-sm);
 }

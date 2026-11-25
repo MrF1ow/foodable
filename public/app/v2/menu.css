@@ -229,6 +229,22 @@
     width: 100%;
 }
 
+/* A link menu (menu({ anchor: "link" })): the trigger is a small Link button
+ * that reads its own label, so the root is as wide as the button and the
+ * panel hangs under its start edge (menu.js flips it when it would leave the
+ * screen). */
+.fd-menu--link {
+    display: inline-block;
+    max-width: 100%;
+}
+.fd-menu--link .fd-menu__panel {
+    right: auto;
+    left: 0;
+}
+.fd-menu--link .fd-menu__panel[data-align="start"] {
+    left: 0;
+}
+
 /* Select leaves the menu while a list is being picked from. */
 .fd-menu__item[hidden] {
     display: none;

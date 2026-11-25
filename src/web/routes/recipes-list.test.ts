@@ -3112,6 +3112,483 @@ describe("recipe versions: compare and align (admin)", () => {
     });
 });
 
+describe("recipe versions on the recipe page", () => {
+    async function giveVersion(userId: string, amount: number) {
+        const [flour] = await db.recipesStore.listIngredients(HH, db.recipeId);
+        await setRecipeVariant(
+            db.recipesStore,
+            db.foodsStore,
+            db.variantsStore,
+            {
+                householdId: HH,
+                recipeId: db.recipeId,
+                userId,
+                action: "amount",
+                ingredientId: flour!.id,
+                amount,
+                unit: "g",
+            },
+        );
+        return flour!;
+    }
+    const pullDown = (html: string) =>
+        html.match(
+            /<div class="fd-menu fd-menu--anchored fd-menu--link fd-recipe-version"[\s\S]*?<\/div><\/div>/,
+        )?.[0] ?? "";
+    const labelsOf = (html: string) =>
+        [...html.matchAll(/<span class="fd-menu__label">([^<]*)<\/span>/g)].map(
+            (m) => m[1]!,
+        );
+    const getAs = (as: string, path: string) =>
+        recipesApp().request(`http://x${path}`, {
+            headers: { cookie: cookieFor(as) },
+        });
+    /** The hidden fields of the first form posting to `action`, as a browser would post them. */
+    const formFields = (html: string, action: string) => {
+        // Plain string search: no pattern is built from `action`.
+        const at = html.indexOf(`action="${action}"`);
+        const start = at < 0 ? -1 : html.lastIndexOf("<form", at);
+        const end = start < 0 ? -1 : html.indexOf("</form>", at);
+        const form = end < 0 ? undefined : html.slice(start, end + 7);
+        expect(form).toBeDefined();
+        return new URLSearchParams(
+            [
+                ...form!.matchAll(
+                    /<input type="hidden" name="([^"]+)" value="([^"]*)">/g,
+                ),
+            ].map((m): [string, string] => [m[1]!, m[2]!]),
+        );
+    };
+    const postForm = (as: string, path: string, body: URLSearchParams) =>
+        recipesApp().request(`http://x${path}`, {
+            method: "POST",
+            headers: {
+                cookie: cookieFor(as),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: body.toString(),
+        });
+
+    test("the page shows the viewer's own version, and the pull-down lists the household", async () => {
+        await giveVersion(ALICE, 60);
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(page.html).toContain("Per serving · Alice · 1 change from base");
+        expect(page.html).toContain("Yours · base 100 g");
+        expect(page.html).toContain(">60 g</span>");
+        const menu = pullDown(page.html);
+        expect(labelsOf(menu)).toEqual([
+            "Base",
+            "Alice",
+            "Bob",
+            "Compare versions",
+        ]);
+        expect(menu).toContain(`href="/recipes/${db.recipeId}?member=base"`);
+        expect(menu).toContain(`href="/recipes/${db.recipeId}"`);
+        expect(menu).toContain(`href="/recipes/${db.recipeId}?member=${BOB}"`);
+        expect(menu).toContain(`href="/recipes/${db.recipeId}/compare"`);
+        // The tick is on the version shown.
+        expect(menu).toMatch(/aria-checked="true"[^>]*>[\s\S]*?Alice/);
+    });
+
+    test("another person's version and the base are one address away", async () => {
+        await giveVersion(BOB, 40);
+        const bob = await renderRecipeDetailRoute(ALICE, db.recipeId, {
+            member: BOB,
+        });
+        expect(bob.html).toContain("Per serving · Bob · 1 change from base");
+        expect(bob.html).toMatch(/Bob(?:&#0?39;|&#x27;|')s · base 100 g/);
+        expect(bob.html).toContain(">40 g</span>");
+        const base = await renderRecipeDetailRoute(ALICE, db.recipeId, {
+            member: "base",
+        });
+        expect(base.html).toContain("Per serving · Base");
+        expect(base.html).not.toContain("from base");
+        expect(base.html).toContain(">100 g</span>");
+        // An address that names nobody in the household shows the viewer's own.
+        const stranger = await renderRecipeDetailRoute(ALICE, db.recipeId, {
+            member: "33333333-3333-4333-8333-333333333333",
+        });
+        expect(stranger.html).toContain("Per serving · Alice");
+    });
+
+    test("only the owner and admins are offered Compare versions", async () => {
+        db.bobRole = "member";
+        const member = await renderRecipeDetailRoute(BOB, db.recipeId);
+        // The viewer comes right after Base.
+        expect(labelsOf(pullDown(member.html))).toEqual([
+            "Base",
+            "Bob",
+            "Alice",
+        ]);
+        expect(member.html).not.toContain("/compare");
+        expect(member.html).not.toContain("versions/align");
+        expect(member.html).not.toContain("versions/reset");
+        db.bobRole = "admin";
+        const admin = await renderRecipeDetailRoute(BOB, db.recipeId);
+        expect(labelsOf(pullDown(admin.html))).toContain("Compare versions");
+    });
+
+    test("the cook follows the version shown: its amounts come off the kitchen and its portion is logged", async () => {
+        await giveVersion(BOB, 40);
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId, {
+            member: BOB,
+        });
+        expect(page.html).toContain(
+            `data-fd-cook-preview-url="/recipes/${db.recipeId}/cook/preview/${BOB}"`,
+        );
+        const body = cookSheetBody(page.html);
+        expect(body.get("version")).toBe(BOB);
+        body.set("servings", "4");
+        const res = await postConfirm(body);
+        expect(res.status).toBe(303);
+        // 4 servings at Bob's 40 g for 2 portions: 80 g, not the base's 200 g.
+        expect(await flourLeft()).toBe(420);
+        // The portion logged for Alice is worked out from Alice's own version
+        // (she has none, so the base's 50 g of flour), not from Bob's 20 g,
+        // as `cook_recipe` logs each person from their own.
+        expect(db.meals).toHaveLength(1);
+        expect(db.meals[0]!.userId).toBe(ALICE);
+        expect(db.meals[0]!.input.calories).toBeCloseTo(182, 1);
+    });
+
+    test("cooking Bob's version as Alice logs her portion from her own version", async () => {
+        await giveVersion(BOB, 40);
+        await giveVersion(ALICE, 60);
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId, {
+            member: BOB,
+        });
+        const body = cookSheetBody(page.html);
+        body.set("servings", "4");
+        expect((await postConfirm(body)).status).toBe(303);
+        // Bob's 40 g for 2 portions, four servings.
+        expect(await flourLeft()).toBe(420);
+        // Alice's 60 g over 2 portions is 30 g of flour: 109.2 kcal.
+        expect(db.meals).toHaveLength(1);
+        expect(db.meals[0]!.userId).toBe(ALICE);
+        expect(db.meals[0]!.input.calories).toBeCloseTo(109.2, 1);
+    });
+
+    test("cooking a person's version lands back on that version, and the base on the base", async () => {
+        await giveVersion(BOB, 40);
+        const bob = cookSheetBody(
+            (
+                await renderRecipeDetailRoute(ALICE, db.recipeId, {
+                    member: BOB,
+                })
+            ).html,
+        );
+        bob.set("servings", "2");
+        const first = await postConfirm(bob);
+        expect(first.status).toBe(303);
+        expect(first.headers.get("location")).toBe(
+            `/recipes/${db.recipeId}?member=${BOB}`,
+        );
+        const base = cookSheetBody(
+            (
+                await renderRecipeDetailRoute(ALICE, db.recipeId, {
+                    member: "base",
+                })
+            ).html,
+        );
+        base.set("servings", "2");
+        const second = await postConfirm(base);
+        expect(second.status).toBe(303);
+        expect(second.headers.get("location")).toBe(
+            `/recipes/${db.recipeId}?member=base`,
+        );
+    });
+
+    test("a cook of the base that fails shows the base again, and a resubmit cooks the base", async () => {
+        await giveVersion(ALICE, 60);
+        const base = await renderRecipeDetailRoute(ALICE, db.recipeId, {
+            member: "base",
+        });
+        const body = cookSheetBody(base.html);
+        body.set("servings", "0");
+        const failed = await postConfirm(body);
+        expect(failed.status).toBe(400);
+        const html = await failed.text();
+        expect(html).toContain("Per serving · Base");
+        const again = cookSheetBody(html);
+        expect(again.has("version")).toBe(false);
+        again.set("servings", "4");
+        expect((await postConfirm(again)).status).toBe(303);
+        // The base's 100 g for 2 portions, four servings: 200 g, not Alice's 120 g.
+        expect(await flourLeft()).toBe(300);
+    });
+
+    test("the base is cooked when the base is shown, or when the version names nobody in the household", async () => {
+        await giveVersion(BOB, 40);
+        const base = await renderRecipeDetailRoute(ALICE, db.recipeId, {
+            member: "base",
+        });
+        const baseBody = cookSheetBody(base.html);
+        expect(baseBody.has("version")).toBe(false);
+        baseBody.set("servings", "4");
+        expect((await postConfirm(baseBody)).status).toBe(303);
+        expect(await flourLeft()).toBe(300);
+        // A forged version is not a version.
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId, {
+            member: "base",
+        });
+        const forged = cookSheetBody(page.html);
+        forged.set("servings", "4");
+        forged.set("version", "33333333-3333-4333-8333-333333333333");
+        expect((await postConfirm(forged)).status).toBe(303);
+        expect(await flourLeft()).toBe(100);
+    });
+
+    test("the cook preview can be asked for one version", async () => {
+        await giveVersion(BOB, 40);
+        const res = await getAs(
+            ALICE,
+            `/recipes/${db.recipeId}/cook/preview/${BOB}?servings=4`,
+        );
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain(">80 g</span>");
+        const base = await getAs(
+            ALICE,
+            `/recipes/${db.recipeId}/cook/preview?servings=4`,
+        );
+        expect(await base.text()).toContain(">200 g</span>");
+        // A name that is not a household member is the base.
+        const forged = await getAs(
+            ALICE,
+            `/recipes/${db.recipeId}/cook/preview/not-a-person?servings=4`,
+        );
+        expect(await forged.text()).toContain(">200 g</span>");
+    });
+
+    test("Compare versions lists what differs and who has a version, for the owner and admins", async () => {
+        await giveVersion(BOB, 40);
+        const res = await getAs(ALICE, `/recipes/${db.recipeId}/compare`);
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        expect(html).toContain(">Compare versions</h1>");
+        expect(html).toContain("Base 100 g · Bob 40 g");
+        expect(html).toContain("1 change");
+        expect(html).toContain("No version yet");
+        db.bobRole = "admin";
+        expect(
+            (await getAs(BOB, `/recipes/${db.recipeId}/compare`)).status,
+        ).toBe(200);
+    });
+
+    test("a member who asks for Compare versions is refused on the recipe page, and no one else's version is shown", async () => {
+        await giveVersion(ALICE, 60);
+        db.bobRole = "member";
+        const res = await getAs(BOB, `/recipes/${db.recipeId}/compare`);
+        expect(res.status).toBe(403);
+        const html = await res.text();
+        expect(html).toContain("fd-recipe-detail");
+        expect(html).toContain('role="alert"');
+        expect(html).not.toContain("Compare versions</h1>");
+        expect(html).not.toContain("versions/align");
+        expect(html).not.toContain("versions/reset");
+    });
+
+    test("Compare versions of an unknown recipe is a 404", async () => {
+        const res = await getAs(
+            ALICE,
+            "/recipes/33333333-3333-4333-8333-333333333333/compare",
+        );
+        expect(res.status).toBe(404);
+        expect(
+            (await getAs(ALICE, "/recipes/not-a-recipe/compare")).status,
+        ).toBe(404);
+    });
+
+    test("the compare page's Use posts what align wants, and the base changes", async () => {
+        const flour = await giveVersion(BOB, 40);
+        const html = await (
+            await getAs(ALICE, `/recipes/${db.recipeId}/compare`)
+        ).text();
+        const fields = formFields(
+            html,
+            `/recipes/${db.recipeId}/versions/align`,
+        );
+        expect(fields.get("user_id")).toBe(BOB);
+        expect(fields.get("ingredient_id")).toBe(flour.id);
+        const res = await postForm(
+            ALICE,
+            `/recipes/${db.recipeId}/versions/align`,
+            fields,
+        );
+        expect(fields.get("back")).toBe("compare");
+        expect(res.status).toBe(303);
+        // Back on Compare versions, where the next Use is one tap away.
+        expect(res.headers.get("location")).toBe(
+            `/recipes/${db.recipeId}/compare?make=${BOB}`,
+        );
+        expect(toastOf(res)).toBeNull();
+        expect(
+            (await db.recipesStore.listIngredients(HH, db.recipeId))[0]!
+                .quantity,
+        ).toEqual({ amount: 40, unit: "g" });
+    });
+
+    test("an align posted without back=compare lands on the recipe, as before", async () => {
+        const flour = await giveVersion(BOB, 40);
+        const html = await (
+            await getAs(ALICE, `/recipes/${db.recipeId}/compare`)
+        ).text();
+        const fields = formFields(
+            html,
+            `/recipes/${db.recipeId}/versions/align`,
+        );
+        fields.delete("back");
+        expect(fields.get("ingredient_id")).toBe(flour.id);
+        const res = await postForm(
+            ALICE,
+            `/recipes/${db.recipeId}/versions/align`,
+            fields,
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+    });
+
+    test("a stale align from the compare page is refused in place on the compare page", async () => {
+        await giveVersion(BOB, 40);
+        const html = await (
+            await getAs(ALICE, `/recipes/${db.recipeId}/compare`)
+        ).text();
+        const fields = formFields(
+            html,
+            `/recipes/${db.recipeId}/versions/align`,
+        );
+        const path = `/recipes/${db.recipeId}/versions/align`;
+        expect((await postForm(ALICE, path, fields)).status).toBe(303);
+        // The same change again: it was used already.
+        const stale = await postForm(ALICE, path, fields);
+        expect(stale.status).toBe(400);
+        const page = await stale.text();
+        expect(page).toContain(">Compare versions</h1>");
+        expect(page).toContain('role="alert"');
+        expect(page).not.toContain("data-sheet-open-on-load");
+        // A change saved again since is refused the same way.
+        await giveVersion(BOB, 45);
+        const changed = await postForm(ALICE, path, fields);
+        expect(changed.status).toBe(400);
+        const changedPage = await changed.text();
+        expect(changedPage).toContain(">Compare versions</h1>");
+        expect(changedPage).toContain("Their change changed; look again.");
+    });
+
+    test("Compare versions reopens a person's sheet only when they still have changes to use", async () => {
+        await giveVersion(BOB, 40);
+        const open = await (
+            await getAs(ALICE, `/recipes/${db.recipeId}/compare?make=${BOB}`)
+        ).text();
+        expect(open).toContain("data-sheet-open-on-load");
+        const none = await (
+            await getAs(ALICE, `/recipes/${db.recipeId}/compare?make=${ALICE}`)
+        ).text();
+        expect(none).not.toContain("data-sheet-open-on-load");
+        const closed = await (
+            await getAs(ALICE, `/recipes/${db.recipeId}/compare`)
+        ).text();
+        expect(closed).not.toContain("data-sheet-open-on-load");
+    });
+
+    test("the compare page's Delete posts the rows it showed, and the person is back on the base", async () => {
+        await giveVersion(BOB, 40);
+        const html = await (
+            await getAs(ALICE, `/recipes/${db.recipeId}/compare`)
+        ).text();
+        const fields = formFields(
+            html,
+            `/recipes/${db.recipeId}/versions/reset`,
+        );
+        expect(fields.get("user_id")).toBe(BOB);
+        expect(fields.get("confirm")).toBe("1");
+        expect(fields.get("back")).toBe("compare");
+        expect(fields.getAll("row_keys")).toHaveLength(1);
+        const res = await postForm(
+            ALICE,
+            `/recipes/${db.recipeId}/versions/reset`,
+            fields,
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(
+            `/recipes/${db.recipeId}/compare`,
+        );
+        expect(
+            await db.variantsStore.listOverrides(HH, db.recipeId),
+        ).toHaveLength(0);
+    });
+
+    test("a reset posted without back=compare lands on the recipe, and a stale one is refused in place on the compare page", async () => {
+        await giveVersion(BOB, 40);
+        const html = await (
+            await getAs(ALICE, `/recipes/${db.recipeId}/compare`)
+        ).text();
+        const fields = formFields(
+            html,
+            `/recipes/${db.recipeId}/versions/reset`,
+        );
+        const path = `/recipes/${db.recipeId}/versions/reset`;
+        // Bob saves again after the page was drawn: what it showed is stale.
+        await giveVersion(BOB, 45);
+        const stale = await postForm(ALICE, path, fields);
+        expect(stale.status).toBe(400);
+        const page = await stale.text();
+        expect(page).toContain(">Compare versions</h1>");
+        expect(page).toContain("Their version changed; look again.");
+        expect(
+            await db.variantsStore.listOverrides(HH, db.recipeId),
+        ).toHaveLength(1);
+        // From anywhere else it keeps landing on the recipe.
+        fields.delete("back");
+        fields.delete("row_keys");
+        const fresh = await getAs(ALICE, `/recipes/${db.recipeId}/compare`);
+        const keys = formFields(await fresh.text(), path).getAll("row_keys");
+        for (const key of keys) fields.append("row_keys", key);
+        const res = await postForm(ALICE, path, fields);
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+    });
+
+    test("a member's forged align and reset change nothing", async () => {
+        const flour = await giveVersion(ALICE, 60);
+        db.bobRole = "member";
+        const align = await postForm(
+            BOB,
+            `/recipes/${db.recipeId}/versions/align`,
+            new URLSearchParams({
+                user_id: ALICE,
+                ingredient_id: flour.id,
+                row_key: "x",
+            }),
+        );
+        expect(align.status).toBe(403);
+        const reset = await postForm(
+            BOB,
+            `/recipes/${db.recipeId}/versions/reset`,
+            new URLSearchParams({ user_id: ALICE, confirm: "1" }),
+        );
+        expect(reset.status).toBe(403);
+        // Saying it came from the compare page does not change the answer.
+        const forgedBack = await postForm(
+            BOB,
+            `/recipes/${db.recipeId}/versions/reset`,
+            new URLSearchParams({
+                user_id: ALICE,
+                confirm: "1",
+                back: "compare",
+            }),
+        );
+        expect(forgedBack.status).toBe(403);
+        expect(
+            await db.variantsStore.listOverrides(HH, db.recipeId),
+        ).toHaveLength(1);
+        expect(
+            (await db.recipesStore.listIngredients(HH, db.recipeId))[0]!
+                .quantity,
+        ).toEqual({ amount: 100, unit: "g" });
+    });
+});
+
 describe("drafts in the app", () => {
     /** A draft Alice imported: no steps yet, so the check still fails. */
     async function draftOf(

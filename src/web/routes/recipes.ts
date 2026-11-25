@@ -1,7 +1,8 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import {
     loadCookPreview,
     renderDashboardPage,
+    renderRecipeCompareRoute,
     renderRecipeDetailRoute,
     renderRecipesListPage,
 } from "../loaders.js";
@@ -181,6 +182,8 @@ async function recipeFormError(
         openModalId?: string;
         servings?: number;
         plan?: { date?: string; slot?: string; servings?: number };
+        /** The member whose version the page shows again (a cook that failed). */
+        version?: string;
     } = {},
 ) {
     const message =
@@ -196,6 +199,7 @@ async function recipeFormError(
         openModalId: opts.openModalId,
         cookServings: opts.servings,
         plan: opts.plan,
+        member: opts.version,
     });
     const status = err instanceof RecipeForbiddenError ? 403 : (400 as const);
     return { html: page.html, status: status as 400 | 403 };
@@ -466,6 +470,16 @@ recipesRoutes.get("/recipes/:id", requireSiteUser, async (c) => {
     return c.html(page.html, page.status);
 });
 
+/** Compare versions: the owner's and admins' page. A member is refused on the recipe. */
+recipesRoutes.get("/recipes/:id/compare", requireSiteUser, async (c) => {
+    const page = await renderRecipeCompareRoute(
+        c.get("userId"),
+        c.req.param("id"),
+        { openFor: c.req.query("make") },
+    );
+    return c.html(page.html, page.status);
+});
+
 /** The most servings the cook sheet takes in one go. */
 const COOK_SERVINGS_MAX = 999;
 
@@ -476,7 +490,22 @@ const COOK_SLOTS: readonly CookSlot[] = [
     "snack",
 ];
 
-recipesRoutes.get("/recipes/:id/cook/preview", requireMember, async (c) => {
+/**
+ * The member whose version a cook is for, from the sheet's `version` field or
+ * the preview's address. A person who is not in the household names no
+ * version, so the base is cooked.
+ */
+async function cookVersionOf(
+    householdId: string,
+    raw: string,
+): Promise<string | undefined> {
+    const id = raw.trim();
+    if (!UUID_SHAPE.test(id)) return undefined;
+    const membership = await getHouseholdMembership(id, householdId);
+    return membership?.userId;
+}
+
+async function cookPreviewResponse(c: Context, versionRaw: string) {
     const member = siteMember(c);
     const servings = Number(c.req.query("servings") ?? "");
     c.header("Cache-Control", "no-store");
@@ -497,14 +526,24 @@ recipesRoutes.get("/recipes/:id/cook/preview", requireMember, async (c) => {
     }
     const { preview, error, places } = await loadCookPreview(
         member.householdId,
-        c.req.param("id"),
+        c.req.param("id") ?? "",
         servings,
+        await cookVersionOf(member.householdId, versionRaw),
     );
     return c.html(
         renderCookPreviewRegion(preview, error, places),
         preview ? 200 : 400,
     );
-});
+}
+
+recipesRoutes.get("/recipes/:id/cook/preview", requireMember, (c) =>
+    cookPreviewResponse(c, ""),
+);
+
+/** The same preview for one member's version: the sheet's address carries who. */
+recipesRoutes.get("/recipes/:id/cook/preview/:version", requireMember, (c) =>
+    cookPreviewResponse(c, c.req.param("version") ?? ""),
+);
 
 /**
  * The cook sheet's Cook button: cook the recipe for `servings` portions (the
@@ -538,6 +577,14 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
         .trim()
         .replace(/[^A-Za-z0-9_-]/g, "")
         .slice(0, 64);
+    // The version the sheet cooked, and so the one the page shows again: the
+    // person it named, or the base when it named nobody.
+    const cookedVersion = () =>
+        cookVersionOf(member.householdId, formText(body, "version")).catch(
+            () => undefined,
+        );
+    const backTo = async () =>
+        `/recipes/${recipeId}?member=${encodeURIComponent((await cookedVersion()) ?? "base")}`;
     // The meal this request inserted, to take back if the cook fails.
     let insertedMealId: string | null = null;
     // With a meal, its key claims the submit; without one the cook does.
@@ -560,10 +607,18 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
                     ? profile.timezone
                     : "UTC",
             ) as CookSlot);
+        // Whose version the sheet cooked: that person's amounts come off the
+        // kitchen. The portion logged for the viewer is worked out from the
+        // viewer's own version (the base when they have none), as
+        // `cook_recipe` logs each person from their own.
+        const version = await cookedVersion();
         const meal = logServing
-            ? await mealWriteFromItems(member.householdId, [
-                  { recipeId, portions: 1 },
-              ])
+            ? await mealWriteFromItems(
+                  member.householdId,
+                  [{ recipeId, portions: 1 }],
+                  undefined,
+                  userId,
+              )
             : null;
         // What this cook is about to take, to compare with what the sheet
         // showed. A recipe it cannot plan fails in cookRecipe below.
@@ -571,6 +626,7 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
             member.householdId,
             recipeId,
             servings,
+            version,
         );
         const changedNames = preview
             ? cookPreviewChanges(
@@ -591,7 +647,7 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
             });
             if (inserted.deduplicated) {
                 // toast: none
-                return c.redirect(`/recipes/${recipeId}`, 303);
+                return c.redirect(await backTo(), 303);
             }
             insertedMealId = inserted.meal.id;
         }
@@ -608,12 +664,20 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
                     deductStock: true,
                     actorUserId: userId,
                     submitKey: cookKey,
+                    ...(version
+                        ? {
+                              memberPortions: [
+                                  { userId: version, portions: servings },
+                              ],
+                              variants: liveRecipeVariantsStore(),
+                          }
+                        : {}),
                 },
             ),
         );
         if (cooked.alreadyCooked) {
             // toast: none
-            return c.redirect(`/recipes/${recipeId}`, 303);
+            return c.redirect(await backTo(), 303);
         }
         const flash = cookSheetToastFlash({
             shortNames: cooked.shortfalls.map((row) => row.displayName),
@@ -623,13 +687,13 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
         if (flash) {
             return redirectWithToast(
                 c,
-                `/recipes/${recipeId}`,
+                await backTo(),
                 flash.key,
                 flash.params,
             );
         }
         // toast: none — the recipe page and Today show what was cooked
-        return c.redirect(`/recipes/${recipeId}`, 303);
+        return c.redirect(await backTo(), 303);
     } catch (err) {
         // A request for the same sheet that got in first has cooked by now
         // (this one was rolled back against it): that is a repeat, not an
@@ -644,7 +708,7 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
                 .catch(() => false))
         ) {
             // toast: none
-            return c.redirect(`/recipes/${recipeId}`, 303);
+            return c.redirect(await backTo(), 303);
         }
         if (insertedMealId) {
             try {
@@ -661,6 +725,8 @@ recipesRoutes.post("/recipes/:id/cook/confirm", requireMember, async (c) => {
         const page = await recipeFormError(userId, recipeId, err, {
             openModalId: COOK_SHEET_ID,
             servings: Number.isFinite(servings) ? servings : undefined,
+            // The base stays the base: a resubmit cooks what was chosen.
+            version: (await cookedVersion()) ?? "base",
         });
         return c.html(page.html, page.status);
     }
@@ -1214,6 +1280,32 @@ function alignRefusal(member: {
 }
 
 /**
+ * Where an align or reset came from: the Compare versions page says so with
+ * `back=compare`, and the answer lands there. A field, never an address.
+ */
+function fromComparePage(body: Parameters<typeof formText>[0]): boolean {
+    return formText(body, "back") === "compare";
+}
+
+/** A refusal shown in place on the Compare versions page. */
+async function compareFormError(
+    userId: string,
+    recipeId: string,
+    err: RecipeInputError | RecipeForbiddenError,
+) {
+    const page = await renderRecipeCompareRoute(userId, recipeId, {
+        error: err.message,
+    });
+    const status =
+        page.status === 200
+            ? err instanceof RecipeForbiddenError
+                ? 403
+                : 400
+            : page.status;
+    return { html: page.html, status: status as 400 | 403 | 404 };
+}
+
+/**
  * The compare view as data for the admin's screen: the base lines, each
  * member's differences from them (with the `ref` that names a change to
  * align) and who uses the base. JSON, no page: the screen reads it.
@@ -1295,8 +1387,21 @@ recipesRoutes.post("/recipes/:id/versions/align", requireMember, async (c) => {
         ) {
             throw err;
         }
+        if (fromComparePage(body)) {
+            const page = await compareFormError(userId, recipeId, err);
+            return c.html(page.html, page.status);
+        }
         const page = await recipeFormError(userId, recipeId, err);
         return c.html(page.html, page.status);
+    }
+    if (fromComparePage(body)) {
+        // Back on Compare versions, that person's sheet open again when more
+        // of their changes remain.
+        // toast: none
+        return c.redirect(
+            `/recipes/${recipeId}/compare?make=${encodeURIComponent(formText(body, "user_id"))}`,
+            303,
+        );
     }
     // toast: none — the page reloads on the recipe, the base now changed
     return c.redirect(`/recipes/${recipeId}`, 303);
@@ -1365,8 +1470,16 @@ recipesRoutes.post("/recipes/:id/versions/reset", requireMember, async (c) => {
                 err instanceof RecipeForbiddenError ? 403 : 400,
             );
         }
+        if (fromComparePage(body)) {
+            const page = await compareFormError(userId, recipeId, err);
+            return c.html(page.html, page.status);
+        }
         const page = await recipeFormError(userId, recipeId, err);
         return c.html(page.html, page.status);
+    }
+    if (fromComparePage(body)) {
+        // toast: none — back on Compare versions
+        return c.redirect(`/recipes/${recipeId}/compare`, 303);
     }
     // toast: none — the page reloads on the recipe, the person back on the base
     return c.redirect(`/recipes/${recipeId}`, 303);
