@@ -107,3 +107,12 @@ test("every string is escaped", async () => {
     expect(html).not.toContain("<script>");
     expect(() => chip({ label: "x", href: "javascript:alert(1)" })).toThrow();
 });
+
+test("a chip can submit the form around it", () => {
+    expect(String(chip({ label: "Eggs", submit: true }))).toContain(
+        '<button type="submit" class="fd-pill-chip"',
+    );
+    expect(String(chip({ label: "Eggs" }))).toContain(
+        '<button type="button" class="fd-pill-chip"',
+    );
+});

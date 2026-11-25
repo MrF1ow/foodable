@@ -121,3 +121,18 @@ test("a step of zero or below is refused", () => {
         ).toThrow();
     }
 });
+
+test("the figure can belong to a form it sits outside of", () => {
+    const html = String(
+        stepperControl({
+            name: "qty_amount",
+            label: "Amount",
+            value: 2,
+            form: "edit-form",
+        }),
+    );
+    expect(html).toMatch(/<input[^>]*name="qty_amount"[^>]*form="edit-form"/);
+    expect(
+        String(stepperControl({ name: "q", label: "Q", value: 1 })),
+    ).not.toContain("form=");
+});

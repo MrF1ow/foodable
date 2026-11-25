@@ -27,6 +27,8 @@ export type ChipOptions = {
     href?: string;
     className?: string;
     data?: Readonly<Record<string, string>>;
+    /** A toggle that submits the form around it (a suggestion's add chip). */
+    submit?: boolean;
 };
 
 type Role = "toggle" | "radio" | "link";
@@ -51,7 +53,7 @@ function chipMarkup(opts: ChipOptions, role: Role, tabStop: boolean): string {
         role === "radio"
             ? ` role="radio" aria-checked="${opts.selected ? "true" : "false"}" tabindex="${tabStop ? "0" : "-1"}"`
             : ` aria-pressed="${opts.selected ? "true" : "false"}"`;
-    return `<button type="button" class="${classes}"${state}${value}${opts.disabled ? " disabled" : ""}${data}>${inner}</button>`;
+    return `<button type="${opts.submit ? "submit" : "button"}" class="${classes}"${state}${value}${opts.disabled ? " disabled" : ""}${data}>${inner}</button>`;
 }
 
 /** One chip: a toggle button, or a link with a `href`. */

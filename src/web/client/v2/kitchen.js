@@ -1,4 +1,4 @@
-// Kitchen page scripts: the Fridge's Use soon cards, Add search and Expires chips, the grocery and usual rows, and the Add a usual tabs. The row sheets open from `[data-fd-sheet-row]` (today.js).
+// Kitchen page scripts: the Fridge's Use soon cards, the Add searches of the Fridge and Groceries, the Expires chips, the usual rows, and the Add a usual tabs. The row sheets open from `[data-fd-sheet-row]` (today.js).
 function openSheet(id) {
     const dialog = document.getElementById(id);
     if (!dialog || typeof dialog.showModal !== "function" || dialog.open)
@@ -19,38 +19,56 @@ document.addEventListener("click", (event) => {
     openSheet(dialog.id);
 });
 
-// Add to fridge: the search box narrows the usuals as it is typed; with no
-// match the hand form is the way on.
-function initFridgeAddSearch(root) {
-    root.querySelectorAll("#fd-fridge-add-q").forEach((input) => {
-        if (input.dataset.fdFridgeSearchInit === "1") return;
-        input.dataset.fdFridgeSearchInit = "1";
-        const sheet = input.closest("dialog");
-        if (!sheet) return;
-        // What was searched for is what Add it by hand starts with, until
-        // the Name is typed in by hand.
-        const name = sheet.querySelector("#fd-fridge-add-name");
-        let nameTyped = false;
-        if (name) {
-            name.addEventListener("input", () => {
-                nameTyped = true;
+// Add to fridge and Add to list: the search box narrows the usuals as it is
+// typed; with no match the hand form is the way on. Each sheet names its
+// input, its rows and its "no match" line.
+const ADD_SEARCHES = [
+    {
+        input: "#fd-fridge-add-q",
+        name: "#fd-fridge-add-name",
+        rows: "[data-fd-fridge-usual]",
+        rowAttr: "data-fd-fridge-usual",
+        none: "[data-fd-fridge-none]",
+    },
+    {
+        input: "#fd-grocery-add-q",
+        name: "#fd-grocery-add-name",
+        rows: "[data-fd-grocery-usual]",
+        rowAttr: "data-fd-grocery-usual",
+        none: "[data-fd-grocery-none]",
+    },
+];
+
+function initAddSearch(root) {
+    ADD_SEARCHES.forEach((spec) => {
+        root.querySelectorAll(spec.input).forEach((input) => {
+            if (input.dataset.fdAddSearchInit === "1") return;
+            input.dataset.fdAddSearchInit = "1";
+            const sheet = input.closest("dialog");
+            if (!sheet) return;
+            // What was searched for is what Add it by hand starts with, until
+            // the Name is typed in by hand.
+            const name = sheet.querySelector(spec.name);
+            let nameTyped = false;
+            if (name) {
+                name.addEventListener("input", () => {
+                    nameTyped = true;
+                });
+            }
+            input.addEventListener("input", () => {
+                if (name && !nameTyped) name.value = input.value.trim();
+                const q = input.value.trim().toLowerCase();
+                let shown = 0;
+                sheet.querySelectorAll(spec.rows).forEach((row) => {
+                    const hit =
+                        q === "" ||
+                        (row.getAttribute(spec.rowAttr) || "").includes(q);
+                    row.hidden = !hit;
+                    if (hit) shown += 1;
+                });
+                const none = sheet.querySelector(spec.none);
+                if (none) none.hidden = q === "" || shown > 0;
             });
-        }
-        input.addEventListener("input", () => {
-            if (name && !nameTyped) name.value = input.value.trim();
-            const q = input.value.trim().toLowerCase();
-            let shown = 0;
-            sheet.querySelectorAll("[data-fd-fridge-usual]").forEach((row) => {
-                const hit =
-                    q === "" ||
-                    (row.getAttribute("data-fd-fridge-usual") || "").includes(
-                        q,
-                    );
-                row.hidden = !hit;
-                if (hit) shown += 1;
-            });
-            const none = sheet.querySelector("[data-fd-fridge-none]");
-            if (none) none.hidden = q === "" || shown > 0;
         });
     });
 }
@@ -61,49 +79,16 @@ function initExpires(root) {
     root.querySelectorAll("[data-fd-expires]").forEach((host) => {
         if (host.dataset.fdExpiresInit === "1") return;
         host.dataset.fdExpiresInit = "1";
-        const input = host.querySelector('input[name="expires_on"]');
+        const input = host.querySelector('input[type="date"]');
         if (!input) return;
         const keep = host.getAttribute("data-fd-expires-keep") || "";
         host.addEventListener("change", (event) => {
             const radio = event.target;
-            if (!radio || radio.name !== "expires_mode") return;
+            if (!radio || !radio.name.startsWith("expires_mode")) return;
             if (radio.value === "keep") input.value = keep;
             else if (radio.value === "none") input.value = "";
             else input.focus();
         });
-    });
-}
-
-function formatPutDateLabel(value) {
-    if (!value) return "No date";
-    const d = new Date(`${value}T12:00:00Z`);
-    return d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-    });
-}
-
-function initPutAwayDates(root) {
-    root.querySelectorAll("[data-fd-put-date]").forEach((wrap) => {
-        if (wrap.dataset.fdPutDateInit === "1") return;
-        wrap.dataset.fdPutDateInit = "1";
-        const input = wrap.querySelector(".fd-kitchen-put-date__input");
-        const text = wrap.querySelector("[data-fd-put-date-text]");
-        const btn = wrap.querySelector("[data-fd-put-date-btn]");
-        if (!input || !text) return;
-        const sync = () => {
-            text.textContent = formatPutDateLabel(input.value);
-        };
-        input.addEventListener("change", sync);
-        if (btn) {
-            btn.addEventListener("click", (e) => {
-                if (e.target === input) return;
-                e.preventDefault();
-                input.showPicker?.();
-                input.click();
-            });
-        }
     });
 }
 
@@ -176,27 +161,6 @@ function initUsualRows(root) {
     });
 }
 
-function initGroceryRows(root) {
-    root.querySelectorAll("[data-fd-grocery-row]").forEach((row) => {
-        if (row.dataset.fdGroceryRowInit === "1") return;
-        row.dataset.fdGroceryRowInit = "1";
-        const sheetId = row.getAttribute("data-sheet-id");
-        if (!sheetId) return;
-        const open = () => openSheet(sheetId);
-        row.addEventListener("click", (e) => {
-            if (e.target.closest("button, form, a.fd-swipe-btn")) return;
-            open();
-        });
-        row.addEventListener("keydown", (e) => {
-            if (e.target !== row) return;
-            if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                open();
-            }
-        });
-    });
-}
-
 // Add a usual: Scan, Search and Type it are tabs of one sheet. The server
 // renders the right one selected and the others `hidden`; this swaps them.
 const USUAL_ADD_TAB = "[data-fd-usual-add-tab]";
@@ -245,12 +209,12 @@ document.addEventListener("input", (event) => {
 
 window.FoodableApp.onLoad((root) => {
     if (root.querySelector(".fd-kitchen-fridge-page")) {
-        initFridgeAddSearch(root);
+        initAddSearch(root);
         initExpires(root);
     }
     if (root.querySelector(".fd-kitchen-groceries-page")) {
-        initGroceryRows(root);
-        initPutAwayDates(root);
+        initAddSearch(root);
+        initExpires(root);
     }
     if (root.querySelector(".fd-kitchen-usuals-page")) {
         initUsualRows(root);
@@ -258,3 +222,65 @@ window.FoodableApp.onLoad((root) => {
         syncUsualProductRows(root);
     }
 });
+
+// Clear checked confirms in place: its button only arms the row (the dock, or
+// a sheet's action row), and Cancel and the verb ("Clear 3") take its place.
+function setConfirmArmed(row, armed, focus) {
+    row.querySelectorAll(
+        "[data-fd-confirm-arm],[data-fd-confirm-idle]",
+    ).forEach((el) => (el.hidden = armed));
+    row.querySelectorAll(
+        "[data-fd-confirm-cancel],[data-fd-confirm-go]",
+    ).forEach((el) => (el.hidden = !armed));
+    const next = focus
+        ? row.querySelector(
+              armed ? "[data-fd-confirm-cancel]" : "[data-fd-confirm-arm]",
+          )
+        : null;
+    if (next) next.focus();
+}
+
+document.addEventListener("click", (event) => {
+    const control = event.target?.closest?.(
+        "[data-fd-confirm-arm],[data-fd-confirm-cancel]",
+    );
+    const row = control?.closest("[data-fd-confirm]");
+    if (!row) return;
+    event.preventDefault();
+    setConfirmArmed(row, control.hasAttribute("data-fd-confirm-arm"), true);
+});
+
+// A sheet that closes puts its row back, so it opens on the idle buttons.
+document.addEventListener(
+    "close",
+    (event) => {
+        event.target
+            ?.querySelectorAll?.("[data-fd-confirm]")
+            .forEach((row) => setConfirmArmed(row, false, false));
+    },
+    true,
+);
+
+// A Store or Section pull-down in a line's sheet saves its own pick. The
+// amount and note typed in the sheet and not yet saved go with it.
+document.addEventListener(
+    "submit",
+    (event) => {
+        const form = event.target;
+        if (!form?.classList?.contains("fd-menu__form")) return;
+        const edit = form
+            .closest("dialog")
+            ?.querySelector("form[data-fd-line-edit]");
+        if (!edit) return;
+        const sent = new Set(new FormData(form).keys());
+        new FormData(edit).forEach((value, name) => {
+            if (sent.has(name) || typeof value !== "string") return;
+            const input = document.createElement("input");
+            input.type = "hidden";
+            input.name = name;
+            input.value = value;
+            form.append(input);
+        });
+    },
+    true,
+);

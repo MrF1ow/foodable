@@ -1,5 +1,10 @@
 import { escapeHtml } from "../../../html.js";
 import { button } from "./button.js";
+import {
+    CONFIRM_ARM_ATTRS,
+    CONFIRM_IDLE_ATTRS,
+    confirmButtons,
+} from "./confirm-row.js";
 import { esc, join, raw, type Html } from "./html.js";
 import { icon } from "./icon.js";
 
@@ -155,6 +160,12 @@ export type SheetActionsOptions =
           /** Default: a "Cancel" that closes the sheet. */
           cancel?: SheetAction;
           primary: SheetAction;
+          /**
+           * Makes `cancel` the arm of a destructive action that confirms in
+           * place: it only arms, and Cancel and `label` ("Clear 3", posting
+           * `form`) take the row until it is cancelled.
+           */
+          confirm?: { label: string; form: string };
       }
     | {
           kind: "destructive";
@@ -332,6 +343,13 @@ export function sheetSection(opts: SheetSectionOptions): Html {
     );
 }
 
+function withAttrs(
+    action: SheetAction,
+    attrs: Readonly<Record<string, string>>,
+): SheetAction {
+    return { ...action, attrs: { ...action.attrs, ...attrs } };
+}
+
 function actionButton(
     action: SheetAction,
     variant: "secondary" | "primary" | "danger",
@@ -367,12 +385,36 @@ export function sheetActions(
         case "single":
             buttons = actionButton(opts.primary, "primary");
             break;
-        case "pair":
+        case "pair": {
+            const { confirm } = opts;
+            if (confirm) {
+                if (!opts.cancel) {
+                    throw new Error("sheetActions: confirm needs a cancel");
+                }
+                buttons = join(
+                    [
+                        actionButton(
+                            withAttrs(opts.cancel, CONFIRM_ARM_ATTRS),
+                            "secondary",
+                        ),
+                        actionButton(
+                            withAttrs(opts.primary, CONFIRM_IDLE_ATTRS),
+                            "primary",
+                        ),
+                        confirmButtons(confirm),
+                    ],
+                    "\n",
+                );
+                return raw(
+                    `<div class="fd-sheet__actions fd-sheet__actions--pair" data-fd-confirm>\n${buttons}\n</div>`,
+                );
+            }
             buttons = join(
                 [cancel(opts.cancel), actionButton(opts.primary, "primary")],
                 "\n",
             );
             break;
+        }
         case "destructive":
             buttons = join(
                 [cancel(opts.cancel), actionButton(opts.danger, "danger")],

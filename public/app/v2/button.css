@@ -157,3 +157,8 @@
     outline: var(--space-2xs) solid var(--accent-text);
     outline-offset: var(--space-2xs);
 }
+
+/* A hidden button stays hidden: the button's own display would show it. */
+.fd-btn[data-fd-btn][hidden] {
+    display: none;
+}

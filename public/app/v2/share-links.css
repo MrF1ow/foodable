@@ -1,46 +1,8 @@
-/* Share links made from the app: the Share button in the Groceries title row,
- * the "Link ready" screen that shows a new link's address once, and the Shared
- * links list in Settings › Household. The Share button on a recipe reuses the
- * recipe page's Plan button (recipes.css); the sheet reuses the Add to plan
- * sheet's form (fd-plan-*). The one desktop block is last. */
-
-/* Groceries: the title on the left, Share on the right of its row. On the
-   phone the account chip sits in the top right corner, so the button rides on
-   the count line, under it. */
-.fd-kitchen-grocery-head {
-    display: flex;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: var(--space-gap);
-}
-
-.fd-kitchen-grocery-share {
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    justify-content: center;
-    gap: var(--fd-s-6);
-    min-height: 32px;
-    margin: 0 0 2px;
-    padding: 0 var(--fd-s-12);
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font: 600 13px/18px var(--font-body);
-    cursor: pointer;
-}
-
-.fd-kitchen-grocery-share .fd-icon {
-    flex: none;
-    width: 18px;
-    height: 18px;
-}
-
-.fd-kitchen-grocery-share:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
+/* Share links made from the app: the "Link ready" screen that shows a new
+ * link's address once, and the Shared links list in Settings › Household. The
+ * Share button on a recipe reuses the recipe page's Plan button (recipes.css);
+ * Groceries' Share list is an item of its tab row ⋯; the sheet reuses the Add
+ * to plan sheet's form (fd-plan-*). The one desktop block is last. */
 
 .fd-share-note {
     margin: 0;
@@ -163,17 +125,6 @@
 }
 
 @media (min-width: 1024px) {
-    .fd-kitchen-grocery-head {
-        align-items: flex-end;
-    }
-
-    .fd-kitchen-grocery-share {
-        min-height: 42px;
-        padding: 0 18px;
-        font-size: 14px;
-        line-height: 18px;
-    }
-
     .fd-share-made__box {
         flex-direction: row;
         flex-wrap: wrap;

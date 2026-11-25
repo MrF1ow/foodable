@@ -106,9 +106,12 @@ import {
 import {
     groceryOpenLineCount,
     addStoreIdFromModal,
+    isGroceryAddModal,
+    lowLeftFromReason,
     renderKitchenGroceriesV2Page,
     type GroceryAllergenRetry,
     type GroceryLineView,
+    type GroceryAddUsual,
     type KitchenGroceriesLineMeta,
     type PutAwayDraft,
 } from "./pages/v2/kitchen-groceries.js";
@@ -524,8 +527,10 @@ export async function renderFridgeInventoryPage(
     };
 }
 
-/** The usuals the Add sheet offers: each as its usual product, with its usual amount. */
-function addableUsuals(foods: readonly Food[]): FridgeAddUsual[] {
+/** The usuals the Add sheets offer, each with the plain food it belongs to. */
+function addableUsualRows(
+    foods: readonly Food[],
+): { plainId: string; storeId: string | null; add: FridgeAddUsual }[] {
     return usualProductRows({ foods }).rows.map(({ food, usual }) => {
         const amount = food.usualAmount;
         const unit = amount?.unit?.trim() || "each";
@@ -533,14 +538,64 @@ function addableUsuals(foods: readonly Food[]): FridgeAddUsual[] {
             amount?.amount != null && amount.amount > 0 ? amount.amount : 1;
         const label = formatQuantityDisplayParts(qty, unit);
         return {
-            foodId: (usual ?? food).id,
-            kind: (usual ?? food).kind === "supply" ? "supply" : "food",
-            name: food.name,
-            subtitle: usual ? `${usual.name} · ${label}` : label,
-            amount: qty,
-            unit,
+            plainId: food.id,
+            // The store the usual goes to by its own settings: its product's
+            // first, as the domain reads them.
+            storeId: usual?.usualStoreId ?? food.usualStoreId ?? null,
+            add: {
+                foodId: (usual ?? food).id,
+                kind: (usual ?? food).kind === "supply" ? "supply" : "food",
+                name: food.name,
+                subtitle: usual ? `${usual.name} · ${label}` : label,
+                amount: qty,
+                unit,
+            },
         };
     });
+}
+
+/** The usuals the fridge's Add sheet offers: each as its usual product, with its usual amount. */
+function addableUsuals(foods: readonly Food[]): FridgeAddUsual[] {
+    return addableUsualRows(foods).map((row) => row.add);
+}
+
+/**
+ * The usuals the grocery Add sheet offers: those not on the list yet, the ones
+ * running low first, each with the level it is below.
+ */
+function groceryAddUsuals(
+    foods: readonly Food[],
+    lines: readonly import("../domain/grocery.js").GroceryLine[],
+    low: {
+        below: ReadonlyMap<string, string>;
+        left: ReadonlyMap<string, string>;
+    },
+    storeNames: ReadonlyMap<string, string>,
+): GroceryAddUsual[] {
+    const onList = new Set(
+        lines.flatMap((line) => (line.foodId ? [line.foodId] : [])),
+    );
+    return addableUsualRows(foods)
+        .filter(
+            (row) => !onList.has(row.plainId) && !onList.has(row.add.foodId),
+        )
+        .map((row): GroceryAddUsual => {
+            const below = low.below.get(row.plainId);
+            const left = low.left.get(row.plainId);
+            const storeName =
+                row.storeId != null ? storeNames.get(row.storeId) : undefined;
+            return {
+                ...row.add,
+                ...(below != null ? { lowBelow: below } : {}),
+                ...(below != null && left != null ? { lowLeft: left } : {}),
+                ...(storeName != null ? { storeName } : {}),
+            };
+        })
+        .sort(
+            (a, b) =>
+                Number(b.lowBelow != null) - Number(a.lowBelow != null) ||
+                a.name.localeCompare(b.name),
+        );
 }
 
 function chromeWithKitchenGroceriesCount<
@@ -617,7 +672,8 @@ export async function renderGroceryListPage(
         openLineId?: string;
         openPutAway?: boolean;
         putAwayDraft?: PutAwayDraft;
-        storeFilter?: string;
+        /** The stores to show (a store id, or several); none shows every store. */
+        storeFilter?: string | readonly string[];
     } = {},
 ): Promise<{ status: 200 | 403; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -873,16 +929,24 @@ export async function renderGroceryListPage(
                 })
             );
         });
-    const selectedStoreId =
-        opts.storeFilter &&
-        stores.some((store) => store.id === opts.storeFilter)
-            ? opts.storeFilter
-            : null;
+    const asked =
+        typeof opts.storeFilter === "string"
+            ? [opts.storeFilter]
+            : (opts.storeFilter ?? []);
+    const selectedStoreIds = stores
+        .map((store) => store.id)
+        .filter((id) => asked.includes(id));
     const chromeWithCount = chromeWithKitchenGroceriesCount(
         chrome,
         snapshot.lines,
     );
     const addStoreId = addStoreIdFromModal(opts.openModalId);
+    const lowLeft = new Map<string, string>();
+    for (const notice of noticeResult.notices) {
+        if (notice.code !== "grocery.running_low") continue;
+        const left = lowLeftFromReason(notice.params.reason);
+        if (left != null) lowLeft.set(notice.subject.id, left);
+    }
     return {
         status: 200,
         html: renderKitchenGroceriesV2Page({
@@ -893,16 +957,25 @@ export async function renderGroceryListPage(
             locations,
             lineMeta,
             openLineCount: groceryOpenLineCount(snapshot.lines),
-            selectedStoreId,
+            selectedStoreIds,
             error: opts.error,
             unknownAllergen: unknownAllergen && !opts.allergenNotices?.length,
             openLineId: opts.openLineId,
             openPutAway: opts.openPutAway,
             putAwayDraft: opts.putAwayDraft,
-            openAdd: addStoreId != null,
+            openAdd: isGroceryAddModal(opts.openModalId),
             shareEnabled: chrome.flags.mcpShareLinks,
             openShare: opts.openModalId === GROCERY_SHARE_SHEET_ID,
-            addStoreId: addStoreId ?? selectedStoreId,
+            addStoreId,
+            usuals: groceryAddUsuals(
+                allFoods,
+                snapshot.lines,
+                {
+                    below: lowStockLevels(noticeResult.notices, allFoods),
+                    left: lowLeft,
+                },
+                new Map(snapshot.stores.map((store) => [store.id, store.name])),
+            ),
             allergenNotices: opts.allergenNotices,
             allergenRetry: opts.allergenRetry,
             didYouMean: opts.didYouMean,

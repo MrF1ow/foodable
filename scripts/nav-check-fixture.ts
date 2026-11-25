@@ -16,6 +16,10 @@ import {
 import {
     buildPreviewKitchenGroceriesView,
     renderKitchenGroceriesV2Page,
+    type GroceryLineView,
+    type GroceryStoreView,
+    type KitchenGroceriesLineMeta,
+    type KitchenGroceriesV2View,
 } from "../src/web/pages/v2/kitchen-groceries.js";
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
@@ -685,6 +689,216 @@ function fixtureFridgeView(chrome: unknown) {
     });
 }
 
+/**
+ * The grocery list as the design draws it: two stores, a checked egg and
+ * spinach (so the dock and the put away sheet show), usuals to add, and a
+ * product choice on the eggs. `overrides` makes the other states (a store
+ * filtered to, Share off, a line's sheet open).
+ */
+function fixtureGroceriesView(
+    chrome: unknown,
+    overrides: Partial<KitchenGroceriesV2View> = {},
+) {
+    const line = (
+        id: string,
+        displayName: string,
+        storeId: string,
+        sectionId: string,
+        amount: number,
+        unit: string,
+        extra: Partial<GroceryLineView> = {},
+    ): GroceryLineView => ({
+        id,
+        householdId: H,
+        storeId,
+        sectionId,
+        kind: "food",
+        displayName,
+        quantity: { amount, unit },
+        foodId: `f-${id}`,
+        checked: false,
+        source: "manual",
+        sourceFridgeItemId: null,
+        note: null,
+        alreadyHave: null,
+        lastLocationId: "l-fridge",
+        ...extra,
+    });
+    const section = (
+        id: string,
+        storeId: string,
+        name: string,
+        sortOrder: number,
+        lines: GroceryLineView[],
+    ) => ({
+        id,
+        householdId: H,
+        storeId,
+        name,
+        sortOrder,
+        hidden: false,
+        isOther: false,
+        lines,
+    });
+    const costco: GroceryStoreView = {
+        id: "s-costco",
+        householdId: H,
+        name: "Costco",
+        sortOrder: 0,
+        rules: [],
+        sections: [
+            section("sec-dairy", "s-costco", "Dairy & eggs", 0, [
+                line(
+                    "gl-milk",
+                    "Kirkland 2% milk",
+                    "s-costco",
+                    "sec-dairy",
+                    1,
+                    "gal",
+                    {
+                        note: null,
+                    },
+                ),
+                line(
+                    "gl-eggs",
+                    "Vital Farms large eggs",
+                    "s-costco",
+                    "sec-dairy",
+                    24,
+                    "each",
+                    {
+                        checked: true,
+                        putAwayProducts: [
+                            { id: "f-eggs", label: "Eggs" },
+                            { id: "p-eggs", label: "Vital Farms large eggs" },
+                        ],
+                        putAwayProductId: "p-eggs",
+                    },
+                ),
+            ]),
+            section("sec-produce", "s-costco", "Produce", 1, [
+                line(
+                    "gl-spinach",
+                    "Spinach",
+                    "s-costco",
+                    "sec-produce",
+                    300,
+                    "g",
+                    {
+                        checked: true,
+                    },
+                ),
+            ]),
+            section("sec-meat", "s-costco", "Meat", 2, [
+                line(
+                    "gl-chicken",
+                    "Kirkland chicken thighs",
+                    "s-costco",
+                    "sec-meat",
+                    4,
+                    "lb",
+                ),
+            ]),
+        ],
+    };
+    const tj: GroceryStoreView = {
+        id: "s-tj",
+        householdId: H,
+        name: "Trader Joe's",
+        sortOrder: 1,
+        rules: [],
+        sections: [
+            section("sec-pantry", "s-tj", "Pantry", 0, [
+                line("gl-rice", "Jasmine rice", "s-tj", "sec-pantry", 5, "lb"),
+                line(
+                    "gl-oil",
+                    "California Olive Ranch",
+                    "s-tj",
+                    "sec-pantry",
+                    1,
+                    "bottle",
+                ),
+            ]),
+        ],
+    };
+    const meta = (
+        plainFoodName: string | null,
+        isUsual: boolean,
+        storeName: string,
+        sectionName: string,
+        extra: Partial<KitchenGroceriesLineMeta> = {},
+    ): KitchenGroceriesLineMeta => ({
+        plainFoodName,
+        isUsual,
+        allergenWarning: null,
+        storeName,
+        sectionName,
+        ...extra,
+    });
+    const lineMeta = new Map<string, KitchenGroceriesLineMeta>([
+        ["gl-milk", meta("Milk", true, "Costco", "Dairy & eggs")],
+        [
+            "gl-eggs",
+            meta("Eggs", true, "Costco", "Dairy & eggs", { productScore: 74 }),
+        ],
+        ["gl-spinach", meta(null, false, "Costco", "Produce")],
+        [
+            "gl-chicken",
+            meta("Chicken thighs", true, "Costco", "Meat", {
+                allergenWarning: "Contains poultry — Sam.",
+            }),
+        ],
+        ["gl-rice", meta("Any brand", false, "Trader Joe's", "Pantry")],
+        ["gl-oil", meta("Olive oil", true, "Trader Joe's", "Pantry")],
+    ]);
+    const stores = overrides.stores ?? [costco, tj];
+    const lines = stores.flatMap((st) =>
+        st.sections.flatMap((sec) => sec.lines),
+    );
+    return buildPreviewKitchenGroceriesView(chrome as never, {
+        stores,
+        lineMeta,
+        checkedLines: lines.filter((l) => l.checked),
+        openLineCount: lines.filter((l) => !l.checked).length,
+        locations: [
+            { id: "l-fridge", name: "Fridge" },
+            { id: "l-freezer", name: "Freezer" },
+            { id: "l-pantry", name: "Pantry" },
+        ],
+        usuals: [
+            {
+                foodId: "p-eggs",
+                kind: "food",
+                name: "Eggs",
+                subtitle: "Vital Farms · 12 each",
+                amount: 12,
+                unit: "each",
+                lowBelow: "6",
+                lowLeft: "3 left",
+            },
+            {
+                foodId: "p-milk",
+                kind: "food",
+                name: "Milk 2%",
+                subtitle: "Kirkland · 1 gal",
+                amount: 1,
+                unit: "gal",
+                storeName: "Costco",
+            },
+            {
+                foodId: "f-towels",
+                kind: "supply",
+                name: "Paper towels",
+                subtitle: "1 each",
+                amount: 1,
+                unit: "each",
+            },
+        ],
+        shareEnabled: true,
+        ...overrides,
+    });
+}
+
 async function pages(
     theme: "light" | "dark",
     unread: boolean,
@@ -741,9 +955,82 @@ async function pages(
             ),
         ),
         fridge: renderKitchenFridgeV2Page(fixtureFridgeView(chrome)),
-        grocery: renderKitchenGroceriesV2Page(
-            buildPreviewKitchenGroceriesView(chrome as never),
+        grocery: renderKitchenGroceriesV2Page(fixtureGroceriesView(chrome)),
+        // The list filtered to one store, to both, and with Share off or a
+        // line's sheet open on it.
+        "grocery-costco": renderKitchenGroceriesV2Page(
+            fixtureGroceriesView(chrome, { selectedStoreIds: ["s-costco"] }),
         ),
+        "grocery-both": renderKitchenGroceriesV2Page(
+            fixtureGroceriesView(chrome, {
+                selectedStoreIds: ["s-costco", "s-tj"],
+            }),
+        ),
+        "grocery-share-off": renderKitchenGroceriesV2Page(
+            fixtureGroceriesView(chrome, { shareEnabled: false }),
+        ),
+        "grocery-line-open": renderKitchenGroceriesV2Page(
+            fixtureGroceriesView(chrome, { openLineId: "gl-milk" }),
+        ),
+        // The Add sheet after "chicken egg" came back with a question.
+        "grocery-did-you-mean": renderKitchenGroceriesV2Page(
+            fixtureGroceriesView(chrome, {
+                openAdd: true,
+                didYouMean: {
+                    modalId: "grocery-add-food-",
+                    action: "/kitchen/groceries/lines",
+                    view: {
+                        name: "chicken egg",
+                        heading: "Did you mean one of these?",
+                        candidates: [
+                            { foodId: "f-eggs", label: "Eggs" },
+                            {
+                                foodId: "p-eggs",
+                                label: "Vital Farms large eggs",
+                            },
+                        ],
+                        aliasLabel:
+                            "Remember chicken egg as another name for the food you pick",
+                        newFoodLabel: "Add chicken egg as a new food",
+                        hiddenFields: {
+                            kind: "food",
+                            food_name: "chicken egg",
+                            qty_amount: "1",
+                            qty_unit: "each",
+                            return_to: "/kitchen/groceries",
+                        },
+                    },
+                },
+            }),
+        ),
+        // The line sheet of a store with ten sections: its Section pull-down is
+        // longer than the sheet's room, so every item has to stay reachable.
+        "grocery-many-sections": (() => {
+            const view = fixtureGroceriesView(chrome, {
+                openLineId: "gl-milk",
+            });
+            const costco = view.stores.find((st) => st.id === "s-costco")!;
+            const more = [
+                "Bakery",
+                "Frozen",
+                "Pantry",
+                "Snacks",
+                "Drinks",
+                "Household",
+                "Pets",
+            ].map((name, i) => ({
+                id: `sec-x${i + 1}`,
+                householdId: H,
+                storeId: costco.id,
+                name,
+                sortOrder: 10 + i,
+                hidden: false,
+                isOther: false,
+                lines: [],
+            }));
+            costco.sections.push(...more);
+            return renderKitchenGroceriesV2Page(view);
+        })(),
         recipes: renderRecipesListV2Page({
             chrome,
             query: "",
@@ -909,6 +1196,12 @@ const ROUTE_BASE: Record<string, string> = {
     "/?camera=off": "nutrition-camera-off",
     "/kitchen/fridge": "fridge",
     "/kitchen/groceries": "grocery",
+    "/kitchen/groceries?store=s-costco": "grocery-costco",
+    "/kitchen/groceries?store=s-costco&store=s-tj": "grocery-both",
+    "/kitchen/groceries?share=off": "grocery-share-off",
+    "/kitchen/groceries?line=gl-milk": "grocery-line-open",
+    "/kitchen/groceries?line=gl-milk&sections=10": "grocery-many-sections",
+    "/kitchen/groceries?add=did-you-mean": "grocery-did-you-mean",
     "/recipes": "recipes",
     "/trends": "trends",
     "/settings": "settings",

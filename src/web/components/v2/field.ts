@@ -68,6 +68,8 @@ export type FieldOptions = {
      * comma). `rows` is how many lines show; it takes `value` as its text.
      */
     rows?: number;
+    /** The id of a form the input belongs to, when it sits outside that form. */
+    form?: string;
 };
 
 export function field(opts: FieldOptions): Html {
@@ -98,6 +100,7 @@ export function field(opts: FieldOptions): Html {
         opts.min != null ? `min="${opts.min}"` : "",
         opts.step != null ? `step="${opts.step}"` : "",
         opts.inputmode != null ? `inputmode="${opts.inputmode}"` : "",
+        opts.form != null ? `form="${esc(opts.form)}"` : "",
         opts.required ? "required" : "",
         opts.disabled ? "disabled" : "",
         opts.readonly ? "readonly" : "",

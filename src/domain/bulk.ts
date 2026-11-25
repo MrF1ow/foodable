@@ -1,6 +1,6 @@
 /**
  * Select several rows, act once: the bulk twins of the single-row actions on
- * the Fridge, Usuals and Saved foods & recipes lists. Each one
+ * the Fridge, Groceries, Usuals and Saved foods & recipes lists. Each one
  * calls the same domain function the one-row action does, once per selected
  * row, so a bulk and a row-by-row run end in the same state.
  *
@@ -21,6 +21,7 @@ import {
 } from "./foods.js";
 import { removeUsual } from "./usual-add.js";
 import { type FridgeStore } from "./fridge.js";
+import { type GroceryListStore } from "./grocery.js";
 import {
     assertCanDeleteRecipe,
     deleteRecipe,
@@ -147,6 +148,32 @@ export async function discardFridgeItems(
             itemId: item.id,
             actorUserId: input.actorUserId,
         });
+    }
+    return { status: "applied", count: todo.length };
+}
+
+/**
+ * Delete several grocery lines, each as `delete_grocery_line` does. An id that
+ * is no line of the household refuses the batch when others are still there;
+ * when every id is gone it is a double submit. The live adapter runs it in one
+ * transaction, so a delete that throws part way leaves every line in place.
+ */
+export async function deleteGroceryLines(
+    grocery: GroceryListStore,
+    input: { householdId: string; lineIds: readonly string[] },
+): Promise<BulkResult> {
+    const have = new Set(
+        (await grocery.listLines(input.householdId)).map((line) => line.id),
+    );
+    const todo = settle(input.lineIds, (id) =>
+        have.has(id) ? { kind: "todo", item: id } : null,
+    );
+    if (!todo) return ALREADY;
+    for (const id of todo) {
+        // Exactly the lines read above: one that went away since is refused.
+        if (!(await grocery.deleteLine(input.householdId, id))) {
+            throw new BulkSelectionError(STALE_MESSAGE);
+        }
     }
     return { status: "applied", count: todo.length };
 }

@@ -10,6 +10,7 @@
  * other.
  */
 import {
+    deleteGroceryLines,
     deleteSavedItems,
     discardFridgeItems,
     removeUsuals,
@@ -18,12 +19,14 @@ import {
 import type { Notify } from "../domain/foods.js";
 import { liveFoodsStore } from "./foods.js";
 import { liveFridgeStore } from "./fridge.js";
+import { liveGroceryStore } from "./grocery.js";
 import { createNotifyQueue, liveNotifier } from "./notify.js";
 import { liveRecipesStore } from "./recipes.js";
 import { run } from "./sql.js";
 import { liveStockStore } from "./stock.js";
 
-export type BulkAction = "fridge-discard" | "usuals-remove" | "saved-delete";
+export type BulkAction =
+    "fridge-discard" | "grocery-delete" | "usuals-remove" | "saved-delete";
 
 /** The advisory-lock name of one household's batches of one action. */
 export function bulkLockKey(householdId: string, action: BulkAction): string {
@@ -72,6 +75,15 @@ export function bulkDiscardFridgeItems(input: {
             liveFoodsStore(),
             input,
         ),
+    );
+}
+
+export function bulkDeleteGroceryLines(input: {
+    householdId: string;
+    lineIds: readonly string[];
+}): Promise<BulkResult> {
+    return inBulkTransaction(input.householdId, "grocery-delete", () =>
+        deleteGroceryLines(liveGroceryStore(), input),
     );
 }
 

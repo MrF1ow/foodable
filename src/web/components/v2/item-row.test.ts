@@ -984,3 +984,52 @@ test("a swipe bed can draw its own glyph in place of its side's", () => {
         html.match(/fd-item-row__bed--delete">[\s\S]*?<\/form>/)?.[0] ?? "";
     expect(del).toContain("fd-icon--trash");
 });
+
+test("a check lead is a ring that posts its form, filled while checked", () => {
+    const html = String(
+        itemRow({
+            title: "Milk",
+            lead: {
+                kind: "check",
+                label: "Check off Milk",
+                checked: true,
+                form: {
+                    action: "/kitchen/groceries/lines/l1/check",
+                    fields: { checked: "0" },
+                },
+            },
+        }),
+    );
+    expect(html).toContain(
+        `<form class="fd-inline-form" method="post" action="/kitchen/groceries/lines/l1/check"><input type="hidden" name="checked" value="0">`,
+    );
+    expect(html).toContain(
+        `class="fd-item-row__lead fd-item-row__check fd-item-row__check-btn" aria-label="Check off Milk" role="checkbox" aria-checked="true"`,
+    );
+    expect(html).toContain("fd-item-row__check-box");
+    const off = String(
+        itemRow({
+            title: "Milk",
+            lead: {
+                kind: "check",
+                label: "Check off Milk",
+                form: { action: "/x" },
+            },
+        }),
+    );
+    expect(off).toContain('aria-checked="false"');
+});
+
+test("a done lead is the filled ring with nothing to press", () => {
+    const html = String(
+        itemRow({
+            title: "Spinach",
+            lead: { kind: "done", label: "Checked off" },
+        }),
+    );
+    expect(html).toContain(
+        `<span class="fd-item-row__lead fd-item-row__check fd-item-row__done" role="img" aria-label="Checked off">`,
+    );
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("<input");
+});

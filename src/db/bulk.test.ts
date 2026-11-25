@@ -1,6 +1,10 @@
 import { afterEach, beforeEach, expect, test } from "bun:test";
 import type { SQL } from "bun";
-import { BulkSelectionError, discardFridgeItems } from "../domain/bulk.js";
+import {
+    BulkSelectionError,
+    deleteGroceryLines,
+    discardFridgeItems,
+} from "../domain/bulk.js";
 import { createProduct, setUsualSchedule } from "../domain/foods.js";
 import { isUsualFood, runRestockCheck } from "../domain/restock.js";
 import { liveRestockCheckDeps } from "../restock-runner.js";
@@ -8,6 +12,7 @@ import { getHouseholdConfig, updateHouseholdConfig } from "./household.js";
 import { createRecipe, RecipeForbiddenError } from "../domain/recipes.js";
 import type { StockStore } from "../domain/stock.js";
 import {
+    bulkDeleteGroceryLines,
     bulkDeleteSavedItems,
     bulkDiscardFridgeItems,
     bulkLockKey,
@@ -16,6 +21,7 @@ import {
 } from "./bulk.js";
 import { liveFoodsStore } from "./foods.js";
 import { liveFridgeStore } from "./fridge.js";
+import { liveGroceryStore } from "./grocery.js";
 import { liveRecipesStore } from "./recipes.js";
 import { liveStockStore } from "./stock.js";
 import { setFallbackActorForTests } from "./actor.js";
@@ -25,9 +31,11 @@ import {
     seedFood,
     seedFridgeItem,
     seedFridgeLocation,
+    seedGrocerySection,
     seedGroceryStore,
     seedHousehold,
 } from "./testing/fixtures.js";
+import { sampleGroceryLine } from "./contract/helpers.js";
 import { raceOnUniqueKey } from "./testing/lock-race.js";
 import { findPgBin } from "./testing/pg-temp.js";
 
@@ -165,6 +173,103 @@ describeDb(pgAvailable !== null, "bulk actions db", (getCtx) => {
         });
         expect([a.status, b.status].sort()).toEqual(["already", "applied"]);
         expect(await discardRows()).toHaveLength(2);
+    });
+
+    async function seedLines(names: string[]) {
+        const storeId = await seedGroceryStore(sql, householdId);
+        const sectionId = await seedGrocerySection(sql, householdId, storeId);
+        const ids: string[] = [];
+        for (const name of names) {
+            const foodId = await seedFood(sql, householdId, { name });
+            const line = await liveGroceryStore().insertLine(
+                sampleGroceryLine(
+                    {
+                        householdId,
+                        userId,
+                        otherHouseholdId: crypto.randomUUID(),
+                        storeId,
+                        sectionId,
+                        foodId,
+                        locationId: crypto.randomUUID(),
+                    },
+                    { displayName: name },
+                ),
+            );
+            ids.push(line.id);
+        }
+        return ids;
+    }
+
+    const lineNames = async () =>
+        (
+            (await sql`
+                select display_name from public.grocery_lines
+                where household_id = ${householdId}
+                order by display_name
+            `) as { display_name: string }[]
+        ).map((r) => r.display_name);
+
+    test("deleting grocery lines removes the picked ones and no other", async () => {
+        const ids = await seedLines(["Oats", "Oil", "Salt"]);
+        const result = await bulkDeleteGroceryLines({
+            householdId,
+            lineIds: [ids[0]!, ids[1]!],
+        });
+        expect(result).toEqual({ status: "applied", count: 2 });
+        expect(await lineNames()).toEqual(["Salt"]);
+        expect(
+            await bulkDeleteGroceryLines({
+                householdId,
+                lineIds: [ids[0]!, ids[1]!],
+            }),
+        ).toEqual({ status: "already", count: 0 });
+    });
+
+    test("a grocery delete with one id that is not there deletes nothing", async () => {
+        const ids = await seedLines(["Oats", "Oil"]);
+        await expect(
+            bulkDeleteGroceryLines({
+                householdId,
+                lineIds: [ids[0]!, crypto.randomUUID()],
+            }),
+        ).rejects.toBeInstanceOf(BulkSelectionError);
+        expect(await lineNames()).toEqual(["Oats", "Oil"]);
+    });
+
+    test("a grocery delete that throws part way leaves every line in place", async () => {
+        const ids = await seedLines(["Oats", "Oil", "Salt"]);
+        const real = liveGroceryStore();
+        let deleted = 0;
+        const failing = {
+            ...real,
+            async deleteLine(household: string, id: string) {
+                deleted += 1;
+                if (deleted === 2) throw new Error("connection reset");
+                return real.deleteLine(household, id);
+            },
+        };
+        await expect(
+            inBulkTransaction(householdId, "grocery-delete", () =>
+                deleteGroceryLines(failing, { householdId, lineIds: ids }),
+            ),
+        ).rejects.toThrow("connection reset");
+        expect(deleted).toBe(2);
+        expect(await lineNames()).toEqual(["Oats", "Oil", "Salt"]);
+    });
+
+    test("two grocery deletes of the same lines at once delete them once", async () => {
+        const { pg, sql: owner } = getCtx();
+        const ids = await seedLines(["Oats", "Oil"]);
+        const key = bulkLockKey(householdId, "grocery-delete");
+        const [a, b] = await raceOnUniqueKey({
+            url: pg.url,
+            restoreSql: owner,
+            blockInsert: (tx) =>
+                tx`select pg_advisory_xact_lock(hashtextextended(${key}, 0))`,
+            run: () => bulkDeleteGroceryLines({ householdId, lineIds: ids }),
+        });
+        expect([a.status, b.status].sort()).toEqual(["already", "applied"]);
+        expect(await lineNames()).toEqual([]);
     });
 
     async function seedUsual(name: string) {

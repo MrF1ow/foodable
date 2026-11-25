@@ -1,23 +1,29 @@
 import type { GroceryLine } from "../../../domain/grocery.js";
 import type { AppChromeBase } from "../../attention.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
-import { chipLink, chipNav, choiceGroup } from "../../components/v2/chips.js";
-import { renderFoodPicker } from "../../components/food-picker.js";
-import { noticeList } from "../../components/notices.js";
 import {
     didYouMeanModalBlock,
     type DidYouMeanModal,
 } from "../../components/did-you-mean.js";
 import type { Notice } from "../../../domain/notices.js";
-import { esc, raw, type Html } from "../../components/v2/html.js";
+import { button } from "../../components/v2/button.js";
+import { chip } from "../../components/v2/chip.js";
+import { choiceGroup } from "../../components/v2/chips.js";
 import {
-    groceryRow,
-    rowList,
-    sectionHeader,
-} from "../../components/v2/rows.js";
-import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
-import { confirmSheet } from "../../components/v2/sheet.js";
-import { iconCheck, iconChevronRight } from "../../components/v2/icons.js";
+    CONFIRM_ARM_ATTRS,
+    CONFIRM_IDLE_ATTRS,
+    confirmButtons,
+} from "../../components/v2/confirm-row.js";
+import { emptyState } from "../../components/v2/empty-state.js";
+import { field } from "../../components/v2/field.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { pageLayout } from "../../components/v2/page-layout.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
+import { sheet, sheetSection } from "../../components/v2/sheet.js";
+import { stepperControl } from "../../components/v2/stepper-control.js";
 import type { AlreadyHaveTag } from "../../../domain/linking.js";
 import type { StoreRule } from "../../../domain/rules.js";
 import type { GrocerySection, GroceryStore } from "../../../domain/settings.js";
@@ -28,12 +34,13 @@ import {
     kitchenTopTools,
     renderKitchenHead,
 } from "./kitchen-head.js";
-import { UNKNOWN_ALLERGEN_TEXT } from "../../../copy/notices.js";
+import { selectionBars } from "./select-mode.js";
 import {
-    GROCERY_SHARE_SHEET_ID,
-    renderShareSheet,
-    renderShareTrigger,
-} from "./share-sheet.js";
+    noticeSentence,
+    UNKNOWN_ALLERGEN_TEXT,
+} from "../../../copy/notices.js";
+import { GROCERY_SHARE_SHEET_ID, renderShareSheet } from "./share-sheet.js";
+import type { FridgeAddUsual } from "./kitchen-fridge.js";
 
 export type GroceryLineView = GroceryLine & {
     notices?: Notice[];
@@ -58,19 +65,46 @@ export type GroceryStoreView = GroceryStore & {
 export type GroceryAllergenRetry = {
     storeId: string;
     fields: Record<string, string>;
+    /** The food the add was for, so the warning can name it. */
+    foodName?: string;
+};
+
+/** A usual the Add sheet offers: one tap puts its usual amount on the list. */
+export type GroceryAddUsual = FridgeAddUsual & {
+    /** The level it is running low below ("6"), when it is. */
+    lowBelow?: string;
+    /** What is left of it ("3 left"), when the stock is known. */
+    lowLeft?: string;
+    /** The store its own settings send it to, when it has one. */
+    storeName?: string;
 };
 
 export const GROCERY_V2_RETURN_TO = "/kitchen/groceries";
 export const FD_GROCERY_PUT_AWAY_SHEET_ID = "fd-grocery-put-away";
 export const FD_GROCERY_ADD_SHEET_ID = "fd-grocery-add";
 const GROCERY_ADD_FOOD_PREFIX = "grocery-add-food-";
-const GROCERY_FOOD_PICKER_ID = "fd-grocery-food-picker";
+const CLEAR_CHECKED_ACTION = "/kitchen/groceries/clear-checked";
+const ADD_LINE_ACTION = "/kitchen/groceries/lines";
+const CLEAR_FORM_ID = "fd-grocery-clear-form";
 
-export function groceryV2ReturnTo(selectedStoreId?: string | null): string {
-    if (!selectedStoreId) return GROCERY_V2_RETURN_TO;
-    return `${GROCERY_V2_RETURN_TO}?store=${encodeURIComponent(selectedStoreId)}`;
+/**
+ * Where an action comes back to: the list with the stores it was filtered to
+ * (a store id each) and, for a pull-down in a line's sheet, the line, so the
+ * sheet is open again on the new value.
+ */
+export function groceryV2ReturnTo(
+    selected?: readonly string[] | string | null,
+    lineId?: string | null,
+): string {
+    const ids = typeof selected === "string" ? [selected] : (selected ?? []);
+    const query = [
+        ...ids.filter(Boolean).map((id) => `store=${encodeURIComponent(id)}`),
+        ...(lineId ? [`line=${encodeURIComponent(lineId)}`] : []),
+    ];
+    return query.length === 0
+        ? GROCERY_V2_RETURN_TO
+        : `${GROCERY_V2_RETURN_TO}?${query.join("&")}`;
 }
-export const FD_GROCERY_CLEAR_SHEET_ID = "fd-grocery-clear-checked";
 
 export type KitchenGroceriesLineMeta = {
     plainFoodName: string | null;
@@ -99,7 +133,8 @@ export type KitchenGroceriesV2View = {
     locations: { id: string; name: string }[];
     lineMeta: ReadonlyMap<string, KitchenGroceriesLineMeta>;
     openLineCount: number;
-    selectedStoreId?: string | null;
+    /** The stores the list is filtered to; none is every store. */
+    selectedStoreIds?: readonly string[];
     error?: string;
     unknownAllergen?: boolean;
     openLineId?: string;
@@ -108,7 +143,7 @@ export type KitchenGroceriesV2View = {
     openAdd?: boolean;
     /**
      * Whether the page offers Share (the `mcp-share-links` flag). Absent or
-     * false leaves the button and the sheet out.
+     * false leaves the menu item and the sheet out.
      */
     shareEnabled?: boolean;
     /** A refused Share post re-renders the page with the Share sheet open. */
@@ -117,6 +152,8 @@ export type KitchenGroceriesV2View = {
     allergenNotices?: Notice[];
     allergenRetry?: GroceryAllergenRetry;
     didYouMean?: DidYouMeanModal;
+    /** The usuals not on the list yet, for the Add sheet. */
+    usuals?: readonly GroceryAddUsual[];
 };
 
 export type GroceryV2SectionGroup = {
@@ -156,6 +193,12 @@ export function groceryCheckedCount(
     return inStores + orphans;
 }
 
+/** Whether the page was asked to open the Add sheet (a refused add came back). */
+export function isGroceryAddModal(openModalId?: string | null): boolean {
+    return !!openModalId?.startsWith(GROCERY_ADD_FOOD_PREFIX);
+}
+
+/** The store a refused add had posted; none when it left the store out. */
 export function addStoreIdFromModal(
     openModalId?: string | null,
 ): string | null {
@@ -164,11 +207,32 @@ export function addStoreIdFromModal(
     return id || null;
 }
 
+/**
+ * "3 left" out of the running-low notice's reason ("3 left, below 6"), the one
+ * place the stock that is left is written.
+ */
+export function lowLeftFromReason(reason: unknown): string | null {
+    if (typeof reason !== "string") return null;
+    const match = /^(.+) left, below /.exec(reason);
+    return match ? `${match[1]} left` : null;
+}
+
+/**
+ * The store an add names: the one the list is filtered to when it is exactly
+ * one, or the one a refused add had posted. With none, the add leaves the
+ * store out and the domain picks, as `add_grocery_line` does: a usual's own
+ * store, else where the family was last listed, else the first store.
+ */
 function addStoreFor(view: KitchenGroceriesV2View): GroceryStoreView | null {
     const pick =
-        view.addStoreId ?? view.selectedStoreId ?? view.stores[0]?.id ?? null;
-    if (!pick) return view.stores[0] ?? null;
-    return view.stores.find((store) => store.id === pick) ?? null;
+        view.addStoreId ??
+        (view.selectedStoreIds?.length === 1
+            ? view.selectedStoreIds[0]
+            : null) ??
+        null;
+    return pick
+        ? (view.stores.find((store) => store.id === pick) ?? null)
+        : null;
 }
 
 function defaultSectionId(store: GroceryStoreView): string {
@@ -178,20 +242,6 @@ function defaultSectionId(store: GroceryStoreView): string {
         store.sections.find((section) => !section.hidden && !section.isOther) ??
         store.sections[0];
     return sec?.id ?? "";
-}
-
-function formatPutAwayDateLabel(expiresOn: string): string {
-    if (!expiresOn.trim()) return "No date";
-    const d = new Date(`${expiresOn}T12:00:00Z`);
-    return d.toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        timeZone: "UTC",
-    });
-}
-
-function calendarIcon(): string {
-    return `<svg class="fd-icon" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/></svg>`;
 }
 
 export function groceryV2QuantityLabel(line: GroceryLine): string {
@@ -217,6 +267,11 @@ export function groceryRowLabels(
     }
     const tag = meta.isUsual ? "usual" : undefined;
     return { title, subtitle, tag };
+}
+
+/** "Milk · usual": what the row and the sheet say under the name. */
+function labelLine(labels: { subtitle?: string; tag?: string }): string {
+    return [labels.subtitle, labels.tag].filter(Boolean).join(" · ");
 }
 
 export function buildGroceryV2StoreGroups(input: {
@@ -257,62 +312,36 @@ export function buildGroceryV2StoreGroups(input: {
     return groups.filter((g) => g.sections.some((s) => s.lines.length > 0));
 }
 
-export function renderGroceryStoreChips(
-    view: Pick<
-        KitchenGroceriesV2View,
-        "stores" | "noStoreLines" | "selectedStoreId"
-    >,
-): string {
-    const storeCounts = new Map<string, number>();
-    for (const store of view.stores) {
-        let n = 0;
-        for (const section of store.sections) {
-            n += section.lines.filter((row) => !row.checked).length;
-        }
-        storeCounts.set(store.id, n);
-    }
-    const noStoreCount = view.noStoreLines.filter((row) => !row.checked).length;
-    const allCount =
-        [...storeCounts.values()].reduce((a, b) => a + b, 0) + noStoreCount;
-    const chips = [
-        chipLink({
-            label: "All",
-            href: GROCERY_V2_RETURN_TO,
-            count: allCount,
-            selected: !view.selectedStoreId,
-        }),
-        ...view.stores.map((store) =>
-            chipLink({
-                label: store.name,
-                href: `${GROCERY_V2_RETURN_TO}?store=${encodeURIComponent(store.id)}`,
-                count: storeCounts.get(store.id) ?? 0,
-                selected: view.selectedStoreId === store.id,
-            }),
-        ),
-    ];
-    return String(
-        chipNav(chips, {
-            label: "Grocery stores",
-            className: "fd-kitchen-grocery-stores",
-        }),
-    );
-}
-
-function checkForm(line: GroceryLineView, checked: boolean, returnTo: string) {
+function checkForm(line: GroceryLineView, returnTo: string) {
     return {
         action: `/kitchen/groceries/lines/${line.id}/check`,
         fields: {
-            checked: checked ? "0" : "1",
+            checked: line.checked ? "0" : "1",
             return_to: returnTo,
         },
     };
+}
+
+function deleteForm(line: GroceryLineView, returnTo: string) {
+    return {
+        action: `/kitchen/groceries/lines/${line.id}/delete`,
+        fields: { return_to: returnTo },
+    };
+}
+
+/** A row's allergen mark: a hit the household's allergen list makes, in words. */
+function allergenMark(
+    meta: Pick<KitchenGroceriesLineMeta, "allergenWarning">,
+): string | null {
+    const text = meta.allergenWarning?.trim();
+    // "Unknown allergen data" is one line for the whole page, not a mark.
+    return text && text !== UNKNOWN_ALLERGEN_TEXT ? text : null;
 }
 
 export function groceryLineRowMarkup(
     line: GroceryLineView,
     view: Pick<KitchenGroceriesV2View, "lineMeta">,
     returnTo: string,
-    opts: { overview?: boolean } = {},
 ): Html {
     const meta = view.lineMeta.get(line.id) ?? {
         plainFoodName: null,
@@ -322,76 +351,73 @@ export function groceryLineRowMarkup(
         sectionName: "",
     };
     const labels = groceryRowLabels(line, meta);
-    const amount = groceryV2QuantityLabel(line);
     const sheetId = groceryLineSheetId(line.id);
-    const swipe = {
-        lead: {
-            label: line.checked ? "Uncheck" : "Check off",
-            icon: line.checked ? undefined : iconCheck(),
-            form: checkForm(line, line.checked, returnTo),
-        },
-        ...(opts.overview ? {} : { sheetId }),
-    };
+    const check = checkForm(line, returnTo);
+    const del = deleteForm(line, returnTo);
+    const checkLabel = line.checked ? "Uncheck" : "Check off";
+    const items: MenuItem[] = [
+        { kind: "post", label: checkLabel, ...check },
+        { kind: "opens", label: "Edit", sheetId },
+        { kind: "destructive", label: "Delete", ...del },
+    ];
+    const mark = allergenMark(meta);
+    const sub = labelLine(labels);
     const rowHtml = String(
-        groceryRow({
+        itemRow({
             title: labels.title,
             score: meta.productScore,
-            subtitle: labels.subtitle,
-            tag: labels.tag,
-            amount,
-            checked: line.checked,
-            toggle: { form: checkForm(line, line.checked, returnTo) },
-            swipe,
+            ...(mark
+                ? {
+                      state: "warning" as const,
+                      subtitle: sub ? `${sub} · ${mark}` : mark,
+                  }
+                : { subtitle: sub }),
+            value: groceryV2QuantityLabel(line),
+            lead: {
+                kind: "check",
+                label: `${checkLabel} ${labels.title}`,
+                checked: line.checked,
+                form: check,
+            },
+            trailing: {
+                kind: "control",
+                html: menu({
+                    label: `Actions for ${labels.title}`,
+                    anchor: "more",
+                    items,
+                }),
+            },
+            swipe: {
+                left: { label: "Delete", form: del },
+                right: {
+                    label: checkLabel,
+                    icon: "check",
+                    form: check,
+                },
+            },
+            select: { name: "ids[]", value: line.id },
+            id: `fd-grocery-row-${line.id}`,
+            data: { "fd-sheet-row": "", "sheet-id": sheetId },
         }),
     );
-    const attrs = opts.overview
-        ? ` data-fd-grocery-row-overview tabindex="0" data-fd-grocery-line-href="${esc(`${GROCERY_V2_RETURN_TO}?line=${encodeURIComponent(line.id)}`)}"`
-        : ` data-fd-grocery-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
         // A function replacement: a string would read `$` in an id as a pattern.
-        rowHtml.replace(
-            "<li ",
-            () => `<li id="fd-grocery-row-${esc(line.id)}"${attrs} `,
-        ),
+        rowHtml.replace("<li ", () => `<li tabindex="0" `),
     );
 }
 
-const KITCHEN_OVERVIEW_RETURN_TO = "/kitchen/fridge";
+/** How far a step moves the line sheet's amount, from the unit it is in. */
+function amountStep(line: GroceryLine): number {
+    const unit = line.quantity.unit.trim().toLowerCase();
+    if (unit === "g" || unit === "ml") return 50;
+    return line.quantity.amount >= 1 ? 1 : 0.5;
+}
 
-export function renderGroceryOverviewSections(
-    view: Pick<
-        KitchenGroceriesV2View,
-        "stores" | "noStoreLines" | "lineMeta" | "selectedStoreId"
-    >,
-): string {
-    const groups = buildGroceryV2StoreGroups({
-        stores: view.selectedStoreId
-            ? view.stores.filter((s) => s.id === view.selectedStoreId)
-            : view.stores,
-        noStoreLines: view.selectedStoreId ? [] : view.noStoreLines,
-    });
-    return groups
-        .map((store) =>
-            store.sections
-                .map((section) => {
-                    if (section.lines.length === 0) return "";
-                    const rows = section.lines.map((line) =>
-                        groceryLineRowMarkup(
-                            line,
-                            view,
-                            KITCHEN_OVERVIEW_RETURN_TO,
-                            { overview: true },
-                        ),
-                    );
-                    return `<section class="fd-kitchen-grocery-section fd-kitchen-overview-grocery-section" aria-labelledby="fd-overview-grocery-sec-${esc(section.section.id)}">${String(
-                        sectionHeader({
-                            title: section.section.name,
-                            count: section.lines.length,
-                            id: `fd-overview-grocery-sec-${section.section.id}`,
-                        }),
-                    )}${String(rowList(rows, { label: section.section.name }))}</section>`;
-                })
-                .join(""),
+function hiddenInputs(fields: Readonly<Record<string, string>>): string {
+    return Object.entries(fields)
+        .map(
+            ([name, value]) =>
+                `<input type="hidden" name="${esc(name)}" value="${esc(value)}" />`,
         )
         .join("");
 }
@@ -402,37 +428,248 @@ function lineSheet(
     returnTo: string,
 ): string {
     const open = view.openLineId === line.id;
+    const sheetId = groceryLineSheetId(line.id);
     const meta = view.lineMeta.get(line.id);
-    const amount = groceryV2QuantityLabel(line);
-    const checkLabel = line.checked ? "Uncheck" : "Check off";
+    const labels = groceryRowLabels(
+        line,
+        meta ?? { plainFoodName: null, isUsual: false },
+    );
+    const editId = `${sheetId}-edit`;
+    const checkId = `${sheetId}-check`;
+    const editAction = `/kitchen/groceries/lines/${line.id}/edit`;
+    // A pull-down saves what it changed and comes back with this sheet open.
+    const comeBack = groceryV2ReturnTo(view.selectedStoreIds, line.id);
+    const store = view.stores.find((row) => row.id === line.storeId);
+    const sections = (store?.sections ?? []).filter(
+        (section) => !section.hidden || section.id === line.sectionId,
+    );
     const error =
         open && view.error
             ? `<p class="fd-kitchen-sheet-error" role="alert">${esc(view.error)}</p>`
             : "";
-    const detail = [
-        ["Amount", amount],
-        ["Store", meta?.storeName ?? "—"],
-        ["Section", meta?.sectionName ?? "—"],
-        ...(line.note?.trim() ? [["Note", line.note.trim()] as const] : []),
-    ]
-        .map(
-            ([label, value]) =>
-                `<div class="fd-kitchen-sheet-kv"><dt>${esc(label)}</dt><dd>${esc(value)}</dd></div>`,
-        )
-        .join("");
-    const body = `${error}<dl class="fd-kitchen-sheet-kvs">${detail}</dl>`;
-    const checkFormId = `${groceryLineSheetId(line.id)}-check`;
-    const actions = [
-        `<button type="submit" class="fd-btn fd-btn--primary" form="${esc(checkFormId)}">${esc(checkLabel)}</button>`,
-    ].join("\n");
-    return `${sheet({
-        id: groceryLineSheetId(line.id),
-        kind: "edit",
-        title: line.displayName,
-        body: `${body}<form id="${esc(checkFormId)}" method="post" action="/kitchen/groceries/lines/${esc(line.id)}/check" class="fd-visually-hidden" aria-hidden="true"><input type="hidden" name="checked" value="${line.checked ? "0" : "1"}" /><input type="hidden" name="return_to" value="${esc(returnTo)}" /></form>`,
-        actions,
+    const amount = sheetSection({
+        kind: "amount",
+        content: stepperControl({
+            name: "qty_amount",
+            label: "Amount",
+            value: line.quantity.amount,
+            min: 0,
+            step: amountStep(line),
+            inputStep: "any",
+            unit: line.quantity.unit,
+            id: `${sheetId}-amount`,
+            form: editId,
+        }),
+    });
+    const pulldown = (
+        title: string,
+        value: string,
+        choices: readonly { id: string; name: string; current: boolean }[],
+        name: "store_id" | "section",
+    ) =>
+        raw(
+            `<li class="fd-item-row">${menu({
+                label: title,
+                anchor: "row",
+                row: { title, value },
+                items: choices.map((choice) => ({
+                    kind: "checked" as const,
+                    label: choice.name,
+                    checked: choice.current,
+                    // The value already chosen only closes the menu.
+                    current: choice.current,
+                    action: editAction,
+                    fields: { [name]: choice.id, return_to: comeBack },
+                })),
+            })}</li>`,
+        );
+    const rows: Html[] = [];
+    if (view.stores.length > 0) {
+        rows.push(
+            pulldown(
+                "Store",
+                meta?.storeName ?? store?.name ?? "No store",
+                view.stores.map((row) => ({
+                    id: row.id,
+                    name: row.name,
+                    current: row.id === line.storeId,
+                })),
+                "store_id",
+            ),
+        );
+    }
+    if (sections.length > 0) {
+        rows.push(
+            pulldown(
+                "Section",
+                meta?.sectionName ?? "Other",
+                sections.map((section) => ({
+                    id: section.id,
+                    name: section.name,
+                    current: section.id === line.sectionId,
+                })),
+                "section",
+            ),
+        );
+    }
+    const where =
+        rows.length > 0
+            ? sheetSection({
+                  kind: "rows",
+                  content: listGroup({ rows, label: "Where it is bought" }),
+              })
+            : "";
+    const note = sheetSection({
+        kind: "fields",
+        label: "Note",
+        content: field({
+            id: `${sheetId}-note`,
+            label: "Note",
+            labelHidden: true,
+            name: "note",
+            value: line.note ?? "",
+            maxlength: 500,
+            autocomplete: "off",
+            form: editId,
+        }),
+    });
+    const body = `${error}${amount}${where}${note}
+<form id="${esc(editId)}" method="post" action="${esc(editAction)}" data-fd-line-edit>${hiddenInputs({ qty_unit: line.quantity.unit, return_to: returnTo })}</form>
+<form id="${esc(checkId)}" method="post" action="/kitchen/groceries/lines/${esc(line.id)}/check" class="fd-visually-hidden" aria-hidden="true">${hiddenInputs({ checked: line.checked ? "0" : "1", return_to: returnTo })}</form>`;
+    return sheet({
+        id: sheetId,
+        placement: "side",
+        className: "fd-kitchen-sheet",
+        header: {
+            kind: "title",
+            title: line.displayName,
+            subtitle: labelLine(labels) || undefined,
+        },
+        body: raw(body),
+        actions: {
+            kind: "pair",
+            cancel: {
+                label: line.checked ? "Uncheck" : "Check off",
+                type: "submit",
+                form: checkId,
+            },
+            primary: { label: "Save", type: "submit", form: editId },
+        },
         openOnLoad: open,
-    })}`;
+        focus: "panel",
+    });
+}
+
+/** The first Expires chip the draft or the line has: the chosen date, or none. */
+function putAwayExpires(
+    lineId: string,
+    expiresOn: string,
+): { host: Html; field: Html } {
+    const choices = expiresOn
+        ? [
+              { value: "none", label: "No date" },
+              { value: "pick", label: "Pick a date", selected: true },
+          ]
+        : [
+              { value: "none", label: "No date", selected: true },
+              { value: "pick", label: "Pick a date" },
+          ];
+    return {
+        host: choiceGroup({
+            name: `expires_mode_${lineId}`,
+            legend: "Expires",
+            options: choices,
+        }),
+        field: field({
+            id: `put-away-expires-${lineId}`,
+            label: "Expires on",
+            labelHidden: true,
+            name: `expires_on_${lineId}`,
+            type: "date",
+            value: expiresOn,
+        }),
+    };
+}
+
+function putAwayLine(
+    line: GroceryLineView,
+    view: KitchenGroceriesV2View,
+): string {
+    const draft = view.putAwayDraft?.[line.id];
+    const loc =
+        draft?.locationId ?? line.lastLocationId ?? view.locations[0]?.id ?? "";
+    const expiresOn = draft?.expiresOn ?? "";
+    const labels = groceryRowLabels(
+        line,
+        view.lineMeta.get(line.id) ?? { plainFoodName: null, isUsual: false },
+    );
+    const note = line.note?.trim();
+    const head = itemRow({
+        title: labels.title,
+        ...(note ? { subtitle: note } : { meta: groceryV2QuantityLabel(line) }),
+        lead: { kind: "done", label: "Checked off" },
+    });
+    const keptIn = sheetSection({
+        kind: "chips",
+        label: "Kept in",
+        content: choiceGroup({
+            name: `location_id_${line.id}`,
+            legend: `Kept in for ${line.displayName}`,
+            required: true,
+            options: view.locations.map((location) => ({
+                value: location.id,
+                label: location.name,
+                selected: location.id === loc,
+            })),
+        }),
+    });
+    const exp = putAwayExpires(line.id, expiresOn);
+    const expires = sheetSection({
+        kind: "chips",
+        label: "Expires",
+        content: raw(
+            `<div class="fd-kitchen-item-expires" data-fd-expires data-fd-expires-keep="">${exp.host}<div class="fd-kitchen-item-expires__field">${exp.field}</div></div>`,
+        ),
+    });
+    const product =
+        line.putAwayProducts && line.putAwayProducts.length > 0
+            ? sheetSection({
+                  kind: "chips",
+                  label: "Product",
+                  content: choiceGroup({
+                      name: `product_food_id_${line.id}`,
+                      legend: `Product for ${line.displayName}`,
+                      options: line.putAwayProducts.map((p) => ({
+                          value: p.id,
+                          label: p.label,
+                          selected:
+                              (draft?.productFoodId ??
+                                  line.putAwayProductId) === p.id,
+                      })),
+                  }),
+              })
+            : "";
+    // A to-taste line has no amount of its own: the shopper says what they got,
+    // starting from the line's amount when it has one.
+    const howMuch = note
+        ? sheetSection({
+              kind: "amount",
+              label: "How much did you buy",
+              content: stepperControl({
+                  name: `put_away_amount_${line.id}`,
+                  label: `Amount for ${line.displayName}`,
+                  value:
+                      Number(draft?.putAwayAmount) ||
+                      (line.quantity.amount > 0 ? line.quantity.amount : 1),
+                  min: 0,
+                  step: line.quantity.amount > 0 ? amountStep(line) : 1,
+                  inputStep: "any",
+                  unit: line.quantity.unit,
+                  id: `put-away-amt-${line.id}`,
+              }),
+          })
+        : "";
+    return `<section class="fd-kitchen-put-line">${String(listGroup({ rows: [head], label: labels.title }))}${howMuch}${keptIn}${product}${expires}</section>`;
 }
 
 function putAwaySheet(view: KitchenGroceriesV2View, returnTo: string): string {
@@ -444,223 +681,385 @@ function putAwaySheet(view: KitchenGroceriesV2View, returnTo: string): string {
             ? `<p class="fd-kitchen-sheet-error" role="alert">${esc(view.error)}</p>`
             : "";
     const lineIds = checked.map((row) => row.id).join(",");
-    const rows = checked
-        .map((line) => {
-            const draft = view.putAwayDraft?.[line.id];
-            const loc =
-                draft?.locationId ??
-                line.lastLocationId ??
-                view.locations[0]?.id ??
-                "";
-            const expires = draft?.expiresOn ?? "";
-            const labels = groceryRowLabels(
-                line,
-                view.lineMeta.get(line.id) ?? {
-                    plainFoodName: null,
-                    isUsual: false,
-                },
-            );
-            const amount = groceryV2QuantityLabel(line);
-            const locField = String(
-                choiceGroup({
-                    name: `location_id_${line.id}`,
-                    legend: `Location for ${line.displayName}`,
-                    className: "fd-kitchen-put-loc",
-                    required: true,
-                    options: view.locations.map((location) => ({
-                        value: location.id,
-                        label: location.name,
-                        selected: location.id === loc,
-                    })),
-                }),
-            );
-            const dateLabel = formatPutAwayDateLabel(expires);
-            const note = line.note?.trim()
-                ? `<p class="fd-kitchen-grocery-put-note">${esc(line.note.trim())} — enter the amount you bought</p>`
-                : "";
-            const amountField = line.note?.trim()
-                ? `<p class="fd-kitchen-sheet-label">Amount</p><input id="put-away-amt-${esc(line.id)}" name="put_away_amount_${esc(line.id)}" type="number" min="0" step="any" inputmode="decimal" value="${esc(draft?.putAwayAmount ?? "1")}" required aria-label="Amount for ${esc(line.displayName)}" />`
-                : "";
-            const productSelect =
-                line.putAwayProducts && line.putAwayProducts.length > 0
-                    ? `<p class="fd-kitchen-sheet-label">Product</p><select id="put-away-product-${esc(line.id)}" name="product_food_id_${esc(line.id)}" aria-label="Product for ${esc(line.displayName)}">${line.putAwayProducts
-                          .map((product) => {
-                              const sel =
-                                  (draft?.productFoodId ??
-                                      line.putAwayProductId) === product.id
-                                      ? " selected"
-                                      : "";
-                              return `<option value="${esc(product.id)}"${sel}>${esc(product.label)}</option>`;
-                          })
-                          .join("")}</select>`
-                    : "";
-            return `<article class="fd-kitchen-put-row">
-<div class="fd-kitchen-put-row__head">
-<span class="fd-kitchen-put-row__title">${esc(labels.title)}</span>
-<span class="fd-kitchen-put-row__amount">${esc(amount)}</span>
-</div>
-<div class="fd-kitchen-put-row__controls">
-${locField}
-<div class="fd-kitchen-put-date" data-fd-put-date>
-<button type="button" class="fd-kitchen-put-date__chip" data-fd-put-date-btn aria-label="Best before date for ${esc(line.displayName)}">${calendarIcon()}<span data-fd-put-date-text>${esc(dateLabel)}</span></button>
-<input type="date" class="fd-kitchen-put-date__input" name="expires_on_${esc(line.id)}" value="${esc(expires)}" aria-label="Best before for ${esc(line.displayName)}" />
-</div>
-</div>
-${productSelect}
-${amountField}
-${note}
-</article>`;
-        })
-        .join("");
     const formId = "fd-grocery-put-away-form";
-    const clearBtn = sheetTrigger({
-        target: FD_GROCERY_CLEAR_SHEET_ID,
-        label: "Clear checked",
-        className: "fd-btn fd-kitchen-grocery-clear-quiet",
-    });
     const n = checked.length;
-    const title = n === 1 ? "Put away 1 item" : `Put away ${n} items`;
     return sheet({
         id: FD_GROCERY_PUT_AWAY_SHEET_ID,
-        kind: "edit",
-        title,
-        subtitle: "From the grocery list into the kitchen",
-        body: `${error}<form id="${formId}" method="post" action="/kitchen/groceries/put-away"><input type="hidden" name="return_to" value="${esc(returnTo)}" /><input type="hidden" name="line_ids" value="${esc(lineIds)}" />${rows}</form>`,
-        actions: `${clearBtn}<button type="submit" class="fd-btn fd-btn--primary" form="${formId}">Put away</button>`,
+        placement: "dialog",
+        className: "fd-kitchen-sheet",
+        header: {
+            kind: "title",
+            title: n === 1 ? "Put away 1 item" : `Put away ${n} items`,
+        },
+        body: raw(
+            `${error}<form id="${formId}" method="post" action="/kitchen/groceries/put-away">${hiddenInputs({ return_to: returnTo, line_ids: lineIds })}${checked.map((line) => putAwayLine(line, view)).join("")}</form>`,
+        ),
+        actions: {
+            kind: "pair",
+            cancel: { label: "Clear checked" },
+            primary: { label: "Put away", type: "submit", form: formId },
+            confirm: { label: `Clear ${n}`, form: CLEAR_FORM_ID },
+        },
         openOnLoad: open,
+        focus: "panel",
     });
 }
 
-function groceryAddSheet(
-    view: KitchenGroceriesV2View,
+/** What the retry button re-posts: the add the allergen warning stopped. */
+function allergenBlock(view: KitchenGroceriesV2View, storeId: string): string {
+    if (
+        !view.openAdd ||
+        !view.allergenNotices?.length ||
+        view.allergenRetry?.storeId !== storeId
+    ) {
+        return "";
+    }
+    const food = view.allergenRetry.foodName?.trim();
+    const sentences = view.allergenNotices
+        .map((notice) => {
+            const said = noticeSentence(notice);
+            // "Contains milk — Max." reads "Cheddar contains milk — Max."
+            const text = food
+                ? `${food} ${said.charAt(0).toLowerCase()}${said.slice(1)}`
+                : said;
+            return `<p class="fd-kitchen-sheet-error" role="alert">${esc(text)}</p>`;
+        })
+        .join("");
+    const retry = view.allergenRetry
+        ? `<form class="fd-kitchen-allergen-retry" method="post" action="${ADD_LINE_ACTION}">${hiddenInputs({ ...view.allergenRetry.fields, confirm_allergen: "1" })}${String(button({ label: "Add anyway", type: "submit" }))}</form>`
+        : "";
+    return `${sentences}${retry}`;
+}
+
+function usualAddForm(
+    usual: GroceryAddUsual,
+    store: GroceryStoreView | null,
+    sectionId: string,
     returnTo: string,
+): { action: string; fields: Record<string, string> } {
+    return {
+        action: ADD_LINE_ACTION,
+        fields: {
+            kind: usual.kind,
+            ...(usual.kind === "supply" ? { name: usual.name } : {}),
+            food_id: usual.foodId,
+            // No store: the domain files it where the usual itself goes.
+            ...(store ? { store_id: store.id } : {}),
+            ...(store && sectionId ? { section_id: sectionId } : {}),
+            qty_amount: String(usual.amount),
+            qty_unit: usual.unit,
+            return_to: returnTo,
+        },
+    };
+}
+
+/** What a suggestion says it is, and where it goes when that is known. */
+function usualSubtitle(
+    usual: GroceryAddUsual,
+    store: GroceryStoreView | null,
 ): string {
+    const what =
+        usual.lowLeft != null
+            ? `Low · ${usual.lowLeft}`
+            : usual.lowBelow != null
+              ? `Low, below ${usual.lowBelow}`
+              : `Usual · ${usual.subtitle}`;
+    const where = store?.name ?? usual.storeName;
+    return where ? `${what} · ${where}` : what;
+}
+
+function groceryAddSheet(view: KitchenGroceriesV2View): string {
+    if (view.stores.length === 0) return "";
     const store = addStoreFor(view);
-    if (!store) return "";
     const open = !!view.openAdd;
-    const modalId = `${GROCERY_ADD_FOOD_PREFIX}${store.id}`;
+    const modalId = `${GROCERY_ADD_FOOD_PREFIX}${store?.id ?? ""}`;
     const error =
         open && view.error
             ? `<p class="fd-kitchen-sheet-error" role="alert">${esc(view.error)}</p>`
-            : "";
-    const allergen =
-        open &&
-        view.allergenNotices?.length &&
-        view.allergenRetry?.storeId === store.id
-            ? noticeList(view.allergenNotices, {
-                  className: "fd-kitchen-sheet-error",
-              })
             : "";
     const didYouMean = didYouMeanModalBlock(
         view.didYouMean,
         modalId,
         view.openAdd ? modalId : undefined,
-    );
-    const sectionId = defaultSectionId(store);
-    const hiddenSection =
-        sectionId !== ""
-            ? `<input type="hidden" name="section_id" value="${esc(sectionId)}" data-grocery-section-field />`
+    ).replaceAll("did-you-mean-", "fd-did-you-mean-");
+    const sectionId = store ? defaultSectionId(store) : "";
+    // An add lands back on the list as it was filtered.
+    const returnTo = groceryV2ReturnTo(view.selectedStoreIds);
+    const usuals = view.usuals ?? [];
+    const low = usuals.filter((usual) => usual.lowBelow != null);
+    const lowChips =
+        low.length > 0
+            ? String(
+                  sheetSection({
+                      kind: "chips",
+                      label: "Running low",
+                      content: raw(
+                          `<div class="fd-kitchen-add-low">${low
+                              .map((usual) => {
+                                  const form = usualAddForm(
+                                      usual,
+                                      store,
+                                      sectionId,
+                                      returnTo,
+                                  );
+                                  return `<form class="fd-inline-form" method="post" action="${esc(form.action)}" data-fd-grocery-usual="${esc(usual.name.toLowerCase())}">${hiddenInputs(form.fields)}${String(chip({ label: usual.name, submit: true }))}</form>`;
+                              })
+                              .join("")}</div>`,
+                      ),
+                  }),
+              )
             : "";
-    const body = `${error}${allergen}${didYouMean}${renderFoodPicker({
-        id: GROCERY_FOOD_PICKER_ID,
-        action: "/kitchen/groceries/lines",
-        method: "post",
-        hiddenFields: {
-            kind: "food",
-            store_id: store.id,
-            return_to: returnTo,
-        },
-        formExtras: hiddenSection,
-        includeQuantity: true,
-    })}`;
+    const suggestions =
+        usuals.length > 0
+            ? String(
+                  sheetSection({
+                      kind: "results",
+                      label: "Suggestions",
+                      content: listGroup({
+                          label: "Suggestions",
+                          rows: usuals.map((usual) =>
+                              itemRow({
+                                  title: usual.name,
+                                  subtitle: usualSubtitle(usual, store),
+                                  trailing: {
+                                      kind: "add",
+                                      label: `Add ${usual.name}`,
+                                      form: usualAddForm(
+                                          usual,
+                                          store,
+                                          sectionId,
+                                          returnTo,
+                                      ),
+                                  },
+                                  data: {
+                                      "fd-grocery-usual":
+                                          usual.name.toLowerCase(),
+                                  },
+                              }),
+                          ),
+                      }),
+                  }),
+              ) +
+              `<p class="fd-kitchen-add__none" data-fd-grocery-none hidden>No usual matches.</p>`
+            : "";
+    // A failed add or a did-you-mean opens the hand form.
+    const handOpen = (open && view.error) || view.didYouMean != null;
+    const hand = `<details class="fd-kitchen-hand"${handOpen ? " open" : ""}><summary class="fd-kitchen-hand__summary">Not here? Add it by hand</summary>
+<form id="fd-grocery-add-form" class="fd-kitchen-hand__form" method="post" action="${ADD_LINE_ACTION}">
+${hiddenInputs({ kind: "food", ...(store ? { store_id: store.id } : {}), return_to: returnTo, ...(store && sectionId ? { section_id: sectionId } : {}) })}
+${String(
+    field({
+        id: "fd-grocery-add-name",
+        label: "Name",
+        name: "food_name",
+        required: true,
+        autocomplete: "off",
+    }),
+)}
+${String(
+    stepperControl({
+        name: "qty_amount",
+        label: "Amount",
+        value: 1,
+        min: 0,
+        step: 1,
+        inputStep: "any",
+        unit: "each",
+        id: "fd-grocery-add-qty",
+    }),
+)}
+<input type="hidden" name="qty_unit" value="each" />
+${String(button({ label: "Add", variant: "primary", type: "submit" }))}
+</form></details>`;
     return sheet({
         id: FD_GROCERY_ADD_SHEET_ID,
-        kind: "edit",
-        title: "Add to list",
-        subtitle: store.name,
-        body,
-        openOnLoad: open,
-        showClose: true,
+        placement: "dialog",
+        className: "fd-kitchen-sheet",
+        header: {
+            kind: "search",
+            title: "Add to list",
+            search: {
+                name: "q",
+                id: "fd-grocery-add-q",
+                label: "Search your usuals",
+                placeholder: "Add to list",
+            },
+        },
+        body: raw(
+            `${error}${allergenBlock(view, store?.id ?? "")}${didYouMean}${lowChips}${suggestions}${hand}`,
+        ),
+        openOnLoad: view.openAdd,
+        focus: "panel",
     });
 }
 
-function walkingOrderNote(view: KitchenGroceriesV2View): string {
-    if (!view.selectedStoreId) return "";
-    const store = view.stores.find((row) => row.id === view.selectedStoreId);
-    if (!store) return "";
-    return `<p class="fd-kitchen-grocery-footnote">Sections follow ${esc(store.name)}&rsquo;s walking order. Change it in <a href="/settings/household">Settings › Household › Stores</a>.</p>`;
+/** The store filter: a tick for each store shown, Clear to show them all. */
+function storeFilter(view: KitchenGroceriesV2View): string {
+    if (view.stores.length < 2) return "";
+    const selected = new Set(view.selectedStoreIds ?? []);
+    const items: MenuItem[] = view.stores.map((store) => {
+        const next = view.stores
+            .filter((row) =>
+                row.id === store.id
+                    ? !selected.has(row.id)
+                    : selected.has(row.id),
+            )
+            .map((row) => row.id);
+        return {
+            kind: "checked" as const,
+            label: store.name,
+            checked: selected.has(store.id),
+            href: groceryV2ReturnTo(next),
+        };
+    });
+    if (selected.size > 0) {
+        items.push({
+            kind: "link",
+            label: "Clear",
+            href: GROCERY_V2_RETURN_TO,
+        });
+    }
+    return String(
+        menu({
+            label: "Filter by store",
+            anchor: "filter",
+            filterCount: selected.size,
+            items,
+        }),
+    );
 }
 
-function putAwayLink(view: KitchenGroceriesV2View): string {
+/** The groups the page shows: the filtered stores, or all of them. */
+function shownGroups(view: KitchenGroceriesV2View): GroceryV2StoreGroup[] {
+    const selected = view.selectedStoreIds ?? [];
+    return buildGroceryV2StoreGroups({
+        stores:
+            selected.length > 0
+                ? view.stores.filter((store) => selected.includes(store.id))
+                : view.stores,
+        noStoreLines: selected.length > 0 ? [] : view.noStoreLines,
+    });
+}
+
+function sectionBlock(
+    group: GroceryV2StoreGroup,
+    section: GroceryV2SectionGroup,
+    view: KitchenGroceriesV2View,
+    returnTo: string,
+    named: boolean,
+): Html {
+    const id = `fd-grocery-sec-${group.storeId || "none"}-${section.section.id}`;
+    // Two stores each have a Dairy: name the store when more than one shows.
+    const label =
+        named && group.storeId
+            ? `${section.section.name} · ${group.storeName}`
+            : section.section.name;
+    const rows = section.lines.map((line) =>
+        groceryLineRowMarkup(line, view, returnTo),
+    );
+    return raw(
+        `<section class="fd-kitchen-grocery-section" aria-labelledby="${esc(id)}">${String(
+            sectionHeader({
+                label,
+                count: section.lines.length,
+                rule: false,
+                id,
+            }),
+        )}${String(listGroup({ rows, label }))}</section>`,
+    );
+}
+
+/**
+ * The phone's dock above the Nav bar and the desktop's row under the header.
+ * Clear checked only arms: Cancel and "Clear N" take the row, so nothing is
+ * deleted by one tap.
+ */
+function putAwayDock(view: KitchenGroceriesV2View): string {
     const n = groceryCheckedCount(view);
     if (n === 0) return "";
-    const label =
-        n === 1 ? "Put 1 away in the kitchen" : `Put ${n} away in the kitchen`;
-    return `<button type="button" class="fd-kitchen-grocery-put-link" commandfor="${esc(FD_GROCERY_PUT_AWAY_SHEET_ID)}" command="show-modal"><span>${esc(label)}</span><span class="fd-kitchen-grocery-put-link__chev" aria-hidden="true">${String(iconChevronRight())}</span></button>`;
+    return `<div class="fd-kitchen-grocery-dock" data-fd-grocery-dock data-fd-confirm role="group" aria-label="Checked items">${String(
+        button({
+            label: "Clear checked",
+            attrs: CONFIRM_ARM_ATTRS,
+        }),
+    )}${String(
+        button({
+            label: `Put away ${n}`,
+            variant: "primary",
+            attrs: {
+                ...CONFIRM_IDLE_ATTRS,
+                command: "show-modal",
+                commandfor: FD_GROCERY_PUT_AWAY_SHEET_ID,
+            },
+        }),
+    )}${String(confirmButtons({ label: `Clear ${n}`, form: CLEAR_FORM_ID }))}</div>`;
 }
 
 export function renderKitchenGroceriesBody(
     view: KitchenGroceriesV2View,
 ): string {
-    const returnTo = groceryV2ReturnTo(view.selectedStoreId);
-    const groups = buildGroceryV2StoreGroups({
-        stores: view.selectedStoreId
-            ? view.stores.filter((s) => s.id === view.selectedStoreId)
-            : view.stores,
-        noStoreLines: view.selectedStoreId ? [] : view.noStoreLines,
-    });
-    const showStoreHeadings = !view.selectedStoreId && groups.length > 1;
-    const sections = groups
-        .map((store) => {
-            const sectionBlocks = store.sections
-                .map((section) => {
-                    if (section.lines.length === 0) return "";
-                    const rows = section.lines.map((line) =>
-                        groceryLineRowMarkup(line, view, returnTo),
-                    );
-                    return `<section class="fd-kitchen-grocery-section" aria-labelledby="fd-grocery-sec-${esc(section.section.id)}">${String(
-                        sectionHeader({
-                            title: section.section.name,
-                            count: section.lines.length,
-                            id: `fd-grocery-sec-${section.section.id}`,
-                        }),
-                    )}${String(rowList(rows, { label: section.section.name }))}</section>`;
-                })
-                .join("");
-            if (!sectionBlocks) return "";
-            if (!showStoreHeadings) return sectionBlocks;
-            const storeHeadId = store.storeId
-                ? `fd-grocery-store-${store.storeId}`
-                : "fd-grocery-store-none";
-            return `<section class="fd-kitchen-grocery-store" aria-labelledby="${esc(storeHeadId)}"><h2 class="fd-kitchen-grocery-store__title" id="${esc(storeHeadId)}">${esc(store.storeName)}</h2>${sectionBlocks}</section>`;
-        })
-        .join("");
-    const empty =
-        view.openLineCount === 0 && groceryCheckedCount(view) === 0
-            ? `<p class="fd-kitchen-grocery-empty">Nothing on the grocery list yet.</p>`
-            : "";
-    const allergenBanner = view.unknownAllergen
-        ? `<p class="fd-kitchen-grocery-unknown-allergen">${esc(UNKNOWN_ALLERGEN_TEXT)}</p>`
-        : "";
-    const pageError =
-        view.error && !view.openLineId && !view.openPutAway && !view.openShare
-            ? String(settingsErrorBanner(view.error))
-            : "";
-    const itemCount = groceryHeaderSubtitle(view.openLineCount);
-    const allLines = view.stores.flatMap((s) =>
-        s.sections.flatMap((sec) => sec.lines),
+    const returnTo = groceryV2ReturnTo(view.selectedStoreIds);
+    const groups = shownGroups(view);
+    const named = groups.filter((group) => group.storeId).length > 1;
+    const blocks = groups.flatMap((group) =>
+        group.sections.map((section) =>
+            sectionBlock(group, section, view, returnTo, named),
+        ),
     );
-    const sheets = allLines
-        .map((line) => lineSheet(line, view, returnTo))
-        .join("");
-    const shareButton = view.shareEnabled
-        ? String(
-              renderShareTrigger(
-                  GROCERY_SHARE_SHEET_ID,
-                  "fd-kitchen-grocery-share",
-              ),
-          )
-        : "";
+    // Only the lines the list shows: a filtered-out store has no rows to open
+    // a sheet or to pick.
+    const shownLines = groups.flatMap((group) =>
+        group.sections.flatMap((section) => section.lines),
+    );
+    const checkedCount = groceryCheckedCount(view);
+    const select = selectionBars({
+        scope: "groceries",
+        returnTo,
+        actions: [
+            {
+                kind: "confirm",
+                key: "delete",
+                label: "Delete",
+                action: "/kitchen/groceries/bulk/delete",
+            },
+        ],
+    });
+    const selectable = shownLines.length > 0;
+    // The ⋯ holds only what applies: Share with the flag on, Select with
+    // rows, Clear checked with something checked; with none, no ⋯.
+    const menuItems: MenuItem[] = [
+        ...(view.shareEnabled
+            ? [
+                  {
+                      kind: "opens" as const,
+                      label: "Share list",
+                      sheetId: GROCERY_SHARE_SHEET_ID,
+                  },
+              ]
+            : []),
+        ...(selectable ? [select.menuItem] : []),
+        ...(checkedCount > 0
+            ? [
+                  {
+                      kind: "destructive" as const,
+                      label: "Clear checked",
+                      action: CLEAR_CHECKED_ACTION,
+                      fields: { return_to: returnTo },
+                  },
+              ]
+            : []),
+    ];
+    const more =
+        menuItems.length > 0
+            ? String(
+                  menu({
+                      label: "Groceries options",
+                      anchor: "more",
+                      items: menuItems,
+                  }),
+              )
+            : "";
+    const filter = storeFilter(view);
     // Without a store there is no add sheet, so nothing for a plus to open.
     const add =
         view.stores.length > 0
@@ -669,35 +1068,70 @@ export function renderKitchenGroceriesBody(
                   label: "Add to list",
               })
             : null;
+    const itemCount = groceryHeaderSubtitle(view.openLineCount);
+    const tools = [filter, more].filter(Boolean).join("");
     const head = renderKitchenHead({
         active: "groceries",
         phoneSubtitle: itemCount,
-        desktopSubtitle: itemCount,
-        ...(shareButton || add
-            ? {
-                  desktopTools: [shareButton, add?.desktop]
-                      .filter(Boolean)
-                      .join("\n"),
-              }
-            : {}),
+        desktopTools: `${tools}${add?.desktop ?? ""}`,
     });
-    // On the phone the header is the bare title (as on the other tabs) and
-    // Share and the plus ride at the right of the first row under the tabs.
     const top =
-        shareButton || add
-            ? `${kitchenTopTools(shareButton, add?.phone ?? "")}\n`
+        tools || add ? `${kitchenTopTools(tools, add?.phone ?? "")}\n` : "";
+    const addRow = add
+        ? listGroup({
+              label: "Add to list",
+              data: { "fd-grocery-add-row": "" },
+              rows: [
+                  itemRow({
+                      title: "Add to list",
+                      lead: { kind: "icon", name: "plus" },
+                      opens: FD_GROCERY_ADD_SHEET_ID,
+                  }),
+              ],
+          })
+        : raw("");
+    const [first, ...rest] = blocks;
+    const left = raw(`${String(addRow)}${first ? String(first) : ""}`);
+    const right = raw(rest.map(String).join(""));
+    const layout = pageLayout({
+        layout: "two-columns",
+        left,
+        right,
+        className: "fd-kitchen-groceries-layout",
+    });
+    const empty =
+        view.openLineCount === 0 && checkedCount === 0
+            ? emptyState({ title: "Nothing on the list yet" })
+            : raw("");
+    const allergenBanner = view.unknownAllergen
+        ? `<p class="fd-kitchen-grocery-unknown-allergen">${esc(UNKNOWN_ALLERGEN_TEXT)}</p>`
+        : "";
+    const pageError =
+        view.error &&
+        !view.openLineId &&
+        !view.openPutAway &&
+        !view.openShare &&
+        !view.openAdd
+            ? String(settingsErrorBanner(view.error))
+            : "";
+    const sheets = shownLines
+        .map((line) => lineSheet(line, view, returnTo))
+        .join("");
+    const clearForm =
+        checkedCount > 0
+            ? `<form id="${CLEAR_FORM_ID}" method="post" action="${CLEAR_CHECKED_ACTION}" hidden>${hiddenInputs({ return_to: returnTo })}</form>`
             : "";
     return `${head}
-<div class="fd-kitchen-groceries-page">
+<div class="fd-kitchen-groceries-page"${select.rootAttrs}>
 ${top}${pageError}
 ${allergenBanner}
-${renderGroceryStoreChips(view)}
-${sections}
-${putAwayLink(view)}
-${walkingOrderNote(view)}
-${empty}
+${selectable ? `${String(select.bars)}${String(select.head)}` : ""}
+${putAwayDock(view)}
+${String(layout)}
+${String(empty)}
+${clearForm}
 ${sheets}
-${groceryAddSheet(view, returnTo)}
+${groceryAddSheet(view)}
 ${putAwaySheet(view, returnTo)}
 ${
     view.shareEnabled
@@ -712,14 +1146,6 @@ ${
           })
         : ""
 }
-${confirmSheet({
-    id: FD_GROCERY_CLEAR_SHEET_ID,
-    title: "Clear checked",
-    message: "Remove every checked item from the list?",
-    action: "/kitchen/groceries/clear-checked",
-    confirmLabel: "Clear checked",
-    hiddenFields: { return_to: returnTo },
-})}
 </div>`;
 }
 

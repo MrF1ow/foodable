@@ -126,6 +126,33 @@ a.fd-item-row__face:focus-visible,
     outline-offset: 2px;
 }
 
+/* A check lead that is a button (a grocery line's check-off): the same ring,
+   a plain filled disc while `aria-checked` as the design draws it, with the
+   larger hit area unseen around it. */
+button.fd-item-row__check-btn {
+    padding: 0;
+    border: 0;
+    background: transparent;
+    font: inherit;
+}
+.fd-item-row__check-btn::before {
+    content: "";
+    position: absolute;
+    inset: calc(var(--space-sm) * -1);
+}
+.fd-item-row__check-btn[aria-checked="true"] .fd-item-row__check-box,
+.fd-item-row__done .fd-item-row__check-box {
+    border-color: var(--accent-fill);
+    background: var(--accent-fill);
+}
+.fd-item-row__done {
+    cursor: default;
+}
+.fd-item-row__check-btn:focus-visible .fd-item-row__check-box {
+    outline: 2px solid var(--accent-fill);
+    outline-offset: 2px;
+}
+
 /* A radio lead is the same ring; picked, it is a plain filled disc (no tick),
    and the row (a label) is the whole hit area. */
 .fd-item-row__check--radio .fd-item-row__check-input {

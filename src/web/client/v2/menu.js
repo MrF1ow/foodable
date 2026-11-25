@@ -34,6 +34,34 @@ function resetConfirms(root) {
     });
 }
 
+// A sheet clips what hangs out of it (its own overflow, and its scrolling
+// body), so a panel inside one is placed on the screen instead: fixed, under
+// the trigger when the room below fits it, else above, else on the side with
+// more room, scrolling inside itself.
+function placeInSheet(root, panel) {
+    delete panel.dataset.align;
+    delete panel.dataset.side;
+    panel.dataset.fixed = "";
+    panel.style.maxHeight = "";
+    panel.style.left = "0px";
+    panel.style.top = "0px";
+    const vw = document.documentElement.clientWidth;
+    const vh = window.innerHeight;
+    const box = root.getBoundingClientRect();
+    const width = panel.offsetWidth;
+    const height = panel.scrollHeight;
+    const gap = 4;
+    const left = Math.max(EDGE, Math.min(box.right - width, vw - EDGE - width));
+    const below = vh - EDGE - (box.bottom + gap);
+    const above = box.top - gap - EDGE;
+    const under = height <= below || (height > above && below >= above);
+    const room = Math.floor(under ? below : above);
+    const used = Math.min(height, room);
+    if (height > room) panel.style.maxHeight = room + "px";
+    panel.style.left = left + "px";
+    panel.style.top = (under ? box.bottom + gap : box.top - gap - used) + "px";
+}
+
 // Right-aligned under the trigger; flipped to start when that fits the screen
 // better, and above the trigger when it would leave the bottom. When neither
 // side fits, the side with more room is used and the panel is clamped inside
@@ -42,6 +70,12 @@ function place(root) {
     const panel = panelOf(root);
     const trigger = triggerOf(root);
     if (!panel || !trigger) return;
+    if (root.closest(".fd-sheet")) {
+        placeInSheet(root, panel);
+        return;
+    }
+    delete panel.dataset.fixed;
+    panel.style.top = "";
     delete panel.dataset.align;
     delete panel.dataset.side;
     panel.style.left = "";
@@ -327,6 +361,27 @@ function bindMenu(root) {
 function bindDocument() {
     if (documentBound) return;
     documentBound = true;
+    // A fixed panel inside a sheet follows its trigger while the sheet's body
+    // scrolls under it.
+    document.addEventListener(
+        "scroll",
+        (event) => {
+            const target =
+                event.target instanceof Element ? event.target : null;
+            document.querySelectorAll("[data-fd-menu]").forEach((root) => {
+                const panel = panelOf(root);
+                if (
+                    isOpen(root) &&
+                    panel &&
+                    panel.dataset.fixed !== undefined &&
+                    !(target && panel.contains(target))
+                ) {
+                    place(root);
+                }
+            });
+        },
+        true,
+    );
     // A press outside every open menu closes it; focus stays where the person
     // put it.
     document.addEventListener("pointerdown", (event) => {

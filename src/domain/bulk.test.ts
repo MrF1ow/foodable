@@ -2,6 +2,7 @@ import { expect, spyOn, test } from "bun:test";
 import {
     BULK_MAX_IDS,
     BulkSelectionError,
+    deleteGroceryLines,
     deleteSavedItems,
     discardFridgeItems,
     parseBulkIds,
@@ -358,4 +359,74 @@ test("deleteSavedItems takes an already archived food as done", async () => {
     });
     expect(result).toEqual({ status: "applied", count: 1 });
     expect((await foods.getFood(HH, rice.id))?.archivedAt).not.toBeNull();
+});
+
+async function groceryWith(names: string[]) {
+    const grocery = createMemoryGroceryStore();
+    const settings = createMemorySettingsStore();
+    const foods = createMemoryFoodsStore();
+    const store = await createGroceryStore(settings, HH, "Shop");
+    const lines = [];
+    for (const name of names) {
+        lines.push(
+            await addGroceryManualFood(grocery, settings, foods, {
+                householdId: HH,
+                storeId: store.id,
+                name,
+                amount: 1,
+                unit: "each",
+            }),
+        );
+    }
+    return { grocery, lines };
+}
+
+test("deleteGroceryLines deletes every picked line and no other", async () => {
+    const { grocery, lines } = await groceryWith(["Oats", "Oil", "Salt"]);
+    const result = await deleteGroceryLines(grocery, {
+        householdId: HH,
+        lineIds: [lines[0]!.id, lines[1]!.id],
+    });
+    expect(result).toEqual({ status: "applied", count: 2 });
+    expect((await grocery.listLines(HH)).map((line) => line.id)).toEqual([
+        lines[2]!.id,
+    ]);
+});
+
+test("deleteGroceryLines refuses a line that is gone when others are there, and deletes nothing", async () => {
+    const { grocery, lines } = await groceryWith(["Oats", "Oil"]);
+    await expect(
+        deleteGroceryLines(grocery, {
+            householdId: HH,
+            lineIds: [lines[0]!.id, "3f2b1c4e-0000-4000-8000-000000000000"],
+        }),
+    ).rejects.toBeInstanceOf(BulkSelectionError);
+    expect(await grocery.listLines(HH)).toHaveLength(2);
+});
+
+test("deleteGroceryLines answers a repeat as already done", async () => {
+    const { grocery, lines } = await groceryWith(["Oats"]);
+    const input = { householdId: HH, lineIds: [lines[0]!.id] };
+    await deleteGroceryLines(grocery, input);
+    expect(await deleteGroceryLines(grocery, input)).toEqual({
+        status: "already",
+        count: 0,
+    });
+});
+
+test("deleteGroceryLines refuses a line that went away between the read and the delete", async () => {
+    const { grocery, lines } = await groceryWith(["Oats", "Oil"]);
+    const racing: GroceryListStore = {
+        ...grocery,
+        async deleteLine(householdId, id) {
+            if (id === lines[1]!.id) return false;
+            return grocery.deleteLine(householdId, id);
+        },
+    };
+    await expect(
+        deleteGroceryLines(racing, {
+            householdId: HH,
+            lineIds: lines.map((line) => line.id),
+        }),
+    ).rejects.toBeInstanceOf(BulkSelectionError);
 });

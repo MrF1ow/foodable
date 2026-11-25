@@ -140,7 +140,7 @@ describe("/app-v2.css", () => {
         expect(css).not.toMatch(/@media[^{]*max-width/);
     });
 
-    test("Kitchen tab pages sit one 16px step under the tabs and keep Add and Share out of flow", () => {
+    test("Kitchen tab pages sit one 16px step under the tabs and keep the tab tools out of flow", () => {
         const css = readFileSync("./public/app/v2/kitchen.css", "utf8").replace(
             /\/\*[\s\S]*?\*\//g,
             "",
@@ -162,18 +162,13 @@ describe("/app-v2.css", () => {
         expect(desktop).toMatch(
             /\.fd-kitchen-usuals-page {[^}]*margin-top:\s*0/,
         );
-        // Add and Share are absolutely placed beside the tabs: no fixed
+        // The tab tools are absolutely placed beside the tabs: no fixed
         // negative margins pulling a row up into them.
         const tools = css.indexOf(".fd-kitchen-fridge-top {");
         expect(css.slice(tools, css.indexOf("}", tools))).toMatch(
             /position:\s*absolute/,
         );
         expect(css).not.toMatch(/margin-top:\s*calc\(-1 \* \(28px/);
-        // Share is the same 34px circle as Add on the phone (icon only), so
-        // it cannot cover the end of the Usuals tab on a narrow screen.
-        expect(css).toMatch(
-            /\.fd-kitchen-fridge-top \.fd-kitchen-grocery-share {[^}]*width:\s*34px/,
-        );
     });
 
     test("Help titles are plain, not capitals; Kitchen has no per-tab title classes", () => {
@@ -311,7 +306,9 @@ describe("/app-v2.js", () => {
         // +~0.4 KB Log sheet: a row's own link is followed only when it stays on this site.
         // +~1.8 KB Fridge: a Selection bar that asks in place (Cancel, Discard N) with the count in its verb, the count row, Use soon cards that open their item, the Add search and the Expires chips; the old row and Freeze scripts are gone.
         // +~0.7 KB Fridge: focus follows a Selection bar's question, and the Add search fills the hand form's Name.
-        expect(js.length).toBeLessThan(214_300);
+        // +~0.8 KB Groceries: Clear checked confirms in place (the dock and the put away sheet), and a Store or Section pull-down keeps the line sheet's unsaved amount and note.
+        // +~2.1 KB Menu: a pull-down inside a sheet is placed on the screen (fixed, under or over its trigger, scrolling inside itself), so the sheet cannot clip it.
+        expect(js.length).toBeLessThan(217_100);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

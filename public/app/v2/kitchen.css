@@ -32,39 +32,49 @@
 
 /* Fridge: one column on the phone, Use soon and the places stacked; two
    columns from 1024px (Use soon and the first place, then the rest). */
-.fd-kitchen-fridge-layout .fd-page-layout__columns {
+.fd-kitchen-fridge-layout .fd-page-layout__columns,
+.fd-kitchen-groceries-layout .fd-page-layout__columns {
     flex-direction: column;
     flex-wrap: nowrap;
     align-items: stretch;
     gap: var(--space-xl);
 }
-.fd-kitchen-fridge-layout .fd-page-layout__column {
+.fd-kitchen-fridge-layout .fd-page-layout__column,
+.fd-kitchen-groceries-layout .fd-page-layout__column {
     flex: none;
     gap: var(--space-xl);
     min-width: 0;
 }
-.fd-kitchen-fridge-layout .fd-page-layout__column:empty {
+.fd-kitchen-fridge-layout .fd-page-layout__column:empty,
+.fd-kitchen-groceries-layout .fd-page-layout__column:empty {
     display: none;
 }
-.fd-kitchen-loc {
+.fd-kitchen-loc,
+.fd-kitchen-grocery-section {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
 }
 /* A row's ⋯ is the bare glyph the design draws, not a raised circle. */
-.fd-kitchen-loc .fd-item-row .fd-menu > .fd-btn {
+:is(.fd-kitchen-loc, .fd-kitchen-grocery-section)
+    .fd-item-row
+    .fd-menu
+    > .fd-btn {
     background: transparent;
     color: var(--text-secondary);
 }
 /* A row that opens its item's sheet. */
-.fd-kitchen-loc [data-fd-sheet-row] {
+:is(.fd-kitchen-loc, .fd-kitchen-grocery-section) [data-fd-sheet-row] {
     cursor: pointer;
 }
-.fd-kitchen-loc [data-fd-sheet-row]:focus-visible {
+:is(.fd-kitchen-loc, .fd-kitchen-grocery-section)
+    [data-fd-sheet-row]:focus-visible {
     outline: var(--space-2xs) solid var(--accent-text);
     outline-offset: calc(var(--space-2xs) * -1);
 }
-.fd-kitchen-loc [data-fd-sheet-row] :is(button, a, summary) {
+:is(.fd-kitchen-loc, .fd-kitchen-grocery-section)
+    [data-fd-sheet-row]
+    :is(button, a, summary) {
     cursor: pointer;
 }
 
@@ -192,7 +202,16 @@
    neither Select nor + (the count row has Cancel). */
 .fd-kitchen-fridge-page[data-fd-selecting] .fd-kitchen-use-soon,
 .fd-kitchen-fridge-page[data-fd-selecting] .fd-kitchen-fridge-top,
-.fd-main:has(.fd-kitchen-fridge-page[data-fd-selecting])
+.fd-kitchen-groceries-page[data-fd-selecting] .fd-kitchen-fridge-top,
+.fd-kitchen-groceries-page[data-fd-selecting] .fd-kitchen-grocery-dock,
+.fd-kitchen-groceries-page[data-fd-selecting]
+    .fd-list-group[data-fd-grocery-add-row],
+.fd-main:has(
+        :is(
+            .fd-kitchen-fridge-page,
+            .fd-kitchen-groceries-page
+        )[data-fd-selecting]
+    )
     .fd-kitchen-head
     .fd-page-header__actions {
     display: none;
@@ -318,28 +337,37 @@
 }
 
 .fd-did-you-mean-block {
-    margin: 0 0 var(--fd-s-6);
-    padding: var(--fd-s-4);
-    border-radius: var(--radius-md);
-    background: var(--surface-raised);
+    margin: 0 0 var(--space-xl);
 }
 
 .fd-did-you-mean-heading {
-    margin: 0 0 var(--fd-s-4);
-    font: 400 14px/20px var(--font-body);
+    margin: 0 0 var(--space-md);
+    font: 600 15px/20px var(--font-body);
     color: var(--text-primary);
 }
 
-.fd-did-you-mean-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-4);
+/* Grids, not flex: a sheet's buttons share the row (flex: 1 1 0), which
+ * would collapse them in a column. Each button takes the sheet's width. */
+.fd-did-you-mean-form,
+.fd-did-you-mean-candidates {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-md);
 }
 
 .fd-did-you-mean-candidates {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--fd-s-2);
+    gap: var(--space-sm);
+}
+
+/* A long food name wraps inside the button instead of widening the sheet. */
+.fd-sheet .fd-did-you-mean-candidates .fd-btn {
+    width: 100%;
+    height: auto;
+    min-height: 52px;
+    padding-block: var(--space-md);
+    white-space: normal;
+    line-height: 1.25;
+    text-align: center;
 }
 
 .fd-kitchen-sheet-label {
@@ -396,7 +424,7 @@
     color: var(--status-over);
 }
 
-/* Kitchen · Groceries (phone) */
+/* Kitchen · Groceries */
 
 .fd-kitchen-groceries-page {
     display: flex;
@@ -405,85 +433,68 @@
     padding: 0 0 var(--fd-s-12);
 }
 
-/* Share rides level with the tabs at the right, left of the add button,
-   as the same 34px circle: icon only, so it can never cover the end of the
-   Usuals tab on a narrow phone. The label stays for assistive tech; from
-   1024px Share moves into the header's tools. */
-.fd-kitchen-fridge-top .fd-kitchen-grocery-share {
-    width: 34px;
+/* While picking, the pick box is the row's only ring. */
+.fd-kitchen-groceries-page[data-fd-selecting] .fd-item-row__check-btn {
+    display: none;
+}
+
+/* The checked lines' dock: Clear checked and Put away N, floating over the
+   phone page just above the Nav bar; from 1024px it is a right-aligned row
+   under the header. */
+.fd-kitchen-grocery-dock {
+    position: fixed;
+    bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    z-index: 45;
+    display: flex;
+    gap: var(--space-md);
+    width: min(calc(100vw - 2 * var(--space-gutter)), 350px);
+    transform: translateX(-50%);
+}
+.fd-kitchen-grocery-dock .fd-btn[data-fd-btn] {
+    flex: 1 1 0;
     min-width: 0;
-    height: 34px;
-    min-height: 0;
+    height: 48px;
+    border-radius: var(--radius-md);
+}
+.fd-kitchen-grocery-dock .fd-btn:not(.fd-btn--primary) {
+    background: var(--surface-raised);
+}
+/* The last row stays clear of the dock. */
+.fd-kitchen-groceries-page:has(.fd-kitchen-grocery-dock) {
+    padding-bottom: calc(48px + var(--space-xl));
+}
+
+/* Add to list: the running-low chips, the allergen retry. */
+.fd-kitchen-add-low {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+.fd-kitchen-allergen-retry {
+    margin: 0 0 var(--space-md);
+}
+
+/* Put away: one block per line, the row with its amount, then the pickers. */
+.fd-kitchen-put-line {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
     margin: 0;
+    padding: 0 0 var(--space-lg);
+}
+.fd-kitchen-put-line + .fd-kitchen-put-line {
+    padding-top: var(--space-lg);
+    border-top: 1px solid var(--line);
+}
+.fd-kitchen-put-line .fd-sheet__section {
     padding: 0;
-    aspect-ratio: 1;
-}
-
-.fd-kitchen-fridge-top .fd-kitchen-grocery-share span {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    overflow: hidden;
-    clip-path: inset(50%);
-    white-space: nowrap;
-}
-
-.fd-kitchen-grocery-stores {
-    margin: 0 calc(-1 * var(--space-gutter));
-    padding: 0 var(--space-gutter);
-}
-
-.fd-kitchen-grocery-store + .fd-kitchen-grocery-store {
-    margin-top: var(--space-section);
-}
-
-.fd-kitchen-grocery-store__title {
-    margin: 0 0 var(--fd-s-4);
-    font: 600 17px/22px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-kitchen-grocery-section + .fd-kitchen-grocery-section {
-    margin-top: var(--fd-s-4);
 }
 
 .fd-kitchen-grocery-unknown-allergen {
     margin: 0;
     font: 400 14px/20px var(--font-body);
     color: var(--status-over);
-}
-
-.fd-kitchen-grocery-put-link {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--fd-s-4);
-    margin: 0;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    font: 500 15px/20px var(--font-body);
-    color: var(--accent-text);
-    cursor: pointer;
-}
-
-.fd-kitchen-grocery-put-link__chev .fd-icon {
-    width: 16px;
-    height: 16px;
-}
-
-.fd-kitchen-grocery-footnote {
-    margin: 0;
-    font: 400 13px/18px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-grocery-footnote a {
-    color: var(--accent-text);
-    text-decoration: none;
-}
-
-.fd-kitchen-grocery-clear-quiet {
-    color: var(--text-secondary);
 }
 
 .fd-kitchen-usuals-page {
@@ -593,143 +604,6 @@ button.fd-kitchen-sheet-row {
 
 .fd-kitchen-usuals-page .fd-row--usual .fd-row__body--link {
     cursor: pointer;
-}
-
-.fd-kitchen-put-row {
-    padding: var(--fd-s-10) 0;
-    border-bottom: 1px solid var(--line);
-}
-
-.fd-kitchen-put-row:first-child {
-    padding-top: 0;
-}
-
-.fd-kitchen-put-row__head {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: var(--fd-s-10);
-    margin-bottom: var(--fd-s-10);
-}
-
-.fd-kitchen-put-row__title {
-    font: 600 16px/22px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-kitchen-put-row__amount {
-    flex: none;
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-put-row__controls {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--fd-s-10);
-}
-
-.fd-kitchen-put-loc .fd-chips {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    padding: 2px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-}
-
-.fd-kitchen-put-loc .fd-chip--choice .fd-chip__face {
-    padding: 6px 12px;
-    border: 0;
-    background: transparent;
-    border-radius: var(--radius-pill);
-    font: 500 13px/18px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-put-loc .fd-chip__input:checked + .fd-chip__face {
-    border-color: var(--text-primary);
-    background: var(--text-primary);
-    color: var(--surface-bg);
-}
-
-.fd-kitchen-put-date {
-    position: relative;
-    flex: none;
-}
-
-.fd-kitchen-put-date__chip {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--fd-s-6);
-    margin: 0;
-    padding: 6px 12px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    font: 500 13px/18px var(--font-body);
-    color: var(--text-secondary);
-    cursor: pointer;
-}
-
-.fd-kitchen-put-date__input {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    margin: 0;
-    opacity: 0;
-    cursor: pointer;
-}
-
-.fd-kitchen-grocery-empty {
-    margin: 0;
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-sheet-kvs {
-    margin: 0;
-    display: grid;
-    gap: var(--fd-s-6);
-}
-
-.fd-kitchen-sheet-kvs dt {
-    margin: 0;
-    font: 600 12px/16px var(--font-body);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-kitchen-sheet-kvs dd {
-    margin: 0;
-    font: 400 16px/22px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-kitchen-put-line {
-    margin: 0 0 var(--fd-s-12);
-    padding: 0;
-    border: none;
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-6);
-}
-
-.fd-kitchen-put-line__title {
-    padding: 0;
-    font: 600 16px/22px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-kitchen-grocery-put-note {
-    margin: 0;
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
 }
 
 /* Usual sheet: the Restock row and the "Add when it runs low" switch sit in
@@ -876,13 +750,15 @@ button.fd-kitchen-sheet-row {
     .fd-kitchen-head .fd-page-header__actions {
         display: flex;
     }
-    .fd-kitchen-fridge-layout .fd-page-layout__columns {
+    .fd-kitchen-fridge-layout .fd-page-layout__columns,
+    .fd-kitchen-groceries-layout .fd-page-layout__columns {
         flex-direction: row;
         flex-wrap: wrap;
         align-items: flex-start;
         gap: var(--space-3xl);
     }
-    .fd-kitchen-fridge-layout .fd-page-layout__column {
+    .fd-kitchen-fridge-layout .fd-page-layout__column,
+    .fd-kitchen-groceries-layout .fd-page-layout__column {
         flex: 1 1 0;
     }
     /* The item sheet's Save sits at the bottom of the side panel. */
@@ -890,7 +766,8 @@ button.fd-kitchen-sheet-row {
         flex: 1 1 auto;
     }
     /* Picking turns the page into one 720 wide list. */
-    .fd-kitchen-fridge-page[data-fd-selecting] .fd-page-layout__columns {
+    :is(.fd-kitchen-fridge-page, .fd-kitchen-groceries-page)[data-fd-selecting]
+        .fd-page-layout__columns {
         flex-direction: column;
         align-items: stretch;
         width: 100%;
@@ -898,12 +775,13 @@ button.fd-kitchen-sheet-row {
         margin-inline: auto;
         gap: var(--space-xl);
     }
-    .fd-kitchen-fridge-page[data-fd-selecting] .fd-page-layout__column {
+    :is(.fd-kitchen-fridge-page, .fd-kitchen-groceries-page)[data-fd-selecting]
+        .fd-page-layout__column {
         flex: none;
         width: 100%;
     }
-    .fd-kitchen-fridge-page[data-fd-selecting] .fd-select-head,
-    .fd-kitchen-fridge-page[data-fd-selecting] .fd-select-bar-slot--desktop {
+    :is(.fd-kitchen-fridge-page, .fd-kitchen-groceries-page)[data-fd-selecting]
+        :is(.fd-select-head, .fd-select-bar-slot--desktop) {
         width: 100%;
         max-width: 720px;
         margin-inline: auto;
@@ -956,21 +834,24 @@ button.fd-kitchen-sheet-row {
         display: flex;
     }
 
-    .fd-kitchen-overview-grocery-section .fd-list {
-        display: flex;
-        flex-direction: column;
-        gap: 0;
+    .fd-kitchen-grocery-dock {
+        position: static;
+        justify-content: flex-end;
+        width: 100%;
+        transform: none;
+    }
+    .fd-kitchen-grocery-dock .fd-btn[data-fd-btn] {
+        flex: none;
+        height: var(--control-lg-height);
+    }
+    .fd-kitchen-groceries-page:has(.fd-kitchen-grocery-dock) {
+        padding-bottom: var(--space-section);
     }
 
     .fd-kitchen-groceries-page {
         width: 100%;
         margin-top: 0;
         padding-bottom: var(--space-section);
-    }
-
-    .fd-kitchen-grocery-stores {
-        margin: 0;
-        padding: 0;
     }
 
     .fd-kitchen-usuals-page {
