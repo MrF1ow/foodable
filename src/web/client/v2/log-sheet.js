@@ -14,19 +14,6 @@ const MEAL_LABEL = {
     snack: "Add to snacks",
 };
 
-// A row's own link, only when it stays on this site (an attribute is never
-// trusted to name a javascript: or another origin's address).
-function sameOriginPath(raw) {
-    if (!raw) return null;
-    try {
-        const url = new URL(raw, window.location.href);
-        if (url.origin !== window.location.origin) return null;
-        return url.pathname + url.search + url.hash;
-    } catch (_) {
-        return null;
-    }
-}
-
 function round1(n) {
     return Math.round(n * 10) / 10;
 }
@@ -339,7 +326,7 @@ function searchRowHtml(item, kind, rowIndex) {
     const pickAttr = relivable
         ? ` data-fd-log-row-pick="${payload}"`
         : againMealId
-          ? ` data-fd-log-row-open="${esc(item.open ?? "")}"`
+          ? ` data-fd-log-row-meal="${esc(againMealId)}"`
           : "";
     const open = typeof item.open === "string" ? item.open : "";
     // A past meal opens the log form, not a page: its row is no link.
@@ -1180,7 +1167,7 @@ function bindOpeners() {
         // opens the log form, or the meal's own search when it has no single
         // food. The row's links and its plus act for themselves.
         const row = event.target.closest?.(
-            "[data-fd-log-row-pick], [data-fd-log-row-open]",
+            "[data-fd-log-row-pick], [data-fd-log-row-meal]",
         );
         if (
             row &&
@@ -1193,9 +1180,12 @@ function bindOpeners() {
                     pickItem(JSON.parse(raw));
                 } catch (_) {}
             } else {
-                const open = sameOriginPath(
-                    row.getAttribute("data-fd-log-row-open"),
-                );
+                // The meal's own search: the path is built here from its id,
+                // never taken from the page as a whole address.
+                const mealId = row.getAttribute("data-fd-log-row-meal");
+                const open = mealId
+                    ? `/?log=meal:${encodeURIComponent(mealId)}`
+                    : "";
                 if (open && window.Turbo?.visit) window.Turbo.visit(open);
                 else if (open) window.location.assign(open);
             }
