@@ -43,7 +43,12 @@ import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
+    notAllowedHtml,
+    notFoundHtml,
 } from "../src/web/loaders.js";
+import { renderShareViewPage } from "../src/web/pages/share-view.js";
+import { LOGIN, LOGIN_ERRORS } from "../src/copy/login.js";
+import { field } from "../src/web/components/v2/field.js";
 import {
     getAppCss,
     getAppJs,
@@ -1836,6 +1841,69 @@ async function pages(
         }),
         "create-household": createHouseholdFormHtml(undefined, theme),
         forbidden: forbiddenDashboardHtml(theme),
+        "not-allowed": notAllowedHtml(undefined, theme),
+        "not-found": notFoundHtml("Page", theme),
+        // The public /s/:token pages: no session, no shell.
+        "share-recipe": renderShareViewPage(
+            {
+                kind: "recipe",
+                recipe: {
+                    name: "Smoky red lentil soup",
+                    portions: 4,
+                    instructions:
+                        "1. Soften the onion and garlic in olive oil.\n2. Stir in the lentils, smoked paprika and stock, then simmer for 25 minutes until the lentils are soft and the soup has thickened, and blend half of it for body.\n3. Finish with lemon and parsley.",
+                    tags: ["Dinner", "Vegan", "Batch cook"],
+                    ingredients: [
+                        {
+                            name: "Red lentils",
+                            amount: 300,
+                            unit: "g",
+                            note: null,
+                        },
+                        {
+                            name: "Onion",
+                            amount: 2,
+                            unit: "each",
+                            note: "Finely diced",
+                        },
+                        {
+                            name: "Smoked paprika",
+                            amount: null,
+                            unit: null,
+                            note: null,
+                        },
+                    ],
+                },
+            },
+            theme,
+        ),
+        "share-groceries": renderShareViewPage(
+            {
+                kind: "grocery_list",
+                list: {
+                    stores: [
+                        {
+                            name: "Corner Shop",
+                            lines: [
+                                {
+                                    name: "Leeks",
+                                    amount: 3,
+                                    unit: "each",
+                                    checked: false,
+                                },
+                                {
+                                    name: "Eggs",
+                                    amount: 12,
+                                    unit: "each",
+                                    checked: true,
+                                },
+                            ],
+                        },
+                    ],
+                },
+            },
+            theme,
+        ),
     };
 }
 
@@ -1926,6 +1994,9 @@ const ROUTE_BASE: Record<string, string> = {
         "settings-ai-changes",
     "/settings/help?q=zip": "help-search",
     "/create-household": "create-household",
+    "/gate-forbidden": "forbidden",
+    "/gate-not-allowed": "not-allowed",
+    "/gate-not-found": "not-found",
     "/foods/f-chicken": "product-full",
 };
 
@@ -1992,12 +2063,45 @@ async function fileHtml(file: string, path: string) {
     return stamp(raw, path);
 }
 
-async function loginDocument() {
+/**
+ * The login template filled as `renderLoginPage` fills it: the same hashed
+ * stylesheet and script hrefs as the app pages carry (so a login page that
+ * arrives over Turbo after the session expires is what the real one is), and
+ * one of the design's four states.
+ */
+async function loginDocument(
+    state: "default" | "invite" | "connect" | "error" = "default",
+) {
+    const widgets = await import("../src/widgets.js");
     const raw = await Bun.file("./public/login.html").text();
+    const invite = String(
+        field({
+            id: "invite_code",
+            name: "invite_code",
+            label: LOGIN.inviteCodeLabel,
+            labelHidden: true,
+            placeholder: LOGIN.inviteCodeLabel,
+            type: "text",
+            autocomplete: "off",
+            autocapitalize: "none",
+            spellcheck: false,
+        }),
+    );
+    const error = `<p class="fd-auth__error" role="alert">${LOGIN_ERRORS.invalidCredentials}</p>`;
+    const hint =
+        state === "connect"
+            ? `${LOGIN.signingInToConnect} claude.ai`
+            : LOGIN.tagline;
     return raw
-        .replaceAll("{{SESSION_ID}}", "sess-p8")
-        .replaceAll("{{ERROR}}", "")
-        .replaceAll("{{CONNECT_HINT}}", "");
+        .replaceAll("{{SESSION_ID}}", () => "sess-p8")
+        .replaceAll("{{ERROR}}", () => (state === "error" ? error : ""))
+        .replaceAll("{{CONNECT_HINT}}", () => hint)
+        .replaceAll("{{INVITE_FIELDS}}", () =>
+            state === "invite" ? invite : "",
+        )
+        .replaceAll("{{APP_CSS_HREF}}", () => widgets.appStylesheetHref())
+        .replaceAll("{{APP_V2_CSS_HREF}}", () => widgets.appV2StylesheetHref())
+        .replaceAll("{{APP_JS_HREF}}", () => widgets.appScriptHref());
 }
 
 const server = Bun.serve({
@@ -2217,7 +2321,12 @@ const server = Bun.serve({
             );
         }
         if (path === "/login-test") {
-            const html = await loginDocument();
+            const asked = url.searchParams.get("state");
+            const html = await loginDocument(
+                asked === "invite" || asked === "connect" || asked === "error"
+                    ? asked
+                    : "default",
+            );
             return new Response(html, {
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
@@ -2416,6 +2525,22 @@ const server = Bun.serve({
                 status: 200,
                 headers: { "content-type": "text/html; charset=utf-8" },
             });
+        }
+        // The public share pages need no session. With `mcp-share-links` off
+        // every link answers the route's one plain 404.
+        if (path === "/s/recipe-test" || path === "/s/list-test") {
+            if (url.searchParams.get("share") === "off") {
+                return new Response("Not found", {
+                    status: 404,
+                    headers: { "content-type": "text/plain; charset=utf-8" },
+                });
+            }
+            const base =
+                path === "/s/recipe-test" ? "share-recipe" : "share-groceries";
+            return new Response(
+                await fileHtml(`${base}-${themeFileSuffix()}.html`, path),
+                { headers: { "content-type": "text/html; charset=utf-8" } },
+            );
         }
         // A page the query changes (the readers terms) has its own entry.
         const routeKey = ROUTE_BASE[path + url.search]

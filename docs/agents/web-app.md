@@ -12,11 +12,13 @@ Do not add marketing routes, and do not restore `gen-index.ts`, `gen-tools.ts`, 
 
 ## Login chrome and assets
 
-Login is a single card styled by `/app.css`, the household app's base stylesheet. It follows the OS theme and has no header or theme toggle. It uses the app's self-hosted fonts and brand layer. Consent `{terms}` / `{privacy}` render as plain text, not anchors.
+Sign in is the design's Brand hero (`brandHero`, with the line under the name: the tagline, or "Sign in to connect <host>" when an agent is signing in) over one 350 px column: an email-or-username box, a password box (`field`, named by placeholder and by a label no one sees), an invite-code box when sign-up is by invite, the wrong-credentials line in place above Continue, and the consent sentence as a caption. It is styled by `/app.css` and `/app-v2.css` (`public/app/v2/auth.css`, `brand-hero.css`, `field.css`, `button.css`), follows the OS theme and has no header or theme toggle. `{terms}` / `{privacy}` render as plain text, not anchors. The password box has no `minlength`: sign-in accepts any existing password however short, and a new account's own minimum (`MIN_PASSWORD_LENGTH`, 12) is checked on the server and answered in place; any create-account field uses `MIN_PASSWORD_LENGTH`. The form keeps the class `auth-form` (a hook, no styles): `client/v2/shell.js` and `check:nav` find the login HTML by it, so an expired session's login page reloads instead of morphing into the app.
+
+The gate pages (create household, no household yet, not allowed, not found) are the same hero and column, built in `pages/v2/gate.ts` and wrapped by `renderGatePage` in `src/web/shell.ts`: no bar and no Log out in a corner. A 403 for someone with no household is the no-household gate (`forbiddenDashboardHtml`); a refusal to a member (owner, manager or action checks, a `?member=` they cannot view) is the Not allowed gate (`notAllowedHtml`, `refusalHtml(member)` picks), with the refusal's own words and Go to Today, same 403. Log out (a full load) is on the no-household gate and under Create household; not found offers Go to Today. `renderBarePage` (logo and Log out on top) is left for the share probe. The public share page (`pages/share-view.ts`, `/s/:token`) is a bare document of Chip group, Section header, List group and Item row, with no script, chrome or toast region; with `mcp-share-links` off every link answers the route's plain 404, as before.
 
 Static assets served: `/app.css` and `/app-v2.css` (assembled, see `docs/agents/app-styling.md`), `/app.js` and `/app-v2.js` (the client bundles from `src/web/client/` and `client/v2/`), `/favicon.ico`, `/apple-touch-icon.png`, `/brand/*.svg`, `/fonts/:file` (allowlisted in `APP_FONTS`), `/robots.txt`. `public/styles.css`, `public/site.js` and the old marketing font path stay gone; `src/public-site.test.ts` fails if they come back.
 
-Re-run `bun run gen:all` after editing login copy, `site-partials.ts` or `gen-login.ts`. The generated file is still a template: `{{SESSION_ID}}` and `{{ERROR}}` are filled per request.
+Re-run `bun run gen:all` after editing login copy, `site-partials.ts` or `gen-login.ts`. The generated file is still a template: `renderLoginPage` fills `{{SESSION_ID}}`, `{{CONNECT_HINT}}` (the line under the name), `{{ERROR}}`, `{{INVITE_FIELDS}}` and the stylesheet and script hrefs per request, escaping every value.
 
 The first-user / closed-household flow is documented in `docs/self-hosting.md` ("First-user flow"). Deploy-day steps are in `docs/deploy-checklist.md`.
 
@@ -37,7 +39,7 @@ Flows that opt out of Turbo (each answers with something Turbo cannot render as 
 - the invite-create form (Settings › Household › Invites; the one-time code on a 200 page);
 - the Share sheet form (`share-sheet.ts`, the one-time link on a 200 page);
 - Export data on Settings home (the 303 goes to a download link, not a page);
-- the logout link, on the Account page and the gate app bar.
+- the logout link, on the Account page, the no-household gate and the create-household gate.
 
 Everything else in Settings is Turbo: the sidebar item, the account row and chip, every Settings back link, the account forms (name, time zone, photo), the Display control on Settings home, and the Units, Nutrients shown, AI connections (Disconnect, the agent switches, Undo) and Help search forms. No Settings form is left waiting. iOS Safari's toolbar tint is synced in place on the visit (see Theme sync below), so a theme change no longer needs a full load; the tint on a real iPhone is what the user's audit checks.
 

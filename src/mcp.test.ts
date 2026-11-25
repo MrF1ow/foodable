@@ -17168,6 +17168,13 @@ describe("authenticated dashboard HTTP", () => {
             body: "display_name=Kid&password=password1234&username=kid",
         });
         expect(r.status).toBe(403);
+        // A member is refused with Not allowed and a way back, not told they
+        // have no household.
+        const html = await r.text();
+        expect(html).toContain("Not allowed");
+        expect(html).toContain('href="/"');
+        expect(html).not.toContain("No household yet");
+        expect(html).not.toContain("/logout");
         expect(db.members.map((m) => m.displayName)).toEqual(["Alice", "Bob"]);
         expect(db.addedLogins).toEqual([]);
     });
@@ -17230,6 +17237,29 @@ describe("authenticated dashboard HTTP", () => {
         expect(
             db.members.map((m) => `${m.displayName}:${m.role}`).sort(),
         ).toEqual(["Alice:member", "Bob:owner"]);
+    });
+
+    test("a manager-only page refuses a member with Not allowed and a way back", async () => {
+        const r = await siteApp.request(
+            "http://x/settings/household/stores/add",
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(bob),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "name=Safeway",
+            },
+        );
+        expect(r.status).toBe(403);
+        expect(await db.settingsStore.listStores("hh-1")).toEqual([]);
+        const html = await r.text();
+        expect(html).toContain("Not allowed");
+        expect(html).toContain(
+            '<a class="fd-btn fd-btn--primary" data-fd-btn href="/">',
+        );
+        expect(html).not.toContain("No household yet");
+        expect(html).not.toContain("/logout");
     });
 
     test("a member cannot take or hand out ownership", async () => {
@@ -17593,7 +17623,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(403);
         const html = await r.text();
-        expect(html).toContain("household membership");
+        expect(html).toContain("No household yet");
         expect(html).not.toContain("<h1>Fridge</h1>");
     });
 
@@ -18128,7 +18158,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(403);
         const html = await r.text();
-        expect(html).toContain("household membership");
+        expect(html).toContain("No household yet");
         expect(html).not.toContain("<h1>Recipes</h1>");
     });
 
@@ -18401,7 +18431,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(403);
         const html = await r.text();
-        expect(html).toContain("household membership");
+        expect(html).toContain("No household yet");
         expect(html).not.toContain("fd-kitchen-groceries-page");
     });
 
@@ -18544,7 +18574,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(403);
         const html = await r.text();
-        expect(html).toContain("household membership");
+        expect(html).toContain("No household yet");
         expect(html).not.toContain("<h1>Settings</h1>");
     });
 
@@ -18632,13 +18662,18 @@ describe("authenticated dashboard HTTP", () => {
         );
     });
 
-    test("?member= of a stranger is 403", async () => {
+    test("?member= of a stranger is 403, Not allowed with a way back to Today", async () => {
         const r = await siteApp.request(`http://x/?member=${outsider}`, {
             headers: { cookie: cookieFor(alice) },
         });
         expect(r.status).toBe(403);
         const html = await r.text();
-        expect(html).toContain("household membership");
+        expect(html).toContain("Not allowed");
+        expect(html).toContain(
+            '<a class="fd-btn fd-btn--primary" data-fd-btn href="/">',
+        );
+        expect(html).not.toContain("No household yet");
+        expect(html).not.toContain("/logout");
         expect(html).not.toContain("<iframe");
     });
 
@@ -18648,7 +18683,7 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(r.status).toBe(403);
         const html = await r.text();
-        expect(html).toContain("household membership");
+        expect(html).toContain("No household yet");
         expect(html).not.toContain('action="/create-household"');
         expect(html).not.toContain("<iframe");
     });

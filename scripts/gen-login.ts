@@ -3,8 +3,9 @@
  *
  * This is a TEMPLATE, not a final document: src/oauth.ts's renderLoginPage()
  * reads the output this writes and fills in {{SESSION_ID}}, {{CONNECT_HINT}}
- * and {{ERROR}} at request time. Those tokens must reach the written file untouched; nothing
- * below interpolates them.
+ * (the line under the name), {{ERROR}}, {{INVITE_FIELDS}} and the stylesheet
+ * and script hrefs at request time. Those tokens must reach the written file
+ * untouched; nothing below interpolates them.
  *
  * Re-run after editing src/copy/login.ts:
  *   bun run scripts/gen-login.ts
@@ -12,6 +13,9 @@
  */
 
 import { HTML_LANG } from "../src/routes.js";
+import { brandHero } from "../src/web/components/v2/brand-hero.js";
+import { button } from "../src/web/components/v2/button.js";
+import { field } from "../src/web/components/v2/field.js";
 import { generatedBanner } from "./site-partials.js";
 import { escapeHtml as esc } from "../src/html.js";
 import { appHead } from "../src/web/shell.js";
@@ -60,12 +64,15 @@ await getAppJs();
 function loginAppHead(title: string): string {
     return appHead(title, "system", "page")
         .replace(/href="[^"]*app\.css[^"]*"/, 'href="{{APP_CSS_HREF}}"')
-        .replace(/src="[^"]*app\.js[^"]*"/, 'src="{{APP_JS_HREF}}"');
+        .replace(/src="[^"]*app\.js[^"]*"/, 'src="{{APP_JS_HREF}}"')
+        .concat(
+            '\n<link rel="stylesheet" href="{{APP_V2_CSS_HREF}}" data-turbo-track="reload" />',
+        );
 }
 
 function renderDoc(doc: LoginDoc): string {
     // appHead escapes the title itself.
-    const head = loginAppHead(`${doc.title} — ${doc.subtitle}`)
+    const head = loginAppHead(`${doc.title} — ${doc.heading}`)
         .split("\n")
         .map((line) => `        ${line}`)
         .join("\n");
@@ -76,9 +83,46 @@ function renderDoc(doc: LoginDoc): string {
         .replace("{terms}", () => esc(doc.termsLinkText))
         .replace("{privacy}", () => esc(doc.privacyLinkText));
 
-    // Styled by /app.css, the household app's stylesheet, with the app's own
-    // <head> (appHead). No data-theme on <html>: login always follows the OS
-    // theme.
+    // Styled by /app.css and /app-v2.css with the app's own <head> (appHead).
+    // No data-theme on <html>: login always follows the OS theme. The line
+    // under the name is {{CONNECT_HINT}}: the tagline, or "Sign in to
+    // connect <host>" when an agent is signing in. The `/approve` form keeps
+    // its route, method, fields and hidden field; a boxed field is named by
+    // its placeholder and by a label no one sees. `auth-form` styles nothing:
+    // client/v2/shell.js and check:nav find the login HTML by it, so an
+    // expired session's login page reloads instead of morphing into the app.
+    const hero = brandHero({ title: doc.title, tagline: "{{CONNECT_HINT}}" });
+    const emailField = field({
+        id: "email",
+        name: "email",
+        label: doc.emailLabel,
+        labelHidden: true,
+        placeholder: doc.emailLabel,
+        type: "text",
+        required: true,
+        autocomplete: "username",
+        autocapitalize: "none",
+        spellcheck: false,
+    });
+    // No minlength: the server lets any existing password sign in, however
+    // short. A new account's own minimum (MIN_PASSWORD_LENGTH) is checked
+    // there and answered in place with {{ERROR}}.
+    const passwordField = field({
+        id: "password",
+        name: "password",
+        label: doc.passwordLabel,
+        labelHidden: true,
+        placeholder: doc.passwordLabel,
+        type: "password",
+        required: true,
+        autocomplete: "current-password",
+    });
+    const submit = button({
+        label: doc.continueButton,
+        variant: "primary",
+        type: "submit",
+        attrs: { name: "action", value: "login" },
+    });
     return `<!doctype html>
 <html lang="${HTML_LANG.en}">
     <head>
@@ -91,33 +135,22 @@ ${head}
         <meta name="robots" content="noindex, nofollow" />
         <meta name="turbo-visit-control" content="reload" />
     </head>
-    <body class="auth">
+    <body class="fd-body fd-auth-body">
 ${generatedBanner("scripts/gen-login.ts")}
-        <main id="main" class="auth-stage native">
-            <div class="auth-card panel">
-                <div class="auth-head">
-                    <img class="auth-mark" src="/brand/mark.svg" width="51" height="48" alt="" />
-                    <h1 class="auth-title">${esc(doc.title)}</h1>
-                    <p class="auth-sub">${esc(doc.subtitle)}</p>
-                </div>
-
-                {{CONNECT_HINT}}
-                {{ERROR}}
-
-                <form method="POST" action="/approve" class="auth-form" data-turbo="false">
+        <main id="main" class="fd-auth native">
+            <h1 class="fd-visually-hidden">${esc(doc.heading)}</h1>
+            ${hero}
+            <div class="fd-auth__content">
+                <form method="POST" action="/approve" class="auth-form fd-auth__form" data-turbo="false">
                     <input type="hidden" name="session_id" value="{{SESSION_ID}}" />
-                    <label for="email">${esc(doc.emailLabel)}</label>
-                    <input type="text" id="email" name="email" required autocomplete="username" autocapitalize="none" spellcheck="false" />
-                    <label for="password">${esc(doc.passwordLabel)}</label>
-                    <input type="password" id="password" name="password" required minlength="6" autocomplete="current-password" />
+                    ${emailField}
+                    ${passwordField}
                     {{INVITE_FIELDS}}
-                    <button type="submit" name="action" value="login" class="btn-primary">${esc(doc.continueButton)}</button>
-                    <p class="auth-note">${consent}</p>
-                    <p class="auth-note">${esc(doc.newHereNote)}</p>
-                    <p class="auth-note">${esc(doc.afterConnectNote)}</p>
+                    {{ERROR}}
+                    ${submit}
                 </form>
+                <p class="fd-auth__caption">${consent}</p>
             </div>
-            <p class="auth-foot">${esc(doc.footerNote)}</p>
         </main>
     </body>
 </html>

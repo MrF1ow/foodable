@@ -191,8 +191,13 @@ import {
     loadViewerNotices,
     viewerChromeWithAttention,
 } from "./attention.js";
-import { errorBanner, emptyState, pageHeader, field } from "./components/ui.js";
-import { renderBarePage, type ThemePref } from "./shell.js";
+import { renderGatePage, type ThemePref } from "./shell.js";
+import {
+    createHouseholdGate,
+    noHouseholdGate,
+    notAllowedGate,
+    notFoundGate,
+} from "./pages/v2/gate.js";
 import { householdClock, householdToday } from "../db/restock.js";
 import { loadWeekPlanView } from "./loaders-plan.js";
 import { isPlanDate, type PlanSlot } from "../domain/plan.js";
@@ -262,31 +267,46 @@ export async function weighInPrefillForUser(
     };
 }
 
-export function forbiddenDashboardHtml(
+/** The 403 for a person with no household: Log out is their way out. */
+export function forbiddenDashboardHtml(theme: ThemePref = "system"): string {
+    return renderGatePage("Household", noHouseholdGate(), theme);
+}
+
+/** The 403 for someone who is in the household but may not do this: they go
+ * back to Today and stay signed in. */
+export function notAllowedHtml(
+    message?: string,
     theme: ThemePref = "system",
-    message = "You need a household membership to view this dashboard.",
 ): string {
-    return renderBarePage("Household", emptyState(message), theme);
+    return renderGatePage("Not allowed", notAllowedGate(message), theme);
+}
+
+/** The right 403 for a refusal: no household for a person without one, Not
+ * allowed for a member. */
+export function refusalHtml(
+    member: HouseholdMember | null | undefined,
+    message?: string,
+    theme: ThemePref = "system",
+): string {
+    return member == null
+        ? forbiddenDashboardHtml(theme)
+        : notAllowedHtml(message, theme);
 }
 
 export function createHouseholdFormHtml(
     error?: string,
     theme: ThemePref = "system",
 ): string {
-    return renderBarePage(
+    return renderGatePage(
         "Create household",
-        `${pageHeader({
-            title: "Create household",
-            sub: `<p class="muted">Name the household. Everyone else is added from Household.</p>`,
-        })}
-        ${errorBanner(error)}
-        <form method="POST" action="/create-household" class="create-household panel">
-            ${field({ id: "household_name", label: "Household name", control: `<input id="household_name" name="household_name" required maxlength="80" />` })}
-            ${field({ id: "display_name", label: "Your name", control: `<input id="display_name" name="display_name" required maxlength="80" />` })}
-            <button type="submit" class="btn-primary">Create household</button>
-        </form>`,
+        createHouseholdGate(error),
         theme,
     );
+}
+
+/** A page, store or pair that is not there: 404 at the call site. */
+export function notFoundHtml(what = "Page", theme: ThemePref = "system") {
+    return renderGatePage("Not found", notFoundGate(what), theme);
 }
 
 type MemberGate =
@@ -347,13 +367,13 @@ export async function renderDashboardPage(
     if (requestedMember && requestedMember !== viewerUserId) {
         const requested = await getHouseholdMembership(requestedMember);
         if (requested == null) {
-            return { status: 403, html: forbiddenDashboardHtml() };
+            return { status: 403, html: notAllowedHtml() };
         }
         subject = requested;
     }
     const access = dashboardAccess(gate.viewer, subject);
     if (!access.ok) {
-        return { status: 403, html: forbiddenDashboardHtml() };
+        return { status: 403, html: notAllowedHtml() };
     }
 
     const viewerProfile = await getProfile(access.viewer.userId);
@@ -1101,7 +1121,7 @@ export async function renderHouseholdTimezoneRoute(
     const gate = await memberGate(viewerUserId);
     if ("html" in gate) return { status: gate.status, html: gate.html };
     if (!canManageHousehold(gate.viewer)) {
-        return { status: 403, html: forbiddenDashboardHtml() };
+        return { status: 403, html: notAllowedHtml() };
     }
     const profile = await getProfile(viewerUserId);
     const config = await getHouseholdConfig(gate.viewer.householdId);
@@ -1374,7 +1394,7 @@ export async function renderSettingsScoreHouseholdV2Route(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     // Reading the default's editor is for the people who may change it.
     if (!canManageHousehold(gate.viewer)) {
-        return { status: 403, html: forbiddenDashboardHtml() };
+        return { status: 403, html: notAllowedHtml() };
     }
     const profile = await getProfile(viewerUserId);
     const chrome = await viewerChromeWithAttention(profile, gate.viewer);
@@ -1695,7 +1715,7 @@ export async function renderSharedLinksRoute(
     if (!chrome.flags.mcpShareLinks) {
         return {
             status: 404,
-            html: renderBarePage("Not found", emptyState("Page not found.")),
+            html: notFoundHtml(),
         };
     }
     const [{ timezone }, members] = await Promise.all([
@@ -1852,7 +1872,7 @@ export async function renderSettingsStoreV2Route(
     if (!store) {
         return {
             status: 404,
-            html: renderBarePage("Not found", emptyState("Store not found.")),
+            html: notFoundHtml("Store"),
         };
     }
     const profile = await getProfile(viewerUserId);
@@ -1907,16 +1927,16 @@ export async function renderHouseholdMemberRoute(
     ) {
         return {
             status: 404,
-            html: renderBarePage("Not found", emptyState("Page not found.")),
+            html: notFoundHtml(),
         };
     }
     const target = await getHouseholdMembership(memberUserId);
     if (target == null || target.householdId !== gate.viewer.householdId) {
-        return { status: 403, html: forbiddenDashboardHtml() };
+        return { status: 403, html: notAllowedHtml() };
     }
     const access = dashboardAccess(gate.viewer, target);
     if (!access.ok) {
-        return { status: 403, html: forbiddenDashboardHtml() };
+        return { status: 403, html: notAllowedHtml() };
     }
     const noticeResult = await loadViewerNotices(gate.viewer);
     const chrome = await viewerChromeWithAttention(
@@ -2742,7 +2762,7 @@ export async function renderSettingsDuplicateCompareRoute(
     if (!pair) {
         return {
             status: 404,
-            html: renderBarePage("Not found", emptyState("Pair not found.")),
+            html: notFoundHtml("Pair"),
         };
     }
     return {

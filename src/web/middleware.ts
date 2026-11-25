@@ -17,7 +17,7 @@ import {
 import { getHouseholdMembership } from "../db/household.js";
 import { recordUserSeen } from "../last-seen.js";
 import { readSiteSession, SITE_COOKIE } from "../site-session.js";
-import { forbiddenDashboardHtml } from "./loaders.js";
+import { forbiddenDashboardHtml, refusalHtml } from "./loaders.js";
 
 declare module "hono" {
     interface ContextVariableMap {
@@ -101,7 +101,7 @@ export const requireOwner = createMiddleware(async (c, next) => {
     if (!userId) return beginSiteLogin(c, c.req.query("locale"));
     const member = await ensureSiteMembershipResolved(c, userId);
     const check = ownerCheck(member);
-    if (!check.ok) return c.html(forbiddenDashboardHtml(), 403);
+    if (!check.ok) return c.html(refusalHtml(member), 403);
     c.set("userId", userId);
     c.set("member", check.member);
     const auth = { kind: "user" as const, userId };
@@ -120,7 +120,7 @@ export function requireAction(action: Action) {
         const member = await ensureSiteMembershipResolved(c, userId);
         const check = requireMemberOfHousehold(member, null);
         if (!check.ok || !can(check.member, action).ok) {
-            return c.html(forbiddenDashboardHtml(), 403);
+            return c.html(refusalHtml(member), 403);
         }
         c.set("userId", userId);
         c.set("member", check.member);
@@ -138,7 +138,7 @@ export const requireManager = createMiddleware(async (c, next) => {
     if (!userId) return beginSiteLogin(c, c.req.query("locale"));
     const member = await ensureSiteMembershipResolved(c, userId);
     const check = managerCheck(member);
-    if (!check.ok) return c.html(forbiddenDashboardHtml(), 403);
+    if (!check.ok) return c.html(refusalHtml(member), 403);
     c.set("userId", userId);
     c.set("member", check.member);
     const auth = { kind: "user" as const, userId };

@@ -31,57 +31,122 @@ import { loadViewerNotices } from "./attention.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
+    notAllowedHtml,
+    notFoundHtml,
     ownerFirst,
+    refusalHtml,
 } from "./loaders.js";
 
 const pgAvailable = await findPgBin();
 
 test("create-household form posts name fields and has no widgets", () => {
     const html = createHouseholdFormHtml();
-    expect(html).toContain('action="/create-household"');
+    expect(html).toContain(
+        '<form method="POST" action="/create-household" class="fd-auth__form">',
+    );
     expect(html).toContain('name="household_name"');
     expect(html).toContain('name="display_name"');
-    expect(html).toContain("<h1>Create household</h1>");
+    expect(html).toContain('placeholder="Household name"');
+    expect(html).toContain('placeholder="Your name"');
+    expect(html).toContain("Name your household");
+    expect(html).toContain(
+        '<h1 class="fd-visually-hidden">Create household</h1>',
+    );
     expect(html).not.toContain("<iframe");
-    expect(html).toContain('href="/logout"');
-    expect(html).toContain('data-turbo="false"');
 });
 
-test("bare pages use the app stylesheet, not the deleted marketing one", () => {
-    const html = createHouseholdFormHtml("Enter a household name.");
+test("the gates are the Brand hero and one column: no bar, no Log out in a corner", () => {
+    for (const html of [
+        createHouseholdFormHtml(),
+        forbiddenDashboardHtml(),
+        notAllowedHtml(),
+        notFoundHtml(),
+    ]) {
+        expect(html).toContain("fd-brand-hero__title");
+        expect(html).toContain('<main id="main" class="fd-auth native">');
+        expect(html).toContain('<body class="fd-body fd-auth-body">');
+        expect(html).not.toContain("app-bar");
+        expect(html).not.toContain("bottom-nav");
+        expect(html).not.toContain("fd-bell");
+    }
+    // Only the pages for someone with no household offer Log out; a member who
+    // is refused, or looks for a missing page, goes back to Today.
+    expect(notAllowedHtml()).not.toContain("/logout");
+    expect(notFoundHtml()).not.toContain("/logout");
+    for (const html of [createHouseholdFormHtml(), forbiddenDashboardHtml()]) {
+        expect(html).toContain('href="/logout"');
+        expect(html).toContain('data-turbo="false"');
+    }
+});
+
+test("a gate names what is missing and where to go", () => {
+    const forbidden = forbiddenDashboardHtml();
+    expect(forbidden).toContain("No household yet");
+    expect(forbidden).toContain("Ask the owner for an invite code");
+    expect(forbidden).not.toContain('href="/"');
+    const refused = notAllowedHtml(
+        "Only an owner or admin can change the household default.",
+    );
+    expect(refused).toContain("Not allowed");
+    expect(refused).toContain(
+        "Only an owner or admin can change the household default.",
+    );
+    expect(refused).toContain(
+        '<a class="fd-btn fd-btn--primary" data-fd-btn href="/">',
+    );
+    expect(refused).not.toContain("Ask the owner for an invite code");
+    expect(refused).not.toContain("No household yet");
+    const missing = notFoundHtml();
+    expect(missing).toContain("Page not found");
+    expect(missing).toContain("It may have moved or been deleted");
+    expect(missing).toContain(
+        '<a class="fd-btn fd-btn--primary" data-fd-btn href="/">',
+    );
+    expect(notFoundHtml("Store")).toContain("Store not found");
+    expect(notFoundHtml("Pair")).toContain("Pair not found");
+});
+
+test("gates use both stylesheets, not the deleted marketing one, and escape what they show", () => {
+    const html = createHouseholdFormHtml("Enter a <name>.");
     expect(html).toMatch(
         /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
+    );
+    expect(html).toMatch(
+        /<link rel="stylesheet" href="\/app-v2\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
     expect(html).toMatch(
         /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
     );
     expect(html).not.toContain("/styles.css");
     expect(html).not.toContain("<style>");
-    expect(html).toContain('<main class="app-main native">');
     expect(html).toContain(
-        '<form method="POST" action="/create-household" class="create-household panel">',
+        '<p class="fd-auth__error" role="alert">Enter a &lt;name&gt;.</p>',
     );
+    expect(html).not.toContain("Enter a <name>");
     expect(html).toContain(
-        '<button type="submit" class="btn-primary">Create household</button>',
+        '<div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>',
     );
-    expect(html).toContain('class="app-bar-logo"');
-    expect(html).toContain('aria-label="Log out"');
-    expect(html).toContain('class="error-banner"');
-    expect(html).not.toContain('class="logout"');
-    expect(html).not.toContain("bottom-nav");
 });
 
-test("bare pages stamp data-theme when preview asks, and always show the top bar", () => {
+test("a refusal is No household for someone with none and Not allowed for a member", () => {
+    expect(refusalHtml(null)).toContain("No household yet");
+    expect(refusalHtml(undefined)).toContain('href="/logout"');
+    const member = { userId: "u1", role: "member" } as never;
+    const refused = refusalHtml(member, "Not yours.");
+    expect(refused).toContain("Not allowed");
+    expect(refused).toContain("Not yours.");
+    expect(refused).not.toContain("/logout");
+});
+
+test("gates stamp data-theme when preview asks", () => {
     const light = createHouseholdFormHtml(undefined, "light");
     const dark = createHouseholdFormHtml(undefined, "dark");
     expect(light).toContain('data-theme="light"');
     expect(dark).toContain('data-theme="dark"');
     expect(light).not.toBe(dark);
-    const forbidden = forbiddenDashboardHtml("light");
-    expect(forbidden).toContain('<header class="app-bar">');
-    expect(forbidden).toContain('data-theme="light"');
-    expect(forbidden).toContain('class="empty"');
-    expect(forbidden).not.toContain("bottom-nav");
+    expect(forbiddenDashboardHtml("light")).toContain('data-theme="light"');
+    expect(notAllowedHtml(undefined, "dark")).toContain('data-theme="dark"');
+    expect(notFoundHtml("Page", "dark")).toContain('data-theme="dark"');
 });
 
 describeDb(

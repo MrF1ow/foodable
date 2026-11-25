@@ -1,4 +1,4 @@
-/* App-only motion primitives (Magic UI's blur-fade and border-beam, in CSS).
+/* App-only motion primitives (Magic UI's blur-fade, in CSS).
  *
  * Entrances are gated on html.fx, which the inline script in <head> sets before
  * the first paint and never under prefers-reduced-motion, so the first full
@@ -11,17 +11,6 @@
         opacity: 0;
         filter: blur(4px);
         transform: translateY(4px);
-    }
-}
-
-@property --fx-beam-a {
-    syntax: "<angle>";
-    inherits: false;
-    initial-value: 0deg;
-}
-@keyframes fx-beam {
-    to {
-        --fx-beam-a: 360deg;
     }
 }
 

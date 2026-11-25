@@ -86,6 +86,26 @@ test("a links group is a nav and is not scripted", () => {
     expect(html).not.toContain("data-fd-chips");
 });
 
+test("a static group is a named list of labels with nothing to press", () => {
+    const html = String(
+        chipGroup({
+            label: "Tags",
+            select: "static",
+            chips: [{ label: "Dinner" }, { label: "Vegan" }],
+        }),
+    );
+    expect(html).toContain(
+        '<ul class="fd-pill-chip-group fd-pill-chip-group--static" aria-label="Tags">',
+    );
+    expect(html).toContain(
+        '<li><span class="fd-pill-chip"><span class="fd-pill-chip__label">Dinner</span></span></li>',
+    );
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("aria-pressed");
+    expect(html).not.toContain("tabindex");
+    expect(html).not.toContain("data-fd-chips");
+});
+
 test("the old chip classes are not used", () => {
     const html = chipGroup({
         label: "x",

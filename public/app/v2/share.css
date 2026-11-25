@@ -1,155 +1,79 @@
 /* The public share page (/s/:token): one recipe or the grocery list for a
- * visitor who is not signed in. A single centred column on the page surface,
- * no navigation. It reuses the recipe page's section head, title, meta and
- * steps (recipes.css); the rest is here. The one desktop block is last. */
+ * visitor who is not signed in. A single centred column (Page layout, Single
+ * 720, its 20 px gutters inside it) on the page surface, no navigation. The wordmark,
+ * the kind of page, the title and the line under it are plain text in the
+ * design, so they are plain here; everything under them is built from the
+ * components (Chip group, Section header, List group, Item row). */
 
 body.fd-share-body {
     min-height: 100vh;
 }
 
 .fd-share {
+    --fd-share-column: 720px;
+    --fd-share-top: 54px;
     box-sizing: border-box;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-section);
     width: 100%;
-    max-width: 640px;
+    max-width: var(--fd-share-column);
     margin: 0 auto;
-    padding: calc(20px + env(safe-area-inset-top, 0px))
-        max(var(--space-gutter), env(safe-area-inset-left, 0px))
-        calc(32px + env(safe-area-inset-bottom, 0px));
+    padding: calc(var(--fd-share-top) + env(safe-area-inset-top, 0px))
+        max(var(--space-xl), env(safe-area-inset-left, 0px))
+        calc(var(--space-3xl) + env(safe-area-inset-bottom, 0px));
+}
+
+/* The design stacks every part of the page 12 apart, header slot included. */
+.fd-share-layout .fd-page-layout__box,
+.fd-share-layout .fd-page-layout__header,
+.fd-share-layout .fd-page-layout__content {
+    gap: var(--space-md);
 }
 
 .fd-share-brand {
-    display: flex;
-    align-items: center;
-    gap: var(--space-gap);
     margin: 0;
-    font: 600 16px/20px var(--font-display);
-    color: var(--text-primary);
-}
-
-.fd-share-card {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-section);
-}
-
-.fd-share-head {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-6);
-}
-
-.fd-share-head .dash-head {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-6);
-}
-
-/* The page title: the recipe page's, set here because the page header writes
-   a bare <h1>. */
-.fd-share-head h1 {
-    margin: 0;
-    font: 600 28px/34px var(--font-display);
-    letter-spacing: -0.5px;
-    color: var(--text-primary);
-    overflow-wrap: anywhere;
+    color: var(--accent-text);
+    font-family: var(--font-display);
+    font-size: var(--text-title-section-size);
+    font-weight: 600;
+    line-height: var(--text-title-section-line);
 }
 
 .fd-share-kicker {
     margin: 0;
-    font: 600 11px/14px var(--font-body);
+    color: var(--text-secondary);
+    font-family: var(--font-body);
+    font-size: var(--text-micro-size);
+    font-weight: 600;
+    line-height: var(--text-micro-line);
     letter-spacing: 0.09em;
     text-transform: uppercase;
-    color: var(--accent-text);
 }
 
-.fd-share-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-gap);
-    margin: var(--fd-s-4) 0 0;
-    padding: 0;
-    list-style: none;
-}
-
-.fd-share-tag {
-    padding: 3px 10px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-share-section {
-    min-width: 0;
-}
-
-.fd-share-rows {
+.fd-share-title {
     margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.fd-share-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: baseline;
-    gap: var(--space-gap);
-    padding: var(--space-row) 0;
-    border-bottom: 1px solid var(--line);
-}
-
-.fd-share-row:last-child {
-    border-bottom: 0;
-}
-
-.fd-share-row__body {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-}
-
-.fd-share-row__name {
-    font: 400 15px/20px var(--font-body);
     color: var(--text-primary);
+    font-family: var(--font-display);
+    font-size: var(--text-title-page-size);
+    font-weight: 700;
+    line-height: var(--text-title-page-line);
+    letter-spacing: -0.5px;
     overflow-wrap: anywhere;
 }
 
-.fd-share-row__note {
-    font: 400 12px/16px var(--font-body);
+.fd-share-meta,
+.fd-share-foot {
+    margin: 0;
     color: var(--text-secondary);
-}
-
-.fd-share-row__amount {
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-    text-align: right;
-    white-space: nowrap;
-}
-
-.fd-share-line--checked .fd-share-row__name,
-.fd-share-line--checked .fd-share-row__amount {
-    color: var(--text-tertiary);
-    text-decoration: line-through;
+    font-family: var(--font-body);
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
 }
 
 .fd-share-foot {
-    margin: 0;
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-tertiary);
+    text-align: center;
 }
 
 @media (min-width: 1024px) {
     .fd-share {
-        max-width: 720px;
-        padding-top: 48px;
-        gap: 32px;
-    }
-
-    .fd-share-card {
-        gap: 32px;
+        --fd-share-top: 64px;
     }
 }

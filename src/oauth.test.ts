@@ -87,10 +87,10 @@ process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
 
 // Minimal fake session — every renderLoginPage call needs one now that the
 // language switcher's links are reconstructed from its fields.
-function fakeSession() {
+function fakeSession(over: { redirectUri?: string } = {}) {
     return {
         state: "state-xyz",
-        redirectUri: ALLOWED_REDIRECT,
+        redirectUri: over.redirectUri ?? ALLOWED_REDIRECT,
         clientId: "test-client-id",
         purpose: "mcp" as const,
     };
@@ -118,24 +118,39 @@ test("renderLoginPage substitutes every {{SESSION_ID}} occurrence", async () => 
     expect(html).not.toContain("/authorize/google");
 });
 
-test("renderLoginPage shows MCP redirect host hint", async () => {
+test("renderLoginPage puts the redirect host under the name, in place of the tagline", async () => {
     const html = await renderLoginPage("s1", fakeSession());
-    expect(html).toContain("Signing in to connect");
-    expect(html).toContain("<strong>localhost</strong>");
+    expect(html).toContain(
+        '<p class="fd-brand-hero__tagline">Sign in to connect localhost</p>',
+    );
     expect(html).not.toContain("{{CONNECT_HINT}}");
 });
 
-test("renderLoginPage renders the error banner only when given an error", async () => {
+test("renderLoginPage escapes the redirect host in the line under the name", async () => {
+    const html = await renderLoginPage(
+        "s1",
+        fakeSession({ redirectUri: "https://a&b.example/cb" }),
+    );
+    expect(html).toContain("Sign in to connect a&amp;b.example");
+    expect(html).not.toContain("connect a&b");
+});
+
+test("renderLoginPage renders the error in place only when given an error", async () => {
     const clean = await renderLoginPage("s1", fakeSession());
     expect(clean).not.toContain("{{ERROR}}");
-    expect(clean).not.toContain("error-banner");
+    expect(clean).not.toContain("fd-auth__error");
 
     const withError = await renderLoginPage(
         "s1",
         fakeSession(),
         "Bad <stuff> & things",
     );
-    expect(withError).toContain("error-banner");
+    // Between the fields and the button, announced as an alert.
+    const errorAt = withError.indexOf(
+        '<p class="fd-auth__error" role="alert">',
+    );
+    expect(errorAt).toBeGreaterThan(withError.indexOf('id="password"'));
+    expect(errorAt).toBeLessThan(withError.indexOf('name="action"'));
     // Error text is HTML-escaped.
     expect(withError).toContain("Bad &lt;stuff&gt; &amp; things");
 });
@@ -166,6 +181,10 @@ test("generated login uses the shared app stylesheet and no web fonts", async ()
     const html = await renderLoginPage("s1", fakeSession());
     expect(html).not.toContain("{{APP_CSS_HREF}}");
     expect(html).not.toContain("{{APP_JS_HREF}}");
+    expect(html).not.toContain("{{APP_V2_CSS_HREF}}");
+    expect(html).toMatch(
+        /<link rel="stylesheet" href="\/app-v2\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
+    );
     expect(html).toMatch(
         /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
     );
@@ -176,8 +195,8 @@ test("generated login uses the shared app stylesheet and no web fonts", async ()
     expect(html).toMatch(
         /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
     );
-    expect(html).toContain('class="auth-stage native"');
-    expect(html).toContain('class="btn-primary"');
+    expect(html).toContain('<main id="main" class="fd-auth native">');
+    expect(html).toContain('class="fd-btn fd-btn--primary"');
     expect(html).not.toContain("/styles.css");
     expect(html).not.toContain("/site.js");
     expect(html).not.toContain("/fonts/");
@@ -1054,9 +1073,10 @@ test("beginSiteLogin still renders login without MCP connect hint", async () => 
     expect(html).toContain('action="/approve"');
     // One field takes an email or a username, so it cannot be type="email"
     // (the browser would refuse a bare username before it reached /approve).
-    expect(html).toContain('<input type="text" id="email" name="email"');
-    expect(html).toContain("Email or username");
-    expect(html).not.toContain("Signing in to connect");
+    expect(html).toMatch(/<input [^>]*id="email" name="email" type="text"/);
+    expect(html).toContain('placeholder="Email or username"');
+    expect(html).toContain("Your household's kitchen, in one place.");
+    expect(html).not.toContain("Sign in to connect");
 });
 
 test("signed-out site logins are capped so long shares can't fill memory", async () => {

@@ -1,6 +1,6 @@
 ---
 name: foodable-test
-description: Run, start, verify, test, preview or screenshot Foodable safely - isolated local stack (Postgres plus server on its own ports), which verification tool fits which change, and what never to touch. Use before running the server, tests, check:nav, previews, the widget harness or e2e.
+description: Run, start, verify, test, preview or screenshot Foodable safely - isolated local stack, which verification tool fits which change, and what never to touch. Use before running the server, tests, check:nav, previews, the widget harness or e2e.
 updated: "06fe0cb01f4fb21c3f547e380acda7d6dba63f45"
 watches:
     - package.json#scripts
@@ -20,13 +20,13 @@ watches:
 
 ## Rules first
 
-- Bun loads `.env` on its own, and a real `.env` can hold production secrets. Pass every variable the process needs on the command line (a process env var beats `.env`), and start the server with `bun --no-env-file` so nothing else leaks in. `bun --no-env-file run <script>` does **not** reach the inner `bun`: use it only on `bun <file>` or `bun test`.
-- `bun run db:dev` defaults to the user's own dev database (data dir ~/.local/share/foodable/pg, port 54330, run by `foodable-db.service`). `db:dev stop` would stop it and `init` would migrate it, with no force flag to guard either. **Always** set `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` first (below), or run only `status` or `url`. `db:dev` reads only those two (plus `PG_BIN`), never `DATABASE_URL`, so it is safe under `bun run`.
+- Bun loads `.env` itself and a real one can hold production secrets. Pass every variable the process needs on the command line (it beats `.env`) and start the server with `bun --no-env-file`. `bun --no-env-file run <script>` does **not** reach the inner `bun`: use it only on `bun <file>` or `bun test`.
+- `bun run db:dev` defaults to the user's own dev database (data dir ~/.local/share/foodable/pg, port 54330, run by `foodable-db.service`). `db:dev stop` would stop it and `init` would migrate it, with no force flag to guard either. **Always** set `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` first (below), or run only `status` or `url`. `db:dev` reads only those two (plus `PG_BIN`), never `DATABASE_URL`, so is safe under `bun run`.
 - Never use port 8080 or 54330: the user's dev server and database live there.
 
-## Isolated stack (one-off verification)
+## Isolated stack
 
-Shell variables do not survive tool calls: begin **every** block with `STACK=<path printed by the first block>; . "$STACK/env"`. `init` makes the cluster and its database, starts it and migrates.
+Shell variables do not survive tool calls: begin **every** block with `STACK=<path from the first block>; . "$STACK/env"`. `init` makes the cluster and its database, starts it and migrates.
 
 ```bash
 free_port() { bun -e 'const s=Bun.listen({hostname:"127.0.0.1",port:0,socket:{open(){},data(){}}});console.log(s.port);s.stop(true)'; }
@@ -70,7 +70,7 @@ bun run db:dev status   # "stopped", exit 1
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
 - **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off). Page loads sync `notifications`; db-less route tests log `sync failed`.
-- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs `CHROME_BIN`. Ports :4791, :9223, one run ("harness crashed" = port held). No DB: `scripts/nav-check-fixture.ts` keys pages by path and query, flags on, POSTs 303 back. Recipe: `?member=base|u-mia`, `?role=member`; draft: `/recipes/r-draft`, `?imported=1` after import. Swipe, select: touch.
+- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs `CHROME_BIN`. Ports :4791, :9223, one run ("harness crashed" = port held). No DB: `scripts/nav-check-fixture.ts` keys pages by path and query, flags on, POSTs 303 back. Recipe: `?member=base|u-mia`, `?role=member`; draft: `/recipes/r-draft`, `?imported=1` after import. Public pages: `/login-test?state=invite|connect|error`, `/create-household`, `/gate-*`, `/s/{recipe,list}-test` (`?share=off`: 404). Swipe, select: touch.
 - **Flicker:** `bun scripts/flicker-check.ts --base http://<tailscale ip -4>:$APP_PORT` on an isolated stack: remote browserless Chromium, 390 px, both themes.
 - **App look:** `bun run preview:app --shots [--only=recipe]`: `-390.png`/`-1440.png` per page in tmp/app-preview. Without it: serves :4787 (`PREVIEW_PORT`), pages `/<name>-<light|dark>.html`; clock, caret pinned.
 - **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`) compares base and branch; exit 1 on a diff. Clean commits cache in `~/.cache/foodable/preview-diff` (`rm -rf` old).
@@ -97,4 +97,4 @@ bun run db:dev status   # "stopped", exit 1
 
 ## When this skill is out of date
 
-`watches:` lists the files this skill describes: change one and update this skill in the same PR, or **skill-drift** fails (`bun scripts/conventions/skill-drift.ts`). Skills and CLAUDE.md have a size cap (`bun scripts/conventions/context-budget.ts`); growing past it needs the `agent-context-increase` label.
+`watches:` lists the files this skill describes: change one and update this skill in the same PR, or **skill-drift** fails (`bun scripts/conventions/skill-drift.ts`). Skills and CLAUDE.md have a size cap (`bun scripts/conventions/context-budget.ts`); more needs the `agent-context-increase` label.

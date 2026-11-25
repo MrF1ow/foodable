@@ -155,7 +155,8 @@ button.fd-item-row__check-btn {
     border-color: var(--accent-fill);
     background: var(--accent-fill);
 }
-.fd-item-row__done {
+.fd-item-row__done,
+.fd-item-row__ring {
     cursor: default;
 }
 .fd-item-row__check-btn:focus-visible .fd-item-row__check-box {
@@ -219,6 +220,13 @@ button.fd-item-row__check-btn {
     align-items: center;
     gap: var(--fd-item-row-line-gap);
     min-width: 0;
+}
+/* A row whose title is a sentence (a recipe step on the public share page):
+   it wraps instead of running out in an ellipsis. */
+.fd-item-row--wrap .fd-item-row__title {
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
 }
 .fd-item-row__title {
     flex: 0 1 auto;

@@ -249,7 +249,7 @@ describeDb(
             expect(at("Leeks")).toBeLessThan(at("Milk"));
             expect(at("Milk")).toBeLessThan(at("Market"));
             expect(at("Market")).toBeLessThan(at("Rice"));
-            expect(html).toContain("fd-share-line--checked");
+            expect(html).toContain("fd-item-row__done");
         });
 
         test("the page carries nothing of the household's people, ids or notes", async () => {

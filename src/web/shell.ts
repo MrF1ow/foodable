@@ -1,6 +1,10 @@
 import { escapeHtml } from "../html.js";
 import { THEME_COLOR } from "../tokens.js";
-import { appScriptHref, appStylesheetHref } from "../widgets.js";
+import {
+    appScriptHref,
+    appStylesheetHref,
+    appV2StylesheetHref,
+} from "../widgets.js";
 import type { MemberRole } from "../household.js";
 import type { ViewerFlags } from "../viewer-flags.js";
 import { iconLogOut } from "./components/icons.js";
@@ -167,10 +171,8 @@ export function renderAppShell(chrome: AppChrome): string {
     return renderAppShellV2(chrome);
 }
 
-/** Create-household, forbidden and not found: a bare page with the logo and
- *  Log out on top and none of the shell around it. There is no saved theme
- *  yet, so production leaves it as "system". Preview stamps light/dark so a
- *  shot of each is not the same bytes. */
+/** A bare page with the logo and Log out on top and none of the shell around
+ *  it (the share probe). The gates use `renderGatePage`. */
 export function renderBarePage(
     title: string,
     body: string,
@@ -184,6 +186,30 @@ ${appHead(title, theme, "page")}
 <body>
 ${appBar()}
 <main class="app-main native">${body}</main>
+<div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
+</body>
+</html>`;
+}
+
+/** Sign in's neighbours (create household, no household, not found): the
+ *  design's Brand hero and one column under it, with no bar, no nav and no
+ *  Log out in a corner (the gate offers its own button where one belongs).
+ *  The title names the page for the tab and, unseen, for a screen reader.
+ *  There is no saved theme yet, so production leaves it "system"; preview
+ *  stamps light or dark. */
+export function renderGatePage(
+    title: string,
+    body: string,
+    theme: ThemePref = "system",
+): string {
+    return `<!doctype html>
+${htmlOpen(theme)}
+<head>
+${appHead(title, theme, "page")}
+<link rel="stylesheet" href="${appV2StylesheetHref()}" data-turbo-track="reload" />
+</head>
+<body class="fd-body fd-auth-body">
+<main id="main" class="fd-auth native"><h1 class="fd-visually-hidden">${escapeHtml(title)}</h1>${body}</main>
 <div id="toast-region" class="toast-region" role="status" aria-live="polite" data-turbo-permanent></div>
 </body>
 </html>`;

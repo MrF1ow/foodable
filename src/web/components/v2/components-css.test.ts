@@ -312,7 +312,6 @@ const LEGACY_PARTIALS = [
     "select.css",
     "settings.css",
     "share-links.css",
-    "share.css",
     "sheet.css",
     "shell.css",
     "stores.css",

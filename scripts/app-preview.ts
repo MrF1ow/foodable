@@ -64,7 +64,12 @@ import { EMPTY_HOUSEHOLD_PREFERENCES } from "../src/household.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
+    notAllowedHtml,
+    notFoundHtml,
 } from "../src/web/loaders.js";
+import { renderLoginPage } from "../src/oauth.js";
+import { LOGIN_ERRORS } from "../src/copy/login.js";
+import { resetSignupPolicyCache } from "../src/domain/signup.js";
 import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
 import {
     buildPreviewTrendsPageData,
@@ -1551,6 +1556,37 @@ function withMenuOpen(html: string, nth: number): string {
         ">" +
         html.slice(hidden + " hidden>".length)
     );
+}
+
+/**
+ * The OAuth login template filled as the server fills it, one state of the
+ * design's Sign in frames. The template is `public/login.html`, which
+ * `bun run gen:all` writes; the page has no saved theme, so it follows the
+ * colour scheme the shot emulates.
+ */
+async function loginPreview(
+    state: "default" | "invite" | "connect" | "error",
+): Promise<string> {
+    const before = process.env.FOODABLE_SIGNUP_POLICY;
+    process.env.FOODABLE_SIGNUP_POLICY =
+        state === "invite" ? "invite" : "closed";
+    resetSignupPolicyCache();
+    try {
+        return await renderLoginPage(
+            "preview-session",
+            {
+                state: "preview",
+                redirectUri: "https://claude.ai/api/mcp/auth_callback",
+                clientId: "preview-client",
+                purpose: state === "connect" ? "mcp" : "site",
+            },
+            state === "error" ? LOGIN_ERRORS.invalidCredentials : undefined,
+        );
+    } finally {
+        if (before === undefined) delete process.env.FOODABLE_SIGNUP_POLICY;
+        else process.env.FOODABLE_SIGNUP_POLICY = before;
+        resetSignupPolicyCache();
+    }
 }
 
 async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
@@ -3319,8 +3355,21 @@ for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet
             ],
             createdCode: "preview-invite-code",
         }),
+        login: await loginPreview("default"),
+        "login-invite": await loginPreview("invite"),
+        "login-connect": await loginPreview("connect"),
+        "login-error": await loginPreview("error"),
         "create-household": createHouseholdFormHtml(undefined, theme),
+        "create-household-error": createHouseholdFormHtml(
+            "Enter a household name and your name.",
+            theme,
+        ),
         forbidden: forbiddenDashboardHtml(theme),
+        "not-allowed": notAllowedHtml(
+            "Only an owner or admin can change the household default.",
+            theme,
+        ),
+        "not-found": notFoundHtml("Page", theme),
         "dev-gallery-v2": renderDevGalleryV2Page(chrome),
         "nutrition-log-search": await logSheetPreview(theme, "empty"),
         "nutrition-log-search-no-yesterday": await logSheetPreview(
@@ -3401,7 +3450,7 @@ for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet
                     portions: 4,
                     instructions:
                         "1. Soften the onion and garlic in olive oil.\n2. Stir in the lentils, smoked paprika and stock.\n3. Simmer for 25 minutes, then blend half.\n4. Finish with lemon and parsley.",
-                    tags: ["dinner", "vegan", "batch cook"],
+                    tags: ["Dinner", "Vegan", "Batch cook"],
                     ingredients: [
                         {
                             name: "Red lentils",
@@ -3413,7 +3462,7 @@ for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet
                             name: "Onion",
                             amount: 2,
                             unit: "each",
-                            note: "finely diced",
+                            note: "Finely diced",
                         },
                         {
                             name: "Vegetable stock",
