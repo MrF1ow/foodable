@@ -17576,7 +17576,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(recipes.status).toBe(200);
         const recipesHtml = await recipes.text();
         expect(recipesHtml).toContain(
-            '<h1 class="fd-recipes-title">Recipes</h1>',
+            '<h1 class="fd-page-header__title">Recipes</h1>',
         );
         expect(recipesHtml).not.toContain("Coming soon.");
         expect(recipesHtml).toContain("0 saved");
@@ -17882,7 +17882,7 @@ describe("authenticated dashboard HTTP", () => {
         const pinGoneHtml = await pinGone.text();
         expect(pinGoneHtml).toContain("That page doesn't exist anymore.");
         expect(pinGoneHtml).toContain('value="Kept Chef"');
-        expect(pinGoneHtml).toContain('aria-label="Recipe website"');
+        expect(pinGoneHtml).toContain(">Recipe website</span>");
 
         const pinEmpty = await siteApp.request("http://x/recipes/import", {
             method: "POST",

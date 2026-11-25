@@ -544,7 +544,9 @@ const NAVS: readonly Nav[] = [
     {
         name: "recipes: open a recipe",
         start: "/recipes",
-        click: [`a.fd-recipes-card[href="/recipes/${SEED_RECIPE}"]`],
+        click: [
+            `.fd-recipes-row a.fd-item-row__anchor[href="/recipes/${SEED_RECIPE}"]`,
+        ],
         lands: `/recipes/${SEED_RECIPE}`,
     },
     {

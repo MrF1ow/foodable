@@ -1971,7 +1971,12 @@ export async function renderRecipesListPage(
         importShowRetry?: boolean;
         importRetryDisabled?: boolean;
         /** v2: a recipe pasted from another Foodable that could not be imported. */
-        sharedImport?: { error?: string; reason?: string; input?: string };
+        sharedImport?: {
+            error?: string;
+            reason?: string;
+            input?: string;
+            via?: "field" | "form";
+        };
         /** v2: picking a recipe for this day (`?plan_date=`). */
         planDate?: string;
         /** v2: a plan move that failed its checks: its edit sheet opens with this. */
@@ -2039,7 +2044,6 @@ export async function renderRecipesListPage(
             })
             .map((ingredient) => ingredient.displayName),
     }));
-    const cookableCount = cards.filter((card) => card.flags.cookable).length;
     const kept = new Set(
         applyFilters(
             recipes.filter((recipe) => matchesRecipeQuery(recipe, v2Query)),
@@ -2064,12 +2068,8 @@ export async function renderRecipesListPage(
             query: v2Query,
             filters: v2Filters,
             cards: filtered,
-            cookableCount,
             totalCount: recipes.length,
             week,
-            notices: noticeResult.notices,
-            canDismissNotices: can(gate.viewer, "notification.dismiss_everyone")
-                .ok,
             planDate:
                 opts.planDate && isPlanDate(opts.planDate)
                     ? opts.planDate

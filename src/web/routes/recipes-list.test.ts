@@ -1173,9 +1173,11 @@ describe("favourites on the pages", () => {
         });
         expect(mine.html).toContain("Pancakes");
         expect(mine.html).not.toContain("Porridge");
+        // The pull-down ticks Favourites and the Filter button counts it.
         expect(mine.html).toMatch(
-            /fd-chip--selected[^>]*aria-current="true"[^>]*><span class="fd-chip__label">Favourites/,
+            /aria-checked="true"[^>]*>(<span[^>]*>[\s\S]*?<\/span>)<span class="fd-menu__text"><span class="fd-menu__label">Favourites/,
         );
+        expect(mine.html).toContain('data-fd-recipes-filter-count="1"');
 
         const bobs = await renderRecipesListPage(BOB, {
             filter: "favourites",
@@ -1196,7 +1198,7 @@ describe("favourites on the pages", () => {
         const card = (id: string) =>
             page.html.match(
                 new RegExp(
-                    `<li class="fd-row fd-row--recipe" id="recipe-${id}">[\\s\\S]*?</li>`,
+                    `<li class="fd-item-row fd-recipes-row" id="recipe-${id}">[\\s\\S]*?</li>`,
                 ),
             )![0];
         expect(card(db.recipeId)).toContain("fd-star--on");
@@ -1408,6 +1410,41 @@ describe("POST /recipes/:id/plan", () => {
         expect(await planned()).toEqual([]);
     });
 
+    test("an identical entry with other servings answers already planned and leaves the servings as they were", async () => {
+        const day = addPlanDays(todayUtc(), 2);
+        const first = await add({ date: day, slot: "dinner", servings: "2" });
+        expect(first.status).toBe(303);
+        const again = await add({ date: day, slot: "dinner", servings: "6" });
+        expect(again.status).toBe(303);
+        expect(again.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+        // The route's answer: a toast naming where it already is.
+        expect(toastOf(again)).toMatchObject({ key: "plan.already" });
+        const entries = await planned();
+        expect(entries).toHaveLength(1);
+        expect(entries[0]).toMatchObject({
+            date: day,
+            slot: "dinner",
+            servings: 2,
+        });
+        // The list shows that one entry, not a second or a sum.
+        const page = await renderRecipesListPage(ALICE, {});
+        expect(
+            page.html.match(/<button[^>]*class="fd-mini-card/g),
+        ).toHaveLength(1);
+    });
+
+    test("the same servings again is a plain 303 with no toast, and the page shows the entry", async () => {
+        const day = addPlanDays(todayUtc(), 2);
+        await add({ date: day, slot: "dinner", servings: "4" });
+        const again = await add({ date: day, slot: "dinner", servings: "4" });
+        expect(again.status).toBe(303);
+        expect(again.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+        expect(toastOf(again)).toBeNull();
+        expect(await planned()).toHaveLength(1);
+        const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
+        expect(page.html).toContain(`Planned · ${planDayLabel(day)} · dinner`);
+    });
+
     test("a double submit plans once", async () => {
         const body = { date: todayUtc(), slot: "dinner", servings: "2" };
         await add(body);
@@ -1584,7 +1621,7 @@ describe("moving and removing a plan", () => {
             expect(html).toMatch(EDIT_OPEN(id));
             expect(html).toContain(error);
             // Recipes, not a redirect: the page and its list are there.
-            expect(html).toContain("fd-plan-strip");
+            expect(html).toContain("fd-plan-planned");
             const sheet = html.match(
                 new RegExp(
                     `<dialog[^>]*id="fd-plan-edit-${id}"[\\s\\S]*?</dialog>`,
@@ -2300,10 +2337,13 @@ describe("This week on the pages", () => {
             servings: 2,
         });
         const page = await renderRecipesListPage(ALICE, {});
-        expect(page.html).toContain("fd-plan-strip");
-        expect(page.html.match(/<li class="fd-plan-tile/g)).toHaveLength(7);
+        expect(page.html).toContain("fd-plan-planned");
+        // One card per planned entry; the days with nothing planned draw none.
+        expect(
+            page.html.match(/<button[^>]*class="fd-mini-card/g),
+        ).toHaveLength(1);
         const strip = page.html.match(
-            /<ul class="fd-plan-tiles">[\s\S]*?<\/ul>\s*<\/section>/,
+            /<div class="fd-plan-planned__scroll">[\s\S]*?<\/div><button|<div class="fd-plan-planned__scroll">[\s\S]*?<\/div><\/section>/,
         )![0];
         expect(strip).toContain("Pancakes");
         expect(page.html).toContain(`id="fd-plan-edit-`);
@@ -2322,7 +2362,7 @@ describe("This week on the pages", () => {
         });
         const page = await renderRecipesListPage(ALICE, {});
         const strip = page.html.match(
-            /<ul class="fd-plan-tiles">[\s\S]*?<\/ul>\s*<\/section>/,
+            /<div class="fd-plan-planned__scroll">[\s\S]*?<\/section>/,
         )![0];
         const weekdays = [0, 1, 2, 3, 4, 5, 6].filter((n) => {
             const day = new Date(
@@ -2336,7 +2376,7 @@ describe("This week on the pages", () => {
             expect(page.html).toContain(`/recipes/plan/${id}/remove`);
             expect(page.html).toContain(`/recipes/plan/${id}/move`);
         }
-        expect(strip.match(/class="fd-plan-item"/g)).toHaveLength(
+        expect(strip.match(/<button[^>]*class="fd-mini-card/g)).toHaveLength(
             weekdays.length,
         );
     });
@@ -2353,12 +2393,12 @@ describe("This week on the pages", () => {
         });
         const page = await renderRecipesListPage(ALICE, {});
         expect(page.html).toContain("Pancakes");
-        expect(page.html).toContain('fd-plan-tile"');
-        // Kiritimati is a day ahead of UTC for most of every day.
-        const firstTile = page.html.match(
-            /<li class="fd-plan-tile[^>]*>[\s\S]*?<\/li>/,
+        // Kiritimati is a day ahead of UTC for most of every day: its today
+        // is the first day of the week, so the planned card is there.
+        const firstCard = page.html.match(
+            /<button[^>]*class="fd-mini-card[^>]*>[\s\S]*?<\/button>/,
         )![0];
-        expect(firstTile).toContain("Pancakes");
+        expect(firstCard).toContain("Pancakes");
     });
 
     test("plans before today are hidden but stay stored", async () => {
@@ -2371,13 +2411,13 @@ describe("This week on the pages", () => {
         });
         const page = await renderRecipesListPage(ALICE, {});
         expect(page.html).not.toContain("fd-plan-edit-");
-        expect(page.html).toContain("Nothing planned yet");
+        expect(page.html).not.toContain("Planned this week");
         expect(await planned()).toHaveLength(1);
     });
 
-    test("an empty week shows the empty state and no missing link", async () => {
+    test("an empty week shows no planned section and no missing link", async () => {
         const page = await renderRecipesListPage(ALICE, {});
-        expect(page.html).toContain("Nothing planned yet");
+        expect(page.html).not.toContain("Planned this week");
         expect(page.html).not.toContain("fd-plan-missing-sheet");
     });
 
@@ -2398,12 +2438,12 @@ describe("This week on the pages", () => {
     test("?plan_date sends each card's Plan to that day", async () => {
         const day = addPlanDays(todayUtc(), 3);
         const page = await renderRecipesListPage(ALICE, { planDate: day });
-        expect(page.html).toContain("Pick a recipe for");
+        expect(page.html).toContain("Pick one for");
         expect(page.html).toContain(
             `href="/recipes/${db.recipeId}?plan=1&amp;date=${day}"`,
         );
         const junk = await renderRecipesListPage(ALICE, { planDate: "nope" });
-        expect(junk.html).not.toContain("Pick a recipe for");
+        expect(junk.html).not.toContain("Pick one for");
     });
 
     test("the recipe page offers Add to plan, open on ?plan=1 with the day", async () => {
@@ -2469,12 +2509,10 @@ describe("GET /recipes with ?filter and ?q", () => {
         expect(html).toContain("Pancakes");
         expect(html).not.toContain("Omelette");
         expect(html).not.toContain("Stew");
-        // The Filter button counts both, and both chips read as on.
+        // The Filter button counts both, and both items read as ticked.
         expect(html).toContain('data-fd-recipes-filter-count="2"');
-        expect(html).not.toContain("fd-recipes-filter-button");
-        expect(
-            html.match(/<a class="fd-chip fd-chip--selected"/g)?.length,
-        ).toBe(2);
+        expect(html).toContain('aria-label="Filter recipes, 2 on"');
+        expect(html.match(/aria-checked="true"/g)?.length).toBe(2);
         // The search form carries the filters on, so a search keeps them.
         expect(html).toContain('name="filter" value="quick,favourites"');
     });
@@ -2485,8 +2523,8 @@ describe("GET /recipes with ?filter and ?q", () => {
         expect(html).toContain("Pancakes");
         expect(html).not.toContain("Omelette");
         const none = await getList("?q=stew&filter=quick");
-        expect(none).not.toContain("fd-row--recipe");
-        expect(none).toContain("No recipes match this search.");
+        expect(none).not.toContain("fd-recipes-row");
+        expect(none).toContain("No recipes match");
     });
 
     test("?q= alone filters by name", async () => {
@@ -3069,7 +3107,7 @@ describe("drafts in the app", () => {
         const html = (await renderRecipesListPage(BOB, {})).html;
         expect(html).toContain('id="fd-recipes-drafts"');
         expect(html).toContain(`href="/recipes/${mine}"`);
-        expect(html).toContain("deleted 2026-12-01 unless saved");
+        expect(html).toContain("deleted Tue 1 Dec unless saved");
         expect(html).not.toContain("Alice draft");
         // Drafts are not cards in All recipes, nor counted as saved.
         const all = html.slice(html.indexOf("fd-recipes-all-heading"));
@@ -3103,18 +3141,18 @@ describe("drafts in the app", () => {
         expect(page).toContain("deleted on 2026-11-30");
         expect(page).not.toContain("2026-12-01");
         const list = (await renderRecipesListPage(ALICE, {})).html;
-        expect(list).toContain("deleted 2026-11-30 unless saved");
+        expect(list).toContain("deleted Mon 30 Nov unless saved");
     });
 
     test("with only drafts, the list does not say there are no recipes", async () => {
         await db.recipesStore.deleteRecipe(HH, db.recipeId);
         const none = (await renderRecipesListPage(ALICE, {})).html;
-        expect(none).toContain("No recipes yet.");
+        expect(none).toContain("No recipes yet");
         await draftOf({ name: "Alice draft" });
         const html = (await renderRecipesListPage(ALICE, {})).html;
         expect(html).toContain('id="fd-recipes-drafts"');
         expect(html).toContain("0 saved");
-        expect(html).not.toContain("No recipes yet.");
+        expect(html).not.toContain("No recipes yet");
     });
 
     test("a draft has no favourite star, and starring one is refused", async () => {

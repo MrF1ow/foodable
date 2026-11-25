@@ -99,21 +99,10 @@
     cursor: pointer;
 }
 
-/* "5 ingredients missing" under This week: a cart and the count in the accent. */
-.fd-plan-week .fd-plan-missing-link {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-sm);
+/* "5 ingredients missing" under This week: the small Link button with a cart. */
+.fd-plan-week > .fd-btn {
     align-self: flex-start;
     margin-top: var(--space-md);
-    padding: var(--space-sm) var(--space-lg);
-    font-size: var(--text-label-size);
-    font-weight: 600;
-    line-height: var(--text-label-line);
-}
-.fd-plan-week .fd-plan-missing-link .fd-icon {
-    width: var(--control-md-icon);
-    height: var(--control-md-icon);
 }
 
 @media (min-width: 1024px) {

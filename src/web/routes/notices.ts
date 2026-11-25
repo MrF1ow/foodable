@@ -34,7 +34,36 @@ import { can } from "../../domain/permissions.js";
 import { redirectWithToast } from "../components/toast.js";
 import { formText } from "../form.js";
 import { requireMember, siteMember } from "../middleware.js";
-import { parseNoticeBack } from "../pages/v2/notice-strip.js";
+
+/** The pages an action or a dismissal may send the person back to. */
+export const NOTICE_BACK_PATHS = [
+    "/",
+    "/kitchen/usuals",
+    "/kitchen/fridge",
+    "/recipes",
+] as const;
+export type NoticeBack =
+    (typeof NOTICE_BACK_PATHS)[number] | `/?date=${string}`;
+
+/**
+ * A path from a form, if it is one of ours; never an address taken from the
+ * request. Today may carry the day it is showing (`/?date=YYYY-MM-DD`, a real
+ * calendar date and nothing else), so acting from another day returns there.
+ */
+export function parseNoticeBack(value: string | undefined): NoticeBack {
+    const known = NOTICE_BACK_PATHS.find((path) => path === value);
+    if (known) return known;
+    const day = /^\/\?date=(\d{4}-\d{2}-\d{2})$/.exec(value ?? "")?.[1];
+    return day && isCalendarDate(day) ? `/?date=${day}` : "/";
+}
+
+function isCalendarDate(value: string): boolean {
+    const parsed = new Date(`${value}T00:00:00Z`);
+    return (
+        !Number.isNaN(parsed.getTime()) &&
+        parsed.toISOString().slice(0, 10) === value
+    );
+}
 
 export const noticeActionRoutes = new Hono();
 

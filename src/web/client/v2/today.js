@@ -215,7 +215,7 @@ function initEditMacros(root) {
 }
 
 // The edit sheet's Time chips (CSS shows the field); the meal's chip puts its
-// time back. A plan sheet's pull-down row shows the list's choice.
+// time back.
 function initPicks(root) {
     root.querySelectorAll("[data-fd-edit-time]").forEach((host) => {
         const input = host.querySelector('input[name="logged_time"]');
@@ -223,14 +223,6 @@ function initPicks(root) {
             if (e.target.name !== "time_mode" || !input) return;
             if (e.target.value === "keep") input.value = input.defaultValue;
             else input.focus();
-        });
-    });
-    root.querySelectorAll(".fd-plan-edit-row__select").forEach((select) => {
-        select.addEventListener("change", () => {
-            const v = select
-                .closest(".fd-item-row")
-                .querySelector(".fd-item-row__value");
-            v.textContent = select.options[select.selectedIndex].textContent;
         });
     });
 }

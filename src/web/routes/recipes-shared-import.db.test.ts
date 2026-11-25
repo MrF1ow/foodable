@@ -348,6 +348,28 @@ describeDb(
             const html = await res.text();
             expect(html).toContain("doesn't work any more");
             expect(await recipesOf()).toEqual([]);
+            // The link shows once, in the search field; the shared-recipe form
+            // stays closed and empty.
+            expect(html.split(SHARE_PAGE).length - 1).toBe(1);
+            expect(html).toContain(`value="${SHARE_PAGE}"`);
+            expect(html).not.toContain(
+                '<details class="fd-recipes-shared" open>',
+            );
+        });
+
+        test("a share link that fails in the shared-recipe form shows once, in that form, open", async () => {
+            setSharedRecipeFetcherForTests(failing("not_found", 404));
+            const res = await post("/recipes/import-shared", {
+                shared: SHARE_PAGE,
+            });
+            expect(res.status).toBe(422);
+            const html = await res.text();
+            expect(html).toContain("doesn't work any more");
+            expect(html.split(SHARE_PAGE).length - 1).toBe(1);
+            expect(html).toContain('<details class="fd-recipes-shared" open>');
+            expect(html).toMatch(
+                new RegExp(`<textarea[^>]*>${SHARE_PAGE}</textarea>`),
+            );
         });
 
         type PasteCase = { fetcher: Stub | null; shared: string };
@@ -519,10 +541,10 @@ describeDb(
                 // In place: the Recipes page with the import panel open.
                 expect(html).toContain("fd-recipes-page");
                 expect(html).toMatch(
-                    /<details class="fd-recipes-import-link"[^>]*\sopen/,
+                    /<details class="fd-recipes-shared"[^>]*\sopen/,
                 );
                 const error =
-                    /<div class="fd-card fd-recipes-import-error fd-recipes-import-shared-error" role="alert">(.*?)<\/div>/.exec(
+                    /fd-recipes-import-shared-error"><div class="fd-card__content"><div role="alert">(.*?)<\/div>/.exec(
                         html,
                     );
                 expect(error).not.toBeNull();

@@ -28,12 +28,12 @@ import {
     type PlanRecipe,
 } from "../../../domain/plan-week.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
+import { button } from "../../components/v2/button.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
-import { iconPlus } from "../../components/v2/icons.js";
-import { icon } from "../../components/v2/icon.js";
 import { itemRow } from "../../components/v2/item-row.js";
 import { listGroup } from "../../components/v2/list-group.js";
-import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { menu, menuRow, type MenuItem } from "../../components/v2/menu.js";
+import { miniCard } from "../../components/v2/mini-card.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import {
     sheet,
@@ -358,10 +358,10 @@ function dayAfter(date: string, days: number): string {
 }
 
 /**
- * A row whose value is a pull-down: an Item row with its title, value and
- * chevron, and the form's own `<select>` laid invisibly over it, so a press
- * anywhere on the row opens the list and the form posts it as `name`. The page
- * script writes the chosen option into the row's value.
+ * A row whose value is a pull-down (Day, Meal): an Item row with its title,
+ * value and chevron that opens the choices, the form's own hidden field
+ * carrying the pick as `name`. `client/v2/menu.js` writes the chosen label
+ * into the row.
  */
 function pickRow(opts: {
     title: string;
@@ -369,31 +369,27 @@ function pickRow(opts: {
     options: readonly { value: string; label: string }[];
     selected: string;
 }): Html {
-    const options = opts.options
-        .map(
-            (o) =>
-                `<option value="${esc(o.value)}"${o.value === opts.selected ? " selected" : ""}>${esc(o.label)}</option>`,
-        )
-        .join("");
-    const select = `<select class="fd-plan-edit-row__select" name="${esc(opts.name)}" aria-label="${esc(opts.title)}">${options}</select>`;
-    const chosen = opts.options.find((o) => o.value === opts.selected);
-    const row = String(
-        itemRow({
-            title: opts.title,
-            value: chosen?.label ?? opts.selected,
-            trailing: { kind: "chevron" },
-            className: "fd-plan-edit-row",
-        }),
-    );
-    return raw(row.replace(/<\/div><\/li>$/, () => `${select}</div></li>`));
+    const chosen =
+        opts.options.find((o) => o.value === opts.selected) ?? opts.options[0]!;
+    return menuRow({
+        label: opts.title,
+        row: { title: opts.title, value: chosen.label },
+        field: { name: opts.name, value: chosen.value },
+        items: opts.options.map((o) => ({
+            kind: "checked" as const,
+            label: o.label,
+            checked: o.value === chosen.value,
+            value: o.value,
+        })),
+    });
 }
 
 /**
- * One sheet per planned recipe in the week, titled with its day and the meal
- * under it: Day and Meal are rows with pull-downs, Servings a stepper, Remove
- * beside Save. Save posts the day, meal and servings to the move route, Remove
- * to the remove route. Rendered on every page that lists the week, so the
- * rows' buttons have something to open.
+ * One sheet per planned recipe in the week, titled with its recipe and the day
+ * and meal under it: Day and Meal are rows with pull-downs, Servings a
+ * stepper, Remove beside Save. Save posts the day, meal and servings to the
+ * move route, Remove to the remove route. Rendered on every page that lists
+ * the week, so the rows' buttons and cards have something to open.
  */
 export function renderPlanEditSheets(
     view: WeekPlanView,
@@ -478,20 +474,20 @@ ${String(servingsSection)}
             return sheet({
                 id,
                 placement: "side",
+                className: "fd-plan-edit-sheet",
                 header: {
                     kind: "title",
-                    title: planDayLabel(plan.date),
-                    subtitle: PLAN_SLOT_LABEL[plan.slot],
+                    title: plan.recipeName,
+                    subtitle: `${planDayLabel(plan.date)} · ${PLAN_SLOT_LABEL[plan.slot].toLowerCase()}`,
                 },
                 body: raw(body),
                 actions: {
                     kind: "pair",
-                    cancel: {
-                        label: "Remove",
-                        type: "submit",
-                        form: removeId,
-                    },
+                    // Remove asks in place: it arms, then Cancel and Remove
+                    // take the row.
+                    cancel: { label: "Remove" },
                     primary: { label: "Save", type: "submit", form: moveId },
+                    confirm: { label: "Remove", form: removeId },
                 },
                 openOnLoad: view.openSheet === id,
                 focus: "panel",
@@ -504,22 +500,6 @@ function ingredientsMissingText(count: number): string {
     return count === 1
         ? "1 ingredient missing"
         : `${count} ingredients missing`;
-}
-
-/**
- * "2 ingredients missing · Add to groceries" (it opens the list), or a line
- * saying the kitchen covers the week, or nothing when nothing is planned.
- */
-export function renderWeekMissingLine(view: WeekPlanView): string {
-    if (view.plannedCount === 0) return "";
-    if (view.missing.length === 0) {
-        return `<p class="fd-plan-covered">You have everything for this week</p>`;
-    }
-    return sheetTrigger({
-        target: PLAN_MISSING_SHEET_ID,
-        label: `${ingredientsMissingText(view.missing.length)} · add to groceries`,
-        className: "fd-plan-missing-link",
-    });
 }
 
 /**
@@ -539,108 +519,98 @@ export function renderMissingSheet(view: WeekPlanView, back: PlanBack): string {
             title: line.name,
             meta: line.amount ?? undefined,
             subtitle: note,
-            lead: { kind: "dot", color: line.unknown ? "warn" : "good" },
+            // The design marks each line with the filled ring: all of it is added.
+            lead: { kind: "done", label: "Will be added" },
         });
     });
     const body = `<form id="${MISSING_FORM_ID}" method="post" action="/recipes/plan/add-missing">
-${hidden("back", back)}${String(listGroup({ rows, label: "Missing for the plan", className: "fd-plan-missing-list" }))}
+${hidden("back", back)}${String(
+        sheetSection({
+            kind: "rows",
+            content: listGroup({
+                rows,
+                label: "Missing for the plan",
+                className: "fd-plan-missing-list",
+            }),
+        }),
+    )}
 </form>`;
+    const count = view.missing.length;
     return sheet({
         id: PLAN_MISSING_SHEET_ID,
-        kind: "confirm",
-        title: "Missing for the plan",
-        subtitle: `${ingredientsMissingText(view.missing.length)} · next 7 days`,
-        body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${MISSING_FORM_ID}">Add ${view.missing.length} to groceries</button>`,
+        placement: "dialog",
+        header: {
+            kind: "title",
+            title: "Missing for the plan",
+            subtitle: `${count} ${count === 1 ? "ingredient" : "ingredients"} · next 7 days`,
+        },
+        body: raw(body),
+        actions: {
+            kind: "single",
+            primary: {
+                label: `Add ${count} to groceries`,
+                type: "submit",
+                form: MISSING_FORM_ID,
+            },
+        },
         openOnLoad: view.openSheet === PLAN_MISSING_SHEET_ID,
         focus: "panel",
     });
 }
 
-function planAddHref(date: string): string {
-    return `/recipes?plan_date=${encodeURIComponent(date)}`;
-}
-
-function planButton(plan: WeekPlanEntry, inner: string): string {
-    return sheetTrigger({
-        target: planEditSheetId(plan.id),
-        label: `Change ${plan.recipeName}, ${planDayLabel(plan.date)}`,
-        className: "fd-plan-item",
-        icon: inner,
-    });
-}
-
 /**
- * The seven days as rows, for the Today rail card and the phone Today section:
- * the weekday, the planned recipe (a button that opens its sheet) with its
- * meal, or "Nothing planned" and a plus that goes to Recipes to pick one.
+ * "5 ingredients missing": the design's small Link button with a cart, opening
+ * the Missing for the plan sheet. Nothing when nothing is planned or nothing
+ * is missing.
  */
-export function renderWeekRows(view: WeekPlanView): string {
-    const items = view.days.flatMap((day) => {
-        const day3 = day.weekday.toUpperCase();
-        if (day.plans.length === 0) {
-            return [
-                `<li class="fd-plan-day fd-plan-day--empty"><span class="fd-plan-day__label">${esc(day3)}</span><span class="fd-plan-day__name">Nothing planned</span><a class="fd-plan-day__add" href="${esc(planAddHref(day.date))}" aria-label="Plan a recipe for ${esc(day.label)}">${String(iconPlus())}</a></li>`,
-            ];
-        }
-        return day.plans.map((plan, i) => {
-            const label = i === 0 ? esc(day3) : "";
-            const inner = `<span class="fd-plan-item__name">${esc(plan.recipeName)}</span><span class="fd-plan-item__slot">${esc(PLAN_SLOT_LABEL[plan.slot])}</span>`;
-            return `<li class="fd-plan-day${day.isToday ? " fd-plan-day--today" : ""}"><span class="fd-plan-day__label">${label}</span>${planButton(plan, inner)}</li>`;
-        });
-    });
-    return `<ul class="fd-plan-days">${items.join("")}</ul>`;
-}
-
-/**
- * The Recipes page's This week: seven tiles (a planned day shows its recipes,
- * an open one "+ Plan"), and the missing link in the heading row. On the phone
- * only the planned days show, under a small label.
- */
-export function renderWeekStrip(view: WeekPlanView): string {
-    const tiles = view.days
-        .map((day) => {
-            const day3 = esc(day.weekday.toUpperCase());
-            if (day.plans.length === 0) {
-                return `<li class="fd-plan-tile fd-plan-tile--empty"><a class="fd-plan-tile__add" href="${esc(planAddHref(day.date))}" aria-label="Plan a recipe for ${esc(day.label)}"><span class="fd-plan-tile__day">${day3}</span><span class="fd-plan-tile__name">+ Plan</span></a></li>`;
-            }
-            const buttons = day.plans
-                .map((plan) =>
-                    planButton(
-                        plan,
-                        `<span class="fd-plan-tile__name">${esc(plan.recipeName)}</span>`,
-                    ),
-                )
-                .join("");
-            return `<li class="fd-plan-tile"><span class="fd-plan-tile__day">${day3}</span>${buttons}</li>`;
-        })
-        .join("");
-    const empty =
-        view.plannedCount === 0
-            ? `<p class="fd-plan-empty">Nothing planned yet. Tap Plan on a recipe to put it on a day.</p>`
-            : "";
-    // Title, then the tiles, then the missing link: on the phone that is the
-    // reading order; the desktop grid lifts the link up beside the title.
-    return `<section class="fd-plan-strip" aria-labelledby="fd-plan-strip-title">
-<h2 class="fd-plan-strip__title" id="fd-plan-strip-title"><span class="fd-plan-strip__title--phone">Planned this week</span><span class="fd-plan-strip__title--desk">This week</span></h2>
-${empty}<ul class="fd-plan-tiles">${tiles}</ul>
-${renderWeekMissingLine(view)}
-</section>`;
-}
-
-/**
- * "5 ingredients missing" under This week: a cart and the count, opening the
- * Missing for the plan sheet. Nothing when nothing is planned or nothing is
- * missing.
- */
-function missingRow(view: WeekPlanView): string {
+export function planMissingLink(view: WeekPlanView): string {
     if (view.plannedCount === 0 || view.missing.length === 0) return "";
-    return sheetTrigger({
-        target: PLAN_MISSING_SHEET_ID,
-        label: ingredientsMissingText(view.missing.length),
-        className: "fd-plan-missing-link",
-        icon: `${String(icon("cart"))}<span>${esc(ingredientsMissingText(view.missing.length))}</span>`,
-    });
+    return String(
+        button({
+            variant: "link",
+            size: "md",
+            icon: "cart",
+            label: ingredientsMissingText(view.missing.length),
+            attrs: {
+                commandfor: PLAN_MISSING_SHEET_ID,
+                command: "show-modal",
+            },
+        }),
+    );
+}
+
+/**
+ * The Recipes page's "Planned this week": a Section header, the planned
+ * entries as Mini cards in a row (the weekday over the recipe, each opening
+ * its edit sheet), and the missing link under them. Entries are shown as
+ * stored, one card each; nothing when nothing is planned.
+ */
+export function renderPlannedWeek(view: WeekPlanView): string {
+    if (view.plannedCount === 0) return "";
+    const cards = view.days.flatMap((day) =>
+        day.plans.map((plan) =>
+            String(
+                miniCard({
+                    label: day.weekday,
+                    title: plan.recipeName,
+                    opens: planEditSheetId(plan.id),
+                    className: "fd-plan-card",
+                }),
+            ),
+        ),
+    );
+    return `<section class="fd-plan-week fd-plan-planned" aria-label="Planned this week">${String(
+        sectionHeader({ label: "Planned this week", rule: false }),
+    )}<div class="fd-plan-planned__scroll">${cards.join("")}</div>${planMissingLink(view)}</section>`;
+}
+
+/**
+ * Where Today's Plan goes: the Recipes list picking a recipe for the first day
+ * of the week with nothing planned (today when every day has something).
+ */
+export function planPickHref(view: WeekPlanView): string {
+    const open = view.days.find((day) => day.plans.length === 0);
+    return `/recipes?plan_date=${encodeURIComponent(open?.date ?? view.today)}`;
 }
 
 /** What an entry's menu does: edit it, or take it off the week. */
@@ -689,7 +659,8 @@ function entryMenu(plan: WeekPlanEntry, day: WeekPlanDayView, back: PlanBack) {
 /**
  * Today's This week: a section header with Plan, then one row per planned
  * entry in the order the week gives them: the recipe and its meal, the day,
- * and a menu. A row opens the entry's edit sheet. Entries are shown as stored,
+ * and a menu. A row opens the entry's edit sheet; Plan picks a recipe for the
+ * first empty day. Entries are shown as stored,
  * never merged or summed; a day of a repeat has This day and The whole series
  * in its menu, for that one repeat.
  */
@@ -731,7 +702,7 @@ export function renderWeekSection(view: WeekPlanView, back: PlanBack): string {
         sectionHeader({
             label: "This week",
             rule: false,
-            action: { label: "Plan", href: "/recipes" },
+            action: { label: "Plan", href: planPickHref(view) },
         }),
-    )}${String(list)}${missingRow(view)}</section>`;
+    )}${String(list)}${planMissingLink(view)}</section>`;
 }

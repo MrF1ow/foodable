@@ -259,7 +259,7 @@ recipesRoutes.post("/recipes/import", requireMember, async (c) => {
     if (!pasteStep && looksLikeSharedRecipeLink(importUrl)) {
         const flags = await viewerFlagsFor(member);
         if (flags.mcpShareLinks) {
-            return answerSharedRecipeImport(c, importUrl);
+            return answerSharedRecipeImport(c, importUrl, "field");
         }
     }
 

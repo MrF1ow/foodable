@@ -801,7 +801,7 @@ describe("This week on Today", () => {
         const html = body(weekOf([plan("p1", "2026-11-11", "dinner")]));
         expect(html).toContain('fd-section-header__label">This week<');
         expect(html).toContain(
-            '<a class="fd-section-header__action" href="/recipes">Plan</a>',
+            `<a class="fd-section-header__action" href="/recipes?plan_date=${today}">Plan</a>`,
         );
         const listed = rows(html);
         expect(listed).toHaveLength(1);
@@ -817,6 +817,24 @@ describe("This week on Today", () => {
         expect(html.match(/ id="fd-plan-missing-sheet"/g)).toHaveLength(1);
         expect(html).toContain('name="back" value="today"');
         expect(html).toContain("Add 1 to groceries");
+    });
+
+    test("Plan picks a recipe for the first day with nothing planned", () => {
+        const day = (n: number) =>
+            new Date(Date.parse(`${today}T00:00:00Z`) + n * 86_400_000)
+                .toISOString()
+                .slice(0, 10);
+        const plan1 = (id: string, date: string) => plan(id, date, "dinner");
+        const href = (html: string) =>
+            html.match(
+                /class="fd-section-header__action" href="([^"]+)">Plan</,
+            )?.[1];
+        // Today and tomorrow are taken: the day after is offered.
+        expect(
+            href(body(weekOf([plan1("p1", day(0)), plan1("p2", day(1))]))),
+        ).toBe(`/recipes?plan_date=${day(2)}`);
+        // Nothing planned: today.
+        expect(href(body(weekOf([])))).toBe(`/recipes?plan_date=${today}`);
     });
 
     test("two entries of one recipe on one day in different meals stay two rows", () => {

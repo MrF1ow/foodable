@@ -185,7 +185,7 @@ afterAll(() => {
     mock.module("../../foods.js", () => realFoods);
 });
 
-const { noticeActionRoutes } = await import("./notices.js");
+const { noticeActionRoutes, parseNoticeBack } = await import("./notices.js");
 const { mintSiteSession, SITE_COOKIE } = await import("../../site-session.js");
 
 function cookieFor(userId: string): string {
@@ -769,5 +769,35 @@ describe("one-tap notice routes", () => {
             back: "/needs-attention",
         });
         expect(dismissed.headers.get("location")).toBe("/");
+    });
+});
+
+describe("parseNoticeBack", () => {
+    test("keeps a real Today date; the retired Needs attention page falls back to Today", () => {
+        expect(parseNoticeBack("/needs-attention")).toBe("/");
+        expect(parseNoticeBack("/?date=2026-11-03")).toBe("/?date=2026-11-03");
+        for (const bad of [
+            "/?date=2026-02-31",
+            "/?date=nope",
+            "/?date=2026-11-03&x=1",
+            "/x?date=2026-11-03",
+            "//?date=2026-11-03",
+        ]) {
+            expect(parseNoticeBack(bad)).toBe("/");
+        }
+    });
+
+    test("only ever returns one of the app's pages", () => {
+        expect(parseNoticeBack("/kitchen/usuals")).toBe("/kitchen/usuals");
+        expect(parseNoticeBack("/recipes")).toBe("/recipes");
+        for (const bad of [
+            "https://evil.example",
+            "//evil.example",
+            "/settings",
+            "",
+            undefined,
+        ]) {
+            expect(parseNoticeBack(bad)).toBe("/");
+        }
     });
 });
