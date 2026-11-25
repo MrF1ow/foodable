@@ -56,6 +56,8 @@ function nutritionTable(html: string): string[][] {
         cell
             .replace(/<span class="fd-sr">[^<]*<\/span>/g, "")
             .replace(/<[^>]+>/g, "")
+            // Whatever is left of a tag goes too: the cell is read as text.
+            .replace(/[<>]/g, "")
             .trim();
     return [
         ...html.matchAll(
