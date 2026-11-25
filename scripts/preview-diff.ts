@@ -80,7 +80,36 @@ import { join, relative, resolve, sep } from "node:path";
 import { findChromium } from "./app-preview-shots.js";
 
 const ROOT = resolve(import.meta.dir, "..");
-const COMPARE_CONCURRENCY = 8;
+// Each compare decodes two shots into ImageMagick's float pixel cache (about
+// 800 MB for the 1440x23248 gallery shot uncapped). Four at once, each capped
+// (MAGICK_LIMITS) and spilling to disk, kept a full compare under 0.8 GB.
+const COMPARE_CONCURRENCY = 4;
+
+/** One thread and a small pixel cache per compare; past it, the disk. */
+const MAGICK_LIMITS = [
+    "-limit",
+    "thread",
+    "1",
+    "-limit",
+    "memory",
+    "128MiB",
+    "-limit",
+    "map",
+    "256MiB",
+];
+
+/**
+ * Where a capped compare spills. ImageMagick's default is /tmp, which is RAM
+ * on a tmpfs host, so the cap would save nothing there. MAGICK_TEMPORARY_PATH,
+ * when set, wins.
+ */
+function magickTempDir(): string {
+    const dir =
+        process.env.MAGICK_TEMPORARY_PATH ??
+        join(homedir(), ".cache/foodable/magick-tmp");
+    mkdirSync(dir, { recursive: true });
+    return dir;
+}
 
 /** The usage text: printed by --help and after a refused argument. */
 export const USAGE = `usage: bun scripts/preview-diff.ts [--base <ref>] [--work <dir>]
@@ -213,7 +242,7 @@ export function renderEnvFingerprint(
  * shot flags, the pinned clock, the window sizes): the commit and the browser
  * version cannot see that, and a stored set would pass for a current one.
  */
-export const CACHE_FORMAT = "v1";
+export const CACHE_FORMAT = "v2";
 
 /**
  * The folder name of a cached shot set: the full commit SHA, CACHE_FORMAT, the
@@ -408,6 +437,13 @@ export async function differs(a: string, b: string): Promise<boolean> {
     const [sa, sb] = await Promise.all([sizeOf(a), sizeOf(b)]);
     if (!sa || !sb) return true;
     if (sa.width !== sb.width || sa.height !== sb.height) return true;
+    // Identical bytes are identical pixels. One Chromium renders a page to
+    // the same bytes every time, so most pairs stop here, undecoded.
+    const [ba, bb] = await Promise.all([
+        Bun.file(a).bytes(),
+        Bun.file(b).bytes(),
+    ]);
+    if (Buffer.from(ba).equals(Buffer.from(bb))) return false;
     // The largest per-channel difference over every pixel, alpha included. It
     // is 0 only for identical pixels: `compare -metric AE` prints a summed
     // figure that stays below 1 (and exits 0) for a handful of near-equal
@@ -415,6 +451,7 @@ export async function differs(a: string, b: string): Promise<boolean> {
     const proc = Bun.spawn(
         [
             "magick",
+            ...MAGICK_LIMITS,
             a,
             b,
             "-compose",
@@ -424,7 +461,11 @@ export async function differs(a: string, b: string): Promise<boolean> {
             "%[fx:maxima]",
             "info:",
         ],
-        { stdout: "pipe", stderr: "ignore" },
+        {
+            stdout: "pipe",
+            stderr: "ignore",
+            env: { ...process.env, MAGICK_TEMPORARY_PATH: magickTempDir() },
+        },
     );
     const [out, code] = await Promise.all([
         new Response(proc.stdout).text(),
