@@ -1033,3 +1033,36 @@ test("a done lead is the filled ring with nothing to press", () => {
     expect(html).not.toContain("<button");
     expect(html).not.toContain("<input");
 });
+
+test("a radio lead can belong to a form outside its row", () => {
+    const html = itemRow({
+        title: "Any brand",
+        lead: {
+            kind: "radio",
+            label: "Any brand",
+            name: "p",
+            value: "",
+            form: "edit-form",
+        },
+    });
+    expect(html).toContain('name="p" value="" form="edit-form"');
+    expect(
+        itemRow({
+            title: "x",
+            lead: { kind: "radio", label: "x", name: "p", value: "1" },
+        }),
+    ).not.toContain("form=");
+});
+
+test("a focusable row is in the tab order, and an overlay sits last inside the row", () => {
+    const html = String(
+        itemRow({
+            title: "Go to a day",
+            focusable: true,
+            overlay: raw('<input type="date" name="date">'),
+        }),
+    );
+    expect(html).toMatch(/^<li class="fd-item-row" tabindex="0">/);
+    expect(html.endsWith('<input type="date" name="date"></li>')).toBe(true);
+    expect(String(itemRow({ title: "Plain" }))).not.toContain("tabindex");
+});

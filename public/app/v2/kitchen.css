@@ -191,6 +191,16 @@
 .fd-select-head {
     margin: 0;
 }
+/* Picking on Usuals: the "N selected" head runs straight into the list, with
+   no page gap and no section-header padding between them. */
+.fd-kitchen-usuals-page[data-fd-selecting] {
+    gap: 0;
+}
+.fd-kitchen-usuals-page[data-fd-selecting]
+    .fd-kitchen-usuals-layout
+    .fd-section-header:first-child {
+    padding-top: 0;
+}
 .fd-select-bar-slot:not([data-fd-select-asking]) [data-fd-select-when="ask"],
 .fd-select-bar-slot[data-fd-select-asking] [data-fd-select-when="idle"] {
     display: none;
@@ -203,13 +213,17 @@
 .fd-kitchen-fridge-page[data-fd-selecting] .fd-kitchen-use-soon,
 .fd-kitchen-fridge-page[data-fd-selecting] .fd-kitchen-fridge-top,
 .fd-kitchen-groceries-page[data-fd-selecting] .fd-kitchen-fridge-top,
+.fd-kitchen-usuals-page[data-fd-selecting] .fd-kitchen-fridge-top,
+.fd-kitchen-usuals-page[data-fd-selecting]
+    .fd-list-group[data-fd-usual-add-row],
 .fd-kitchen-groceries-page[data-fd-selecting] .fd-kitchen-grocery-dock,
 .fd-kitchen-groceries-page[data-fd-selecting]
     .fd-list-group[data-fd-grocery-add-row],
 .fd-main:has(
         :is(
             .fd-kitchen-fridge-page,
-            .fd-kitchen-groceries-page
+            .fd-kitchen-groceries-page,
+            .fd-kitchen-usuals-page
         )[data-fd-selecting]
     )
     .fd-kitchen-head
@@ -265,77 +279,6 @@
     border: 0;
 }
 
-/* FigCraft 21714: Expires and Kept in sit together in one white card. */
-.fd-kitchen-sheet-rows {
-    display: flex;
-    flex-direction: column;
-    margin-top: var(--fd-s-4);
-    padding: 0 var(--fd-s-14);
-    border-radius: var(--radius-lg);
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-kitchen-sheet-rows .fd-kitchen-sheet-row {
-    gap: var(--fd-s-12);
-    min-height: 56px;
-}
-
-.fd-kitchen-sheet-rows .fd-kitchen-sheet-row:first-child {
-    border-top: 0;
-}
-
-.fd-kitchen-sheet-rows .fd-kitchen-sheet-row__meta {
-    color: var(--text-tertiary);
-}
-
-.fd-kitchen-sheet-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--fd-s-4);
-    min-height: 48px;
-    padding: var(--fd-s-2) 0;
-    border-top: 1px solid var(--line);
-    color: inherit;
-    text-decoration: none;
-}
-
-.fd-kitchen-sheet-row__icon {
-    display: flex;
-    flex: none;
-    color: var(--text-tertiary);
-}
-
-.fd-kitchen-sheet-row__icon .fd-icon {
-    width: 20px;
-    height: 20px;
-}
-
-.fd-kitchen-sheet-row__label {
-    font: 400 16px/22px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-kitchen-sheet-row__value {
-    position: relative;
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-2);
-    margin-left: auto;
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-sheet-row__meta {
-    font: 400 16px/22px var(--font-body);
-    pointer-events: none;
-}
-
-.fd-kitchen-sheet-row__chev {
-    display: flex;
-    color: var(--text-tertiary);
-}
-
 .fd-did-you-mean-block {
     margin: 0 0 var(--space-xl);
 }
@@ -368,14 +311,6 @@
     white-space: normal;
     line-height: 1.25;
     text-align: center;
-}
-
-.fd-kitchen-sheet-label {
-    margin: 0 0 var(--fd-s-4);
-    font: 600 12px/16px var(--font-body);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
 }
 
 .fd-kitchen-date-field {
@@ -504,59 +439,6 @@
     padding: 0 0 var(--fd-s-12);
 }
 
-.fd-kitchen-usual-stores {
-    margin: 0;
-    padding: 0;
-}
-
-.fd-kitchen-usual-intro {
-    margin: 0;
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-usual-empty {
-    margin: 0;
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-}
-
-/* A sheet row that is a button looks like the link rows in the fridge
-   sheet, not like a native button. */
-button.fd-kitchen-sheet-row {
-    width: 100%;
-    margin: 0;
-    padding: var(--fd-s-12) 0;
-    border: 0;
-    border-bottom: 1px solid var(--line);
-    border-radius: 0;
-    background: none;
-    text-align: left;
-    color: inherit;
-    font: inherit;
-    cursor: pointer;
-}
-
-.fd-kitchen-usual-amount {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--fd-s-6);
-}
-
-.fd-kitchen-usual-unit {
-    flex: 0 0 auto;
-    width: auto;
-    max-width: 9rem;
-    min-height: 40px;
-    padding: 0 var(--fd-s-6);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: var(--surface-raised);
-    font: 500 14px/20px var(--font-body);
-    color: var(--text-primary);
-}
-
 .fd-chips--stack {
     flex-direction: column;
     align-items: stretch;
@@ -564,151 +446,6 @@ button.fd-kitchen-sheet-row {
 
 .fd-chips--stack .fd-chip--choice {
     width: 100%;
-}
-
-.fd-kitchen-usual-add-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-6);
-}
-
-.fd-kitchen-usual-add__results {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.fd-kitchen-usual-add__result {
-    border-bottom: 1px solid var(--line);
-}
-
-.fd-kitchen-usual-add__choose {
-    display: block;
-    padding: var(--fd-s-6) 0;
-    color: var(--text-primary);
-    text-decoration: none;
-}
-
-.fd-kitchen-usual-add__hint,
-.fd-kitchen-usual-add__empty {
-    margin: 0;
-    font: 400 13px/18px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-usual-sheet-form {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-6);
-}
-
-.fd-kitchen-usuals-page .fd-row--usual .fd-row__body--link {
-    cursor: pointer;
-}
-
-/* Usual sheet: the Restock row and the "Add when it runs low" switch sit in
-   one card under Amount (FigCraft 22694). */
-.fd-kitchen-restock-group {
-    margin-top: var(--fd-s-12);
-}
-
-.fd-kitchen-restock-group .fd-kitchen-sheet-row {
-    width: 100%;
-    box-sizing: border-box;
-}
-
-.fd-kitchen-restock-group .fd-kitchen-sheet-row__label {
-    margin-right: auto;
-}
-
-.fd-kitchen-restock-group .fd-kitchen-sheet-row__value {
-    margin-left: 0;
-}
-
-/* A checkbox drawn like `.fd-switch`, so the Restock form posts it with the
-   rest of its fields and needs no script. */
-.fd-kitchen-switch {
-    position: relative;
-    flex: none;
-    width: 48px;
-    height: 28px;
-    margin: 0;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-track);
-    appearance: none;
-    cursor: pointer;
-    transition: background 0.15s ease;
-}
-
-.fd-kitchen-switch::after {
-    content: "";
-    position: absolute;
-    top: 3px;
-    left: 3px;
-    width: 22px;
-    height: 22px;
-    border-radius: var(--radius-pill);
-    background: var(--text-secondary);
-    transition: transform 0.15s ease;
-}
-
-.fd-kitchen-switch:checked {
-    background: var(--accent-fill);
-}
-
-.fd-kitchen-switch:checked::after {
-    background: var(--accent-on);
-    transform: translateX(20px);
-}
-
-.fd-kitchen-switch:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
-.fd-kitchen-restock-form {
-    gap: var(--fd-s-10);
-}
-
-.fd-kitchen-restock-form .fd-kitchen-sheet-rows {
-    margin-top: var(--fd-s-10);
-}
-
-/* The weeks stepper only matters for "Every N weeks". */
-.fd-kitchen-restock-form:not(
-        :has(input[name="restock_schedule"][value="every_n_weeks"]:checked)
-    )
-    .fd-kitchen-restock-weeks {
-    display: none;
-}
-
-.fd-kitchen-restock-level {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-10);
-}
-
-.fd-kitchen-restock-level__input {
-    flex: 0 1 8rem;
-    min-height: 44px;
-    padding: 0 var(--fd-s-12);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sm);
-    background: var(--surface-raised);
-    font: 500 15px/20px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-kitchen-restock-level__unit {
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-restock-hint {
-    margin: 0;
-    font: 400 13px/18px var(--font-body);
-    color: var(--text-secondary);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -730,13 +467,6 @@ button.fd-kitchen-sheet-row {
     overflow: hidden;
 }
 
-/* Desktop table cells and column titles (FigCraft 48217); the phone row
-   shows the product as meta and the rest on its sub-line instead. */
-.fd-kitchen-usual-thead,
-.fd-usual-cell {
-    display: none;
-}
-
 @media (min-width: 1024px) {
     .fd-kitchen-fridge-page {
         max-width: none;
@@ -746,6 +476,12 @@ button.fd-kitchen-sheet-row {
 
     .fd-kitchen-head {
         padding-right: 0;
+    }
+    /* Usuals is one 720 column, its title and actions inside it. */
+    .fd-kitchen-head[data-fd-kitchen-tab="usuals"] {
+        width: 100%;
+        max-width: 720px;
+        margin-inline: auto;
     }
     .fd-kitchen-head .fd-page-header__actions {
         display: flex;
@@ -780,7 +516,11 @@ button.fd-kitchen-sheet-row {
         flex: none;
         width: 100%;
     }
-    :is(.fd-kitchen-fridge-page, .fd-kitchen-groceries-page)[data-fd-selecting]
+    :is(
+            .fd-kitchen-fridge-page,
+            .fd-kitchen-groceries-page,
+            .fd-kitchen-usuals-page
+        )[data-fd-selecting]
         :is(.fd-select-head, .fd-select-bar-slot--desktop) {
         width: 100%;
         max-width: 720px;
@@ -859,220 +599,86 @@ button.fd-kitchen-sheet-row {
         margin-top: 0;
         padding-bottom: var(--space-section);
     }
-
-    .fd-kitchen-usual-stores {
-        margin: 0;
-        padding: 0;
-    }
-
-    /* Usuals as a table in one panel (FigCraft 48217). */
-    .fd-kitchen-usuals-page .fd-section-head {
-        display: none;
-    }
-
-    .fd-kitchen-usual-table {
-        padding: var(--fd-s-12) 22px var(--fd-s-12);
-        border-radius: var(--radius-lg);
-        background: var(--surface-panel);
-        box-shadow: 0 4px 14px var(--overlay-shadow);
-    }
-
-    .fd-kitchen-usual-thead,
-    .fd-kitchen-usual-table .fd-row--usual .fd-row__body {
-        display: grid;
-        grid-template-columns:
-            minmax(0, 196fr) minmax(0, 330fr) minmax(0, 166fr)
-            minmax(0, 116fr) minmax(0, 237fr) 24px;
-        align-items: center;
-        gap: 0;
-    }
-
-    .fd-kitchen-usual-thead {
-        padding: var(--fd-s-10) 0;
-        border-bottom: 1px solid var(--line);
-        font: 600 11px/14px var(--font-body);
-        letter-spacing: 0.09em;
-        text-transform: uppercase;
-        color: var(--text-tertiary);
-    }
-
-    .fd-kitchen-usual-table .fd-row--usual:last-child {
-        border-bottom: 0;
-    }
-
-    .fd-kitchen-usual-table .fd-row--usual .fd-row__body {
-        min-height: 50px;
-        padding: var(--fd-s-10) 0;
-        cursor: pointer;
-    }
-
-    .fd-kitchen-usual-table .fd-row--usual .fd-row__meta,
-    .fd-kitchen-usual-table .fd-row--usual .fd-row__sub {
-        display: none;
-    }
-
-    .fd-usual-cell {
-        display: block;
-        min-width: 0;
-        padding-right: var(--fd-s-12);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        font: 400 14px/18px var(--font-body);
-        color: var(--text-secondary);
-    }
-
-    .fd-usual-cell--product {
-        color: var(--text-primary);
-    }
-
-    .fd-usual-cell--muted {
-        color: var(--text-tertiary);
-    }
-
-    .fd-usual-cell--restock {
-        font-size: 13px;
-    }
-
-    .fd-usual-cell.fd-tone--warn {
-        color: var(--status-warn);
-    }
-
-    .fd-usual-cell.fd-tone--accent {
-        color: var(--accent-text);
-    }
 }
 
-/* Add a usual: Scan, Search and Type it are three tabs of one sheet. */
-.fd-usual-add-tabs {
+/* Kitchen · Usuals: one list of usuals and the add row under it. A usual's
+   product rides beside its name; the line under it is store, amount, restock. */
+.fd-kitchen-usuals-layout .fd-page-layout__content {
     display: flex;
-    gap: var(--fd-s-4);
-    margin: 0 0 var(--fd-s-12);
-    padding: var(--fd-s-3);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+.fd-kitchen-usuals-layout .fd-list-group[data-fd-usual-add-row] {
+    margin-top: 0;
+}
+.fd-kitchen-weight {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-md);
 }
 
-.fd-usual-add-tab {
-    flex: 1 1 0;
-    min-height: 40px;
-    margin: 0;
-    padding: 0 var(--fd-s-10);
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: none;
-    color: var(--text-secondary);
-    font: 500 14px/20px var(--font-body);
-    cursor: pointer;
-}
-
-.fd-usual-add-tab[aria-selected="true"] {
-    background: var(--text-primary);
-    color: var(--surface-bg);
-}
-
+/* Add a usual: the three ways in are the sheet's tiles; then the view each opens. */
 .fd-usual-add-panel {
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-10);
+    gap: var(--space-lg);
 }
-
 .fd-usual-add-panel[hidden] {
     display: none;
 }
-
-.fd-usual-add-lead,
+.fd-usual-add-find {
+    margin: 0;
+}
+/* Type it hides the tiles; Back is a link under the sheet's title. */
+.fd-usual-add-back {
+    margin: 0;
+}
+.fd-sheet .fd-usual-add-back .fd-btn[data-fd-btn] {
+    flex: none;
+    width: auto;
+}
 .fd-usual-add-note,
-.fd-usual-add-hint {
+.fd-usual-add-hint,
+.fd-usual-add-none {
     margin: 0;
     font: 400 14px/20px var(--font-body);
     color: var(--text-secondary);
 }
-
-.fd-usual-add-step {
-    margin: 0;
-    font: 600 18px/24px var(--font-body);
-    color: var(--text-primary);
+.fd-usual-add-type,
+.fd-usual-add-panel > form[id$="-what-form"] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-lg);
 }
-
-.fd-usual-add-product {
-    padding: var(--fd-s-10) 0;
-    border-bottom: 1px solid var(--line);
-}
-
-.fd-usual-add-product p {
-    margin: 0;
-}
-
-.fd-usual-add-product__name {
-    font: 500 16px/22px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-usual-add-product__brand,
-.fd-usual-add-product__code {
-    font: 400 13px/18px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-usual-add-find {
-    display: flex;
-    gap: var(--fd-s-6);
-    align-items: center;
-}
-
-.fd-usual-add-find input[type="search"] {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.fd-usual-add-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-3);
-}
-
-.fd-usual-add-field input {
-    width: 100%;
-}
-
-.fd-usual-add-chip-note {
-    color: var(--text-tertiary);
-    font: 400 12px/16px var(--font-body);
-}
-
 .fd-usual-add-macros {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--fd-s-10);
+    gap: var(--space-md);
 }
-
-.fd-usual-add-serving {
+.fd-usual-add-serving__row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: var(--fd-s-10);
-    align-items: end;
-}
-
-.fd-usual-add-amount {
-    display: flex;
-    gap: var(--fd-s-6);
     align-items: center;
+    gap: var(--space-md);
+}
+/* Serving size only matters for "Per serving". */
+.fd-usual-add-type:not(:has(input[name="basis"][value="per_serving"]:checked))
+    .fd-usual-add-serving {
+    display: none;
+}
+/* `.fd-sheet .fd-btn` (flex 1 1 0) would collapse a button in these grids. */
+.fd-sheet .fd-usual-add-type > .fd-btn[data-fd-btn],
+.fd-sheet .fd-usual-add-panel > form > .fd-btn[data-fd-btn] {
+    flex: none;
+    width: 100%;
 }
 
-.fd-usual-add-amount__input {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.fd-usual-add-scan {
-    align-self: flex-start;
-}
-
-.fd-kitchen-usual-add__result {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--fd-s-10);
+/* The macro and weight fields are captioned in caps, as the sheet's own labels. */
+:is(.fd-usual-add-macros, .fd-kitchen-weight) .fd-field__label {
+    font-size: var(--text-micro-size);
+    font-weight: 600;
+    line-height: var(--text-micro-line);
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-secondary);
 }

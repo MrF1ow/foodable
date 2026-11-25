@@ -60,3 +60,15 @@ test("every string is escaped and a javascript: href is refused", async () => {
     expect(html).not.toContain("<script>");
     expect(() => tab({ label: "x", href: "javascript:alert(1)" })).toThrow();
 });
+
+test("a tab carries its own class and data hooks", () => {
+    const html = tab({
+        label: "365 days",
+        href: "/t?range=365",
+        className: "fd-trends-tab--desktop",
+        data: { "fd-trends-range": "365" },
+    });
+    expect(html).toContain(
+        'class="fd-tab-row__tab fd-trends-tab--desktop" href="/t?range=365" data-fd-trends-range="365"',
+    );
+});

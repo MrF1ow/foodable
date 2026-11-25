@@ -826,3 +826,18 @@ test("the quick grid is four columns on the phone and a tight row of six on the 
         /\.fd-sheet--dialog \.fd-sheet__section--tiles \.fd-sheet__content \{[^}]*repeat\(6, minmax\(0, 1fr\)\)/,
     );
 });
+
+test("a title header can carry a ⋯ menu before the close button", () => {
+    const html = sheetHeader({
+        kind: "title",
+        title: "Milk",
+        sheetId: "s",
+        menu: raw('<div class="fd-menu">⋯</div>'),
+    });
+    const menuAt = html.indexOf('class="fd-sheet__menu"');
+    expect(menuAt).toBeGreaterThan(-1);
+    expect(menuAt).toBeLessThan(html.indexOf('commandfor="s"'));
+    expect(
+        sheetHeader({ kind: "title", title: "Milk", sheetId: "s" }),
+    ).not.toContain("fd-sheet__menu");
+});

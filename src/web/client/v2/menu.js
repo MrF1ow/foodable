@@ -310,6 +310,29 @@ function bindMenu(root) {
             close(root, true);
             return;
         }
+        // A pull-down that sets a field of the form around it (a store, a
+        // unit): the choice goes in the hidden input and in the row, the ticks
+        // follow it, and the menu closes. Nothing is posted until the form is.
+        if (item.hasAttribute("data-fd-menu-value")) {
+            const field = root.querySelector("[data-fd-menu-field]");
+            if (field) {
+                field.value = item.getAttribute("data-fd-menu-value") || "";
+                items(root).forEach((other) => {
+                    if (other.hasAttribute("data-fd-menu-value")) {
+                        other.setAttribute(
+                            "aria-checked",
+                            other === item ? "true" : "false",
+                        );
+                    }
+                });
+                const shown = root.querySelector(".fd-item-row__value");
+                const label = item.querySelector(".fd-menu__label");
+                if (shown && label) shown.textContent = label.textContent;
+                close(root, true);
+                field.dispatchEvent(new Event("change", { bubbles: true }));
+                return;
+            }
+        }
         // A tick that posts a form (a pull-down that saves its value) just submits.
         if (
             item.getAttribute("role") === "menuitemcheckbox" &&

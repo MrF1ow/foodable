@@ -197,12 +197,12 @@ function matchesSel(el: MockEl, sel: string): boolean {
     const attrEq = sel.match(/^\[([\w-]+)="([^"]*)"\]$/);
     if (attrEq) return el.attributes.get(attrEq[1]!) === attrEq[2];
     const attrPressed = sel.match(
-        /^\[data-fd-trends-range\]\[aria-pressed="true"\]$/,
+        /^\[data-fd-trends-range\]\[aria-current="page"\]$/,
     );
     if (attrPressed) {
         return (
             el.attributes.has("data-fd-trends-range") &&
-            el.attributes.get("aria-pressed") === "true"
+            el.attributes.get("aria-current") === "page"
         );
     }
     const twoAttr = sel.match(/^\[([\w-]+)\]\[([\w-]+)="([^"]*)"\]$/);
@@ -219,12 +219,14 @@ function mountTrendsHtml(html: string): MockEl {
     const stripped = html.replace(/<svg[\s\S]*?<\/svg>/gi, "");
     const root = createEl("div", new Map(), null);
     const stack: MockEl[] = [root];
-    const re = /<([a-z][\w-]*)([^>/]*)(\/)?>|<\/([a-z][\w-]*)>/gi;
+    const re =
+        /<([a-z][\w-]*)((?:"[^"]*"|'[^']*'|[^>"'/])*)(\/)?>|<\/([a-z][\w-]*)>/gi;
     let m: RegExpExecArray | null;
     while ((m = re.exec(stripped))) {
         if (m[1]) {
             const attrs = parseAttrs(m[2] ?? "");
-            const selfClose = m[3] === "/";
+            const selfClose =
+                m[3] === "/" || ["input", "br", "hr", "img"].includes(m[1]);
             const el = createEl(m[1], attrs, stack[stack.length - 1]!);
             stack[stack.length - 1]!.children.push(el);
             if (!selfClose) stack.push(el);
@@ -317,12 +319,12 @@ function visiblePanelRange(root: MockEl): string | null {
 
 function pressedRange(root: MockEl): string | null {
     const btn = root.querySelector(
-        '[data-fd-trends-range][aria-pressed="true"]',
+        '[data-fd-trends-range][aria-current="page"]',
     );
     return btn?.getAttribute("data-fd-trends-range") ?? null;
 }
 
-test("toggle shows the matching panel and aria-pressed through 7→30→90→365", () => {
+test("toggle shows the matching panel and aria-current through 7→30→90→365", () => {
     fetchCalls = 0;
     expect(visiblePanelRange(trendsRoot)).toBe("30");
     expect(pressedRange(trendsRoot)).toBe("30");

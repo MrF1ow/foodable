@@ -1,14 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { goalsResolver } from "../../../domain/insights.js";
 import type { NutritionGoals } from "../../../db/nutrition.js";
 import type { TrendsDay } from "../../../domain/trends-view.js";
 import {
     buildPreviewTrendsPageData,
     buildTrendsViews,
-    canAdvanceTrendsMonth,
-    parseTrendsMonthParam,
+    parseTrendsRangeParam,
     renderTrendsV2Page,
-    trendsMonthHref,
 } from "./trends.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 
@@ -49,6 +48,28 @@ function fixtureDays(today: string): TrendsDay[] {
     return out;
 }
 
+const chrome = { theme: "light" as const, flags: FIXTURE_APP_CHROME_FLAGS };
+
+function dataFor(
+    today: string,
+    opts: {
+        days?: TrendsDay[];
+        weights?: { date: string; weight_g: number }[];
+        member?: string;
+        range?: 7 | 30 | 90 | 365;
+    } = {},
+) {
+    return buildPreviewTrendsPageData(
+        { ...chrome },
+        opts.days ?? fixtureDays(today),
+        goalsResolver(baseGoals, []),
+        opts.weights ?? [{ date: "2026-08-10", weight_g: 75_000 }],
+        today,
+        "kg",
+        { range: opts.range, member: opts.member },
+    );
+}
+
 describe("buildTrendsViews", () => {
     test("precomputes all four ranges", () => {
         const today = "2026-08-15";
@@ -58,7 +79,6 @@ describe("buildTrendsViews", () => {
             [{ date: "2026-08-10", weight_g: 75_000 }],
             today,
             "kg",
-            { year: 2026, month: 8 },
         );
         expect(Object.keys(views).sort()).toEqual(["30", "365", "7", "90"]);
         expect(views["7"]!.range).toBe(7);
@@ -66,320 +86,226 @@ describe("buildTrendsViews", () => {
     });
 });
 
+describe("parseTrendsRangeParam", () => {
+    test("takes the four ranges and falls back to 30", () => {
+        expect(parseTrendsRangeParam("7")).toBe(7);
+        expect(parseTrendsRangeParam("365")).toBe(365);
+        expect(parseTrendsRangeParam("12")).toBe(30);
+        expect(parseTrendsRangeParam(undefined)).toBe(30);
+    });
+});
+
 describe("renderTrendsV2Page", () => {
-    test("includes toggle, four range panels, and sections", () => {
-        const today = "2026-08-15";
-        const data = buildPreviewTrendsPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            fixtureDays(today),
-            goalsResolver(baseGoals, [
-                {
-                    user_id: "u1",
-                    date: "2026-08-01",
-                    updated_at: "x",
-                    daily_calories: 1800,
-                    daily_protein_g: null,
-                    daily_carbs_g: null,
-                    daily_fat_g: null,
-                    daily_fiber_g: null,
-                    daily_sugar_g: null,
-                    daily_alcohol_g: null,
-                    daily_caffeine_mg: null,
-                    daily_water_ml: null,
-                },
-            ]),
-            [{ date: "2026-08-10", weight_g: 75_000 }],
-            today,
-            "kg",
-        );
-        const html = renderTrendsV2Page(data);
+    test("is the Page header, the range tabs, then four range panels of the design's sections", () => {
+        const html = renderTrendsV2Page(dataFor("2026-08-15"));
         expect(html).toContain("fd-trends-page");
-        expect(html).toContain('data-fd-trends-range="30"');
-        // Only the toggle buttons carry data-fd-trends-range: on the page root
-        // the client's closest() would swallow every click (month links).
-        expect(html).not.toMatch(
-            /data-fd-trends-root[^>]*data-fd-trends-range/,
-        );
-        expect(html).toContain("Near goal");
-        expect(html).toContain('data-fd-trends-panel="7"');
-        expect(html).toContain('data-fd-trends-panel="30"');
-        expect(html).toContain('data-fd-trends-panel="90"');
-        expect(html).toContain('data-fd-trends-panel="365"');
-        expect(html).not.toContain("fd-trends-data");
-        expect(html).toContain("fd-trends-rings");
-        expect(html).toContain("fd-trends-weight");
-        expect(html).toContain("Logged");
-        expect(html).toContain("No log");
-        expect(html).toContain("fd-trends-month");
-        expect(html).toContain("fd-trends-summary--phone");
-        expect(html).toContain("fd-trends-summary--desktop");
-        expect(html).toContain("Day streak");
-        expect(html).toContain("fd-trends-bars-wrap");
+        expect(html).toMatch(/<header class="fd-page-header fd-trends-header"/);
+        expect(html).toContain(">Trends</h1>");
+        expect(html).toContain("Last 30 days");
+        for (const range of [7, 30, 90, 365]) {
+            expect(html).toContain(`data-fd-trends-panel="${range}"`);
+        }
+        // Only the shown range is visible.
+        expect(html).toMatch(/data-fd-trends-panel="7" hidden/);
+        expect(html).not.toMatch(/data-fd-trends-panel="30" hidden/);
+        // The sections, each from a phase 1 builder.
+        expect(html).toContain("fd-stat-card");
+        expect(html).toContain("fd-table-rows");
+        expect(html).toContain("fd-section-header");
+        expect(html).toContain("Averages");
+        expect(html).toContain("Calories by day");
+        expect(html).toContain("fd-trends-weight__chart");
+        expect(html).toContain("fd-page-layout--two-columns");
+        // What the design does not draw is gone.
+        for (const gone of [
+            "fd-trends-rings",
+            "fd-trends-month",
+            "fd-trends-legend",
+            "Near goal",
+            "fd-trends-summary",
+            "fd-utab",
+            "fd-trends-section__title",
+        ]) {
+            expect(html).not.toContain(gone);
+        }
     });
 
-    test("range picker is the shared underline tab row under the title; 365 is desktop-only", () => {
-        const today = "2026-08-15";
-        const html = renderTrendsV2Page(
-            buildPreviewTrendsPageData(
-                {
-                    theme: "light",
-                    flags: FIXTURE_APP_CHROME_FLAGS,
-                },
-                fixtureDays(today),
-                goalsResolver(baseGoals, []),
-                [],
-                today,
-                "kg",
-            ),
+    test("the summary is four tiles and the averages a table of avg against goal", () => {
+        const html = renderTrendsV2Page(dataFor("2026-08-15"));
+        const panel = html.slice(
+            html.indexOf('data-fd-trends-panel="30"'),
+            html.indexOf('data-fd-trends-panel="90"'),
         );
-        const buttons = [
+        for (const label of [
+            "Avg kcal",
+            "Avg protein",
+            "Logged days",
+            "Streak",
+        ]) {
+            expect(panel).toContain(`>${label}</span>`);
+        }
+        expect(panel.match(/fd-stat-card"/g)?.length).toBe(4);
+        expect(panel).toContain(">Avg</span>");
+        expect(panel).toContain(">Goal</span>");
+        for (const row of ["Calories", "Protein", "Carbs", "Fat"]) {
+            expect(panel).toContain(`>${row}</span>`);
+        }
+        // The goal is the day's own: 2,200 kcal and 160 g.
+        expect(panel).toContain("2,200");
+        expect(panel).toContain("160 g");
+    });
+
+    test("range tabs are links to the page with that range; the active one is current; 365 is desktop-only", () => {
+        const html = renderTrendsV2Page(
+            dataFor("2026-08-15", { member: "sam-id" }),
+        );
+        const tabs = [
             ...html.matchAll(
-                /<button[^>]*data-fd-trends-range="(\d+)"([^>]*)>([^<]*)<\/button>/g,
+                /<a class="([^"]*fd-tab-row__tab[^"]*)" href="([^"]*)"([^>]*)data-fd-trends-range="(\d+)">([^<]*)<\/a>/g,
             ),
-        ].map((m) => ({ range: m[1], attrs: m[2], label: m[3] }));
-        expect(buttons.map((b) => b.label)).toEqual([
+        ].map((m) => ({
+            cls: m[1]!,
+            href: m[2]!,
+            attrs: m[3]!,
+            range: m[4]!,
+            label: m[5]!,
+        }));
+        expect(tabs.map((t) => t.label)).toEqual([
             "7 days",
             "30 days",
             "90 days",
             "365 days",
         ]);
-        expect(buttons.map((b) => b.range)).toEqual(["7", "30", "90", "365"]);
-        // Only the 365 tab is desktop-only; the default (30) is pressed.
-        expect(html.match(/fd-utab--desktop-only/g)?.length).toBe(1);
-        expect(html).toContain(
-            'class="fd-utab fd-utab--desktop-only" data-fd-trends-range="365"',
-        );
+        expect(tabs.map((t) => t.href)).toEqual([
+            "/trends?range=7&amp;member=sam-id",
+            "/trends?range=30&amp;member=sam-id",
+            "/trends?range=90&amp;member=sam-id",
+            "/trends?range=365&amp;member=sam-id",
+        ]);
         expect(
-            buttons.filter((b) => b.attrs?.includes('aria-pressed="true"')),
-        ).toEqual([expect.objectContaining({ range: "30" })]);
-        // The title row carries no range control: the tab row comes after the
-        // title and subtitle, in the shared tab component (not the pill).
-        const headerAt = html.indexOf('<header class="fd-trends-header">');
+            tabs
+                .filter((t) => t.attrs.includes('aria-current="page"'))
+                .map((t) => t.range),
+        ).toEqual(["30"]);
+        expect(
+            tabs
+                .filter((t) => t.cls.includes("fd-trends-tab--desktop"))
+                .map((t) => t.range),
+        ).toEqual(["365"]);
+        // The title row carries no range control: the tabs come after it.
         const header = html.slice(
-            headerAt,
-            html.indexOf("</header>", headerAt),
+            html.indexOf("<header"),
+            html.indexOf("</header>"),
         );
-        const title = header.indexOf("fd-trends-title");
-        const subtitle = header.indexOf("fd-trends-subtitle");
-        const tabs = header.indexOf('<div class="fd-utabs');
-        expect(title).toBeGreaterThanOrEqual(0);
-        expect(subtitle).toBeGreaterThan(title);
-        expect(tabs).toBeGreaterThan(subtitle);
-        const top = header.slice(0, header.indexOf("</div>"));
-        expect(top).not.toContain("data-fd-trends-range");
-        expect(html).not.toContain("fd-seg");
-        expect(html).toContain("How the last 30 days went");
+        expect(header).not.toContain("data-fd-trends-range");
+    });
+
+    test("the range the query asks for is the one shown", () => {
+        const html = renderTrendsV2Page(dataFor("2026-08-15", { range: 7 }));
+        expect(html).toContain("Last 7 days");
+        expect(html).toContain('data-fd-trends-active="7"');
+        expect(html).not.toMatch(/data-fd-trends-panel="7" hidden/);
+        expect(html).toMatch(/data-fd-trends-panel="30" hidden/);
+    });
+
+    test("a week's bars are lettered by weekday; a longer range names its two ends", () => {
+        const html = renderTrendsV2Page(dataFor("2026-08-15"));
+        const week = html.slice(
+            html.indexOf('data-fd-trends-panel="7"'),
+            html.indexOf('data-fd-trends-panel="30"'),
+        );
+        expect(week.match(/fd-trends-bar__day/g)?.length).toBe(7);
+        expect(week).not.toContain("fd-trends-bars__ends");
+        const month = html.slice(
+            html.indexOf('data-fd-trends-panel="30"'),
+            html.indexOf('data-fd-trends-panel="90"'),
+        );
+        expect(month).not.toContain("fd-trends-bar__day");
+        expect(month).toContain("fd-trends-bars__ends");
+        expect(month.match(/<li class="fd-trends-bar /g)?.length).toBe(30);
+    });
+
+    test("weight shows the latest figure and its change; with none, it says so", () => {
+        const withWeights = renderTrendsV2Page(
+            dataFor("2026-08-15", {
+                weights: [
+                    { date: "2026-08-01", weight_g: 76_000 },
+                    { date: "2026-08-10", weight_g: 75_000 },
+                ],
+            }),
+        );
+        const panel = withWeights.slice(
+            withWeights.indexOf('data-fd-trends-panel="30"'),
+            withWeights.indexOf('data-fd-trends-panel="90"'),
+        );
+        expect(panel).toContain("75.0 kg");
+        expect(panel).toContain("↓ 1.0 this month");
+        const none = renderTrendsV2Page(dataFor("2026-08-15", { weights: [] }));
+        expect(none).toContain("No weigh-ins in this range");
+    });
+
+    test("Go to a day is a date picker that opens Today, with the member kept", () => {
+        const html = renderTrendsV2Page(
+            dataFor("2026-08-15", { member: "sam-id" }),
+        );
+        const form =
+            html.match(/<form class="fd-trends-goto"[\s\S]*?<\/form>/)?.[0] ??
+            "";
+        expect(form).toContain('method="get" action="/"');
+        expect(form).toContain('name="member" value="sam-id"');
+        expect(form).toContain(
+            'type="date" name="date" max="2026-08-15" value="2026-08-15"',
+        );
+        expect(form).toContain("data-fd-trends-goto");
+        expect(form).toContain("Go to a day");
+        expect(form).toContain("Sat 15 Aug");
     });
 
     test("member subject label is shown when set", () => {
-        const today = "2026-08-15";
-        const data = buildPreviewTrendsPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            fixtureDays(today),
-            goalsResolver(baseGoals, []),
-            [],
-            today,
-            "kg",
-        );
+        const data = dataFor("2026-08-15");
         data.chrome.subjectLabel = "Sam";
-        data.empty = true;
         const html = renderTrendsV2Page(data);
         expect(html).toContain("fd-trends-subject");
-        expect(html).toContain("Sam");
+        expect(html).toContain("Viewing Sam");
     });
 
     test("weights without meals still render panels", () => {
-        const today = "2026-08-15";
-        const data = buildPreviewTrendsPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            fixtureDays(today).map((d) => ({
-                ...d,
-                logged: false,
-                calories: 0,
-            })),
-            goalsResolver(baseGoals, []),
-            [{ date: "2026-08-10", weight_g: 75_000 }],
-            today,
-            "kg",
-        );
+        const days = fixtureDays("2026-08-15").map((d) => ({
+            ...d,
+            logged: false,
+            calories: 0,
+        }));
+        const data = dataFor("2026-08-15", { days });
         expect(data.empty).toBe(false);
         const html = renderTrendsV2Page(data);
         expect(html).toContain('data-fd-trends-panel="30"');
-        expect(html).not.toContain("fd-trends-empty");
+        expect(html).not.toContain("Log meals to see trends here.");
     });
 
-    test("empty user sees empty state", () => {
-        const today = "2026-08-15";
-        const data = buildPreviewTrendsPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            fixtureDays(today).map((d) => ({
-                ...d,
-                logged: false,
-                calories: 0,
-            })),
-            goalsResolver(baseGoals, []),
-            [],
-            today,
-            "kg",
-        );
+    test("an empty user sees the empty state and no panels", () => {
+        const days = fixtureDays("2026-08-15").map((d) => ({
+            ...d,
+            logged: false,
+            calories: 0,
+        }));
+        const data = dataFor("2026-08-15", { days, weights: [] });
         expect(data.empty).toBe(true);
         const html = renderTrendsV2Page(data);
-        expect(html).toContain("fd-trends-empty");
+        expect(html).toContain("Log meals to see trends here.");
+        expect(html).not.toContain("data-fd-trends-panel");
     });
+});
 
-    test("month card grades days and links prev/next with member and range", () => {
-        const today = "2026-08-15";
-        const days = fixtureDays(today);
-        const onTarget = days.find((d) => d.date === "2026-07-10")!;
-        onTarget.calories = 2100;
-        onTarget.logged = true;
-        const loggedOff = days.find((d) => d.date === "2026-07-11")!;
-        loggedOff.calories = 2500;
-        loggedOff.logged = true;
-        const empty = days.find((d) => d.date === "2026-07-12")!;
-        empty.logged = false;
-        empty.calories = 0;
+test("Calories by day bars are drawn in the accent, with no off-goal colour", () => {
+    const css = readFileSync("./public/app/v2/trends.css", "utf8");
+    expect(css).toContain("background: var(--accent-fill)");
+    expect(css).not.toContain("--status-warn");
+    expect(css).not.toContain("bar--off");
+});
 
-        const data = buildPreviewTrendsPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            days,
-            goalsResolver(baseGoals, []),
-            [],
-            today,
-            "kg",
-            { month: { year: 2026, month: 7 }, range: 30, member: "sam-id" },
-        );
-        const html = renderTrendsV2Page(data);
-
-        expect(html).toMatch(
-            /fd-trends-month__day--on-target[^>]*data-date="2026-07-10"/,
-        );
-        expect(html).toMatch(
-            /fd-trends-month__day--logged[^>]*data-date="2026-07-11"/,
-        );
-        expect(html).toMatch(
-            /fd-trends-month__day--empty[^>]*data-date="2026-07-12"/,
-        );
-        expect(html).toContain(
-            'href="/trends?month=2026-06&amp;range=30&amp;member=sam-id"',
-        );
-        expect(html).toContain(
-            'href="/trends?month=2026-08&amp;range=30&amp;member=sam-id"',
-        );
-        expect(html).toContain("On target");
-        expect(html).toMatch(/fd-trends-month__legend[\s\S]*Logged/);
-    });
-
-    test("today is marked in the month card when it is in the displayed month", () => {
-        const today = "2026-08-15";
-        const data = buildPreviewTrendsPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            fixtureDays(today),
-            goalsResolver(baseGoals, []),
-            [],
-            today,
-            "kg",
-            { month: { year: 2026, month: 8 } },
-        );
-        const html = renderTrendsV2Page(data);
-        expect(html).toMatch(
-            /fd-trends-month__day--today[^>]*data-date="2026-08-15"/,
-        );
-    });
-
-    test("no next month link when display month is the current month", () => {
-        const today = "2026-08-15";
-        const data = buildPreviewTrendsPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            fixtureDays(today),
-            goalsResolver(baseGoals, []),
-            [],
-            today,
-            "kg",
-            { month: { year: 2026, month: 8 } },
-        );
-        const html = renderTrendsV2Page(data);
-        expect(html).not.toContain('href="/trends?month=2026-09');
-        expect(html).toContain('href="/trends?month=2026-07');
-    });
-
-    test("a year outside 1970-2999 falls back to the current month", () => {
-        expect(parseTrendsMonthParam("0100-01", "2026-08-15")).toEqual({
-            year: 2026,
-            month: 8,
-        });
-        expect(parseTrendsMonthParam("2025-03", "2026-08-15")).toEqual({
-            year: 2025,
-            month: 3,
-        });
-    });
-
-    test("invalid month query falls back to the current month", () => {
-        expect(parseTrendsMonthParam(undefined, "2026-08-15")).toEqual({
-            year: 2026,
-            month: 8,
-        });
-        expect(parseTrendsMonthParam("2026-13", "2026-08-15")).toEqual({
-            year: 2026,
-            month: 8,
-        });
-        expect(parseTrendsMonthParam("nope", "2026-08-15")).toEqual({
-            year: 2026,
-            month: 8,
-        });
-        expect(parseTrendsMonthParam("2026-07", "2026-08-15")).toEqual({
-            year: 2026,
-            month: 7,
-        });
-        // A future month falls back to the current one.
-        expect(parseTrendsMonthParam("2026-09", "2026-08-15")).toEqual({
-            year: 2026,
-            month: 8,
-        });
-        expect(parseTrendsMonthParam("2027-01", "2026-08-15")).toEqual({
-            year: 2026,
-            month: 8,
-        });
-    });
-
-    test("canAdvanceTrendsMonth blocks future months", () => {
-        expect(
-            canAdvanceTrendsMonth({ year: 2026, month: 8 }, "2026-08-15"),
-        ).toBe(false);
-        expect(
-            canAdvanceTrendsMonth({ year: 2026, month: 7 }, "2026-08-15"),
-        ).toBe(true);
-    });
-
-    test("trendsMonthHref preserves member and range", () => {
-        expect(
-            trendsMonthHref({
-                year: 2026,
-                month: 7,
-                range: 90,
-                member: "x",
-            }),
-        ).toBe("/trends?month=2026-07&range=90&member=x");
-    });
+test("Calories by day can be scrolled from the keyboard", () => {
+    const html = renderTrendsV2Page(dataFor("2026-08-15", { range: 90 }));
+    expect(html).toMatch(
+        /<ul class="fd-trends-bars" tabindex="0" aria-label="[^"]+"/,
+    );
 });

@@ -114,6 +114,8 @@ export type SheetHeaderOptions = {
     subtitle?: string;
     /** The close button. Default on; `{ label }` renames it ("Close"). */
     close?: boolean | { label: string };
+    /** A ⋯ menu before the close button (Edit a usual's Remove); `kind: "title"` only. */
+    menu?: Html;
     /** The search box of `kind: "search"`. */
     search?: SheetSearchOptions;
 };
@@ -318,7 +320,7 @@ export function sheetHeader(
     const closeLabel =
         typeof opts.close === "object" ? opts.close.label : "Close";
     return raw(
-        `<header class="fd-sheet__header fd-sheet__header--title">\n${HANDLE}\n<div class="fd-sheet__row">\n<div class="fd-sheet__titles">\n<h2 class="fd-sheet__title" id="${esc(titleId)}">${esc(opts.title)}</h2>${subtitle}\n</div>\n${showClose ? closeButton(sheetId, closeLabel) : ""}\n</div>\n</header>`,
+        `<header class="fd-sheet__header fd-sheet__header--title">\n${HANDLE}\n<div class="fd-sheet__row">\n<div class="fd-sheet__titles">\n<h2 class="fd-sheet__title" id="${esc(titleId)}">${esc(opts.title)}</h2>${subtitle}\n</div>\n${opts.menu ? `<div class="fd-sheet__menu">${opts.menu}</div>\n` : ""}${showClose ? closeButton(sheetId, closeLabel) : ""}\n</div>\n</header>`,
     );
 }
 

@@ -123,6 +123,7 @@ import {
 } from "./pages/v2/kitchen-usuals-add.js";
 import {
     kitchenUsualRowMeta,
+    parseUsualsStoreFilter,
     renderKitchenUsualsV2Page,
     restockWeekdayLabel,
     type KitchenUsualsRowMeta,
@@ -1519,11 +1520,7 @@ export async function renderUsualProductsListPage(
             }),
         );
     }
-    const selectedStoreId =
-        opts.storeFilter &&
-        stores.some((store) => store.id === opts.storeFilter)
-            ? opts.storeFilter
-            : null;
+    const selectedStoreIds = parseUsualsStoreFilter(opts.storeFilter, stores);
     const knownOpen =
         opts.openFoodId && rows.some((row) => row.food.id === opts.openFoodId)
             ? opts.openFoodId
@@ -1540,7 +1537,7 @@ export async function renderUsualProductsListPage(
             stores,
             rowMeta,
             addable,
-            selectedStoreId,
+            selectedStoreIds,
             error,
             openFoodId: knownOpen,
             openRestock: opts.openRestock,

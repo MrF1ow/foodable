@@ -21,6 +21,12 @@ import {
     type KitchenGroceriesLineMeta,
     type KitchenGroceriesV2View,
 } from "../src/web/pages/v2/kitchen-groceries.js";
+import {
+    buildPreviewKitchenUsualsView,
+    kitchenUsualRowMeta,
+    renderKitchenUsualsV2Page,
+    type KitchenUsualsV2View,
+} from "../src/web/pages/v2/kitchen-usuals.js";
 import { renderRecipesListV2Page } from "../src/web/pages/v2/recipes-list.js";
 import { renderSettingsHouseholdV2Page } from "../src/web/pages/v2/settings-household.js";
 import { renderHouseholdInvitesPage } from "../src/web/pages/v2/settings-household-invites.js";
@@ -64,7 +70,7 @@ import { renderSettingsNotificationsV2Page } from "../src/web/pages/v2/settings-
 import type { NotificationRow } from "../src/domain/notifications.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
-import { newFood } from "../src/domain/foods.js";
+import { newFood, usualProductRows } from "../src/domain/foods.js";
 import {
     buildPreviewProductPageView,
     renderProductV2Page,
@@ -134,7 +140,10 @@ function previewTrendsPage(chrome: ReturnType<typeof fixtureChrome>) {
         chrome as Parameters<typeof buildPreviewTrendsPageData>[0],
         fixtureTrendsDays(today),
         goalsResolver(FIXTURE_TRENDS_GOALS, []),
-        [{ date: "2026-11-01", weight_g: 79_000 }],
+        [
+            { date: "2026-10-20", weight_g: 79_400 },
+            { date: "2026-11-01", weight_g: 79_000 },
+        ],
         today,
         "kg",
     );
@@ -899,6 +908,138 @@ function fixtureGroceriesView(
     });
 }
 
+/**
+ * Kitchen › Usuals with a catalog to drive: Milk with two products, Eggs
+ * running low, Bananas with no usual product and Olive oil paused, over two
+ * stores, and three foods that are not usuals yet for the Add a usual sheet.
+ */
+const USUAL_STORES = [
+    { id: "s-costco", householdId: H, name: "Costco", sortOrder: 0 },
+    { id: "s-tj", householdId: H, name: "Trader Joe's", sortOrder: 1 },
+];
+
+function fixtureUsualsCatalog() {
+    const make = (id: string, over: Parameters<typeof newFood>[0]) => ({
+        ...newFood(over),
+        id,
+    });
+    const usualOf = (
+        id: string,
+        name: string,
+        product: string | null,
+        store: string,
+        amount: { amount: number; unit: string },
+        plain: Partial<Parameters<typeof newFood>[0]> = {},
+    ) => [
+        make(id, {
+            householdId: H,
+            kind: "food",
+            name,
+            ...(product
+                ? { usualProductId: `${id}-p` }
+                : { usualAddedAt: "2026-10-01" }),
+            usualStoreId: store,
+            usualAmount: amount,
+            ...plain,
+        }),
+        ...(product
+            ? [
+                  make(`${id}-p`, {
+                      householdId: H,
+                      kind: "food",
+                      name: product,
+                      genericFoodId: id,
+                      usualStoreId: store,
+                      usualAmount: amount,
+                  }),
+              ]
+            : []),
+    ];
+    const catalog = [
+        ...usualOf(
+            "u-milk",
+            "Milk",
+            "Kirkland 2% milk",
+            "s-costco",
+            { amount: 64, unit: "fl oz" },
+            { restockSchedule: "weekly" },
+        ),
+        make("u-milk-q", {
+            householdId: H,
+            kind: "food",
+            name: "Organic Valley whole milk",
+            genericFoodId: "u-milk",
+        }),
+        ...usualOf(
+            "u-eggs",
+            "Eggs",
+            "Vital Farms large",
+            "s-costco",
+            { amount: 24, unit: "each" },
+            { restockSchedule: "weekly", restockWhenLow: true },
+        ),
+        ...usualOf(
+            "u-bananas",
+            "Bananas",
+            null,
+            "s-tj",
+            { amount: 6, unit: "each" },
+            { restockWhenLow: true, restockLowLevel: 2 },
+        ),
+        ...usualOf(
+            "u-oil",
+            "Olive oil",
+            "California Olive Ranch",
+            "s-costco",
+            { amount: 1, unit: "each" },
+            { restockSchedule: "monthly", restockPaused: true },
+        ),
+        make("f-butter", { householdId: H, kind: "food", name: "Butter" }),
+        make("f-bread", {
+            householdId: H,
+            kind: "food",
+            name: "Sourdough bread",
+        }),
+        make("f-spinach", { householdId: H, kind: "food", name: "Spinach" }),
+    ];
+    return { catalog, usual: usualProductRows({ foods: catalog }) };
+}
+
+function fixtureUsualsView(
+    chrome: unknown,
+    overrides: Partial<KitchenUsualsV2View> = {},
+): KitchenUsualsV2View {
+    const { catalog, usual } = fixtureUsualsCatalog();
+    const storesById = new Map(USUAL_STORES.map((row) => [row.id, row]));
+    const foodsById = new Map(
+        catalog.map((row) => [
+            row.id,
+            { id: row.id, genericFoodId: row.genericFoodId },
+        ]),
+    );
+    const rowMeta = new Map(
+        usual.rows.map((row) => [
+            row.food.id,
+            kitchenUsualRowMeta(row, {
+                storesById,
+                groceryLines: [],
+                foodsById,
+                lowFoodIds: new Set(["u-eggs"]),
+            }),
+        ]),
+    );
+    return buildPreviewKitchenUsualsView({
+        chrome: chrome as never,
+        rows: usual.rows,
+        stores: USUAL_STORES,
+        rowMeta,
+        addable: usual.addable,
+        restockDay: "Sundays",
+        openGroceriesCount: 3,
+        ...overrides,
+    });
+}
+
 async function pages(
     theme: "light" | "dark",
     unread: boolean,
@@ -1031,6 +1172,40 @@ async function pages(
             costco.sections.push(...more);
             return renderKitchenGroceriesV2Page(view);
         })(),
+        // Kitchen › Usuals: the list, one store, both stores, a usual's sheet,
+        // a search of foods, and with `barcode-camera` off.
+        usuals: renderKitchenUsualsV2Page(fixtureUsualsView(chrome)),
+        "usuals-costco": renderKitchenUsualsV2Page(
+            fixtureUsualsView(chrome, { selectedStoreIds: ["s-costco"] }),
+        ),
+        "usuals-both": renderKitchenUsualsV2Page(
+            fixtureUsualsView(chrome, {
+                selectedStoreIds: ["s-costco", "s-tj"],
+            }),
+        ),
+        "usual-open": renderKitchenUsualsV2Page(
+            fixtureUsualsView(chrome, { openFoodId: "u-milk" }),
+        ),
+        "usuals-search": renderKitchenUsualsV2Page(
+            fixtureUsualsView(chrome, {
+                add: {
+                    tab: "search",
+                    search: {
+                        q: "but",
+                        results: fixtureUsualsCatalog().usual.addable.filter(
+                            (food) => food.name === "Butter",
+                        ),
+                        truncated: false,
+                    },
+                },
+            }),
+        ),
+        "usuals-camera-off": renderKitchenUsualsV2Page(
+            fixtureUsualsView({
+                ...chrome,
+                flags: { ...chrome.flags, barcodeCamera: false },
+            }),
+        ),
         recipes: renderRecipesListV2Page({
             chrome,
             query: "",
@@ -1202,6 +1377,12 @@ const ROUTE_BASE: Record<string, string> = {
     "/kitchen/groceries?line=gl-milk": "grocery-line-open",
     "/kitchen/groceries?line=gl-milk&sections=10": "grocery-many-sections",
     "/kitchen/groceries?add=did-you-mean": "grocery-did-you-mean",
+    "/kitchen/usuals": "usuals",
+    "/kitchen/usuals?store=s-costco": "usuals-costco",
+    "/kitchen/usuals?store=s-costco%2Cs-tj": "usuals-both",
+    "/kitchen/usuals?food=u-milk": "usual-open",
+    "/kitchen/usuals?q=but": "usuals-search",
+    "/kitchen/usuals?camera=off": "usuals-camera-off",
     "/recipes": "recipes",
     "/trends": "trends",
     "/settings": "settings",

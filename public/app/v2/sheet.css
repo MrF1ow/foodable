@@ -378,6 +378,10 @@
     gap: var(--space-sm);
 }
 
+.fd-sheet__menu {
+    flex: none;
+}
+
 .fd-sheet__titles {
     display: flex;
     flex: 1 1 auto;

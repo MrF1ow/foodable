@@ -114,27 +114,20 @@ describe("/app-v2.css", () => {
         }
     });
 
-    test("the Trends range tabs share the Kitchen tab CSS and the year shows on desktop only", () => {
+    test("the Trends range tabs are the shared Tabs and the year shows on desktop only", () => {
         const css = readFileSync("./public/app/v2/trends.css", "utf8").replace(
             /\/\*[\s\S]*?\*\//g,
             "",
         );
-        const shell = readFileSync("./public/app/v2/shell.css", "utf8");
-        // One rule set for both: Kitchen and Trends tabs share selectors, the
-        // track ends at the last tab and the active tab is the green underline.
-        expect(shell).toMatch(
-            /\.fd-kitchen-tabs,\s*\.fd-utabs\s*{[^}]*width:\s*fit-content/,
-        );
-        expect(shell).toMatch(
-            /\.fd-kitchen-tab\[aria-current="page"\]::after,\s*\.fd-utab\[aria-pressed="true"\]::after\s*{\s*background:\s*var\(--accent-fill\)/,
+        const tabRow = readFileSync("./public/app/v2/tab-row.css", "utf8");
+        // The tabs are the Tabs component's: the underline is its active rule,
+        // and trends.css styles none of it.
+        expect(tabRow).toMatch(
+            /\.fd-tab-row__tab--active\s*{[^}]*border-bottom:[^;]*var\(--accent-fill\)/,
         );
         expect(css).not.toContain(".fd-seg");
-        expect(css).toMatch(/\.fd-utab--desktop-only\s*{\s*display:\s*none/);
-        // The year shows on the phone while it is the active range
-        // (?range=365), so the row never has no highlighted tab.
-        expect(css).toMatch(
-            /\.fd-utab--desktop-only\[aria-pressed="true"\]\s*{\s*display:\s*flex/,
-        );
+        expect(css).not.toContain(".fd-utab");
+        expect(css).toMatch(/\.fd-trends-tab--desktop\s*{\s*display:\s*none/);
         // The single desktop block stays last; no max-width queries.
         expect(css.match(/@media \(min-width: 1024px\)/g)?.length).toBe(1);
         expect(css).not.toMatch(/@media[^{]*max-width/);
@@ -308,7 +301,10 @@ describe("/app-v2.js", () => {
         // +~0.7 KB Fridge: focus follows a Selection bar's question, and the Add search fills the hand form's Name.
         // +~0.8 KB Groceries: Clear checked confirms in place (the dock and the put away sheet), and a Store or Section pull-down keeps the line sheet's unsaved amount and note.
         // +~2.1 KB Menu: a pull-down inside a sheet is placed on the screen (fixed, under or over its trigger, scrolling inside itself), so the sheet cannot clip it.
-        expect(js.length).toBeLessThan(217_100);
+        // +~1.4 KB Usuals: a pull-down that sets a field of its form (unit, store), the unit naming the stepper, the product picker's search, and the Add a usual views.
+        // +~3.1 KB Usuals: Add a usual offers the amount the food already has (a scan's choices, a typed name), and its food search asks the server when no listed food matches.
+        // +~1.4 KB Usuals: Weeks between shows for Every N weeks only, and Type it hides the tiles; Calories by day opens on the newest day.
+        expect(js.length).toBeLessThan(224_500);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

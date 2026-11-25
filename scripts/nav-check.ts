@@ -4660,6 +4660,882 @@ try {
         { firstLoad, settled, turboPage, ex: drain() },
     );
 
+    // ---- Kitchen › Usuals and Trends (phone and desktop) ----
+    // The list and its rows, the tab row's filter and ⋯, a usual's sheet (its
+    // header ⋯ asks in place, every field posts the route it posted before, the
+    // unit and Restock pull-downs and the product picker), Add a usual (search,
+    // Type it, the camera on and off), select mode, and Trends.
+    const postFields = (line: string | undefined) => {
+        const out: Record<string, string> = {};
+        const [, query = ""] = (line ?? "").split(/ (.*)/s);
+        for (const part of query.split("&")) {
+            const at = part.indexOf("=");
+            if (at > 0) out[part.slice(0, at)] = part.slice(at + 1);
+        }
+        return out;
+    };
+    const setViewport = async (width: number) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 800 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: width < 800,
+        });
+        await send("Emulation.setTouchEmulationEnabled", {
+            enabled: width < 800,
+            maxTouchPoints: 1,
+        });
+    };
+    // Every item of a pull-down is reachable: scrolled into its panel, inside
+    // the screen, and the panel itself inside the screen.
+    const reachAll = (rootSel: string) => `(() => {
+        const root = document.querySelector(${JSON.stringify(rootSel)});
+        const panel = root.querySelector(".fd-menu__panel");
+        const items = [...panel.querySelectorAll('[role^="menuitem"]')];
+        const pr = panel.getBoundingClientRect();
+        const bad = [];
+        for (const item of items) {
+            item.scrollIntoView({ block: "nearest" });
+            const r = item.getBoundingClientRect();
+            const p = panel.getBoundingClientRect();
+            if (r.top < p.top - 1 || r.bottom > p.bottom + 1 || r.top < 0 || r.bottom > innerHeight) bad.push(item.textContent.trim());
+        }
+        return { count: items.length, bad, panelInside: pr.top >= 0 && pr.bottom <= innerHeight && pr.left >= 0 && pr.right <= innerWidth };
+    })()`;
+    const usualsCase = async (width: number) => {
+        await setViewport(width);
+        await goto("/kitchen/usuals");
+        await setMarker();
+        await control("reset=posts");
+        const list = await ev<{
+            titles: string[];
+            metas: string[];
+            subs: string[];
+            lowWarn: string[];
+            addRow: boolean;
+            h1: string;
+            sub: string;
+            noIntro: boolean;
+            filter: boolean;
+            more: boolean;
+        }>(`({
+            titles: [...document.querySelectorAll(".fd-kitchen-usuals-page .fd-item-row[data-fd-sheet-row] .fd-item-row__title")].map((t) => t.textContent),
+            metas: [...document.querySelectorAll(".fd-kitchen-usuals-page .fd-item-row[data-fd-sheet-row] .fd-item-row__meta")].map((t) => t.textContent),
+            subs: [...document.querySelectorAll(".fd-kitchen-usuals-page .fd-item-row[data-fd-sheet-row] .fd-item-row__subtitle")].map((t) => t.textContent),
+            lowWarn: [...document.querySelectorAll(".fd-kitchen-usuals-page .fd-item-row--warning[data-fd-sheet-row] .fd-item-row__title")].map((t) => t.textContent),
+            addRow: !!document.querySelector("[data-fd-usual-add-row] .fd-item-row"),
+            h1: document.querySelector(".fd-kitchen-head h1")?.textContent ?? "",
+            sub: document.querySelector(".fd-kitchen-head .fd-page-header__subtitle")?.textContent ?? "",
+            noIntro: !document.body.textContent.includes("What you usually buy"),
+            filter: ${visible("[aria-label='Filter by store']")}.length > 0,
+            more: ${visible("[aria-label='Usuals options']")}.length > 0,
+        })`);
+        // The low usual's words are in the warning colour, the rest are not.
+        const tone = await ev<{ low: string; calm: string }>(`({
+            low: getComputedStyle(document.querySelector("#fd-usual-row-u-eggs .fd-item-row__subtitle")).color,
+            calm: getComputedStyle(document.querySelector("#fd-usual-row-u-milk .fd-item-row__subtitle")).color,
+        })`);
+        // The tab row's filter: a tick per store; the ⋯ holds Select.
+        await ev(`${visible("[aria-label='Filter by store']")}[0].click()`);
+        await sleep(200);
+        const filterMenu = await ev<{
+            items: string[];
+            reach: { count: number; bad: string[]; panelInside: boolean };
+        }>(`({
+            items: [...${visible("[data-anchor='filter'] .fd-menu__item")}].map((i) => i.textContent.trim()),
+            reach: ${reachAll("[data-anchor='filter']:has(.fd-menu__panel:not([hidden]))")},
+        })`);
+        await ev(
+            `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
+        );
+        await sleep(100);
+        await ev(`${visible("[aria-label='Usuals options']")}[0].click()`);
+        await sleep(200);
+        const moreMenu = await ev<string[]>(
+            `[...${visible("[aria-label='Usuals options'] ~ .fd-menu__panel .fd-menu__item")}].map((i) => i.textContent.trim())`,
+        );
+        await ev(
+            `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
+        );
+        // Choosing a store filters over Turbo and keeps the page.
+        await ev(`${visible("[aria-label='Filter by store']")}[0].click()`);
+        await sleep(150);
+        await ev(
+            `[...${visible("[data-anchor='filter'] .fd-menu__item")}].find((i) => i.textContent.includes("Costco")).click()`,
+        );
+        await sleep(600);
+        const filtered = await ev<{
+            marker: string | null;
+            path: string;
+            titles: string[];
+            badge: string;
+        }>(`({
+            marker: window.__marker ?? null,
+            path: location.pathname + location.search,
+            titles: [...document.querySelectorAll(".fd-kitchen-usuals-page .fd-item-row[data-fd-sheet-row] .fd-item-row__title")].map((t) => t.textContent),
+            badge: document.querySelector(".fd-btn__badge")?.textContent ?? "",
+        })`);
+        return { list, tone, filterMenu, moreMenu, filtered };
+    };
+    const usualsPhone = await usualsCase(390);
+    const usualsDesk = await usualsCase(1440);
+    const usualsListOk = (c: Awaited<ReturnType<typeof usualsCase>>) =>
+        c.list.h1 === "Kitchen" &&
+        c.list.sub === "4 usuals · restock on Sundays" &&
+        c.list.noIntro &&
+        c.list.addRow &&
+        c.list.filter &&
+        c.list.more &&
+        c.list.titles.join("|") === "Bananas|Eggs|Milk|Olive oil" &&
+        c.list.metas.join("|") ===
+            "No usual product yet|Vital Farms large|Kirkland 2% milk|California Olive Ranch" &&
+        c.list.subs.join("|") ===
+            "Trader Joe's · 6 · When low|Costco · 24 · Every week · low now|Costco · 64 fl oz · Every week|Costco · 1 · Paused" &&
+        c.list.lowWarn.join("|") === "Eggs" &&
+        c.tone.low !== c.tone.calm &&
+        c.filterMenu.items.join("|") === "Costco|Trader Joe's" &&
+        c.filterMenu.reach.bad.length === 0 &&
+        c.filterMenu.reach.panelInside &&
+        c.moreMenu.join("|") === "Select" &&
+        c.filtered.marker === "stay" &&
+        c.filtered.path === "/kitchen/usuals?store=s-costco" &&
+        c.filtered.titles.join("|") === "Eggs|Milk|Olive oil" &&
+        c.filtered.badge === "1";
+    record(
+        "v2 usuals list: the rows read name, product beside it, then store, amount and restock (a low usual in the warning tone, an unset product as No usual product yet), no intro; the tab row has the store filter (a tick per store) and a ⋯ whose only item is Select; choosing a store filters over Turbo with the count on the button, on the phone and at 1440",
+        usualsListOk(usualsPhone) && usualsListOk(usualsDesk),
+        { usualsPhone, usualsDesk, ex: drain() },
+    );
+
+    const usualSheetCase = async (width: number) => {
+        await setViewport(width);
+        await goto("/kitchen/usuals");
+        await setMarker();
+        await control("reset=posts");
+        await clickSel("#fd-usual-row-u-milk .fd-item-row__face");
+        await sleep(400);
+        const open = await ev<{
+            open: boolean;
+            title: string;
+            hasRemoveButton: boolean;
+            rows: string[];
+            chips: string[];
+            buttons: { name: string; w: number; h: number }[];
+            overflow: boolean;
+        }>(`(() => {
+            const d = document.getElementById("fd-usual-u-milk");
+            const sheet = d.querySelector(".fd-sheet-panel");
+            return {
+                open: d.open,
+                title: d.querySelector(".fd-sheet__title")?.textContent ?? "",
+                hasRemoveButton: [...d.querySelectorAll(".fd-sheet__actions button")].some((b) => /Remove/.test(b.textContent)),
+                rows: [...d.querySelectorAll("form > .fd-sheet__section .fd-item-row")].map((r) => r.querySelector(".fd-item-row__title")?.textContent ?? ""),
+                chips: [...d.querySelectorAll(".fd-chip__label")].map((c) => c.textContent),
+                buttons: [...d.querySelectorAll("button, a.fd-btn")].filter((b) => b.offsetParent !== null).map((b) => {
+                    const r = b.getBoundingClientRect();
+                    return { name: (b.getAttribute("aria-label") || b.textContent || "").trim(), w: Math.round(r.width), h: Math.round(r.height) };
+                }),
+                overflow: sheet.scrollWidth > sheet.clientWidth + 1,
+            };
+        })()`);
+        // The header ⋯ asks in place.
+        await ev(
+            `document.querySelector("#fd-usual-u-milk .fd-sheet__menu [data-fd-menu-trigger]").click()`,
+        );
+        await sleep(200);
+        const menu0 = await ev<string[]>(
+            `[...document.querySelectorAll("#fd-usual-u-milk .fd-sheet__menu .fd-menu__item")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
+        );
+        await ev(
+            `document.querySelector("#fd-usual-u-milk [data-fd-menu-arm]").click()`,
+        );
+        await sleep(150);
+        const menu1 = await ev<string[]>(
+            `[...document.querySelectorAll("#fd-usual-u-milk .fd-sheet__menu .fd-menu__item")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
+        );
+        const noPostYet = (await asPosts()).length === 0;
+        await ev(
+            `document.querySelector("#fd-usual-u-milk [data-fd-menu-cancel]").click()`,
+        );
+        await sleep(100);
+        const menu2 = await ev<string[]>(
+            `[...document.querySelectorAll("#fd-usual-u-milk .fd-sheet__menu .fd-menu__item")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
+        );
+        await ev(
+            `document.querySelector("#fd-usual-u-milk [data-fd-menu-arm]").click()`,
+        );
+        await sleep(100);
+        await ev(
+            `[...document.querySelectorAll("#fd-usual-u-milk .fd-sheet__menu .fd-menu__confirm-row .fd-menu__item")].find((i) => i.textContent.trim() === "Remove").click()`,
+        );
+        await sleep(600);
+        const removePost = await asPosts();
+        // The unit pull-down: every unit is reachable, choosing one names the stepper.
+        await goto("/kitchen/usuals?food=u-milk");
+        await control("reset=posts");
+        await sleep(300);
+        await ev(
+            `document.querySelector('#fd-usual-u-milk [data-fd-menu-field][name="usual_unit"]').closest("[data-fd-menu]").querySelector("[data-fd-menu-trigger]").click()`,
+        );
+        await sleep(250);
+        const unitMenu = await ev<{
+            count: number;
+            bad: string[];
+            panelInside: boolean;
+        }>(
+            reachAll(
+                `#fd-usual-u-milk [data-fd-menu]:has([name="usual_unit"])`,
+            ),
+        );
+        await ev(
+            `document.querySelector('#fd-usual-u-milk [data-fd-menu-value="g"]').click()`,
+        );
+        await sleep(200);
+        const unitNow = await ev<{
+            field: string;
+            shown: string;
+            stepper: string;
+            closed: boolean;
+        }>(`({
+            field: document.querySelector('#fd-usual-u-milk [name="usual_unit"]').value,
+            shown: document.querySelector('#fd-usual-u-milk [data-fd-menu]:has([name="usual_unit"]) .fd-item-row__value').textContent,
+            stepper: document.querySelector("#fd-usual-u-milk .fd-stepper-control__unit")?.textContent ?? "",
+            closed: document.querySelector('#fd-usual-u-milk [data-fd-menu]:has([name="usual_unit"]) .fd-menu__panel').hidden,
+        })`);
+        // Store chip, the stepper, the product picker, then Save posts the edit route.
+        await ev(
+            `[...document.querySelectorAll('#fd-usual-u-milk .fd-chip__input[name="usual_store_id"]')].find((i) => i.value === "s-tj").click()`,
+        );
+        await ev(
+            `document.querySelector('#fd-usual-u-milk [data-fd-step="1"]').click()`,
+        );
+        await clickSel(
+            '#fd-usual-u-milk [commandfor="fd-usual-u-milk-product"]',
+        );
+        await sleep(300);
+        const picker = await ev<{
+            open: boolean;
+            rows: string[];
+            checked: string;
+            done: { w: number; h: number };
+        }>(`(() => {
+            const d = document.getElementById("fd-usual-u-milk-product");
+            const done = d.querySelector(".fd-sheet__actions button").getBoundingClientRect();
+            return {
+                open: d.open,
+                rows: [...d.querySelectorAll(".fd-item-row .fd-item-row__title")].map((t) => t.textContent),
+                checked: d.querySelector('input[name="product_food_id"]:checked')?.parentElement.parentElement.querySelector(".fd-item-row__title")?.textContent ?? "",
+                done: { w: Math.round(done.width), h: Math.round(done.height) },
+            };
+        })()`);
+        await ev(`(() => {
+            const i = document.querySelector("#fd-usual-u-milk-product [data-fd-usual-product-search] input");
+            i.value = "organic";
+            i.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        const narrowed = await ev<string[]>(
+            `[...document.querySelectorAll("#fd-usual-u-milk-product [data-fd-usual-product]")].filter((r) => !r.hidden).map((r) => r.querySelector(".fd-item-row__title").textContent)`,
+        );
+        await ev(`(() => {
+            const i = document.querySelector("#fd-usual-u-milk-product [data-fd-usual-product-search] input");
+            i.value = "";
+            i.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        await ev(
+            `document.querySelector('#fd-usual-u-milk-product input[name="product_food_id"][value=""]').click()`,
+        );
+        await sleep(100);
+        const productRow = await ev<string>(
+            `document.querySelector('#fd-usual-u-milk [commandfor="fd-usual-u-milk-product"] .fd-item-row__value').textContent`,
+        );
+        await ev(
+            `document.querySelector("#fd-usual-u-milk-product .fd-sheet__actions button").click()`,
+        );
+        await sleep(300);
+        await clickSel(
+            '#fd-usual-u-milk-form ~ .fd-sheet__actions, #fd-usual-u-milk .fd-sheet__actions button[type="submit"]',
+        );
+        await sleep(700);
+        const savePost = postFields((await asPosts())[0]);
+        const savePath = (await asPosts())[0]?.split(" ")[0];
+        // Restock: its sheet opens over this one, posts the schedule route.
+        await goto("/kitchen/usuals?food=u-milk");
+        await control("reset=posts");
+        await sleep(300);
+        await clickSel(
+            '#fd-usual-u-milk [commandfor="fd-usual-u-milk-restock"]',
+        );
+        await sleep(300);
+        const restock = await ev<{
+            open: boolean;
+            labels: string[];
+            save: { w: number; h: number };
+        }>(`(() => {
+            const d = document.getElementById("fd-usual-u-milk-restock");
+            const save = d.querySelector(".fd-sheet__actions button").getBoundingClientRect();
+            return {
+                open: d.open,
+                labels: [...d.querySelectorAll(".fd-chip__label")].map((l) => l.textContent),
+                save: { w: Math.round(save.width), h: Math.round(save.height) },
+            };
+        })()`);
+        await ev(
+            `document.querySelector('#fd-usual-u-milk-restock input[name="restock_schedule"][value="monthly"]').click()`,
+        );
+        await clickSel(
+            '#fd-usual-u-milk-restock .fd-sheet__actions button[type="submit"]',
+        );
+        await sleep(700);
+        const restockLine = (await asPosts())[0];
+        return {
+            open,
+            menu0,
+            menu1,
+            menu2,
+            noPostYet,
+            removePost,
+            unitMenu,
+            unitNow,
+            picker,
+            narrowed,
+            productRow,
+            savePath,
+            savePost,
+            restock,
+            restockPath: restockLine?.split(" ")[0],
+            restockPost: postFields(restockLine),
+        };
+    };
+    const usualSheetPhone = await usualSheetCase(390);
+    const usualSheetDesk = await usualSheetCase(1440);
+    const usualSheetOk = (c: Awaited<ReturnType<typeof usualSheetCase>>) =>
+        c.open.open &&
+        c.open.title === "Milk" &&
+        !c.open.hasRemoveButton &&
+        c.open.rows.join("|") === "Product|Unit|Restock|Add when it runs low" &&
+        c.open.chips.join("|") === "Any store|Costco|Trader Joe's" &&
+        !c.open.overflow &&
+        c.open.buttons.every((b) => b.w >= 36 && b.h >= 36) &&
+        c.open.buttons
+            .filter((b) => b.name === "Save")
+            .every((b) => b.h >= 40 && b.w >= 200) &&
+        c.menu0.join("|") === "Remove" &&
+        c.menu1.join("|") === "Cancel|Remove" &&
+        c.noPostYet &&
+        c.menu2.join("|") === "Remove" &&
+        c.removePost.join("\n") ===
+            "/kitchen/usuals/u-milk/remove return_to=/kitchen/usuals" &&
+        c.unitMenu.count > 8 &&
+        c.unitMenu.bad.length === 0 &&
+        c.unitMenu.panelInside &&
+        c.unitNow.field === "g" &&
+        c.unitNow.shown === "g" &&
+        c.unitNow.stepper === "g" &&
+        c.unitNow.closed &&
+        c.picker.open &&
+        c.picker.rows.join("|") ===
+            "Kirkland 2% milk|Organic Valley whole milk|Any brand" &&
+        c.picker.checked === "Kirkland 2% milk" &&
+        c.picker.done.h >= 40 &&
+        c.picker.done.w >= 200 &&
+        c.narrowed.join("|") === "Organic Valley whole milk" &&
+        c.productRow === "Any brand" &&
+        c.savePath === "/kitchen/usuals/u-milk" &&
+        c.savePost.usual_store_id === "s-tj" &&
+        c.savePost.usual_amount === "65" &&
+        c.savePost.usual_unit === "g" &&
+        c.savePost.product_food_id === "" &&
+        c.savePost.restock_when_low_present === "1" &&
+        c.savePost.weights_present === "1" &&
+        c.savePost.return_to === "/kitchen/usuals" &&
+        c.restock.open &&
+        c.restock.labels.join("|") ===
+            "No schedule|Every week|Every N weeks|Every month" &&
+        c.restock.save.h >= 40 &&
+        c.restock.save.w >= 200 &&
+        c.restockPath === "/kitchen/usuals/u-milk/schedule" &&
+        c.restockPost.restock_schedule === "monthly" &&
+        c.restockPost.scope === "schedule" &&
+        c.restockPost.return_to === "/kitchen/usuals";
+    record(
+        "v2 usuals sheet: a row opens it; its header ⋯ holds Remove and asks in place (Cancel puts it back, Remove posts /remove with the return path); the Unit pull-down lists every unit on the screen and names the stepper; the product picker lists the products and Any brand, narrows as typed and shows the pick in the Product row; Save posts the edit route's fields (store, amount, unit, product, markers); Restock posts the schedule route; every sheet button is at least 36px (Save and Done 40px by 200px), on the phone and at 1440",
+        usualSheetOk(usualSheetPhone) && usualSheetOk(usualSheetDesk),
+        { usualSheetPhone, usualSheetDesk, ex: drain() },
+    );
+
+    const addUsualCase = async (width: number) => {
+        await setViewport(width);
+        await goto("/kitchen/usuals");
+        await setMarker();
+        await control("reset=posts");
+        await ev(
+            `${visible("[aria-label='Add a usual'][commandfor='fd-usual-add']")}[0].click()`,
+        );
+        await sleep(400);
+        const open = await ev<{
+            open: boolean;
+            ways: string[];
+            scanTarget: string | null;
+            searchShown: boolean;
+            typeHidden: boolean;
+            foods: string[];
+        }>(`(() => {
+            const d = document.getElementById("fd-usual-add");
+            return {
+                open: d.open,
+                ways: [...d.querySelectorAll(".fd-quick-action__caption")].map((c) => c.textContent),
+                scanTarget: d.querySelector("[data-fd-scanner-target]")?.getAttribute("data-fd-scanner-target") ?? null,
+                searchShown: !d.querySelector('[data-fd-usual-add-panel="search"]').hidden,
+                typeHidden: d.querySelector('[data-fd-usual-add-panel="type"]').hidden,
+                foods: [...d.querySelectorAll("[data-fd-usual-food] .fd-item-row__title")].map((t) => t.textContent),
+            };
+        })()`);
+        // Typing narrows the foods; a plus adds that food as a usual.
+        await ev(`(() => {
+            const i = document.getElementById("fd-usual-add-q");
+            i.value = "spin";
+            i.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        const narrowed = await ev<string[]>(
+            `[...document.querySelectorAll("#fd-usual-add [data-fd-usual-food]")].filter((r) => !r.hidden).map((r) => r.querySelector(".fd-item-row__title").textContent)`,
+        );
+        await clickSel(
+            '#fd-usual-add [data-fd-usual-food="spinach"] .fd-item-row__add',
+        );
+        await sleep(600);
+        const searchPost = (await asPosts())[0];
+        // Type it: the other view shows, the form posts the manual route.
+        await goto("/kitchen/usuals");
+        await control("reset=posts");
+        await ev(`document.getElementById("fd-usual-add").showModal()`);
+        await sleep(300);
+        await clickSel('#fd-usual-add [data-fd-usual-add-tab="type"]');
+        await sleep(200);
+        const typeView = await ev<{
+            typeShown: boolean;
+            searchHidden: boolean;
+            serving: string;
+            submit: { w: number; h: number };
+            formW: number;
+            pulldowns: string[];
+            macros: number;
+            tilesHidden: boolean;
+        }>(`(() => {
+            const d = document.getElementById("fd-usual-add");
+            const form = d.querySelector(".fd-usual-add-type");
+            const b = form.querySelector('button[type="submit"]').getBoundingClientRect();
+            return {
+                typeShown: !d.querySelector('[data-fd-usual-add-panel="type"]').hidden,
+                searchHidden: d.querySelector('[data-fd-usual-add-panel="search"]').hidden,
+                serving: getComputedStyle(form.querySelector(".fd-usual-add-serving")).display,
+                submit: { w: Math.round(b.width), h: Math.round(b.height) },
+                formW: Math.round(form.getBoundingClientRect().width),
+                pulldowns: [...form.querySelectorAll("[data-fd-menu] .fd-item-row__face .fd-item-row__title")].map((t) => t.textContent),
+                macros: form.querySelectorAll(".fd-usual-add-macros input").length,
+                tilesHidden: d.querySelector("[data-fd-usual-add-tiles]").offsetParent === null,
+            };
+        })()`);
+        // Back returns to the tiles; Type it again for the form below.
+        await clickSel("#fd-usual-add .fd-usual-add-back button");
+        await sleep(150);
+        const backView = await ev<{ tiles: boolean; search: boolean }>(`(() => {
+            const d = document.getElementById("fd-usual-add");
+            return {
+                tiles: d.querySelector("[data-fd-usual-add-tiles]").offsetParent !== null,
+                search: !d.querySelector('[data-fd-usual-add-panel="search"]').hidden,
+            };
+        })()`);
+        await clickSel('#fd-usual-add [data-fd-usual-add-tab="type"]');
+        await sleep(150);
+        await ev(`(() => {
+            const set = (n, v) => { const i = document.querySelector('#fd-usual-add .fd-usual-add-type [name="' + n + '"]'); i.value = v; i.dispatchEvent(new Event("input", { bubbles: true })); };
+            set("name", "Oat milk"); set("calories", "46"); set("protein_g", "1"); set("carbs_g", "6.7"); set("fat_g", "1.5");
+        })()`);
+        await ev(
+            `document.querySelector('#fd-usual-add .fd-usual-add-type input[name="basis"][value="per_100ml"]').click()`,
+        );
+        const servingAfter = await ev<string>(
+            `getComputedStyle(document.querySelector("#fd-usual-add .fd-usual-add-serving")).display`,
+        );
+        await ev(
+            `document.querySelector('#fd-usual-add .fd-usual-add-type input[name="basis"][value="per_serving"]').click()`,
+        );
+        const servingPer = await ev<string>(
+            `getComputedStyle(document.querySelector("#fd-usual-add .fd-usual-add-serving")).display`,
+        );
+        await ev(
+            `document.querySelector('#fd-usual-add .fd-usual-add-type input[name="basis"][value="per_100ml"]').click()`,
+        );
+        // The Store pull-down: every store is reachable, choosing one rides in the field.
+        await ev(
+            `document.querySelector('#fd-usual-add [data-fd-menu]:has([name="usual_store_id"]) [data-fd-menu-trigger]').click()`,
+        );
+        await sleep(250);
+        const storeMenu = await ev<{
+            count: number;
+            bad: string[];
+            panelInside: boolean;
+        }>(
+            reachAll(
+                `#fd-usual-add [data-fd-menu]:has([name="usual_store_id"])`,
+            ),
+        );
+        await ev(
+            `document.querySelector('#fd-usual-add [data-fd-menu-value="s-tj"]').click()`,
+        );
+        await sleep(150);
+        await clickSel(
+            '#fd-usual-add .fd-usual-add-type button[type="submit"]',
+        );
+        await sleep(700);
+        const typePost = (await asPosts())[0];
+        return {
+            open,
+            narrowed,
+            searchPath: searchPost?.split(" ")[0],
+            searchPost: postFields(searchPost),
+            typeView,
+            backView,
+            servingAfter,
+            servingPer,
+            storeMenu,
+            typePath: typePost?.split(" ")[0],
+            typePost: postFields(typePost),
+        };
+    };
+    const addUsualPhone = await addUsualCase(390);
+    const addUsualDesk = await addUsualCase(1440);
+    const addUsualOk = (c: Awaited<ReturnType<typeof addUsualCase>>) =>
+        c.open.open &&
+        c.open.ways.join("|") === "Scan a barcode|Search your foods|Type it" &&
+        c.open.scanTarget === "/kitchen/usuals/add/barcode/{code}" &&
+        c.open.searchShown &&
+        c.open.typeHidden &&
+        c.open.foods.join("|") === "Butter|Sourdough bread|Spinach" &&
+        c.narrowed.join("|") === "Spinach" &&
+        c.searchPath === "/kitchen/usuals/add/product" &&
+        c.searchPost.product_id === "f-spinach" &&
+        c.searchPost.food_choice === "f-spinach" &&
+        c.searchPost.via === "search" &&
+        c.typeView.typeShown &&
+        c.typeView.searchHidden &&
+        // Type it shows its form alone; Back returns to the tiles.
+        c.typeView.tilesHidden &&
+        c.backView.tiles &&
+        c.backView.search &&
+        c.typeView.serving === "none" &&
+        c.servingAfter === "none" &&
+        c.servingPer !== "none" &&
+        c.typeView.submit.h >= 40 &&
+        c.typeView.submit.w >= c.typeView.formW - 2 &&
+        c.typeView.pulldowns.join("|") === "Unit|Store" &&
+        c.typeView.macros === 4 &&
+        c.storeMenu.count === 3 &&
+        c.storeMenu.bad.length === 0 &&
+        c.storeMenu.panelInside &&
+        c.typePath === "/kitchen/usuals/add/manual" &&
+        c.typePost.name === "Oat milk" &&
+        c.typePost.calories === "46" &&
+        c.typePost.basis === "per_100ml" &&
+        c.typePost.usual_store_id === "s-tj" &&
+        c.typePost.usual_unit === "each" &&
+        c.typePost.return_to === "/kitchen/usuals";
+    record(
+        "v2 usuals Add a usual: the + opens one sheet with Scan a barcode, Search your foods and Type it; the foods are listed and typing narrows them, a plus posts the add route with its food; Type it shows its form (serving size only for Per serving), its Store pull-down lists every store on the screen, and Add usual is full width and at least 40px tall and posts the manual route, on the phone and at 1440",
+        addUsualOk(addUsualPhone) && addUsualOk(addUsualDesk),
+        { addUsualPhone, addUsualDesk, ex: drain() },
+    );
+
+    // Restock: Weeks between shows only while "Every N weeks" is chosen.
+    await setViewport(390);
+    await goto("/kitchen/usuals");
+    const weeksToggle = await ev<{
+        atLoad: boolean;
+        everyN: boolean;
+        weekly: boolean;
+    }>(`(() => {
+        const form = document.querySelector("form:has([data-fd-restock-weeks])");
+        const box = form.querySelector("[data-fd-restock-weeks]");
+        const pick = (v) => form.querySelector('input[name="restock_schedule"][value="' + v + '"]').click();
+        const atLoad = box.hidden;
+        pick("every_n_weeks");
+        const everyN = box.hidden;
+        pick("weekly");
+        return { atLoad, everyN, weekly: box.hidden };
+    })()`);
+    record(
+        "v2 usuals Restock sheet: Weeks between is hidden until Every N weeks is chosen, and hides again for another choice",
+        weeksToggle.atLoad && !weeksToggle.everyN && weeksToggle.weekly,
+        { weeksToggle, ex: drain() },
+    );
+
+    // The camera kill switch: the same opener asks for the number by hand.
+    await setViewport(390);
+    await goto("/kitchen/usuals?camera=off");
+    await ev(`document.getElementById("fd-usual-add").showModal()`);
+    await sleep(300);
+    const usualsCameraOff = await ev<{
+        ways: string[];
+        opener: string | null;
+        menus: number;
+    }>(`({
+        ways: [...document.querySelectorAll("#fd-usual-add .fd-quick-action__caption")].map((c) => c.textContent),
+        opener: document.querySelector("#fd-usual-add [data-fd-open-sheet]")?.getAttribute("data-fd-open-sheet") ?? null,
+        menus: [...document.querySelectorAll(".fd-menu__panel")].filter((p) => p.querySelectorAll('[role^="menuitem"]').length === 0).length,
+    })`);
+    await goto("/kitchen/usuals");
+    const usualsCameraOn = await ev<{ menus: number }>(
+        `({ menus: [...document.querySelectorAll(".fd-menu__panel")].filter((p) => p.querySelectorAll('[role^="menuitem"]').length === 0).length })`,
+    );
+    record(
+        "v2 usuals with barcode-camera off: Add a usual offers Enter a barcode (the same scanner opener, its number field) in place of Scan a barcode, and no ⋯ menu is empty with it on or off",
+        usualsCameraOff.ways.join("|") ===
+            "Enter a barcode|Search your foods|Type it" &&
+            usualsCameraOff.opener === "fd-barcode-scan" &&
+            usualsCameraOff.menus === 0 &&
+            usualsCameraOn.menus === 0,
+        { usualsCameraOff, usualsCameraOn, ex: drain() },
+    );
+
+    // Select mode: Select (the tab row's ⋯) shows the count row and the bar,
+    // rows pick without opening a sheet, Remove asks in place and posts ids.
+    const selectCase = async (width: number) => {
+        await setViewport(width);
+        await goto("/kitchen/usuals");
+        await control("reset=posts");
+        await ev(`${visible("[aria-label='Usuals options']")}[0].click()`);
+        await sleep(200);
+        await ev(`${visible("[data-fd-select-toggle='usuals']")}[0].click()`);
+        await sleep(200);
+        await clickSel("#fd-usual-row-u-oil .fd-item-row__face");
+        await clickSel("#fd-usual-row-u-bananas .fd-item-row__face");
+        await sleep(150);
+        const picking = await ev<{
+            sheetOpen: boolean;
+            count: string;
+            bars: string[];
+            addRowHidden: boolean;
+            headGap: number;
+        }>(`(() => {
+            const bar = ${visible("[data-fd-select-bar] .fd-selection-bar")}[0];
+            const head = document.querySelector("[data-fd-select-head]").getBoundingClientRect();
+            const list = document.querySelector(".fd-kitchen-usuals-layout").getBoundingClientRect();
+            return {
+                headGap: Math.round(list.top - head.bottom),
+                sheetOpen: !!document.querySelector("dialog[open]"),
+                count: document.querySelector("[data-fd-select-head] .fd-section-header__label")?.textContent ?? "",
+                bars: [...bar.querySelectorAll(".fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()),
+                addRowHidden: !document.querySelector("[data-fd-usual-add-row]")?.offsetParent,
+            };
+        })()`);
+        await ev(`${visible("[data-fd-select-ask]")}[0].click()`);
+        await sleep(150);
+        const asking = await ev<string[]>(
+            `[...${visible("[data-fd-select-bar] .fd-selection-bar .fd-btn")}].map((b) => b.textContent.trim())`,
+        );
+        const noPostYet = (await asPosts()).length === 0;
+        await ev(
+            `[...${visible("[data-fd-select-bar] .fd-selection-bar .fd-btn[data-fd-select-verb]")}].find((b) => /Remove 2/.test(b.textContent)).click()`,
+        );
+        await sleep(700);
+        const posts = await asPosts();
+        return {
+            picking,
+            asking,
+            noPostYet,
+            post: posts[0]?.split(" ")[0],
+            ids: (posts[0] ?? "").match(/ids\[\]=[^&]+/g) ?? [],
+            fields: postFields(posts[0]),
+        };
+    };
+    const selectPhone = await selectCase(390);
+    const selectDesk = await selectCase(1440);
+    const selectOk = (c: Awaited<ReturnType<typeof selectCase>>) =>
+        !c.picking.sheetOpen &&
+        c.picking.count === "2 selected" &&
+        c.picking.bars.some((b) => b.startsWith("Remove")) &&
+        c.picking.addRowHidden &&
+        // The "N selected" head runs straight into the list.
+        c.picking.headGap <= 4 &&
+        c.asking.join("|").includes("Cancel") &&
+        c.asking.join("|").includes("Remove 2") &&
+        c.noPostYet &&
+        c.post === "/kitchen/usuals/bulk/remove" &&
+        c.ids.sort().join("|") === "ids[]=u-bananas|ids[]=u-oil" &&
+        c.fields.return_to === "/kitchen/usuals";
+    record(
+        "v2 usuals select mode: Select in the tab row's ⋯ shows the 2 selected row and the Selection bar, rows pick without opening a sheet, Remove asks in place (Cancel, Remove 2) and posts the picked ids to the bulk route, on the phone and at 1440",
+        selectOk(selectPhone) && selectOk(selectDesk),
+        { selectPhone, selectDesk, ex: drain() },
+    );
+
+    // Trends: the Page header, the range tabs (the year only from 1024), the
+    // summary tiles, the averages table, the bars, the weight line and Go to a day.
+    const trendsCase = async (width: number) => {
+        await setViewport(width);
+        await goto("/trends");
+        await setMarker();
+        const base = await ev<{
+            title: string;
+            subtitle: string;
+            tabs: string[];
+            active: string | null;
+            tiles: number;
+            rows: string[];
+            bars: number;
+            weight: boolean;
+            goto: boolean;
+            noOverflow: boolean;
+            columns: number;
+        }>(`(() => {
+            const panel = document.querySelector("[data-fd-trends-panel]:not([hidden])");
+            return {
+                title: document.querySelector(".fd-page-header__title")?.textContent ?? "",
+                subtitle: document.querySelector(".fd-page-header__subtitle")?.textContent ?? "",
+                tabs: [...${visible(".fd-trends-range .fd-tab-row__tab")}].map((t) => t.textContent),
+                active: document.querySelector('[data-fd-trends-range][aria-current="page"]')?.getAttribute("data-fd-trends-range") ?? null,
+                tiles: panel.querySelectorAll(".fd-stat-card").length,
+                rows: [...panel.querySelectorAll(".fd-table-row .fd-table-row__label")].map((r) => r.textContent),
+                bars: panel.querySelectorAll(".fd-trends-bar").length,
+                weight: !!panel.querySelector(".fd-trends-weight__line")?.getAttribute("d"),
+                goto: !!panel.querySelector("[data-fd-trends-goto]"),
+                noOverflow: document.documentElement.scrollWidth <= innerWidth + 1,
+                columns: new Set([...panel.querySelectorAll(".fd-page-layout__column")].map((c) => Math.round(c.getBoundingClientRect().left))).size,
+            };
+        })()`);
+        await clickSel('[data-fd-trends-range="7"]');
+        await sleep(200);
+        const seven = await ev<{
+            active: string | null;
+            panel: string | null;
+            hidden30: boolean;
+            subtitle: string;
+            days: number;
+            path: string;
+            marker: string | null;
+        }>(`({
+            active: document.querySelector('[data-fd-trends-range][aria-current="page"]')?.getAttribute("data-fd-trends-range") ?? null,
+            panel: document.querySelector("[data-fd-trends-panel]:not([hidden])")?.getAttribute("data-fd-trends-panel") ?? null,
+            hidden30: document.querySelector('[data-fd-trends-panel="30"]')?.hasAttribute("hidden") ?? false,
+            subtitle: document.querySelector(".fd-page-header__subtitle")?.textContent ?? "",
+            days: document.querySelectorAll('[data-fd-trends-panel="7"] .fd-trends-bar__day').length,
+            path: location.pathname + location.search,
+            marker: window.__marker ?? null,
+        })`);
+        return { base, seven };
+    };
+    const trendsPhone = await trendsCase(390);
+    const trendsDesk = await trendsCase(1440);
+    record(
+        "v2 trends: the Page header with Last 30 days, the range tabs (7, 30, 90 days; the year as a fourth from 1024px), four summary tiles, the averages table, a bar a day, the weight line and Go to a day, one column on the phone and two at 1440 with no sideways scroll; 7 days flips the tab, the panel, the subtitle and the weekday letters with no request",
+        trendsPhone.base.title === "Trends" &&
+            trendsPhone.base.subtitle === "Last 30 days" &&
+            trendsPhone.base.tabs.join("|") === "7 days|30 days|90 days" &&
+            trendsDesk.base.tabs.join("|") ===
+                "7 days|30 days|90 days|365 days" &&
+            [trendsPhone, trendsDesk].every(
+                (c) =>
+                    c.base.active === "30" &&
+                    c.base.tiles === 4 &&
+                    c.base.rows.join("|") === "|Calories|Protein|Carbs|Fat" &&
+                    c.base.bars === 30 &&
+                    c.base.weight &&
+                    c.base.goto &&
+                    c.base.noOverflow &&
+                    c.seven.active === "7" &&
+                    c.seven.panel === "7" &&
+                    c.seven.hidden30 &&
+                    c.seven.subtitle === "Last 7 days" &&
+                    c.seven.days === 7 &&
+                    c.seven.path === "/trends?range=7" &&
+                    c.seven.marker === "stay",
+            ) &&
+            trendsPhone.base.columns === 1 &&
+            trendsDesk.base.columns === 2,
+        { trendsPhone, trendsDesk, ex: drain() },
+    );
+    // Calories by day never widens the page: every range, a bar a day, at both
+    // widths. A long range scrolls inside its own chart.
+    const trendsRanges = async (width: number) => {
+        await setViewport(width);
+        await goto("/trends");
+        const out: {
+            range: number;
+            bars: number;
+            noOverflow: boolean;
+            scrollWidth: number;
+            viewport: number;
+        }[] = [];
+        for (const range of [7, 30, 90, 365]) {
+            out.push(
+                await ev<(typeof out)[number]>(`(() => {
+                    for (const p of document.querySelectorAll("[data-fd-trends-panel]")) {
+                        p.hidden = p.getAttribute("data-fd-trends-panel") !== "${range}";
+                    }
+                    const panel = document.querySelector('[data-fd-trends-panel="${range}"]');
+                    return {
+                        range: ${range},
+                        bars: panel.querySelectorAll(".fd-trends-bar").length,
+                        // The width asked for, not innerWidth: a phone's layout
+                        // viewport grows with content that overflows.
+                        noOverflow: document.documentElement.scrollWidth <= ${width} + 1,
+                        scrollWidth: document.documentElement.scrollWidth,
+                        viewport: ${width},
+                    };
+                })()`),
+            );
+        }
+        return out;
+    };
+    const trendsRangesPhone = await trendsRanges(390);
+    const trendsRangesDesk = await trendsRanges(1440);
+    record(
+        "v2 trends: Calories by day draws a bar a day for 7, 30, 90 and 365 days and the page never widens past the viewport, at 390 and 1440",
+        [trendsRangesPhone, trendsRangesDesk].every((rows) =>
+            rows.every((r) => r.bars === r.range && r.noOverflow),
+        ),
+        { trendsRangesPhone, trendsRangesDesk, ex: drain() },
+    );
+    // Calories by day opens on the newest day: a long range is scrolled to its
+    // right edge when its tab is pressed and again after a Turbo visit.
+    const barsAtEnd = async (width: number, range: number) => {
+        await setViewport(width);
+        await goto("/trends");
+        const read = () =>
+            ev<{ overflows: boolean; atEnd: boolean }>(`(() => {
+                const el = document.querySelector('[data-fd-trends-panel="${range}"] .fd-trends-bars');
+                return {
+                    overflows: el.scrollWidth > el.clientWidth + 1,
+                    atEnd: el.scrollWidth - el.clientWidth - el.scrollLeft <= 1,
+                };
+            })()`);
+        await clickSel(`[data-fd-trends-range="${range}"]`);
+        await sleep(150);
+        const afterTab = await read();
+        await ev(`window.Turbo.visit("/kitchen/fridge")`);
+        await sleep(500);
+        await ev(`window.Turbo.visit("/trends")`);
+        await sleep(500);
+        await clickSel(`[data-fd-trends-range="${range}"]`);
+        await sleep(150);
+        const afterVisit = await read();
+        return { width, range, afterTab, afterVisit };
+    };
+    const barsEndPhone = await barsAtEnd(390, 90);
+    const barsEndDesk = await barsAtEnd(1440, 365);
+    record(
+        "v2 trends: Calories by day opens scrolled to the newest day (90 days at 390, 365 days at 1440), after a tab press and after a Turbo visit",
+        [barsEndPhone, barsEndDesk].every(
+            (r) =>
+                r.afterTab.overflows &&
+                r.afterTab.atEnd &&
+                r.afterVisit.overflows &&
+                r.afterVisit.atEnd,
+        ),
+        { barsEndPhone, barsEndDesk, ex: drain() },
+    );
+    await setViewport(390);
+
     await goto("/kitchen/fridge");
     await setMarker();
     await clickSel("a.fd-log");
@@ -4672,7 +5548,7 @@ try {
     const v2Trends = await v2Snap();
     const trendsPage = await ev<{ path: string; title: string | null }>(`({
         path: location.pathname,
-        title: document.querySelector(".fd-trends-title")?.textContent?.trim() ?? null,
+        title: document.querySelector(".fd-page-header__title")?.textContent?.trim() ?? null,
     })`);
     await clickSel('[data-fd-trends-range="7"]');
     await sleep(200);
@@ -4681,7 +5557,7 @@ try {
         panel: string | null;
         hidden30: boolean;
     }>(`({
-        pressed: document.querySelector('[data-fd-trends-range][aria-pressed="true"]')?.getAttribute("data-fd-trends-range") ?? null,
+        pressed: document.querySelector('[data-fd-trends-range][aria-current="page"]')?.getAttribute("data-fd-trends-range") ?? null,
         panel: document.querySelector("[data-fd-trends-panel]:not([hidden])")?.getAttribute("data-fd-trends-panel") ?? null,
         hidden30: document.querySelector('[data-fd-trends-panel="30"]')?.hasAttribute("hidden") ?? false,
     })`);
