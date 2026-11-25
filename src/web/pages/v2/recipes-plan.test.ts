@@ -205,9 +205,43 @@ describe("week renderers", () => {
         expect(html).toContain('action="/recipes/plan/p1/remove"');
         expect(html).toContain('name="back" value="today"');
         expect(html).toContain('name="slot"');
-        expect(html).toContain('type="date"');
-        // No auto-focus on the date field (the keyboard would cover the sheet).
+        expect(html).toContain('name="date"');
+        // No auto-focus on the first field (the keyboard would cover the sheet).
         expect(html).toContain('data-fd-sheet-focus="panel"');
+    });
+
+    test("the edit sheet is a side sheet titled with the day and the meal under it, with Day and Meal as rows with pull-downs (FigCraft 386041)", () => {
+        const html = renderPlanEditSheets(sampleView(), "today");
+        const sheet = html.match(
+            /<dialog[^>]*id="fd-plan-edit-p2"[\s\S]*?<\/dialog>/,
+        )![0];
+        expect(sheet).toContain("fd-sheet--side");
+        expect(sheet).toContain(">Sat 14 Nov<");
+        expect(sheet).toContain(">Lunch<");
+        // Day and Meal: an Item row each, the form's select over it.
+        const rows = [
+            ...sheet.matchAll(
+                /<li class="fd-item-row fd-plan-edit-row">[\s\S]*?<\/li>/g,
+            ),
+        ].map((m) => m[0]);
+        expect(rows).toHaveLength(2);
+        expect(rows[0]).toContain('fd-item-row__title" title="Day"');
+        expect(rows[0]).toContain('fd-item-row__value">Sat 14 Nov<');
+        expect(rows[0]).toContain('<option value="2026-11-14" selected>');
+        expect(rows[0]).toContain('<option value="2026-11-12">Thu 12 Nov<');
+        expect(rows[1]).toContain('fd-item-row__title" title="Meal"');
+        expect(rows[1]).toContain('<option value="lunch" selected>');
+        // The same fields go to the same routes: Save moves, Remove removes.
+        expect(sheet).toContain('name="date"');
+        expect(sheet).toContain('name="slot"');
+        expect(sheet).toContain('name="servings"');
+        expect(sheet).toMatch(/<button[^>]*form="fd-plan-edit-p2-move"/);
+        expect(sheet).toMatch(
+            /<button[^>]*form="fd-plan-edit-p2-remove"[^>]*>\s*(<[^>]*>\s*)*Remove/,
+        );
+        // The recipe cannot be changed by the route, so it has no row.
+        expect(sheet).not.toContain('title="Recipe"');
+        expect(sheet).not.toContain('type="date"');
     });
 
     test("a plan for named people shows their portions as saved now and offers no servings to edit", () => {
@@ -332,7 +366,9 @@ describe("week renderers", () => {
         expect(html).toContain('action="/recipes/plan/add-missing"');
         expect(html).toContain("Flour");
         expect(html).toContain("can't tell what you have");
-        expect(html).toContain("Add to groceries");
+        // The warning dot is the only mark: no class for CSS that is gone.
+        expect(html).not.toContain("fd-plan-missing-row");
+        expect(html).toMatch(/Add \d+ to groceries/);
     });
 });
 

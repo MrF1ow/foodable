@@ -306,7 +306,8 @@ describe("/app-v2.js", () => {
         // +~0.2 KB Stores: after a section's ⋯ Move up or down, focus goes back to that section's ⋯.
         // +~1.4 KB Menu: a shared sheet filled for the item that opens it (Edit and Merge on Saved foods), and a button item that closes the menu (Select).
         // +~3.5 KB Menu and Select: a refusal a shared sheet showed goes when another row opens it, the food going in is left out of Keep, a menu panel that is longer than the screen scrolls inside it, and a Select in a ⋯ reads Cancel selection while picking (focus to the ⋯ that shows); a confirm words itself for the kind of row picked.
-        expect(js.length).toBeLessThan(207_000);
+        // +~0.9 KB Today: the edit sheet's Time chips put the meal's time back, and a plan sheet's pull-down row shows the list's choice.
+        expect(js.length).toBeLessThan(208_500);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

@@ -196,7 +196,7 @@ describe("GET /", () => {
             headers: { cookie: cookie(ALICE) },
         });
         const html = await res.text();
-        expect(html).toContain('fd-today-title">Monday</');
+        expect(html).toContain('fd-page-header__title">Monday</');
         expect(html).toContain("3 August");
     });
 
@@ -216,7 +216,7 @@ describe("GET /", () => {
             month: "long",
             timeZone: "UTC",
         });
-        expect(html).toContain(`fd-today-title">${weekday}</`);
+        expect(html).toContain(`fd-page-header__title">${weekday}</`);
         expect(html).toContain(dayMonth);
     });
 
@@ -233,8 +233,9 @@ describe("GET /", () => {
             html.match(
                 /<div class="fd-today-meals">[\s\S]*?<\/div><\/main>/,
             )?.[0] ?? "";
-        expect(meals).not.toContain("fd-today-section__add");
-        expect(meals).not.toContain('class="fd-btn fd-btn--primary"');
+        expect(meals).not.toContain("fd-item-row__add");
+        expect(meals).not.toContain("data-fd-open-sheet");
+        expect(meals).not.toContain("fd-menu");
     });
 
     test("member can view owner day in peer mode", async () => {
@@ -249,7 +250,8 @@ describe("GET /", () => {
             html.match(
                 /<div class="fd-today-meals">[\s\S]*?<\/div><\/main>/,
             )?.[0] ?? "";
-        expect(meals).not.toContain("fd-today-section__add");
+        expect(meals).not.toContain("fd-item-row__add");
+        expect(meals).not.toContain("fd-menu");
     });
 
     test("stranger member query is forbidden", async () => {

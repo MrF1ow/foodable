@@ -31,7 +31,7 @@ import {
 import { settingsErrorBanner } from "./settings-shared.js";
 import { renderAppShell } from "../../shell.js";
 import { fdIcon } from "../../components/fd-icons.js";
-import { formatExpiryWhen, expiryToneClass } from "./today-rail.js";
+import { formatExpiryWhen, expiryToneClass } from "./expiry-format.js";
 import { kitchenAddButton, kitchenTopTools } from "./kitchen-head.js";
 import { selectMode } from "./select-mode.js";
 import {

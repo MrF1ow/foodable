@@ -115,9 +115,26 @@ describe("calorieGauge (FigCraft 381807)", () => {
     test("a target that rounds below 1 counts as no target", () => {
         const html = String(calorieGauge({ consumed: 100, target: 0.3 }));
         expect(html).toContain("no calorie goal");
-        expect(html).toContain("—");
+        expect(html).toContain('<span class="fd-calorie-gauge__figure">100<');
         expect(arcs(html).map((a) => a.kind)).toEqual(["track"]);
         expect(html).not.toContain("left of 0");
+    });
+
+    test("with no goal the day's total still shows, seen and spoken", () => {
+        for (const target of [null, 0, -2000]) {
+            const html = String(calorieGauge({ consumed: 1284.4, target }));
+            expect(html).toContain(
+                '<span class="fd-calorie-gauge__figure">1,284</span>',
+            );
+            expect(html).toContain("kcal eaten · no calorie goal");
+            expect(html).toContain("Eaten 1,284 kcal, no calorie goal");
+            expect(html).not.toContain("left of");
+            expect(arcs(html).map((a) => a.kind)).toEqual(["track"]);
+        }
+        const none = String(calorieGauge({ consumed: 0, target: null }));
+        expect(none).toContain(
+            '<span class="fd-calorie-gauge__figure">0</span>',
+        );
     });
 
     test("within half a kcal of the target the figure and the spoken line agree", () => {
@@ -139,19 +156,17 @@ describe("calorieGauge (FigCraft 381807)", () => {
     test("unknown consumed or target shows a dash and only the track", () => {
         for (const opts of [
             { consumed: null, target: 2000 },
-            { consumed: 100, target: null },
-            { consumed: 100, target: 0 },
             { consumed: -100, target: 2000 },
             { consumed: NaN, target: 2000 },
-            { consumed: 100, target: -2000 },
+            { consumed: null, target: null },
         ]) {
             const html = String(calorieGauge(opts));
             expect(html).toContain("—");
             expect(arcs(html).map((a) => a.kind)).toEqual(["track"]);
         }
-        expect(String(calorieGauge({ consumed: 100, target: null }))).toContain(
-            "no calorie goal",
-        );
+        expect(
+            String(calorieGauge({ consumed: null, target: null })),
+        ).toContain("no calorie goal");
         expect(
             String(calorieGauge({ consumed: null, target: 2000 })),
         ).toContain("kcal left of 2,000");

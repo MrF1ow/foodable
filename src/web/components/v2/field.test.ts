@@ -22,6 +22,17 @@ test("a field is a box around a named input", () => {
     expect(html).not.toContain("aria-invalid");
 });
 
+test("a time field is a native time input holding its value", () => {
+    const html = field({
+        id: "at",
+        label: "Time",
+        name: "logged_time",
+        type: "time",
+        value: "12:30",
+    });
+    expect(html).toContain('name="logged_time" type="time" value="12:30"');
+});
+
 test("labelHidden keeps the accessible name and draws no label", () => {
     const html = field({
         id: "q",

@@ -254,6 +254,7 @@ a.fd-item-row__face:focus-visible,
     background: transparent;
 }
 .fd-item-row__add {
+    text-decoration: none;
     display: grid;
     place-items: center;
     width: var(--fd-item-row-add);
@@ -372,6 +373,18 @@ a.fd-item-row__face:focus-visible,
 
 .fd-item-row--swipe {
     overflow: hidden;
+}
+/* A row holding an open ⋯ menu stands above the rows after it (each swipe
+ * face is its own stacking layer, so a later row would paint over the panel)
+ * and, on the phone, stops clipping so the panel can leave the row. A row
+ * swiped open keeps its clip: the menu and the swipe are not open together. */
+.fd-item-row:has(.fd-menu__panel:not([hidden])),
+.fd-item-row:has(.fd-menu[open]) {
+    z-index: 60;
+}
+.fd-item-row--swipe:not([data-swipe-open]):has(.fd-menu__panel:not([hidden])),
+.fd-item-row--swipe:not([data-swipe-open]):has(.fd-menu[open]) {
+    overflow: visible;
 }
 .fd-item-row--swipe .fd-item-row__face {
     position: relative;

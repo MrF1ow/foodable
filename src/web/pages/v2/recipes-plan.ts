@@ -1,14 +1,12 @@
 /**
  * The week plan in the new app: "Add to plan" on a recipe, This week on Today
- * (a card in the desktop rail, a section on the phone) and on Recipes (a strip
- * of seven days), the sheets that move or remove a plan, and the sheet that
- * lists what the plan still needs and puts it on the grocery list.
+ * (a list of the planned entries) and on Recipes (a strip of seven days), the
+ * sheets that move or remove a plan, and the sheet that lists what the plan
+ * still needs and puts it on the grocery list.
  *
- * FigCraft Screens › Recipes (desktop dark 48591, light 57474; phone dark
- * 22716, light 27628) and Desktop › Today (dark 41837, light 50720) carry the
- * strip, the rail card and the Plan buttons. The design has no frame for the
- * Add to plan sheet, the edit sheet or the missing list, and no This week
- * section on the phone Today.
+ * An entry is shown as it is stored, one per recipe, day and meal: nothing is
+ * merged, summed or split. An entry that is a day of a repeat names that one
+ * repeat, and its menu offers to remove this day or end the whole series.
  *
  * `buildWeekPlanView` is the pure step between the data and the markup: seven
  * days from today in the household's calendar, each with its plans, and the
@@ -32,7 +30,16 @@ import {
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
 import { iconPlus } from "../../components/v2/icons.js";
-import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
+import { icon } from "../../components/v2/icon.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
+import {
+    sheet,
+    sheetSection,
+    sheetTrigger,
+} from "../../components/v2/sheet.js";
 import { stepper } from "../../components/v2/stepper.js";
 
 export const PLAN_SHEET_ID = "fd-recipe-plan-sheet";
@@ -77,6 +84,8 @@ export type WeekPlanEntry = {
     date: string;
     /** The plan is for named people: it has no servings of its own to edit. */
     named: boolean;
+    /** The one repeat this entry is a day of; absent on a one-off plan. */
+    ruleId?: string;
 };
 
 export type WeekPlanDayView = {
@@ -194,6 +203,7 @@ export function buildWeekPlanView(input: {
                         yieldPortions: recipe.yieldPortions,
                         date: p.date,
                         named: (p.memberIds?.length ?? 0) > 0,
+                        ruleId: p.ruleId,
                     },
                 ];
             }),
@@ -330,9 +340,59 @@ export function renderPlanTrigger(): Html {
     );
 }
 
+/** How many days ahead the Day pull-down reaches. */
+const DAY_CHOICES = 14;
+
+function dayChoiceLabel(date: string): string {
+    return /^\d{4}-\d{2}-\d{2}$/.test(date) &&
+        !Number.isNaN(new Date(`${date}T00:00:00Z`).getTime())
+        ? planDayLabel(date)
+        : date;
+}
+
+/** `date` moved by `days` calendar days. */
+function dayAfter(date: string, days: number): string {
+    const at = new Date(`${date}T00:00:00Z`);
+    at.setUTCDate(at.getUTCDate() + days);
+    return at.toISOString().slice(0, 10);
+}
+
 /**
- * One sheet per planned recipe in the week: change the day, meal or servings,
- * or take it off the plan. Rendered on every page that lists the week, so the
+ * A row whose value is a pull-down: an Item row with its title, value and
+ * chevron, and the form's own `<select>` laid invisibly over it, so a press
+ * anywhere on the row opens the list and the form posts it as `name`. The page
+ * script writes the chosen option into the row's value.
+ */
+function pickRow(opts: {
+    title: string;
+    name: string;
+    options: readonly { value: string; label: string }[];
+    selected: string;
+}): Html {
+    const options = opts.options
+        .map(
+            (o) =>
+                `<option value="${esc(o.value)}"${o.value === opts.selected ? " selected" : ""}>${esc(o.label)}</option>`,
+        )
+        .join("");
+    const select = `<select class="fd-plan-edit-row__select" name="${esc(opts.name)}" aria-label="${esc(opts.title)}">${options}</select>`;
+    const chosen = opts.options.find((o) => o.value === opts.selected);
+    const row = String(
+        itemRow({
+            title: opts.title,
+            value: chosen?.label ?? opts.selected,
+            trailing: { kind: "chevron" },
+            className: "fd-plan-edit-row",
+        }),
+    );
+    return raw(row.replace(/<\/div><\/li>$/, () => `${select}</div></li>`));
+}
+
+/**
+ * One sheet per planned recipe in the week, titled with its day and the meal
+ * under it: Day and Meal are rows with pull-downs, Servings a stepper, Remove
+ * beside Save. Save posts the day, meal and servings to the move route, Remove
+ * to the remove route. Rendered on every page that lists the week, so the
  * rows' buttons have something to open.
  */
 export function renderPlanEditSheets(
@@ -348,33 +408,91 @@ export function renderPlanEditSheets(
             const draft =
                 view.editDraft?.planId === plan.id ? view.editDraft : null;
             const draftServings = draft?.servings;
+            const date = draft ? draft.date : plan.date;
+            const slot = draft ? draft.slot : plan.slot;
+            const servings =
+                draftServings != null && Number.isFinite(draftServings)
+                    ? draftServings
+                    : plan.servings;
             const err = draft
                 ? `<p class="fd-plan-error" role="alert">${esc(draft.error)}</p>`
                 : "";
+            // Today on, two weeks of days; a day outside them (the plan's own,
+            // or one a failed save typed) stays a choice so nothing is lost.
+            const days = Array.from({ length: DAY_CHOICES }, (_, i) =>
+                dayAfter(view.today, i),
+            );
+            if (!days.includes(date)) days.push(date);
+            const dayRowHtml = pickRow({
+                title: "Day",
+                name: "date",
+                options: days.map((d) => ({
+                    value: d,
+                    label: dayChoiceLabel(d),
+                })),
+                selected: date,
+            });
+            const mealRowHtml = pickRow({
+                title: "Meal",
+                name: "slot",
+                options: PLAN_SLOTS.map((value) => ({
+                    value,
+                    label: PLAN_SLOT_LABEL[value],
+                })),
+                selected: slot,
+            });
+            const servingsSection = plan.named
+                ? sheetSection({
+                      kind: "message",
+                      label: "Servings",
+                      text: `${plan.servings} ${servingsUnit(plan.servings)}: the portions of the people it is for. Change their portions to change it.`,
+                  })
+                : sheetSection({
+                      kind: "amount",
+                      label: "Servings",
+                      content: stepper({
+                          name: "servings",
+                          label: "Servings",
+                          value: servings,
+                          step: 1,
+                          inputStep: "any",
+                          min: Math.min(1, plan.yieldPortions),
+                          unit: servingsUnit(servings),
+                          id: `${id}-servings`,
+                          className: "fd-plan-stepper",
+                      }),
+                  });
             const body = `<form id="${esc(moveId)}" class="fd-plan-form" method="post" action="/recipes/plan/${esc(plan.id)}/move">
-${hidden("back", back)}${err}${planFields({
-                idPrefix: id,
-                today: view.today,
-                date: draft ? draft.date : plan.date,
-                slot: draft ? draft.slot : plan.slot,
-                servings:
-                    draftServings != null && Number.isFinite(draftServings)
-                        ? draftServings
-                        : plan.servings,
-                yieldPortions: plan.yieldPortions,
-                named: plan.named,
-            })}
+${hidden("back", back)}${err}${String(
+                sheetSection({
+                    kind: "rows",
+                    content: listGroup({
+                        rows: [dayRowHtml, mealRowHtml],
+                        label: "When",
+                    }),
+                }),
+            )}
+${String(servingsSection)}
 </form>
 <form id="${esc(removeId)}" method="post" action="/recipes/plan/${esc(plan.id)}/remove">${hidden("back", back)}</form>`;
-            const actions = `<button type="submit" class="fd-btn fd-btn--danger" form="${esc(removeId)}">Remove</button>
-<button type="submit" class="fd-btn fd-btn--primary" form="${esc(moveId)}">Save</button>`;
             return sheet({
                 id,
-                kind: "confirm",
-                title: plan.recipeName,
-                subtitle: `${planDayLabel(plan.date)} · ${PLAN_SLOT_LABEL[plan.slot].toLowerCase()}`,
-                body,
-                actions,
+                placement: "side",
+                header: {
+                    kind: "title",
+                    title: planDayLabel(plan.date),
+                    subtitle: PLAN_SLOT_LABEL[plan.slot],
+                },
+                body: raw(body),
+                actions: {
+                    kind: "pair",
+                    cancel: {
+                        label: "Remove",
+                        type: "submit",
+                        form: removeId,
+                    },
+                    primary: { label: "Save", type: "submit", form: moveId },
+                },
                 openOnLoad: view.openSheet === id,
                 focus: "panel",
             });
@@ -411,26 +529,29 @@ export function renderWeekMissingLine(view: WeekPlanView): string {
  */
 export function renderMissingSheet(view: WeekPlanView, back: PlanBack): string {
     if (view.missing.length === 0) return "";
-    const rows = view.missing
-        .map((line) => {
-            const note = line.unknown
-                ? `${line.neededBy} · can't tell what you have, so the full amount is added`
-                : line.unmeasured
-                  ? `${line.neededBy} · no amount, added as to taste`
-                  : line.neededBy;
-            return `<li class="fd-plan-missing-row${line.unknown ? " fd-plan-missing-row--unknown" : ""}"><span class="fd-plan-missing-row__main"><span class="fd-plan-missing-row__name">${esc(line.name)}</span><span class="fd-plan-missing-row__note">${esc(note)}</span></span>${line.amount ? `<span class="fd-plan-missing-row__amount">${esc(line.amount)}</span>` : ""}</li>`;
-        })
-        .join("");
+    const rows = view.missing.map((line) => {
+        const note = line.unknown
+            ? `${line.neededBy} · can't tell what you have, so the full amount is added`
+            : line.unmeasured
+              ? `${line.neededBy} · no amount, added as to taste`
+              : line.neededBy;
+        return itemRow({
+            title: line.name,
+            meta: line.amount ?? undefined,
+            subtitle: note,
+            lead: { kind: "dot", color: line.unknown ? "warn" : "good" },
+        });
+    });
     const body = `<form id="${MISSING_FORM_ID}" method="post" action="/recipes/plan/add-missing">
-${hidden("back", back)}<ul class="fd-plan-missing-list">${rows}</ul>
+${hidden("back", back)}${String(listGroup({ rows, label: "Missing for the plan", className: "fd-plan-missing-list" }))}
 </form>`;
     return sheet({
         id: PLAN_MISSING_SHEET_ID,
         kind: "confirm",
         title: "Missing for the plan",
-        subtitle: `${ingredientsMissingText(view.missing.length)} for the next 7 days`,
+        subtitle: `${ingredientsMissingText(view.missing.length)} · next 7 days`,
         body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${MISSING_FORM_ID}">Add to groceries</button>`,
+        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${MISSING_FORM_ID}">Add ${view.missing.length} to groceries</button>`,
         openOnLoad: view.openSheet === PLAN_MISSING_SHEET_ID,
         focus: "panel",
     });
@@ -507,10 +628,110 @@ ${renderWeekMissingLine(view)}
 </section>`;
 }
 
-/** The phone Today's This week section (the desktop has the rail card instead). */
-export function renderWeekPhoneSection(view: WeekPlanView): string {
-    return `<section class="fd-today-section fd-plan-phone" aria-labelledby="fd-plan-phone-title">
-<div class="fd-plan-phone__head"><h2 class="fd-plan-phone__title" id="fd-plan-phone-title">This week</h2><a class="fd-plan-phone__link" href="/recipes">Recipes</a></div>
-${renderWeekRows(view)}${renderWeekMissingLine(view)}
-</section>`;
+/**
+ * "5 ingredients missing" under This week: a cart and the count, opening the
+ * Missing for the plan sheet. Nothing when nothing is planned or nothing is
+ * missing.
+ */
+function missingRow(view: WeekPlanView): string {
+    if (view.plannedCount === 0 || view.missing.length === 0) return "";
+    return sheetTrigger({
+        target: PLAN_MISSING_SHEET_ID,
+        label: ingredientsMissingText(view.missing.length),
+        className: "fd-plan-missing-link",
+        icon: `${String(icon("cart"))}<span>${esc(ingredientsMissingText(view.missing.length))}</span>`,
+    });
+}
+
+/** What an entry's menu does: edit it, or take it off the week. */
+function entryMenu(plan: WeekPlanEntry, day: WeekPlanDayView, back: PlanBack) {
+    const action = `/recipes/plan/${plan.id}/remove`;
+    const items: MenuItem[] = [
+        {
+            kind: "opens",
+            label: "Edit",
+            sheetId: planEditSheetId(plan.id),
+        },
+    ];
+    if (plan.ruleId == null) {
+        items.push({
+            kind: "destructive",
+            label: "Remove",
+            action,
+            fields: { back },
+        });
+    } else {
+        // A day of a repeat: this day alone, or the repeat from this day on.
+        items.push(
+            {
+                kind: "destructive",
+                label: "This day",
+                confirmLabel: "Remove this day",
+                action,
+                fields: { back, scope: "day" },
+            },
+            {
+                kind: "destructive",
+                label: "The whole series",
+                confirmLabel: "End the series",
+                action,
+                fields: { back, scope: "series" },
+            },
+        );
+    }
+    return menu({
+        label: `Actions for ${plan.recipeName}, ${day.label}`,
+        anchor: "more",
+        items,
+    });
+}
+
+/**
+ * Today's This week: a section header with Plan, then one row per planned
+ * entry in the order the week gives them: the recipe and its meal, the day,
+ * and a menu. A row opens the entry's edit sheet. Entries are shown as stored,
+ * never merged or summed; a day of a repeat has This day and The whole series
+ * in its menu, for that one repeat.
+ */
+export function renderWeekSection(view: WeekPlanView, back: PlanBack): string {
+    const rows = view.days.flatMap((day) =>
+        day.plans.map((plan) => {
+            const slot = PLAN_SLOT_LABEL[plan.slot];
+            const sheetId = planEditSheetId(plan.id);
+            const html = String(
+                itemRow({
+                    title: plan.recipeName,
+                    subtitle: slot,
+                    value: day.isToday ? "Today" : day.weekday,
+                    trailing: {
+                        kind: "control",
+                        html: entryMenu(plan, day, back),
+                    },
+                    className: "fd-plan-row",
+                }),
+            );
+            // A function replacement: a string would read `$` in an id as a pattern.
+            return raw(
+                html.replace(
+                    "<li ",
+                    () =>
+                        `<li data-fd-sheet-row data-sheet-id="${esc(sheetId)}" tabindex="0" `,
+                ),
+            );
+        }),
+    );
+    const list =
+        rows.length > 0
+            ? listGroup({ rows, label: "This week" })
+            : listGroup({
+                  rows: [itemRow({ title: "Nothing planned" })],
+                  label: "This week",
+              });
+    return `<section class="fd-today-section fd-plan-week" aria-label="This week">${String(
+        sectionHeader({
+            label: "This week",
+            rule: false,
+            action: { label: "Plan", href: "/recipes" },
+        }),
+    )}${String(list)}${missingRow(view)}</section>`;
 }

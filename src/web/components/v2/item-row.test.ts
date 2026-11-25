@@ -268,6 +268,21 @@ test("Add is a round button, a submit button inside a form when given one", () =
     );
 });
 
+test("Add with an href is a link that still goes there with no script", () => {
+    const html = itemRow({
+        title: "Nothing yet",
+        trailing: {
+            kind: "add",
+            label: "Log lunch",
+            href: "/#log",
+            data: { "open-sheet": "x" },
+        },
+    });
+    expect(html).toContain(
+        `<a class="fd-item-row__trail fd-item-row__add" href="/#log" aria-label="Log lunch" data-open-sheet="x">${icon("plus")}</a>`,
+    );
+});
+
 test("Toggle is a switch with aria-checked for On and Off", () => {
     const on = itemRow({
         title: "Show cards",

@@ -119,11 +119,11 @@
     color: var(--text-tertiary);
 }
 
-.fd-kitchen-use-card__when.fd-today-rail-row__when--high {
+.fd-kitchen-use-card__when.fd-expiry--high {
     color: var(--status-over);
 }
 
-.fd-kitchen-use-card__when.fd-today-rail-row__when--medium {
+.fd-kitchen-use-card__when.fd-expiry--medium {
     color: var(--status-warn);
 }
 
@@ -178,11 +178,11 @@
     color: var(--text-secondary);
 }
 
-.fd-kitchen-item-expiry.fd-today-rail-row__when--high {
+.fd-kitchen-item-expiry.fd-expiry--high {
     color: var(--status-over);
 }
 
-.fd-kitchen-item-expiry.fd-today-rail-row__when--medium {
+.fd-kitchen-item-expiry.fd-expiry--medium {
     color: var(--status-warn);
 }
 

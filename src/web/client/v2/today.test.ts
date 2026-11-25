@@ -286,43 +286,24 @@ test("undo toast action submits and auto-dismisses after six seconds", () => {
     expect(regionChildren).toHaveLength(0);
 });
 
-test("meal row keydown ignores Enter from swipe delete control", () => {
+type SheetEvent = {
+    key?: string;
+    target: unknown;
+    preventDefault: () => void;
+};
+
+// today.js in a stubbed browser: the document's listeners are collected, the
+// sheet opens are recorded, and every FoodableApp.onLoad hook can be run again.
+const loadSheetRows = () => {
     const opened: string[] = [];
-    const keydownHandlers: Array<
-        (e: {
-            key: string;
-            target: unknown;
-            preventDefault: () => void;
-        }) => void
-    > = [];
-    const row = {
-        dataset: {} as Record<string, string>,
-        getAttribute(name: string) {
-            if (name === "data-sheet-id") return "fd-edit-meal-1";
-            return null;
-        },
-        addEventListener(
-            ev: string,
-            fn: (e: {
-                key: string;
-                target: unknown;
-                preventDefault: () => void;
-            }) => void,
-        ) {
-            if (ev === "keydown") keydownHandlers.push(fn);
-        },
-        closest() {
-            return null;
-        },
-    };
+    const listeners: {
+        click: Array<(e: SheetEvent) => void>;
+        keydown: Array<(e: SheetEvent) => void>;
+        [ev: string]: Array<(e: SheetEvent) => void> | undefined;
+    } = { click: [], keydown: [] };
     const src = readFileSync(new URL("./today.js", import.meta.url), "utf8");
     const g = globalThis as typeof globalThis & {
-        document?: {
-            getElementById: (id: string) => {
-                open: boolean;
-                showModal: () => void;
-            };
-        };
+        document?: unknown;
         window?: unknown;
         FoodableApp?: { onLoad: (cb: (root: unknown) => void) => void };
         FOODABLE_EXPOSE_TODAY_WEEK?: () => void;
@@ -335,6 +316,9 @@ test("meal row keydown ignores Enter from swipe delete control", () => {
             open: false,
             showModal: () => opened.push(id),
         }),
+        addEventListener(ev: string, fn: (e: SheetEvent) => void) {
+            listeners[ev]?.push(fn);
+        },
     };
     g.FOODABLE_EXPOSE_TODAY_WEEK = () => {};
     g.FOODABLE_EXPOSE_TODAY_EDIT = () => {};
@@ -346,23 +330,65 @@ test("meal row keydown ignores Enter from swipe delete control", () => {
     };
     eval(src);
     const scope = {
-        querySelector() {
-            return null;
-        },
-        querySelectorAll(sel: string) {
-            if (sel === "[data-fd-meal-row]") return [row];
-            if (sel === "[data-fd-edit-macros]") return [];
-            return [];
+        querySelector: () => null,
+        querySelectorAll: () => [],
+    };
+    return {
+        opened,
+        listeners,
+        load: () => {
+            for (const hook of hooks) hook(scope);
         },
     };
-    for (const hook of hooks) hook(scope);
-    expect(keydownHandlers).toHaveLength(1);
-    const handler = keydownHandlers[0]!;
-    const button = { tagName: "BUTTON" };
-    handler({ key: "Enter", target: button, preventDefault() {} });
+};
+
+const sheetRow = (sheetId: string) => {
+    const row = {
+        id: sheetId,
+        getAttribute(name: string) {
+            return name === "data-sheet-id" ? row.id : null;
+        },
+    };
+    // An event target inside the row: the row itself, or a control in it.
+    const target = (control: boolean, isRow = false) => ({
+        ...(isRow ? row : {}),
+        closest(sel: string) {
+            if (sel === "[data-fd-sheet-row]") return row;
+            return control ? {} : null;
+        },
+    });
+    return { row, target };
+};
+
+test("a meal row's Enter opens its sheet, and Enter from a control inside it does not", () => {
+    const { opened, listeners, load } = loadSheetRows();
+    load();
+    const { row, target } = sheetRow("fd-edit-meal-1");
+    const handler = listeners.keydown[0]!;
+    handler({ key: "Enter", target: target(true), preventDefault() {} });
     expect(opened).toHaveLength(0);
-    handler({ key: "Enter", target: row, preventDefault() {} });
+    const focused = Object.assign(row, target(false));
+    handler({ key: "Enter", target: focused, preventDefault() {} });
     expect(opened).toEqual(["fd-edit-meal-1"]);
+});
+
+test("a row reused by a morph under a new sheet id opens one sheet, the new one", () => {
+    const { opened, listeners, load } = loadSheetRows();
+    load();
+    // The page loads again after a Turbo morph: nothing is bound twice.
+    load();
+    load();
+    expect(listeners.click).toHaveLength(1);
+    expect(listeners.keydown).toHaveLength(1);
+    const { row, target } = sheetRow("fd-plan-edit-1");
+    listeners.click[0]!({ target: target(false), preventDefault() {} });
+    expect(opened).toEqual(["fd-plan-edit-1"]);
+    row.id = "fd-plan-edit-2";
+    listeners.click[0]!({ target: target(false), preventDefault() {} });
+    expect(opened).toEqual(["fd-plan-edit-1", "fd-plan-edit-2"]);
+    // A tap on a button, link, form or menu inside the row opens nothing.
+    listeners.click[0]!({ target: target(true), preventDefault() {} });
+    expect(opened).toHaveLength(2);
 });
 
 test("stepper change updates fd-tile macro values", () => {

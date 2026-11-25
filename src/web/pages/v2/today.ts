@@ -13,52 +13,41 @@ import {
     weekDates,
     type WeekStripLayout,
 } from "../../../domain/today.js";
-import {
-    BAR_SPECS,
-    GAUGE_SPECS,
-    MACRO_ORDER,
-    barFill,
-    calorieGauge,
-    type MacroKey,
-} from "../../../domain/geometry.js";
+import { KCAL_PER_GRAM } from "../../../domain/geometry.js";
 import type { SlotSuggestion } from "../../../domain/suggestions.js";
 import { shiftLocalDate } from "../../../domain/tz.js";
 import type { AppChromeBase } from "../../attention.js";
+import { calorieGauge } from "../../components/v2/calorie-gauge.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
-import { dot } from "../../components/v2/dot.js";
-import {
-    foodRow,
-    macroLine,
-    rowList,
-    type Macros,
-} from "../../components/v2/rows.js";
-import {
-    iconChevronRight,
-    iconPlus,
-    iconRepeat,
-    iconTrash,
-} from "../../components/v2/icons.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { macroBar } from "../../components/v2/macro-bar.js";
+import { menu } from "../../components/v2/menu.js";
+import { button } from "../../components/v2/button.js";
+import { nutrientLine } from "../../components/v2/nutrient-line.js";
+import { pageHeader } from "../../components/v2/page-header.js";
+import { pageLayout } from "../../components/v2/page-layout.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
+import { weekStrip } from "../../components/v2/week-strip.js";
+import type { Macros } from "../../components/v2/rows.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 import { goalName } from "./settings-goals-label.js";
+import { FD_LOG_HREF } from "../../shell-v2.js";
 import {
     FD_LOG_SEARCH_SHEET_ID,
     type CopyYesterdayOpts,
     type RenderLogSheetsOpts,
 } from "./log-sheet.js";
-import { FD_LOG_HREF } from "../../shell-v2.js";
 import type { TodayView } from "../../loaders-today.js";
 import { renderAppShell } from "../../shell.js";
 import { renderTodayEditSheets } from "./today-edit-sheet.js";
 import { todayEditSheetId } from "../../../domain/today-edit.js";
-import { renderTodayRail } from "./today-rail.js";
 import {
     renderMissingSheet,
     renderPlanEditSheets,
-    renderWeekPhoneSection,
+    renderWeekSection,
     type WeekPlanView,
 } from "./recipes-plan.js";
-import type { Notice } from "../../../domain/notices.js";
-import type { FridgeItem } from "../../../domain/fridge.js";
 
 export type TodayPageChrome = AppChromeBase & {
     subjectLabel?: string;
@@ -73,7 +62,7 @@ export type TodayPageData = {
     error?: string;
     openEditMealId?: string;
     editError?: string;
-    /** The household's week plan: the rail card, the phone section, their sheets. */
+    /** The household's week plan: This week, its sheets. */
     plan?: WeekPlanView;
 };
 
@@ -144,22 +133,16 @@ function fmtWholeMg(value: number | null): string {
     return String(Math.round(value));
 }
 
-function fmtWater(ml: number, goalMl: number | null): string {
+function fmtLiters(ml: number): string {
     const liters = ml / 1000;
-    const lit =
-        Math.abs(liters - Math.round(liters)) < 0.05
-            ? String(Math.round(liters))
-            : (Math.round(liters * 10) / 10).toFixed(1);
-    if (goalMl == null || goalMl <= 0) return `${lit} L`;
-    const goalL =
-        Math.abs(goalMl / 1000 - Math.round(goalMl / 1000)) < 0.05
-            ? String(Math.round(goalMl / 1000))
-            : (Math.round((goalMl / 1000) * 10) / 10).toFixed(1);
-    return `${lit} / ${goalL} L`;
+    return Math.abs(liters - Math.round(liters)) < 0.05
+        ? String(Math.round(liters))
+        : (Math.round(liters * 10) / 10).toFixed(1);
 }
 
-function dayNumber(date: string): string {
-    return String(Number(date.slice(8, 10)));
+function fmtWater(ml: number, goalMl: number | null): string {
+    if (goalMl == null || goalMl <= 0) return `${fmtLiters(ml)} L`;
+    return `${fmtLiters(ml)} / ${fmtLiters(goalMl)} L`;
 }
 
 function formatCalendarWeekday(date: string): string {
@@ -188,206 +171,51 @@ function headerMarkup(data: TodayPageData): Html {
     // streak; nameless goals add nothing.
     const name = goalName(view.goals);
     const namePart = name != null ? ` · ${name}` : "";
-    const subtitle = `<p class="fd-today-subtitle">${esc(`${dateLine}${namePart}${streakPart}`)}</p>`;
+    const header = pageHeader({
+        title: weekday,
+        subtitle: `${dateLine}${namePart}${streakPart}`,
+        className: "fd-today-header",
+    });
     const peer =
         data.chrome.subjectLabel != null
             ? `<p class="fd-today-peer" role="status">${esc(`Viewing ${data.chrome.subjectLabel}`)}</p>`
             : "";
-    return raw(
-        `<header class="fd-today-header"><div class="fd-today-header__text"><h1 class="fd-today-title">${esc(weekday)}</h1>${subtitle}${peer}</div></header>`,
-    );
+    return raw(`${header}${peer}`);
 }
 
 function isReadOnlyPeer(data: TodayPageData): boolean {
     return data.chrome.subjectLabel != null;
 }
 
-function weekDotAttr(state: WeekDotState): string {
-    return ` data-fd-dot="${state}"`;
-}
-
 function weekStripMarkup(data: TodayPageData): Html {
     const { view, memberQuery } = data;
     const { week } = view;
-    const prev = todayHref({
-        date: week.prevWeekStart,
-        member: memberQuery,
-    });
-    const next = todayHref({
-        date: week.nextWeekStart,
-        member: memberQuery,
-    });
+    const prev = todayHref({ date: week.prevWeekStart, member: memberQuery });
+    const next = todayHref({ date: week.nextWeekStart, member: memberQuery });
     const dotsByDate = new Map(week.dots.map((d) => [d.date, d.state]));
-    const labels = WEEKDAY_LETTERS.map(
-        (letter) =>
-            `<span class="fd-today-week__label" aria-hidden="true">${letter}</span>`,
-    ).join("");
-    const days = week.days
-        .map((day) => {
-            const state = dotsByDate.get(day.date) ?? "empty";
-            const href = todayHref({ date: day.date, member: memberQuery });
-            const current = day.isSelected ? ` aria-current="date"` : "";
-            const todayClass = day.isToday ? " fd-today-week__day--today" : "";
-            const selectedClass = day.isSelected
-                ? " fd-today-week__day--selected"
-                : "";
-            // The highlighted number already marks the day; a dot under it
-            // would say the same thing twice.
-            const dot = day.isSelected
-                ? ""
-                : `<span class="fd-today-week__dot"${weekDotAttr(state)} aria-hidden="true"></span>`;
-            return `<a class="fd-today-week__day${todayClass}${selectedClass}" href="${esc(href)}"${current}><span class="fd-today-week__num">${esc(dayNumber(day.date))}</span>${dot}</a>`;
-        })
-        .join("");
-    return raw(
-        `<nav class="fd-today-week" aria-label="Week" data-fd-week-strip data-fd-week-prev="${esc(prev)}" data-fd-week-next="${esc(next)}"><a class="fd-today-week__chev fd-today-week__chev--prev" href="${esc(prev)}" aria-label="Previous week">${iconChevronRight()}</a><div class="fd-today-week__grid"><div class="fd-today-week__labels">${labels}</div><div class="fd-today-week__days">${days}</div></div><a class="fd-today-week__chev fd-today-week__chev--next" href="${esc(next)}" aria-label="Next week">${iconChevronRight()}</a></nav>`,
-    );
-}
-
-function gaugeMarkup(view: TodayView): Html {
-    const goal = activeCalorieGoal(view.goals);
-    const hasMeals = viewHasMealRows(view);
-    const eatenRaw = view.totals.calories;
-    const eatenForGauge =
-        eatenRaw == null && !hasMeals && goal != null ? 0 : eatenRaw;
-    const g = calorieGauge(
-        {
-            goal,
-            eaten: eatenForGauge ?? 0,
-            protein_g: view.totals.protein_g,
-            carbs_g: view.totals.carbs_g,
-            fat_g: view.totals.fat_g,
-        },
-        GAUGE_SPECS.today,
-    );
-    const track = `<path class="fd-today-gauge__track" d="${g.track.d}" fill="none" stroke-width="${g.stroke}"/>`;
-    const segments = g.segments
-        .map(
-            (seg) =>
-                `<path class="fd-today-gauge__seg fd-today-gauge__seg--${seg.key}" d="${seg.d}" fill="none" stroke-width="${g.stroke}"/>`,
-        )
-        .join("");
-    const { box } = g;
-    let center: string;
-    if (goal == null) {
-        center = `<div class="fd-today-gauge__center fd-today-gauge__center--solo"><span class="fd-today-gauge__hero">${esc(fmtKcal(eatenRaw))}</span><span class="fd-today-gauge__caption">kcal eaten</span></div>`;
-    } else if (eatenForGauge == null) {
-        center = `<div class="fd-today-gauge__center"><span class="fd-today-gauge__hero">—</span></div>`;
-    } else if (g.remaining != null && g.remaining < 0) {
-        center = `<div class="fd-today-gauge__center"><span class="fd-today-gauge__hero fd-today-gauge__hero--over">${esc(fmtKcal(Math.abs(g.remaining)))}</span><span class="fd-today-gauge__caption fd-today-gauge__caption--over">kcal over ${esc(fmtKcal(goal))}</span></div>`;
-    } else {
-        const remaining = g.remaining ?? 0;
-        center = `<div class="fd-today-gauge__center"><span class="fd-today-gauge__hero">${esc(fmtKcal(remaining))}</span><span class="fd-today-gauge__caption">kcal left of ${esc(fmtKcal(goal))}</span></div>`;
-    }
-    // The accessible name says what the hero number says.
-    const ariaEaten = eatenForGauge == null ? null : eatenForGauge;
-    const ariaLabel =
-        ariaEaten == null
-            ? "Calories unknown"
-            : goal == null
-              ? `${fmtKcal(ariaEaten)} kcal eaten`
-              : g.remaining != null && g.remaining < 0
-                ? `${fmtKcal(Math.abs(g.remaining))} kcal over ${fmtKcal(goal)}`
-                : `${fmtKcal(g.remaining ?? 0)} kcal left of ${fmtKcal(goal)}`;
-    return raw(
-        `<div class="fd-today-gauge" role="img" aria-label="${esc(ariaLabel)}"><svg class="fd-today-gauge__svg" viewBox="0 0 ${box.width} ${box.height}" width="${box.width}" height="${box.height}" aria-hidden="true">${track}${segments}</svg>${center}</div>`,
-    );
-}
-
-function macroDeltaHint(
-    actual: number | null,
-    goal: number | null,
-): { text: string; over: boolean } | null {
-    if (goal == null || !Number.isFinite(goal)) return null;
-    const eaten = actual != null && Number.isFinite(actual) ? actual : 0;
-    const delta = goal - eaten;
-    if (delta > 0) {
-        return { text: `${Math.round(delta)} g to go`, over: false };
-    }
-    if (delta < 0) {
-        return { text: `${Math.round(Math.abs(delta))} g over`, over: true };
-    }
-    return null;
-}
-
-function macroBarRow(
-    key: MacroKey | "calories",
-    label: string,
-    actual: number | null,
-    goal: number | null,
-): string {
-    const fill = barFill(actual, goal);
-    const pct = fill.percent != null ? Math.min(100, fill.percent) : 0;
-    const over = fill.over ? " fd-today-macro__nums--over" : "";
-    const actualFmt =
-        key === "calories" ? fmtKcal(actual) : fmtWholeGrams(actual);
-    const goalFmt = key === "calories" ? fmtKcal(goal) : fmtWholeGrams(goal);
-    const goalText = goal != null ? ` / ${goalFmt} g` : "";
-    const marker =
-        fill.goalMarker != null
-            ? `<span class="fd-today-macro__marker" style="left:${fill.goalMarker * 100}%"></span>`
-            : "";
-    const dotHtml = String(
-        dot(key === "calories" ? "calories" : key, { size: "sm" }),
-    );
-    const hint = key !== "calories" ? macroDeltaHint(actual, goal) : null;
-    const hintHtml = hint
-        ? `<p class="fd-today-macro__hint${hint.over ? " fd-today-macro__hint--over" : ""}">${esc(hint.text)}</p>`
-        : "";
-    return `<article class="fd-today-macro fd-today-macro--${key}"><span class="fd-today-macro__label">${dotHtml}${esc(label)}</span><span class="fd-today-macro__nums${over}"><span class="fd-today-macro__actual">${esc(actualFmt)}</span>${goal != null ? `<span class="fd-today-macro__goal">${esc(goalText)}</span>` : ""}</span><div class="fd-today-macro__track" style="--fd-bar-h:${BAR_SPECS.today.height}px"><span class="fd-today-macro__fill" style="width:${pct}%"></span>${marker}</div>${hintHtml}</article>`;
-}
-
-function macroBarsMarkup(view: TodayView): Html {
-    const goals = view.goals;
-    const hasMeals = viewHasMealRows(view);
-    const rows = MACRO_ORDER.map((key) => {
-        const label = key.charAt(0).toUpperCase() + key.slice(1);
-        const goalKey = `daily_${key}_g` as const;
-        return macroBarRow(
-            key,
-            label,
-            emptyDayZero(view.totals[`${key}_g`], hasMeals),
-            goals?.[goalKey] ?? null,
-        );
+    const strip = weekStrip({
+        label: "Week",
+        className: "fd-today-week",
+        previous: { label: "Previous week", href: prev },
+        next: { label: "Next week", href: next },
+        days: week.days.map((day) => ({
+            weekday:
+                WEEKDAY_LETTERS[new Date(`${day.date}T12:00:00Z`).getUTCDay()]!,
+            day: Number(day.date.slice(8, 10)),
+            label: `${formatCalendarWeekday(day.date)} ${formatCalendarDayMonth(day.date)}`,
+            selected: day.isSelected,
+            marked: (dotsByDate.get(day.date) ?? "empty") !== "empty",
+            href: todayHref({ date: day.date, member: memberQuery }),
+        })),
     });
-    return raw(`<div class="fd-today-macros">${rows.join("")}</div>`);
-}
-
-function alsoBarFill(actual: number | null, goal: number | null): number {
-    if (goal == null || goal <= 0) return 0;
-    const v = actual != null && Number.isFinite(actual) ? actual : 0;
-    return Math.min(100, Math.round((v / goal) * 100));
-}
-
-function alsoTrackedColumn(opts: {
-    key: string;
-    label: string;
-    nums: string;
-    pct: number;
-}): string {
-    return `<article class="fd-today-also-col fd-today-also-col--${opts.key}"><span class="fd-today-also-col__label">${esc(opts.label)}</span><span class="fd-today-also-col__nums">${opts.nums}</span><div class="fd-today-also-col__track"><span class="fd-today-also-col__fill" style="width:${opts.pct}%"></span></div></article>`;
-}
-
-function fmtAlsoWater(
-    ml: number,
-    goalMl: number | null,
-): { nums: string; pct: number } {
-    const liters = ml / 1000;
-    const lit =
-        Math.abs(liters - Math.round(liters)) < 0.05
-            ? String(Math.round(liters))
-            : (Math.round(liters * 10) / 10).toFixed(1);
-    if (goalMl == null || goalMl <= 0) {
-        return { nums: esc(`${lit} L`), pct: 0 };
-    }
-    const goalL =
-        Math.abs(goalMl / 1000 - Math.round(goalMl / 1000)) < 0.05
-            ? String(Math.round(goalMl / 1000))
-            : (Math.round((goalMl / 1000) * 10) / 10).toFixed(1);
-    return {
-        nums: `${esc(lit)} / ${esc(goalL)} L`,
-        pct: alsoBarFill(ml, goalMl),
-    };
+    // The swipe script reads the neighbouring weeks off these.
+    return raw(
+        String(strip).replace(
+            "<nav ",
+            () =>
+                `<nav data-fd-week-strip data-fd-week-prev="${esc(prev)}" data-fd-week-next="${esc(next)}" `,
+        ),
+    );
 }
 
 function viewHasMealRows(view: TodayView): boolean {
@@ -399,19 +227,41 @@ function emptyDayZero(value: number | null, hasMeals: boolean): number | null {
     return !hasMeals && value == null ? 0 : value;
 }
 
-function fmtAlsoGrams(
-    actual: number | null,
-    goal: number | null,
-): { nums: string; pct: number } {
-    const a = fmtWholeGrams(actual);
-    if (goal == null || goal <= 0) return { nums: esc(`${a} g`), pct: 0 };
-    return {
-        nums: `${esc(a)} / ${esc(String(Math.round(goal)))} g`,
-        pct: alsoBarFill(actual, goal),
-    };
+function gaugeMarkup(view: TodayView): Html {
+    const goal = activeCalorieGoal(view.goals);
+    const hasMeals = viewHasMealRows(view);
+    const eatenRaw = view.totals.calories;
+    const eaten = eatenRaw == null && !hasMeals && goal != null ? 0 : eatenRaw;
+    // The arcs split the eaten share by the calories each macro gave.
+    const kcal = (grams: number | null, per: number) =>
+        grams == null ? null : grams * per;
+    return calorieGauge({
+        consumed: eaten,
+        target: goal,
+        protein: kcal(view.totals.protein_g, KCAL_PER_GRAM.protein),
+        carbs: kcal(view.totals.carbs_g, KCAL_PER_GRAM.carbs),
+        fat: kcal(view.totals.fat_g, KCAL_PER_GRAM.fat),
+    });
 }
 
-function alsoTrackedMarkup(view: TodayView): Html {
+function macroBarsMarkup(view: TodayView): Html {
+    const goals = view.goals;
+    const hasMeals = viewHasMealRows(view);
+    return raw(
+        `<div class="fd-today-macros">${(["protein", "carbs", "fat"] as const)
+            .map((kind) =>
+                macroBar({
+                    kind,
+                    value: emptyDayZero(view.totals[`${kind}_g`], hasMeals),
+                    target: goals?.[`daily_${kind}_g`] ?? null,
+                }),
+            )
+            .join("")}</div>`,
+    );
+}
+
+/** Water, then the small nutrients the member has not switched off. */
+function nutrientLineMarkup(view: TodayView): Html {
     const { totals, goals } = view;
     const hasMeals = viewHasMealRows(view);
     const fiber = emptyDayZero(totals.fiber_g, hasMeals);
@@ -419,87 +269,25 @@ function alsoTrackedMarkup(view: TodayView): Html {
     const caffeine = emptyDayZero(totals.caffeine_mg, hasMeals);
     // What the member switched off under Settings › Nutrients shown.
     const hidden = new Set(view.hiddenNutrients ?? []);
-    const bits: string[] = [
-        esc(fmtWater(totals.water_ml, goals?.daily_water_ml ?? null)),
+    const items: { label?: string; value: string; dot?: "water" }[] = [
+        {
+            value: fmtWater(totals.water_ml, goals?.daily_water_ml ?? null),
+            dot: "water",
+        },
     ];
     if (fiber != null && !hidden.has("fiber")) {
-        bits.push(`Fiber ${esc(fmtGrams(fiber))}`);
+        items.push({ label: "Fiber", value: fmtGrams(fiber) });
     }
     if (sugar != null && !hidden.has("sugar")) {
-        bits.push(`Sugar ${esc(fmtGrams(sugar))}`);
+        items.push({ label: "Sugar", value: fmtGrams(sugar) });
     }
     if (view.alcoholTrackingEnabled && totals.alcohol_g != null) {
-        bits.push(`Alcohol ${esc(fmtGrams(totals.alcohol_g))}`);
+        items.push({ label: "Alcohol", value: fmtGrams(totals.alcohol_g) });
     }
     if (caffeine != null && !hidden.has("caffeine")) {
-        bits.push(`Caffeine ${esc(fmtWholeMg(caffeine))} mg`);
+        items.push({ label: "Caffeine", value: `${fmtWholeMg(caffeine)} mg` });
     }
-    const line = bits
-        .map(
-            (bit, i) =>
-                `<span class="fd-today-also__item${i === 0 ? " fd-today-also__item--water" : ""}">${bit}</span>`,
-        )
-        .join("");
-    const phone = `<div class="fd-today-also fd-today-also--phone"><span class="fd-today-also__line">${line}</span><a class="fd-today-also__link" href="/trends" aria-label="Open trends">${iconChevronRight()}</a></div>`;
-
-    const water = fmtAlsoWater(totals.water_ml, goals?.daily_water_ml ?? null);
-    const cols = [
-        alsoTrackedColumn({
-            key: "water",
-            label: "Water",
-            nums: water.nums,
-            pct: water.pct,
-        }),
-        ...(hidden.has("fiber")
-            ? []
-            : [
-                  alsoTrackedColumn({
-                      key: "fiber",
-                      label: "Fiber",
-                      ...fmtAlsoGrams(fiber, goals?.daily_fiber_g ?? null),
-                  }),
-              ]),
-        ...(hidden.has("sugar")
-            ? []
-            : [
-                  alsoTrackedColumn({
-                      key: "sugar",
-                      label: "Sugar",
-                      ...fmtAlsoGrams(sugar, goals?.daily_sugar_g ?? null),
-                  }),
-              ]),
-        ...(hidden.has("caffeine")
-            ? []
-            : [
-                  alsoTrackedColumn({
-                      key: "caffeine",
-                      label: "Caffeine",
-                      nums:
-                          goals?.daily_caffeine_mg != null &&
-                          goals.daily_caffeine_mg > 0
-                              ? `${esc(fmtWholeMg(caffeine))} / ${esc(fmtWholeMg(goals.daily_caffeine_mg))} mg`
-                              : esc(`${fmtWholeMg(caffeine)} mg`),
-                      pct: alsoBarFill(
-                          caffeine,
-                          goals?.daily_caffeine_mg ?? null,
-                      ),
-                  }),
-              ]),
-    ];
-    if (view.alcoholTrackingEnabled) {
-        cols.push(
-            alsoTrackedColumn({
-                key: "alcohol",
-                label: "Alcohol",
-                ...fmtAlsoGrams(
-                    totals.alcohol_g,
-                    goals?.daily_alcohol_g ?? null,
-                ),
-            }),
-        );
-    }
-    const desktop = `<div class="fd-today-also-grid fd-today-also--desk">${cols.join("")}</div>`;
-    return raw(`${phone}${desktop}`);
+    return nutrientLine({ items, href: "/trends", label: "Open trends" });
 }
 
 function rowMacros(row: MealRow): Macros {
@@ -510,60 +298,63 @@ function rowMacros(row: MealRow): Macros {
     };
 }
 
+/** The log sheet's search, opened from a plus. */
+const OPEN_LOG = { "fd-open-sheet": FD_LOG_SEARCH_SHEET_ID } as const;
+
 function mealRowMarkup(row: MealRow, data: TodayPageData): Html {
-    const readOnly = isReadOnlyPeer(data);
+    const base = {
+        title: row.title,
+        meta: row.inlineMeta ?? undefined,
+        subtitle: row.subtitle ?? undefined,
+        macros: rowMacros(row),
+        value: fmtKcal(row.calories),
+        className: "fd-today-meal",
+    };
+    if (isReadOnlyPeer(data)) return itemRow(base);
     const sheetId = todayEditSheetId(row.mealId);
     const returnTo = todayHref({
         date: data.view.date,
         member: data.memberQuery,
     });
+    const again = (key: string) => ({
+        action: `/meals/${row.mealId}/again`,
+        fields: { return_to: returnTo, date: data.view.date, submit_key: key },
+    });
+    const del = {
+        action: `/meals/${row.mealId}/delete`,
+        fields: { return_to: returnTo, date: data.view.date },
+    };
     const rowHtml = String(
-        foodRow({
-            id: row.mealId,
-            className: "fd-today-meal",
-            title: row.title,
-            meta: row.inlineMeta ?? undefined,
-            subtitle: row.subtitle ?? undefined,
-            macros: rowMacros(row),
-            trailing: fmtKcal(row.calories),
-            swipe: readOnly
-                ? undefined
-                : {
-                      lead: {
-                          label: "Again",
-                          icon: iconRepeat(),
-                          form: {
-                              action: `/meals/${row.mealId}/again`,
-                              fields: {
-                                  return_to: returnTo,
-                                  date: data.view.date,
-                                  submit_key: crypto.randomUUID(),
-                              },
-                          },
-                      },
-                      trail: {
-                          label: "Delete",
-                          icon: iconTrash(),
-                          form: {
-                              action: `/meals/${row.mealId}/delete`,
-                              fields: {
-                                  return_to: returnTo,
-                                  date: data.view.date,
-                              },
-                          },
-                      },
-                      sheetId,
-                  },
+        itemRow({
+            ...base,
+            trailing: {
+                kind: "control",
+                html: menu({
+                    label: `Actions for ${row.title}`,
+                    anchor: "more",
+                    items: [
+                        {
+                            kind: "post",
+                            label: "Again",
+                            ...again(crypto.randomUUID()),
+                        },
+                        { kind: "opens", label: "Edit", sheetId },
+                        { kind: "destructive", label: "Delete", ...del },
+                    ],
+                }),
+            },
+            swipe: {
+                left: { label: "Delete", form: del },
+                right: { label: "Again", form: again(crypto.randomUUID()) },
+            },
         }),
     );
-    const attrs = readOnly
-        ? ""
-        : ` data-fd-meal-row data-sheet-id="${esc(sheetId)}" tabindex="0"`;
     return raw(
         // A function replacement: a string would read `$` in an id as a pattern.
         rowHtml.replace(
             "<li ",
-            () => `<li data-fd-meal-id="${esc(row.mealId)}"${attrs} `,
+            () =>
+                `<li data-fd-meal-id="${esc(row.mealId)}" data-fd-sheet-row data-sheet-id="${esc(sheetId)}" tabindex="0" `,
         ),
     );
 }
@@ -575,120 +366,109 @@ function groupForType(
     return groups.find((g) => g.mealType === mealType) ?? null;
 }
 
-function sectionSubtotalMacros(
-    sub: MealTypeGroup["subtotals"],
-): Macros | undefined {
-    if (sub.protein_g == null && sub.carbs_g == null && sub.fat_g == null) {
-        return undefined;
-    }
-    return {
-        protein: fmtWholeGrams(sub.protein_g),
-        carbs: fmtWholeGrams(sub.carbs_g),
-        fat: fmtWholeGrams(sub.fat_g),
-    };
-}
-
-function mealSectionHead(
-    mealType: MealTypeSlot,
-    rows: readonly MealRow[],
-    sub: MealTypeGroup["subtotals"],
-): string {
-    const macroSummary = sectionSubtotalMacros(sub);
-    const macroHtml = macroSummary
-        ? `<span class="fd-today-section__macros">${String(macroLine(macroSummary))}</span>`
-        : "";
-    const kcal =
-        rows.length > 0
-            ? `<span class="fd-today-section__kcal">${esc(fmtKcal(sub.calories))}</span>`
-            : "";
-    const meta =
-        macroHtml || kcal
-            ? `<span class="fd-today-section__head-meta">${macroHtml}${macroHtml && kcal ? `<span class="fd-today-section__head-sep" aria-hidden="true"> · </span>` : ""}${kcal}</span>`
-            : "";
-    return `<div class="fd-today-section__head"><h2 id="fd-today-${mealType}" class="fd-today-section__title">${esc(MEAL_SECTION_LABEL[mealType])}</h2>${meta}</div>`;
-}
-
-function mealSectionAddRow(readOnly: boolean): string {
-    if (readOnly) return "";
-    return `<a class="fd-today-section__add-food" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}">${iconPlus()}<span>Add food</span></a>`;
-}
-
-function yesterdayCopyMarkup(
-    mealType: MealTypeSlot,
-    data: TodayPageData,
-): string {
-    const hint = data.view.yesterdayCopy?.[mealType];
-    if (!hint) return "";
-    const returnTo = todayHref({
-        date: data.view.date,
-        member: data.memberQuery,
-    });
-    const kcal =
-        hint.kcal != null && Number.isFinite(hint.kcal)
-            ? ` · ${esc(fmtKcal(hint.kcal))}`
-            : "";
-    return `<form class="fd-today-yesterday" method="post" action="/log/copy-yesterday"><input type="hidden" name="slot" value="${esc(mealType)}" /><input type="hidden" name="return_to" value="${esc(returnTo)}" /><button type="submit" class="fd-today-yesterday__btn">Same as yesterday? ${esc(hint.label)}${kcal}</button></form>`;
-}
-
-/** "Salmon & rice fits · uses 2 things expiring" for one suggestion. */
+/** "Salmon & rice fits" and what it uses up, for one suggestion. */
 export function slotSuggestionText(suggestion: SlotSuggestion): string {
     const used = suggestion.usesExpiring.length;
     if (used === 0) return `${suggestion.name} fits`;
     return `${suggestion.name} fits · uses ${used} ${used === 1 ? "thing" : "things"} expiring`;
 }
 
-function slotSuggestionsMarkup(
-    mealType: MealTypeSlot,
-    data: TodayPageData,
-): string {
-    const picked = data.view.slotSuggestions?.[mealType] ?? [];
-    return picked
-        .map(
-            (suggestion) =>
-                `<a class="fd-today-suggest" href="/recipes/${esc(suggestion.recipeId)}">${esc(slotSuggestionText(suggestion))}</a>`,
-        )
-        .join("");
+/** Rows that stand in for an empty slot: the copy of yesterday, then what fits. */
+function emptySlotRows(mealType: MealTypeSlot, data: TodayPageData): Html[] {
+    const rows: Html[] = [];
+    const returnTo = todayHref({
+        date: data.view.date,
+        member: data.memberQuery,
+    });
+    // A peer's day is read-only: nothing to copy, nothing to plan.
+    const hint = isReadOnlyPeer(data)
+        ? undefined
+        : data.view.yesterdayCopy?.[mealType];
+    if (hint) {
+        const kcal =
+            hint.kcal != null && Number.isFinite(hint.kcal)
+                ? ` · ${fmtKcal(hint.kcal)} kcal`
+                : "";
+        rows.push(
+            itemRow({
+                title: "Same as yesterday",
+                subtitle: `${hint.label}${kcal}`,
+                lead: { kind: "icon", name: "repeat" },
+                trailing: {
+                    kind: "add",
+                    label: `Copy yesterday's ${MEAL_SECTION_LABEL[mealType].toLowerCase()}`,
+                    form: {
+                        action: "/log/copy-yesterday",
+                        fields: { slot: mealType, return_to: returnTo },
+                    },
+                },
+                className: "fd-today-yesterday",
+            }),
+        );
+    }
+    const fits = isReadOnlyPeer(data)
+        ? []
+        : (data.view.slotSuggestions?.[mealType] ?? []);
+    for (const suggestion of fits) {
+        const used = suggestion.usesExpiring.length;
+        rows.push(
+            itemRow({
+                title: `${suggestion.name} fits`,
+                subtitle:
+                    used > 0
+                        ? `Uses ${used} ${used === 1 ? "thing" : "things"} expiring`
+                        : undefined,
+                lead: { kind: "icon", name: "star" },
+                trailing: {
+                    kind: "control",
+                    html: button({
+                        label: `Open ${suggestion.name}`,
+                        round: true,
+                        icon: "plus",
+                        href: `/recipes/${suggestion.recipeId}`,
+                    }),
+                },
+                className: "fd-today-suggest",
+            }),
+        );
+    }
+    if (rows.length > 0) return rows;
+    const nothing = "Nothing yet";
+    return [
+        isReadOnlyPeer(data)
+            ? itemRow({ title: nothing })
+            : itemRow({
+                  title: nothing,
+                  trailing: {
+                      kind: "add",
+                      label: `Log ${MEAL_SECTION_LABEL[mealType].toLowerCase()}`,
+                      // A link, so it still goes to the log with no script.
+                      href: FD_LOG_HREF,
+                      data: OPEN_LOG,
+                  },
+              }),
+    ];
 }
 
 function mealsMarkup(data: TodayPageData): Html {
-    const { view } = data;
-    const readOnly = isReadOnlyPeer(data);
-    const groups = view.meals;
+    const groups = data.view.meals;
     const sections = MEAL_TYPE_ORDER.map((mealType) => {
         const group = groupForType(groups, mealType);
         const rows = group?.rows ?? [];
-        const sub = group?.subtotals ?? {
-            calories: null,
-            protein_g: null,
-            carbs_g: null,
-            fat_g: null,
-        };
-        const head = mealSectionHead(mealType, rows, sub);
-        const yesterdayHint =
-            rows.length === 0 && !readOnly
-                ? yesterdayCopyMarkup(mealType, data)
-                : "";
-        const suggestions =
-            rows.length === 0 && !readOnly
-                ? slotSuggestionsMarkup(mealType, data)
-                : "";
-        const emptyLabel = suggestions
-            ? `<div class="fd-today-empty-stack">${yesterdayHint}${suggestions}</div>`
-            : yesterdayHint ||
-              `<span class="fd-today-section__empty">Nothing yet</span>`;
-        const list =
+        const label = MEAL_SECTION_LABEL[mealType];
+        const head = sectionHeader({
+            label,
+            rule: false,
+            count:
+                rows.length > 0
+                    ? fmtKcal(group!.subtotals.calories)
+                    : undefined,
+        });
+        const items =
             rows.length > 0
-                ? rowList(
-                      rows.map((r) => mealRowMarkup(r, data)),
-                      {
-                          label: MEAL_SECTION_LABEL[mealType],
-                      },
-                  )
-                : readOnly
-                  ? `<p class="fd-today-section__empty">Nothing yet</p>`
-                  : `<div class="fd-today-section__empty-row">${emptyLabel}<a class="fd-icon-btn fd-today-section__add" href="${esc(FD_LOG_HREF)}" data-fd-open-sheet="${FD_LOG_SEARCH_SHEET_ID}" aria-label="Log food">${iconPlus()}</a></div>`;
-        const addFood = mealSectionAddRow(readOnly);
-        return `<section class="fd-today-section" aria-labelledby="fd-today-${mealType}">${head}${list}${addFood}</section>`;
+                ? rows.map((r) => mealRowMarkup(r, data))
+                : emptySlotRows(mealType, data);
+        return `<section class="fd-today-section" aria-label="${esc(label)}">${String(head)}${String(listGroup({ rows: items, label }))}</section>`;
     });
     return raw(sections.join(""));
 }
@@ -709,17 +489,20 @@ export function renderTodayBody(data: TodayPageData): Html {
                           ? { [data.openEditMealId]: data.editError }
                           : undefined,
               });
-    const summary = `<section class="fd-today-summary" aria-label="Day summary"><div class="fd-today-summary__layout">${gaugeMarkup(view)}<div class="fd-today-summary__side">${macroBarsMarkup(view)}${alsoTrackedMarkup(view)}</div></div></section>`;
     // The week plan is the household's, not the day's: a peer's day has none.
     const plan = isReadOnlyPeer(data) ? undefined : data.plan;
-    const planPhone = plan ? renderWeekPhoneSection(plan) : "";
+    const planSection = plan ? renderWeekSection(plan, "today") : "";
     const planSheets = plan
         ? `${renderPlanEditSheets(plan, "today")}\n${renderMissingSheet(plan, "today")}`
         : "";
-    const main = `${banner}<div class="fd-today-top">${headerMarkup(data)}${weekStripMarkup(data)}</div>${summary}<div class="fd-today-meals">${mealsMarkup(data)}</div>${planPhone}`;
-    const rail = renderTodayRail(data);
+    const left = raw(
+        `${banner}<div class="fd-today-day"><div class="fd-today-top">${String(headerMarkup(data))}${String(weekStripMarkup(data))}</div><section class="fd-today-summary" aria-label="Day summary">${String(gaugeMarkup(view))}${String(macroBarsMarkup(view))}${String(nutrientLineMarkup(view))}</section></div>`,
+    );
+    const right = raw(
+        `<div class="fd-today-meals">${String(mealsMarkup(data))}</div>${planSection}`,
+    );
     return raw(
-        `<div class="fd-today-page"><div class="fd-today-main">${main}</div>${rail}${sheets}${planSheets}</div>`,
+        `${String(pageLayout({ layout: "two-columns", left, right, className: "fd-today-page" }))}${sheets}${planSheets}`,
     );
 }
 
@@ -970,12 +753,7 @@ export function buildPreviewTodayView(today: string): TodayView {
     return {
         date: today,
         householdDate: today,
-        fridgeLocationNames: new Map([
-            ["loc-fridge", "Fridge"],
-            ["loc-freezer", "Freezer"],
-        ]),
         timezone: "UTC",
-        preferredWeightUnit: "kg",
         alcoholTrackingEnabled: true,
         totals: todayDayTotals(meals, waterMl),
         goals: PREVIEW_GOALS,
@@ -983,13 +761,9 @@ export function buildPreviewTodayView(today: string): TodayView {
         meals: mealRows(meals),
         week,
         streak: 4,
-        expiringFridge: [],
         notices: [],
-        weight: { latest: null, series30d: [] },
         yesterdayCopy: {},
         slotSuggestions: {},
-        useSoonUses: [],
-        useSoonHighlight: null,
     };
 }
 
@@ -1007,79 +781,28 @@ export function buildPreviewTodayViewWithYesterdayHint(
     return view;
 }
 
-const PREVIEW_FRIDGE: FridgeItem[] = [
-    {
-        id: "fr-salmon",
-        householdId: "hh",
-        locationId: "loc-fridge",
-        kind: "food",
-        displayName: "Salmon",
-        quantity: { amount: 1, unit: "lb" },
-        foodId: "f-salmon",
-        expiresOn: "2026-11-08",
-    },
-    {
-        id: "fr-spinach",
-        householdId: "hh",
-        locationId: "loc-fridge",
-        kind: "food",
-        displayName: "Baby <spinach>",
-        quantity: { amount: 0.5, unit: "bag" },
-        foodId: "f-spinach",
-        expiresOn: "2026-11-09",
-    },
-];
-
-function previewWeightSeries(): TodayView["weight"] {
-    const series30d = [
-        { date: "2026-10-12", weight_g: 83_000 },
-        { date: "2026-10-20", weight_g: 82_600 },
-        { date: "2026-11-01", weight_g: 82_300 },
-        { date: "2026-11-09", weight_g: 82_600 },
-    ];
-    return {
-        latest: {
-            id: "w1",
-            user_id: "preview",
-            weight_g: 82_600,
-            logged_at: "2026-11-09T08:00:00.000Z",
-            created_at: "2026-11-09T08:00:00.000Z",
-            idempotency_key: null,
-            notes: null,
-        },
-        series30d,
-    };
-}
-
-/** App-preview fixture with rail cards populated (expiring, weight). */
-export function buildPreviewTodayViewWithRail(today: string): TodayView {
-    return {
-        ...buildPreviewTodayView(today),
-        preferredWeightUnit: "lb",
-        expiringFridge: PREVIEW_FRIDGE.map((item) => ({
-            ...item,
-            expiresOn:
-                item.id === "fr-salmon"
-                    ? shiftLocalDate(today, 1)
-                    : shiftLocalDate(today, 2),
-        })),
-        weight: previewWeightSeries(),
-    };
-}
-
-/** Preview: dinner empty with a fitting recipe, and Use soon with recipe lines. */
+/** Preview: breakfast has a copy-yesterday hint, and dinner a fitting recipe that uses two expiring items. */
 export function buildPreviewTodayViewWithSuggestions(today: string): TodayView {
-    const view = buildPreviewTodayViewWithRail(today);
-    view.meals = view.meals.filter((g) => g.mealType !== "dinner");
-    view.editMeals = view.editMeals.filter((m) => m.meal_type !== "dinner");
+    const view = buildPreviewTodayView(today);
+    view.meals = view.meals.filter(
+        (g) => g.mealType !== "dinner" && g.mealType !== "breakfast",
+    );
+    view.editMeals = view.editMeals.filter(
+        (m) => m.meal_type !== "dinner" && m.meal_type !== "breakfast",
+    );
     view.yesterdayCopy = { breakfast: { label: "Eggs & toast", kcal: 432 } };
-    view.meals = view.meals.filter((g) => g.mealType !== "breakfast");
-    view.editMeals = view.editMeals.filter((m) => m.meal_type !== "breakfast");
-    const used = view.expiringFridge.map((item) => ({
-        id: item.id,
-        displayName: item.displayName,
-        expiresOn: item.expiresOn ?? today,
-    }));
+    const used = [
+        {
+            id: "fr-salmon",
+            displayName: "Salmon",
+            expiresOn: shiftLocalDate(today, 1),
+        },
+        {
+            id: "fr-spinach",
+            displayName: "Baby spinach",
+            expiresOn: shiftLocalDate(today, 2),
+        },
+    ];
     view.slotSuggestions = {
         dinner: [
             {
@@ -1094,33 +817,6 @@ export function buildPreviewTodayViewWithSuggestions(today: string): TodayView {
                 usesExpiring: used,
             },
         ],
-    };
-    view.useSoonUses = used.map((item, i) => ({
-        item,
-        recipes: [
-            {
-                recipeId: "r-salmon-rice",
-                name: "Salmon & rice",
-                incomplete: false,
-            },
-            ...(i === 0
-                ? [
-                      {
-                          recipeId: "r-salmon-bowl",
-                          name: "Salmon bowl",
-                          incomplete: false,
-                      },
-                  ]
-                : []),
-        ],
-    }));
-    view.useSoonHighlight = {
-        recipeId: "r-salmon-rice",
-        name: "Salmon & rice",
-        itemCount: used.length,
-        totalItems: used.length,
-        minutes: 25,
-        kcalPerPortion: 640,
     };
     return view;
 }

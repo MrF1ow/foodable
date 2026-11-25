@@ -66,7 +66,6 @@ describeDb(
 
         test("switching sugar off drops its limit row from Today, and on brings it back", async () => {
             const before = await (await get(userId, "/")).text();
-            expect(before).toContain("fd-today-also-col--sugar");
             expect(before).toMatch(/Sugar \d/);
 
             const res = await post(userId, "/settings/nutrients", {
@@ -80,10 +79,9 @@ describeDb(
             ]);
 
             const today = await (await get(userId, "/")).text();
-            expect(today).not.toContain("fd-today-also-col--sugar");
             expect(today).not.toMatch(/Sugar \d/);
-            expect(today).toContain("fd-today-also-col--fiber");
-            expect(today).toContain("fd-today-also-col--caffeine");
+            expect(today).toMatch(/Fiber \d/);
+            expect(today).toMatch(/Caffeine \d/);
 
             // The page shows the switch Off, the others On.
             const page = await (
@@ -99,9 +97,7 @@ describeDb(
             });
             expect(back.status).toBe(303);
             expect((await getProfile(userId))?.hidden_nutrients).toEqual([]);
-            expect(await (await get(userId, "/")).text()).toContain(
-                "fd-today-also-col--sugar",
-            );
+            expect(await (await get(userId, "/")).text()).toMatch(/Sugar \d/);
         });
 
         test("each switch is merged into the stored list, never replacing it", async () => {

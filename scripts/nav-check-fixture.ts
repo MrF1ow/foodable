@@ -49,6 +49,7 @@ import {
     buildPreviewTodayPageData,
     renderTodayV2Page,
 } from "../src/web/pages/v2/today.js";
+import { buildWeekPlanView } from "../src/web/pages/v2/recipes-plan.js";
 import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
@@ -513,15 +514,67 @@ function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
     } as never);
 }
 
+/** This week on Today: a one-off dinner and a day of a weekly repeat. Moved,
+ * the one-off sits on the day after the repeat's day, so a save re-orders the
+ * two rows and each row ends up under the other's sheet. */
+function fixtureWeekPlan(moved = false) {
+    const plan = (
+        id: string,
+        recipeId: string,
+        date: string,
+        ruleId?: string,
+    ) => ({
+        id,
+        householdId: "hh",
+        recipeId,
+        date,
+        slot: "dinner" as const,
+        servings: 2,
+        createdBy: null,
+        createdAt: "2026-11-09T10:00:00.000Z",
+        ...(ruleId ? { ruleId } : {}),
+    });
+    const recipe = (id: string, name: string) => ({
+        id,
+        name,
+        yieldPortions: 2,
+        ingredients: [
+            {
+                displayName: "Kidney beans",
+                foodId: "f-beans",
+                quantity: { amount: 400, unit: "g" },
+            },
+        ],
+    });
+    return buildWeekPlanView({
+        today: "2026-11-10",
+        plans: [
+            plan("pl1", "r-salmon", moved ? "2026-11-12" : "2026-11-10"),
+            plan("rule:rl1:2026-11-11", "r-chili", "2026-11-11", "rl1"),
+        ],
+        recipes: [
+            recipe("r-salmon", "Salmon, rice & spinach"),
+            recipe("r-chili", "Beef chili"),
+        ],
+        stock: [],
+        foodsById: new Map(),
+    });
+}
+
 async function pages(
     theme: "light" | "dark",
     unread: boolean,
 ): Promise<Record<string, string>> {
     const chrome = fixtureChrome(theme, unread);
     return {
-        nutrition: renderTodayV2Page(
-            buildPreviewTodayPageData(chrome as never, "2026-11-10"),
-        ),
+        nutrition: renderTodayV2Page({
+            ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+            plan: fixtureWeekPlan(),
+        }),
+        "nutrition-plan-moved": renderTodayV2Page({
+            ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
+            plan: fixtureWeekPlan(true),
+        }),
         fridge: renderKitchenFridgeV2Page(
             buildPreviewKitchenFridgeView(chrome as never, "2026-11-10"),
         ),
@@ -1046,9 +1099,14 @@ const server = Bun.serve({
                 destKey = "/settings/account";
             }
             // A page the query changes (reorder mode) has its own entry.
-            const file = routeHtmlFile(
+            let file = routeHtmlFile(
                 ROUTE_BASE[destKey] ? destKey : destKey.split("?")[0]!,
             );
+            if (path === "/recipes/plan/pl1/move") {
+                // Like the route: the one-off is moved a day on, and Today
+                // lists it after the repeat's day.
+                file = file.replace(/^nutrition-/, "nutrition-plan-moved-");
+            }
             let html = applyAccountTheme(
                 await fileHtml(file, destKey + "#post"),
             );

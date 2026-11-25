@@ -69,7 +69,7 @@ import {
 } from "../src/web/pages/v2/trends.js";
 import {
     buildPreviewTodayPageData,
-    buildPreviewTodayViewWithRail,
+    buildPreviewTodayView,
     buildPreviewTodayViewWithSuggestions,
     buildPreviewTodayViewWithYesterdayHint,
     renderTodayV2Page,
@@ -930,6 +930,8 @@ function previewWeekPlan(openSheet?: "missing" | "plan") {
         servings,
         createdBy: null,
         createdAt: "2026-11-09T10:00:00.000Z",
+        // Beef chili is a day of a weekly repeat; the other two are one-offs.
+        ...(id === "pl2" ? { ruleId: "rl1" } : {}),
     });
     const grams = (amount: number) => ({ amount, unit: "g" });
     const view = buildWeekPlanView({
@@ -1593,7 +1595,7 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     const { catalog, usual } = previewFoodCatalog();
     const nutrition = renderTodayV2Page({
         ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
-        view: buildPreviewTodayViewWithRail("2026-11-10"),
+        view: buildPreviewTodayView("2026-11-10"),
         plan: previewWeekPlan(),
     });
     const nutritionEditSheet = renderTodayV2Page({
@@ -2264,17 +2266,17 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         "nutrition-plan-move-error": renderTodayV2Page({
             ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
-            view: buildPreviewTodayViewWithRail("2026-11-10"),
+            view: buildPreviewTodayView("2026-11-10"),
             plan: previewMoveError(),
         }),
         "nutrition-plan-missing": renderTodayV2Page({
             ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
-            view: buildPreviewTodayViewWithRail("2026-11-10"),
+            view: buildPreviewTodayView("2026-11-10"),
             plan: previewWeekPlan("missing"),
         }),
         "nutrition-plan-edit": renderTodayV2Page({
             ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
-            view: buildPreviewTodayViewWithRail("2026-11-10"),
+            view: buildPreviewTodayView("2026-11-10"),
             plan: previewWeekPlan("plan"),
         }),
         settings: renderSettingsHomeV2Page({
