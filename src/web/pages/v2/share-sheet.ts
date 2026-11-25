@@ -36,6 +36,18 @@ export const SHARE_EXPIRY_CHOICES: readonly ShareExpiryChoice[] = [
 ];
 
 /** The days a posted choice stands for, or null when the form never offered it. */
+
+/**
+ * Where closing Link ready goes, as a key the script builds the path from
+ * (never a whole address read back off the page): "groceries" or
+ * "recipe:<id>"; anything else is "" and the sheet just closes.
+ */
+export function shareBackKey(backHref: string): string {
+    if (backHref === "/kitchen/groceries") return "groceries";
+    const m = /^\/recipes\/([^/?#]+)$/.exec(backHref);
+    return m ? `recipe:${decodeURIComponent(m[1]!)}` : "";
+}
+
 export function parseShareExpiry(
     value: string,
 ): { ok: true; days: number | null } | { ok: false } {
@@ -177,7 +189,7 @@ export function renderShareCreatedBody(view: ShareCreatedView): string {
         kind: "custom",
         label: "Share link",
         content: raw(
-            `<div class="fd-share-made__box" data-fd-share-made data-fd-share-back="${esc(view.backHref)}">${urlField}${copy}</div>
+            `<div class="fd-share-made__box" data-fd-share-made data-fd-share-back="${esc(shareBackKey(view.backHref))}">${urlField}${copy}</div>
 <p class="fd-share-made__meta">${esc(shareExpiryLabel(view.expiresAt))} · shown only once</p>
 <p class="fd-share-made__meta">Anyone with the link can read this ${esc(view.what)}. Revoke it in Settings › Household.</p>
 <p class="fd-share-made__status fd-sr" role="status" aria-live="polite" data-fd-share-status></p>`,

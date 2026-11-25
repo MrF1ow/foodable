@@ -32,7 +32,7 @@ async function setup(opts: { clipboard: "ok" | "denied" | "none" }) {
     const box = {
         closest: (sel: string) => (sel === "dialog" ? dialog : null),
         getAttribute: (name: string) =>
-            name === "data-fd-share-back" ? "/recipes/r1" : null,
+            name === "data-fd-share-back" ? "recipe:r1" : null,
         parentNode: {
             querySelector: (sel: string) =>
                 sel === "[data-fd-share-status]" ? status : null,

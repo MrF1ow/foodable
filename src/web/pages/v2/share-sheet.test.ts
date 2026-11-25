@@ -136,7 +136,7 @@ describe("renderShareCreatedBody", () => {
         expect(html).toMatch(
             /<button[^>]*aria-label="Copy link"[^>]*data-fd-share-copy/,
         );
-        expect(html).toContain('data-fd-share-back="/recipes/r1"');
+        expect(html).toContain('data-fd-share-back="recipe:r1"');
         // Done closes the sheet, and closing goes to the page itself: no GET
         // form, which would land on the address with a stray "?".
         expect(html).not.toContain("<form");
@@ -173,4 +173,13 @@ describe("renderShareCreatedBody", () => {
         expect(list).toContain("Grocery list");
         expect(list).toContain("Expires 2 Jan 2027 · shown only once");
     });
+});
+
+test("the page to go back to is a key, never a whole address", async () => {
+    const { shareBackKey } = await import("./share-sheet.js");
+    expect(shareBackKey("/recipes/r1")).toBe("recipe:r1");
+    expect(shareBackKey("/kitchen/groceries")).toBe("groceries");
+    expect(shareBackKey("javascript:alert(1)")).toBe("");
+    expect(shareBackKey("https://evil.example/recipes/x")).toBe("");
+    expect(shareBackKey("/recipes/r1?x=1")).toBe("");
 });

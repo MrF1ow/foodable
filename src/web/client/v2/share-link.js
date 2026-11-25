@@ -56,10 +56,17 @@ function initShareMade(scope) {
 
         const sheet =
             typeof box.closest === "function" ? box.closest("dialog") : null;
-        const back =
+        // The way back is built from a key, never read as an address.
+        const key =
             typeof box.getAttribute === "function"
-                ? box.getAttribute("data-fd-share-back")
-                : null;
+                ? box.getAttribute("data-fd-share-back") || ""
+                : "";
+        const back =
+            key === "groceries"
+                ? "/kitchen/groceries"
+                : key.startsWith("recipe:") && key.length > 7
+                  ? `/recipes/${encodeURIComponent(key.slice(7))}`
+                  : "";
         if (sheet && back) {
             sheet.addEventListener("close", () => {
                 window.location.assign(back);
