@@ -52,13 +52,25 @@ function food(over: Partial<Food> & Pick<Food, "name">): Food {
  * each cell's text (an unknown cell is "—"). The header row comes first.
  */
 function nutritionTable(html: string): string[][] {
-    const text = (cell: string) =>
-        cell
-            .replace(/<span class="fd-sr">[^<]*<\/span>/g, "")
-            .replace(/<[^>]+>/g, "")
-            // Whatever is left of a tag goes too: the cell is read as text.
-            .replace(/[<>]/g, "")
-            .trim();
+    // The cell's visible text: the spoken-only spans dropped, then every
+    // character inside a tag skipped.
+    const text = (cell: string) => {
+        const sr = '<span class="fd-sr">';
+        const shown = cell
+            .split(sr)
+            .map((part, i) =>
+                i === 0 ? part : part.slice(part.indexOf("</span>") + 7),
+            )
+            .join("");
+        let out = "";
+        let inTag = false;
+        for (const ch of shown) {
+            if (ch === "<") inTag = true;
+            else if (ch === ">") inTag = false;
+            else if (!inTag) out += ch;
+        }
+        return out.trim();
+    };
     return [
         ...html.matchAll(
             /<div class="fd-table-row[^"]*" role="row">(.*?)<\/div>/g,
