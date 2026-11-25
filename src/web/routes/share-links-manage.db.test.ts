@@ -509,7 +509,7 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         expect(recipeOn).toContain("fd-recipe-share-btn");
         const groceriesOn = await page("/kitchen/groceries");
         expect(groceriesOn).toContain('id="fd-grocery-share-sheet"');
-        expect(groceriesOn).toContain("fd-kitchen-grocery-share");
+        expect(groceriesOn).toContain("Share list");
         expect(await page("/settings/household")).toContain(
             'href="/settings/household/shared-links"',
         );
@@ -522,7 +522,7 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         expect(recipeOff).not.toContain(`/recipes/${recipe.id}/share`);
         const groceriesOff = await page("/kitchen/groceries");
         expect(groceriesOff).not.toContain("fd-grocery-share-sheet");
-        expect(groceriesOff).not.toContain("fd-kitchen-grocery-share");
+        expect(groceriesOff).not.toContain("Share list");
         expect(groceriesOff).not.toContain("/kitchen/groceries/share");
         const settingsOff = await page("/settings/household");
         expect(settingsOff).not.toContain("Shared links");

@@ -188,15 +188,23 @@ test("no app page HTML contains a script with a body but the one that sets html.
     }
 });
 
-test("the Groceries page ships the picker logic once", async () => {
+test("the Groceries page no longer carries the old food picker", () => {
     const html = renderKitchenGroceriesV2Page(
         buildPreviewKitchenGroceriesView(PAGE_CHROME as never),
     );
-    expect((html.match(/data-food-picker/g) ?? []).length).toBe(1);
+    expect(html).not.toContain("data-food-picker");
     expect(html).not.toContain("/api/foods/search");
-    const picker = (
-        await Bun.file("./src/web/client/food-picker.js").text()
-    ).trim();
-    const js = await getAppJs();
-    expect(js.split(picker).length - 1).toBe(1);
+});
+
+test("kitchen.js confirms Clear checked in place and carries the line sheet's unsaved values", async () => {
+    const js = await Bun.file(
+        new URL("./web/client/v2/kitchen.js", import.meta.url),
+    ).text();
+    // The arm and cancel buttons toggle a row; the verb posts.
+    expect(js).toContain("data-fd-confirm-arm");
+    expect(js).toContain("data-fd-confirm-cancel");
+    expect(js).toContain("data-fd-confirm-go");
+    // A pull-down's post takes the edit form's amount and note along.
+    expect(js).toContain("form[data-fd-line-edit]");
+    expect(js).toContain("fd-menu__form");
 });

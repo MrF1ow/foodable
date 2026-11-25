@@ -21,6 +21,7 @@ import { can } from "../../domain/permissions.js";
 import { RecipeForbiddenError } from "../../domain/recipes.js";
 import { StockInputError } from "../../domain/stock.js";
 import {
+    bulkDeleteGroceryLines,
     bulkDeleteSavedItems,
     bulkDiscardFridgeItems,
     bulkRemoveUsuals,
@@ -28,6 +29,7 @@ import {
 import { formText } from "../form.js";
 import {
     renderFridgeInventoryPage,
+    renderGroceryListPage,
     renderSettingsSavedV2Route,
     renderUsualProductsListPage,
 } from "../loaders.js";
@@ -105,6 +107,17 @@ function filterOf(path: string, name: "store" | "q"): string | undefined {
 
 const storeOf = (path: string) => filterOf(path, "store");
 
+/** Every store the Groceries list was filtered to (it takes several). */
+function storesOf(path: string): string[] {
+    try {
+        return new URL(path, "http://foodable.local").searchParams
+            .getAll("store")
+            .filter((id) => id.trim() !== "");
+    } catch {
+        return [];
+    }
+}
+
 type Render = (message: string) => Promise<{ html: string }>;
 
 /** The shared shape of every action: parse, run, redirect or re-render. */
@@ -141,6 +154,23 @@ bulkRoutes.post("/kitchen/fridge/bulk/discard", requireMember, (c) => {
                 actorUserId: c.get("userId"),
             }),
         render: (error) => renderFridgeInventoryPage(c.get("userId"), error),
+    });
+});
+
+bulkRoutes.post("/kitchen/groceries/bulk/delete", requireMember, (c) => {
+    const member = siteMember(c);
+    return act(c, {
+        fallback: "/kitchen/groceries",
+        run: (body) =>
+            bulkDeleteGroceryLines({
+                householdId: member.householdId,
+                lineIds: parseBulkIds(postedIds(body)),
+            }),
+        render: (error, returnTo) =>
+            renderGroceryListPage(c.get("userId"), {
+                error,
+                storeFilter: storesOf(returnTo),
+            }),
     });
 });
 

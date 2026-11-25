@@ -134,6 +134,87 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
                 { display_name: "Milk", checked: false },
             ]);
         });
+
+        test("delete removes every picked line, lands where it was told, and leaves the rest", async () => {
+            const [milk, eggs] = await seedLines(["Milk", "Eggs", "Salt"]);
+            const res = await post("/kitchen/groceries/bulk/delete", [
+                ...ids([milk!, eggs!]),
+                ["return_to", "/kitchen/groceries?store=a&store=b"],
+            ]);
+            expect(res.status).toBe(303);
+            expect(res.headers.get("location")).toBe(
+                "/kitchen/groceries?store=a&store=b",
+            );
+            expect(toastKey(res)).toBeNull();
+            expect(await lines()).toEqual([
+                { display_name: "Salt", checked: false },
+            ]);
+            // Everything already gone is a double submit: the same answer.
+            const again = await post("/kitchen/groceries/bulk/delete", [
+                ...ids([milk!, eggs!]),
+            ]);
+            expect(again.status).toBe(303);
+        });
+
+        test("delete with one line gone answers 400 in place and deletes none", async () => {
+            const [milk] = await seedLines(["Milk", "Eggs"]);
+            const res = await post("/kitchen/groceries/bulk/delete", [
+                ...ids([milk!, crypto.randomUUID()]),
+            ]);
+            expect(res.status).toBe(400);
+            expect(await res.text()).toContain("no longer there");
+            expect(await lines()).toHaveLength(2);
+        });
+
+        test("delete with nothing picked or a bad id answers 400", async () => {
+            await seedLines(["Milk"]);
+            const none = await post("/kitchen/groceries/bulk/delete", []);
+            expect(none.status).toBe(400);
+            const bad = await post("/kitchen/groceries/bulk/delete", [
+                ["ids[]", "not-a-uuid"],
+            ]);
+            expect(bad.status).toBe(400);
+            expect(await lines()).toHaveLength(1);
+        });
+
+        test("a delete that fails part way answers 400 and leaves every line in place", async () => {
+            const picked = await seedLines(["Eggs", "Milk", "Salt"]);
+            // The database refuses the second line's delete, as a dropped
+            // connection or a lock timeout would part way through a batch.
+            await sql.unsafe(`
+                create or replace function public.test_refuse_milk_delete()
+                returns trigger language plpgsql as $$
+                begin
+                    if old.display_name = 'Milk' then
+                        raise exception 'refused for the test';
+                    end if;
+                    return old;
+                end $$
+            `);
+            await sql.unsafe(`
+                create trigger test_refuse_milk_delete
+                before delete on public.grocery_lines
+                for each row execute function public.test_refuse_milk_delete()
+            `);
+            try {
+                const res = await post("/kitchen/groceries/bulk/delete", [
+                    ...ids(picked),
+                ]);
+                expect(res.status).toBe(400);
+                expect(await lines()).toEqual([
+                    { display_name: "Eggs", checked: false },
+                    { display_name: "Milk", checked: false },
+                    { display_name: "Salt", checked: false },
+                ]);
+            } finally {
+                await sql.unsafe(
+                    "drop trigger test_refuse_milk_delete on public.grocery_lines",
+                );
+                await sql.unsafe(
+                    "drop function public.test_refuse_milk_delete()",
+                );
+            }
+        });
     });
 
     describe("fridge", () => {

@@ -299,6 +299,8 @@ describe("did-you-mean web forms", () => {
         expect(askHtml).toContain(modalId);
         expect(askHtml).toContain("data-sheet-open-on-load");
         expect(askHtml).toContain("Did you mean");
+        // The question sits in the Add sheet beside the open by-hand form.
+        expect(askHtml).toContain('<details class="fd-kitchen-hand" open>');
         expect(askHtml).toContain(`name="food_id" value="${eggs.id}"`);
         expect(askHtml).toContain('name="new_food"');
         expect(askHtml).toContain('name="remember_alias"');
@@ -573,7 +575,7 @@ describe("did-you-mean allergen replay", () => {
         expect(ask.status).toBe(409);
         const askHtml = await ask.text();
         const didYouMean = askHtml.match(
-            /<div data-fill-transient class="did-you-mean-block">[\s\S]*?<\/form>\s*<\/div>/,
+            /<div data-fill-transient class="fd-did-you-mean-block">[\s\S]*?<\/form>\s*<\/div>/,
         )?.[0];
         expect(didYouMean).toBeDefined();
         expect(didYouMean!).not.toContain('name="confirm_allergen"');
@@ -643,6 +645,32 @@ describe("did-you-mean allergen replay", () => {
         const aliasMap = await db.foodsStore.listAllAliases(HH);
         expect([...aliasMap.values()].flat()).toContain("egg noodles");
         expect((await db.groceryStore.listLines(HH)).length).toBe(1);
+    });
+});
+
+describe("did-you-mean grocery filter", () => {
+    test("the question replays return_to and the page stays filtered", async () => {
+        await seedEggs();
+        const store = await createGroceryStore(db.settingsStore, HH, "Shop");
+        const filtered = `/kitchen/groceries?store=${store.id}`;
+        const res = await app().request("http://x/kitchen/groceries/lines", {
+            method: "POST",
+            headers: {
+                Cookie: cookieFor(ALICE),
+                "Content-Type": "application/x-www-form-urlencoded",
+            },
+            body: formBody({
+                kind: "food",
+                store_id: store.id,
+                food_name: "chicken egg",
+                qty_amount: "2",
+                qty_unit: "each",
+                return_to: filtered,
+            }),
+        });
+        expect(res.status).toBe(409);
+        const html = await res.text();
+        expect(html).toContain(`name="return_to" value="${filtered}"`);
     });
 });
 

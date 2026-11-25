@@ -8,6 +8,12 @@ import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
 import { fridgeBarcodeLookup } from "./fridge.js";
 import { normalizeBarcode } from "../../foods.js";
 import {
+    applyLineEdit,
+    lineEditChanges,
+    planGroceryLineEdit,
+    type LineEdit,
+} from "../../domain/grocery-lines.js";
+import {
     addGroceryFoodById,
     addGroceryManualFood,
     addGrocerySupply,
@@ -46,13 +52,13 @@ export const groceryRoutes = new Hono();
 // Select several rows, act once (Groceries, Fridge, Usuals, Saved foods & recipes).
 groceryRoutes.route("/", bulkRoutes);
 
-function storeFilterFromReturnTo(returnTo: string): string | undefined {
+/** The stores the list was filtered to, read back from `return_to` (none: all). */
+function storeFilterFromReturnTo(returnTo: string): string[] {
     try {
         const u = new URL(returnTo, "http://foodable.local");
-        const store = u.searchParams.get("store");
-        return store && store.trim() !== "" ? store : undefined;
+        return u.searchParams.getAll("store").filter((id) => id.trim() !== "");
     } catch {
-        return undefined;
+        return [];
     }
 }
 
@@ -94,6 +100,17 @@ function groceryReturnTo(body: Record<string, string | File>) {
     return safeReturnPath(formText(body, "return_to"), "/kitchen/groceries");
 }
 
+/** What an add re-posts after a warning or a question: its fields and the page it came from. */
+function addRetryFields(
+    body: Record<string, string | File>,
+    storeId: string,
+): Record<string, string> {
+    return {
+        ...groceryLineRetryFields(body, storeId),
+        return_to: groceryReturnTo(body),
+    };
+}
+
 function putAwayDraftFromBody(
     body: Record<string, string | File | (string | File)[]>,
     lineIds: string[],
@@ -112,7 +129,7 @@ function putAwayDraftFromBody(
 
 groceryRoutes.get("/kitchen/groceries", requireSiteUser, async (c) => {
     const page = await renderGroceryListPage(c.get("userId"), {
-        storeFilter: c.req.query("store"),
+        storeFilter: c.req.queries("store") ?? [],
         openLineId: c.req.query("line"),
         openPutAway: c.req.query("put-away") === "1",
     });
@@ -123,8 +140,12 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
     const body = await c.req.parseBody();
-    const storeId = formText(body, "store_id");
-    const sectionId = formText(body, "section_id") || undefined;
+    // No store posted: the domain picks one, as `add_grocery_line` does (a
+    // usual's own store first), so a section that belongs to none goes too.
+    const storeId = formText(body, "store_id").trim();
+    const sectionId = storeId
+        ? formText(body, "section_id") || undefined
+        : undefined;
     const amount = formAmount(body, "qty_amount");
     const grocery = liveGroceryStore();
     const settings = liveSettingsStore();
@@ -135,7 +156,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
         if (kind === "supply") {
             await addGrocerySupply(grocery, settings, foods, {
                 householdId: member.householdId,
-                storeId,
+                storeId: storeId || undefined,
                 sectionId,
                 name: formText(body, "name"),
                 amount,
@@ -184,15 +205,17 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
                     openModalId: `grocery-add-food-${storeId}`,
                     allergenRetry: {
                         storeId,
-                        fields: groceryLineRetryFields(body, storeId),
+                        fields: addRetryFields(body, storeId),
+                        foodName: previewName,
                     },
+                    storeFilter: storeFilterFromReturnTo(groceryReturnTo(body)),
                 });
                 return c.html(page.html, 400);
             }
             if (foodId) {
                 await addGroceryFoodById(grocery, settings, foods, {
                     householdId: member.householdId,
-                    storeId,
+                    storeId: storeId || undefined,
                     sectionId,
                     foodId,
                     amount,
@@ -214,7 +237,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
                 );
                 await addGroceryFoodById(grocery, settings, foods, {
                     householdId: member.householdId,
-                    storeId,
+                    storeId: storeId || undefined,
                     sectionId,
                     foodId: food.id,
                     amount,
@@ -223,7 +246,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
             } else {
                 await addGroceryManualFood(grocery, settings, foods, {
                     householdId: member.householdId,
-                    storeId,
+                    storeId: storeId || undefined,
                     sectionId,
                     name: formText(body, "food_name"),
                     amount,
@@ -237,7 +260,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
             const modalId = `grocery-add-food-${storeId}`;
             const didYouMean = buildDidYouMeanModal(
                 err,
-                groceryLineRetryFields(body, storeId),
+                addRetryFields(body, storeId),
                 modalId,
                 "/kitchen/groceries/lines",
             );
@@ -245,6 +268,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
                 const page = await renderGroceryListPage(userId, {
                     openModalId: modalId,
                     didYouMean,
+                    storeFilter: storeFilterFromReturnTo(groceryReturnTo(body)),
                 });
                 return c.html(page.html, 409);
             }
@@ -253,11 +277,12 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
             userId,
             err,
             `grocery-add-food-${storeId}`,
+            { returnTo: groceryReturnTo(body) },
         );
         return c.html(page.html, page.status);
     }
     // toast: none
-    return c.redirect("/kitchen/groceries", 303);
+    return c.redirect(groceryReturnTo(body), 303);
 });
 
 groceryRoutes.post(
@@ -429,5 +454,89 @@ groceryRoutes.post(
         }
         // toast: none
         return c.redirect("/kitchen/groceries", 303);
+    },
+);
+
+/** The caps `update_grocery_line` puts on a unit and a note. */
+const LINE_UNIT_MAX = 40;
+const LINE_NOTE_MAX = 500;
+
+/** What the line sheet posts: only the fields it sent are changed. */
+function lineEditFromBody(
+    body: Record<string, string | File | (string | File)[]>,
+): LineEdit {
+    const edit: LineEdit = {};
+    const amount = formOptionalNumber(body, "qty_amount");
+    if (amount !== undefined) edit.amount = amount;
+    const unit = formText(body, "qty_unit").trim();
+    if (unit.length > LINE_UNIT_MAX) {
+        throw new GroceryInputError(
+            `Use ${LINE_UNIT_MAX} characters or fewer for the unit.`,
+        );
+    }
+    if (unit) edit.unit = unit;
+    // A note that is posted blank is removed; one that is not posted stays.
+    if ("note" in body) {
+        const note = formText(body, "note");
+        if (note.length > LINE_NOTE_MAX) {
+            throw new GroceryInputError(
+                `Use ${LINE_NOTE_MAX} characters or fewer for the note.`,
+            );
+        }
+        edit.note = note;
+    }
+    const storeId = formText(body, "store_id").trim();
+    if (storeId) edit.storeId = storeId;
+    const section = formText(body, "section").trim();
+    if (section) edit.section = section;
+    return edit;
+}
+
+// The line sheet's Save and its Store and Section pull-downs: the app twin of
+// `update_grocery_line`, through the same plan and apply steps.
+groceryRoutes.post(
+    "/kitchen/groceries/lines/:id/edit",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        const lineId = c.req.param("id");
+        try {
+            const grocery = liveGroceryStore();
+            const plan = await planGroceryLineEdit(
+                { grocery, settings: liveSettingsStore() },
+                member.householdId,
+                lineId,
+                lineEditFromBody(body),
+            );
+            if (plan && lineEditChanges(plan)) {
+                await applyLineEdit(grocery, plan);
+            }
+        } catch (err) {
+            const page = await groceryFormError(userId, err, undefined, {
+                openLineId: lineId,
+                returnTo: groceryReturnTo(body),
+            });
+            return c.html(page.html, page.status);
+        }
+        // toast: none
+        return c.redirect(groceryReturnTo(body), 303);
+    },
+);
+
+// Delete one line (the row's ⋯ and its swipe): `delete_grocery_line`'s twin.
+groceryRoutes.post(
+    "/kitchen/groceries/lines/:id/delete",
+    requireMember,
+    async (c) => {
+        const member = siteMember(c);
+        const body = await c.req.parseBody();
+        await liveGroceryStore().deleteLine(
+            member.householdId,
+            c.req.param("id"),
+        );
+        // toast: none (a line that is already gone is the same answer)
+        return c.redirect(groceryReturnTo(body), 303);
     },
 );

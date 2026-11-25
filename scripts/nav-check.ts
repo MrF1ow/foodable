@@ -2004,6 +2004,1070 @@ try {
     await goto("/");
     await setMarker();
 
+    // Kitchen › Groceries on the phone: rows by section with the check ring,
+    // the allergen words and the amount, the filter, ⋯ and + beside the tabs,
+    // the dock for the checked lines, and a row's ⋯ and swipes posting the
+    // routes they post.
+    const asPosts = async () =>
+        (await stats()).posts.map(
+            (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
+        );
+    const visible = (sel: string) =>
+        `[...document.querySelectorAll(${JSON.stringify(sel)})].filter((b) => b.offsetParent !== null)`;
+    const swipeGrocery = async (id: string, from: number, to: number) => {
+        const box = await ev<{ x: number; y: number; w: number }>(`(() => {
+            const r = document.querySelector('#fd-grocery-row-${id} .fd-item-row__face').getBoundingClientRect();
+            return { x: r.left, y: r.top + r.height / 2, w: r.width };
+        })()`);
+        const x0 = box.x + box.w * from;
+        const x1 = box.x + box.w * to;
+        await send("Input.dispatchTouchEvent", {
+            type: "touchStart",
+            touchPoints: [{ x: x0, y: box.y }],
+        });
+        for (let i = 1; i <= 8; i++) {
+            await send("Input.dispatchTouchEvent", {
+                type: "touchMove",
+                touchPoints: [{ x: x0 + ((x1 - x0) * i) / 8, y: box.y }],
+            });
+            await sleep(16);
+        }
+        await send("Input.dispatchTouchEvent", {
+            type: "touchEnd",
+            touchPoints: [],
+        });
+        await sleep(500);
+    };
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    await send("Emulation.setTouchEmulationEnabled", {
+        enabled: true,
+        maxTouchPoints: 1,
+    });
+    await goto("/kitchen/groceries");
+    await setMarker();
+    await control("reset=posts");
+    // The page's entrance (a blur that is a containing block for the fixed
+    // dock) has played before anything is measured: headless only advances an
+    // animation as frames are drawn, so it is finished by hand.
+    await ev(`document.getAnimations().forEach((a) => a.finish())`);
+    const grocPhone = await ev<{
+        sections: string[];
+        rows: number;
+        milkSub: string;
+        milkValue: string;
+        chickenSub: string;
+        chickenWarn: boolean;
+        eggsScore: boolean;
+        rings: string[];
+        topTools: string[];
+        toolsLevel: number;
+        tabsShown: boolean;
+        headActions: string;
+        dock: string[];
+        dockFixed: boolean;
+        dockAboveNav: boolean;
+        rects: unknown;
+        dockWidths: number[];
+        addRow: boolean;
+        oldBits: number;
+    }>(`({
+        sections: [...document.querySelectorAll(".fd-kitchen-grocery-section .fd-section-header__label")].map((h) => h.textContent),
+        rows: document.querySelectorAll("li[id^='fd-grocery-row-']").length,
+        milkSub: document.querySelector("#fd-grocery-row-gl-milk .fd-item-row__subtitle")?.textContent ?? "",
+        milkValue: document.querySelector("#fd-grocery-row-gl-milk .fd-item-row__value")?.textContent ?? "",
+        chickenSub: document.querySelector("#fd-grocery-row-gl-chicken .fd-item-row__subtitle")?.textContent ?? "",
+        chickenWarn: document.querySelector("#fd-grocery-row-gl-chicken").classList.contains("fd-item-row--warning"),
+        eggsScore: !!document.querySelector("#fd-grocery-row-gl-eggs .fd-score"),
+        rings: [...document.querySelectorAll("li[id^='fd-grocery-row-'] [role='checkbox']")].map((b) => b.getAttribute("aria-checked")),
+        topTools: [...document.querySelectorAll(".fd-kitchen-fridge-top button[aria-label]")].map((b) => b.getAttribute("aria-label")),
+        toolsLevel: (() => {
+            const t = document.querySelector(".fd-kitchen-fridge-top").getBoundingClientRect();
+            const row = document.querySelector(".fd-kitchen-tabs").getBoundingClientRect();
+            return Math.round(Math.abs((t.top + t.height / 2) - (row.top + row.height / 2)));
+        })(),
+        tabsShown: getComputedStyle(document.querySelector(".fd-kitchen-tabs")).display !== "none",
+        headActions: getComputedStyle(document.querySelector(".fd-kitchen-head .fd-page-header__actions")).display,
+        dock: [...document.querySelectorAll(".fd-kitchen-grocery-dock .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()),
+        dockFixed: getComputedStyle(document.querySelector(".fd-kitchen-grocery-dock")).position === "fixed",
+        dockAboveNav: (() => {
+            const dock = document.querySelector(".fd-kitchen-grocery-dock").getBoundingClientRect();
+            const nav = document.querySelector(".fd-tabs").getBoundingClientRect();
+            return dock.bottom <= nav.top + 1 && dock.width > 0;
+        })(),
+        rects: (() => {
+            const r = (s) => { const b = document.querySelector(s).getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.width)].join(","); };
+            const page = getComputedStyle(document.querySelector(".fd-kitchen-groceries-page"));
+            return { dock: r(".fd-kitchen-grocery-dock"), nav: r(".fd-tabs"), win: innerHeight, anim: page.animationName + "|" + page.filter + "|" + page.transform + "|" + document.documentElement.className, bottom: getComputedStyle(document.querySelector(".fd-kitchen-grocery-dock")).bottom };
+        })(),
+        dockWidths: [...document.querySelectorAll(".fd-kitchen-grocery-dock .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => Math.round(b.getBoundingClientRect().width)),
+        addRow: !!document.querySelector("[data-fd-grocery-add-row] [commandfor='fd-grocery-add']"),
+        oldBits: document.querySelectorAll(".fd-kitchen-grocery-stores, .fd-kitchen-grocery-put-link, .fd-kitchen-grocery-footnote").length,
+    })`);
+    await clickSel("#fd-grocery-row-gl-milk .fd-menu [data-fd-menu-trigger]");
+    await sleep(150);
+    const grocRowMenu = await ev<string[]>(
+        `[...document.querySelectorAll("#fd-grocery-row-gl-milk [role='menuitem']")].map((i) => i.textContent.trim())`,
+    );
+    await clickSel("#fd-grocery-row-gl-milk [data-fd-menu-arm]");
+    await sleep(100);
+    const grocConfirm = await ev<string[]>(
+        `[...document.querySelectorAll("#fd-grocery-row-gl-milk .fd-menu__confirm-row [role='menuitem']")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
+    );
+    await clickSel(
+        '#fd-grocery-row-gl-milk form[action="/kitchen/groceries/lines/gl-milk/delete"] [type="submit"]',
+    );
+    await sleep(500);
+    await clickSel(
+        '#fd-grocery-row-gl-rice form[action="/kitchen/groceries/lines/gl-rice/check"] [role="checkbox"]',
+    );
+    await sleep(500);
+    await swipeGrocery("gl-chicken", 0.15, 0.85);
+    await swipeGrocery("gl-milk", 0.85, 0.15);
+    const grocPosts = await asPosts();
+    record(
+        "v2 groceries on the phone: rows by section (the store named when two show), the check ring, usual and allergen words in the warning tone, the amount and a score; the filter, ⋯ and + sit level with the tabs; checked lines add a fixed dock above the nav; a row's ⋯ is Check off, Edit and Delete (confirmed in place); Delete, the ring and both swipes post the routes and fields they should",
+        grocPhone.sections.join("|") ===
+            "Dairy & eggs · Costco|Produce · Costco|Meat · Costco|Pantry · Trader Joe's" &&
+            grocPhone.rows === 6 &&
+            grocPhone.milkSub === "Milk · usual" &&
+            grocPhone.milkValue === "1 gal" &&
+            grocPhone.chickenSub ===
+                "Chicken thighs · usual · Contains poultry — Sam." &&
+            grocPhone.chickenWarn &&
+            grocPhone.eggsScore &&
+            grocPhone.rings.join("|") === "false|true|true|false|false|false" &&
+            grocPhone.topTools.join("|") ===
+                "Filter by store|Groceries options|Add to list" &&
+            grocPhone.toolsLevel <= 8 &&
+            grocPhone.tabsShown &&
+            grocPhone.headActions === "none" &&
+            grocPhone.dock.join("|") === "Clear checked|Put away 2" &&
+            grocPhone.dockFixed &&
+            grocPhone.dockAboveNav &&
+            grocPhone.dockWidths.every((w) => w >= 120) &&
+            grocPhone.addRow &&
+            grocPhone.oldBits === 0 &&
+            grocRowMenu.slice(0, 3).join("|") === "Check off|Edit|Delete" &&
+            grocConfirm.join("|") === "Cancel|Delete" &&
+            grocPosts.join("\n") ===
+                [
+                    "/kitchen/groceries/lines/gl-milk/delete return_to=/kitchen/groceries",
+                    "/kitchen/groceries/lines/gl-rice/check checked=1&return_to=/kitchen/groceries",
+                    "/kitchen/groceries/lines/gl-chicken/check checked=1&return_to=/kitchen/groceries",
+                    "/kitchen/groceries/lines/gl-milk/delete return_to=/kitchen/groceries",
+                ].join("\n"),
+        { grocPhone, grocRowMenu, grocConfirm, grocPosts, ex: drain() },
+    );
+
+    // The store filter is a pull-down of ticks: each choice is a Turbo visit
+    // to the list with those stores, the badge counts them, Clear shows all.
+    await goto("/kitchen/groceries");
+    await setMarker();
+    const filterTrigger =
+        ".fd-kitchen-fridge-top [data-anchor='filter'] [data-fd-menu-trigger]";
+    const filterItems = () =>
+        ev<string[]>(
+            `[...document.querySelectorAll(".fd-kitchen-fridge-top [data-anchor='filter'] [role^='menuitem']")].map((i) => i.textContent.trim() + (i.getAttribute("aria-checked") === "true" ? "*" : ""))`,
+        );
+    const grocShown = () =>
+        ev<{
+            href: string;
+            sections: string;
+            badge: string;
+            marker: string;
+        }>(`({
+            href: location.pathname + location.search,
+            sections: [...document.querySelectorAll(".fd-kitchen-grocery-section .fd-section-header__label")].map((h) => h.textContent).join("|"),
+            badge: document.querySelector(".fd-kitchen-fridge-top [data-anchor='filter'] .fd-btn__badge")?.textContent ?? "",
+            marker: window.__marker ?? "gone",
+        })`);
+    await clickSel(filterTrigger);
+    await sleep(150);
+    const filter0 = await filterItems();
+    await clickSel(
+        ".fd-kitchen-fridge-top [data-anchor='filter'] [role='menuitemcheckbox']",
+    );
+    await sleep(700);
+    const filterOne = await grocShown();
+    await clickSel(filterTrigger);
+    await sleep(150);
+    const filter1 = await filterItems();
+    await clickSel(
+        ".fd-kitchen-fridge-top [data-anchor='filter'] [role='menuitemcheckbox'][aria-checked='false']",
+    );
+    await sleep(700);
+    const filterBoth = await grocShown();
+    await clickSel(filterTrigger);
+    await sleep(150);
+    await clickSel(
+        ".fd-kitchen-fridge-top [data-anchor='filter'] a[href='/kitchen/groceries']",
+    );
+    await sleep(700);
+    const filterCleared = await grocShown();
+    record(
+        "v2 groceries store filter: a pull-down of the stores (none ticked, no Clear), choosing one shows only it with a badge of 1 over Turbo, the second adds it (badge 2, Clear offered), and Clear shows every store again",
+        filter0.join("|") === "Costco|Trader Joe's" &&
+            filterOne.href === "/kitchen/groceries?store=s-costco" &&
+            filterOne.marker === "stay" &&
+            filterOne.badge === "1" &&
+            filterOne.sections === "Dairy & eggs|Produce|Meat" &&
+            filter1.join("|") === "Costco*|Trader Joe's|Clear" &&
+            filterBoth.href ===
+                "/kitchen/groceries?store=s-costco&store=s-tj" &&
+            filterBoth.badge === "2" &&
+            filterCleared.href === "/kitchen/groceries" &&
+            filterCleared.badge === "" &&
+            filterCleared.marker === "stay",
+        { filter0, filterOne, filter1, filterBoth, filterCleared, ex: drain() },
+    );
+
+    // The tab row ⋯: Share list (flag on), Select, Clear checked (confirmed
+    // in place, posting its route); with Share off the ⋯ has no Share list.
+    await goto("/kitchen/groceries");
+    await setMarker();
+    await control("reset=posts");
+    await clickSel(
+        ".fd-kitchen-fridge-top [aria-label='Groceries options'][data-fd-menu-trigger]",
+    );
+    await sleep(150);
+    const tabMenu = await ev<string[]>(
+        `[...document.querySelectorAll(".fd-kitchen-fridge-top [data-anchor='more'] [role='menuitem']")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
+    );
+    await clickSel(
+        ".fd-kitchen-fridge-top [data-anchor='more'] [data-fd-menu-arm]",
+    );
+    await sleep(100);
+    const tabConfirm = await ev<string[]>(
+        `[...document.querySelectorAll(".fd-kitchen-fridge-top [data-anchor='more'] .fd-menu__confirm-row [role='menuitem']")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
+    );
+    await clickSel(
+        ".fd-kitchen-fridge-top [data-anchor='more'] .fd-menu__confirm-row [type='submit']",
+    );
+    await sleep(500);
+    const tabClearPosts = await asPosts();
+    await goto("/kitchen/groceries?share=off");
+    await clickSel(
+        ".fd-kitchen-fridge-top [aria-label='Groceries options'][data-fd-menu-trigger]",
+    );
+    await sleep(150);
+    const tabMenuOff = await ev<string[]>(
+        `[...document.querySelectorAll(".fd-kitchen-fridge-top [data-anchor='more'] [role='menuitem']")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
+    );
+    record(
+        "v2 groceries tab row ⋯: Share list, Select and Clear checked (a confirm in place that posts the route), and no Share list with mcp-share-links off",
+        tabMenu.join("|") === "Share list|Select|Clear checked" &&
+            tabConfirm.join("|") === "Cancel|Clear checked" &&
+            tabClearPosts.join("\n") ===
+                "/kitchen/groceries/clear-checked return_to=/kitchen/groceries" &&
+            tabMenuOff.join("|") === "Select|Clear checked",
+        { tabMenu, tabConfirm, tabClearPosts, tabMenuOff, ex: drain() },
+    );
+
+    // The line sheet from a row: amount, Store and Section pull-downs, Note,
+    // Check off and Save, each posting the edit route's fields; its buttons
+    // are measured on the phone and at 1440.
+    const lineCase = async (width: number) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 800 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: width < 800,
+        });
+        await send("Emulation.setTouchEmulationEnabled", {
+            enabled: width < 800,
+            maxTouchPoints: 1,
+        });
+        await goto("/kitchen/groceries");
+        await setMarker();
+        await control("reset=posts");
+        await clickSel("#fd-grocery-row-gl-milk .fd-item-row__face");
+        await sleep(400);
+        const sheet = await ev<{
+            open: string[];
+            title: string;
+            sub: string;
+            amount: string;
+            unit: string;
+            rows: string[];
+            note: string;
+            actions: string[];
+            actionBoxes: { w: number; h: number }[];
+        }>(`({
+            open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
+            title: document.querySelector("#fd-grocery-line-gl-milk .fd-sheet__title")?.textContent ?? "",
+            sub: document.querySelector("#fd-grocery-line-gl-milk .fd-sheet__subtitle")?.textContent ?? "",
+            amount: document.querySelector("#fd-grocery-line-gl-milk input[name='qty_amount']").value,
+            unit: document.querySelector("#fd-grocery-line-gl-milk .fd-stepper-control__unit")?.textContent ?? "",
+            rows: [...document.querySelectorAll("#fd-grocery-line-gl-milk .fd-menu--row .fd-item-row__face")].map((r) => r.textContent.replace(/\\s+/g, " ").trim()),
+            note: document.querySelector("#fd-grocery-line-gl-milk input[name='note']").value,
+            actions: [...document.querySelectorAll("#fd-grocery-line-gl-milk .fd-sheet__actions .fd-btn")].map((b) => b.textContent.trim()),
+            actionBoxes: [...document.querySelectorAll("#fd-grocery-line-gl-milk .fd-sheet__actions .fd-btn")].map((b) => { const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }),
+        })`);
+        // The Store pull-down's panel is not clipped by the sheet and lists
+        // every store with the line's own ticked.
+        await clickSel(
+            "#fd-grocery-line-gl-milk .fd-menu--row [data-fd-menu-trigger]",
+        );
+        await sleep(200);
+        const storeMenu = await ev<{
+            items: string[];
+            inside: boolean;
+            hit: boolean;
+        }>(`(() => {
+            const menu = document.querySelector("#fd-grocery-line-gl-milk .fd-menu--row");
+            const panel = menu.querySelector(".fd-menu__panel");
+            const r = panel.getBoundingClientRect();
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+            return {
+                items: [...panel.querySelectorAll("[role^='menuitem']")].map((i) => i.textContent.trim() + (i.getAttribute("aria-checked") === "true" ? "*" : "")),
+                inside: r.left >= 0 && r.right <= window.innerWidth && r.top >= 0 && r.bottom <= window.innerHeight,
+                hit: !!hit && panel.contains(hit),
+            };
+        })()`);
+        // An amount and a note typed and not yet saved ride the pick along.
+        await clickSel("#fd-grocery-line-gl-milk [data-fd-step='1']");
+        await ev(`(() => {
+            const n = document.querySelector("#fd-grocery-line-gl-milk input[name='note']");
+            n.value = "The big one";
+            n.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        await clickSel(
+            "#fd-grocery-line-gl-milk .fd-menu--row [role='menuitemcheckbox'][aria-checked='false']",
+        );
+        await sleep(600);
+        const afterStore = await asPosts();
+        // Save: bump the amount, write a note.
+        await goto("/kitchen/groceries?line=gl-milk");
+        await setMarker();
+        await control("reset=posts");
+        await ev(`(() => {
+            const d = document.getElementById("fd-grocery-line-gl-milk");
+            if (!d.open) d.showModal();
+        })()`);
+        await sleep(300);
+        await clickSel("#fd-grocery-line-gl-milk [data-fd-step='1']");
+        await ev(`(() => {
+            const n = document.querySelector("#fd-grocery-line-gl-milk input[name='note']");
+            n.value = "The big one";
+            n.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        await clickSel(
+            "#fd-grocery-line-gl-milk .fd-sheet__actions button[type='submit'][form$='-edit']",
+        );
+        await sleep(600);
+        const afterSave = await asPosts();
+        await goto("/kitchen/groceries?line=gl-milk");
+        await control("reset=posts");
+        await ev(`(() => {
+            const d = document.getElementById("fd-grocery-line-gl-milk");
+            if (!d.open) d.showModal();
+        })()`);
+        await sleep(300);
+        await clickSel(
+            "#fd-grocery-line-gl-milk .fd-sheet__actions button[type='submit'][form$='-check']",
+        );
+        await sleep(600);
+        const afterCheck = await asPosts();
+        return { sheet, storeMenu, afterStore, afterSave, afterCheck };
+    };
+    const linePhone = await lineCase(390);
+    const lineDesk = await lineCase(1440);
+    const lineOk = (c: Awaited<ReturnType<typeof lineCase>>) =>
+        c.sheet.open.join() === "fd-grocery-line-gl-milk" &&
+        c.sheet.title === "Kirkland 2% milk" &&
+        c.sheet.sub === "Milk · usual" &&
+        c.sheet.amount === "1" &&
+        c.sheet.unit === "gal" &&
+        c.sheet.rows.join("|") === "StoreCostco|SectionDairy & eggs" &&
+        c.sheet.note === "" &&
+        c.sheet.actions.join("|") === "Check off|Save" &&
+        c.sheet.actionBoxes.every((b) => b.w >= 120 && b.h >= 44) &&
+        c.storeMenu.items.join("|") === "Costco*|Trader Joe's" &&
+        c.storeMenu.inside &&
+        c.storeMenu.hit &&
+        c.afterStore.join("\n") ===
+            "/kitchen/groceries/lines/gl-milk/edit store_id=s-tj&return_to=/kitchen/groceries?line=gl-milk&qty_amount=2&note=The big one&qty_unit=gal" &&
+        c.afterSave.join("\n") ===
+            "/kitchen/groceries/lines/gl-milk/edit qty_amount=2&note=The big one&qty_unit=gal&return_to=/kitchen/groceries" &&
+        c.afterCheck.join("\n") ===
+            "/kitchen/groceries/lines/gl-milk/check checked=1&return_to=/kitchen/groceries";
+    record(
+        "v2 groceries line sheet: a row opens it with the amount, Store and Section pull-downs (not clipped by the sheet) and a Note; choosing a store posts the edit route with that store and the amount and note typed so far, and comes back with the sheet open; Save posts the amount, unit and note; Check off posts the check route; both buttons are full-size on the phone and at 1440",
+        lineOk(linePhone) && lineOk(lineDesk),
+        { linePhone, lineDesk, ex: drain() },
+    );
+
+    // A pull-down inside a sheet shows every item at the phone width and at
+    // 1440: its panel is placed on the screen (not clipped by the sheet), so
+    // each of the ten Section items hit-tests to itself and the last one,
+    // which the sheet used to cut off, posts its section.
+    const sheetMenuCase = async (width: number) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 800 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: width < 800,
+        });
+        await send("Emulation.setTouchEmulationEnabled", {
+            enabled: width < 800,
+            maxTouchPoints: 1,
+        });
+        await goto("/kitchen/groceries?line=gl-milk&sections=10");
+        await setMarker();
+        await control("reset=posts");
+        await ev(`(() => {
+            const d = document.getElementById("fd-grocery-line-gl-milk");
+            if (!d.open) d.showModal();
+        })()`);
+        await sleep(400);
+        const section =
+            "#fd-grocery-line-gl-milk .fd-list-group > li:nth-child(2) .fd-menu--row";
+        await clickSel(section + " [data-fd-menu-trigger]");
+        await sleep(250);
+        const menu = await ev<{
+            count: number;
+            misses: string[];
+            inScreen: boolean;
+        }>(`(() => {
+            const panel = document.querySelector(${JSON.stringify(section)} + " .fd-menu__panel");
+            const items = [...panel.querySelectorAll("[role^='menuitem']")];
+            const pr = panel.getBoundingClientRect();
+            return {
+                count: items.length,
+                misses: items.filter((i) => {
+                    const r = i.getBoundingClientRect();
+                    const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                    return !(hit && i.contains(hit));
+                }).map((i) => i.textContent.trim()),
+                inScreen: pr.top >= 0 && pr.bottom <= window.innerHeight && pr.left >= 0 && pr.right <= window.innerWidth,
+            };
+        })()`);
+        await clickSel(
+            section +
+                " .fd-menu__panel > .fd-menu__form:last-child [role='menuitemcheckbox']",
+        );
+        await sleep(600);
+        const posts = await asPosts();
+        return { menu, posts };
+    };
+    const sheetMenuPhone = await sheetMenuCase(390);
+    const sheetMenuDesk = await sheetMenuCase(1440);
+    const sheetMenuOk = (c: Awaited<ReturnType<typeof sheetMenuCase>>) =>
+        c.menu.count === 10 &&
+        c.menu.misses.length === 0 &&
+        c.menu.inScreen &&
+        c.posts.length === 1 &&
+        c.posts[0]!.startsWith(
+            "/kitchen/groceries/lines/gl-milk/edit section=sec-x7&",
+        );
+    record(
+        "v2 sheet pull-downs: the line sheet's Section pull-down with ten sections shows every item inside the screen (each item's centre hits that item) on the phone and at 1440, and the last item posts its section",
+        sheetMenuOk(sheetMenuPhone) && sheetMenuOk(sheetMenuDesk),
+        { sheetMenuPhone, sheetMenuDesk, ex: drain() },
+    );
+
+    // The did-you-mean question in the Add sheet is the shared buttons and an
+    // Item row with a Toggle: every button takes the card's width and is full
+    // height on the phone and at 1440, and one tap posts the food with the
+    // alias choice and the page it came from.
+    const dymCase = async (width: number) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 800 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: width < 800,
+        });
+        await send("Emulation.setTouchEmulationEnabled", {
+            enabled: width < 800,
+            maxTouchPoints: 1,
+        });
+        await goto("/kitchen/groceries?add=did-you-mean");
+        await setMarker();
+        await control("reset=posts");
+        await ev(`(() => {
+            const d = document.getElementById("fd-grocery-add");
+            if (!d.open) d.showModal();
+        })()`);
+        await sleep(400);
+        const card = await ev<{
+            heading: string;
+            buttons: { t: string; w: number; h: number }[];
+            cardW: number;
+            row: string;
+            toggle: boolean;
+        }>(`(() => {
+            const b = document.querySelector("#fd-grocery-add .fd-did-you-mean-block");
+            return {
+                heading: b.querySelector(".fd-did-you-mean-heading").textContent,
+                buttons: [...b.querySelectorAll(".fd-btn")].map((x) => { const r = x.getBoundingClientRect(); return { t: x.textContent.trim(), w: Math.round(r.width), h: Math.round(r.height) }; }),
+                cardW: Math.round(b.getBoundingClientRect().width),
+                row: b.querySelector(".fd-item-row .fd-item-row__title")?.textContent ?? "",
+                toggle: !!b.querySelector(".fd-item-row input[role='switch'][name='remember_alias']"),
+            };
+        })()`);
+        await clickSel("#fd-grocery-add .fd-did-you-mean-block .fd-toggle");
+        await clickSel(
+            "#fd-grocery-add .fd-did-you-mean-block button[name='food_id'][value='p-eggs']",
+        );
+        await sleep(600);
+        const posts = await asPosts();
+        return { card, posts };
+    };
+    const dymPhone = await dymCase(390);
+    const dymDesk = await dymCase(1440);
+    const dymOk = (c: Awaited<ReturnType<typeof dymCase>>) =>
+        c.card.heading === "Did you mean one of these?" &&
+        c.card.buttons.map((b) => b.t).join("|") ===
+            "Eggs|Vital Farms large eggs|Add chicken egg as a new food" &&
+        c.card.buttons.every(
+            (b) => b.w <= c.card.cardW && b.w >= c.card.cardW - 40 && b.h >= 44,
+        ) &&
+        c.card.row === "Remember this name" &&
+        c.card.toggle &&
+        c.posts.length === 1 &&
+        c.posts[0]!.includes("remember_alias=1") &&
+        c.posts[0]!.includes("food_id=p-eggs") &&
+        c.posts[0]!.includes("return_to=/kitchen/groceries");
+    record(
+        "v2 groceries Add to list: the did-you-mean question is the shared buttons (the card's width, at least 44px tall) and an Item row with a Toggle, on the phone and at 1440, and a candidate posts the food with the alias choice and the page it came from",
+        dymOk(dymPhone) && dymOk(dymDesk),
+        { dymPhone, dymDesk, ex: drain() },
+    );
+
+    // Clear checked on the dock confirms in place: a tap only arms it, Cancel
+    // and Clear 2 take the row (full-size buttons), Cancel puts it back, and
+    // only Clear 2 posts the route.
+    const dockCase = async (width: number) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 800 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: width < 800,
+        });
+        await send("Emulation.setTouchEmulationEnabled", {
+            enabled: width < 800,
+            maxTouchPoints: 1,
+        });
+        await goto("/kitchen/groceries");
+        await setMarker();
+        await control("reset=posts");
+        const dockRow = () =>
+            ev<{
+                labels: string[];
+                boxes: { w: number; h: number }[];
+            }>(`(() => {
+                const shown = [...document.querySelectorAll(".fd-kitchen-grocery-dock .fd-btn")].filter((b) => b.offsetParent !== null);
+                return {
+                    labels: shown.map((b) => b.textContent.trim()),
+                    boxes: shown.map((b) => { const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }),
+                };
+            })()`);
+        const idle = await dockRow();
+        await clickSel(".fd-kitchen-grocery-dock [data-fd-confirm-arm]");
+        await sleep(100);
+        const armed = await dockRow();
+        const armedPosts = await asPosts();
+        await clickSel(".fd-kitchen-grocery-dock [data-fd-confirm-cancel]");
+        await sleep(100);
+        const cancelled = await dockRow();
+        const cancelledPosts = await asPosts();
+        await clickSel(".fd-kitchen-grocery-dock [data-fd-confirm-arm]");
+        await sleep(100);
+        await clickSel(".fd-kitchen-grocery-dock [data-fd-confirm-go]");
+        await sleep(600);
+        const posts = await asPosts();
+        return { idle, armed, armedPosts, cancelled, cancelledPosts, posts };
+    };
+    const dockPhone = await dockCase(390);
+    const dockDesk = await dockCase(1440);
+    const dockOk = (c: Awaited<ReturnType<typeof dockCase>>) =>
+        c.idle.labels.join("|") === "Clear checked|Put away 2" &&
+        c.armed.labels.join("|") === "Cancel|Clear 2" &&
+        c.armed.boxes.every((b) => b.w >= 80 && b.h >= 44) &&
+        c.armedPosts.length === 0 &&
+        c.cancelled.labels.join("|") === "Clear checked|Put away 2" &&
+        c.cancelledPosts.length === 0 &&
+        c.posts.join("\n") ===
+            "/kitchen/groceries/clear-checked return_to=/kitchen/groceries";
+    record(
+        "v2 groceries dock: Clear checked only arms (Cancel and Clear 2 take the row, full-size), Cancel puts it back and posts nothing, and Clear 2 posts the route, on the phone and at 1440",
+        dockOk(dockPhone) && dockOk(dockDesk),
+        { dockPhone, dockDesk, ex: drain() },
+    );
+
+    // Put away from the dock: one block per checked line with where it is
+    // kept and when it expires, the product choice, and the same fields.
+    const putCase = async (width: number) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 800 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: width < 800,
+        });
+        await send("Emulation.setTouchEmulationEnabled", {
+            enabled: width < 800,
+            maxTouchPoints: 1,
+        });
+        await goto("/kitchen/groceries");
+        await setMarker();
+        await control("reset=posts");
+        await clickSel(".fd-kitchen-grocery-dock .fd-btn--primary");
+        await sleep(400);
+        const sheet = await ev<{
+            open: boolean;
+            title: string;
+            lines: string[];
+            kept: string[];
+            products: string[];
+            expires: string[];
+            fieldShown: boolean;
+            actions: string[];
+            actionBoxes: { w: number; h: number }[];
+        }>(`({
+            open: document.getElementById("fd-grocery-put-away").open,
+            title: document.querySelector("#fd-grocery-put-away .fd-sheet__title")?.textContent ?? "",
+            lines: [...document.querySelectorAll("#fd-grocery-put-away .fd-kitchen-put-line .fd-item-row__title")].map((t) => t.textContent),
+            kept: [...document.querySelectorAll("#fd-grocery-put-away input[name^='location_id_']")].map((i) => i.name.slice(12) + ":" + i.value + (i.checked ? "*" : "")),
+            products: [...document.querySelectorAll("#fd-grocery-put-away input[name^='product_food_id_']")].map((i) => i.value + (i.checked ? "*" : "")),
+            expires: [...document.querySelectorAll("#fd-grocery-put-away input[name^='expires_mode_gl-eggs']")].map((i) => i.value + (i.checked ? "*" : "")),
+            fieldShown: document.querySelector("#fd-grocery-put-away .fd-kitchen-item-expires__field").offsetParent !== null,
+            actions: [...document.querySelectorAll("#fd-grocery-put-away .fd-sheet__actions .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()),
+            actionBoxes: [...document.querySelectorAll("#fd-grocery-put-away .fd-sheet__actions .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => { const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }),
+        })`);
+        await clickSel(
+            "#fd-grocery-put-away input[name='location_id_gl-spinach'][value='l-freezer']",
+        );
+        await clickSel(
+            "#fd-grocery-put-away input[name='expires_mode_gl-eggs'][value='pick']",
+        );
+        await sleep(100);
+        const fieldAfter = await ev<boolean>(
+            `document.querySelector("#fd-grocery-put-away input[name='expires_on_gl-eggs']").offsetParent !== null`,
+        );
+        await ev(`(() => {
+            const i = document.querySelector("#fd-grocery-put-away input[name='expires_on_gl-eggs']");
+            i.value = "2026-12-01";
+            i.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        await clickSel(
+            "#fd-grocery-put-away .fd-sheet__actions button[form='fd-grocery-put-away-form']",
+        );
+        await sleep(600);
+        const put = (await asPosts()).map((p) =>
+            p
+                .split("&")
+                .filter((e) => !e.startsWith("expires_mode_"))
+                .join("&"),
+        );
+        await goto("/kitchen/groceries");
+        await control("reset=posts");
+        await clickSel(".fd-kitchen-grocery-dock .fd-btn--primary");
+        await sleep(300);
+        // Clear checked in the sheet only arms: Cancel and Clear 2 take the
+        // row, Cancel puts it back, and only Clear 2 posts.
+        const sheetRow = () =>
+            ev<{
+                labels: string[];
+                boxes: { w: number; h: number }[];
+            }>(`(() => {
+                const shown = [...document.querySelectorAll("#fd-grocery-put-away .fd-sheet__actions .fd-btn")].filter((b) => b.offsetParent !== null);
+                return {
+                    labels: shown.map((b) => b.textContent.trim()),
+                    boxes: shown.map((b) => { const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }),
+                };
+            })()`);
+        await clickSel("#fd-grocery-put-away [data-fd-confirm-arm]");
+        await sleep(100);
+        const armed = await sheetRow();
+        const armedPosts = await asPosts();
+        await clickSel("#fd-grocery-put-away [data-fd-confirm-cancel]");
+        await sleep(100);
+        const cancelled = await sheetRow();
+        await clickSel("#fd-grocery-put-away [data-fd-confirm-arm]");
+        await sleep(100);
+        await clickSel("#fd-grocery-put-away [data-fd-confirm-go]");
+        await sleep(600);
+        const clear = await asPosts();
+        return { sheet, fieldAfter, put, armed, armedPosts, cancelled, clear };
+    };
+    const putPhone = await putCase(390);
+    const putDesk = await putCase(1440);
+    const putOk = (c: Awaited<ReturnType<typeof putCase>>) =>
+        c.sheet.open &&
+        c.sheet.title === "Put away 2 items" &&
+        c.sheet.lines.join("|") === "Vital Farms large eggs|Spinach" &&
+        c.sheet.kept.join("|") ===
+            "gl-eggs:l-fridge*|gl-eggs:l-freezer|gl-eggs:l-pantry|gl-spinach:l-fridge*|gl-spinach:l-freezer|gl-spinach:l-pantry" &&
+        c.sheet.products.join("|") === "f-eggs|p-eggs*" &&
+        c.sheet.expires.join("|") === "none*|pick" &&
+        !c.sheet.fieldShown &&
+        c.fieldAfter &&
+        c.sheet.actions.join("|") === "Clear checked|Put away" &&
+        c.sheet.actionBoxes.every((b) => b.w >= 120 && b.h >= 44) &&
+        c.put.join("\n") ===
+            "/kitchen/groceries/put-away return_to=/kitchen/groceries&line_ids=gl-eggs,gl-spinach&location_id_gl-eggs=l-fridge&product_food_id_gl-eggs=p-eggs&expires_on_gl-eggs=2026-12-01&location_id_gl-spinach=l-freezer&expires_on_gl-spinach=" &&
+        c.armed.labels.join("|") === "Cancel|Clear 2" &&
+        c.armed.boxes.every((b) => b.w >= 120 && b.h >= 44) &&
+        c.armedPosts.length === 0 &&
+        c.cancelled.labels.join("|") === "Clear checked|Put away" &&
+        c.clear.join("\n") ===
+            "/kitchen/groceries/clear-checked return_to=/kitchen/groceries";
+    record(
+        "v2 groceries put away: the dock's Put away N opens the sheet with each checked line, where it is kept, when it expires (a date field only on Pick a date) and the product; Put away posts the route's fields for each line, Clear checked only arms (Cancel and Clear 2 take the row, Cancel puts it back) and Clear 2 posts its own route, and the buttons are full-size on the phone and at 1440",
+        putOk(putPhone) && putOk(putDesk),
+        { putPhone, putDesk, ex: drain() },
+    );
+
+    // Add to list: the + opens the sheet with the running-low chips and the
+    // usuals, typing narrows them, a plus or a chip posts the add route, and
+    // the hand form keeps its button size at both widths.
+    const addCase = async (width: number) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 800 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: width < 800,
+        });
+        await send("Emulation.setTouchEmulationEnabled", {
+            enabled: width < 800,
+            maxTouchPoints: 1,
+        });
+        await goto("/kitchen/groceries");
+        await setMarker();
+        await control("reset=posts");
+        await ev(
+            `${visible("[aria-label='Add to list'][commandfor='fd-grocery-add']")}[0].click()`,
+        );
+        await sleep(400);
+        const add0 = await ev<{
+            open: boolean;
+            low: string[];
+            usuals: string[];
+            lowSubtitle: string;
+            title: string;
+        }>(`({
+            open: document.getElementById("fd-grocery-add").open,
+            low: [...document.querySelectorAll("#fd-grocery-add .fd-kitchen-add-low .fd-pill-chip")].map((c) => c.textContent),
+            usuals: [...document.querySelectorAll("#fd-grocery-add .fd-item-row[data-fd-grocery-usual]")].map((r) => r.querySelector(".fd-item-row__title").textContent),
+            lowSubtitle: document.querySelector("#fd-grocery-add .fd-item-row[data-fd-grocery-usual] .fd-item-row__subtitle")?.textContent ?? "",
+            title: document.getElementById("fd-grocery-add-title")?.textContent ?? "",
+        })`);
+        await ev(`(() => {
+            const input = document.getElementById("fd-grocery-add-q");
+            input.value = "mil";
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        const filtered = await ev<string[]>(
+            `[...document.querySelectorAll("#fd-grocery-add .fd-item-row[data-fd-grocery-usual]")].filter((r) => !r.hidden).map((r) => r.querySelector(".fd-item-row__title").textContent)`,
+        );
+        const handName = await ev<string>(
+            `document.getElementById("fd-grocery-add-name").value`,
+        );
+        await clickSel(
+            "#fd-grocery-add .fd-item-row[data-fd-grocery-usual='milk 2%'] .fd-item-row__add",
+        );
+        await sleep(600);
+        const usualPost = await asPosts();
+        await goto("/kitchen/groceries");
+        await control("reset=posts");
+        await ev(
+            `${visible("[aria-label='Add to list'][commandfor='fd-grocery-add']")}[0].click()`,
+        );
+        await sleep(300);
+        await clickSel("#fd-grocery-add .fd-kitchen-add-low .fd-pill-chip");
+        await sleep(600);
+        const chipPost = await asPosts();
+        await goto("/kitchen/groceries");
+        await control("reset=posts");
+        await ev(`document.getElementById("fd-grocery-add").showModal()`);
+        await sleep(300);
+        await ev(
+            `document.querySelector("#fd-grocery-add .fd-kitchen-hand").open = true`,
+        );
+        await sleep(100);
+        await ev(`(() => {
+            const name = document.getElementById("fd-grocery-add-name");
+            name.value = "Basil";
+            name.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        const hand = await ev<{
+            h: number;
+            w: number;
+            formW: number;
+            steppers: number[];
+        }>(`(() => {
+            const b = document.querySelector("#fd-grocery-add-form button[type=submit]").getBoundingClientRect();
+            return {
+                h: Math.round(b.height),
+                w: Math.round(b.width),
+                formW: Math.round(document.getElementById("fd-grocery-add-form").getBoundingClientRect().width),
+                steppers: [...document.querySelectorAll("#fd-grocery-add-form [data-fd-step]")].map((s) => Math.round(s.getBoundingClientRect().width)),
+            };
+        })()`);
+        await clickSel("#fd-grocery-add-form button[type=submit]");
+        await sleep(600);
+        const handPost = await asPosts();
+        // With the list filtered to one store, every add names that store; a
+        // usual that names its own store says so while none is chosen.
+        await goto("/kitchen/groceries?store=s-costco");
+        await control("reset=posts");
+        await ev(
+            `${visible("[aria-label='Add to list'][commandfor='fd-grocery-add']")}[0].click()`,
+        );
+        await sleep(300);
+        const oneSubtitle = await ev<string>(
+            `document.querySelector("#fd-grocery-add .fd-item-row[data-fd-grocery-usual='milk 2%'] .fd-item-row__subtitle")?.textContent ?? ""`,
+        );
+        await clickSel(
+            "#fd-grocery-add .fd-item-row[data-fd-grocery-usual='milk 2%'] .fd-item-row__add",
+        );
+        await sleep(600);
+        const onePost = await asPosts();
+        return {
+            add0,
+            filtered,
+            handName,
+            usualPost,
+            chipPost,
+            hand,
+            handPost,
+            oneSubtitle,
+            onePost,
+        };
+    };
+    const addPhone = await addCase(390);
+    const addDesk = await addCase(1440);
+    const addOk = (c: Awaited<ReturnType<typeof addCase>>) =>
+        c.add0.open &&
+        c.add0.title === "Add to list" &&
+        c.add0.low.join("|") === "Eggs" &&
+        c.add0.usuals.join("|") === "Eggs|Milk 2%|Paper towels" &&
+        c.add0.lowSubtitle === "Low · 3 left" &&
+        c.filtered.join("|") === "Milk 2%" &&
+        c.handName === "mil" &&
+        c.usualPost.join("\n") ===
+            "/kitchen/groceries/lines kind=food&food_id=p-milk&qty_amount=1&qty_unit=gal&return_to=/kitchen/groceries" &&
+        c.chipPost.join("\n") ===
+            "/kitchen/groceries/lines kind=food&food_id=p-eggs&qty_amount=12&qty_unit=each&return_to=/kitchen/groceries" &&
+        c.hand.h >= 40 &&
+        c.hand.w >= c.hand.formW - 1 &&
+        c.hand.steppers.length === 2 &&
+        c.hand.steppers.every((w) => w === 48) &&
+        c.handPost.join("\n") ===
+            "/kitchen/groceries/lines kind=food&return_to=/kitchen/groceries&food_name=Basil&qty_amount=1&qty_unit=each" &&
+        c.oneSubtitle === "Usual · Kirkland · 1 gal · Costco" &&
+        c.onePost.join("\n") ===
+            "/kitchen/groceries/lines kind=food&food_id=p-milk&store_id=s-costco&section_id=sec-dairy&qty_amount=1&qty_unit=gal&return_to=/kitchen/groceries?store=s-costco";
+    record(
+        "v2 groceries Add to list: the + opens the search sheet with the running-low chips and the usuals not on the list; typing narrows them and fills the hand form's Name; a usual's plus and a chip post the add route with the food and usual amount and no store (the usual's own applies), or the one filtered store and its section; a low usual reads Low · N left; the hand form's Add button is at least 40px tall and as wide as the form and the stepper's buttons stay 48px, on the phone and at 1440",
+        addOk(addPhone) && addOk(addDesk),
+        { addPhone, addDesk, ex: drain() },
+    );
+
+    // Select mode on the phone: Select (the tab row's ⋯) hides the dock,
+    // shows the count row and a floating Selection bar, rows pick without
+    // opening a sheet, Delete asks in place and posts the picked ids.
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    await send("Emulation.setTouchEmulationEnabled", {
+        enabled: true,
+        maxTouchPoints: 1,
+    });
+    await goto("/kitchen/groceries");
+    await setMarker();
+    await control("reset=posts");
+    await ev(`document.getAnimations().forEach((a) => a.finish())`);
+    await clickSel(
+        ".fd-kitchen-fridge-top [aria-label='Groceries options'][data-fd-menu-trigger]",
+    );
+    await sleep(150);
+    await clickSel(
+        '.fd-kitchen-fridge-top [data-fd-select-toggle="groceries"]',
+    );
+    await sleep(150);
+    await clickSel("#fd-grocery-row-gl-milk .fd-item-row__face");
+    await clickSel("#fd-grocery-row-gl-rice .fd-item-row__face");
+    await sleep(100);
+    const grocSel = await ev<{
+        selecting: boolean;
+        head: string;
+        dock: string;
+        addRow: string;
+        opened: number;
+        ticked: string[];
+        buttons: string;
+        phoneBar: string;
+        fixed: boolean;
+        aboveNav: boolean;
+        rects: unknown;
+    }>(`({
+        selecting: document.querySelector(".fd-kitchen-groceries-page").hasAttribute("data-fd-selecting"),
+        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
+        dock: getComputedStyle(document.querySelector(".fd-kitchen-grocery-dock")).display,
+        addRow: getComputedStyle(document.querySelector("[data-fd-grocery-add-row]")).display,
+        opened: document.querySelectorAll("dialog[open]").length,
+        ticked: [...document.querySelectorAll("input[data-fd-select-item]:checked")].map((i) => i.value),
+        buttons: [...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
+        phoneBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).display,
+        fixed: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).position === "fixed",
+        aboveNav: (() => {
+            const bar = document.querySelector(".fd-select-bar-slot--phone").getBoundingClientRect();
+            const nav = document.querySelector(".fd-tabs").getBoundingClientRect();
+            return bar.bottom <= nav.top + 1 && bar.width > 0;
+        })(),
+        rects: (() => {
+            const r = (s) => { const b = document.querySelector(s).getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.width)].join(","); };
+            return { bar: r(".fd-select-bar-slot--phone"), nav: r(".fd-tabs"), win: innerHeight };
+        })(),
+    })`);
+    await clickSel(".fd-select-bar-slot--phone [data-fd-select-ask]");
+    await sleep(100);
+    const grocAsk = await ev<string>(
+        `[...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|")`,
+    );
+    await clickSel(
+        '.fd-select-bar-slot--phone [data-fd-select-when="ask"][type="submit"]',
+    );
+    await sleep(600);
+    const grocBulk = await asPosts();
+    record(
+        "v2 groceries select mode on the phone: Select (the tab row's ⋯) hides the dock and Add to list, shows the count row and a Selection bar fixed above the nav, rows pick without opening a sheet, Delete asks in place (Cancel, Delete 2) and the bulk route is posted with both ids",
+        grocSel.selecting &&
+            grocSel.head === "2 selectedCancel" &&
+            grocSel.dock === "none" &&
+            grocSel.addRow === "none" &&
+            grocSel.opened === 0 &&
+            grocSel.ticked.join("|") === "gl-milk|gl-rice" &&
+            grocSel.buttons === "Delete 2" &&
+            grocSel.phoneBar !== "none" &&
+            grocSel.fixed &&
+            grocSel.aboveNav &&
+            grocAsk === "Cancel|Delete 2" &&
+            grocBulk.join("\n") ===
+                "/kitchen/groceries/bulk/delete return_to=/kitchen/groceries&ids[]=gl-milk&ids[]=gl-rice",
+        { grocSel, grocAsk, grocBulk, ex: drain() },
+    );
+
+    // Kitchen › Groceries at 1440: Groceries is the sidebar's current
+    // sub-link, the header holds the filter, ⋯ and Add to list, the first
+    // section is the left column and the rest the right, the dock is a row
+    // under the header, and select mode shows the Selection bar inline.
+    await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 960,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await goto("/kitchen/groceries");
+    await setMarker();
+    await control("reset=posts");
+    const grocDesk = await ev<{
+        current: string;
+        tabs: string;
+        actions: string[];
+        phoneTools: string;
+        leftHas: string[];
+        rightHas: string[];
+        sideBySide: boolean;
+        dockStatic: boolean;
+        dockRight: boolean;
+        dockBelowHeader: boolean;
+        rowMenuVisible: boolean;
+    }>(`({
+        current: document.querySelector(".fd-sidebar a.fd-side-link--sub[aria-current='page']")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
+        tabs: getComputedStyle(document.querySelector(".fd-kitchen-tabs")).display,
+        actions: [...document.querySelectorAll(".fd-kitchen-head .fd-page-header__actions [aria-label]")].filter((b) => b.offsetParent !== null).map((b) => b.getAttribute("aria-label")),
+        phoneTools: getComputedStyle(document.querySelector(".fd-kitchen-fridge-top")).display,
+        leftHas: [...document.querySelectorAll(".fd-page-layout__column:first-child .fd-section-header__label")].map((h) => h.textContent),
+        rightHas: [...document.querySelectorAll(".fd-page-layout__column:last-child .fd-section-header__label")].map((h) => h.textContent),
+        sideBySide: (() => {
+            const [a, b] = [...document.querySelectorAll(".fd-kitchen-groceries-layout .fd-page-layout__column")].map((c) => c.getBoundingClientRect());
+            return !!a && !!b && b.left >= a.right && Math.abs(a.top - b.top) < 2;
+        })(),
+        dockStatic: getComputedStyle(document.querySelector(".fd-kitchen-grocery-dock")).position === "static",
+        dockRight: (() => {
+            const last = [...document.querySelectorAll(".fd-kitchen-grocery-dock .fd-btn")].filter((b) => b.offsetParent !== null).pop().getBoundingClientRect();
+            const page = document.querySelector(".fd-kitchen-groceries-page").getBoundingClientRect();
+            return Math.abs(last.right - page.right) <= 2 && last.left > page.left + page.width / 2;
+        })(),
+        dockBelowHeader: document.querySelector(".fd-kitchen-grocery-dock").getBoundingClientRect().top >= document.querySelector(".fd-kitchen-head").getBoundingClientRect().bottom,
+        rowMenuVisible: document.querySelector("#fd-grocery-row-gl-milk .fd-menu").offsetParent !== null,
+    })`);
+    await clickSel(
+        ".fd-kitchen-head .fd-page-header__actions [aria-label='Groceries options'][data-fd-menu-trigger]",
+    );
+    await sleep(150);
+    await clickSel('.fd-kitchen-head [data-fd-select-toggle="groceries"]');
+    await sleep(150);
+    await clickSel("#fd-grocery-row-gl-chicken .fd-item-row__face");
+    await clickSel("#fd-grocery-row-gl-oil .fd-item-row__face");
+    await sleep(100);
+    const grocDeskSel = await ev<{
+        inline: boolean;
+        phoneBar: string;
+        dock: string;
+        oneColumn: boolean;
+        buttons: string;
+        head: string;
+    }>(`({
+        inline: (() => {
+            const slot = document.querySelector(".fd-select-bar-slot--desktop");
+            return getComputedStyle(slot).display !== "none" && getComputedStyle(slot.firstElementChild).position === "static";
+        })(),
+        phoneBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).display,
+        dock: getComputedStyle(document.querySelector(".fd-kitchen-grocery-dock")).display,
+        oneColumn: (() => {
+            const cols = [...document.querySelectorAll(".fd-kitchen-groceries-layout .fd-page-layout__column")].filter((c) => c.offsetParent !== null).map((c) => c.getBoundingClientRect());
+            return cols.length >= 1 && cols.every((c) => Math.abs(c.left - cols[0].left) < 2);
+        })(),
+        buttons: [...document.querySelectorAll(".fd-select-bar-slot--desktop .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
+        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
+    })`);
+    await clickSel(".fd-select-bar-slot--desktop [data-fd-select-ask]");
+    await sleep(100);
+    await clickSel(
+        '.fd-select-bar-slot--desktop [data-fd-select-when="ask"][type="submit"]',
+    );
+    await sleep(600);
+    const grocDeskPosts = await asPosts();
+    record(
+        "v2 groceries at 1440px: Groceries is the sidebar's current sub-link (no tab row), the filter, ⋯ and Add to list sit in the header, the first section is the left column and the rest the right, the dock is a right-aligned row under the header, and select mode shows the Selection bar inline over one list and posts both ids",
+        grocDesk.current.startsWith("Groceries") &&
+            grocDesk.tabs === "none" &&
+            grocDesk.actions.join("|") ===
+                "Filter by store|Groceries options|Add to list" &&
+            grocDesk.phoneTools === "none" &&
+            grocDesk.leftHas.join("|") === "Dairy & eggs · Costco" &&
+            grocDesk.rightHas.join("|") ===
+                "Produce · Costco|Meat · Costco|Pantry · Trader Joe's" &&
+            grocDesk.sideBySide &&
+            grocDesk.dockStatic &&
+            grocDesk.dockRight &&
+            grocDesk.dockBelowHeader &&
+            grocDesk.rowMenuVisible &&
+            grocDeskSel.inline &&
+            grocDeskSel.phoneBar === "none" &&
+            grocDeskSel.dock === "none" &&
+            grocDeskSel.oneColumn &&
+            grocDeskSel.buttons === "Delete 2" &&
+            grocDeskSel.head === "2 selectedCancel" &&
+            grocDeskPosts.join("\n") ===
+                "/kitchen/groceries/bulk/delete return_to=/kitchen/groceries&ids[]=gl-chicken&ids[]=gl-oil",
+        { grocDesk, grocDeskSel, grocDeskPosts, ex: drain() },
+    );
+    await goto("/");
+    await setMarker();
+
     // Quick add and water post the routes they always did.
     await goto("/");
     await setMarker();

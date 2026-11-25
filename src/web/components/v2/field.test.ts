@@ -201,3 +201,13 @@ test("a number box takes its bounds, step and keypad; a date-time box is a type"
         String(field({ id: "a", label: "A", name: "a", step: "any" })),
     ).toContain('step="any"');
 });
+
+test("a field can belong to a form it sits outside of", () => {
+    const html = String(
+        field({ id: "n", label: "Note", name: "note", form: "edit-form" }),
+    );
+    expect(html).toContain('form="edit-form"');
+    expect(
+        String(field({ id: "n", label: "Note", name: "note" })),
+    ).not.toContain("form=");
+});

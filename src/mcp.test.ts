@@ -17567,7 +17567,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(groceryHtml).toContain(
             '<a class="fd-kitchen-tab" href="/kitchen/groceries" aria-current="page">',
         );
-        expect(groceryHtml).toContain("Nothing on the grocery list yet.");
+        expect(groceryHtml).toContain("Nothing on the list yet");
         expect(groceryHtml).not.toContain("Coming soon.");
 
         const recipes = await siteApp.request("http://x/recipes", {
@@ -18224,7 +18224,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(html).toContain("Safeway");
         expect(html).toContain("Foil");
         expect(html).toContain("Uncheck");
-        expect(html).toContain('id="fd-grocery-clear-checked"');
+        expect(html).toContain('id="fd-grocery-clear-form"');
         const clear = await siteApp.request(
             "http://x/kitchen/groceries/clear-checked",
             {
@@ -18257,8 +18257,10 @@ describe("authenticated dashboard HTTP", () => {
         });
         expect(add.status).toBe(400);
         const html = await add.text();
-        expect(html).toContain('data-blocking="true"');
-        expect(html).toContain("Contains peanut");
+        expect(html).toContain("Add anyway");
+        expect(html).toContain('name="confirm_allergen" value="1"');
+        // The warning names the food that was typed.
+        expect(html).toContain("Peanut Butter contains peanut");
         expect(html).toContain("Bob");
         expect(html).toContain(`name="store_id" value="${store.id}"`);
         expect(await db.groceryStore.listLines("hh-1")).toEqual([]);

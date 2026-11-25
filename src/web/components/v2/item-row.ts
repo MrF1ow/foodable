@@ -4,7 +4,9 @@
  *
  *   text      title, meta (beside the title), subtitle, value (before the
  *             trailing control)
- *   lead      checkbox, radio, avatar, icon, dot
+ *   lead      checkbox, radio, check (a ring that posts a form: a grocery
+ *             line's check-off), done (the same ring, filled and not a
+ *             control), avatar, icon, dot
  *   extras    score (on the title line), macros (under the subtitle)
  *   trailing  chevron, more, add, toggle (on / off, or disabled: shown, nothing
  *             to press, and described by the row's subtitle when the row has
@@ -65,6 +67,21 @@ export type ItemRowLead =
           /** Field the ticked box posts under. */
           name?: string;
           value?: string;
+      }
+    | {
+          /**
+           * A ring that is a button: pressing it posts `form` (a grocery line's
+           * check-off). `checked` fills it; the name says what it checks.
+           */
+          kind: "check";
+          label: string;
+          checked?: boolean;
+          form: ActionForm;
+      }
+    | {
+          /** The ring filled with its tick, and nothing to press (a line already checked off). */
+          kind: "done";
+          label: string;
       }
     | {
           /** One of a group of choices: a ring that fills when picked, and the
@@ -242,6 +259,23 @@ function leadSlot(lead: ItemRowLead, disabled: boolean): Html {
                 `<label class="fd-item-row__lead fd-item-row__check"><input type="checkbox" class="fd-item-row__check-input"${attrs} aria-label="${esc(lead.label)}"><span class="fd-item-row__check-box" aria-hidden="true">${icon("check")}</span></label>`,
             );
         }
+        case "check":
+            return actionButton({
+                label: lead.label,
+                iconOnly: true,
+                className:
+                    "fd-item-row__lead fd-item-row__check fd-item-row__check-btn",
+                content: raw(
+                    `<span class="fd-item-row__check-box" aria-hidden="true">${icon("check")}</span>`,
+                ),
+                form: lead.form,
+                disabled,
+                extraAttrs: ` role="checkbox" aria-checked="${lead.checked ? "true" : "false"}"`,
+            });
+        case "done":
+            return raw(
+                `<span class="fd-item-row__lead fd-item-row__check fd-item-row__done" role="img" aria-label="${esc(lead.label)}"><span class="fd-item-row__check-box" aria-hidden="true">${icon("check")}</span></span>`,
+            );
         case "radio": {
             const attrs = [
                 ` name="${esc(lead.name)}"`,

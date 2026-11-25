@@ -34,6 +34,8 @@ export type StepperControlOptions = {
     /** The input's id; default from `name`. Pass one when two share a name. */
     id?: string;
     className?: string;
+    /** The id of a form the figure belongs to, when it sits outside that form. */
+    form?: string;
 };
 
 /** A plain finite number as text; the script counts decimals from it. */
@@ -83,7 +85,7 @@ export function stepperControl(opts: StepperControlOptions): Html {
     const unit = opts.unit
         ? `<span class="fd-stepper-control__unit" id="${esc(unitId)}">${esc(opts.unit)}</span>`
         : "";
-    const input = `<input class="fd-stepper-control__input" id="${esc(id)}" type="number" name="${esc(opts.name)}" value="${value}"${optional("min", opts.min)}${optional("max", opts.max)} step="${inputStep}" inputmode="decimal" aria-label="${esc(opts.label)}"${opts.unit ? ` aria-describedby="${esc(unitId)}"` : ""}>`;
+    const input = `<input class="fd-stepper-control__input" id="${esc(id)}" type="number" name="${esc(opts.name)}" value="${value}"${optional("min", opts.min)}${optional("max", opts.max)} step="${inputStep}" inputmode="decimal"${opts.form != null ? ` form="${esc(opts.form)}"` : ""} aria-label="${esc(opts.label)}"${opts.unit ? ` aria-describedby="${esc(unitId)}"` : ""}>`;
     const chars = Math.max(2, value.length);
     return raw(
         `<div class="${cls("fd-stepper-control", opts.className)}" data-fd-stepper${opts.inputStep != null ? ` data-fd-button-step="${buttonStep}"` : ""} style="--fd-chars:${chars}">${step("down")}<div class="fd-stepper-control__value">${input}${unit}</div>${step("up")}</div>`,

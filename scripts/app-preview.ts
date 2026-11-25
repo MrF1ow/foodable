@@ -6,6 +6,7 @@
  *   bun run preview:app            # writes tmp/app-preview/*.html, serves :4787
  *   bun run preview:app --shots    # also writes a 390px phone PNG (-390.png) and a
  *                                  # 1440px desktop PNG (-1440.png) per page, then exits
+ *   bun run preview:app --shots --only=grocery,fridge   # only pages named like so
  *
  * --shots needs Chromium on PATH (google-chrome-stable, chromium, or
  * chromium-browser — not the PATH google-chrome wrapper, which pins the GUI
@@ -2057,6 +2058,86 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             () =>
                 `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
         );
+    const groceryPage = (
+        extra: Partial<
+            import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
+        > = {},
+    ) => {
+        const legacy = groceryView(chrome) as never as {
+            stores: import("../src/web/pages/v2/kitchen-groceries.js").GroceryStoreView[];
+            locations: { id: string; name: string }[];
+        };
+        const lines = legacy.stores.flatMap((st) =>
+            st.sections.flatMap((sec) => sec.lines),
+        );
+        const names = new Map(
+            legacy.stores.flatMap((st) =>
+                st.sections.flatMap((sec) =>
+                    sec.lines.map(
+                        (row) => [row.id, [st.name, sec.name]] as const,
+                    ),
+                ),
+            ),
+        );
+        const meta = (
+            id: string,
+        ): import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesLineMeta => ({
+            plainFoodName: id === "g3" ? "Eggs" : null,
+            isUsual: id === "g3" || id === "g4",
+            allergenWarning: id === "g4" ? "Contains milk — Sam." : null,
+            storeName: names.get(id)?.[0] ?? "",
+            sectionName: names.get(id)?.[1] ?? "",
+            productScore: id === "g3" ? 74 : null,
+        });
+        return renderKitchenGroceriesV2Page(
+            buildPreviewKitchenGroceriesView(chrome as never, {
+                shareEnabled: true,
+                stores: legacy.stores,
+                locations: legacy.locations,
+                checkedLines: lines.filter((row) => row.checked),
+                openLineCount: lines.filter((row) => !row.checked).length,
+                lineMeta: new Map(lines.map((row) => [row.id, meta(row.id)])),
+                usuals: [
+                    {
+                        foodId: "p-yogurt",
+                        kind: "food",
+                        name: "Greek yogurt",
+                        subtitle: "Fage Total 2% · 1 tub",
+                        amount: 1,
+                        unit: "tub",
+                        lowBelow: "2",
+                    },
+                    {
+                        foodId: "f-bananas",
+                        kind: "food",
+                        name: "Coffee beans",
+                        subtitle: "1 bag",
+                        amount: 1,
+                        unit: "bag",
+                    },
+                    {
+                        foodId: "f-towels",
+                        kind: "supply",
+                        name: "Paper towels",
+                        subtitle: "1 each",
+                        amount: 1,
+                        unit: "each",
+                    },
+                ],
+                ...extra,
+            }),
+        );
+    };
+    // A Groceries state driven by a script after load, as a person would.
+    const groceryDriven = (
+        steps: string,
+        extra: Parameters<typeof groceryPage>[0] = {},
+    ) =>
+        groceryPage(extra).replace(
+            "</body>",
+            () =>
+                `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
+        );
     return {
         nutrition,
         "nutrition-edit-sheet": nutritionEditSheet,
@@ -2076,109 +2157,78 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "kitchen-fridge-discard": fridgeDriven(
             `document.querySelector('[data-fd-select-toggle="fridge"]').click();for(const id of ["i2","i1"])document.querySelector("#fd-fridge-row-"+id+" .fd-item-row__face").click();for(const b of document.querySelectorAll("[data-fd-select-ask]"))b.click()`,
         ),
-        grocery: renderKitchenGroceriesV2Page(
-            buildPreviewKitchenGroceriesView(chrome as never, {
-                shareEnabled: true,
-                ...((): Partial<
-                    import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
-                > => {
-                    const legacy = groceryView(chrome) as never as {
-                        stores: import("../src/web/pages/v2/kitchen-groceries.js").GroceryStoreView[];
-                        locations: { id: string; name: string }[];
-                    };
-                    const checked = legacy.stores.flatMap((s) =>
-                        s.sections.flatMap((sec) =>
-                            sec.lines.filter((row) => row.checked),
-                        ),
-                    );
-                    const open = legacy.stores.flatMap((s) =>
-                        s.sections.flatMap((sec) =>
-                            sec.lines.filter((row) => !row.checked),
-                        ),
-                    );
-                    return {
-                        stores: legacy.stores.map((store) => ({
-                            ...store,
-                            sections: store.sections.map((section) => ({
-                                ...section,
-                                lines: section.lines,
-                            })),
-                        })),
-                        checkedLines: checked,
-                        locations: legacy.locations,
-                        openLineCount: open.length,
-                        lineMeta: new Map(
-                            legacy.stores.flatMap((store) =>
-                                store.sections.flatMap((section) =>
-                                    section.lines.map((row) => [
-                                        row.id,
-                                        {
-                                            plainFoodName: row.usualProductName
-                                                ? "Eggs"
-                                                : null,
-                                            isUsual: !!row.usualProductName,
-                                            allergenWarning: null,
-                                            storeName: store.name,
-                                            sectionName: section.name,
-                                        },
-                                    ]),
-                                ),
-                            ),
-                        ),
-                    };
-                })(),
-            }),
+        // Groceries (frames 394511, 398022): rows by section, the checked
+        // ones above the dock, then each state the design draws.
+        grocery: groceryPage(),
+        // mcp-share-links off: no Share list in the tab row's ⋯.
+        "grocery-share-off": groceryPage({ shareEnabled: false }),
+        // The store filter pull-down (394677) with both stores ticked.
+        "grocery-filter": groceryDriven(
+            `[...document.querySelectorAll('[data-anchor="filter"] [data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
+            { selectedStoreIds: ["s1", "s2"] },
         ),
-        "grocery-put-away": renderKitchenGroceriesV2Page(
-            buildPreviewKitchenGroceriesView(chrome as never, {
-                shareEnabled: true,
-                ...((): Partial<
-                    import("../src/web/pages/v2/kitchen-groceries.js").KitchenGroceriesV2View
-                > => {
-                    const legacy = groceryView(chrome) as never as {
-                        stores: import("../src/web/pages/v2/kitchen-groceries.js").GroceryStoreView[];
-                        locations: { id: string; name: string }[];
-                    };
-                    const checked = legacy.stores
-                        .flatMap((s) => s.sections.flatMap((sec) => sec.lines))
-                        .filter((row) => row.checked);
-                    return {
-                        stores: legacy.stores.map((store) => ({
-                            ...store,
-                            sections: store.sections.map((s) => ({
-                                ...s,
-                                lines: [],
-                            })),
-                        })),
-                        checkedLines: checked.length
-                            ? checked
-                            : [
-                                  {
-                                      id: "g2",
-                                      householdId: H,
-                                      storeId: "s1",
-                                      sectionId: "sec1",
-                                      kind: "food" as const,
-                                      displayName: "Spinach",
-                                      quantity: {
-                                          amount: 300,
-                                          unit: "g",
-                                      },
-                                      foodId: "f-g2",
-                                      checked: true,
-                                      source: "manual" as const,
-                                      sourceFridgeItemId: null,
-                                      note: null,
-                                      alreadyHave: null,
-                                      lastLocationId: "l1",
-                                  },
-                              ],
-                        locations: legacy.locations,
-                        openLineCount: 0,
-                        openPutAway: true,
-                    };
-                })(),
-            }),
+        // The tab row's ⋯: Share list, Select, Clear checked.
+        "grocery-menu": groceryDriven(
+            `[...document.querySelectorAll('[aria-label="Groceries options"][data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
+        ),
+        // A row's ⋯: Check off, Edit, Delete.
+        "grocery-row-menu": groceryDriven(
+            `document.querySelector("#fd-grocery-row-g1 .fd-menu [data-fd-menu-trigger]").click()`,
+        ),
+        // Add to list (394843): the low usuals as chips, then the rest.
+        "grocery-add": groceryPage({ openAdd: true }),
+        // A line's sheet (398664): amount, store, section, note.
+        "grocery-line": groceryPage({ openLineId: "g4" }),
+        // Select mode with two rows picked.
+        "grocery-select": groceryDriven(
+            `document.querySelector('[data-fd-select-toggle="groceries"]').click();for(const id of ["g1","g4"])document.querySelector("#fd-grocery-row-"+id+" .fd-item-row__face").click()`,
+        ),
+        // Put away (395390) the checked lines.
+        "grocery-put-away": groceryPage({ openPutAway: true }),
+        // A noted line asks how much of it came home, in its own unit.
+        "grocery-put-away-noted": groceryPage({
+            openPutAway: true,
+            checkedLines: (
+                groceryView(chrome) as never as {
+                    stores: import("../src/web/pages/v2/kitchen-groceries.js").GroceryStoreView[];
+                }
+            ).stores
+                .flatMap((st) => st.sections.flatMap((sec) => sec.lines))
+                .filter((row) => row.checked)
+                .map((row, i) =>
+                    i === 0
+                        ? {
+                              ...row,
+                              note: "to taste",
+                              quantity: { amount: 2, unit: "bunch" },
+                          }
+                        : row,
+                ),
+        }),
+        // The Add sheet's did-you-mean question (shared buttons, an Item row
+        // with a Toggle) and the line sheet's Section pull-down open.
+        "grocery-did-you-mean": groceryPage({
+            openAdd: true,
+            didYouMean: {
+                modalId: "grocery-add-food-",
+                action: "/kitchen/groceries/lines",
+                view: {
+                    name: "yogurt",
+                    heading: "Did you mean one of these?",
+                    candidates: [
+                        { foodId: "p-yogurt", label: "Greek yogurt" },
+                        { foodId: "f-yogurt", label: "Plain yogurt" },
+                    ],
+                    aliasLabel:
+                        "Remember yogurt as another name for the food you pick",
+                    newFoodLabel: "Add yogurt as a new food",
+                    hiddenFields: { kind: "food", food_name: "yogurt" },
+                },
+            },
+        }),
+        "grocery-line-section-menu": groceryDriven(
+            `document.querySelector("#fd-grocery-line-g4 .fd-list-group > li:nth-child(2) [data-fd-menu-trigger]").click()`,
+            { openLineId: "g4" },
         ),
         "kitchen-usuals": renderKitchenUsualsV2Page(
             previewKitchenUsualsView(chrome as never),
@@ -3307,8 +3357,17 @@ if (process.argv.includes("--shots")) {
     // One Chromium for the whole run, a private context per shot (see
     // scripts/app-preview-shots.ts). Always closed, whatever happens.
     const browser = await launchBrowser(chromium, `${OUT}/chrome-shots`);
+    // `--only=grocery,fridge` shoots just the pages whose name starts with one
+    // of those words (all of them without it).
+    const only = process.argv
+        .find((arg) => arg.startsWith("--only="))
+        ?.slice("--only=".length)
+        .split(",")
+        .filter(Boolean);
+    const wanted = (name: string) =>
+        !only || only.some((word) => name.startsWith(word));
     try {
-        for (const name of names) {
+        for (const name of names.filter(wanted)) {
             // Bare pages follow the OS; headless Chromium defaults to dark, so
             // emulate the shot's colour scheme.
             const scheme = colorSchemeOf(name);
@@ -3364,7 +3423,7 @@ if (process.argv.includes("--shots")) {
                 console.log(`${OUT}/${name}-${suffix}.png`);
             }
         }
-        for (const name of modalShotPages) {
+        for (const name of modalShotPages.filter(wanted)) {
             const png = await browser.screenshot({
                 url: `${origin}/${name}.html`,
                 viewport: { width: PHONE_WIDTH, height: 844 },
