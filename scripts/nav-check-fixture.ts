@@ -66,6 +66,8 @@ import {
     RECIPE_NOT_IN_STOCK_ID,
     type RecipeDetailV2View,
 } from "../src/web/pages/v2/recipes-page.js";
+import { renderRecipeCompareV2Page } from "../src/web/pages/v2/recipes-page-compare.js";
+import type { VersionsCompare } from "../src/domain/recipe-variants.js";
 import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
@@ -1158,6 +1160,104 @@ const FIXTURE_COOK_PLACES = new Map([
     ["fi-parmesan", "Fridge"],
 ]);
 
+/** The household as the version pull-down lists it. */
+const FIXTURE_PEOPLE = [
+    { userId: "u-ethan", name: "Ethan" },
+    { userId: "u-sarah", name: "Sarah" },
+    { userId: "u-mia", name: "Mia" },
+    { userId: "u-leo", name: "Leo" },
+];
+
+/**
+ * Compare versions for the draft-named "Simple Pad See Ew" of the design:
+ * Ethan has one change, Mia two and an added line, Sarah and Leo none.
+ */
+function fixtureComparePage(chrome: unknown): string {
+    const oz = (amount: number) => ({ amount, unit: "oz" });
+    const thighs = {
+        ingredientId: "i-thighs",
+        displayName: "Chicken thighs",
+        base: oz(6),
+    };
+    const compare: VersionsCompare = {
+        recipeId: "r-draft",
+        base: [
+            { ...thighs, foodId: "f-thighs", quantity: oz(6) },
+            {
+                ingredientId: "i-fish",
+                displayName: "Fish sauce",
+                foodId: "f-fish",
+                quantity: { amount: 1, unit: "tbsp" },
+            },
+        ],
+        versions: [
+            {
+                userId: "u-ethan",
+                overrideCount: 1,
+                differences: [
+                    {
+                        kind: "amount",
+                        ref: "i-thighs",
+                        rowKey: "o-ethan-thighs@2026-11-10",
+                        ...thighs,
+                        version: oz(8),
+                    },
+                ],
+            },
+            {
+                userId: "u-mia",
+                overrideCount: 3,
+                differences: [
+                    {
+                        kind: "amount",
+                        ref: "i-thighs",
+                        rowKey: "o-mia-thighs@2026-11-10",
+                        ...thighs,
+                        version: oz(10),
+                    },
+                    {
+                        kind: "removed",
+                        ref: "i-fish",
+                        rowKey: "o-mia-fish@2026-11-10",
+                        ingredientId: "i-fish",
+                        displayName: "Fish sauce",
+                        base: { amount: 1, unit: "tbsp" },
+                    },
+                    {
+                        kind: "added",
+                        ref: "o-mia-chili",
+                        rowKey: "o-mia-chili@2026-11-10",
+                        ingredientId: null,
+                        displayName: "Chili flakes",
+                        foodId: "f-chili",
+                        version: { amount: 1, unit: "tsp" },
+                    },
+                ],
+            },
+        ],
+        usingBase: ["u-sarah", "u-leo"],
+    };
+    return renderRecipeCompareV2Page({
+        chrome: chrome as never,
+        recipeId: "r-alfredo",
+        recipeName: "Simple Pad See Ew",
+        compare,
+        people: FIXTURE_PEOPLE.map((p) => ({
+            ...p,
+            resetRowKeys:
+                p.userId === "u-ethan"
+                    ? ["o-ethan-thighs@2026-11-10"]
+                    : p.userId === "u-mia"
+                      ? [
+                            "o-mia-thighs@2026-11-10",
+                            "o-mia-fish@2026-11-10",
+                            "o-mia-chili@2026-11-10",
+                        ]
+                      : undefined,
+        })),
+    });
+}
+
 /**
  * The recipe page: Chicken alfredo, a saved recipe with a cook that falls
  * short on cream, or Simple Pad See Ew, an import still a draft. Each takes a
@@ -1171,6 +1271,10 @@ function fixtureRecipePage(
         draft?: boolean;
         saved?: boolean;
         error?: string;
+        /** Whose version is shown: Ethan's own (default), the base, or Mia's. */
+        version?: "base" | "mia";
+        /** A member sees the pull-down without Compare versions. */
+        member?: boolean;
     } = {},
 ): string {
     const draft = opts.draft === true;
@@ -1228,7 +1332,13 @@ function fixtureRecipePage(
           ]
         : [
               ingredient("i1", "f-fettuccine", "Fettuccine", 8, "oz"),
-              ingredient("i2", "f-chicken", "Chicken breast", 1, "lb"),
+              ingredient(
+                  "i2",
+                  "f-chicken",
+                  "Chicken breast",
+                  opts.version === "base" ? 6 : opts.version === "mia" ? 10 : 8,
+                  "oz",
+              ),
               ingredient("i3", "f-cream", "Heavy cream", 1, "cup"),
               ingredient("i4", "f-parmesan", "Parmesan", 50, "g"),
           ];
@@ -1259,7 +1369,15 @@ function fixtureRecipePage(
                   placeId: "l-fridge",
                   placeName: "Fridge",
                   lines: [
-                      line("i2", "Chicken breast", "1 lb"),
+                      line(
+                          "i2",
+                          "Chicken breast",
+                          opts.version === "base"
+                              ? "6 oz"
+                              : opts.version === "mia"
+                                ? "10 oz"
+                                : "8 oz",
+                      ),
                       line("i4", "Parmesan", "50 g"),
                   ],
               },
@@ -1279,16 +1397,51 @@ function fixtureRecipePage(
         alcohol_g: null,
         incomplete: draft && !opts.saved,
     };
+    const who = opts.version === "mia" ? "Mia's" : "Yours";
     const view: RecipeDetailV2View = {
         chrome: chrome as never,
         recipe: recipe as never,
-        ingredients,
+        ingredients:
+            draft || opts.version === "base"
+                ? ingredients
+                : ingredients.map((row) =>
+                      row.id === "i2"
+                          ? { ...row, versionNote: `${who} · base 6 oz` }
+                          : row,
+                  ),
         ingredientGroups,
         macrosPerPortion: macros,
         gapReasons: draft && !opts.saved ? ["Counts 1 of 11 ingredients"] : [],
         favourite: false,
         error: opts.error,
         ...(opts.share === false ? {} : { share: { open: false } }),
+        ...(draft
+            ? {}
+            : {
+                  versions: {
+                      viewerId: "u-ethan",
+                      viewing:
+                          opts.version === "base"
+                              ? "base"
+                              : opts.version === "mia"
+                                ? "u-mia"
+                                : "u-ethan",
+                      viewingName:
+                          opts.version === "base"
+                              ? "Base"
+                              : opts.version === "mia"
+                                ? "Mia"
+                                : "Ethan",
+                      changeCount:
+                          opts.version === "base"
+                              ? 0
+                              : opts.version === "mia"
+                                ? 2
+                                : 1,
+                      people: FIXTURE_PEOPLE,
+                      canCompare: opts.member !== true,
+                  },
+              }),
     };
     if (draft && !opts.saved) {
         view.draft = {
@@ -1308,6 +1461,12 @@ function fixtureRecipePage(
                 : FIXTURE_COOK_PREVIEW,
             slot: "dinner",
             viewerName: "Ethan",
+            version:
+                opts.version === "base"
+                    ? undefined
+                    : opts.version === "mia"
+                      ? "u-mia"
+                      : "u-ethan",
             places: FIXTURE_COOK_PLACES,
             submitKey: "fixture",
             open: opts.open === "cook",
@@ -1520,6 +1679,11 @@ async function pages(
         "recipe-plan": fixtureRecipePage(chrome, { open: "plan" }),
         "recipe-cook": fixtureRecipePage(chrome, { open: "cook" }),
         "recipe-share-off": fixtureRecipePage(chrome, { share: false }),
+        // Whose version: the base, Mia's, and a member (no Compare versions).
+        "recipe-base": fixtureRecipePage(chrome, { version: "base" }),
+        "recipe-mia": fixtureRecipePage(chrome, { version: "mia" }),
+        "recipe-member": fixtureRecipePage(chrome, { member: true }),
+        "recipe-compare": fixtureComparePage(chrome),
         "recipe-draft": fixtureRecipePage(chrome, { draft: true }),
         "recipe-draft-refused": fixtureRecipePage(chrome, {
             draft: true,
@@ -1714,6 +1878,10 @@ const ROUTE_BASE: Record<string, string> = {
     "/recipes/r-alfredo": "recipe",
     "/recipes/r-alfredo?cook=1": "recipe-cook",
     "/recipes/r-alfredo?share=off": "recipe-share-off",
+    "/recipes/r-alfredo?member=base": "recipe-base",
+    "/recipes/r-alfredo?member=u-mia": "recipe-mia",
+    "/recipes/r-alfredo?role=member": "recipe-member",
+    "/recipes/r-alfredo/compare": "recipe-compare",
     "/recipes/r-draft": "recipe-draft",
     "/recipes/r-draft?saved=1": "recipe-saved",
     "/recipes/r-alfredo?plan=1": "recipe-plan",

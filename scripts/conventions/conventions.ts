@@ -373,6 +373,8 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/client/v2/scanner.test.ts": "web",
     "src/web/client/v2/scanner-zxing-entry.js": "web",
     "public/app/v2/scanner.css": "web",
+    "src/web/pages/v2/recipes-page-compare.ts": "web",
+    "src/web/pages/v2/recipes-page-compare.test.ts": "web",
     "src/web/pages/v2/recipes-page-cook.ts": "web",
     "src/web/pages/v2/recipes-page-cook.test.ts": "web",
     "src/web/pages/v2/recipes-page-mentions.ts": "web",

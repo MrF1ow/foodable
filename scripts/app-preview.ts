@@ -51,6 +51,8 @@ import {
     renderRecipeDetailV2Page,
 } from "../src/web/pages/v2/recipes-page.js";
 import type { CookSheetView } from "../src/web/pages/v2/recipes-page-cook.js";
+import { renderRecipeCompareV2Page } from "../src/web/pages/v2/recipes-page-compare.js";
+import type { VersionsCompare } from "../src/domain/recipe-variants.js";
 import {
     renderNotificationsPage,
     type NotificationsPageView,
@@ -1927,6 +1929,221 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 : { cook: { ...cookSheet, recipeName: recipe.name } }),
         });
     };
+    // Whose version of Chicken alfredo, as the versions frames draw it: Ethan's
+    // own (one change from the base), the pull-down open, and the admin's
+    // Compare versions with a person's ⋯ open. A script opens the menu after
+    // load, as a person would.
+    const alfredoVersions = (steps?: string) => {
+        const line = (
+            id: string,
+            displayName: string,
+            amount: number,
+            unit: string,
+            versionNote?: string,
+        ) => ({
+            id,
+            recipeId: "r1",
+            foodId: `f-${id}`,
+            displayName,
+            quantity: { amount, unit },
+            note: null,
+            sortOrder: 0,
+            perPortionAmount: amount / 4,
+            personAmount: amount / 4,
+            ...(versionNote ? { versionNote } : {}),
+        });
+        const ingredients = [
+            line("fet", "Fettuccine", 8, "oz"),
+            line("chk", "Chicken breast", 8, "oz", "Yours · base 6 oz"),
+            line("crm", "Heavy cream", 1, "cup"),
+            line("par", "Parmesan", 0.5, "cup"),
+            line("gar", "Garlic", 2, "each"),
+            {
+                ...line("slt", "Salt", 0, "g"),
+                quantity: null,
+                note: "to taste",
+            },
+        ];
+        const places: Record<string, string> = {
+            fet: "l2",
+            chk: "l1",
+            crm: "l1",
+            par: "l1",
+            gar: "l2",
+            slt: "l2",
+        };
+        const html = renderRecipeDetailV2Page({
+            chrome,
+            recipe: {
+                ...RECIPE,
+                name: "Chicken alfredo",
+                yieldPortions: 4,
+                instructions:
+                    "Boil the fettuccine until al dente, 10 minutes\nSear the chicken 6 minutes a side, then slice\nMelt butter with garlic, add cream and parmesan",
+                sourceUrl: "https://www.seriouseats.com/chicken-alfredo",
+                prepMinutes: 10,
+                cookMinutes: 20,
+            },
+            ingredients: ingredients as never,
+            ingredientGroups: groupRecipeIngredientsByPlace(
+                ingredients as never,
+                ingredients.map((ing) => ({
+                    id: `fi-${ing.id}`,
+                    householdId: H,
+                    locationId: places[ing.id]!,
+                    kind: "food" as const,
+                    displayName: ing.displayName,
+                    quantity: ing.quantity ?? { amount: 1, unit: "each" },
+                    foodId: ing.foodId,
+                    expiresOn: null,
+                })),
+                [
+                    { id: "l1", householdId: H, name: "Fridge", sortOrder: 0 },
+                    { id: "l2", householdId: H, name: "Pantry", sortOrder: 1 },
+                ],
+                new Map(
+                    ingredients.map((ing) => [
+                        ing.foodId,
+                        { id: ing.foodId, genericFoodId: null },
+                    ]),
+                ),
+            ),
+            macrosPerPortion: {
+                ...MACROS,
+                calories: 690,
+                protein_g: 42,
+                carbs_g: 58,
+                fat_g: 31,
+                incomplete: true,
+            } as never,
+            gapReasons: ["Counts 5 of 6 ingredients"],
+            favourite: false,
+            cook: { ...cookSheet, recipeName: "Chicken alfredo" },
+            plan: {
+                recipeId: "r1",
+                recipeName: "Chicken alfredo",
+                yieldPortions: 4,
+                today: "2026-11-10",
+                date: "2026-11-11",
+                slot: "dinner",
+                servings: 4,
+            },
+            versions: {
+                viewerId: "u-ethan",
+                viewing: "u-ethan",
+                viewingName: "Ethan",
+                changeCount: 1,
+                people: [
+                    { userId: "u-ethan", name: "Ethan" },
+                    { userId: "u-sarah", name: "Sarah" },
+                    { userId: "u-mia", name: "Mia" },
+                    { userId: "u-leo", name: "Leo" },
+                ],
+                canCompare: true,
+            },
+        });
+        return steps
+            ? html.replace(
+                  "</body>",
+                  () =>
+                      `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
+              )
+            : html;
+    };
+    const compareVersionsPage = (steps?: string) => {
+        const oz = (amount: number) => ({ amount, unit: "oz" });
+        const thighs = {
+            ingredientId: "i-thighs",
+            displayName: "Chicken thighs",
+            base: oz(6),
+        };
+        const compare: VersionsCompare = {
+            recipeId: "r1",
+            base: [
+                {
+                    ingredientId: "i-thighs",
+                    displayName: "Chicken thighs",
+                    foodId: "f-thighs",
+                    quantity: oz(6),
+                },
+                {
+                    ingredientId: "i-fish",
+                    displayName: "Fish sauce",
+                    foodId: "f-fish",
+                    quantity: { amount: 1, unit: "tbsp" },
+                },
+            ],
+            versions: [
+                {
+                    userId: "u-ethan",
+                    overrideCount: 1,
+                    differences: [
+                        {
+                            kind: "amount",
+                            ref: "i-thighs",
+                            rowKey: "a@1",
+                            ...thighs,
+                            version: oz(8),
+                        },
+                    ],
+                },
+                {
+                    userId: "u-mia",
+                    overrideCount: 3,
+                    differences: [
+                        {
+                            kind: "amount",
+                            ref: "i-thighs",
+                            rowKey: "b@1",
+                            ...thighs,
+                            version: oz(10),
+                        },
+                        {
+                            kind: "removed",
+                            ref: "i-fish",
+                            rowKey: "c@1",
+                            ingredientId: "i-fish",
+                            displayName: "Fish sauce",
+                            base: { amount: 1, unit: "tbsp" },
+                        },
+                        {
+                            kind: "added",
+                            ref: "d",
+                            rowKey: "d@1",
+                            ingredientId: null,
+                            displayName: "Chili flakes",
+                            foodId: "f-chili",
+                            version: { amount: 1, unit: "tsp" },
+                        },
+                    ],
+                },
+            ],
+            usingBase: ["u-sarah", "u-leo"],
+        };
+        const html = renderRecipeCompareV2Page({
+            chrome,
+            recipeId: "r1",
+            recipeName: "Simple Pad See Ew",
+            compare,
+            people: [
+                { userId: "u-ethan", name: "Ethan", resetRowKeys: ["a@1"] },
+                { userId: "u-sarah", name: "Sarah" },
+                {
+                    userId: "u-mia",
+                    name: "Mia",
+                    resetRowKeys: ["b@1", "c@1", "d@1"],
+                },
+                { userId: "u-leo", name: "Leo" },
+            ],
+        });
+        return steps
+            ? html.replace(
+                  "</body>",
+                  () =>
+                      `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
+              )
+            : html;
+    };
     const recipesListV2 = (
         extra: Partial<Parameters<typeof renderRecipesListV2Page>[0]> = {},
     ) =>
@@ -2399,6 +2616,16 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ],
         }),
         recipe: recipeV2(cookSheet),
+        // Whose version (frames 402459, 402619, 402803): the page on Ethan's
+        // version, the pull-down open, Compare versions and Mia's ⋯ open.
+        "recipe-version": alfredoVersions(),
+        "recipe-version-menu": alfredoVersions(
+            `document.querySelector(".fd-recipe-version [data-fd-menu-trigger]").click()`,
+        ),
+        "recipe-compare": compareVersionsPage(),
+        "recipe-compare-menu": compareVersionsPage(
+            `document.querySelectorAll(".fd-recipe-compare .fd-page-layout__column:last-child .fd-item-row [data-fd-menu-trigger]")[1].click()`,
+        ),
         "recipe-mentions": padSeeEw(),
         // The draft bar: Save and what is left, in place of Cook and Plan.
         "recipe-draft": padSeeEw({

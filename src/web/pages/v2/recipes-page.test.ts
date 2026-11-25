@@ -5,8 +5,10 @@ import { findMissingMentions } from "../../../domain/recipe-mentions.js";
 import type { Recipe, RecipeMacros } from "../../../domain/recipes.js";
 import {
     groupRecipeIngredientsByPlace,
+    ingredientVersionNote,
     RECIPE_NOT_IN_STOCK_ID,
     renderRecipeDetailBody,
+    type RecipeVersionPicker,
 } from "./recipes-page.js";
 
 const HH = "hh-1";
@@ -863,5 +865,172 @@ describe("the steps-mention warnings on the recipe page", () => {
             }),
         );
         expect(html).toContain('the <span class="fd-mention-mark">egg</span>.');
+    });
+});
+
+describe("the whose-version pull-down", () => {
+    const people = [
+        { userId: "u-ethan", name: "Ethan" },
+        { userId: "u-mia", name: "Mia" },
+    ];
+    const picker = (over: Partial<RecipeVersionPicker> = {}) => ({
+        viewerId: "u-ethan",
+        viewing: "u-ethan",
+        viewingName: "Ethan",
+        changeCount: 1,
+        people,
+        canCompare: true,
+        ...over,
+    });
+    const render = (over: Partial<RecipeVersionPicker> = {}) =>
+        renderRecipeDetailBody({ ...viewBase, versions: picker(over) });
+    const panel = (html: string) =>
+        first(
+            html,
+            /<div class="fd-menu__panel" role="menu" aria-label="Whose version"[\s\S]*?<\/div><\/div>/,
+        );
+    const labels = (html: string) =>
+        [...html.matchAll(/<span class="fd-menu__label">([^<]*)<\/span>/g)].map(
+            (m) => m[1],
+        );
+
+    test("without versions the caption is plain words", () => {
+        const html = renderRecipeDetailBody({ ...viewBase });
+        expect(html).toContain('<p class="fd-recipe-caption">Per serving</p>');
+        expect(html).not.toContain("fd-recipe-version");
+    });
+
+    test("the caption is a Link button naming whose version and how far it departs", () => {
+        const html = render();
+        const trigger = first(
+            html,
+            /<button type="button" class="[^"]*fd-btn--link[^"]*"[^>]*data-fd-menu-trigger[\s\S]*?<\/button>/,
+        );
+        expect(trigger).toContain("fd-btn--link");
+        expect(trigger).toContain("fd-icon--users");
+        expect(trigger).toContain("Per serving · Ethan · 1 change from base");
+        expect(trigger).toContain('aria-haspopup="menu"');
+        expect(render({ changeCount: 2 })).toContain("2 changes from base");
+        // A version that is the base says only whose it is.
+        expect(render({ changeCount: 0 })).toContain("Per serving · Ethan<");
+        expect(
+            render({ viewing: "base", viewingName: "Base", changeCount: 0 }),
+        ).toContain("Per serving · Base<");
+    });
+
+    test("the menu lists Base and every person, ticks the one shown, and links to each", () => {
+        const html = render();
+        expect(labels(panel(html))).toEqual([
+            "Base",
+            "Ethan",
+            "Mia",
+            "Compare versions",
+        ]);
+        const menu = panel(html);
+        expect(menu).toContain('href="/recipes/r1?member=base"');
+        // The viewer's own version is the page's plain address.
+        expect(menu).toContain('href="/recipes/r1"');
+        expect(menu).toContain('href="/recipes/r1?member=u-mia"');
+        expect(menu).toContain('href="/recipes/r1/compare"');
+        expect(menu.match(/aria-checked="true"/g)).toHaveLength(1);
+        const ticked = (markup: string) =>
+            markup
+                .split("<a ")
+                .filter((item) => item.includes('aria-checked="true"'))
+                .map((item) => labels(item)[0]);
+        expect(ticked(menu)).toEqual(["Ethan"]);
+        expect(
+            ticked(
+                panel(
+                    render({
+                        viewing: "base",
+                        viewingName: "Base",
+                        changeCount: 0,
+                    }),
+                ),
+            ),
+        ).toEqual(["Base"]);
+    });
+
+    test("Compare versions is only there for who may compare", () => {
+        const html = render({ canCompare: false });
+        expect(labels(panel(html))).toEqual(["Base", "Ethan", "Mia"]);
+        expect(html).not.toContain("/compare");
+    });
+
+    test("a line the version changed says who changed it and what it was", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            ingredients: [
+                { ...FLOUR, versionNote: "Yours · base 6 oz" },
+                BUTTERMILK,
+            ],
+            versions: picker(),
+        });
+        expect(html).toContain("Yours · base 6 oz · Not in stock");
+        // The other line has no note.
+        expect(html.match(/base 6 oz/g)).toHaveLength(1);
+    });
+
+    test("the portions line names whose portions it counts", () => {
+        const others = renderRecipeDetailBody({
+            ...viewBase,
+            portionCount: 2,
+            versions: picker({ viewing: "u-mia", viewingName: "Mia" }),
+        });
+        expect(others).toContain("2 portions for Mia");
+        expect(render()).not.toContain("for Mia");
+        expect(
+            renderRecipeDetailBody({
+                ...viewBase,
+                portionCount: 2,
+                versions: picker(),
+            }),
+        ).toContain("2 portions for you");
+    });
+
+    test("ingredientVersionNote says what the line was in the base", () => {
+        const base = {
+            displayName: "Chicken breast",
+            quantity: { amount: 6, unit: "oz" } as const,
+        };
+        expect(ingredientVersionNote("Yours", "amount", base)).toBe(
+            "Yours · base 6 oz",
+        );
+        expect(ingredientVersionNote("Mia's", "food", base)).toBe(
+            "Mia's · base Chicken breast 6 oz",
+        );
+        expect(ingredientVersionNote("Yours", "add", undefined)).toBe(
+            "Yours · not in base",
+        );
+        expect(
+            ingredientVersionNote("Yours", "amount", {
+                displayName: "Salt",
+                quantity: null,
+            }),
+        ).toBe("Yours · base to taste");
+    });
+
+    test("the cook sheet carries the version it cooks", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            cook: { ...COOK, version: "u-mia" },
+            plan: PLAN,
+        });
+        expect(html).toContain(
+            'data-fd-cook-preview-url="/recipes/r1/cook/preview/u-mia"',
+        );
+        expect(html).toContain(
+            '<input type="hidden" name="version" value="u-mia">',
+        );
+        const base = renderRecipeDetailBody({
+            ...viewBase,
+            cook: COOK,
+            plan: PLAN,
+        });
+        expect(base).toContain(
+            'data-fd-cook-preview-url="/recipes/r1/cook/preview"',
+        );
+        expect(base).not.toContain('name="version"');
     });
 });

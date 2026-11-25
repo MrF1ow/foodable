@@ -1714,6 +1714,286 @@ try {
         recipePageOk,
         { ...recipePageRes, ex: drain() },
     );
+    // ---- Recipe versions: the whose-version pull-down, Compare versions,
+    // Make a version the base, and reset ----
+    const versionsRes: Record<string, unknown> = {};
+    let versionsOk = true;
+    for (const width of [390, 1440]) {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 600 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: false,
+        });
+        await control("reset=posts");
+        await goto("/recipes/r-alfredo");
+        await setMarker();
+        await sleep(800);
+        const own = await ev<{
+            link: string | null;
+            icon: boolean;
+            onScreen: boolean;
+            note: string | null;
+            fits: boolean;
+            cookVersion: string | null;
+        }>(`(() => {
+            const link = document.querySelector(".fd-recipe-version [data-fd-menu-trigger]");
+            const r = link?.getBoundingClientRect();
+            return {
+                link: link?.textContent.trim() ?? null,
+                icon: !!link?.querySelector("svg"),
+                onScreen: !!r && r.left >= 0 && r.right <= ${width} && r.width > 0,
+                note: document.querySelectorAll(".fd-recipe-detail .fd-page-layout .fd-item-row")[1]?.querySelector(".fd-item-row__subtitle")?.textContent ?? null,
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+                cookVersion: document.querySelector("[data-fd-cook-form] [name=version]")?.value ?? null,
+            };
+        })()`);
+        // The pull-down: Base, each person with a tick on the one shown, and
+        // Compare versions; every item reachable and on the screen.
+        await clickSel(".fd-recipe-version [data-fd-menu-trigger]");
+        await sleep(250);
+        const pullReach = await reachItems(".fd-recipe-version");
+        const pull = await ev<{
+            labels: string[];
+            ticked: string[];
+            inside: boolean;
+            fits: boolean;
+        }>(`(() => {
+            const panel = document.querySelector(".fd-recipe-version .fd-menu__panel");
+            const r = panel.getBoundingClientRect();
+            return {
+                labels: [...panel.querySelectorAll(".fd-menu__label")].map((e) => e.textContent),
+                ticked: [...panel.querySelectorAll('[aria-checked="true"]')].map((e) => e.textContent.trim()),
+                inside: r.left >= 0 && r.right <= ${width} && r.width > 0,
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+            };
+        })()`);
+        // Pick Mia: a Turbo visit, her amount on the row, and the cook sheet
+        // carries her version to the preview and the confirm.
+        await clickSel(
+            '.fd-recipe-version a[href="/recipes/r-alfredo?member=u-mia"]',
+        );
+        await sleep(900);
+        const mia = await ev<{
+            at: string;
+            link: string | null;
+            note: string | null;
+            marker: string | null;
+            cookVersion: string | null;
+            previewUrl: string | null;
+            fits: boolean;
+        }>(`({
+            at: location.pathname + location.search,
+            link: document.querySelector(".fd-recipe-version [data-fd-menu-trigger]")?.textContent.trim() ?? null,
+            note: document.querySelectorAll(".fd-recipe-detail .fd-page-layout .fd-item-row")[1]?.querySelector(".fd-item-row__subtitle")?.textContent ?? null,
+            marker: window.__marker ?? null,
+            cookVersion: document.querySelector("[data-fd-cook-form] [name=version]")?.value ?? null,
+            previewUrl: document.querySelector("[data-fd-cook-form]")?.getAttribute("data-fd-cook-preview-url") ?? null,
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+        })`);
+        // The base: no change on any row, and the cook is the base's.
+        await goto("/recipes/r-alfredo?member=base");
+        await sleep(600);
+        const base = await ev<{
+            link: string | null;
+            notes: number;
+            cookVersion: string | null;
+            ticked: string[];
+        }>(`(() => {
+            document.querySelector(".fd-recipe-version [data-fd-menu-trigger]").click();
+            return {
+                link: document.querySelector(".fd-recipe-version [data-fd-menu-trigger]")?.textContent.trim() ?? null,
+                notes: [...document.querySelectorAll(".fd-recipe-detail .fd-page-layout .fd-item-row .fd-item-row__subtitle")].filter((e) => /base/i.test(e.textContent)).length,
+                cookVersion: document.querySelector("[data-fd-cook-form] [name=version]")?.value ?? null,
+                ticked: [...document.querySelectorAll('.fd-recipe-version [aria-checked="true"]')].map((e) => e.textContent.trim()),
+            };
+        })()`);
+        // A member sees the pull-down and never Compare versions.
+        await goto("/recipes/r-alfredo?role=member");
+        await clickSel(".fd-recipe-version [data-fd-menu-trigger]");
+        await sleep(250);
+        const memberPull = await ev<string[]>(
+            `[...document.querySelectorAll(".fd-recipe-version .fd-menu__label")].map((e) => e.textContent)`,
+        );
+        // Compare versions, from the owner's pull-down.
+        await goto("/recipes/r-alfredo");
+        await setMarker();
+        await clickSel(".fd-recipe-version [data-fd-menu-trigger]");
+        await sleep(250);
+        await clickSel(
+            '.fd-recipe-version a[href="/recipes/r-alfredo/compare"]',
+        );
+        await sleep(900);
+        const compare = await ev<{
+            at: string;
+            title: string | null;
+            marker: string | null;
+            differing: { title: string | null; sub: string | null }[];
+            people: {
+                title: string | null;
+                sub: string | null;
+                menu: boolean;
+            }[];
+            fits: boolean;
+        }>(`({
+            at: location.pathname + location.search,
+            title: document.querySelector(".fd-detail-bar__title")?.textContent ?? null,
+            marker: window.__marker ?? null,
+            differing: [...document.querySelectorAll(".fd-recipe-compare .fd-page-layout__column:first-child .fd-item-row")].map((r) => ({
+                title: r.querySelector(".fd-item-row__title")?.textContent ?? null,
+                sub: r.querySelector(".fd-item-row__subtitle")?.textContent ?? null,
+            })),
+            people: [...document.querySelectorAll(".fd-recipe-compare .fd-page-layout__column:last-child .fd-item-row")].map((r) => ({
+                title: r.querySelector(".fd-item-row__title")?.textContent ?? null,
+                sub: r.querySelector(".fd-item-row__subtitle")?.textContent ?? null,
+                menu: !!r.querySelector("[data-fd-menu-trigger]"),
+            })),
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+        })`);
+        // Mia's ⋯: Align to base, Make hers the base, Delete her version, all reachable.
+        const miaMenu =
+            ".fd-recipe-compare .fd-page-layout__column:last-child li:nth-child(3) .fd-menu";
+        await clickSel(miaMenu + " [data-fd-menu-trigger]");
+        await sleep(250);
+        const miaReach = await reachItems(miaMenu);
+        // Align to base is drawn plain, Delete in the danger tone.
+        const armTones = await ev<boolean[]>(
+            `[...document.querySelectorAll(${JSON.stringify(miaMenu + " [data-fd-menu-arm]")})].map((b) => b.classList.contains("fd-menu__item--danger"))`,
+        );
+        const miaLabels = await ev<string[]>(
+            `[...document.querySelectorAll(${JSON.stringify(miaMenu + " .fd-menu__label")})].filter((e) => e.getClientRects().length > 0).map((e) => e.textContent)`,
+        );
+        // Make Mia's the base: the sheet lists what align can push (not the
+        // removal), and Use posts that change, as the compare read named it.
+        await control("reset=posts");
+        await clickSel(miaMenu + ' [commandfor="fd-compare-base-u-mia"]');
+        await sleep(500);
+        const makeBase = await ev<{
+            open: boolean;
+            rows: string[];
+            fits: boolean;
+        }>(`({
+            open: !!document.querySelector("#fd-compare-base-u-mia[open]"),
+            rows: [...document.querySelectorAll("#fd-compare-base-u-mia .fd-item-row .fd-item-row__title")].map((e) => e.textContent),
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+        })`);
+        const makeBaseControls = await dialogControls();
+        await ev(
+            `document.querySelector('#fd-compare-base-u-mia form[action$="/versions/align"] button[type=submit]').click()`,
+        );
+        await sleep(700);
+        const alignPosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-alfredo/versions/align",
+        );
+        // Delete Mia's version asks in place, then posts the rows it showed.
+        await goto("/recipes/r-alfredo/compare");
+        await control("reset=posts");
+        await clickSel(miaMenu + " [data-fd-menu-trigger]");
+        await sleep(250);
+        await ev(
+            `[...document.querySelectorAll(${JSON.stringify(miaMenu + " [data-fd-menu-arm]")})].find((b) => /Delete/.test(b.textContent)).click()`,
+        );
+        await sleep(200);
+        const asked = await ev<{ confirm: string[] }>(`({
+            confirm: [...document.querySelectorAll(${JSON.stringify(miaMenu + " .fd-menu__confirm-row:not([hidden]) .fd-menu__label")})].map((e) => e.textContent),
+        })`);
+        const noPostYet = (await stats()).posts.length === 0;
+        await ev(
+            `document.querySelector(${JSON.stringify(miaMenu + " .fd-menu__confirm-row:not([hidden]) form button[type=submit]")}).click()`,
+        );
+        await sleep(700);
+        const resetPosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-alfredo/versions/reset",
+        );
+        const entry = (
+            posts: { entries: [string, string][] }[],
+            name: string,
+        ) => posts[0]?.entries.filter(([k]) => k === name).map(([, v]) => v);
+        const ok =
+            own.link === "Per serving · Ethan · 1 change from base" &&
+            own.icon &&
+            own.onScreen &&
+            own.note?.startsWith("Yours · base 6 oz") === true &&
+            own.fits &&
+            own.cookVersion === "u-ethan" &&
+            pullReach.n === 6 &&
+            pullReach.bad.length === 0 &&
+            pull.labels.join() ===
+                "Base,Ethan,Sarah,Mia,Leo,Compare versions" &&
+            pull.ticked.join() === "Ethan" &&
+            pull.inside &&
+            pull.fits &&
+            mia.at === "/recipes/r-alfredo?member=u-mia" &&
+            mia.link === "Per serving · Mia · 2 changes from base" &&
+            mia.note?.startsWith("Mia's · base 6 oz") === true &&
+            mia.marker === "stay" &&
+            mia.cookVersion === "u-mia" &&
+            mia.previewUrl === "/recipes/r-alfredo/cook/preview/u-mia" &&
+            mia.fits &&
+            base.link === "Per serving · Base" &&
+            base.notes === 0 &&
+            base.cookVersion === null &&
+            base.ticked.join() === "Base" &&
+            memberPull.join() === "Base,Ethan,Sarah,Mia,Leo" &&
+            compare.at === "/recipes/r-alfredo/compare" &&
+            compare.title === "Compare versions" &&
+            compare.marker === "stay" &&
+            compare.differing.map((d) => d.title).join() ===
+                "Chicken thighs,Fish sauce,Chili flakes" &&
+            compare.differing.map((d) => d.sub).join("|") ===
+                "Base 6 oz · Ethan 8 oz · Mia 10 oz|Base 1 tbsp · Mia none|Not in base · Mia 1 tsp" &&
+            compare.people
+                .map((p) => `${p.title}:${p.sub}:${p.menu}`)
+                .join("|") ===
+                "Ethan:1 change:true|Sarah:No version yet:false|Mia:2 changes · 1 added:true|Leo:No version yet:false" &&
+            compare.fits &&
+            miaReach.n === 3 &&
+            miaReach.bad.length === 0 &&
+            miaLabels.join() ===
+                "Align Mia to base,Make Mia's the base,Delete Mia's version" &&
+            makeBase.open &&
+            makeBase.rows.join() === "Chicken thighs,Chili flakes" &&
+            makeBase.fits &&
+            makeBaseControls.ok &&
+            armTones.join() === "false,true" &&
+            alignPosts.length === 1 &&
+            entry(alignPosts, "back")?.join() === "compare" &&
+            entry(alignPosts, "user_id")?.join() === "u-mia" &&
+            entry(alignPosts, "ingredient_id")?.join() === "i-thighs" &&
+            entry(alignPosts, "row_key")?.join() ===
+                "o-mia-thighs@2026-11-10" &&
+            asked.confirm.join() === "Cancel,Delete" &&
+            noPostYet &&
+            resetPosts.length === 1 &&
+            entry(resetPosts, "user_id")?.join() === "u-mia" &&
+            entry(resetPosts, "confirm")?.join() === "1" &&
+            entry(resetPosts, "back")?.join() === "compare" &&
+            entry(resetPosts, "row_keys")?.join() ===
+                "o-mia-thighs@2026-11-10,o-mia-fish@2026-11-10,o-mia-chili@2026-11-10";
+        versionsRes[String(width)] = {
+            own,
+            pullReach,
+            pull,
+            mia,
+            base,
+            memberPull,
+            compare,
+            miaReach,
+            miaLabels,
+            armTones,
+            makeBase,
+            makeBaseControls,
+            alignPosts,
+            asked,
+            resetPosts,
+        };
+        versionsOk = versionsOk && ok;
+    }
+    record(
+        "v2 recipe versions at 390 and 1440: the Per serving link opens the whose-version pull-down (Base, each person with a tick, Compare versions for the owner, all reachable and on the screen), picking Mia is a Turbo visit with her amounts on the rows and the cook sheet carrying her version, the base shows no change, a member never sees Compare versions, Compare versions lists what differs and each person's changes, Mia's ⋯ (Align to base, Make hers the base, Delete her version) is reachable, Make hers the base posts the change it names, Delete asks in place and posts the rows it showed; every sheet button measured and the page never wider than the screen",
+        versionsOk,
+        { ...versionsRes, ex: drain() },
+    );
     await send("Emulation.setDeviceMetricsOverride", {
         width: 1440,
         height: 960,

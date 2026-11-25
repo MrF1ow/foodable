@@ -255,6 +255,22 @@ test("a destructive item is an arm button and a hidden Cancel + verb row that po
     expect(html).not.toContain("<dialog");
 });
 
+test("a plain destructive item still asks in place but is not drawn in the danger tone", () => {
+    const html = anchored([
+        {
+            kind: "destructive",
+            label: "Align",
+            action: "/a",
+            plain: true,
+        },
+    ]);
+    expect(html).toContain("data-fd-menu-confirm");
+    expect(html).toContain(
+        '<form class="fd-menu__form" method="post" action="/a">',
+    );
+    expect(html).not.toContain("fd-menu__item--danger");
+});
+
 test("confirmLabel defaults to the label", () => {
     const html = anchored([
         { kind: "destructive", label: "Delete", action: "/d" },
@@ -624,4 +640,76 @@ test("a menu row is the row menu in its list item, and nothing else", () => {
     );
     expect(html.endsWith("</div></li>")).toBe(true);
     expect(html).toContain('data-anchor="row"');
+});
+
+test("a link menu hangs from a small Link button that reads its own label", () => {
+    const html = menu({
+        label: "Whose version",
+        anchor: "link",
+        link: { label: "Per serving · Ethan", icon: "users" },
+        items: [
+            {
+                kind: "checked",
+                label: "Base",
+                checked: false,
+                href: "/r?member=base",
+            },
+            { kind: "checked", label: "Ethan", checked: true, href: "/r" },
+            { kind: "link", label: "Compare versions", href: "/r/compare" },
+        ],
+    });
+    expect(html).toContain("fd-menu--link");
+    expect(html).toContain('data-anchor="link"');
+    const trigger = html.match(
+        /<button[^>]*data-fd-menu-trigger[^>]*>[\s\S]*?<\/button>/,
+    )![0];
+    expect(trigger).toContain("fd-btn--link");
+    expect(trigger).toContain("fd-btn--sm");
+    expect(trigger).toContain("fd-icon--users");
+    expect(trigger).toContain("Per serving · Ethan");
+    // The label is the words; there is no aria-label saying something else.
+    expect(trigger).not.toContain("aria-label");
+    expect(html).toContain(
+        '<div class="fd-menu__panel" role="menu" aria-label="Whose version" hidden>',
+    );
+    expect(html).toContain('href="/r/compare"');
+});
+
+test("a link menu needs its link", () => {
+    expect(() =>
+        menu({
+            label: "x",
+            anchor: "link",
+            items: [{ kind: "link", label: "a", href: "/a" }],
+        }),
+    ).toThrow("link menu needs its link");
+});
+
+test("a field that is a list posts its name once per value", () => {
+    const html = menu({
+        label: "Actions",
+        items: [
+            {
+                kind: "destructive",
+                label: "Delete",
+                action: "/reset",
+                fields: { user_id: "u1", row_keys: ["a@1", "b@2"] },
+            },
+        ],
+    });
+    expect(html).toContain('<input type="hidden" name="user_id" value="u1">');
+    expect(html).toContain('<input type="hidden" name="row_keys" value="a@1">');
+    expect(html).toContain('<input type="hidden" name="row_keys" value="b@2">');
+    const none = menu({
+        label: "Actions",
+        items: [
+            {
+                kind: "destructive",
+                label: "Delete",
+                action: "/reset",
+                fields: { row_keys: [] },
+            },
+        ],
+    });
+    expect(none).not.toContain('name="row_keys"');
 });

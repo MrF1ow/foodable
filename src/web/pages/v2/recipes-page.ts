@@ -63,6 +63,26 @@ export type RecipeIngredientPlaceGroup = {
     lines: RecipeIngredientPlaceLine[];
 };
 
+/**
+ * Whose version of the recipe the page shows, and who may be picked instead.
+ * Absent on a recipe nobody has a version of (a household of one with no
+ * changes) and on a draft: the caption is then a plain "Per serving".
+ */
+export type RecipeVersionPicker = {
+    /** The viewer's own id: their version is the page's address with no `member`. */
+    viewerId: string;
+    /** `base`, or the id of the member whose version is shown. */
+    viewing: string;
+    /** Who the caption names: "Base" or the person's name. */
+    viewingName: string;
+    /** How many changes the shown version has from the base; 0 for the base. */
+    changeCount: number;
+    /** Every member of the household, in the order the menu lists them. */
+    people: { userId: string; name: string }[];
+    /** The viewer may open the compare page (`household.align_recipe_versions`). */
+    canCompare: boolean;
+};
+
 export type RecipeDetailV2View = {
     chrome: AppChromeBase;
     recipe: Recipe;
@@ -73,6 +93,8 @@ export type RecipeDetailV2View = {
     gapReasons: string[];
     /** How many portions of the recipe are the viewer's own; absent shows no line. */
     portionCount?: number;
+    /** The whose-version pull-down; see {@link RecipeVersionPicker}. */
+    versions?: RecipeVersionPicker;
     /** The viewer has starred this recipe. Absent means not. */
     favourite?: boolean;
     /**
@@ -116,7 +138,14 @@ export type RecipeDetailV2View = {
 type IngredientRow = Pick<
     RecipeIngredient,
     "id" | "foodId" | "displayName" | "quantity" | "note"
->;
+> & {
+    /**
+     * How the shown version's line differs from the base, said as the row's
+     * first subline words ("Yours · base 6 oz"); absent on a line the base
+     * has as it is.
+     */
+    versionNote?: string;
+};
 
 function ingredientAmountLabel(
     quantity: RecipeIngredient["quantity"],
@@ -235,7 +264,9 @@ function macroValue(value: number | null | undefined, grams: boolean) {
 function macrosBlock(
     macros: RecipeMacros,
     gapReasons: string[],
-    portionCount?: number,
+    portionCount: number | undefined,
+    caption: string,
+    portionsFor: string,
 ): string {
     const tiles: StatTile[] = [
         {
@@ -265,7 +296,7 @@ function macrosBlock(
     const portions =
         portionCount == null
             ? ""
-            : `<p class="fd-recipe-caption fd-recipe-portions">${portionCount === 1 ? "1 portion for you" : `${portionCount} portions for you`}</p>`;
+            : `<p class="fd-recipe-caption fd-recipe-portions">${esc(portionCount === 1 ? `1 portion for ${portionsFor}` : `${portionCount} portions for ${portionsFor}`)}</p>`;
     const gaps =
         macros.incomplete || macros.calories == null
             ? gapReasons
@@ -275,7 +306,7 @@ function macrosBlock(
                   )
                   .join("")
             : "";
-    return `<section class="fd-recipe-macros" aria-label="Per serving"><p class="fd-recipe-caption">Per serving</p>${String(
+    return `<section class="fd-recipe-macros" aria-label="Per serving">${caption}${String(
         statTiles(tiles, {
             label: "Per serving",
             className: "fd-recipe-macro-tiles",
@@ -320,9 +351,92 @@ function placesByIngredient(
     return out;
 }
 
+export const VERSION_MENU_LABEL = "Whose version";
+
+/**
+ * What a changed line of a version says about the base, as the row's first
+ * subline words: who changed it and what it was ("Yours · base 6 oz"). `who`
+ * is "Yours" or "Mia's".
+ */
+export function ingredientVersionNote(
+    who: string,
+    change: "amount" | "food" | "add",
+    base: Pick<RecipeIngredient, "displayName" | "quantity"> | undefined,
+): string {
+    if (change === "add" || !base) return `${who} · not in base`;
+    const amount = base.quantity
+        ? formatQuantityDisplayParts(base.quantity.amount, base.quantity.unit)
+        : "to taste";
+    return change === "food"
+        ? `${who} · base ${base.displayName} ${amount}`
+        : `${who} · base ${amount}`;
+}
+
+function changesLabel(count: number): string {
+    return `${count} ${count === 1 ? "change" : "changes"} from base`;
+}
+
+/**
+ * The caption over the macro tiles. With a version to pick it is the Link
+ * button of the whose-version pull-down ("Per serving · Ethan · 1 change from
+ * base"): Base, each member, and Compare versions for an admin or the owner.
+ * Without one it is the plain words.
+ */
+function perServingCaption(view: RecipeDetailV2View): string {
+    const picker = view.versions;
+    if (!picker) return `<p class="fd-recipe-caption">Per serving</p>`;
+    const recipeId = view.recipe.id;
+    const items: MenuItem[] = [
+        {
+            kind: "checked",
+            label: "Base",
+            checked: picker.viewing === "base",
+            href: `/recipes/${recipeId}?member=base`,
+        },
+        // The viewer comes right after Base, then everyone else.
+        ...[...picker.people]
+            .sort(
+                (a, b) =>
+                    Number(b.userId === picker.viewerId) -
+                    Number(a.userId === picker.viewerId),
+            )
+            .map((person): MenuItem => ({
+                kind: "checked",
+                label: person.name,
+                checked: picker.viewing === person.userId,
+                href:
+                    person.userId === picker.viewerId
+                        ? `/recipes/${recipeId}`
+                        : `/recipes/${recipeId}?member=${encodeURIComponent(person.userId)}`,
+            })),
+    ];
+    if (picker.canCompare) {
+        items.push({
+            kind: "link",
+            label: "Compare versions",
+            href: `/recipes/${recipeId}/compare`,
+        });
+    }
+    const label = [
+        "Per serving",
+        picker.viewingName,
+        ...(picker.changeCount > 0 ? [changesLabel(picker.changeCount)] : []),
+    ].join(" · ");
+    return String(
+        menu({
+            label: VERSION_MENU_LABEL,
+            anchor: "link",
+            link: { label, icon: "users" },
+            className: "fd-recipe-version",
+            items,
+        }),
+    );
+}
+
 function ingredientSubline(
     place: IngredientPlace | undefined,
     onList: boolean,
+    versionNote?: string,
 ): string {
     const stock =
         !place || !place.inStock
@@ -330,7 +444,8 @@ function ingredientSubline(
             : place.expiresOn
               ? `${place.places.join(", ")} · expires ${place.expiresOn}`
               : place.places.join(", ");
-    return onList ? `${stock} · On the list` : stock;
+    const line = onList ? `${stock} · On the list` : stock;
+    return versionNote ? `${versionNote} · ${line}` : line;
 }
 
 /**
@@ -381,7 +496,7 @@ function ingredientsSection(view: RecipeDetailV2View): string {
             meta:
                 place?.amountLabel ??
                 ingredientAmountLabel(ingredient.quantity, ingredient.note),
-            subtitle: ingredientSubline(place, onList),
+            subtitle: ingredientSubline(place, onList, ingredient.versionNote),
             trailing: {
                 kind: "control",
                 html: ingredientMenu(
@@ -445,6 +560,16 @@ function plannedLine(planned: RecipeDetailV2View["planned"]): string {
     const more = planned.length - shown.length;
     const text = `Planned · ${shown.join(", ")}${more > 0 ? ` · +${more} more` : ""}`;
     return `<p class="fd-recipe-caption fd-recipe-planned">${esc(text)}</p>`;
+}
+
+/** Whose portions the "N portions" line counts: the viewer's, or the person whose version is shown. */
+function portionsFor(view: RecipeDetailV2View): string {
+    const picker = view.versions;
+    return picker &&
+        picker.viewing !== "base" &&
+        picker.viewing !== picker.viewerId
+        ? picker.viewingName
+        : "you";
 }
 
 function servingsMeta(portions: number): string {
@@ -584,7 +709,7 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
         raw(`<div class="fd-recipe-head">${String(title)}${planned}</div>`),
     ]);
     const left = raw(
-        `${pageError}${view.draft ? draftCard(view.draft) : ""}${renderMentionCards(recipe.id, view.mentions)}${macrosBlock(view.macrosPerPortion, view.gapReasons, view.portionCount)}${ingredientsSection(view)}`,
+        `${pageError}${view.draft ? draftCard(view.draft) : ""}${renderMentionCards(recipe.id, view.mentions)}${macrosBlock(view.macrosPerPortion, view.gapReasons, view.portionCount, perServingCaption(view), portionsFor(view))}${ingredientsSection(view)}`,
     );
     const right = raw(instructionsHtml(recipe.instructions, view.mentions));
     const layout = pageLayout({
