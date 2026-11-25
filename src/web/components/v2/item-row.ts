@@ -111,8 +111,12 @@ export type ItemRowTrailing =
 
 export type ItemRowState = "default" | "disabled" | "warning";
 
-/** What a swipe bed does when it is released; the label is its accessible name. */
-export type ItemRowBed = ButtonHooks & { label?: string };
+/**
+ * What a swipe bed does when it is released; the label is its accessible name.
+ * `icon` replaces the glyph the side draws (trash on the left, repeat on the
+ * right) for a bed that does something else (Ate some).
+ */
+export type ItemRowBed = ButtonHooks & { label?: string; icon?: IconName };
 
 export type ItemRowSwipe = {
     /** Swiping left reveals Delete. */
@@ -338,7 +342,7 @@ function bed(side: "left" | "right", spec: ItemRowBed): Html {
                 label: spec.label ?? (again ? "Again" : "Delete"),
                 iconOnly: true,
                 className: "fd-item-row__bed-btn",
-                content: icon(again ? "repeat" : "trash"),
+                content: icon(spec.icon ?? (again ? "repeat" : "trash")),
                 form: spec.form,
                 name: spec.name,
                 value: spec.value,

@@ -14,7 +14,7 @@ import {
     renderKitchenUsualsBody,
 } from "./kitchen-usuals.js";
 
-test("every tab marks itself in the section switch and nothing else differs", () => {
+test("every tab marks itself in the header and nothing else differs", () => {
     const heads = (["fridge", "groceries", "usuals"] as const).map((active) =>
         renderKitchenHead({
             active,
@@ -22,30 +22,41 @@ test("every tab marks itself in the section switch and nothing else differs", ()
             desktopSubtitle: "3 items",
         }),
     );
-    const marked = heads.map(
-        (h) =>
-            h.match(/fd-seg-btn--on" aria-current="page" href="([^"]+)"/)?.[1],
-    );
-    expect(marked).toEqual([
-        "/kitchen/fridge",
-        "/kitchen/groceries",
-        "/kitchen/usuals",
-    ]);
+    expect(
+        heads.map((h) => h.match(/data-fd-kitchen-tab="([^"]+)"/)?.[1]),
+    ).toEqual(["fridge", "groceries", "usuals"]);
     const bare = heads.map((h) =>
-        h.replace(/ fd-seg-btn--on" aria-current="page"/, '"'),
+        h.replace(/ data-fd-kitchen-tab="[^"]+"/, ""),
     );
     expect(new Set(bare).size).toBe(1);
 });
 
-test("the phone title is the first element, so the tabs land right under it", () => {
+test("the header is the Page header, first in the page, so the tabs land right under it", () => {
     const head = renderKitchenHead({
         active: "groceries",
         phoneSubtitle: "4 to get",
         desktopSubtitle: "4 to get",
         desktopTools: "<button>Share</button>",
     });
-    expect(head.startsWith('<h1 class="fd-kitchen-fridge-title ')).toBe(true);
-    expect(head).toContain("<button>Share</button>");
+    expect(
+        head.startsWith('<header class="fd-page-header fd-kitchen-head" '),
+    ).toBe(true);
+    expect(head).toContain('<h1 class="fd-page-header__title">Kitchen</h1>');
+    expect(head).toContain('<p class="fd-page-header__subtitle">4 to get</p>');
+    // The tab's tools ride in the Actions slot.
+    expect(head).toContain(
+        '<div class="fd-page-header__actions"><button>Share</button></div>',
+    );
+    // The section switch is gone: the sidebar lists the sections.
+    expect(head).not.toContain("fd-seg");
+});
+
+test("a tab with no tools has no Actions slot", () => {
+    const head = renderKitchenHead({
+        active: "fridge",
+        phoneSubtitle: "1 item",
+    });
+    expect(head).not.toContain("fd-page-header__actions");
 });
 
 describe("the add button", () => {
@@ -91,7 +102,19 @@ describe("the add button", () => {
         usuals: "Add a usual",
     };
 
-    for (const tab of ["fridge", "groceries", "usuals"] as const) {
+    test("fridge: the round plus is the last tool in the tab row, after the Select menu", () => {
+        const html = pages.fridge;
+        expect(html).toMatch(
+            /<div class="fd-kitchen-fridge-page"[^>]*>\n<div class="fd-kitchen-fridge-top">[\s\S]*?data-fd-select-toggle="fridge"[\s\S]*?<button[^>]*aria-label="Add item"[^>]*commandfor="fd-fridge-add"/,
+        );
+        // The same plus rides in the header's Actions slot.
+        expect(html).toMatch(
+            /fd-page-header__actions">[\s\S]*?aria-label="Add item"/,
+        );
+        expect(html).not.toContain("fd-kitchen-overview-add");
+    });
+
+    for (const tab of ["groceries", "usuals"] as const) {
         test(`${tab}: a round plus is the first thing in the page, level with the tabs`, () => {
             const html = pages[tab];
             expect(html).toMatch(
@@ -106,16 +129,16 @@ describe("the add button", () => {
             expect(html).not.toContain("fd-log-search-field");
         });
 
-        test(`${tab}: the desktop head carries the labelled button after the section switch`, () => {
+        test(`${tab}: the header's Actions slot carries the labelled button`, () => {
             expect(pages[tab]).toMatch(
                 new RegExp(
-                    `</nav>\\n<button[^>]*class="fd-btn fd-btn--primary fd-kitchen-overview-add"[^>]*>[\\s\\S]*?<span>${labels[tab]}</span></button>`,
+                    `fd-page-header__actions">(?:[\\s\\S]*?\\n)?<button[^>]*class="fd-btn fd-btn--primary fd-kitchen-overview-add"[^>]*>[\\s\\S]*?<span>${labels[tab]}</span></button>`,
                 ),
             );
         });
     }
 
-    test("the three plus buttons are the same markup apart from what they open", () => {
+    test("the Groceries and Usuals plus buttons are the same markup apart from what they open", () => {
         const plus = (tab: keyof typeof pages) =>
             pages[tab]
                 .match(
@@ -124,9 +147,7 @@ describe("the add button", () => {
                 .replace(/aria-label="[^"]*"|title="[^"]*"/g, "")
                 .replace(/commandfor="[^"]*"/, "");
         expect(
-            new Set(
-                ["fridge", "groceries", "usuals"].map((t) => plus(t as never)),
-            ).size,
+            new Set(["groceries", "usuals"].map((t) => plus(t as never))).size,
         ).toBe(1);
     });
 

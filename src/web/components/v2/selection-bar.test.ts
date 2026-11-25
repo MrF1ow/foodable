@@ -24,6 +24,18 @@ test("Floating is a toolbar with the count, then the actions", () => {
     );
 });
 
+test("showCount false keeps the count for a screen reader only", () => {
+    const html = selectionBar({
+        placement: "floating",
+        count: 3,
+        showCount: false,
+        actions: ACTIONS,
+    });
+    expect(html).toContain(
+        '<span class="fd-selection-bar__count fd-sr" aria-live="polite">3 selected</span>',
+    );
+});
+
 test("the toolbar is named Selection, not the live count, whatever the count text", () => {
     const html = selectionBar({
         placement: "floating",
@@ -105,4 +117,24 @@ test("strings are escaped", async () => {
     expect(html).toContain(XSS_ESCAPED);
     expect(html).not.toContain("<script>");
     expect(await injectedAttributes(html)).toEqual([]);
+});
+
+test("an action can be a submit that posts a form outside the bar", () => {
+    const html = String(
+        selectionBar({
+            placement: "inline",
+            count: 1,
+            actions: [
+                {
+                    label: "Discard",
+                    variant: "danger",
+                    type: "submit",
+                    attrs: { form: "f1", hidden: "" },
+                },
+            ],
+        }),
+    );
+    expect(html).toMatch(
+        /<button type="submit" class="fd-btn fd-btn--danger fd-btn--sm" data-fd-btn form="f1" hidden="">/,
+    );
 });

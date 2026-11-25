@@ -47,6 +47,7 @@ import {
     renderSettingsScoreV2Page,
     type ScoreFormDraft,
 } from "./pages/v2/settings-score.js";
+import { formatQuantityDisplayParts } from "./display-quantity.js";
 import { liveScoreSettingsStore } from "../db/score-settings.js";
 import { liveGroceryStore } from "../db/grocery.js";
 import { liveRecipesStore } from "../db/recipes.js";
@@ -99,9 +100,9 @@ import {
 import {
     lowStockLevels,
     renderKitchenFridgeV2Page,
+    type FridgeAddUsual,
     type KitchenFridgeFoodMeta,
 } from "./pages/v2/kitchen-fridge.js";
-import { buildKitchenFridgeGroceryOverview } from "./pages/v2/kitchen-overview.js";
 import {
     groceryOpenLineCount,
     addStoreIdFromModal,
@@ -456,12 +457,18 @@ export async function renderFridgeInventoryPage(
     if ("html" in gate) return { status: gate.status, html: gate.html };
     const profile = await getProfile(viewerUserId);
     const householdId = gate.viewer.householdId;
-    const [snapshot, allFoods, grocerySnapshot, today] = await Promise.all([
-        listFridge(liveFridgeStore(), householdId),
-        liveFoodsStore().listFoods(householdId),
-        listGrocery(liveGroceryStore(), liveSettingsStore(), householdId),
-        householdToday(householdId),
-    ]);
+    const [snapshot, allFoods, grocerySnapshot, today, { weights }] =
+        await Promise.all([
+            listFridge(liveFridgeStore(), householdId),
+            liveFoodsStore().listFoods(householdId),
+            listGrocery(liveGroceryStore(), liveSettingsStore(), householdId),
+            householdToday(householdId),
+            scoreSettingsForViewer(
+                liveScoreSettingsStore(),
+                householdId,
+                viewerUserId,
+            ),
+        ]);
     const groceryLines = grocerySnapshot.lines;
     const foodsById = new Map<string, KitchenFridgeFoodMeta>(
         allFoods.map((row) => [
@@ -473,6 +480,13 @@ export async function renderFridgeInventoryPage(
             },
         ]),
     );
+    const stocked = new Set(snapshot.items.flatMap((i) => i.foodId ?? []));
+    const scores = new Map<string, number>();
+    for (const row of allFoods) {
+        if (!stocked.has(row.id)) continue;
+        const score = foodDisplayScore(row, weights);
+        if (score != null) scores.set(row.id, score);
+    }
     const noticeResult = await loadViewerNotices(gate.viewer, { today });
     const chrome = await viewerChromeWithAttention(
         profile,
@@ -504,10 +518,29 @@ export async function renderFridgeInventoryPage(
             ).uses,
             freezeDefaultExpiry: defaultFreezeExpiry(today),
             lowStock: lowStockLevels(noticeResult.notices, allFoods),
-            groceryLines,
-            groceryOverview: buildKitchenFridgeGroceryOverview(grocerySnapshot),
+            scores,
+            usuals: addableUsuals(allFoods),
         }),
     };
+}
+
+/** The usuals the Add sheet offers: each as its usual product, with its usual amount. */
+function addableUsuals(foods: readonly Food[]): FridgeAddUsual[] {
+    return usualProductRows({ foods }).rows.map(({ food, usual }) => {
+        const amount = food.usualAmount;
+        const unit = amount?.unit?.trim() || "each";
+        const qty =
+            amount?.amount != null && amount.amount > 0 ? amount.amount : 1;
+        const label = formatQuantityDisplayParts(qty, unit);
+        return {
+            foodId: (usual ?? food).id,
+            kind: (usual ?? food).kind === "supply" ? "supply" : "food",
+            name: food.name,
+            subtitle: usual ? `${usual.name} · ${label}` : label,
+            amount: qty,
+            unit,
+        };
+    });
 }
 
 function chromeWithKitchenGroceriesCount<

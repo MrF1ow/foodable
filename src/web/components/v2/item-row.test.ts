@@ -961,3 +961,26 @@ test("a row's own data and role are escaped", () => {
     expect(html).toContain('role="option"');
     expect(html).toContain(`data-fd-x="${XSS_ESCAPED}"`);
 });
+
+test("a swipe bed can draw its own glyph in place of its side's", () => {
+    const html = String(
+        itemRow({
+            title: "Eggs",
+            swipe: {
+                right: {
+                    label: "Ate some",
+                    icon: "check",
+                    form: { action: "/eat" },
+                },
+                left: { label: "Discard", form: { action: "/toss" } },
+            },
+        }),
+    );
+    const again =
+        html.match(/fd-item-row__bed--again">[\s\S]*?<\/form>/)?.[0] ?? "";
+    expect(again).toContain("fd-icon--check");
+    expect(again).not.toContain("fd-icon--repeat");
+    const del =
+        html.match(/fd-item-row__bed--delete">[\s\S]*?<\/form>/)?.[0] ?? "";
+    expect(del).toContain("fd-icon--trash");
+});

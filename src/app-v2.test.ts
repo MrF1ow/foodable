@@ -309,7 +309,9 @@ describe("/app-v2.js", () => {
         // +~1.2 KB Log sheet: a search row is the Item row (open link, plus), a pasted recipe link shows Go, the unit is a Segmented (a piece names its weight) and the macro tiles are the Macro tiles.
         // +~1.1 KB Log sheet: a meal's plus opens the search with that meal checked, and Quick calories and Weigh in replace the search sheet.
         // +~0.4 KB Log sheet: a row's own link is followed only when it stays on this site.
-        expect(js.length).toBeLessThan(211_500);
+        // +~1.8 KB Fridge: a Selection bar that asks in place (Cancel, Discard N) with the count in its verb, the count row, Use soon cards that open their item, the Add search and the Expires chips; the old row and Freeze scripts are gone.
+        // +~0.7 KB Fridge: focus follows a Selection bar's question, and the Add search fills the hand form's Name.
+        expect(js.length).toBeLessThan(214_300);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

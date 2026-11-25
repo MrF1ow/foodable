@@ -1,4 +1,4 @@
-// Fridge rows open the item sheet on tap; swipe actions stay as real buttons.
+// Kitchen page scripts: the Fridge's Use soon cards, Add search and Expires chips, the grocery and usual rows, and the Add a usual tabs. The row sheets open from `[data-fd-sheet-row]` (today.js).
 function openSheet(id) {
     const dialog = document.getElementById(id);
     if (!dialog || typeof dialog.showModal !== "function" || dialog.open)
@@ -6,42 +6,70 @@ function openSheet(id) {
     dialog.showModal();
 }
 
-function initFridgeRows(root) {
-    root.querySelectorAll("[data-fd-fridge-row]").forEach((row) => {
-        if (row.dataset.fdFridgeRowInit === "1") return;
-        row.dataset.fdFridgeRowInit = "1";
-        const sheetId = row.getAttribute("data-sheet-id");
-        if (!sheetId) return;
-        const open = () => openSheet(sheetId);
-        row.addEventListener("click", (e) => {
-            if (e.target.closest("button, form, a.fd-swipe-btn")) return;
-            open();
-        });
-        row.addEventListener("keydown", (e) => {
-            if (e.target !== row) return;
-            if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                open();
-            }
+// A Use soon card opens its item's sheet; the link under it still works with
+// no script (the page reopens with that item's sheet showing).
+document.addEventListener("click", (event) => {
+    const card = event.target?.closest?.("[data-fd-open-item]");
+    if (!card) return;
+    const dialog = document.getElementById(
+        card.getAttribute("data-fd-open-item") || "",
+    );
+    if (!dialog || typeof dialog.showModal !== "function") return;
+    event.preventDefault();
+    openSheet(dialog.id);
+});
+
+// Add to fridge: the search box narrows the usuals as it is typed; with no
+// match the hand form is the way on.
+function initFridgeAddSearch(root) {
+    root.querySelectorAll("#fd-fridge-add-q").forEach((input) => {
+        if (input.dataset.fdFridgeSearchInit === "1") return;
+        input.dataset.fdFridgeSearchInit = "1";
+        const sheet = input.closest("dialog");
+        if (!sheet) return;
+        // What was searched for is what Add it by hand starts with, until
+        // the Name is typed in by hand.
+        const name = sheet.querySelector("#fd-fridge-add-name");
+        let nameTyped = false;
+        if (name) {
+            name.addEventListener("input", () => {
+                nameTyped = true;
+            });
+        }
+        input.addEventListener("input", () => {
+            if (name && !nameTyped) name.value = input.value.trim();
+            const q = input.value.trim().toLowerCase();
+            let shown = 0;
+            sheet.querySelectorAll("[data-fd-fridge-usual]").forEach((row) => {
+                const hit =
+                    q === "" ||
+                    (row.getAttribute("data-fd-fridge-usual") || "").includes(
+                        q,
+                    );
+                row.hidden = !hit;
+                if (hit) shown += 1;
+            });
+            const none = sheet.querySelector("[data-fd-fridge-none]");
+            if (none) none.hidden = q === "" || shown > 0;
         });
     });
 }
 
-// A round action with data-fd-reveal shows its panel (Freeze asks for a
-// date before it submits).
-function initReveals(root) {
-    root.querySelectorAll("[data-fd-reveal]").forEach((btn) => {
-        if (btn.dataset.fdRevealInit === "1") return;
-        btn.dataset.fdRevealInit = "1";
-        btn.addEventListener("click", () => {
-            const panel = document.getElementById(
-                btn.getAttribute("data-fd-reveal") || "",
-            );
-            if (!panel) return;
-            const show = panel.hidden;
-            panel.hidden = !show;
-            btn.setAttribute("aria-expanded", show ? "true" : "false");
-            if (show) panel.querySelector("input[type='date']")?.focus();
+// The Expires chips set the one date field the form posts: keeping restores the
+// date the item has, No date clears it, Pick a date shows the field.
+function initExpires(root) {
+    root.querySelectorAll("[data-fd-expires]").forEach((host) => {
+        if (host.dataset.fdExpiresInit === "1") return;
+        host.dataset.fdExpiresInit = "1";
+        const input = host.querySelector('input[name="expires_on"]');
+        if (!input) return;
+        const keep = host.getAttribute("data-fd-expires-keep") || "";
+        host.addEventListener("change", (event) => {
+            const radio = event.target;
+            if (!radio || radio.name !== "expires_mode") return;
+            if (radio.value === "keep") input.value = keep;
+            else if (radio.value === "none") input.value = "";
+            else input.focus();
         });
     });
 }
@@ -76,31 +104,6 @@ function initPutAwayDates(root) {
                 input.click();
             });
         }
-    });
-}
-
-// Overview grocery rows open the line on the Groceries tab.
-function initOverviewGroceryRows(root) {
-    root.querySelectorAll("[data-fd-grocery-line-href]").forEach((row) => {
-        if (row.dataset.fdOverviewRowInit === "1") return;
-        row.dataset.fdOverviewRowInit = "1";
-        const href = row.getAttribute("data-fd-grocery-line-href");
-        if (!href || !href.startsWith("/kitchen/groceries")) return;
-        const go = () => {
-            if (window.Turbo?.visit) window.Turbo.visit(href);
-            else window.location.assign(href);
-        };
-        row.addEventListener("click", (e) => {
-            if (e.target.closest("button, form, a")) return;
-            go();
-        });
-        row.addEventListener("keydown", (e) => {
-            if (e.target !== row) return;
-            if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                go();
-            }
-        });
     });
 }
 
@@ -242,9 +245,8 @@ document.addEventListener("input", (event) => {
 
 window.FoodableApp.onLoad((root) => {
     if (root.querySelector(".fd-kitchen-fridge-page")) {
-        initFridgeRows(root);
-        initReveals(root);
-        initOverviewGroceryRows(root);
+        initFridgeAddSearch(root);
+        initExpires(root);
     }
     if (root.querySelector(".fd-kitchen-groceries-page")) {
         initGroceryRows(root);

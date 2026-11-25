@@ -1,4 +1,4 @@
-/* Kitchen · Fridge (phone) */
+/* Kitchen · Fridge */
 
 /* The three tab pages sit one 16px step under the tabs (the design's gap). The
    shell's gap between siblings (--gap-section) plus the tabs' own 16px bottom
@@ -16,26 +16,186 @@
 .fd-kitchen-fridge-page {
     display: flex;
     flex-direction: column;
-    gap: var(--space-section);
+    gap: var(--space-md);
     padding: 0 0 var(--fd-s-12);
 }
 
-.fd-kitchen-fridge-title {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin: 0;
-    padding-top: var(--space-gap);
-    padding-right: 48px;
-    font: 600 28px/34px var(--font-display);
-    letter-spacing: -0.5px;
-    color: var(--text-primary);
+/* The Kitchen header: the shell's bell and account chip sit over its right
+   end on the phone, and the tab's actions (Select ⋯ and +) join it from
+   1024px, where the tab row is gone. */
+.fd-kitchen-head {
+    padding: var(--space-sm) calc(80px + var(--space-md)) var(--space-md) 0;
+}
+.fd-kitchen-head .fd-page-header__actions {
+    display: none;
 }
 
-.fd-kitchen-fridge-count {
-    font: 400 14px/20px var(--font-body);
-    letter-spacing: 0;
+/* Fridge: one column on the phone, Use soon and the places stacked; two
+   columns from 1024px (Use soon and the first place, then the rest). */
+.fd-kitchen-fridge-layout .fd-page-layout__columns {
+    flex-direction: column;
+    flex-wrap: nowrap;
+    align-items: stretch;
+    gap: var(--space-xl);
+}
+.fd-kitchen-fridge-layout .fd-page-layout__column {
+    flex: none;
+    gap: var(--space-xl);
+    min-width: 0;
+}
+.fd-kitchen-fridge-layout .fd-page-layout__column:empty {
+    display: none;
+}
+.fd-kitchen-loc {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+/* A row's ⋯ is the bare glyph the design draws, not a raised circle. */
+.fd-kitchen-loc .fd-item-row .fd-menu > .fd-btn {
+    background: transparent;
     color: var(--text-secondary);
+}
+/* A row that opens its item's sheet. */
+.fd-kitchen-loc [data-fd-sheet-row] {
+    cursor: pointer;
+}
+.fd-kitchen-loc [data-fd-sheet-row]:focus-visible {
+    outline: var(--space-2xs) solid var(--accent-text);
+    outline-offset: calc(var(--space-2xs) * -1);
+}
+.fd-kitchen-loc [data-fd-sheet-row] :is(button, a, summary) {
+    cursor: pointer;
+}
+
+/* The Fridge's sheets: the buttons in a section (the Stepper's round pair)
+   keep their own size, not the old sheet's flexing pill. */
+.fd-kitchen-sheet
+    :is(.fd-sheet__section, .fd-kitchen-hand__form)
+    .fd-btn[data-fd-btn] {
+    flex: none;
+    margin: 0;
+}
+.fd-kitchen-hand__form .fd-btn--icon[data-fd-btn] {
+    width: var(--control-lg-height);
+    height: var(--control-lg-height);
+    padding: 0;
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+}
+
+/* The item sheet: four round actions under the amount, the pick of where it
+   is kept and when it expires as chips, and the date field only on "Pick a
+   date" (the CSS does it, so it works with no script). */
+.fd-kitchen-item-actions {
+    display: flex;
+    justify-content: center;
+    gap: var(--space-xl);
+}
+.fd-kitchen-item-actions .fd-quick-action {
+    --fd-quick-action-w: 48px;
+}
+.fd-kitchen-item-actions .fd-quick-action__box {
+    border-radius: var(--radius-pill);
+}
+.fd-kitchen-item-expires__field {
+    display: none;
+    margin-top: var(--space-sm);
+}
+.fd-kitchen-item-expires:has(input[value="pick"]:checked)
+    .fd-kitchen-item-expires__field {
+    display: block;
+}
+
+/* Add to fridge: the usuals first, the hand form behind a link. */
+.fd-kitchen-add__none {
+    margin: 0;
+    color: var(--text-secondary);
+    font-size: var(--text-label-size);
+    line-height: var(--text-label-line);
+}
+.fd-kitchen-hand {
+    margin-top: var(--space-lg);
+}
+.fd-kitchen-hand__summary {
+    cursor: pointer;
+    color: var(--accent-text);
+    font-size: var(--text-label-size);
+    font-weight: 500;
+    line-height: var(--text-label-line);
+}
+.fd-kitchen-hand__summary {
+    list-style: none;
+}
+.fd-kitchen-hand__summary::-webkit-details-marker {
+    display: none;
+}
+.fd-kitchen-hand__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-lg);
+    margin-top: var(--space-lg);
+}
+.fd-kitchen-hand__form > * {
+    flex: none;
+}
+/* `.fd-sheet .fd-btn` (flex 1 1 0) would shrink the Add button to nothing in
+   this column; it keeps its height and takes the form's width. */
+.fd-sheet .fd-kitchen-hand__form > .fd-btn[data-fd-btn] {
+    flex: none;
+    width: 100%;
+}
+
+/* Select mode on the Fridge: the Selection bar floats over the phone page
+   and sits flat above the list from 1024px; one slot per placement. */
+.fd-select-bar-slot--desktop {
+    display: none;
+}
+.fd-select-bar-slot--phone {
+    position: fixed;
+    bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+    left: 50%;
+    z-index: 45;
+    width: min(calc(100vw - 2 * var(--space-gutter)), 350px);
+    transform: translateX(-50%);
+}
+/* The phone's bar is its buttons only: one or two full-width, 48px high. */
+.fd-select-bar-slot--phone .fd-selection-bar {
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+.fd-select-bar-slot--phone .fd-selection-bar__actions {
+    flex: 1;
+    min-width: 0;
+}
+.fd-select-bar-slot--phone .fd-selection-bar__actions .fd-btn[data-fd-btn] {
+    flex: 1 1 0;
+    min-width: 0;
+    height: 48px;
+    border-radius: var(--radius-md);
+    background: var(--surface-raised);
+}
+.fd-select-head {
+    margin: 0;
+}
+.fd-select-bar-slot:not([data-fd-select-asking]) [data-fd-select-when="ask"],
+.fd-select-bar-slot[data-fd-select-asking] [data-fd-select-when="idle"] {
+    display: none;
+}
+.fd-select-bar-slot .fd-btn:disabled {
+    opacity: 0.45;
+}
+/* Picking leaves the lists and nothing else on the page: no Use soon, and
+   neither Select nor + (the count row has Cancel). */
+.fd-kitchen-fridge-page[data-fd-selecting] .fd-kitchen-use-soon,
+.fd-kitchen-fridge-page[data-fd-selecting] .fd-kitchen-fridge-top,
+.fd-main:has(.fd-kitchen-fridge-page[data-fd-selecting])
+    .fd-kitchen-head
+    .fd-page-header__actions {
+    display: none;
 }
 
 /* Centred on the tab row: the row's 18px centre line is 34px above the page
@@ -74,83 +234,6 @@
     scroll-padding-inline: var(--space-gutter);
 }
 
-.fd-kitchen-use-card {
-    flex: none;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    width: 128px;
-    min-height: 96px;
-    padding: 13px;
-    border: none;
-    border-radius: var(--radius-lg);
-    background: var(--surface-raised);
-    box-shadow: 0 4px 14px var(--overlay-scrim);
-    color: var(--text-primary);
-    text-align: left;
-    cursor: pointer;
-}
-
-.fd-kitchen-use-card__title {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
-    overflow: hidden;
-    font: 600 14px/18px var(--font-body);
-}
-
-.fd-kitchen-use-card__meta {
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-use-card__use {
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 1;
-    overflow: hidden;
-    margin-top: 2px;
-    font: 400 12px/16px var(--font-body);
-    color: var(--accent-text);
-}
-
-.fd-kitchen-use-card__when {
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-tertiary);
-}
-
-.fd-kitchen-use-card__when.fd-expiry--high {
-    color: var(--status-over);
-}
-
-.fd-kitchen-use-card__when.fd-expiry--medium {
-    color: var(--status-warn);
-}
-
-.fd-kitchen-fridge-loc + .fd-kitchen-fridge-loc {
-    margin-top: var(--fd-s-2);
-}
-
-.fd-row__date--high {
-    color: var(--status-over);
-}
-
-.fd-row__date--medium {
-    color: var(--status-warn);
-}
-
-.fd-row__date--low {
-    color: var(--text-tertiary);
-}
-
-.fd-kitchen-fridge-empty {
-    margin: 0;
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-    text-align: center;
-    padding: var(--fd-s-10) var(--space-gutter);
-}
-
 .fd-visually-hidden {
     position: absolute;
     width: 1px;
@@ -161,83 +244,6 @@
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
     border: 0;
-}
-
-.fd-kitchen-item-sheet {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-section);
-}
-
-.fd-kitchen-item-expiry {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-4);
-    margin: 0;
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-item-expiry.fd-expiry--high {
-    color: var(--status-over);
-}
-
-.fd-kitchen-item-expiry.fd-expiry--medium {
-    color: var(--status-warn);
-}
-
-.fd-kitchen-item-expiry__dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: currentColor;
-}
-
-.fd-kitchen-round-actions {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: var(--fd-s-4);
-}
-
-.fd-kitchen-round-action {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: var(--fd-s-2);
-    padding: var(--fd-s-4) var(--fd-s-2);
-    border: none;
-    border-radius: var(--radius-md);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    cursor: pointer;
-}
-
-.fd-kitchen-round-action--danger {
-    color: var(--status-over);
-}
-
-.fd-kitchen-round-action__icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 44px;
-    height: 44px;
-    border-radius: 50%;
-    background: var(--surface-track);
-}
-
-.fd-kitchen-round-action--danger .fd-kitchen-round-action__icon {
-    background: color-mix(in srgb, var(--status-over) 12%, transparent);
-}
-
-.fd-kitchen-round-action__label {
-    font: 400 11px/14px var(--font-body);
-    text-align: center;
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-round-action--danger .fd-kitchen-round-action__label {
-    color: var(--status-over);
 }
 
 /* FigCraft 21714: Expires and Kept in sit together in one white card. */
@@ -264,8 +270,7 @@
     color: var(--text-tertiary);
 }
 
-.fd-kitchen-sheet-row,
-.fd-kitchen-sheet-row--link {
+.fd-kitchen-sheet-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -310,19 +315,6 @@
 .fd-kitchen-sheet-row__chev {
     display: flex;
     color: var(--text-tertiary);
-}
-
-.fd-kitchen-sheet-row__control {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    cursor: pointer;
-    font: inherit;
-    color: inherit;
-    border: none;
-    background: transparent;
 }
 
 .fd-did-you-mean-block {
@@ -402,20 +394,6 @@
     margin: 0 0 var(--fd-s-6);
     font: 400 14px/20px var(--font-body);
     color: var(--status-over);
-}
-
-.fd-kitchen-freeze {
-    display: flex;
-    align-items: flex-end;
-    gap: var(--fd-s-10);
-    margin: var(--fd-s-12) 0 0;
-}
-
-.fd-kitchen-freeze__field {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-width: 0;
 }
 
 /* Kitchen · Groceries (phone) */
@@ -859,76 +837,23 @@ button.fd-kitchen-sheet-row {
     color: var(--text-secondary);
 }
 
-/* The desktop Kitchen tabs (Overview / Groceries / Usuals): a pill track with
-   the current tab as a light pill. `.fd-seg` is only styled on Trends, so the
-   Kitchen carries its own copy. */
-.fd-kitchen-overview-seg {
-    display: inline-flex;
-    align-items: center;
-    gap: 2px;
-    padding: 3px;
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    background: var(--surface-panel);
-}
-
-.fd-kitchen-overview-seg .fd-seg-btn {
-    display: inline-flex;
-    align-items: center;
-    padding: 5px 14px;
-    border-radius: var(--radius-pill);
-    font: 400 13px/18px var(--font-body);
-    color: var(--text-secondary);
-    text-decoration: none;
-}
-
-.fd-kitchen-overview-seg .fd-seg-btn--on {
-    background: var(--text-primary);
-    color: var(--surface-bg);
-    font-weight: 500;
-}
-
-.fd-kitchen-overview-seg .fd-seg-btn:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
 @media (prefers-reduced-motion: reduce) {
     .fd-kitchen-use-soon__scroll {
         scroll-behavior: auto;
     }
 }
 
-.fd-kitchen-overview-columns {
-    display: contents;
-}
-
-.fd-kitchen-overview-locs {
-    display: contents;
-}
-
-.fd-kitchen-overview-groceries {
-    display: none;
-}
-
-.fd-kitchen-overview-loc--empty {
-    display: none;
-}
-
-.fd-kitchen-overview-head {
-    display: none;
-}
-
-.fd-kitchen-fridge-count--desktop {
-    display: none;
-}
-
-.fd-kitchen-fridge-title--phone {
-    display: flex;
-}
-
 .fd-kitchen-use-card--desktop-only {
     display: none;
+}
+
+/* A long name wraps to two lines on the phone and cuts to one beside the
+   other cards. */
+.fd-kitchen-use-card .fd-mini-card__title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
 }
 
 /* Desktop table cells and column titles (FigCraft 48217); the phone row
@@ -945,31 +870,49 @@ button.fd-kitchen-sheet-row {
         padding-bottom: var(--space-section);
     }
 
-    .fd-kitchen-overview-head {
+    .fd-kitchen-head {
+        padding-right: 0;
+    }
+    .fd-kitchen-head .fd-page-header__actions {
         display: flex;
+    }
+    .fd-kitchen-fridge-layout .fd-page-layout__columns {
         flex-direction: row;
         flex-wrap: wrap;
-        align-items: center;
-        justify-content: space-between;
-        gap: var(--fd-s-10);
-        margin-bottom: var(--space-section);
+        align-items: flex-start;
+        gap: var(--space-3xl);
     }
-
-    .fd-kitchen-overview-head__tools {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: flex-end;
-        gap: var(--fd-s-10);
+    .fd-kitchen-fridge-layout .fd-page-layout__column {
+        flex: 1 1 0;
     }
-
-    .fd-kitchen-overview-head__title {
+    /* The item sheet's Save sits at the bottom of the side panel. */
+    .fd-kitchen-sheet.fd-sheet--side .fd-sheet-body {
         flex: 1 1 auto;
-        min-width: min(100%, 280px);
     }
-
-    .fd-kitchen-overview-seg {
+    /* Picking turns the page into one 720 wide list. */
+    .fd-kitchen-fridge-page[data-fd-selecting] .fd-page-layout__columns {
+        flex-direction: column;
+        align-items: stretch;
+        width: 100%;
+        max-width: 720px;
+        margin-inline: auto;
+        gap: var(--space-xl);
+    }
+    .fd-kitchen-fridge-page[data-fd-selecting] .fd-page-layout__column {
         flex: none;
+        width: 100%;
+    }
+    .fd-kitchen-fridge-page[data-fd-selecting] .fd-select-head,
+    .fd-kitchen-fridge-page[data-fd-selecting] .fd-select-bar-slot--desktop {
+        width: 100%;
+        max-width: 720px;
+        margin-inline: auto;
+    }
+    .fd-select-bar-slot--phone {
+        display: none;
+    }
+    .fd-select-bar-slot--desktop:not([hidden]) {
+        display: block;
     }
 
     .fd-kitchen-overview-add {
@@ -986,165 +929,34 @@ button.fd-kitchen-sheet-row {
         height: 18px;
     }
 
-    .fd-kitchen-fridge-title--phone,
-    .fd-kitchen-fridge-count--phone {
-        display: none;
-    }
-
-    .fd-kitchen-fridge-count--desktop {
-        display: inline;
-    }
-
-    .fd-kitchen-fridge-title {
-        padding-right: 0;
-    }
-
     .fd-kitchen-fridge-top {
         display: none;
     }
 
+    /* The cards keep their 150px and the row scrolls past the column. */
     .fd-kitchen-use-soon__scroll {
         margin: 0;
         padding-left: 0;
         padding-right: 0;
         flex-wrap: nowrap;
-        overflow: visible;
-        gap: var(--fd-s-6);
+        overflow-x: auto;
+        gap: var(--space-md);
     }
 
     .fd-kitchen-use-card {
-        flex: 1 1 0;
-        width: auto;
-        min-width: 0;
+        --fd-mini-card-w: 150px;
+        flex: none;
+    }
+
+    .fd-kitchen-use-card .fd-mini-card__title {
+        -webkit-line-clamp: 1;
     }
 
     .fd-kitchen-use-card--desktop-only {
         display: flex;
     }
 
-    .fd-kitchen-use-card__title {
-        -webkit-line-clamp: 1;
-    }
-
-    /* Locations flow into up to two columns (Fridge, then Freezer and
-       Pantry stacked), the Groceries card is the last column. Narrow
-       desktop windows drop the locations to one column. */
-    .fd-kitchen-overview-columns {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) min(380px, 36%);
-        gap: var(--space-section);
-        align-items: start;
-    }
-
-    .fd-kitchen-overview-locs {
-        display: block;
-        columns: 2 280px;
-        column-gap: var(--space-section);
-    }
-
-    .fd-kitchen-overview-loc {
-        break-inside: avoid;
-        margin-bottom: var(--space-section);
-    }
-
-    .fd-kitchen-overview-loc .fd-section-head__title {
-        font: 600 18px/22px var(--font-display);
-        letter-spacing: -0.3px;
-        text-transform: none;
-        color: var(--text-primary);
-    }
-
-    .fd-kitchen-overview-groceries {
-        grid-column: 2;
-    }
-
-    .fd-kitchen-overview-loc--empty {
-        display: flex;
-        flex-direction: column;
-        gap: var(--fd-s-6);
-    }
-
-    .fd-kitchen-fridge-loc.fd-kitchen-overview-loc {
-        box-sizing: border-box;
-        padding: 22px;
-        border-radius: var(--radius-lg);
-        background: var(--surface-panel);
-        box-shadow: 0 4px 14px var(--overlay-shadow);
-    }
-
-    .fd-kitchen-fridge-loc + .fd-kitchen-fridge-loc {
-        margin-top: 0;
-    }
-
-    .fd-kitchen-overview-loc-empty {
-        margin: 0;
-        font: 400 14px/20px var(--font-body);
-        color: var(--text-secondary);
-        text-align: center;
-        padding: var(--fd-s-10) 0;
-    }
-
-    .fd-kitchen-overview-groceries {
-        display: flex;
-        flex-direction: column;
-        gap: 16px;
-        box-sizing: border-box;
-        padding: 22px;
-        border-radius: var(--radius-lg);
-        background: var(--surface-panel);
-        box-shadow: 0 4px 14px var(--overlay-shadow);
-    }
-
-    .fd-kitchen-overview-groceries__head {
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-    }
-
-    .fd-kitchen-overview-groceries__title {
-        margin: 0;
-        font: 600 18px/24px var(--font-body);
-        color: var(--text-primary);
-    }
-
-    .fd-kitchen-overview-groceries__count {
-        margin: 0;
-        font: 400 14px/20px var(--font-body);
-        color: var(--text-secondary);
-    }
-
-    .fd-kitchen-overview-groceries .fd-kitchen-grocery-stores {
-        margin: 0;
-        padding: 0;
-    }
-
     .fd-kitchen-overview-grocery-section .fd-list {
-        display: flex;
-        flex-direction: column;
-        gap: 0;
-    }
-
-    .fd-kitchen-overview-groceries .fd-row--swipe .fd-row__action {
-        display: none;
-    }
-
-    .fd-kitchen-overview-groceries .fd-row--swipe {
-        --fd-swipe-pad: 0;
-    }
-
-    .fd-kitchen-overview-groceries__empty {
-        margin: 0;
-        font: 400 14px/20px var(--font-body);
-        color: var(--text-secondary);
-    }
-
-    .fd-kitchen-overview-grocery-put {
-        width: 100%;
-        text-align: center;
-        text-decoration: none;
-    }
-
-    .fd-kitchen-fridge-loc .fd-list {
         display: flex;
         flex-direction: column;
         gap: 0;

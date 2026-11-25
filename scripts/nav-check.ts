@@ -1428,6 +1428,582 @@ try {
         { productPage, productMenu, productLog, productPosts, ex: drain() },
     );
 
+    // Kitchen › Fridge on the phone: rows, the row ⋯ and its posts, swipe, the
+    // Select ⋯ beside the tabs, and select mode with the Selection bar.
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    await send("Emulation.setTouchEmulationEnabled", {
+        enabled: true,
+        maxTouchPoints: 1,
+    });
+    await goto("/kitchen/fridge");
+    await setMarker();
+    await control("reset=posts");
+    const fridgePhone = await ev<{
+        rows: number;
+        sections: string[];
+        cards: number;
+        eggs: string;
+        cheeseValue: string;
+        scores: number;
+        topTools: string[];
+        toolsLevel: number;
+        tabsHidden: boolean;
+        headActions: string;
+    }>(`({
+        rows: document.querySelectorAll("li[id^='fd-fridge-row-']").length,
+        sections: [...document.querySelectorAll(".fd-kitchen-loc .fd-section-header__label")].map((h) => h.textContent),
+        cards: document.querySelectorAll(".fd-kitchen-use-soon .fd-mini-card").length,
+        eggs: document.querySelector("#fd-fridge-row-it-eggs .fd-item-row__subtitle")?.textContent ?? "",
+        cheeseValue: document.querySelector("#fd-fridge-row-it-cheese .fd-item-row__value")?.textContent ?? "",
+        scores: document.querySelectorAll(".fd-kitchen-loc .fd-score").length,
+        topTools: [...document.querySelectorAll(".fd-kitchen-fridge-top button[aria-label]")].map((b) => b.getAttribute("aria-label")),
+        toolsLevel: (() => {
+            const t = document.querySelector(".fd-kitchen-fridge-top").getBoundingClientRect();
+            const row = document.querySelector(".fd-kitchen-tabs").getBoundingClientRect();
+            return Math.round(Math.abs((t.top + t.height / 2) - (row.top + row.height / 2)));
+        })(),
+        tabsHidden: getComputedStyle(document.querySelector(".fd-kitchen-tabs")).display === "none",
+        headActions: getComputedStyle(document.querySelector(".fd-kitchen-head .fd-page-header__actions")).display,
+    })`);
+    await clickSel("#fd-fridge-row-it-eggs .fd-menu [data-fd-menu-trigger]");
+    await sleep(150);
+    const fridgeRowMenu = await ev<string[]>(
+        `[...document.querySelectorAll("#fd-fridge-row-it-eggs [role='menuitem']")].map((i) => i.textContent.trim())`,
+    );
+    await clickSel("#fd-fridge-row-it-eggs [data-fd-menu-arm]");
+    await sleep(100);
+    const fridgeConfirm = await ev<string[]>(
+        `[...document.querySelectorAll("#fd-fridge-row-it-eggs .fd-menu__confirm-row [role='menuitem']")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
+    );
+    await clickSel(
+        '#fd-fridge-row-it-eggs form[action="/kitchen/fridge/items/it-eggs/discard"] [type="submit"]',
+    );
+    await sleep(500);
+    await clickSel(
+        '#fd-fridge-row-it-eggs form[action="/kitchen/fridge/items/it-eggs/eat"] [type="submit"]',
+    );
+    await sleep(500);
+    const fridgeSwipe = async (id: string, from: number, to: number) => {
+        const box = await ev<{ x: number; y: number; w: number }>(`(() => {
+            const r = document.querySelector('#fd-fridge-row-${id} .fd-item-row__face').getBoundingClientRect();
+            return { x: r.left, y: r.top + r.height / 2, w: r.width };
+        })()`);
+        const x0 = box.x + box.w * from;
+        const x1 = box.x + box.w * to;
+        await send("Input.dispatchTouchEvent", {
+            type: "touchStart",
+            touchPoints: [{ x: x0, y: box.y }],
+        });
+        for (let i = 1; i <= 8; i++) {
+            await send("Input.dispatchTouchEvent", {
+                type: "touchMove",
+                touchPoints: [{ x: x0 + ((x1 - x0) * i) / 8, y: box.y }],
+            });
+            await sleep(16);
+        }
+        await send("Input.dispatchTouchEvent", {
+            type: "touchEnd",
+            touchPoints: [],
+        });
+        await sleep(500);
+    };
+    await fridgeSwipe("it-cheese", 0.15, 0.85);
+    await fridgeSwipe("it-lime", 0.85, 0.15);
+    const fridgePosts = (await stats()).posts.map(
+        (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
+    );
+    record(
+        "v2 fridge on the phone: Use soon cards, rows by place with the date at the end, the low words and a score, Select and + beside the tabs; a row's ⋯ is Eat, Add to grocery list, Edit amount or expiry and Discard (confirmed in place); Eat and Discard and both swipes post the routes and fields they always did",
+        fridgePhone.rows === 6 &&
+            fridgePhone.sections.join("|") === "Fridge|Pantry" &&
+            fridgePhone.cards === 3 &&
+            fridgePhone.eggs === "Tomorrow · low, below 6" &&
+            fridgePhone.cheeseValue === "Nov 23" &&
+            fridgePhone.scores === 2 &&
+            fridgePhone.topTools.join("|") === "Fridge options|Add item" &&
+            fridgePhone.toolsLevel <= 8 &&
+            !fridgePhone.tabsHidden &&
+            fridgePhone.headActions === "none" &&
+            fridgeRowMenu.slice(0, 4).join("|") ===
+                "Eat|Add to grocery list|Edit amount or expiry|Discard" &&
+            fridgeConfirm.join("|") === "Cancel|Discard" &&
+            fridgePosts.join("\n") ===
+                [
+                    "/kitchen/fridge/items/it-eggs/discard return_to=/kitchen/fridge",
+                    "/kitchen/fridge/items/it-eggs/eat qty_amount=1&return_to=/kitchen/fridge",
+                    "/kitchen/fridge/items/it-cheese/eat qty_amount=100&return_to=/kitchen/fridge",
+                    "/kitchen/fridge/items/it-lime/discard return_to=/kitchen/fridge",
+                ].join("\n"),
+        { fridgePhone, fridgeRowMenu, fridgeConfirm, fridgePosts, ex: drain() },
+    );
+
+    // Select mode on the phone: Select is the tab row's ⋯, the Selection bar
+    // floats above the nav, a Discard asks in place and posts the picked ids.
+    await goto("/kitchen/fridge");
+    await setMarker();
+    await control("reset=posts");
+    await clickSel(".fd-kitchen-fridge-top [data-fd-menu-trigger]");
+    await sleep(150);
+    await clickSel('.fd-kitchen-fridge-top [data-fd-select-toggle="fridge"]');
+    await sleep(150);
+    const fridgeSel0 = await ev<{
+        selecting: boolean;
+        head: string;
+        phoneBar: string;
+        desktopBar: string;
+        aboveNav: boolean;
+        fixed: boolean;
+        discard: string;
+        menuItem: string;
+    }>(`({
+        selecting: document.querySelector(".fd-kitchen-fridge-page").hasAttribute("data-fd-selecting"),
+        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
+        phoneBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).display,
+        desktopBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--desktop")).display,
+        aboveNav: (() => {
+            const bar = document.querySelector(".fd-select-bar-slot--phone").getBoundingClientRect();
+            const nav = document.querySelector(".fd-tabs").getBoundingClientRect();
+            return bar.bottom <= nav.top + 1 && bar.width > 0;
+        })(),
+        fixed: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).position === "fixed",
+        discard: [...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
+        menuItem: document.querySelector('.fd-kitchen-fridge-top [data-fd-select-toggle="fridge"] .fd-menu__label')?.textContent ?? "",
+    })`);
+    // The phone's bar is its buttons: Discard fills the width, no count drawn.
+    const fridgeBarShape = await ev<{
+        w: number;
+        h: number;
+        barW: number;
+        count: number;
+    }>(`(() => {
+        const slot = document.querySelector(".fd-select-bar-slot--phone");
+        const btn = [...slot.querySelectorAll(".fd-btn")].find((b) => b.offsetParent !== null).getBoundingClientRect();
+        return {
+            w: Math.round(btn.width),
+            h: Math.round(btn.height),
+            barW: Math.round(slot.getBoundingClientRect().width),
+            count: Math.round(slot.querySelector(".fd-selection-bar__count").getBoundingClientRect().width),
+        };
+    })()`);
+    // Escape leaves select mode with focus on the ⋯ that opened it, like Cancel.
+    const pressEscape = async () => {
+        for (const type of ["keyDown", "keyUp"]) {
+            await send("Input.dispatchKeyEvent", {
+                type,
+                key: "Escape",
+                code: "Escape",
+                windowsVirtualKeyCode: 27,
+            });
+        }
+        await sleep(250);
+    };
+    await pressEscape();
+    const fridgeEsc = await ev<{ selecting: boolean; focus: string }>(`({
+        selecting: document.querySelector(".fd-kitchen-fridge-page").hasAttribute("data-fd-selecting"),
+        focus: document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName ?? "",
+    })`);
+    await clickSel(".fd-kitchen-fridge-top [data-fd-menu-trigger]");
+    await sleep(150);
+    await clickSel('.fd-kitchen-fridge-top [data-fd-select-toggle="fridge"]');
+    await sleep(150);
+    await clickSel("#fd-fridge-row-it-eggs .fd-item-row__face");
+    await clickSel("#fd-fridge-row-it-lime .fd-item-row__face");
+    await sleep(100);
+    const fridgeSel2 = await ev<{
+        head: string;
+        opened: number;
+        ticked: string[];
+        buttons: string;
+    }>(`({
+        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
+        opened: document.querySelectorAll("dialog[open]").length,
+        ticked: [...document.querySelectorAll("input[data-fd-select-item]:checked")].map((i) => i.value),
+        buttons: [...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
+    })`);
+    await clickSel(".fd-select-bar-slot--phone [data-fd-select-ask]");
+    await sleep(100);
+    const fridgeAsk = await ev<string>(
+        `[...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|")`,
+    );
+    // Focus moves with the question: to Cancel, then back to the action.
+    const selectFocus = `(() => {
+        const el = document.activeElement;
+        const kind = el?.hasAttribute("data-fd-select-ask") ? "ask" : el?.hasAttribute("data-fd-select-unask") ? "unask" : "other";
+        return kind + ":" + (el?.textContent ?? "").trim();
+    })()`;
+    const fridgeAskFocus = await ev<string>(selectFocus);
+    await clickSel(".fd-select-bar-slot--phone [data-fd-select-unask]");
+    await sleep(100);
+    const fridgeBack = await ev<string>(
+        `[...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|")`,
+    );
+    const fridgeBackFocus = await ev<string>(selectFocus);
+    await clickSel(".fd-select-bar-slot--phone [data-fd-select-ask]");
+    await sleep(100);
+    const fridgeAskWidths = await ev<number[]>(
+        `[...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => Math.round(b.getBoundingClientRect().width))`,
+    );
+    await sleep(100);
+    await clickSel(
+        '.fd-select-bar-slot--phone [data-fd-select-when="ask"][type="submit"]',
+    );
+    await sleep(600);
+    const fridgeBulk = (await stats()).posts.map(
+        (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
+    );
+    record(
+        "v2 fridge select mode on the phone: Select (the tab row's ⋯) shows the count row and a Selection bar fixed above the nav, rows pick without opening a sheet, Discard asks in place (Cancel, Discard 2) with focus on Cancel and back on Discard after it, the bar is full-width buttons with no drawn count, Escape leaves with focus on the ⋯, and the bulk route is posted with both ids",
+        fridgeSel0.selecting &&
+            fridgeSel0.head === "0 selectedCancel" &&
+            fridgeSel0.phoneBar !== "none" &&
+            fridgeSel0.desktopBar === "none" &&
+            fridgeSel0.fixed &&
+            fridgeSel0.aboveNav &&
+            fridgeSel0.discard === "Discard" &&
+            fridgeSel0.menuItem === "Cancel selection" &&
+            fridgeSel2.head === "2 selectedCancel" &&
+            fridgeSel2.opened === 0 &&
+            fridgeSel2.ticked.join("|") === "it-eggs|it-lime" &&
+            fridgeSel2.buttons === "Discard 2" &&
+            fridgeAsk === "Cancel|Discard 2" &&
+            fridgeAskFocus === "unask:Cancel" &&
+            fridgeBack === "Discard 2" &&
+            fridgeBackFocus === "ask:Discard 2" &&
+            fridgeBarShape.w >= fridgeBarShape.barW - 2 &&
+            fridgeBarShape.h >= 44 &&
+            fridgeBarShape.count <= 1 &&
+            fridgeAskWidths.length === 2 &&
+            fridgeAskWidths.every((w) => w >= fridgeBarShape.barW / 2 - 12) &&
+            !fridgeEsc.selecting &&
+            fridgeEsc.focus === "Fridge options" &&
+            fridgeBulk.join("\n") ===
+                "/kitchen/fridge/bulk/discard return_to=/kitchen/fridge&ids[]=it-eggs&ids[]=it-lime",
+        {
+            fridgeSel0,
+            fridgeSel2,
+            fridgeAsk,
+            fridgeAskFocus,
+            fridgeBack,
+            fridgeBackFocus,
+            fridgeBarShape,
+            fridgeAskWidths,
+            fridgeEsc,
+            fridgeBulk,
+            ex: drain(),
+        },
+    );
+
+    // Kitchen › Fridge at 1440: the sections are the sidebar's sub-links, the
+    // header's Actions slot holds Select and +, two columns, and select mode
+    // puts the Selection bar inline above one list.
+    await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 960,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await goto("/kitchen/fridge");
+    await setMarker();
+    await control("reset=posts");
+    const fridgeDesk = await ev<{
+        subs: string[];
+        current: string;
+        tabs: string;
+        actions: string[];
+        phoneTools: string;
+        leftHas: string[];
+        rightHas: string[];
+        sideBySide: boolean;
+        cards: number;
+        cardWidths: number[];
+    }>(`({
+        cardWidths: [...document.querySelectorAll(".fd-kitchen-use-soon .fd-mini-card")].filter((c) => c.offsetParent !== null).map((c) => Math.round(c.getBoundingClientRect().width)),
+        subs: [...document.querySelectorAll(".fd-sidebar a.fd-side-link--sub")].map((a) => a.textContent.trim()),
+        current: document.querySelector(".fd-sidebar a.fd-side-link--sub[aria-current='page']")?.textContent.trim() ?? "",
+        tabs: getComputedStyle(document.querySelector(".fd-kitchen-tabs")).display,
+        actions: [...document.querySelectorAll(".fd-kitchen-head .fd-page-header__actions button[aria-label]")].filter((b) => b.offsetParent !== null).map((b) => b.getAttribute("aria-label")),
+        phoneTools: getComputedStyle(document.querySelector(".fd-kitchen-fridge-top")).display,
+        leftHas: [...document.querySelectorAll(".fd-page-layout__column:first-child .fd-section-header__label")].map((h) => h.textContent),
+        rightHas: [...document.querySelectorAll(".fd-page-layout__column:last-child .fd-section-header__label")].map((h) => h.textContent),
+        sideBySide: (() => {
+            const [a, b] = [...document.querySelectorAll(".fd-kitchen-fridge-layout .fd-page-layout__column")].map((c) => c.getBoundingClientRect());
+            return !!a && !!b && b.left >= a.right && Math.abs(a.top - b.top) < 2;
+        })(),
+        cards: [...document.querySelectorAll(".fd-kitchen-use-soon .fd-mini-card")].filter((c) => c.offsetParent !== null).length,
+    })`);
+    await clickSel(
+        ".fd-kitchen-head .fd-page-header__actions [data-fd-menu-trigger]",
+    );
+    await sleep(150);
+    await clickSel('.fd-kitchen-head [data-fd-select-toggle="fridge"]');
+    await sleep(150);
+    await clickSel("#fd-fridge-row-it-cheese .fd-item-row__face");
+    await clickSel("#fd-fridge-row-it-milk .fd-item-row__face");
+    await sleep(100);
+    const fridgeDeskSel = await ev<{
+        inline: boolean;
+        phoneBar: string;
+        useSoon: string;
+        oneColumn: boolean;
+        width: number;
+        buttons: string;
+        head: string;
+        listW: number;
+    }>(`({
+        listW: Math.round(document.querySelector(".fd-kitchen-fridge-layout .fd-page-layout__columns").getBoundingClientRect().width),
+        inline: (() => {
+            const slot = document.querySelector(".fd-select-bar-slot--desktop");
+            return getComputedStyle(slot).display !== "none" && getComputedStyle(slot.firstElementChild).position === "static";
+        })(),
+        phoneBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).display,
+        useSoon: getComputedStyle(document.querySelector(".fd-kitchen-use-soon")).display,
+        oneColumn: (() => {
+            const cols = [...document.querySelectorAll(".fd-kitchen-fridge-layout .fd-page-layout__column")].filter((c) => c.offsetParent !== null).map((c) => c.getBoundingClientRect());
+            return cols.length >= 1 && cols.every((c) => Math.abs(c.left - cols[0].left) < 2);
+        })(),
+        width: Math.round(document.querySelector(".fd-select-bar-slot--desktop .fd-selection-bar").getBoundingClientRect().width),
+        buttons: [...document.querySelectorAll(".fd-select-bar-slot--desktop .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
+        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
+    })`);
+    await clickSel(".fd-select-bar-slot--desktop [data-fd-select-ask]");
+    await sleep(100);
+    const fridgeDeskAsk = await ev<string>(
+        `[...document.querySelectorAll(".fd-select-bar-slot--desktop .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|")`,
+    );
+    const fridgeDeskAskFocus = await ev<string>(selectFocus);
+    await clickSel(
+        '.fd-select-bar-slot--desktop [data-fd-select-when="ask"][type="submit"]',
+    );
+    await sleep(600);
+    const fridgeDeskPosts = (await stats()).posts.map(
+        (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
+    );
+    record(
+        "v2 fridge at 1440px: Kitchen's sections are the sidebar's sub-links (Fridge current, no tab row), Select and + sit in the header, Use soon (cards at their 150px) and the first place are the left column; select mode shows the Selection bar inline above one 720px list, a Discard asks in place and posts both ids",
+        fridgeDesk.subs.join("|") === "Fridge|Groceries|Usuals" &&
+            fridgeDesk.current === "Fridge" &&
+            fridgeDesk.tabs === "none" &&
+            fridgeDesk.actions.join("|") === "Fridge options|Add item" &&
+            fridgeDesk.phoneTools === "none" &&
+            fridgeDesk.leftHas.join("|") === "Use soon|Fridge" &&
+            fridgeDesk.rightHas.join("|") === "Pantry" &&
+            fridgeDesk.sideBySide &&
+            fridgeDesk.cards === 3 &&
+            fridgeDesk.cardWidths.every((w) => w === 150) &&
+            fridgeDeskSel.listW >= 700 &&
+            fridgeDeskSel.inline &&
+            fridgeDeskSel.phoneBar === "none" &&
+            fridgeDeskSel.useSoon === "none" &&
+            fridgeDeskSel.oneColumn &&
+            fridgeDeskSel.width <= 721 &&
+            fridgeDeskSel.buttons === "Discard 2" &&
+            fridgeDeskSel.head === "2 selectedCancel" &&
+            fridgeDeskAsk === "Cancel|Discard 2" &&
+            fridgeDeskAskFocus === "unask:Cancel" &&
+            fridgeDeskPosts.join("\n") ===
+                "/kitchen/fridge/bulk/discard return_to=/kitchen/fridge&ids[]=it-cheese&ids[]=it-milk",
+        {
+            fridgeDesk,
+            fridgeDeskSel,
+            fridgeDeskAsk,
+            fridgeDeskAskFocus,
+            fridgeDeskPosts,
+            ex: drain(),
+        },
+    );
+
+    // The item sheet from a row and from a Use soon card, and Save and the add
+    // sheet post what they always did.
+    await goto("/kitchen/fridge");
+    await setMarker();
+    await control("reset=posts");
+    await clickSel("[data-fd-open-item='fd-fridge-item-it-cremini']");
+    await sleep(300);
+    const fridgeSheet = await ev<{
+        open: string[];
+        title: string;
+        sub: string;
+        actions: string[];
+        useIn: string;
+        kept: string[];
+        expires: string[];
+        fieldShown: boolean;
+    }>(`({
+        open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
+        title: document.querySelector("#fd-fridge-item-it-cremini .fd-sheet__title")?.textContent ?? "",
+        sub: document.querySelector("#fd-fridge-item-it-cremini .fd-sheet__subtitle")?.textContent ?? "",
+        actions: [...document.querySelectorAll("#fd-fridge-item-it-cremini .fd-kitchen-item-actions .fd-quick-action")].map((b) => b.getAttribute("aria-label")),
+        useIn: document.querySelector("#fd-fridge-item-it-cremini .fd-sheet__section--rows")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
+        kept: [...document.querySelectorAll("#fd-fridge-item-it-cremini input[name='location_id']")].map((i) => i.value + (i.checked ? "*" : "")),
+        expires: [...document.querySelectorAll("#fd-fridge-item-it-cremini input[name='expires_mode']")].map((i) => i.value + (i.checked ? "*" : "")),
+        fieldShown: document.querySelector("#fd-fridge-item-it-cremini .fd-kitchen-item-expires__field").offsetParent !== null,
+    })`);
+    await ev(`document.getElementById("fd-fridge-item-it-cremini").close()`);
+    await clickSel("#fd-fridge-row-it-eggs .fd-item-row__face");
+    await sleep(300);
+    await clickSel(
+        "#fd-fridge-item-it-eggs input[name='location_id'][value='l-freezer']",
+    );
+    await clickSel(
+        "#fd-fridge-item-it-eggs input[name='expires_mode'][value='none']",
+    );
+    await sleep(100);
+    const fridgeExpires = await ev<string>(
+        `document.querySelector("#fd-fridge-item-it-eggs input[name='expires_on']").value`,
+    );
+    await clickSel(
+        "#fd-fridge-item-it-eggs .fd-sheet__actions button[type='submit']",
+    );
+    await sleep(600);
+    const fridgeSave = (await stats()).posts.map(
+        (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
+    );
+    record(
+        "v2 fridge item sheet: a Use soon card opens its item with the four actions, the recipe that uses it, Kept in and Expires chips; Save posts the amount, unit, place and the cleared date to the item's route",
+        fridgeSheet.open.join() === "fd-fridge-item-it-cremini" &&
+            fridgeSheet.title === "Cremini mushrooms" &&
+            fridgeSheet.sub === "Fridge · expired" &&
+            fridgeSheet.actions.join("|") ===
+                "Ate some|Add to grocery list|Freeze|Discard" &&
+            fridgeSheet.useIn.includes("Salmon & rice") &&
+            fridgeSheet.useIn.includes("Uses 2 things expiring") &&
+            fridgeSheet.kept.join("|") === "l-fridge*|l-freezer|l-pantry" &&
+            fridgeSheet.expires.join("|") === "keep*|none|pick" &&
+            !fridgeSheet.fieldShown &&
+            fridgeExpires === "" &&
+            fridgeSave.join("\n") ===
+                "/kitchen/fridge/items/it-eggs return_to=/kitchen/fridge&qty_amount=2&qty_unit=each&location_id=l-freezer&expires_mode=none&expires_on=",
+        { fridgeSheet, fridgeExpires, fridgeSave, ex: drain() },
+    );
+
+    // Add to fridge: the usuals first, the search narrows them, a plus posts
+    // the add route with that food.
+    await goto("/kitchen/fridge");
+    await setMarker();
+    await control("reset=posts");
+    await clickSel(
+        ".fd-kitchen-head .fd-page-header__actions [aria-label='Add item']",
+    );
+    await sleep(300);
+    const fridgeAdd0 = await ev<{
+        open: boolean;
+        usuals: string[];
+        title: string;
+        close: boolean;
+        searchBelow: boolean;
+    }>(`({
+        open: document.getElementById("fd-fridge-add").open,
+        usuals: [...document.querySelectorAll("#fd-fridge-add [data-fd-fridge-usual]")].map((r) => r.querySelector(".fd-item-row__title").textContent),
+        title: document.querySelector("#fd-fridge-add .fd-sheet__title")?.textContent ?? "",
+        close: !!document.querySelector("#fd-fridge-add .fd-sheet__header [command='close']"),
+        searchBelow: document.getElementById("fd-fridge-add-q").getBoundingClientRect().top >= document.querySelector("#fd-fridge-add .fd-sheet__header").getBoundingClientRect().bottom,
+    })`);
+    await ev(`(() => {
+        const input = document.getElementById("fd-fridge-add-q");
+        input.value = "mil";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    const fridgeAddFiltered = await ev<string[]>(
+        `[...document.querySelectorAll("#fd-fridge-add [data-fd-fridge-usual]")].filter((r) => !r.hidden).map((r) => r.querySelector(".fd-item-row__title").textContent)`,
+    );
+    const fridgeAddSupply = await ev<string>(
+        `[...document.querySelectorAll("#fd-fridge-add [data-fd-fridge-usual='paper towels'] input[type=hidden]")].map((i) => i.name + "=" + i.value).join("&")`,
+    );
+    const fridgeAddName = await ev<string>(
+        `document.getElementById("fd-fridge-add-name").value`,
+    );
+    await clickSel(
+        "#fd-fridge-add [data-fd-fridge-usual='milk'] .fd-item-row__add",
+    );
+    await sleep(600);
+    const fridgeAddPosts = (await stats()).posts.map(
+        (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
+    );
+    record(
+        "v2 fridge Add to fridge: the + in the header opens the search sheet with the usuals first, typing narrows them and fills the hand form's Name, and a usual's plus posts the add route with its food, place and usual amount (a supply usual posts as a supply)",
+        fridgeAdd0.open &&
+            fridgeAdd0.title === "Add to fridge" &&
+            fridgeAdd0.close &&
+            fridgeAdd0.searchBelow &&
+            fridgeAdd0.usuals.join("|") === "Milk|Eggs|Paper towels" &&
+            fridgeAddSupply.includes("kind=supply") &&
+            fridgeAddSupply.includes("name=Paper towels") &&
+            fridgeAddFiltered.join("|") === "Milk" &&
+            fridgeAddName === "mil" &&
+            fridgeAddPosts.join("\n") ===
+                "/kitchen/fridge/items kind=food&food_id=p-milk&location_id=l-fridge&qty_amount=1&qty_unit=gal",
+        {
+            fridgeAdd0,
+            fridgeAddFiltered,
+            fridgeAddSupply,
+            fridgeAddName,
+            fridgeAddPosts,
+            ex: drain(),
+        },
+    );
+
+    // Not here? Add it by hand: the form's Add button keeps its height and the
+    // sheet's width on the phone and at 1440, and posts what the route takes.
+    const handCase = async (width: number) => {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 800 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: width < 800,
+        });
+        await goto("/kitchen/fridge");
+        await setMarker();
+        await control("reset=posts");
+        await ev(`document.getElementById("fd-fridge-add").showModal()`);
+        await sleep(300);
+        await ev(
+            `document.querySelector("#fd-fridge-add .fd-kitchen-hand").open = true`,
+        );
+        await sleep(100);
+        await ev(`(() => {
+            const name = document.getElementById("fd-fridge-add-name");
+            name.value = "Basil";
+            name.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        const box = await ev<{ h: number; w: number; formW: number }>(`(() => {
+            const b = document.querySelector("#fd-fridge-add-form button[type=submit]").getBoundingClientRect();
+            return { h: Math.round(b.height), w: Math.round(b.width), formW: Math.round(document.getElementById("fd-fridge-add-form").getBoundingClientRect().width) };
+        })()`);
+        const steppers = await ev<number[]>(
+            `[...document.querySelectorAll("#fd-fridge-add-form [data-fd-step]")].map((b) => Math.round(b.getBoundingClientRect().width))`,
+        );
+        await clickSel("#fd-fridge-add-form button[type=submit]");
+        await sleep(600);
+        const posts = (await stats()).posts.map(
+            (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
+        );
+        return { box, steppers, posts };
+    };
+    const handPhone = await handCase(390);
+    const handDesk = await handCase(1440);
+    const handPost =
+        "/kitchen/fridge/items kind=food&food_name=Basil&location_id=l-fridge&qty_amount=1&qty_unit=each";
+    record(
+        "v2 fridge Add by hand: the form's Add button is at least 40px tall and as wide as the form, the stepper's buttons stay 48px, and a click posts the add route with the name, place and amount, on the phone and at 1440",
+        [handPhone, handDesk].every(
+            (c) =>
+                c.box.h >= 40 &&
+                c.box.w >= c.box.formW - 1 &&
+                c.steppers.length === 2 &&
+                c.steppers.every((w) => w === 48) &&
+                c.posts.join("\n") === handPost,
+        ),
+        { handPhone, handDesk, ex: drain() },
+    );
+    await goto("/");
+    await setMarker();
+
     // Quick add and water post the routes they always did.
     await goto("/");
     await setMarker();

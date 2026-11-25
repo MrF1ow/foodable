@@ -17,6 +17,8 @@ export type QuickActionOptions = {
     disabled?: boolean;
     /** A button that submits the form around it (Water +250 ml). */
     submit?: boolean;
+    /** The id of the form a submit button posts, when it sits outside it. */
+    form?: string;
     /** `data-*` hooks for a script (`fd-open-sheet`). */
     data?: Readonly<Record<string, string>>;
     className?: string;
@@ -37,6 +39,6 @@ export function quickAction(opts: QuickActionOptions): Html {
         );
     }
     return raw(
-        `<button type="${opts.submit ? "submit" : "button"}" class="${classes}"${name}${opts.disabled ? " disabled" : ""}${dataAttrs(opts.data)}>${inner}</button>`,
+        `<button type="${opts.submit ? "submit" : "button"}" class="${classes}"${name}${opts.form != null ? ` form="${esc(opts.form)}"` : ""}${opts.disabled ? " disabled" : ""}${dataAttrs(opts.data)}>${inner}</button>`,
     );
 }

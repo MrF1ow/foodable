@@ -21,6 +21,8 @@ export type SelectionBarAction = {
     /** Default `secondary`. */
     variant?: "secondary" | "primary" | "danger";
     href?: string;
+    /** `submit` posts the form named by `attrs.form`. Default `button`. */
+    type?: "button" | "submit";
     attrs?: Readonly<Record<string, string>>;
 };
 
@@ -29,6 +31,11 @@ export type SelectionBarOptions = {
     count: number;
     /** Replaces "<count> selected". */
     countLabel?: string;
+    /**
+     * Whether the count is drawn. `false` keeps it for a screen reader only
+     * (the phone's floating bar is just its buttons; the page says the count).
+     */
+    showCount?: boolean;
     actions: readonly SelectionBarAction[];
     className?: string;
 };
@@ -45,11 +52,12 @@ export function selectionBar(opts: SelectionBarOptions): Html {
                 variant: a.variant,
                 size: "md",
                 href: a.href,
+                type: a.type,
                 attrs: a.attrs,
             }),
         )
         .join("");
     return raw(
-        `<div class="${cls("fd-selection-bar", `fd-selection-bar--${opts.placement}`, opts.className)}" role="toolbar" aria-label="Selection"><span class="fd-selection-bar__count" aria-live="polite">${esc(count)}</span><div class="fd-selection-bar__actions">${actions}</div></div>`,
+        `<div class="${cls("fd-selection-bar", `fd-selection-bar--${opts.placement}`, opts.className)}" role="toolbar" aria-label="Selection"><span class="${cls("fd-selection-bar__count", opts.showCount === false && "fd-sr")}" aria-live="polite">${esc(count)}</span><div class="fd-selection-bar__actions">${actions}</div></div>`,
     );
 }

@@ -216,7 +216,6 @@ describe("renderKitchenUsualsV2Page", () => {
     test("renders Kitchen chrome: tabs, seg, groceries count, Usuals selected", () => {
         const html = renderKitchenUsualsV2Page(baseView() as never);
         expect(html).toContain("fd-kitchen-tabs");
-        expect(html).toContain("fd-kitchen-overview-seg");
         expect(html).toContain("Groceries · 8");
         expect(html).toContain('href="/kitchen/usuals"');
         expect(html).not.toMatch(/fd-sidebar__settings[^>]*aria-current/);
@@ -502,7 +501,7 @@ describe("header subtitle", () => {
 describe("page header", () => {
     test("is the same as on Fridge and Groceries", () => {
         expect(renderKitchenUsualsBody(baseView())).toMatch(
-            /^<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">[^<]+<\/span><\/h1>\n<header class="fd-kitchen-overview-head">\n<div class="fd-kitchen-overview-head__title">\n<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--phone">[^<]+<\/span><span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--desktop">[^<]+<\/span><\/h1>\n<\/div>\n<div class="fd-kitchen-overview-head__tools">\n<nav class="fd-seg fd-kitchen-overview-seg" aria-label="Kitchen sections">/,
+            /^<header class="fd-page-header fd-kitchen-head" data-fd-kitchen-tab="usuals"><div class="fd-page-header__titles"><h1 class="fd-page-header__title">Kitchen<\/h1><p class="fd-page-header__subtitle">[^<]+<\/p><\/div>/,
         );
     });
 });

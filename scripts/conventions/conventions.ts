@@ -489,8 +489,6 @@ const MEDIUM_EXACT: Readonly<Record<string, string>> = {
     "src/web/pages/v2/kitchen-head.ts": "web",
     "src/web/pages/v2/kitchen-fridge.ts": "fridge",
     "src/web/pages/v2/kitchen-fridge.test.ts": "fridge",
-    "src/web/pages/v2/kitchen-overview.ts": "fridge",
-    "src/web/pages/v2/kitchen-overview.test.ts": "fridge",
     "src/web/pages/v2/kitchen-groceries.ts": "grocery",
     "src/web/pages/v2/kitchen-groceries.test.ts": "grocery",
     "src/web/pages/v2/kitchen-usuals.ts": "web",

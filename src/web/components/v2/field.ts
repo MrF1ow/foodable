@@ -28,7 +28,8 @@ export type FieldOptions = {
         | "tel"
         | "url"
         | "time"
-        | "datetime-local";
+        | "datetime-local"
+        | "date";
     value?: string;
     placeholder?: string;
     autocomplete?: string;

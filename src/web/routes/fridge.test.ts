@@ -12,6 +12,7 @@ import {
 import {
     createMemoryFoodsStore,
     findOrCreateManualFood,
+    newFood,
 } from "../../domain/foods.js";
 import type { HouseholdMember } from "../../household.js";
 import * as actualHousehold from "../../db/household.js";
@@ -22,6 +23,8 @@ import * as actualGrocery from "../../db/grocery.js";
 import * as actualSettings from "../../db/settings.js";
 import { createMemorySettingsStore } from "../../domain/settings.js";
 import * as actualRestock from "../../db/restock.js";
+import * as actualScoreSettings from "../../db/score-settings.js";
+import { createMemoryScoreSettingsStore } from "../../domain/score-settings.js";
 import * as actualStock from "../../db/stock.js";
 import * as actualAttention from "../attention.js";
 import { mintSiteSession, SITE_COOKIE } from "../../site-session.js";
@@ -43,6 +46,7 @@ const realFoods = { ...actualFoods };
 const realGrocery = { ...actualGrocery };
 const realSettings = { ...actualSettings };
 const realRestock = { ...actualRestock };
+const realScoreSettings = { ...actualScoreSettings };
 const realStock = { ...actualStock };
 const realAttention = { ...actualAttention };
 
@@ -141,6 +145,12 @@ mock.module("../../db/restock.js", () => ({
     householdToday: async () => today,
 }));
 
+// oxlint-disable-next-line foodable/no-db-mock-outside-windows -- route test owns the score weights the fridge rows read
+mock.module("../../db/score-settings.js", () => ({
+    ...realScoreSettings,
+    liveScoreSettingsStore: () => createMemoryScoreSettingsStore(),
+}));
+
 const emptyNotices = {
     notices: [],
     dismissals: [],
@@ -192,6 +202,8 @@ afterAll(() => {
     // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restore after route test
     mock.module("../../db/settings.js", () => realSettings);
     mock.module("../../db/restock.js", () => realRestock);
+    // oxlint-disable-next-line foodable/no-db-mock-outside-windows -- restore after route test
+    mock.module("../../db/score-settings.js", () => realScoreSettings);
     mock.module("../../db/stock.js", () => realStock);
     mock.module("../attention.js", () => realAttention);
 });
@@ -215,6 +227,81 @@ describe("fridge routes", () => {
         const html = await res.text();
         expect(html).toContain("fd-kitchen-fridge-page");
         expect(html).not.toContain("fridge-add-location");
+    });
+
+    test("GET /kitchen/fridge offers the household's usuals in the Add sheet with their usual amount", async () => {
+        await seedFridge();
+        foodsStore = createMemoryFoodsStore();
+        const eggs = {
+            ...newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Eggs",
+                calories: 143,
+                proteinG: 12.6,
+                carbsG: 0.7,
+                fatG: 9.5,
+            }),
+            id: "f-berries",
+            usualAddedAt: "2026-11-01T00:00:00.000Z",
+            usualAmount: { amount: 12, unit: "each" },
+        };
+        await foodsStore.insertFood(eggs);
+        const res = await app.request("http://x/kitchen/fridge", {
+            headers: { cookie: cookie(ALICE) },
+        });
+        expect(res.status).toBe(200);
+        const html = await res.text();
+        const row = html.match(
+            /<li [^>]*data-fd-fridge-usual="eggs"[\s\S]*?<\/li>/,
+        )?.[0];
+        expect(row).toContain('<span class="fd-item-row__subtitle">12</span>');
+        expect(row).toContain('name="food_id" value="f-berries"');
+        expect(row).toContain('name="qty_amount" value="12"');
+        expect(row).toContain('name="qty_unit" value="each"');
+    });
+
+    test("a supply usual in the Add sheet posts the fields the add route accepts and lands in the fridge", async () => {
+        await seedFridge();
+        stockStore = createMemoryStockStore();
+        foodsStore = createMemoryFoodsStore();
+        await foodsStore.insertFood({
+            ...newFood({
+                householdId: HH,
+                kind: "supply",
+                name: "Paper towels",
+            }),
+            id: "f-towels",
+            usualAddedAt: "2026-11-01T00:00:00.000Z",
+        });
+        const page = await app.request("http://x/kitchen/fridge", {
+            headers: { cookie: cookie(ALICE) },
+        });
+        const html = await page.text();
+        const row = html.match(
+            /<li [^>]*data-fd-fridge-usual="paper towels"[\s\S]*?<\/li>/,
+        )?.[0];
+        expect(row).toBeDefined();
+        const fields = new URLSearchParams();
+        for (const m of row!.matchAll(
+            /<input type="hidden" name="([^"]+)" value="([^"]*)"/g,
+        )) {
+            fields.set(m[1]!, m[2]!);
+        }
+        expect(fields.get("kind")).toBe("supply");
+        const res = await app.request("http://x/kitchen/fridge/items", {
+            method: "POST",
+            headers: {
+                cookie: cookie(ALICE),
+                "content-type": "application/x-www-form-urlencoded",
+            },
+            body: fields.toString(),
+        });
+        expect(res.status).toBe(303);
+        const items = await fridgeStore.listItems(HH);
+        const added = items.find((i) => i.foodId === "f-towels");
+        expect(added?.kind).toBe("supply");
+        expect(added?.quantity).toEqual({ amount: 1, unit: "each" });
     });
 
     test("POST freeze moves item to freezer", async () => {

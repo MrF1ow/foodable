@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import type { FridgeItem, FridgeLocation } from "../../../domain/fridge.js";
-import { defaultFreezeExpiry } from "../../../domain/fridge.js";
 import { listExpiring } from "../../../domain/stock.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import {
@@ -14,6 +13,7 @@ import {
     buildPreviewKitchenFridgeView,
     eatPortionAmount,
     fridgeLowSubtitle,
+    kitchenFridgeItemCountLabel,
     lowStockLevels,
     fridgeItemSheetId,
     formatFridgeExpiryLabel,
@@ -105,82 +105,264 @@ describe("groupFridgeItemsByLocation", () => {
     });
 });
 
-describe("renderKitchenFridgeV2Page", () => {
-    const chrome = {
-        theme: "dark" as const,
-        flags: FIXTURE_APP_CHROME_FLAGS,
-        displayName: "Alex",
-    };
+const chrome = {
+    theme: "dark" as const,
+    flags: FIXTURE_APP_CHROME_FLAGS,
+    displayName: "Alex",
+};
+const fridgeLocation: FridgeLocation = {
+    id: "loc-fridge",
+    householdId: "hh",
+    name: "Fridge",
+    sortOrder: 0,
+};
+const pantryLocation: FridgeLocation = {
+    id: "loc-pantry",
+    householdId: "hh",
+    name: "Pantry",
+    sortOrder: 1,
+};
+const body = (
+    extra: Parameters<typeof buildPreviewKitchenFridgeView>[2] = {},
+) =>
+    renderKitchenFridgeBody(
+        buildPreviewKitchenFridgeView(chrome, today, {
+            locations: [fridgeLocation],
+            ...extra,
+        }),
+    );
 
+describe("kitchenFridgeItemCountLabel", () => {
+    test("counts items", () => {
+        expect(kitchenFridgeItemCountLabel(1)).toBe("1 item");
+        expect(kitchenFridgeItemCountLabel(24)).toBe("24 items");
+    });
+});
+
+describe("renderKitchenFridgeV2Page", () => {
     test("escapes hostile item names in the list", () => {
-        const view = buildPreviewKitchenFridgeView(chrome, today, {
-            items: [
-                item({
-                    id: "x",
-                    displayName: '<script>alert("x")</script>',
-                }),
-            ],
-            locations: [
-                {
-                    id: "loc-fridge",
-                    householdId: "hh",
-                    name: "Fridge",
-                    sortOrder: 0,
-                },
-            ],
-        });
-        const html = renderKitchenFridgeV2Page(view);
+        const html = renderKitchenFridgeV2Page(
+            buildPreviewKitchenFridgeView(chrome, today, {
+                items: [
+                    item({
+                        id: "x",
+                        displayName: '<script>alert("x")</script>',
+                    }),
+                ],
+                locations: [fridgeLocation],
+            }),
+        );
         // The hostile name never reaches the markup raw. (The head's own
         // one-line script that sets html.fx is the only script tag.)
         expect(html).not.toContain('<script>alert("x")');
         expect(html).toContain("&lt;script&gt;");
     });
 
-    test("select mode: every item has a checkbox, with a confirmed Discard", () => {
-        const view = buildPreviewKitchenFridgeView(chrome, today, {
+    test("the header is the Page header, with the shell's tabs right under it", () => {
+        const html = renderKitchenFridgeV2Page(
+            buildPreviewKitchenFridgeView(chrome, today, {
+                items: [item({ id: "a", displayName: "Eggs" })],
+                locations: [fridgeLocation],
+            }),
+        );
+        expect(html).toMatch(
+            /<header class="fd-page-header fd-kitchen-head" data-fd-kitchen-tab="fridge"><div class="fd-page-header__titles"><h1 class="fd-page-header__title">Kitchen<\/h1><p class="fd-page-header__subtitle">1 item<\/p><\/div>[\s\S]*?<\/header><nav class="fd-kitchen-tabs"/,
+        );
+        // No segmented switch of its own: the sidebar lists the sections.
+        expect(html).not.toContain("fd-kitchen-overview-seg");
+        expect(html).not.toContain("fd-kitchen-overview-head");
+    });
+
+    test("the header's Actions slot holds Select and add, and so does the phone's tab row", () => {
+        const html = body({
+            items: [item({ id: "a", displayName: "Eggs" })],
+        });
+        const actions = html.match(
+            /<div class="fd-page-header__actions">([\s\S]*?)<\/div><\/div><\/header>/,
+        )?.[1];
+        expect(actions).toContain('aria-label="Fridge options"');
+        expect(actions).toContain('data-fd-select-toggle="fridge"');
+        expect(actions).toContain('aria-label="Add item"');
+        expect(actions).toContain('commandfor="fd-fridge-add"');
+        const top = html.match(
+            /<div class="fd-kitchen-fridge-top">([\s\S]*?)<\/div>\n/,
+        )?.[1];
+        expect(top).toContain('data-fd-select-toggle="fridge"');
+        expect(top).toContain('aria-label="Add item"');
+    });
+
+    test("an empty fridge has no Select, only add", () => {
+        const html = body({ items: [] });
+        expect(html).not.toContain("data-fd-select-toggle");
+        expect(html).not.toContain("fd-selection-bar");
+        expect(html).toContain('aria-label="Add item"');
+        expect(html).toContain("Nothing in the fridge yet");
+    });
+
+    test("no places: says so", () => {
+        const html = renderKitchenFridgeBody(
+            buildPreviewKitchenFridgeView(chrome, today, {
+                items: [],
+                locations: [],
+            }),
+        );
+        expect(html).toContain("No places yet");
+        expect(html).not.toContain('id="fd-fridge-add"');
+    });
+
+    test("places that hold something are sections with a count, in order, none for an empty one", () => {
+        const html = body({
+            locations: [
+                fridgeLocation,
+                {
+                    ...pantryLocation,
+                    id: "loc-freezer",
+                    name: "Freezer",
+                    sortOrder: 1,
+                },
+                { ...pantryLocation, sortOrder: 2 },
+            ],
             items: [
                 item({ id: "a", displayName: "Eggs" }),
-                item({ id: "b", displayName: "Spinach" }),
+                item({
+                    id: "b",
+                    displayName: "Rice",
+                    locationId: "loc-pantry",
+                    expiresOn: null,
+                }),
             ],
         });
-        const body = renderKitchenFridgeBody(view);
-        expect(body).toContain(
-            'class="fd-kitchen-fridge-page" data-fd-select="fridge"',
+        const labels = [
+            ...html.matchAll(
+                /<h2 class="fd-section-header__label">([^<]+)<\/h2><span class="fd-section-header__count">(\d+)<\/span>/g,
+            ),
+        ]
+            .map((m) => [m[1], m[2]])
+            .filter(([label]) => label !== "Use soon");
+        expect(labels).toEqual([
+            ["Fridge", "1"],
+            ["Pantry", "1"],
+        ]);
+        // Use soon and the first place share the left column.
+        const left = html.match(
+            /<div class="fd-page-layout__column">([\s\S]*?)<\/div><div class="fd-page-layout__column">/,
+        )?.[1];
+        expect(left).toContain('aria-label="Fridge"');
+        expect(left).not.toContain('aria-label="Pantry"');
+    });
+
+    test("a row: name, amount, date at the end, score, a menu and both swipe beds", () => {
+        const html = body({
+            items: [
+                item({
+                    id: "a",
+                    displayName: "Cheddar",
+                    foodId: "f-ch",
+                    expiresOn: "2026-12-02",
+                }),
+            ],
+            scores: new Map([["f-ch", 52]]),
+        });
+        const row =
+            html.match(
+                /<li tabindex="0" class="fd-item-row[^"]*"[^>]*id="fd-fridge-row-a"[\s\S]*?<\/li>/,
+            )?.[0] ?? "";
+        expect(row).toContain(
+            '<span class="fd-item-row__title" title="Cheddar">Cheddar</span>',
         );
-        expect(body).toContain('data-fd-select-toggle="fridge"');
-        for (const [id, name] of [
-            ["a", "Eggs"],
-            ["b", "Spinach"],
-        ]) {
-            expect(body).toContain(
-                `<input type="checkbox" class="fd-row__select-input" data-fd-select-item name="ids[]" value="${id}" aria-label="Select ${name}">`,
-            );
-        }
-        expect(body).toContain('action="/kitchen/fridge/bulk/discard"');
-        expect(body).toContain('data-one="Discard 1 item?"');
-        expect(body).toContain('data-many="Discard {n} items?"');
-        expect(body).toContain(
+        expect(row).toContain('<span class="fd-item-row__meta">2</span>');
+        expect(row).toContain("fd-score fd-score--");
+        expect(row).toContain('<span class="fd-item-row__value">Dec 2</span>');
+        expect(row).not.toContain("fd-item-row--warning");
+        expect(row).toContain('data-fd-sheet-row=""');
+        expect(row).toContain(`data-sheet-id="${fridgeItemSheetId("a")}"`);
+        expect(row).toContain("fd-item-row__bed--again");
+        expect(row).toContain("fd-item-row__bed--delete");
+        expect(row).toContain('aria-label="Ate some"');
+        expect(row).toContain('aria-label="Discard"');
+        expect(row).toContain('name="ids[]" value="a"');
+    });
+
+    test("a row's menu: Eat, Add to grocery list, Edit amount or expiry, Discard confirmed in place", () => {
+        const html = body({
+            items: [item({ id: "a", displayName: "Eggs", foodId: "f-eggs" })],
+            foodsById: new Map([
+                [
+                    "f-eggs",
+                    {
+                        id: "f-eggs",
+                        usualAmount: { amount: 2, unit: "each" },
+                        genericFoodId: null,
+                    },
+                ],
+            ]),
+        });
+        const menu =
+            html.match(
+                /<div class="fd-menu[^"]*" data-fd-menu data-anchor="more"><button[^>]*aria-label="Actions for Eggs"[\s\S]*?<\/div><\/div><\/div><\/div>/,
+            )?.[0] ?? "";
+        expect(menu).toContain('action="/kitchen/fridge/items/a/eat"');
+        expect(menu).toContain(
+            '<input type="hidden" name="qty_amount" value="2">',
+        );
+        expect(menu).toContain(
             '<input type="hidden" name="return_to" value="/kitchen/fridge">',
         );
+        expect(menu).toContain("Eat");
+        expect(menu).toContain(
+            'action="/kitchen/fridge/items/a/add-to-grocery"',
+        );
+        expect(menu).toContain(
+            '<input type="hidden" name="from" value="/kitchen/fridge">',
+        );
+        expect(menu).toContain("Add to grocery list");
+        expect(menu).toContain(`commandfor="${fridgeItemSheetId("a")}"`);
+        expect(menu).toContain("Edit amount or expiry");
+        expect(menu).toContain("data-fd-menu-arm");
+        expect(menu).toContain('action="/kitchen/fridge/items/a/discard"');
+        expect(menu).toContain("Discard");
     });
 
-    test("select mode: an empty fridge has no Select", () => {
-        const body = renderKitchenFridgeBody(
-            buildPreviewKitchenFridgeView(chrome, today, { items: [] }),
+    test("warnings: expired and soon go under the title in the warning state", () => {
+        const html = body({
+            items: [
+                item({
+                    id: "old",
+                    displayName: "Old milk",
+                    expiresOn: "2026-11-09",
+                }),
+                item({
+                    id: "soon",
+                    displayName: "Salmon",
+                    expiresOn: "2026-11-11",
+                }),
+                item({
+                    id: "far",
+                    displayName: "Rice",
+                    expiresOn: "2026-12-01",
+                }),
+            ],
+        });
+        const row = (id: string) =>
+            html.match(
+                new RegExp(
+                    `<li tabindex="0" class="[^"]*"[^>]*id="fd-fridge-row-${id}"[\\s\\S]*?</li>`,
+                ),
+            )?.[0] ?? "";
+        expect(row("old")).toContain("fd-item-row--warning");
+        expect(row("old")).toContain(
+            '<span class="fd-item-row__subtitle">Expired</span>',
         );
-        expect(body).not.toContain("data-fd-select-toggle");
+        expect(row("soon")).toContain(
+            '<span class="fd-item-row__subtitle">Tomorrow</span>',
+        );
+        expect(row("far")).not.toContain("fd-item-row--warning");
+        expect(row("far")).toContain(
+            '<span class="fd-item-row__value">Dec 1</span>',
+        );
     });
 
-    test("the header is the same as on Groceries and Usuals", () => {
-        const body = renderKitchenFridgeBody(
-            buildPreviewKitchenFridgeView(chrome, today, { items: [] }),
-        );
-        expect(body).toMatch(
-            /^<h1 class="fd-kitchen-fridge-title fd-kitchen-fridge-title--phone">Kitchen<span class="fd-kitchen-fridge-count">[^<]+<\/span><\/h1>\n<header class="fd-kitchen-overview-head">\n<div class="fd-kitchen-overview-head__title">\n<h1 class="fd-kitchen-fridge-title">Kitchen<span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--phone">[^<]+<\/span><span class="fd-kitchen-fridge-count fd-kitchen-fridge-count--desktop">[^<]+<\/span><\/h1>\n<\/div>\n<div class="fd-kitchen-overview-head__tools">\n<nav class="fd-seg fd-kitchen-overview-seg" aria-label="Kitchen sections">/,
-        );
-    });
-
-    test("use soon lists expiring and expired items", () => {
+    test("use soon lists expiring and expired items as cards that open the item", () => {
         const view = buildPreviewKitchenFridgeView(chrome, today, {
             items: [
                 item({
@@ -199,29 +381,148 @@ describe("renderKitchenFridgeV2Page", () => {
                     expiresOn: "2026-11-11",
                 }),
             ],
-            locations: [
-                {
-                    id: "loc-fridge",
-                    householdId: "hh",
-                    name: "Fridge",
-                    sortOrder: 0,
-                },
-            ],
+            locations: [fridgeLocation],
         });
-        const expiring = listExpiring(view.items, today, 3);
-        expect(expiring.map((i) => i.id).sort()).toEqual(["exp", "soon"]);
-        const body = renderKitchenFridgeBody(view);
-        const strip = body.slice(
-            body.indexOf("fd-kitchen-use-soon"),
-            body.indexOf("fd-kitchen-fridge-loc"),
+        expect(
+            listExpiring(view.items, today, 3)
+                .map((i) => i.id)
+                .sort(),
+        ).toEqual(["exp", "soon"]);
+        const html = renderKitchenFridgeBody(view);
+        const strip = html.slice(
+            html.indexOf('class="fd-kitchen-use-soon"'),
+            html.indexOf('class="fd-kitchen-loc"'),
         );
         expect(strip).toContain("Use soon");
         expect(strip).toContain("Salmon");
         expect(strip).toContain("Old milk");
         expect(strip).not.toContain("Fresh");
+        expect(strip).toContain('fd-mini-card__label--over">Expired');
+        expect(strip).toContain(
+            `data-fd-open-item="${fridgeItemSheetId("soon")}"`,
+        );
+        expect(strip).toContain('href="/kitchen/fridge?item=soon"');
     });
 
-    test("use soon cards say which recipe uses the item", () => {
+    test("hides use soon when nothing qualifies", () => {
+        expect(
+            body({
+                items: [
+                    item({
+                        id: "ok",
+                        displayName: "Rice",
+                        expiresOn: "2026-12-01",
+                    }),
+                ],
+            }),
+        ).not.toContain("Use soon");
+    });
+
+    test("the item sheet: amount, the four actions, kept in and expires chips, usually buy", () => {
+        const html = renderKitchenFridgeV2Page(
+            buildPreviewKitchenFridgeView(chrome, today, {
+                openItemId: "it-1",
+                items: [
+                    item({
+                        id: "it-1",
+                        displayName: "Eggs",
+                        foodId: "f-eggs",
+                        expiresOn: "2026-11-11",
+                    }),
+                ],
+                locations: [fridgeLocation, pantryLocation],
+                foodsById: new Map([
+                    [
+                        "f-eggs",
+                        {
+                            id: "f-eggs",
+                            usualAmount: { amount: 2, unit: "each" },
+                            genericFoodId: null,
+                        },
+                    ],
+                ]),
+                freezeDefaultExpiry: "2027-02-10",
+            }),
+        );
+        const sheetId = fridgeItemSheetId("it-1");
+        expect(html).toMatch(
+            new RegExp(
+                `<dialog class="fd-sheet fd-sheet--side fd-kitchen-sheet" id="${sheetId}"[^>]* data-sheet-open-on-load`,
+            ),
+        );
+        expect(html).toContain("Fridge · expires tomorrow");
+        expect(html).toContain("How much is left");
+        // The one form the Save button posts: amount, unit, place, date.
+        const form =
+            html.match(
+                /<form id="[^"]*qty-form" method="post" action="\/kitchen\/fridge\/items\/it-1">[\s\S]*?<\/form>/,
+            )?.[0] ?? "";
+        expect(form).toContain('name="return_to" value="/kitchen/fridge"');
+        expect(form).toContain('name="qty_amount"');
+        expect(form).toContain('name="qty_unit" value="each"');
+        expect(form).toContain(
+            'type="radio" name="location_id" value="loc-fridge" checked',
+        );
+        expect(form).toContain(
+            'type="radio" name="location_id" value="loc-pantry"',
+        );
+        expect(form).toContain('name="expires_mode" value="keep" checked');
+        expect(form).toContain('<span class="fd-chip__label">Nov 11</span>');
+        expect(form).toContain("No date");
+        expect(form).toContain('type="date" value="2026-11-11"');
+        expect(form).toContain('name="expires_on"');
+        expect(form).toContain('href="/kitchen/usuals/f-eggs"');
+        // The four actions post their own forms, with the fields main sends.
+        for (const [label, action, fields] of [
+            [
+                "Ate some",
+                "eat",
+                [
+                    'name="qty_amount" value="2"',
+                    'name="return_to" value="/kitchen/fridge"',
+                ],
+            ],
+            [
+                "Add to grocery list",
+                "add-to-grocery",
+                ['name="from" value="/kitchen/fridge"'],
+            ],
+            [
+                "Freeze",
+                "freeze",
+                [
+                    'name="expires_on" value="2027-02-10"',
+                    'name="return_to" value="/kitchen/fridge"',
+                ],
+            ],
+            [
+                "Discard",
+                "discard",
+                ['name="return_to" value="/kitchen/fridge"'],
+            ],
+        ] as const) {
+            expect(html).toContain(`aria-label="${label}" form="`);
+            const post =
+                html.match(
+                    new RegExp(
+                        `<form id="[^"]*" method="post" action="/kitchen/fridge/items/it-1/${action}"[^>]*>[\\s\\S]*?</form>`,
+                    ),
+                )?.[0] ?? "";
+            for (const field of fields) expect(post).toContain(field);
+        }
+        expect(html).toContain(">Save</span></button>");
+    });
+
+    test("an item with no date offers No date chosen and Pick a date", () => {
+        const html = body({
+            items: [item({ id: "a", displayName: "Rice", expiresOn: null })],
+        });
+        expect(html).toContain('name="expires_mode" value="none" checked');
+        expect(html).not.toContain('name="expires_mode" value="keep"');
+        expect(html).toContain('value="pick"');
+    });
+
+    test("the item sheet says which recipe uses the item", () => {
         const view = buildPreviewKitchenFridgeView(chrome, today, {
             items: [
                 item({
@@ -230,26 +531,20 @@ describe("renderKitchenFridgeV2Page", () => {
                     expiresOn: "2026-11-11",
                 }),
                 item({
+                    id: "also",
+                    displayName: "Rice",
+                    expiresOn: "2026-11-11",
+                }),
+                item({
                     id: "no",
                     displayName: "Milk",
                     expiresOn: "2026-11-11",
                 }),
             ],
+            locations: [fridgeLocation],
             useSoonUses: [
-                {
-                    item: {
-                        id: "soon",
-                        displayName: "Salmon",
-                        expiresOn: "2026-11-11",
-                    },
-                    recipes: [
-                        {
-                            recipeId: "r1",
-                            name: "Salmon & <rice>",
-                            incomplete: false,
-                        },
-                    ],
-                },
+                use("soon", "Salmon", "Salmon & <rice>"),
+                use("also", "Rice", "Salmon & <rice>"),
                 {
                     item: {
                         id: "no",
@@ -260,218 +555,255 @@ describe("renderKitchenFridgeV2Page", () => {
                 },
             ],
         });
-        const body = renderKitchenFridgeBody(view);
-        const strip = body.slice(
-            body.indexOf("fd-kitchen-use-soon"),
-            body.indexOf("fd-kitchen-fridge-loc"),
+        const html = renderKitchenFridgeBody(view);
+        const sheet = (id: string) =>
+            html.match(
+                new RegExp(
+                    `<dialog[^>]*id="${fridgeItemSheetId(id)}"[\\s\\S]*?</dialog>`,
+                ),
+            )?.[0] ?? "";
+        expect(sheet("soon")).toContain(">Use in</h3>");
+        expect(sheet("soon")).toContain("Salmon &amp; &lt;rice&gt;");
+        expect(sheet("soon")).toContain("Uses 2 things expiring");
+        expect(sheet("soon")).toContain('href="/recipes/r1"');
+        expect(sheet("no")).not.toContain("Use in");
+        // The cards no longer carry the recipe.
+        expect(html).not.toContain("Use in:");
+    });
+
+    test("an error reopens the sheet it came from", () => {
+        const html = renderKitchenFridgeBody(
+            buildPreviewKitchenFridgeView(chrome, today, {
+                openItemId: "a",
+                error: "That item is no longer in the fridge.",
+                items: [item({ id: "a", displayName: "Eggs" })],
+                locations: [fridgeLocation],
+            }),
         );
-        expect(strip.match(/fd-kitchen-use-card__use"/g)).toHaveLength(1);
-        expect(strip).toContain("Use in: Salmon &amp; &lt;rice&gt;");
-    });
-
-    test("hides use soon when nothing qualifies", () => {
-        const view = buildPreviewKitchenFridgeView(chrome, today, {
-            items: [
-                item({
-                    id: "ok",
-                    displayName: "Rice",
-                    expiresOn: "2026-12-01",
-                }),
-            ],
-            locations: [
-                {
-                    id: "loc-fridge",
-                    householdId: "hh",
-                    name: "Fridge",
-                    sortOrder: 0,
-                },
-            ],
-        });
-        expect(renderKitchenFridgeBody(view)).not.toContain("Use soon");
-    });
-
-    test("item sheet exposes member actions with correct form targets", () => {
-        const view = buildPreviewKitchenFridgeView(chrome, today, {
-            openItemId: "it-1",
-            items: [
-                item({
-                    id: "it-1",
-                    displayName: "Eggs",
-                    foodId: "f-eggs",
-                }),
-            ],
-            locations: [
-                {
-                    id: "loc-fridge",
-                    householdId: "hh",
-                    name: "Fridge",
-                    sortOrder: 0,
-                },
-            ],
-            foodsById: new Map([
-                [
-                    "f-eggs",
-                    {
-                        id: "f-eggs",
-                        usualAmount: { amount: 2, unit: "each" },
-                        genericFoodId: null,
-                    },
-                ],
-            ]),
-            freezeDefaultExpiry: defaultFreezeExpiry(today),
-        });
-        const html = renderKitchenFridgeV2Page(view);
-        const sheetId = fridgeItemSheetId("it-1");
-        expect(html).toContain(`id="${sheetId}"`);
-        expect(html).toContain('action="/kitchen/fridge/items/it-1/eat"');
-        expect(html).toContain('action="/kitchen/fridge/items/it-1/discard"');
-        expect(html).toContain('action="/kitchen/fridge/items/it-1/freeze"');
-        expect(html).toContain('action="/kitchen/fridge/items/it-1"');
         expect(html).toContain(
-            'action="/kitchen/fridge/items/it-1/add-to-grocery"',
+            'role="alert">That item is no longer in the fridge.',
         );
-        expect(html).toContain('href="/kitchen/usuals/f-eggs"');
-        expect(html).toContain("How much is left");
-        expect(html).toContain('name="qty_amount"');
-        expect(html).toContain('value="2"');
-        expect(html).toContain(">Save</button>");
-        // Freeze asks for the date first: a revealed panel with a visible
-        // date input holding the default, not a hidden field.
-        const freezePanel = html.match(
-            /<form id="[^"]*" method="post" action="\/kitchen\/fridge\/items\/it-1\/freeze"[^>]*>[\s\S]*?<\/form>/,
-        )?.[0];
-        expect(freezePanel).toContain(" hidden>");
-        expect(freezePanel).toContain("Freeze until");
-        expect(freezePanel).toContain(
-            `type="date" name="expires_on" value="${defaultFreezeExpiry(today)}"`,
-        );
-        expect(html).toMatch(
-            /aria-controls="[^"]+" aria-expanded="false" data-fd-reveal=/,
-        );
-    });
-
-    test("kitchen header and use-soon order", () => {
-        const view = buildPreviewKitchenFridgeView(chrome, today, {
-            items: [
-                item({
-                    id: "exp",
-                    displayName: "Old milk",
-                    expiresOn: "2026-11-09",
-                }),
-            ],
-            locations: [
-                {
-                    id: "loc-fridge",
-                    householdId: "hh",
-                    name: "Fridge",
-                    sortOrder: 0,
-                },
-            ],
-        });
-        const html = renderKitchenFridgeV2Page(view);
-        const tabs = html.indexOf("fd-kitchen-tabs");
-        const title = html.indexOf("fd-kitchen-fridge-title--phone");
-        expect(html).toContain(">Kitchen<");
-        expect(title).toBeGreaterThan(-1);
-        expect(tabs).toBeGreaterThan(title);
-        const card = html.slice(
-            html.indexOf('class="fd-kitchen-use-card"'),
-            html.indexOf(
-                "</button>",
-                html.indexOf('class="fd-kitchen-use-card"'),
-            ),
-        );
-        expect(card.indexOf("fd-kitchen-use-card__when")).toBeLessThan(
-            card.indexOf("fd-kitchen-use-card__title"),
-        );
-    });
-
-    test("swipe slots on editable rows", () => {
-        const view = buildPreviewKitchenFridgeView(chrome, today, {
-            items: [item({ id: "it-2", displayName: "Yogurt" })],
-            locations: [
-                {
-                    id: "loc-fridge",
-                    householdId: "hh",
-                    name: "Fridge",
-                    sortOrder: 0,
-                },
-            ],
-        });
-        const body = renderKitchenFridgeBody(view);
-        expect(body).toContain("data-swipe-right=");
-        expect(body).toContain("data-swipe-left=");
-        expect(body).toContain("Ate some");
-        expect(body).toContain("Toss");
+        expect(html.match(/role="alert"/g)).toHaveLength(1);
     });
 
     test("an item id or name made of $-patterns stays inert", async () => {
         for (const payload of DOLLAR_PAYLOADS) {
-            const view = buildPreviewKitchenFridgeView(chrome, today, {
+            const html = body({
                 items: [item({ id: payload, displayName: payload })],
-                locations: [
-                    {
-                        id: "loc-fridge",
-                        householdId: "hh",
-                        name: "Fridge",
-                        sortOrder: 0,
-                    },
-                ],
             });
-            const html = renderKitchenFridgeBody(view);
             expect(await injectedAttributes(html)).toEqual([]);
             expect(
-                await attributeValues(html, "li[data-fd-fridge-row]", "id"),
+                await attributeValues(html, "li[data-fd-sheet-row]", "id"),
             ).toEqual([`fd-fridge-row-${payload}`]);
             expect(
                 await attributeValues(
                     html,
-                    "li[data-fd-fridge-row]",
+                    "li[data-fd-sheet-row]",
                     "data-sheet-id",
                 ),
             ).toEqual([fridgeItemSheetId(payload)]);
         }
     });
+});
 
-    test("empty locations shows empty state", () => {
-        const view = buildPreviewKitchenFridgeView(chrome, today, {
-            items: [],
-            locations: [],
-        });
-        expect(renderKitchenFridgeBody(view)).toContain(
-            "fd-kitchen-fridge-empty",
+describe("select mode on the Fridge", () => {
+    const html = body({
+        items: [
+            item({ id: "a", displayName: "Eggs" }),
+            item({ id: "b", displayName: "Spinach" }),
+        ],
+    });
+
+    test("every row has a pick box, and the list is the select root", () => {
+        expect(html).toContain(
+            'class="fd-kitchen-fridge-page" data-fd-select="fridge"',
+        );
+        for (const [id, name] of [
+            ["a", "Eggs"],
+            ["b", "Spinach"],
+        ]) {
+            expect(html).toContain(
+                `<input type="checkbox" class="fd-item-row__select-input" data-fd-select-item name="ids[]" value="${id}" aria-label="Select ${name}">`,
+            );
+        }
+        expect(html.match(/data-fd-select-row/g)).toHaveLength(2);
+    });
+
+    test("the caps count row has Cancel, hidden until picking", () => {
+        expect(html).toContain(
+            '<div class="fd-select-head" data-fd-select-head="fridge" hidden><div class="fd-section-header"><h2 class="fd-section-header__label">0 selected</h2><button type="button" class="fd-section-header__action" data-fd-select-cancel="">Cancel</button>',
         );
     });
 
-    test("item sheet nav rows lead with icons", () => {
-        const view = buildPreviewKitchenFridgeView(chrome, today, {
-            items: [item({ id: "it-1", displayName: "Milk" })],
-            locations: [
-                {
-                    id: "loc-fridge",
-                    householdId: "hh",
-                    name: "Fridge",
-                    sortOrder: 0,
-                },
-            ],
-            openItemId: "it-1",
-        });
-        const body = renderKitchenFridgeBody(view);
-        expect(body).toContain("fd-kitchen-sheet-row__icon");
-        expect(body).toContain('name="expires_on"');
-        expect(body).toContain('name="location_id"');
+    test("one Selection bar floats on the phone and one sits inline on desktop, both hidden", () => {
+        expect(html).toMatch(
+            /<div class="fd-select-bar-slot fd-select-bar-slot--phone" data-fd-select-bar="fridge" hidden><div class="fd-selection-bar fd-selection-bar--floating" role="toolbar"/,
+        );
+        expect(html).toMatch(
+            /<div class="fd-select-bar-slot fd-select-bar-slot--desktop" data-fd-select-bar="fridge" hidden><div class="fd-selection-bar fd-selection-bar--inline" role="toolbar"/,
+        );
+    });
+
+    test("the phone's bar is its buttons only; the count shows on the inline bar", () => {
+        const phone =
+            html.match(
+                /fd-select-bar-slot--phone[\s\S]*?(?=fd-select-bar-slot--desktop)/,
+            )?.[0] ?? "";
+        expect(phone).toContain('class="fd-selection-bar__count fd-sr"');
+        const desktop = html.match(/fd-select-bar-slot--desktop[\s\S]*/)?.[0];
+        expect(desktop).toContain('class="fd-selection-bar__count"');
+    });
+
+    test("Discard is in the bar, confirmed in place, and posts the bulk route with the return", () => {
+        expect(html).toContain(
+            '<form id="fd-select-fridge-discard" method="post" action="/kitchen/fridge/bulk/discard" data-fd-select-form hidden><input type="hidden" name="return_to" value="/kitchen/fridge"></form>',
+        );
+        const bar =
+            html.match(
+                /fd-select-bar-slot--phone[\s\S]*?<\/div><\/div>/,
+            )?.[0] ?? "";
+        // The bar asks first (Discard), then offers Cancel and Discard N.
+        expect(bar).toContain("data-fd-select-ask");
+        expect(bar).toContain('data-fd-select-when="idle"');
+        expect(bar).toContain("data-fd-select-unask");
+        expect(bar).toMatch(
+            /type="submit"[^>]*form="fd-select-fridge-discard"[^>]*data-fd-select-when="ask"/,
+        );
+        // No confirm sheet and no Move: main has no bulk move.
+        expect(html).not.toContain("fd-select-fridge-discard-form");
+        expect(html).not.toContain("Discard 1 item?");
+        expect(html).not.toContain(">Move<");
+        expect(html).not.toContain("fd-select-bar__count");
+    });
+
+    test("Select is an item of the ⋯ in the header and in the tab row", () => {
+        expect(html.match(/data-fd-select-toggle="fridge"/g)).toHaveLength(2);
+        expect(
+            html.match(/<span class="fd-menu__label">Select<\/span>/g),
+        ).toHaveLength(2);
+    });
+});
+
+describe("Add to fridge", () => {
+    const usuals = [
+        {
+            foodId: "p-milk",
+            kind: "food" as const,
+            name: "Milk",
+            subtitle: "Kirkland 2% · 1 gal",
+            amount: 1,
+            unit: "gal",
+        },
+        {
+            foodId: "f-eggs",
+            kind: "food" as const,
+            name: "Eggs",
+            subtitle: "12 each",
+            amount: 12,
+            unit: "each",
+        },
+        {
+            foodId: "f-towels",
+            kind: "supply" as const,
+            name: "Paper towels",
+            subtitle: "1 each",
+            amount: 1,
+            unit: "each",
+        },
+    ];
+    const sheet = (
+        extra: Parameters<typeof buildPreviewKitchenFridgeView>[2] = {},
+    ) =>
+        body({
+            usuals,
+            locations: [fridgeLocation, pantryLocation],
+            ...extra,
+        }).match(/<dialog[^>]*id="fd-fridge-add"[\s\S]*?<\/dialog>/)?.[0] ?? "";
+
+    test("the header is the title and a close button, with the search box in a section under it", () => {
+        const html = sheet();
+        const header = html.match(/<header[\s\S]*?<\/header>/)?.[0] ?? "";
+        expect(header).toContain('class="fd-sheet__title"');
+        expect(header).toContain(">Add to fridge</h2>");
+        expect(header).toContain('commandfor="fd-fridge-add"');
+        expect(header).not.toContain("search");
+        expect(html).not.toContain("fd-sheet--search");
+        const search = html.match(/<input[^>]*id="fd-fridge-add-q"[^>]*>/)?.[0];
+        expect(search).toContain('placeholder="Search foods"');
+        expect(html.indexOf("</header>")).toBeLessThan(
+            html.indexOf('id="fd-fridge-add-q"'),
+        );
+    });
+
+    test("a search box, the usuals first with a plus that posts the add route", () => {
+        const html = sheet();
+        expect(html).toContain("fd-sheet--side");
+        expect(html).toContain('placeholder="Search foods"');
+        expect(html).toContain(">Your usuals</h3>");
+        const milk =
+            html.match(
+                /<li [^>]*data-fd-fridge-usual="milk"[\s\S]*?<\/li>/,
+            )?.[0] ?? "";
+        expect(milk).toContain("Kirkland 2% · 1 gal");
+        expect(milk).toContain('action="/kitchen/fridge/items"');
+        for (const field of [
+            'name="kind" value="food"',
+            'name="food_id" value="p-milk"',
+            'name="location_id" value="loc-fridge"',
+            'name="qty_amount" value="1"',
+            'name="qty_unit" value="gal"',
+        ]) {
+            expect(milk).toContain(field);
+        }
+    });
+
+    test("a supply usual posts as a supply with its name", () => {
+        const towels =
+            sheet().match(
+                /<li [^>]*data-fd-fridge-usual="paper towels"[\s\S]*?<\/li>/,
+            )?.[0] ?? "";
+        expect(towels).toContain('name="kind" value="supply"');
+        expect(towels).toContain('name="name" value="Paper towels"');
+        expect(towels).toContain('name="food_id" value="f-towels"');
+        expect(towels).toContain('name="qty_unit" value="each"');
+    });
+
+    test("not here: the hand form posts the name, place and amount", () => {
+        const html = sheet({ openAdd: true });
+        expect(html).toContain("Not here? Add it by hand");
+        expect(html).not.toContain('<details class="fd-kitchen-hand" open>');
+        const form =
+            html.match(/<form id="fd-fridge-add-form"[\s\S]*?<\/form>/)?.[0] ??
+            "";
+        expect(form).toContain('action="/kitchen/fridge/items"');
+        for (const field of [
+            'name="kind" value="food"',
+            'name="food_name"',
+            'name="location_id" value="loc-fridge" checked',
+            'name="location_id" value="loc-pantry"',
+            'name="qty_amount"',
+            'name="qty_unit" value="each"',
+        ]) {
+            expect(form).toContain(field);
+        }
+    });
+
+    test("a failed add reopens the sheet with the hand form open and the error shown", () => {
+        const html = sheet({ openAdd: true, error: "Name is required." });
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(html).toContain('<details class="fd-kitchen-hand" open>');
+        expect(html).toContain('role="alert">Name is required.');
+    });
+
+    test("no usuals: only the hand form", () => {
+        const html = sheet({ usuals: [] });
+        expect(html).not.toContain("Your usuals");
+        expect(html).toContain("Not here? Add it by hand");
     });
 });
 
 describe("a usual running low shows on its fridge row", () => {
-    const chrome = {
-        theme: "dark" as const,
-        flags: FIXTURE_APP_CHROME_FLAGS,
-        displayName: "Alex",
-    };
-    const locations = [
-        { id: "loc-fridge", householdId: "hh", name: "Fridge", sortOrder: 0 },
-    ];
+    const locations = [fridgeLocation];
     const eggs = item({
         id: "it-eggs",
         displayName: "Eggs",
@@ -483,7 +815,12 @@ describe("a usual running low shows on its fridge row", () => {
         buildPreviewKitchenFridgeView(chrome, today, {
             items: [
                 eggs,
-                item({ id: "it-milk", displayName: "Milk", foodId: "f-milk" }),
+                item({
+                    id: "it-milk",
+                    displayName: "Milk",
+                    foodId: "f-milk",
+                    expiresOn: "2026-12-20",
+                }),
             ],
             locations,
             ...extra,
@@ -494,14 +831,18 @@ describe("a usual running low shows on its fridge row", () => {
             view({ lowStock: new Map([["f-eggs", "6"]]) }),
         );
         expect(html).toContain(
-            '<span class="fd-row__sub fd-tone fd-tone--warn">Tomorrow · low, below 6</span>',
+            '<li tabindex="0" class="fd-item-row fd-item-row--warning fd-item-row--swipe fd-item-row--select"',
+        );
+        expect(html).toContain(
+            '<span class="fd-item-row__subtitle">Tomorrow · low, below 6</span>',
         );
         expect(html).not.toContain("fd-notice-strip");
-        expect(html).not.toContain('aria-label="Running low"');
         // Only the low item: the other row keeps its date and has no subtitle.
         expect(html.match(/low, below/g)).toHaveLength(1);
-        expect(html.match(/fd-row__sub/g)).toHaveLength(1);
-        expect(html).toContain('class="fd-row__date');
+        expect(html.match(/fd-item-row__subtitle/g)).toHaveLength(1);
+        expect(html).toContain(
+            '<span class="fd-item-row__value">Dec 20</span>',
+        );
     });
 
     test("an item with no expiry says only that it is low", () => {
@@ -512,10 +853,13 @@ describe("a usual running low shows on its fridge row", () => {
             }),
         );
         expect(html).toContain(
-            '<span class="fd-row__sub fd-tone fd-tone--warn">low, below 6</span>',
+            '<span class="fd-item-row__subtitle">low, below 6</span>',
         );
-        // The row itself carries no date cell: its line says all it has to.
-        expect(html).not.toContain("fd-row__date");
+        const row =
+            html.match(
+                /<li tabindex="0"[^>]*id="fd-fridge-row-it-eggs"[\s\S]*?<\/li>/,
+            )?.[0] ?? "";
+        expect(row).not.toContain("fd-item-row__value");
     });
 
     test("a product in the usual's family is low with it", () => {
@@ -538,9 +882,8 @@ describe("a usual running low shows on its fridge row", () => {
         expect(html).toContain("low, below 6");
     });
 
-    test("nothing low: no subtitle on any row", () => {
+    test("nothing low: no low words on any row", () => {
         const html = renderKitchenFridgeBody(view());
-        expect(html).not.toContain("fd-row__sub");
         expect(html).not.toContain("low, below");
     });
 
@@ -549,6 +892,13 @@ describe("a usual running low shows on its fridge row", () => {
         expect(fridgeLowSubtitle(null, "2.5")).toBe("low, below 2.5");
     });
 });
+
+function use(itemId: string, itemName: string, recipeName: string) {
+    return {
+        item: { id: itemId, displayName: itemName, expiresOn: "2026-11-11" },
+        recipes: [{ recipeId: "r1", name: recipeName, incomplete: false }],
+    };
+}
 
 describe("lowStockLevels", () => {
     const low = (foodId: string): Notice => ({
