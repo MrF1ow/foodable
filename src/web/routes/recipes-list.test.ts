@@ -2165,6 +2165,45 @@ describe("a repeating plan: add, remove and move", () => {
         expect(await db.plansStore.listRules(HH)).toHaveLength(1);
     });
 
+    test("a refused repeat re-opens the Plan sheet with the day, meal, repeat and weekdays the person chose, and the reason inside it", async () => {
+        await seedRepeat("daily");
+        const start = addPlanDays(todayUtc(), 1);
+        const res = await postPlanPath(
+            `/recipes/${db.recipeId}/plan`,
+            new URLSearchParams([
+                ["date", start],
+                ["slot", "dinner"],
+                ["servings", "3"],
+                ["repeat", "days"],
+                ["days", "1"],
+                ["days", "3"],
+                ["days", "5"],
+            ]),
+        );
+        expect(res.status).toBe(400);
+        // An answer in place: no redirect, no toast.
+        expect(toastOf(res)).toBeNull();
+        const html = await res.text();
+        const sheet = html.slice(
+            html.indexOf(
+                '<dialog class="fd-sheet fd-sheet--dialog" id="fd-recipe-plan-sheet"',
+            ),
+        );
+        const dialog = sheet.slice(0, sheet.indexOf("</dialog>"));
+        expect(dialog).toContain("data-sheet-open-on-load");
+        expect(dialog).toContain("End that series first, or pick other days.");
+        expect(dialog).toContain(`name="date" value="${start}"`);
+        expect(dialog).toContain('name="repeat" value="days"');
+        expect(dialog).toContain('fd-item-row__value">Pick days<');
+        expect(dialog).toContain('name="servings" value="3"');
+        for (const day of [1, 3, 5]) {
+            expect(dialog).toContain(
+                `<input type="hidden" name="days" value="${day}">`,
+            );
+        }
+        expect(await db.plansStore.listRules(HH)).toHaveLength(1);
+    });
+
     test("saving the edit sheet with nothing changed leaves the day on its series", async () => {
         const { ruleId, dayId } = await seedRepeat("daily");
         const day = addPlanDays(todayUtc(), 2);
@@ -3643,6 +3682,85 @@ describe("drafts in the app", () => {
             body: "",
         });
     }
+
+    function getDraftPage(recipeId: string, query = "", as = ALICE) {
+        return recipesApp().request(`http://x/recipes/${recipeId}${query}`, {
+            headers: { cookie: cookieFor(as) },
+        });
+    }
+
+    test("the leave guard is on the importer's landing (?imported=1), and a refresh of it keeps it", async () => {
+        const id = await draftOf();
+        const landing = await (await getDraftPage(id, "?imported=1")).text();
+        expect(landing).toContain('id="fd-recipe-leave-sheet"');
+        expect(landing).toContain("Discard this recipe?");
+        // The words are true for every way off the page: Discard deletes it
+        // now, and an unsaved draft goes on the day the draft card names.
+        expect(landing).toContain(
+            "Discard deletes it now. A draft you leave unsaved is deleted on Tue 1 Dec.",
+        );
+        expect(landing).not.toContain("Leaving deletes the draft");
+        // Save carries the marker, so a refused Save keeps the guard.
+        expect(landing).toContain(
+            '<input type="hidden" name="imported" value="1">',
+        );
+        // A refresh is the same address.
+        const refreshed = await (await getDraftPage(id, "?imported=1")).text();
+        expect(refreshed).toContain('id="fd-recipe-leave-sheet"');
+    });
+
+    test("a later visit to the draft, from Recipes › Drafts, has no leave guard", async () => {
+        const id = await draftOf();
+        const later = await (await getDraftPage(id)).text();
+        expect(later).toContain('id="fd-recipe-draft"');
+        expect(later).not.toContain("fd-recipe-leave-sheet");
+        expect(later).not.toContain('name="imported"');
+        // Another marker value is no marker.
+        const other = await (await getDraftPage(id, "?imported=0")).text();
+        expect(other).not.toContain("fd-recipe-leave-sheet");
+    });
+
+    test("the owner opening a member's draft is never held, even with the marker", async () => {
+        const theirs = await draftOf({ creatorId: BOB });
+        const page = await (await getDraftPage(theirs, "?imported=1")).text();
+        expect(page).toContain('id="fd-recipe-draft"');
+        // The owner may still discard it from the menu, but is never asked on the way out.
+        expect(page).toContain(`action="/recipes/${theirs}/discard"`);
+        expect(page).not.toContain("fd-recipe-leave-sheet");
+        expect(page).not.toContain('name="imported"');
+        // Bob's own landing on it is held.
+        const bobs = await (
+            await getDraftPage(theirs, "?imported=1", BOB)
+        ).text();
+        expect(bobs).toContain("fd-recipe-leave-sheet");
+    });
+
+    test("a saved recipe never has the leave guard, marker or not", async () => {
+        const saved = await (
+            await getDraftPage(db.recipeId, "?imported=1")
+        ).text();
+        expect(saved).not.toContain("fd-recipe-leave-sheet");
+        expect(saved).not.toContain('name="imported"');
+    });
+
+    test("a refused Save on the landing keeps the guard; one without the marker does not", async () => {
+        const id = await draftOf();
+        const post = (body: string) =>
+            recipesApp().request(`http://x/recipes/${id}/save`, {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body,
+            });
+        const marked = await post("imported=1");
+        expect(marked.status).toBe(422);
+        expect(await marked.text()).toContain("fd-recipe-leave-sheet");
+        const plain = await post("");
+        expect(plain.status).toBe(422);
+        expect(await plain.text()).not.toContain("fd-recipe-leave-sheet");
+    });
 
     test("a draft's page shows what is left and Save, and no Cook, Plan or Share", async () => {
         setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));

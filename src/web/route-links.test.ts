@@ -90,7 +90,6 @@ describe("rendered pages have no legacy links", () => {
                     time: "07:00",
                     lastRunOn: null,
                 },
-                unverifiedRecipeExpiryDays: null,
                 isOwner: true,
                 canManage: true,
                 canInvite: true,

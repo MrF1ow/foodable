@@ -64,7 +64,6 @@ export type HouseholdPreferences = {
     shoppingCadence: string | null;
     timezone: string | null;
     restock: RestockPreferences;
-    unverifiedRecipeExpiryDays: number | null;
     socialReaders: SocialReadersPreferences;
 };
 
@@ -74,7 +73,6 @@ export const EMPTY_HOUSEHOLD_PREFERENCES: HouseholdPreferences = {
     shoppingCadence: null,
     timezone: null,
     restock: { ...DEFAULT_RESTOCK },
-    unverifiedRecipeExpiryDays: null,
     socialReaders: { ...DEFAULT_SOCIAL_READERS },
 };
 
@@ -111,7 +109,6 @@ export type HouseholdConfigWire = {
         constraints: string[];
         budget: string | null;
         shopping_cadence: string | null;
-        unverified_recipe_expiry_days: number | null;
         social_readers: {
             tiktok: boolean;
             facebook: boolean;
@@ -139,7 +136,6 @@ export type HouseholdPreferencesPatch = {
         weekday?: number;
         time?: string;
     };
-    unverifiedRecipeExpiryDays?: number | null;
 };
 
 export type HouseholdConfigPatch = {
@@ -210,8 +206,6 @@ function copyHousehold(household: Household): Household {
             shoppingCadence: household.preferences.shoppingCadence,
             timezone: household.preferences.timezone,
             restock: { ...household.preferences.restock },
-            unverifiedRecipeExpiryDays:
-                household.preferences.unverifiedRecipeExpiryDays,
             socialReaders: {
                 ...household.preferences.socialReaders,
             },
@@ -657,8 +651,6 @@ export function householdConfigFromRow(row: {
         timezone?: unknown;
         restock?: unknown;
         shopping_cadence?: unknown;
-        unverifiedRecipeExpiryDays?: unknown;
-        unverified_recipe_expiry_days?: unknown;
     };
     const constraints =
         prefs.constraints === undefined ? [] : asStringArray(prefs.constraints);
@@ -684,15 +676,6 @@ export function householdConfigFromRow(row: {
             ? null
             : parseStoredTimezone(prefs.timezone);
     const restock = parseRestockFromStorage(prefs.restock);
-    const expiryRaw =
-        prefs.unverifiedRecipeExpiryDays !== undefined
-            ? prefs.unverifiedRecipeExpiryDays
-            : prefs.unverified_recipe_expiry_days;
-    const unverifiedRecipeExpiryDays = parseUnverifiedRecipeExpiryDays(
-        expiryRaw === undefined ? null : expiryRaw,
-        true,
-    );
-    if (!unverifiedRecipeExpiryDays.ok) return unverifiedRecipeExpiryDays;
 
     const socialRaw =
         (prefs as { socialReaders?: unknown; social_readers?: unknown })
@@ -711,7 +694,6 @@ export function householdConfigFromRow(row: {
                 shoppingCadence,
                 timezone,
                 restock,
-                unverifiedRecipeExpiryDays: unverifiedRecipeExpiryDays.value,
                 socialReaders,
             },
         },
@@ -751,34 +733,6 @@ export function setSocialReaderEnabled(
     };
 }
 
-export function parseUnverifiedRecipeExpiryDays(
-    value: unknown,
-    allowUndefinedAsNull: boolean,
-): ParseResult<number | null> {
-    if (value === undefined || value === null || value === "") {
-        if (allowUndefinedAsNull || value === "" || value === null) {
-            return { ok: true, value: null };
-        }
-        return {
-            ok: false,
-            error: "Enter days as a whole number from 1 to 3650, or leave empty.",
-        };
-    }
-    const n =
-        typeof value === "number"
-            ? value
-            : typeof value === "string"
-              ? Number(value.trim())
-              : NaN;
-    if (!Number.isInteger(n) || n < 1 || n > 3650) {
-        return {
-            ok: false,
-            error: "Enter days as a whole number from 1 to 3650, or leave empty.",
-        };
-    }
-    return { ok: true, value: n };
-}
-
 export function householdConfigToColumns(
     config: HouseholdConfig,
 ): HouseholdColumns {
@@ -811,8 +765,6 @@ export function householdConfigToWire(
             constraints: config.preferences.constraints,
             budget: config.preferences.budget,
             shopping_cadence: config.preferences.shoppingCadence,
-            unverified_recipe_expiry_days:
-                config.preferences.unverifiedRecipeExpiryDays,
             social_readers: {
                 tiktok: config.preferences.socialReaders.tiktok,
                 facebook: config.preferences.socialReaders.facebook,
@@ -926,8 +878,6 @@ function parseHouseholdPreferencesPatch(
         shopping_cadence?: unknown;
         timezone?: unknown;
         restock?: unknown;
-        unverifiedRecipeExpiryDays?: unknown;
-        unverified_recipe_expiry_days?: unknown;
     };
     const patch: HouseholdPreferencesPatch = {};
     if (prefs.constraints !== undefined) {
@@ -974,15 +924,6 @@ function parseHouseholdPreferencesPatch(
     if (!restockFields.ok) return restockFields;
     if (Object.keys(restockFields.value).length > 0) {
         patch.restock = restockFields.value;
-    }
-    const expiryRaw =
-        prefs.unverifiedRecipeExpiryDays !== undefined
-            ? prefs.unverifiedRecipeExpiryDays
-            : prefs.unverified_recipe_expiry_days;
-    if (expiryRaw !== undefined) {
-        const parsed = parseUnverifiedRecipeExpiryDays(expiryRaw, false);
-        if (!parsed.ok) return parsed;
-        patch.unverifiedRecipeExpiryDays = parsed.value;
     }
     return { ok: true, value: patch };
 }
@@ -1111,12 +1052,6 @@ export function parseHouseholdSettingsForm(
     const timezone = text("timezone");
     if (timezone !== undefined)
         out.timezone = timezone === "" ? null : timezone;
-    const expiry = text("unverified_recipe_expiry_days");
-    if (expiry !== undefined) {
-        out.preferences = {
-            unverified_recipe_expiry_days: expiry === "" ? null : expiry,
-        };
-    }
     return out;
 }
 
@@ -1163,10 +1098,6 @@ export function mergeHouseholdConfig(
                     ? { lastRunAdded: current.preferences.restock.lastRunAdded }
                     : {}),
             },
-            unverifiedRecipeExpiryDays:
-                patch.preferences?.unverifiedRecipeExpiryDays !== undefined
-                    ? patch.preferences.unverifiedRecipeExpiryDays
-                    : current.preferences.unverifiedRecipeExpiryDays,
             socialReaders: current.preferences.socialReaders,
         },
     };

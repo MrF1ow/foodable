@@ -1652,8 +1652,6 @@ export async function renderHouseholdSettingsRoute(
             effectiveTimezone,
             effectiveTimezoneDefaulted,
             restock: config.preferences.restock,
-            unverifiedRecipeExpiryDays:
-                config.preferences.unverifiedRecipeExpiryDays,
             sharedLinks,
         }),
     };
@@ -2171,6 +2169,8 @@ async function planSheetView(
         date?: string;
         slot?: string;
         servings?: number;
+        repeat?: string;
+        days?: number[];
     } = {},
     error: string | undefined,
     failed: boolean,
@@ -2190,6 +2190,8 @@ async function planSheetView(
             values.servings > 0
                 ? values.servings
                 : recipe.yieldPortions,
+        repeat: values.repeat,
+        days: values.days,
         open: values.open === true || failed,
         error,
     };
@@ -2295,8 +2297,12 @@ export async function renderRecipeDetailRoute(
             date?: string;
             slot?: string;
             servings?: number;
+            repeat?: string;
+            days?: number[];
         };
         didYouMean?: import("./components/did-you-mean.js").DidYouMeanModal;
+        /** The address carries `imported=1`: the importer's first landing on a draft. */
+        imported?: boolean;
     } = {},
 ): Promise<{ status: 200 | 403 | 404; html: string }> {
     const gate = await memberGate(viewerUserId);
@@ -2509,6 +2515,11 @@ export async function renderRecipeDetailRoute(
                       canDiscard:
                           view.creatorId === viewerUserId ||
                           can(gate.viewer, "recipe.delete_any").ok,
+                      // The guard is the importer's alone: an owner or admin
+                      // looking at a member's draft is never held.
+                      leaveGuard:
+                          opts.imported === true &&
+                          view.creatorId === viewerUserId,
                       problems: await draftProblems(householdId, recipeId),
                       expiresOn: await draftExpiryDay(
                           householdId,

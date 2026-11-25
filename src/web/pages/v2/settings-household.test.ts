@@ -44,7 +44,6 @@ function baseView(
             weekday: 0 as const,
             time: "09:00",
         },
-        unverifiedRecipeExpiryDays: 30,
         socialReaders: { tiktok: true, facebook: false },
         isOwner: true,
         canManage: true,
@@ -222,11 +221,7 @@ describe("settings household v2", () => {
 
     test("the value sheets are side panels on desktop, bottom sheets on a phone", () => {
         const html = renderSettingsHouseholdV2Page(baseView());
-        for (const id of [
-            "fd-household-name",
-            "fd-household-location",
-            "fd-household-expiry",
-        ]) {
+        for (const id of ["fd-household-name", "fd-household-location"]) {
             expect(html).toMatch(
                 new RegExp(
                     `<dialog class="fd-sheet fd-sheet--side"[^>]*id="${id}"`,
@@ -289,14 +284,17 @@ describe("settings household v2", () => {
             "Restock day",
             "Invite codes",
             "Recipe link readers",
-            "Unverified recipes",
         ]);
         expect(html).toContain('fd-item-row__value">Denver, CO<');
         expect(html).toContain('fd-item-row__value">America/Denver<');
         expect(html).toContain('fd-item-row__value">Sunday<');
         expect(html).not.toContain("Sunday, 9:00 AM");
         expect(html).toContain("TikTok on");
-        expect(html).toContain("30 days");
+        // The retired recipe expiry setting has no row, sheet or form.
+        expect(html).not.toContain("Unverified recipes");
+        expect(html).not.toContain("fd-household-expiry");
+        expect(html).not.toContain("recipe-settings");
+        expect(html).not.toContain("unverified_recipe_expiry_days");
         expect(html).toContain('href="/settings/household/stores"');
         expect(html).toContain('href="/settings/household/restock"');
         expect(html).toContain('href="/settings/household/invites"');
@@ -325,18 +323,12 @@ describe("settings household v2", () => {
             "Stores",
             "Restock day",
             "Recipe link readers",
-            "Unverified recipes",
         ]);
         // The rows still show their values, without a form or a sheet.
         expect(member).toContain("Denver, CO");
         expect(member).not.toContain("/settings/household/invites");
         expect(member).not.toContain('commandfor="fd-household-');
-        for (const action of [
-            "name",
-            "location",
-            "timezone",
-            "recipe-settings",
-        ]) {
+        for (const action of ["name", "location", "timezone"]) {
             expect(member).not.toContain(
                 `action="/settings/household/${action}"`,
             );
@@ -427,7 +419,6 @@ describe("settings household v2", () => {
             "Invite codes",
             "Shared links",
             "Recipe link readers",
-            "Unverified recipes",
         ]);
         expect(on).toContain('href="/settings/household/shared-links"');
         expect(on).toMatch(

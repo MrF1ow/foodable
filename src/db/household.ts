@@ -325,37 +325,19 @@ export async function addHouseholdMemberForHousehold(
     );
 }
 
+/** Every household's id, for the draft sweep that runs for each in turn. */
 export async function listHouseholdsForRecipeSweep(): Promise<
-    {
-        id: string;
-        preferences: { unverifiedRecipeExpiryDays: number | null };
-    }[]
+    { id: string }[]
 > {
     return run(async (tx) => {
-        const data = await rows<{
-            id: string;
-            household_preferences: unknown;
-        }>(
+        const data = await rows<{ id: string }>(
             tx,
             tx`
-                select id, household_preferences
+                select id
                 from ${tx.unsafe(HOUSEHOLDS)}
             `,
         );
-        return data.map((row) => {
-            const parsed = householdConfigFromRow({
-                name: "Household",
-                recipe_search_places: [],
-                household_preferences: row.household_preferences,
-            });
-            const days = parsed.ok
-                ? parsed.value.preferences.unverifiedRecipeExpiryDays
-                : null;
-            return {
-                id: String(row.id),
-                preferences: { unverifiedRecipeExpiryDays: days },
-            };
-        });
+        return data.map((row) => ({ id: String(row.id) }));
     });
 }
 

@@ -506,68 +506,23 @@
 .fd-plan-form {
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-10);
+    gap: var(--space-xl);
 }
 
-.fd-plan-field {
+/* The weekday chips under a Repeat that picks days: the row of seven, centred. */
+.fd-plan-days {
     display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-4);
+    justify-content: center;
+    padding-block: var(--space-md) var(--space-xs);
 }
-
-.fd-plan-field__label {
-    margin: 0;
-    font: 600 11px/14px var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-plan-field input,
-.fd-plan-field select {
-    box-sizing: border-box;
-    width: 100%;
-    min-height: 44px;
-    padding: 0 var(--fd-s-10);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    /* 16px: smaller and iOS zooms the page when the field takes focus. */
-    font: 400 16px/22px var(--font-body);
-}
-
-/* The select's own arrow is off in the app's form reset, so draw one. */
-.fd-plan-select {
-    position: relative;
-    display: block;
-}
-
-.fd-plan-select select {
-    padding-right: 36px;
-}
-
-.fd-plan-select::after {
-    content: "";
-    position: absolute;
-    top: 50%;
-    right: 16px;
-    width: 7px;
-    height: 7px;
-    border-right: 1.7px solid var(--text-secondary);
-    border-bottom: 1.7px solid var(--text-secondary);
-    transform: translateY(-70%) rotate(45deg);
-    pointer-events: none;
+.fd-plan-days__chips {
+    flex-wrap: nowrap;
+    justify-content: center;
+    gap: var(--space-sm);
 }
 
 .fd-plan-stepper {
     margin-top: var(--fd-s-2);
-}
-
-.fd-plan-named {
-    margin: 0;
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
 }
 
 .fd-plan-error {

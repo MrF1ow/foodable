@@ -2841,6 +2841,18 @@ describe("delete tools distinguish deleted from not-found", () => {
     }
 });
 
+/**
+ * The recipe an app import landed on: its 303 goes to the draft with the
+ * marker that makes it the importer's first landing (`?imported=1`).
+ */
+function importedRecipeId(res: Response): string {
+    const location = res.headers.get("location") ?? "";
+    const marker = "?imported=1";
+    expect(location.startsWith("/recipes/")).toBe(true);
+    expect(location.endsWith(marker)).toBe(true);
+    return location.slice("/recipes/".length, location.length - marker.length);
+}
+
 // ---------- delete_account leaves no trace of the deleted user ----------
 
 // deleteAllUserData deletes tool_analytics first, then withAnalytics inserts a
@@ -4443,7 +4455,6 @@ describe("household config tools", () => {
                     constraints: [],
                     budget: null,
                     shopping_cadence: null,
-                    unverified_recipe_expiry_days: null,
                     social_readers: { tiktok: false, facebook: false },
                 },
                 timezone: null,
@@ -4454,6 +4465,34 @@ describe("household config tools", () => {
                 restock_last_run_on: null,
                 plurals_same_food: false,
             });
+        });
+    });
+
+    test("the retired recipe expiry preference is an unknown key: update_household_config treats it like any other, and the config no longer returns it", async () => {
+        await withHousehold(async (call) => {
+            const unknown = await call("update_household_config", {
+                preferences: { someUnknownKey: 30 },
+            });
+            const retired = await call("update_household_config", {
+                preferences: {
+                    unverifiedRecipeExpiryDays: 30,
+                    unverified_recipe_expiry_days: 30,
+                },
+            });
+            expect(retired.isError).toBe(unknown.isError);
+            expect(retired.structuredContent).toEqual(
+                unknown.structuredContent,
+            );
+            const got = await call("get_household_config");
+            expect(got.structuredContent?.preferences).not.toHaveProperty(
+                "unverified_recipe_expiry_days",
+            );
+            expect(JSON.stringify(got.structuredContent)).not.toContain(
+                "expiry",
+            );
+            expect(JSON.stringify(db.household?.preferences)).not.toContain(
+                "xpiry",
+            );
         });
     });
 
@@ -17671,9 +17710,7 @@ describe("authenticated dashboard HTTP", () => {
             }).toString(),
         });
         expect(second.status).toBe(303);
-        const recipeId = (second.headers.get("location") ?? "").slice(
-            "/recipes/".length,
-        );
+        const recipeId = importedRecipeId(second);
         const imp = await db.recipesStore.getImport("hh-1", recipeId);
         expect(imp?.sourceTextOrigin).toBe("shared");
 
@@ -17698,6 +17735,49 @@ describe("authenticated dashboard HTTP", () => {
         expect(badHtml).toContain("Keep this caption");
         expect(badHtml).toContain('name="text_origin" value="shared"');
         expect(badHtml).toContain("That doesn't look like a web link.");
+    });
+
+    test("POST /recipes/import of text with no steps lands as a draft that Save refuses in place, listing what is left", async () => {
+        db.recipeImportFetcher = {
+            async robotsAllows() {
+                return true;
+            },
+            async fetchPage() {
+                throw new Error("fetch should not run for pasted text");
+            },
+        };
+        const post = (path: string, body: string) =>
+            siteApp.request(`http://x${path}`, {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body,
+            });
+        const imported = await post(
+            "/recipes/import",
+            new URLSearchParams({
+                import_step: "paste",
+                text_only: "1",
+                text: "Plain pancakes\n\nIngredients\n- 2 cups flour\n- 1 cup milk\n- 2 eggs\n",
+            }).toString(),
+        );
+        expect(imported.status).toBe(303);
+        const recipeId = importedRecipeId(imported);
+        const draft = await db.recipesStore.getRecipe("hh-1", recipeId);
+        expect(draft?.verification).toBe("unverified");
+        expect(draft?.draftExpiresAt).not.toBeNull();
+        const refused = await post(`/recipes/${recipeId}/save`, "");
+        expect(refused.status).toBe(422);
+        expect(refused.headers.get("set-cookie")).toBeNull();
+        const html = await refused.text();
+        expect(html).toContain("Not saved yet.");
+        expect(html).toContain('id="fd-recipe-draft"');
+        expect(html).toContain(`action="/recipes/${recipeId}/save"`);
+        expect(
+            (await db.recipesStore.getRecipe("hh-1", recipeId))?.verification,
+        ).toBe("unverified");
     });
 
     test("POST /recipes/import paste flow for Instagram and Pinterest website_url", async () => {
@@ -17744,9 +17824,7 @@ describe("authenticated dashboard HTTP", () => {
         expect(imported.status).toBe(303);
         // The recipe page shows what came in: no toast.
         expect(imported.headers.get("set-cookie")).toBeNull();
-        const recipeId = (imported.headers.get("location") ?? "").slice(
-            "/recipes/".length,
-        );
+        const recipeId = importedRecipeId(imported);
         expect(recipeId.length).toBeGreaterThan(0);
         // It lands as a draft with a 7-day expiry, on a page that offers
         // Save, and stays out of the recipe list until it is saved.
@@ -17756,13 +17834,42 @@ describe("authenticated dashboard HTTP", () => {
         expect(
             (await db.recipesStore.listRecipes("hh-1")).map((r) => r.id),
         ).not.toContain(recipeId);
+        // The importer's first landing, the address the import answered with.
         const draftPage = await siteApp.request(
-            `http://x/recipes/${recipeId}`,
+            `http://x/recipes/${recipeId}?imported=1`,
             { headers: { cookie: cookieFor(alice) } },
         );
         const draftHtml = await draftPage.text();
         expect(draftHtml).toContain(`action="/recipes/${recipeId}/save"`);
         expect(draftHtml).not.toContain('id="fd-recipe-cook-sheet"');
+        // It stays a draft until Save, which passes the check here (the
+        // caption has its ingredients and steps) and answers 303, no toast.
+        expect(draftHtml).toContain('id="fd-recipe-leave-sheet"');
+        // A later visit (Recipes › Drafts) is not that landing: no guard.
+        const laterPage = await siteApp.request(
+            `http://x/recipes/${recipeId}`,
+            { headers: { cookie: cookieFor(alice) } },
+        );
+        expect(await laterPage.text()).not.toContain(
+            'id="fd-recipe-leave-sheet"',
+        );
+        const saved = await siteApp.request(
+            `http://x/recipes/${recipeId}/save`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(alice),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "",
+            },
+        );
+        expect(saved.status).toBe(303);
+        expect(saved.headers.get("location")).toBe(`/recipes/${recipeId}`);
+        expect(saved.headers.get("set-cookie")).toBeNull();
+        const afterSave = await db.recipesStore.getRecipe("hh-1", recipeId);
+        expect(afterSave?.verification).toBe("verified");
+        expect(afterSave?.draftExpiresAt).toBeNull();
 
         db.recipeImportFetcher = {
             async robotsAllows() {
@@ -17797,9 +17904,7 @@ describe("authenticated dashboard HTTP", () => {
             }).toString(),
         });
         expect(pinSite.status).toBe(303);
-        const pinRecipeId = (pinSite.headers.get("location") ?? "").slice(
-            "/recipes/".length,
-        );
+        const pinRecipeId = importedRecipeId(pinSite);
         const pinImport = await db.recipesStore.getImport("hh-1", pinRecipeId);
         expect(pinImport?.credit).toBe("Pin Chef");
 
@@ -17854,9 +17959,7 @@ describe("authenticated dashboard HTTP", () => {
             }).toString(),
         });
         expect(pinFallback.status).toBe(303);
-        const fallbackId = (pinFallback.headers.get("location") ?? "").slice(
-            "/recipes/".length,
-        );
+        const fallbackId = importedRecipeId(pinFallback);
         const fallbackImport = await db.recipesStore.getImport(
             "hh-1",
             fallbackId,

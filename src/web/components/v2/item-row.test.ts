@@ -155,6 +155,41 @@ test("an opens row is a button that shows the sheet", () => {
     expect(html).toContain("fd-item-row__chevron");
 });
 
+test("a toggles row is a button that says what it shows and whether it is shown, and carries the data a script finds it by", () => {
+    const html = itemRow({
+        title: "Starts",
+        value: "Today",
+        trailing: { kind: "chevron" },
+        toggles: {
+            controls: "fd-picker",
+            expanded: false,
+            data: { "fd-month-toggle": "fd-picker" },
+        },
+    });
+    expect(html).toContain(
+        `<button type="button" class="fd-item-row__face fd-item-row__face--link" data-fd-month-toggle="fd-picker" aria-expanded="false" aria-controls="fd-picker">`,
+    );
+    expect(html).toContain("fd-item-row__chevron");
+    expect(
+        itemRow({
+            title: "Starts",
+            toggles: { controls: "fd-picker", expanded: true },
+        }),
+    ).toContain('aria-expanded="true" aria-controls="fd-picker"');
+    // A row is one kind of button or link.
+    expect(() =>
+        itemRow({
+            title: "x",
+            href: "/x",
+            toggles: { controls: "p", expanded: false },
+        }),
+    ).toThrow("a link or a button");
+    // Other rows read as before: an opens row has no toggle attributes.
+    expect(itemRow({ title: "Name", opens: "s" })).not.toContain(
+        "aria-controls",
+    );
+});
+
 test("the Avatar lead shows initials and is decorative", () => {
     const html = itemRow({
         title: "Sam",

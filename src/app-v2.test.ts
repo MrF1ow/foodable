@@ -304,7 +304,9 @@ describe("/app-v2.js", () => {
         // +~1.4 KB Usuals: a pull-down that sets a field of its form (unit, store), the unit naming the stepper, the product picker's search, and the Add a usual views.
         // +~3.1 KB Usuals: Add a usual offers the amount the food already has (a scan's choices, a typed name), and its food search asks the server when no listed food matches.
         // +~1.4 KB Usuals: Weeks between shows for Every N weeks only, and Type it hides the tiles; Calories by day opens on the newest day.
-        expect(js.length).toBeLessThan(224_500);
+        // +~8.8 KB Plan sheet: the Starts row's month picker (a month at a time, the pick written into the row and its field), the Repeat pull-down showing the weekday chips for Pick days, and a draft's page asking "Discard this recipe?" before a link leaves it.
+        // +~2.7 KB The leave guard also holds a Turbo visit and a form that would leave the importer's landing, and a discard clears Turbo's cache.
+        expect(js.length).toBeLessThan(237_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

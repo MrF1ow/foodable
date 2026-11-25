@@ -1,4 +1,4 @@
-export const UNVERIFIED_RECIPES_PROMPT = `Help me finish my Foodable recipe drafts. Call \`list_recipes\` with \`verification: "unverified"\` to list them. For each one, call \`get_recipe\` and read its import data: the source link, the pasted text, unresolved lines and problems. Work only from that text. Do not open or fetch the original post or page. If something needed is missing, list it for me instead of guessing.
+export const DRAFT_RECIPES_PROMPT = `Help me finish my Foodable recipe drafts. Call \`list_recipes\` with \`verification: "unverified"\`, the filter that lists drafts. For each one, call \`get_recipe\` and read its import data: the source link, the pasted text, unresolved lines and problems. Work only from that text. Do not open or fetch the original post or page. If something needed is missing, list it for me instead of guessing.
 
 Fix only what the text supports:
 

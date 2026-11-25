@@ -113,7 +113,6 @@ import {
 } from "../usual-products-path.js";
 import { HOUSEHOLD_ADD_MEMBER_SHEET_ID } from "../pages/v2/settings-household-add-member.js";
 import {
-    HOUSEHOLD_EXPIRY_SHEET_ID,
     HOUSEHOLD_LOCATION_SHEET_ID,
     HOUSEHOLD_NAME_SHEET_ID,
 } from "../pages/v2/settings-household.js";
@@ -745,30 +744,6 @@ householdRoutes.post(
         const body = await c.req.parseBody();
         const enabled = formText(body, "plurals_same_food") === "true";
         await setPluralsSameFood(manager.householdId, enabled);
-        // toast: none
-        return c.redirect("/settings/household", 303);
-    },
-);
-
-householdRoutes.post(
-    "/settings/household/recipe-settings",
-    requireManager,
-    async (c) => {
-        const userId = c.get("userId");
-        const manager = siteMember(c);
-        const body = await c.req.parseBody();
-        const saved = await saveHouseholdSettingsForm(
-            manager.householdId,
-            body,
-            ["unverified_recipe_expiry_days"],
-        );
-        if (!saved.ok) {
-            const page = await renderHouseholdSettingsRoute(userId, {
-                error: saved.error,
-                openModalId: HOUSEHOLD_EXPIRY_SHEET_ID,
-            });
-            return c.html(page.html, 400);
-        }
         // toast: none
         return c.redirect("/settings/household", 303);
     },

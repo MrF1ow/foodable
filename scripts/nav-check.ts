@@ -1714,6 +1714,486 @@ try {
         recipePageOk,
         { ...recipePageRes, ex: drain() },
     );
+    // ---- Plan sheet: Starts opens a month picker, Meal and Repeat are
+    // pull-downs, Pick days shows the weekday chips; the form posts the same
+    // fields the plan route takes ----
+    const planSheetRes: Record<string, unknown> = {};
+    let planSheetOk = true;
+    const planMenu = (name: string) =>
+        `#fd-recipe-plan-sheet [data-anchor="row"]:has([data-fd-menu-field][name="${name}"])`;
+    const planFacts = (width: number) =>
+        ev<{
+            open: boolean;
+            title: string | null;
+            rows: string[];
+            values: string[];
+            pickerHidden: boolean;
+            daysHidden: boolean;
+            fits: boolean;
+        }>(`(() => {
+            const d = document.querySelector("#fd-recipe-plan-sheet");
+            return {
+                open: !!d?.open,
+                title: d?.querySelector(".fd-sheet__title")?.textContent ?? null,
+                rows: [...(d?.querySelectorAll(".fd-item-row__title") ?? [])].map((e) => e.textContent.trim()),
+                values: [...(d?.querySelectorAll(".fd-item-row__value") ?? [])].map((e) => e.textContent.trim()),
+                pickerHidden: !!d?.querySelector("[data-fd-month-picker]")?.hidden,
+                daysHidden: !!d?.querySelector("[data-fd-plan-days]")?.hidden,
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+            };
+        })()`);
+    for (const width of [390, 1440]) {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 600 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: false,
+        });
+        await control("reset=posts");
+        await goto("/recipes/r-alfredo?plan=1");
+        await setMarker();
+        await sleep(800);
+        const start = await planFacts(width);
+        const startButtons = await sheetButtons();
+        // Starts: the picker opens inside the sheet, every date in the panel
+        // and a real tap target; before today cannot be picked; next and
+        // previous move a month; a day picked closes it and reads in the row.
+        await clickSel("#fd-recipe-plan-sheet [data-fd-month-toggle]");
+        await sleep(200);
+        const picker = await ev<{
+            shown: boolean;
+            expanded: string | null;
+            label: string | null;
+            days: number;
+            inside: boolean;
+            tap: boolean;
+            pastDisabled: boolean;
+            prevDisabled: boolean;
+        }>(`(() => {
+            const d = document.querySelector("#fd-recipe-plan-sheet");
+            const p = d.querySelector("[data-fd-month-picker]");
+            const panel = d.querySelector(".fd-sheet-panel").getBoundingClientRect();
+            const days = [...p.querySelectorAll("[data-fd-month-day]")];
+            const open = days.filter((b) => !b.disabled);
+            return {
+                shown: !p.hidden && p.getClientRects().length > 0,
+                expanded: d.querySelector("[data-fd-month-toggle]").getAttribute("aria-expanded"),
+                label: p.querySelector("[data-fd-month-label]").textContent,
+                days: days.length,
+                inside: days.every((b) => { const r = b.getBoundingClientRect(); return r.left >= panel.left - 1 && r.right <= panel.right + 1; }),
+                tap: open.every((b) => { const r = b.getBoundingClientRect(); return r.height >= 40 && r.width >= 32; }),
+                pastDisabled: p.querySelector('[data-fd-month-day="2026-11-09"]').disabled && !p.querySelector('[data-fd-month-day="2026-11-10"]').disabled,
+                prevDisabled: p.querySelector("[data-fd-month-prev]").disabled,
+            };
+        })()`);
+        await clickSel("#fd-recipe-plan-sheet [data-fd-month-next]");
+        await sleep(100);
+        const nextMonth = await ev<{
+            label: string | null;
+            days: number;
+            prevDisabled: boolean;
+        }>(`({
+            label: document.querySelector("#fd-recipe-plan-sheet [data-fd-month-label]").textContent,
+            days: document.querySelectorAll("#fd-recipe-plan-sheet [data-fd-month-day]").length,
+            prevDisabled: document.querySelector("#fd-recipe-plan-sheet [data-fd-month-prev]").disabled,
+        })`);
+        await clickSel("#fd-recipe-plan-sheet [data-fd-month-prev]");
+        await sleep(100);
+        const backMonth = await ev<{
+            label: string | null;
+            prevDisabled: boolean;
+        }>(`({
+            label: document.querySelector("#fd-recipe-plan-sheet [data-fd-month-label]").textContent,
+            prevDisabled: document.querySelector("#fd-recipe-plan-sheet [data-fd-month-prev]").disabled,
+        })`);
+        await clickSel(
+            '#fd-recipe-plan-sheet [data-fd-month-day="2026-11-20"]',
+        );
+        await sleep(100);
+        const picked = await ev<{
+            field: string | null;
+            value: string | null;
+            hidden: boolean;
+            expanded: string | null;
+        }>(`({
+            field: document.querySelector("#fd-recipe-plan-sheet [data-fd-month-field]").value,
+            value: document.querySelector("#fd-recipe-plan-sheet [data-fd-month-toggle] .fd-item-row__value").textContent,
+            hidden: document.querySelector("#fd-recipe-plan-sheet [data-fd-month-picker]").hidden,
+            expanded: document.querySelector("#fd-recipe-plan-sheet [data-fd-month-toggle]").getAttribute("aria-expanded"),
+        })`);
+        // Meal and Repeat: every pull-down item is reachable.
+        await clickSel(`${planMenu("slot")} [data-fd-menu-trigger]`);
+        await sleep(250);
+        const mealReach = await reachItems(planMenu("slot"));
+        await menuEsc();
+        await clickSel(`${planMenu("repeat")} [data-fd-menu-trigger]`);
+        await sleep(250);
+        const repeatReach = await reachItems(planMenu("repeat"));
+        const repeatLabels = await ev<string[]>(
+            `[...document.querySelectorAll(${JSON.stringify(planMenu("repeat") + " .fd-menu__label")})].map((e) => e.textContent)`,
+        );
+        // Pick days: the seven chips show, fit the sheet and toggle; the row
+        // reads the days, Monday first.
+        await clickSel(`${planMenu("repeat")} [data-fd-menu-value="days"]`);
+        await sleep(250);
+        const chipsShown = await ev<{
+            n: number;
+            visible: boolean;
+            inside: boolean;
+            tall: boolean;
+            names: string;
+        }>(`(() => {
+            const d = document.querySelector("#fd-recipe-plan-sheet");
+            const panel = d.querySelector(".fd-sheet-panel").getBoundingClientRect();
+            const chips = [...d.querySelectorAll("[data-fd-plan-days] .fd-pill-chip")];
+            return {
+                n: chips.length,
+                visible: !d.querySelector("[data-fd-plan-days]").hidden && chips.every((c) => c.getClientRects().length > 0),
+                inside: chips.every((c) => { const r = c.getBoundingClientRect(); return r.left >= panel.left && r.right <= panel.right; }),
+                tall: chips.every((c) => c.getBoundingClientRect().height >= 32),
+                names: chips.map((c) => c.getAttribute("aria-label")).join(),
+            };
+        })()`);
+        for (const day of ["1", "3", "5"]) {
+            await clickSel(
+                `#fd-recipe-plan-sheet [data-fd-plan-days] [data-value="${day}"]`,
+            );
+        }
+        await sleep(150);
+        const daysPicked = await ev<{
+            row: string | null;
+            fields: string[];
+            pressed: string[];
+        }>(`({
+            row: document.querySelector(${JSON.stringify(planMenu("repeat"))} + " .fd-item-row__value").textContent,
+            fields: [...document.querySelectorAll('#fd-recipe-plan-sheet input[name="days"]')].map((i) => i.value),
+            pressed: [...document.querySelectorAll('#fd-recipe-plan-sheet [data-fd-plan-days] [aria-pressed="true"]')].map((c) => c.textContent.trim()),
+        })`);
+        const planFit = await ev<boolean>(
+            `document.documentElement.scrollWidth <= ${width} + 1`,
+        );
+        const planSheetButtons = await sheetButtons();
+        await ev(
+            `document.querySelector('#fd-recipe-plan-sheet [type="submit"]').click()`,
+        );
+        await sleep(500);
+        const repeatPosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-alfredo/plan",
+        );
+        // Another repeat takes the weekdays away: the chips go and no `days` posts.
+        await control("reset=posts");
+        await goto("/recipes/r-alfredo?plan=1");
+        await sleep(600);
+        await clickSel(`${planMenu("repeat")} [data-fd-menu-trigger]`);
+        await sleep(200);
+        await clickSel(`${planMenu("repeat")} [data-fd-menu-value="days"]`);
+        await sleep(200);
+        await clickSel(
+            '#fd-recipe-plan-sheet [data-fd-plan-days] [data-value="2"]',
+        );
+        await clickSel(`${planMenu("repeat")} [data-fd-menu-trigger]`);
+        await sleep(200);
+        await clickSel(`${planMenu("repeat")} [data-fd-menu-value="weekly"]`);
+        await sleep(200);
+        const weekly = await planFacts(width);
+        const weeklyDays = await ev<number>(
+            `document.querySelectorAll('#fd-recipe-plan-sheet input[name="days"]').length`,
+        );
+        await ev(
+            `document.querySelector('#fd-recipe-plan-sheet [type="submit"]').click()`,
+        );
+        await sleep(500);
+        const weeklyPosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-alfredo/plan",
+        );
+        const field = (
+            p: { entries: [string, string][] } | undefined,
+            k: string,
+        ) => p?.entries.filter(([key]) => key === k).map(([, v]) => v) ?? [];
+        const ok =
+            start.open &&
+            start.title === "Plan Chicken alfredo" &&
+            start.rows.join() === "Starts,Meal,Repeat" &&
+            start.values.join() === "Today,Dinner,Once" &&
+            start.pickerHidden &&
+            start.daysHidden &&
+            start.fits &&
+            startButtons.ok &&
+            startButtons.n === 1 &&
+            picker.shown &&
+            picker.expanded === "true" &&
+            picker.label === "November 2026" &&
+            picker.days === 30 &&
+            picker.inside &&
+            picker.tap &&
+            picker.pastDisabled &&
+            picker.prevDisabled &&
+            nextMonth.label === "December 2026" &&
+            nextMonth.days === 31 &&
+            !nextMonth.prevDisabled &&
+            backMonth.label === "November 2026" &&
+            backMonth.prevDisabled &&
+            picked.field === "2026-11-20" &&
+            picked.value === "Fri 20 Nov" &&
+            picked.hidden &&
+            picked.expanded === "false" &&
+            mealReach.n === 4 &&
+            mealReach.bad.length === 0 &&
+            repeatReach.n === 5 &&
+            repeatReach.bad.length === 0 &&
+            repeatLabels.join() ===
+                "Once,Every week,Every day,Weekdays,Pick days" &&
+            chipsShown.n === 7 &&
+            chipsShown.visible &&
+            chipsShown.inside &&
+            chipsShown.tall &&
+            chipsShown.names ===
+                "Sunday,Monday,Tuesday,Wednesday,Thursday,Friday,Saturday" &&
+            daysPicked.row === "Pick days" &&
+            daysPicked.fields.join() === "1,3,5" &&
+            daysPicked.pressed.join() === "M,W,F" &&
+            planFit &&
+            planSheetButtons.ok &&
+            repeatPosts.length === 1 &&
+            field(repeatPosts[0], "date").join() === "2026-11-20" &&
+            field(repeatPosts[0], "slot").join() === "dinner" &&
+            field(repeatPosts[0], "repeat").join() === "days" &&
+            field(repeatPosts[0], "days").join() === "1,3,5" &&
+            field(repeatPosts[0], "servings").length === 1 &&
+            weekly.daysHidden &&
+            weeklyDays === 0 &&
+            weeklyPosts.length === 1 &&
+            field(weeklyPosts[0], "repeat").join() === "weekly" &&
+            field(weeklyPosts[0], "days").length === 0;
+        planSheetRes[String(width)] = {
+            start,
+            startButtons,
+            picker,
+            nextMonth,
+            backMonth,
+            picked,
+            mealReach,
+            repeatReach,
+            repeatLabels,
+            chipsShown,
+            daysPicked,
+            planFit,
+            planSheetButtons,
+            repeatPosts,
+            weekly,
+            weeklyDays,
+            weeklyPosts,
+        };
+        planSheetOk = planSheetOk && ok;
+    }
+    record(
+        "v2 plan sheet at 390 and 1440: Plan <recipe> with Starts opening a month picker (dates inside the sheet, earlier days off, months move, a pick reads in the row), Meal and Repeat pull-downs with every item reachable, Pick days showing the weekday chips that post their days, another repeat posting none; its button measured and the page never wider than the screen",
+        planSheetOk,
+        { ...planSheetRes, ex: drain() },
+    );
+    // ---- The leave guard: the importer's first landing on a draft asks
+    // "Discard this recipe?" before a link, a Turbo visit or a form leaves it,
+    // never for the page's own actions, a later visit, another person's draft
+    // or a saved recipe ----
+    const leaveRes: Record<string, unknown> = {};
+    let leaveOk = true;
+    const KEEP = `[...document.querySelectorAll("#fd-recipe-leave-sheet .fd-sheet__actions .fd-btn")].find((b) => b.textContent.trim() === "Keep editing").click()`;
+    for (const width of [390, 1440]) {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 600 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: false,
+        });
+        await control("reset=posts");
+        await goto("/recipes/r-draft?imported=1");
+        await setMarker();
+        await sleep(800);
+        const leaveFacts = () =>
+            ev<{
+                at: string;
+                marker: string | null;
+                open: string[];
+                title: string | null;
+                text: string | null;
+                fits: boolean;
+            }>(`(() => {
+                const d = document.querySelector("#fd-recipe-leave-sheet");
+                return {
+                    at: location.pathname + location.search,
+                    marker: window.__marker ?? null,
+                    open: [...document.querySelectorAll("dialog[open]")].map((e) => e.id),
+                    title: d?.querySelector(".fd-sheet__title")?.textContent ?? null,
+                    text: d?.querySelector(".fd-sheet__text")?.textContent ?? null,
+                    fits: document.documentElement.scrollWidth <= ${width} + 1,
+                };
+            })()`);
+        const closed = await leaveFacts();
+        // The Detail bar's back link would leave the page: the sheet opens.
+        await clickSel('.fd-detail-bar a[href="/recipes"]');
+        await sleep(400);
+        const byBack = await leaveFacts();
+        const leaveButtons = await sheetButtons();
+        const leaveLabels = await ev<string[]>(
+            `[...document.querySelectorAll("#fd-recipe-leave-sheet .fd-sheet__actions .fd-btn")].map((b) => b.textContent.trim())`,
+        );
+        // Keep editing stays on the page, with the draft where it was.
+        await ev(KEEP);
+        await sleep(300);
+        const kept = await leaveFacts();
+        // Any other link leaving the page asks too (the tab bar, the sidebar).
+        await clickSel('.fd-tabs a[href="/"], .fd-sidebar a[href="/"]');
+        await sleep(400);
+        const byNav = await leaveFacts();
+        await ev(KEEP);
+        await sleep(300);
+        // A Turbo visit that is not a link click is held too.
+        await ev(`Turbo.visit("/recipes")`);
+        await sleep(400);
+        const byVisit = await leaveFacts();
+        await ev(KEEP);
+        await sleep(300);
+        // So are forms that would leave: a search and Log out.
+        const postsBefore = (await stats()).posts.length;
+        await ev(
+            `(() => { const f = document.createElement("form"); f.method = "get"; f.action = "/search"; document.body.appendChild(f); f.requestSubmit(); f.remove(); })()`,
+        );
+        await sleep(400);
+        const bySearch = await leaveFacts();
+        await ev(KEEP);
+        await sleep(300);
+        await ev(
+            `(() => { const f = document.createElement("form"); f.method = "post"; f.action = "/logout"; document.body.appendChild(f); f.requestSubmit(); f.remove(); })()`,
+        );
+        await sleep(400);
+        const byLogout = await leaveFacts();
+        await ev(KEEP);
+        await sleep(300);
+        const heldPosts = (await stats()).posts.length - postsBefore;
+        // Discard posts the discard route and lands on Recipes.
+        await clickSel('.fd-detail-bar a[href="/recipes"]');
+        await sleep(400);
+        await ev(
+            `[...document.querySelectorAll("#fd-recipe-leave-sheet .fd-sheet__actions .fd-btn")].find((b) => b.textContent.trim() === "Discard").click()`,
+        );
+        await sleep(700);
+        const discarded = await leaveFacts();
+        const discardPosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-draft/discard",
+        );
+        // Turbo keeps no copy of the deleted draft for the back button.
+        const cachedAfterDiscard = await ev<boolean>(
+            `Turbo.session.view.snapshotCache.has(new URL("/recipes/r-draft?imported=1", location.href))`,
+        );
+        // The page's own action goes straight through: Save asks nothing.
+        await control("reset=posts");
+        await goto("/recipes/r-draft?imported=1");
+        await sleep(600);
+        await clickSel("#fd-recipe-draft-bar button[type=submit]");
+        await sleep(700);
+        const savedFacts = await leaveFacts();
+        const savePosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-draft/save",
+        );
+        // A later visit (Recipes › Drafts) and the owner on a member's draft
+        // have no guard: the back link just goes.
+        const later: Record<string, unknown> = {};
+        let laterOk = true;
+        for (const address of [
+            "/recipes/r-draft",
+            "/recipes/r-draft?theirs=1",
+        ]) {
+            await goto(address);
+            await setMarker();
+            await sleep(600);
+            const hasSheet = await ev<boolean>(
+                `!!document.querySelector("#fd-recipe-leave-sheet")`,
+            );
+            await clickSel('.fd-detail-bar a[href="/recipes"]');
+            await sleep(700);
+            const left = await leaveFacts();
+            later[address] = { hasSheet, left };
+            laterOk =
+                laterOk &&
+                !hasSheet &&
+                left.at === "/recipes" &&
+                left.marker === "stay" &&
+                left.open.length === 0;
+        }
+        // A saved recipe never asks: its back link just goes.
+        await goto("/recipes/r-alfredo");
+        await setMarker();
+        await sleep(600);
+        const savedHasSheet = await ev<boolean>(
+            `!!document.querySelector("#fd-recipe-leave-sheet")`,
+        );
+        await clickSel('.fd-detail-bar a[href="/recipes"]');
+        await sleep(700);
+        const savedLeft = await leaveFacts();
+        const heldAt = (f: {
+            at: string;
+            marker: string | null;
+            open: string[];
+        }) =>
+            f.at === "/recipes/r-draft?imported=1" &&
+            f.marker === "stay" &&
+            f.open.join() === "fd-recipe-leave-sheet";
+        const ok =
+            closed.open.length === 0 &&
+            closed.fits &&
+            heldAt(byBack) &&
+            byBack.title === "Discard this recipe?" &&
+            byBack.text ===
+                "Discard deletes it now. A draft you leave unsaved is deleted on Tue 1 Dec." &&
+            byBack.fits &&
+            leaveButtons.ok &&
+            leaveButtons.n === 2 &&
+            leaveLabels.join() === "Keep editing,Discard" &&
+            kept.at === "/recipes/r-draft?imported=1" &&
+            kept.marker === "stay" &&
+            kept.open.length === 0 &&
+            heldAt(byNav) &&
+            heldAt(byVisit) &&
+            heldAt(bySearch) &&
+            heldAt(byLogout) &&
+            heldPosts === 0 &&
+            discardPosts.length === 1 &&
+            discarded.at === "/recipes" &&
+            !cachedAfterDiscard &&
+            savePosts.length === 1 &&
+            savedFacts.open.length === 0 &&
+            laterOk &&
+            !savedHasSheet &&
+            savedLeft.at === "/recipes" &&
+            savedLeft.marker === "stay" &&
+            savedLeft.open.length === 0;
+        leaveRes[String(width)] = {
+            closed,
+            byBack,
+            leaveButtons,
+            leaveLabels,
+            kept,
+            byNav,
+            byVisit,
+            bySearch,
+            byLogout,
+            heldPosts,
+            discarded,
+            discardPosts,
+            cachedAfterDiscard,
+            savedFacts,
+            savePosts,
+            later,
+            savedHasSheet,
+            savedLeft,
+        };
+        leaveOk = leaveOk && ok;
+    }
+    record(
+        "v2 leave guard at 390 and 1440: the importer's first landing on a draft (?imported=1) asks Discard this recipe? for a back link, another link, a Turbo visit and a leaving form (search, Log out), Keep editing stays with the page where it was, Discard posts the discard route and lands on Recipes with no cached copy of the draft; Save asks nothing; a later visit, the owner on a member's draft and a saved recipe never ask; its buttons measured and the page never wider than the screen",
+        leaveOk,
+        { ...leaveRes, ex: drain() },
+    );
     // ---- Recipe versions: the whose-version pull-down, Compare versions,
     // Make a version the base, and reset ----
     const versionsRes: Record<string, unknown> = {};

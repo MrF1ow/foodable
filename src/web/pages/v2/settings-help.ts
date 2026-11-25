@@ -7,7 +7,7 @@
  */
 import type { AppChromeBase } from "../../attention.js";
 import { escapeHtml } from "../../shell.js";
-import { UNVERIFIED_RECIPES_PROMPT } from "../../../copy/agent-prompts.js";
+import { DRAFT_RECIPES_PROMPT } from "../../../copy/agent-prompts.js";
 import { button } from "../../components/v2/button.js";
 import { emptyState } from "../../components/v2/empty-state.js";
 import { field } from "../../components/v2/field.js";
@@ -95,7 +95,7 @@ const GLOSSARY_COPY: GlossaryCopy[] = [
         body: "Restock puts things on the grocery list for you. On the restock day, it adds food that expires within 7 days and usuals whose schedule is due. On any day, it adds usuals set to “Add when it runs low” once they run low. Each goes on at its usual amount and store, and a usual already on the list is not added again. Ask your AI assistant to turn it on and pick the day and time (it uses update_household_config); one switch controls all of it. Nothing is added until it's on.",
     },
     {
-        id: "unverified-recipes",
+        id: "recipe-drafts",
         title: "How do I finish an imported recipe?",
         body: "An imported recipe is a draft until you save it. A draft stays out of your recipe list, the week plan, cooking, the grocery list and search, and it is deleted 7 days after import unless you save it. Your drafts are listed under Drafts on the Recipes page. Save checks the recipe first and tells you what is left to fix. Once saved, an edit that would break the check is refused. To have your agent fix drafts, give it this prompt in a chat; it saves a draft only when you tell it to.",
     },
@@ -151,7 +151,7 @@ const GLOSSARY_COPY: GlossaryCopy[] = [
     },
 ];
 
-const PROMPT_FIELD_ID = "help-unverified-recipes-prompt";
+const PROMPT_FIELD_ID = "help-recipe-drafts-prompt";
 
 function promptBlockHtml(): string {
     return `${field({
@@ -160,7 +160,7 @@ function promptBlockHtml(): string {
         label: "Prompt",
         rows: 14,
         readonly: true,
-        value: UNVERIFIED_RECIPES_PROMPT,
+        value: DRAFT_RECIPES_PROMPT,
     })}${button({
         label: "Copy",
         variant: "secondary",
@@ -179,7 +179,7 @@ export const GLOSSARY: readonly GlossaryEntry[] = GLOSSARY_COPY.map(
         title: entry.title,
         // The newline after the paragraph is part of the rendered bytes.
         answer: `<p>${escapeHtml(entry.body)}</p>\n${
-            entry.id === "unverified-recipes" ? promptBlockHtml() : ""
+            entry.id === "recipe-drafts" ? promptBlockHtml() : ""
         }`,
     }),
 );

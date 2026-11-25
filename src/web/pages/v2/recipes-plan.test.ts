@@ -403,13 +403,134 @@ describe("add to plan sheet", () => {
         servings: 2,
     };
 
-    test("posts the recipe's plan with a date, a slot and servings", () => {
+    test("is titled Plan <recipe> and posts the day, meal, repeat and servings to the recipe's plan route (FigCraft 406295)", () => {
         const html = renderPlanSheet(view);
         expect(html).toContain('action="/recipes/r-pancakes/plan"');
-        expect(html).toContain('type="date"');
+        expect(html).toContain(">Plan Pancakes<");
+        // The day rides in the Starts row's hidden field, not a date input.
+        expect(html).toContain('name="date" value="2026-11-12"');
+        expect(html).not.toContain('type="date"');
+        expect(html).not.toContain("<select");
+        expect(html).toContain('name="slot" value="dinner"');
+        expect(html).toContain('name="repeat" value="once"');
         expect(html).toContain('name="servings"');
-        expect(html).toContain('<option value="dinner" selected>');
+        // Plan submits the form from outside it, with no icon (as the frames).
+        const plan = html.slice(
+            html.indexOf('form="fd-recipe-plan-form">'),
+            html.indexOf(
+                "</button>",
+                html.indexOf('form="fd-recipe-plan-form">'),
+            ),
+        );
+        expect(plan).toContain(">Plan</span>");
+        expect(plan).not.toContain("<svg");
         expect(html).not.toContain("data-sheet-open-on-load");
+    });
+
+    test("Starts, Meal and Repeat are Item rows: Starts opens the month picker, the others are pull-downs with the frames' choices", () => {
+        const html = renderPlanSheet(view);
+        const rows = [
+            ...html.matchAll(/<li class="fd-item-row[^"]*">[\s\S]*?<\/li>/g),
+        ].map((m) => m[0]);
+        expect(rows).toHaveLength(3);
+        expect(rows[0]).toContain('fd-item-row__title" title="Starts">Starts<');
+        expect(rows[0]).toContain('fd-item-row__value">Today<');
+        expect(rows[0]).toContain('aria-expanded="false"');
+        expect(rows[1]).toContain('title="Meal"');
+        expect(rows[1]).toContain('fd-item-row__value">Dinner<');
+        for (const label of ["Breakfast", "Lunch", "Dinner", "Snacks"]) {
+            expect(rows[1]).toContain(`fd-menu__label">${label}<`);
+        }
+        expect(rows[2]).toContain('title="Repeat"');
+        expect(rows[2]).toContain('fd-item-row__value">Once<');
+        const values = [
+            ...rows[2]!.matchAll(/data-fd-menu-value="(\w+)"/g),
+        ].map((m) => m[1]);
+        expect(values).toEqual(["once", "weekly", "daily", "weekdays", "days"]);
+        for (const label of [
+            "Once",
+            "Every week",
+            "Every day",
+            "Weekdays",
+            "Pick days",
+        ]) {
+            expect(rows[2]).toContain(`fd-menu__label">${label}<`);
+        }
+    });
+
+    test("the month picker shows the start day's month, the picked day, and no day before today", () => {
+        const html = renderPlanSheet({ ...view, date: "2026-11-20" });
+        expect(html).toContain('data-month="2026-11"');
+        expect(html).toContain(">November 2026<");
+        expect(html).toContain('fd-item-row__value">Fri 20 Nov<');
+        // The opening tag of a day's button, found by text, not by pattern.
+        const pick = (day: string) => {
+            const at = html.indexOf(`data-fd-month-day="${day}"`);
+            return html.slice(
+                html.lastIndexOf("<button", at),
+                html.indexOf(">", at) + 1,
+            );
+        };
+        expect(pick("2026-11-20")).toContain('aria-pressed="true"');
+        expect(pick("2026-11-20")).not.toContain("disabled");
+        expect(pick("2026-11-12")).toContain('aria-current="date"');
+        expect(pick("2026-11-12")).not.toContain("disabled");
+        expect(pick("2026-11-11")).toContain("disabled");
+        expect(pick("2026-11-01")).toContain("disabled");
+        // November starts on a Sunday, so the grid has no blank before it.
+        expect(html).not.toContain("fd-month-picker__blank");
+        // Nothing earlier than today's month to go back to.
+        expect(html).toMatch(
+            /<button[^>]*data-fd-month-prev=""[^>]* disabled>/,
+        );
+        expect(html).not.toMatch(
+            /<button[^>]*data-fd-month-next=""[^>]* disabled>/,
+        );
+    });
+
+    test("a repeat of Pick days shows the weekday chips with the days on, one hidden field each, and the row reads Pick days (FigCraft 409279)", () => {
+        const html = renderPlanSheet({
+            ...view,
+            repeat: "days",
+            days: [5, 1, 3],
+        });
+        expect(html).toContain('name="repeat" value="days"');
+        // The chips hold the days; the row keeps "Pick days" while they show.
+        expect(html).toContain('fd-item-row__value">Pick days<');
+        expect(html).not.toContain("Mon, Wed, Fri");
+        const chips = html.match(
+            /<div class="fd-plan-days" data-fd-plan-days>[\s\S]*?<\/div>/,
+        )![0];
+        const on = [
+            ...chips.matchAll(
+                /aria-pressed="true" aria-label="(\w+)" data-value="(\d)"/g,
+            ),
+        ].map((m) => m[1]);
+        expect(on).toEqual(["Monday", "Wednesday", "Friday"]);
+        // Seven chips, Sunday first, each named by its weekday.
+        expect(
+            chips.match(/<button type="button" class="fd-pill-chip[ "]/g),
+        ).toHaveLength(7);
+        expect(chips).toContain('aria-label="Sunday" data-value="0"');
+        expect(html.match(/<input type="hidden" name="days"/g)).toHaveLength(3);
+        for (const day of [1, 3, 5]) {
+            expect(html).toContain(
+                `<input type="hidden" name="days" value="${day}">`,
+            );
+        }
+    });
+
+    test("any other repeat hides the chips and posts no weekdays", () => {
+        for (const repeat of ["once", "weekly", "daily", "weekdays"]) {
+            const html = renderPlanSheet({ ...view, repeat, days: [1, 3] });
+            expect(html).toContain(`name="repeat" value="${repeat}"`);
+            expect(html).toContain("data-fd-plan-days hidden");
+            expect(html).not.toContain('name="days"');
+        }
+        // An unknown repeat is Once.
+        expect(renderPlanSheet({ ...view, repeat: "yearly" })).toContain(
+            'name="repeat" value="once"',
+        );
     });
 
     test("a failed add re-opens the sheet with the error and what was typed", () => {
@@ -421,6 +542,9 @@ describe("add to plan sheet", () => {
         });
         expect(html).toContain("data-sheet-open-on-load");
         expect(html).toContain("A plan date must be a day");
-        expect(html).toContain('value="2026-13-45"');
+        expect(html).toContain('name="date" value="2026-13-45"');
+        // The Starts row reads what was typed, and the picker offers no pick.
+        expect(html).toContain('fd-item-row__value">2026-13-45<');
+        expect(html).not.toContain('aria-pressed="true" aria-label="Friday');
     });
 });

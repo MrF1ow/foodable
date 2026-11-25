@@ -18,6 +18,8 @@ import { cls, dataAttrs, esc, raw, safeHref, type Html } from "./html.js";
 
 export type ChipOptions = {
     label: string;
+    /** What a screen reader says when the label is a letter ("Monday" for "M"). */
+    ariaLabel?: string;
     count?: number | string;
     /** On. */
     selected?: boolean;
@@ -46,14 +48,15 @@ function chipMarkup(opts: ChipOptions, role: Role, tabStop: boolean): string {
     const inner = `<span class="fd-pill-chip__label">${esc(opts.label)}</span>${count}`;
     const value = opts.value != null ? ` data-value="${esc(opts.value)}"` : "";
     const data = dataAttrs(opts.data);
+    const name = opts.ariaLabel ? ` aria-label="${esc(opts.ariaLabel)}"` : "";
     if (role === "link") {
-        return `<a class="${classes}" href="${safeHref(opts.href ?? "#")}"${opts.selected ? ' aria-current="true"' : ""}${value}${data}>${inner}</a>`;
+        return `<a class="${classes}" href="${safeHref(opts.href ?? "#")}"${opts.selected ? ' aria-current="true"' : ""}${name}${value}${data}>${inner}</a>`;
     }
     const state =
         role === "radio"
             ? ` role="radio" aria-checked="${opts.selected ? "true" : "false"}" tabindex="${tabStop ? "0" : "-1"}"`
             : ` aria-pressed="${opts.selected ? "true" : "false"}"`;
-    return `<button type="${opts.submit ? "submit" : "button"}" class="${classes}"${state}${value}${opts.disabled ? " disabled" : ""}${data}>${inner}</button>`;
+    return `<button type="${opts.submit ? "submit" : "button"}" class="${classes}"${state}${name}${value}${opts.disabled ? " disabled" : ""}${data}>${inner}</button>`;
 }
 
 /** One chip: a toggle button, or a link with a `href`. */

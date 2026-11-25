@@ -1734,7 +1734,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 lastRunOn: "2026-11-08",
                 lastRunAdded: 3,
             },
-            unverifiedRecipeExpiryDays: 30,
             openModalId,
             sharedLinks,
         } as never);
@@ -2191,6 +2190,15 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             () =>
                 `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
         );
+    /** A page with steps a person would take run once it has loaded (a menu opened, a day picked). */
+    const driven = (html: string, steps: string) =>
+        html.replace(
+            "</body>",
+            () =>
+                `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
+        );
+    const planRow = (name: string) =>
+        `#fd-recipe-plan-sheet [data-anchor="row"]:has([data-fd-menu-field][name="${name}"])`;
     const fridgePage = (
         extra: Partial<
             Parameters<typeof buildPreviewKitchenFridgeView>[2]
@@ -2633,13 +2641,26 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             expiresOn: "2026-12-01",
             canSave: true,
             canDiscard: true,
+            leaveGuard: false,
         }),
+        // The leave guard, on the importer's first landing: a link out asks Discard this recipe?
+        "recipe-draft-leave": driven(
+            padSeeEw({
+                problems: ["Resolve every ingredient line.", "Add the steps."],
+                expiresOn: "2026-12-01",
+                canSave: true,
+                canDiscard: true,
+                leaveGuard: true,
+            }),
+            `document.querySelector('.fd-detail-bar a[href="/recipes"]').click()`,
+        ),
         "recipe-draft-refused": padSeeEw(
             {
                 problems: ["Add the steps."],
                 expiresOn: "2026-12-01",
                 canSave: true,
                 canDiscard: true,
+                leaveGuard: false,
             },
             "Not saved yet. Fix what is listed below, then save it again.",
         ),
@@ -2647,6 +2668,26 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "recipe-no-share": recipeV2(cookSheet, false, false, false),
         "recipe-cook": recipeV2({ ...cookSheet, open: true }),
         "recipe-plan": recipeV2(cookSheet, true),
+        // The Plan sheet's Starts open on its month picker, Meal and Repeat
+        // open as pull-downs, and Repeat on Pick days with three weekdays on.
+        "recipe-plan-starts": driven(
+            recipeV2(cookSheet, true),
+            `document.querySelector("#fd-recipe-plan-sheet [data-fd-month-toggle]").click()`,
+        ),
+        "recipe-plan-meal": driven(
+            recipeV2(cookSheet, true),
+            `document.querySelector(${JSON.stringify(planRow("slot"))} + " [data-fd-menu-trigger]").click()`,
+        ),
+        "recipe-plan-repeat": driven(
+            recipeV2(cookSheet, true),
+            `document.querySelector(${JSON.stringify(planRow("repeat"))} + " [data-fd-menu-trigger]").click()`,
+        ),
+        "recipe-plan-days": driven(
+            recipeV2(cookSheet, true),
+            `document.querySelector(${JSON.stringify(planRow("repeat"))} + " [data-fd-menu-trigger]").click();
+document.querySelector(${JSON.stringify(planRow("repeat"))} + ' [data-fd-menu-value="days"]').click();
+for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet [data-fd-plan-days] [data-value="' + day + '"]').click();`,
+        ),
         "recipe-share": recipeV2(cookSheet, false, true),
         // The one screen that shows a new share link's address.
         "share-link-made": renderShareCreatedPage({
