@@ -1,8 +1,9 @@
-// The "Link ready" screen (src/web/pages/v2/share-sheet.ts): copies the new
+// The "Link ready" sheet (src/web/pages/v2/share-sheet.ts): copies the new
 // link's address. It tries once on load, which most browsers allow only after
 // a tap, so the Copy button is the dependable way; either way the field is
 // selected so a long press or Ctrl+C works too. The address never leaves the
-// field: it is not stored, logged or sent anywhere.
+// field: it is not stored, logged or sent anywhere. Closing the sheet (its X,
+// Esc, a tap outside, Done) goes back to the page the link belongs to.
 // Binding is idempotent per box (a WeakSet), so Turbo re-running onLoad on a
 // morph never double-binds.
 
@@ -52,6 +53,18 @@ function initShareMade(scope) {
                 ? page.querySelector("[data-fd-share-status]")
                 : null;
         if (!input) return;
+
+        const sheet =
+            typeof box.closest === "function" ? box.closest("dialog") : null;
+        const back =
+            typeof box.getAttribute === "function"
+                ? box.getAttribute("data-fd-share-back")
+                : null;
+        if (sheet && back) {
+            sheet.addEventListener("close", () => {
+                window.location.assign(back);
+            });
+        }
 
         // Leaving by a Turbo visit snapshots this page for the Back button;
         // the address must not be in it.

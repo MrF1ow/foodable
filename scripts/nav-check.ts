@@ -1370,6 +1370,350 @@ try {
         shareOn === 1 && shareOff.forms === 0 && shareOff.emptyMenus === 0,
         { shareOn, shareOff, ex: drain() },
     );
+    // ---- The recipe page: Detail bar ⋯ (Share), Cook, Plan, the share sheet,
+    // the draft bar's Save ----
+    // At both widths: the page is never wider than the screen, every button of
+    // an open sheet measures as a button, and every ⋯ item is reachable.
+    const recipePageRes: Record<string, unknown> = {};
+    let recipePageOk = true;
+    // Every control of the open dialog is a real tap target inside the screen.
+    const dialogControls = () =>
+        ev<{ n: number; ok: boolean; boxes: string[] }>(`(() => {
+            const d = document.querySelector("dialog[open]");
+            const cs = [...(d?.querySelectorAll("[data-fd-btn], .fd-btn") ?? [])].filter((b) => b.getClientRects().length > 0);
+            const rs = cs.map((b) => b.getBoundingClientRect());
+            const ok = rs.every((r, i) => r.height >= 32 && r.width >= 32 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && cs[i].scrollWidth <= cs[i].clientWidth + 1);
+            return { n: cs.length, ok: cs.length > 0 && ok, boxes: rs.map((r) => Math.round(r.width) + "x" + Math.round(r.height)) };
+        })()`);
+    for (const width of [390, 1440]) {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 600 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: false,
+        });
+        await control("reset=posts");
+        await goto("/recipes/r-alfredo");
+        await setMarker();
+        // The entrance fade (a filter on the page's first children) is over.
+        await sleep(800);
+        const page = await ev<{
+            h1: string | null;
+            subtitle: string | null;
+            rows: number;
+            rowMenus: number;
+            bar: string[];
+            barClear: boolean;
+            fits: boolean;
+            steps: number;
+            unverified: boolean;
+        }>(`(() => {
+            const bar = document.querySelector(".fd-recipe-bar");
+            const r = bar?.getBoundingClientRect();
+            const tabs = document.querySelector(".fd-tabs")?.getBoundingClientRect();
+            const phone = ${width} < 1024;
+            return {
+                h1: document.querySelector("h1")?.textContent ?? null,
+                subtitle: document.querySelector(".fd-recipe-head .fd-page-header__subtitle")?.textContent ?? null,
+                rows: document.querySelectorAll(".fd-recipe-detail .fd-page-layout .fd-item-row").length,
+                rowMenus: document.querySelectorAll(".fd-recipe-detail .fd-page-layout .fd-item-row [data-fd-menu-trigger]").length,
+                bar: [...(bar?.querySelectorAll("[data-fd-btn]") ?? [])].map((b) => b.textContent.trim()),
+                // On the phone the bar floats above the nav pill, on screen.
+                barClear: !!r && r.left >= 0 && r.right <= ${width} && (!phone || (!!tabs && r.bottom <= tabs.top && r.top >= 0)),
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+                steps: document.querySelectorAll(".fd-recipe-steps li").length,
+                unverified: /unverified/i.test(document.body.textContent ?? ""),
+            };
+        })()`);
+        // The Detail bar's ⋯: Share first, then the star; Share opens the sheet.
+        await clickSel(".fd-detail-bar [data-fd-menu-trigger]");
+        await sleep(250);
+        const menuReach = await reachItems(".fd-detail-bar .fd-menu");
+        const menuLabels = await ev<string[]>(
+            `[...document.querySelectorAll(".fd-detail-bar .fd-menu__label")].map((e) => e.textContent)`,
+        );
+        await clickSel('.fd-detail-bar [commandfor="fd-recipe-share-sheet"]');
+        await sleep(500);
+        const shareOpen = await ev<{
+            open: boolean;
+            chips: string[];
+            picked: string | null;
+            menuClosed: boolean;
+        }>(`({
+            open: !!document.querySelector("#fd-recipe-share-sheet[open]"),
+            chips: [...document.querySelectorAll("#fd-recipe-share-sheet .fd-chip__label")].map((e) => e.textContent),
+            picked: document.querySelector('#fd-recipe-share-sheet input[name="expires"]:checked')?.value ?? null,
+            menuClosed: !document.querySelector(".fd-detail-bar .fd-menu__panel:not([hidden])"),
+        })`);
+        const shareControls = await dialogControls();
+        const shareButtons = await sheetButtons();
+        // Pick 1 month and Make link: the form posts the choice (a full page load answers with the link).
+        await clickSel(
+            '#fd-recipe-share-sheet .fd-chip:has(input[value="30"])',
+        );
+        await ev(
+            `document.querySelector('#fd-recipe-share-sheet [type="submit"]').click()`,
+        );
+        await sleep(800);
+        const sharePosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-alfredo/share",
+        );
+        const made = await ev<{
+            open: boolean;
+            title: string | null;
+            urlValue: string | null;
+            urlCopies: number;
+            fits: boolean;
+        }>(`({
+            open: !!document.querySelector("#fd-share-made-sheet[open]"),
+            title: document.querySelector("#fd-share-made-sheet .fd-sheet__title")?.textContent ?? null,
+            urlValue: document.querySelector("[data-fd-share-url]")?.value ?? null,
+            urlCopies: document.querySelectorAll("[data-fd-share-copy]").length,
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+        })`);
+        const madeControls = await dialogControls();
+        const madeButtons = await sheetButtons();
+        // Done goes back to the recipe.
+        await ev(
+            `document.querySelector('#fd-share-made-sheet [data-fd-btn][command="close"]').click()`,
+        );
+        await sleep(800);
+        const afterDone = await ev<string>(
+            `location.pathname + location.search`,
+        );
+        // Cook: the sheet shows what it takes, the short ingredient greyed, and posts.
+        await goto("/recipes/r-alfredo");
+        await setMarker();
+        await control("reset=posts");
+        await clickSel('.fd-recipe-bar [commandfor="fd-recipe-cook-sheet"]');
+        await sleep(600);
+        const cook = await ev<{
+            open: boolean;
+            title: string | null;
+            rows: number;
+            ticked: number;
+            greyed: number;
+            greyedTitle: string | null;
+            logChips: string[];
+            fits: boolean;
+        }>(`(() => {
+            const d = document.querySelector("#fd-recipe-cook-sheet");
+            const boxes = [...d.querySelectorAll('.fd-item-row input[type="checkbox"]')];
+            return {
+                open: d.open,
+                title: d.querySelector(".fd-sheet__title")?.textContent ?? null,
+                rows: d.querySelectorAll(".fd-item-row").length,
+                ticked: d.querySelectorAll(".fd-item-row__done").length,
+                greyed: boxes.filter((b) => b.disabled && !b.checked).length,
+                greyedTitle: boxes[0]?.closest(".fd-item-row")?.querySelector(".fd-item-row__title")?.textContent ?? null,
+                logChips: [...d.querySelectorAll(".fd-choice-group .fd-chip__label")].map((e) => e.textContent),
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+            };
+        })()`);
+        const cookControls = await dialogControls();
+        const cookButtons = await sheetButtons();
+        await ev(
+            `document.querySelector('#fd-recipe-cook-sheet [type="submit"]').click()`,
+        );
+        await sleep(600);
+        const cookPosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-alfredo/cook/confirm",
+        );
+        const cookEntry = (name: string) =>
+            cookPosts[0]?.entries.find(([k]) => k === name)?.[1] ?? null;
+        // Plan: the bar's Plan opens the Add to plan sheet.
+        await goto("/recipes/r-alfredo");
+        await setMarker();
+        await clickSel('.fd-recipe-bar [commandfor="fd-recipe-plan-sheet"]');
+        await sleep(500);
+        const planOpen = await ev<boolean>(
+            `!!document.querySelector("#fd-recipe-plan-sheet[open]")`,
+        );
+        const planButtons = await sheetButtons();
+        // `mcp-share-links` off: no Share, and no ⋯ with nothing in it.
+        await goto("/recipes/r-alfredo?share=off");
+        const shareOff = await ev<{
+            labels: string[];
+            sheet: boolean;
+            emptyMenus: number;
+            fits: boolean;
+        }>(`({
+            labels: [...document.querySelectorAll(".fd-detail-bar .fd-menu__label")].map((e) => e.textContent),
+            sheet: !!document.querySelector("#fd-recipe-share-sheet"),
+            emptyMenus: [...document.querySelectorAll(".fd-menu__panel")].filter((p) => p.querySelectorAll(".fd-menu__item").length === 0).length,
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+        })`);
+        // A draft: Save and what is left in place of Cook and Plan; Save is
+        // refused in place, then saved.
+        await goto("/recipes/r-draft");
+        await setMarker();
+        await control("reset=posts");
+        await sleep(800);
+        const draft = await ev<{
+            bar: string[];
+            status: string | null;
+            left: string[];
+            cook: number;
+            plan: number;
+            menu: string[];
+            subtitle: string | null;
+            barClear: boolean;
+            fits: boolean;
+            unverified: boolean;
+        }>(`(() => {
+            const bar = document.querySelector("#fd-recipe-draft-bar");
+            const r = bar?.getBoundingClientRect();
+            const tabs = document.querySelector(".fd-tabs")?.getBoundingClientRect();
+            return {
+                bar: [...(bar?.querySelectorAll("[data-fd-btn]") ?? [])].map((b) => b.textContent.trim()),
+                status: bar?.querySelector(".fd-recipe-bar__status")?.textContent ?? null,
+                left: [...document.querySelectorAll(".fd-recipe-draft__problems li")].map((e) => e.textContent),
+                cook: document.querySelectorAll('[commandfor="fd-recipe-cook-sheet"]').length,
+                plan: document.querySelectorAll('[commandfor="fd-recipe-plan-sheet"]').length,
+                menu: [...document.querySelectorAll(".fd-detail-bar .fd-menu__label")].map((e) => e.textContent),
+                subtitle: document.querySelector(".fd-recipe-head .fd-page-header__subtitle")?.textContent ?? null,
+                barClear: !!r && r.left >= 0 && r.right <= ${width} && (${width} >= 1024 || (!!tabs && r.bottom <= tabs.top)),
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+                unverified: /unverified/i.test(document.body.textContent ?? ""),
+            };
+        })()`);
+        await clickSel("#fd-recipe-draft-bar button[type=submit]");
+        await sleep(700);
+        const refused = await ev<{
+            error: string | null;
+            draftBar: boolean;
+            marker: string | null;
+            fits: boolean;
+        }>(`({
+            error: document.querySelector(".fd-recipe-error")?.textContent ?? null,
+            draftBar: !!document.querySelector("#fd-recipe-draft-bar"),
+            marker: window.__marker ?? null,
+            fits: document.documentElement.scrollWidth <= ${width} + 1,
+        })`);
+        await clickSel("#fd-recipe-draft-bar button[type=submit]");
+        await sleep(700);
+        const saved = await ev<{
+            at: string;
+            draftBar: boolean;
+            bar: string[];
+            marker: string | null;
+        }>(`({
+            at: location.pathname + location.search,
+            draftBar: !!document.querySelector("#fd-recipe-draft-bar"),
+            bar: [...document.querySelectorAll(".fd-recipe-bar [data-fd-btn]")].map((b) => b.textContent.trim()),
+            marker: window.__marker ?? null,
+        })`);
+        const savePosts = (await stats()).posts.filter(
+            (p) => p.path === "/recipes/r-draft/save",
+        );
+        const ok =
+            page.h1 === "Chicken alfredo" &&
+            page.subtitle === "4 servings · 30 min · from seriouseats.com" &&
+            page.rows === 4 &&
+            page.rowMenus === 4 &&
+            page.bar.join() === "Plan,Cook" &&
+            page.barClear &&
+            page.fits &&
+            page.steps === 3 &&
+            !page.unverified &&
+            menuReach.n === 2 &&
+            menuReach.bad.length === 0 &&
+            menuLabels.join() === "Share,Add to favourites" &&
+            shareOpen.open &&
+            shareOpen.menuClosed &&
+            shareOpen.chips.join() ===
+                "1 week,1 month,3 months,Never expires" &&
+            shareOpen.picked === "never" &&
+            shareControls.ok &&
+            shareButtons.ok &&
+            shareButtons.n === 1 &&
+            sharePosts.length === 1 &&
+            sharePosts[0]!.entries.some(
+                ([k, v]) => k === "expires" && v === "30",
+            ) &&
+            made.open &&
+            made.title === "Link ready" &&
+            made.urlValue ===
+                "https://foodable.example.com/s/Qk3vZ8mXr1TnY0aLw5uHc9DfJ2bEeSgPiVoN7xRzA4M" &&
+            made.urlCopies === 1 &&
+            made.fits &&
+            madeControls.ok &&
+            madeButtons.ok &&
+            madeButtons.n === 1 &&
+            afterDone === "/recipes/r-alfredo" &&
+            cook.open &&
+            cook.title === "Cook Chicken alfredo" &&
+            cook.rows === 4 &&
+            cook.ticked === 3 &&
+            cook.greyed === 1 &&
+            cook.greyedTitle === "Heavy cream" &&
+            cook.logChips.join() === "Ethan,No one" &&
+            cook.fits &&
+            cookControls.ok &&
+            cookButtons.ok &&
+            cookButtons.n === 1 &&
+            cookPosts.length === 1 &&
+            cookEntry("servings") === "4" &&
+            cookEntry("log_serving") === "1" &&
+            cookEntry("meal_type") === "dinner" &&
+            planOpen &&
+            planButtons.ok &&
+            shareOff.labels.join() === "Add to favourites" &&
+            !shareOff.sheet &&
+            shareOff.emptyMenus === 0 &&
+            shareOff.fits &&
+            draft.bar.join() === "Save" &&
+            draft.status === "1 thing to fix" &&
+            draft.left.join() === "Add the steps." &&
+            draft.cook === 0 &&
+            draft.plan === 0 &&
+            draft.menu.join() === "Discard draft,Cancel,Discard" &&
+            draft.subtitle ===
+                "Draft · 2 servings · 25 min · from slowfoodmama.com" &&
+            draft.barClear &&
+            draft.fits &&
+            !draft.unverified &&
+            refused.error ===
+                "Not saved yet. Fix what is listed below, then save it again." &&
+            refused.draftBar &&
+            refused.marker === "stay" &&
+            refused.fits &&
+            saved.at === "/recipes/r-draft?saved=1" &&
+            !saved.draftBar &&
+            saved.bar.join() === "Plan,Cook" &&
+            saved.marker === "stay" &&
+            savePosts.length === 2;
+        recipePageRes[String(width)] = {
+            page,
+            menuReach,
+            menuLabels,
+            shareOpen,
+            shareControls,
+            shareButtons,
+            sharePosts,
+            made,
+            madeControls,
+            madeButtons,
+            afterDone,
+            cook,
+            cookControls,
+            cookButtons,
+            cookPosts,
+            planOpen,
+            planButtons,
+            shareOff,
+            draft,
+            refused,
+            saved,
+            savePosts,
+        };
+        recipePageOk = recipePageOk && ok;
+    }
+    record(
+        "v2 recipe page at 390 and 1440: Plan and Cook in the bar, the Detail bar's ⋯ (Share, the star) opening the share sheet whose Make link posts the expiry and answers a Link ready sheet (Copy, Done back to the recipe), Cook's sheet listing what it takes with the short ingredient greyed and posting servings, who it is logged for and the slot, Plan's sheet, Share gone and no ⋯ empty with mcp-share-links off, and a draft's bar: Save refused in place with what is left, then saved over Turbo; every sheet button measured and the page never wider than the screen",
+        recipePageOk,
+        { ...recipePageRes, ex: drain() },
+    );
     await send("Emulation.setDeviceMetricsOverride", {
         width: 1440,
         height: 960,

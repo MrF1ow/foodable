@@ -10,17 +10,6 @@ import {
     type CookSheetView,
 } from "./recipes-page-cook.js";
 
-const MACROS = {
-    calories: 640,
-    protein_g: 48,
-    carbs_g: 62,
-    fat_g: 22,
-    fiber_g: null,
-    sugar_g: null,
-    alcohol_g: null,
-    incomplete: false,
-};
-
 function preview(over: Partial<CookPreview> = {}): CookPreview {
     return {
         totalPortions: 2,
@@ -65,24 +54,53 @@ function view(over: Partial<CookSheetView> = {}): CookSheetView {
         yieldPortions: 2,
         preview: preview(),
         slot: "dinner",
-        macrosPerPortion: MACROS,
+        viewerName: "Ethan",
+        places: new Map([
+            ["i-salmon", "Fridge"],
+            ["i-rice", "Pantry"],
+        ]),
         submitKey: "key-1",
         ...over,
     };
 }
 
+/** The rows of a region, one string each. */
+function rows(html: string): string[] {
+    return html
+        .split('<li class="fd-item-row')
+        .slice(1)
+        .map((row) => row.slice(0, row.indexOf("</li>")));
+}
+
 describe("renderCookPreviewRegion", () => {
-    test("lists each fridge item as before → after, zero without a unit", () => {
-        const html = renderCookPreviewRegion(preview());
-        expect(html).toContain("Takes from your kitchen");
-        expect(html).toContain("Salmon");
-        expect(html).toContain("1 lb → 0<");
-        expect(html).toContain("2 lb → 1.6 lb<");
-        expect(html).toContain("3 → 2<");
+    test("lists each ingredient the cook takes with the amount that leaves and where it is kept, ticked", () => {
+        const html = renderCookPreviewRegion(
+            preview(),
+            undefined,
+            new Map([
+                ["i-salmon", "Fridge"],
+                ["i-rice", "Pantry"],
+            ]),
+        );
+        expect(html).toContain("Takes");
         expect(html).toContain("data-fd-cook-region");
+        const [salmon, rice, lemon] = rows(html);
+        expect(salmon).toContain(">Salmon<");
+        expect(salmon).toContain(">1 lb<");
+        expect(salmon).toContain(">Fridge<");
+        expect(rice).toContain(">0.4 lb<");
+        expect(rice).toContain(">Pantry<");
+        // An item with no known place has no second line, and a unit-less amount is a count.
+        expect(lemon).toContain(">1<");
+        expect(lemon).not.toContain("fd-item-row__subtitle");
+        // Ticked, and nothing to press: it is not a form field.
+        for (const row of [salmon, rice, lemon]) {
+            expect(row).toContain("fd-item-row__done");
+            expect(row).not.toContain("<input");
+        }
     });
 
-    test("a shortfall is named in the warning style", () => {
+    test("a shortfall keeps its box, greyed and unticked, with its words in the warning tone", () => {
         const html = renderCookPreviewRegion(
             preview({
                 shortfalls: [
@@ -103,13 +121,42 @@ describe("renderCookPreviewRegion", () => {
                 ],
             }),
         );
-        expect(html).toContain("fd-recipe-cook-use--short");
-        expect(html).toContain("Baby spinach");
-        expect(html).toContain("short 100 g");
-        expect(html).toContain("may be short 2");
+        const spinach = rows(html).find((row) => row.includes("Baby spinach"))!;
+        expect(spinach).toContain("fd-item-row--warning");
+        expect(spinach).toContain("Short 100 g");
+        const box = spinach.match(/<input[^>]*type="checkbox"[^>]*>/)![0];
+        expect(box).toContain("disabled");
+        expect(box).not.toContain("checked");
+        const garlic = rows(html).find((row) => row.includes("Garlic"))!;
+        expect(garlic).toContain("May be short 2");
+        expect(garlic).toMatch(/<input[^>]*type="checkbox"[^>]*disabled/);
     });
 
-    test("unmeasured ingredients are noted, not silently dropped", () => {
+    test("a partly stocked ingredient is one Takes row: what it takes and how short it is", () => {
+        const html = renderCookPreviewRegion(
+            preview({
+                shortfalls: [
+                    {
+                        foodId: "f-lemon",
+                        displayName: "Lemon",
+                        amount: 2,
+                        unit: "each",
+                        unknownFactor: false,
+                    },
+                ],
+            }),
+        );
+        const lemons = rows(html).filter((row) => row.includes("Lemon"));
+        expect(lemons).toHaveLength(1);
+        expect(lemons[0]).toContain("fd-item-row--warning");
+        expect(lemons[0]).toContain("Short 2");
+        expect(lemons[0]).toContain('fd-item-row__meta">1</span>');
+        const box = lemons[0]!.match(/<input[^>]*type="checkbox"[^>]*>/)![0];
+        expect(box).toContain("disabled");
+        expect(box).not.toContain("checked");
+    });
+
+    test("an ingredient with no amount is a greyed row, not silently dropped", () => {
         const html = renderCookPreviewRegion(
             preview({
                 unmeasured: [
@@ -118,13 +165,23 @@ describe("renderCookPreviewRegion", () => {
                 ],
             }),
         );
-        expect(html).toContain("Salt, Pepper");
-        expect(html).toContain("no amount");
+        for (const name of ["Salt", "Pepper"]) {
+            const row = rows(html).find((r) => r.includes(`>${name}<`))!;
+            expect(row).toContain("No amount, so nothing is taken");
+            expect(row).toMatch(/<input[^>]*type="checkbox"[^>]*disabled/);
+        }
     });
 
     test("says so when nothing leaves the kitchen", () => {
         const html = renderCookPreviewRegion(preview({ lines: [] }));
         expect(html).toContain("Nothing in your kitchen to take");
+    });
+
+    test("a preview that could not be built says why", () => {
+        const html = renderCookPreviewRegion(null, "Unknown food.");
+        expect(html).toContain("data-fd-cook-region");
+        expect(html).toContain("Unknown food.");
+        expect(html).not.toContain('name="expected"');
     });
 
     test("escapes names", () => {
@@ -159,33 +216,46 @@ describe("renderCookPreviewRegion", () => {
 });
 
 describe("renderCookSheet", () => {
-    test("is a dialog with servings, the preview, the log switch and a Cook button", () => {
+    test("is a dialog with servings, what it takes, who the portion is for and a Cook button", () => {
         const html = renderCookSheet(view());
         expect(html).toContain(`id="${COOK_SHEET_ID}"`);
         expect(html).toContain('action="/recipes/r1/cook/confirm"');
+        expect(html).toContain("Cook Salmon, rice &amp; spinach");
         expect(html).toContain('name="servings"');
         expect(html).toContain('value="2"');
-        expect(html).toContain("servings");
-        expect(html).toContain("Takes from your kitchen");
-        expect(html).toContain("Log 1 serving to dinner");
-        expect(html).toContain("640 kcal · P 48 C 62 F 22");
-        expect(html).toContain('name="log_serving"');
-        expect(html).toContain('role="switch"');
+        expect(html).toContain("Servings");
+        expect(html).toContain("Takes");
+        expect(html).toContain("Log a portion for");
         expect(html).toContain('name="meal_type" value="dinner"');
         expect(html).toContain('name="submit_key" value="key-1"');
-        expect(html).toContain(">Cook</button>");
+        expect(html).toContain('form="fd-recipe-cook-form"');
+        expect(html).toContain(">Cook</span>");
         expect(html).toContain("data-fd-cook-form");
+    });
+
+    test("the portion is logged for the viewer by default, or for no one", () => {
+        const html = renderCookSheet(view());
+        const chips = html.slice(html.indexOf('name="log_serving"') - 40);
+        expect(chips).toMatch(
+            /name="log_serving" value="1" checked[\s\S]*>Ethan<[\s\S]*name="log_serving" value="0"[\s\S]*>No one</,
+        );
+        expect(html).not.toMatch(/value="0" checked/);
+    });
+
+    test("the Log a portion for row names the meal the portion goes to", () => {
+        const html = renderCookSheet(view());
+        const row = html.slice(html.indexOf("Log a portion for"));
+        expect(row).toContain(">to dinner<");
+        expect(html).toContain('name="meal_type" value="dinner"');
+        expect(renderCookSheet(view({ slot: "breakfast" }))).toContain(
+            ">to breakfast<",
+        );
     });
 
     test("focus parks on the panel, not on the stepper's number", () => {
         expect(renderCookSheet(view())).toContain(
             `id="${COOK_SHEET_ID}" data-fd-sheet-focus="panel"`,
         );
-    });
-
-    test("the log switch starts on", () => {
-        const html = renderCookSheet(view());
-        expect(/name="log_serving"[^>]*checked/.test(html)).toBe(true);
     });
 
     test("opens on load with its error after a failed confirm", () => {
@@ -202,24 +272,7 @@ describe("renderCookSheet", () => {
             view({ preview: null, previewError: "Unknown food." }),
         );
         expect(html).toContain("Unknown food.");
-        expect(html).toContain(">Cook</button>");
-    });
-
-    test("no subline when the recipe has no macros", () => {
-        const html = renderCookSheet(
-            view({
-                macrosPerPortion: {
-                    ...MACROS,
-                    calories: null,
-                    protein_g: null,
-                    carbs_g: null,
-                    fat_g: null,
-                    incomplete: true,
-                },
-            }),
-        );
-        expect(html).toContain("Log 1 serving to dinner");
-        expect(html).not.toContain("kcal ·");
+        expect(html).toContain(">Cook</span>");
     });
 });
 

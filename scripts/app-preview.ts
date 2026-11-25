@@ -1699,7 +1699,12 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             unmeasured: [{ foodId: null, displayName: "Salt" }],
         },
         slot: "dinner",
-        macrosPerPortion: MACROS as never,
+        viewerName: "Ethan",
+        places: new Map([
+            ["ri-eggs", "Fridge"],
+            ["ri-flour", "Pantry"],
+            ["ri-sugar", "Pantry"],
+        ]),
         submitKey: "preview",
     };
     const settingsHouseholdV2 = (
@@ -1748,6 +1753,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         cook: CookSheetView,
         planOpen = false,
         shareOpen = false,
+        // `mcp-share-links` off leaves the Share item and its sheet out.
+        shareOn = true,
     ) =>
         renderRecipeDetailV2Page({
             chrome,
@@ -1810,9 +1817,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             ),
             macrosPerPortion: MACROS as never,
             gapReasons: [],
-            members: recipeView.members,
-            viewerId: recipeView.viewerId,
-            portionCount: recipeView.portionCount,
             favourite: true,
             cook,
             plan: {
@@ -1825,11 +1829,15 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 servings: recipeView.recipe.yieldPortions,
                 open: planOpen,
             },
-            share: { open: shareOpen },
+            ...(shareOn ? { share: { open: shareOpen } } : {}),
         });
     // An imported Pad See Ew whose ingredient list never lists the egg its
     // fourth step scrambles: the warning card with Add and Dismiss.
-    const padSeeEw = () => {
+    const padSeeEw = (
+        // An import nobody has saved: the draft bar in place of Cook and Plan.
+        draft?: Parameters<typeof renderRecipeDetailV2Page>[0]["draft"],
+        error?: string,
+    ) => {
         const instructions = [
             "Soak the rice noodles in warm water until pliable, then drain.",
             "Whisk the soy sauces, oyster sauce, sugar and white pepper into a sauce.",
@@ -1894,11 +1902,19 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                     ]),
                 ),
             ),
-            macrosPerPortion: { ...MACROS, incomplete: false } as never,
-            gapReasons: [],
-            members: recipeView.members,
-            viewerId: recipeView.viewerId,
-            portionCount: 1,
+            macrosPerPortion: draft
+                ? ({
+                      ...MACROS,
+                      calories: null,
+                      protein_g: null,
+                      carbs_g: null,
+                      fat_g: null,
+                      incomplete: true,
+                  } as never)
+                : ({ ...MACROS, incomplete: false } as never),
+            gapReasons: draft ? ["Counts 1 of 10 ingredients"] : [],
+            ...(draft ? { draft } : {}),
+            ...(error ? { error } : {}),
             mentions: findMissingMentions({
                 instructions,
                 ingredients: ingredients.map((ing) => ({
@@ -1906,7 +1922,9 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 })),
                 vocabulary: [],
             }),
-            cook: { ...cookSheet, recipeName: recipe.name },
+            ...(draft
+                ? {}
+                : { cook: { ...cookSheet, recipeName: recipe.name } }),
         });
     };
     const recipesListV2 = (
@@ -2382,6 +2400,24 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         }),
         recipe: recipeV2(cookSheet),
         "recipe-mentions": padSeeEw(),
+        // The draft bar: Save and what is left, in place of Cook and Plan.
+        "recipe-draft": padSeeEw({
+            problems: ["Resolve every ingredient line.", "Add the steps."],
+            expiresOn: "2026-12-01",
+            canSave: true,
+            canDiscard: true,
+        }),
+        "recipe-draft-refused": padSeeEw(
+            {
+                problems: ["Add the steps."],
+                expiresOn: "2026-12-01",
+                canSave: true,
+                canDiscard: true,
+            },
+            "Not saved yet. Fix what is listed below, then save it again.",
+        ),
+        // `mcp-share-links` off: no Share item in the Detail bar's ⋯.
+        "recipe-no-share": recipeV2(cookSheet, false, false, false),
         "recipe-cook": recipeV2({ ...cookSheet, open: true }),
         "recipe-plan": recipeV2(cookSheet, true),
         "recipe-share": recipeV2(cookSheet, false, true),

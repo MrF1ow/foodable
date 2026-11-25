@@ -59,10 +59,14 @@ import {
     buildPreviewTodayPageData,
     renderTodayV2Page,
 } from "../src/web/pages/v2/today.js";
+import { buildWeekPlanView } from "../src/web/pages/v2/recipes-plan.js";
+import { renderCookPreviewRegion } from "../src/web/pages/v2/recipes-page-cook.js";
 import {
-    buildWeekPlanView,
-    renderPlanSheet,
-} from "../src/web/pages/v2/recipes-plan.js";
+    renderRecipeDetailV2Page,
+    RECIPE_NOT_IN_STOCK_ID,
+    type RecipeDetailV2View,
+} from "../src/web/pages/v2/recipes-page.js";
+import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderDevGalleryV2Page } from "../src/web/pages/dev-gallery.js";
 import { renderSettingsHomeV2Page } from "../src/web/pages/v2/settings-home.js";
 import { renderSettingsAccountV2Page } from "../src/web/pages/v2/settings-account.js";
@@ -1107,6 +1111,221 @@ function fixtureRecipesList(
     });
 }
 
+const FIXTURE_COOK_PREVIEW = {
+    totalPortions: 4,
+    lines: [
+        {
+            foodId: "f-fettuccine",
+            displayName: "Fettuccine",
+            fromItemId: "fi-fettuccine",
+            unit: "oz",
+            before: 16,
+            after: 8,
+        },
+        {
+            foodId: "f-chicken",
+            displayName: "Chicken breast",
+            fromItemId: "fi-chicken",
+            unit: "lb",
+            before: 2,
+            after: 1,
+        },
+        {
+            foodId: "f-parmesan",
+            displayName: "Parmesan",
+            fromItemId: "fi-parmesan",
+            unit: "g",
+            before: 200,
+            after: 150,
+        },
+    ],
+    movements: [],
+    shortfalls: [
+        {
+            foodId: "f-cream",
+            displayName: "Heavy cream",
+            amount: 120,
+            unit: "ml",
+            unknownFactor: false,
+        },
+    ],
+    unmeasured: [],
+};
+
+const FIXTURE_COOK_PLACES = new Map([
+    ["fi-fettuccine", "Pantry"],
+    ["fi-chicken", "Fridge"],
+    ["fi-parmesan", "Fridge"],
+]);
+
+/**
+ * The recipe page: Chicken alfredo, a saved recipe with a cook that falls
+ * short on cream, or Simple Pad See Ew, an import still a draft. Each takes a
+ * sheet to open on load and `mcp-share-links` on or off.
+ */
+function fixtureRecipePage(
+    chrome: unknown,
+    opts: {
+        open?: "plan" | "cook";
+        share?: boolean;
+        draft?: boolean;
+        saved?: boolean;
+        error?: string;
+    } = {},
+): string {
+    const draft = opts.draft === true;
+    const recipe = draft
+        ? {
+              id: "r-draft",
+              householdId: "hh",
+              creatorId: "u1",
+              name: "Simple Pad See Ew",
+              yieldPortions: 2,
+              instructions: opts.saved
+                  ? "Soak the noodles.\nSear the chicken."
+                  : null,
+              sourceUrl: "https://www.slowfoodmama.com/simple-pad-see-ew",
+              tags: [],
+              notes: null,
+              prepMinutes: 15,
+              cookMinutes: 10,
+              verification: opts.saved ? "verified" : "unverified",
+              updatedAt: "2026-11-10T00:00:00.000Z",
+          }
+        : {
+              id: "r-alfredo",
+              householdId: "hh",
+              creatorId: "u1",
+              name: "Chicken alfredo",
+              yieldPortions: 4,
+              instructions:
+                  "Cook the fettuccine until al dente.\nSear the chicken six minutes a side, then slice.\nToss with garlic, add cream and parmesan.",
+              sourceUrl: "https://www.seriouseats.com/chicken-alfredo",
+              tags: [],
+              notes: null,
+              prepMinutes: 10,
+              cookMinutes: 20,
+              verification: "verified",
+              updatedAt: "2026-11-10T00:00:00.000Z",
+          };
+    const ingredient = (
+        id: string,
+        foodId: string,
+        displayName: string,
+        amount: number,
+        unit: string,
+    ) => ({
+        id,
+        foodId,
+        displayName,
+        quantity: { amount, unit } as const,
+        note: null,
+    });
+    const ingredients = draft
+        ? [
+              ingredient("i1", "f-noodles", "Wide rice noodles", 7, "oz"),
+              ingredient("i2", "f-soy", "Dark soy sauce", 1, "tbsp"),
+          ]
+        : [
+              ingredient("i1", "f-fettuccine", "Fettuccine", 8, "oz"),
+              ingredient("i2", "f-chicken", "Chicken breast", 1, "lb"),
+              ingredient("i3", "f-cream", "Heavy cream", 1, "cup"),
+              ingredient("i4", "f-parmesan", "Parmesan", 50, "g"),
+          ];
+    const line = (id: string, name: string, amountLabel: string) => ({
+        ingredientId: id,
+        displayName: name,
+        amountLabel,
+        expiresOn: null,
+    });
+    const ingredientGroups = draft
+        ? [
+              {
+                  placeId: "l-pantry",
+                  placeName: "Pantry",
+                  lines: [
+                      line("i1", "Wide rice noodles", "7 oz"),
+                      line("i2", "Dark soy sauce", "1 tbsp"),
+                  ],
+              },
+          ]
+        : [
+              {
+                  placeId: "l-pantry",
+                  placeName: "Pantry",
+                  lines: [line("i1", "Fettuccine", "8 oz")],
+              },
+              {
+                  placeId: "l-fridge",
+                  placeName: "Fridge",
+                  lines: [
+                      line("i2", "Chicken breast", "1 lb"),
+                      line("i4", "Parmesan", "50 g"),
+                  ],
+              },
+              {
+                  placeId: RECIPE_NOT_IN_STOCK_ID,
+                  placeName: "Not in stock",
+                  lines: [line("i3", "Heavy cream", "1 cup")],
+              },
+          ];
+    const macros = {
+        calories: draft && !opts.saved ? null : 690,
+        protein_g: draft && !opts.saved ? null : 42,
+        carbs_g: draft && !opts.saved ? null : 58,
+        fat_g: draft && !opts.saved ? null : 31,
+        fiber_g: null,
+        sugar_g: null,
+        alcohol_g: null,
+        incomplete: draft && !opts.saved,
+    };
+    const view: RecipeDetailV2View = {
+        chrome: chrome as never,
+        recipe: recipe as never,
+        ingredients,
+        ingredientGroups,
+        macrosPerPortion: macros,
+        gapReasons: draft && !opts.saved ? ["Counts 1 of 11 ingredients"] : [],
+        favourite: false,
+        error: opts.error,
+        ...(opts.share === false ? {} : { share: { open: false } }),
+    };
+    if (draft && !opts.saved) {
+        view.draft = {
+            problems: ["Add the steps."],
+            expiresOn: "2026-12-01",
+            canSave: true,
+            canDiscard: true,
+        };
+    } else {
+        view.cook = {
+            recipeId: recipe.id,
+            recipeName: recipe.name,
+            servings: recipe.yieldPortions,
+            yieldPortions: recipe.yieldPortions,
+            preview: draft
+                ? { ...FIXTURE_COOK_PREVIEW, shortfalls: [] }
+                : FIXTURE_COOK_PREVIEW,
+            slot: "dinner",
+            viewerName: "Ethan",
+            places: FIXTURE_COOK_PLACES,
+            submitKey: "fixture",
+            open: opts.open === "cook",
+        };
+        view.plan = {
+            recipeId: recipe.id,
+            recipeName: recipe.name,
+            yieldPortions: recipe.yieldPortions,
+            today: "2026-11-10",
+            date: "2026-11-10",
+            slot: "dinner",
+            servings: recipe.yieldPortions,
+            open: opts.open === "plan",
+        };
+    }
+    return renderRecipeDetailV2Page(view);
+}
+
 async function pages(
     theme: "light" | "dark",
     unread: boolean,
@@ -1296,22 +1515,26 @@ async function pages(
         "recipes-share-off": fixtureRecipesList(chrome, {
             sharedImportEnabled: false,
         }),
-        // The recipe page the list's Plan leads to, reduced to its Add to plan
-        // sheet (the page itself is not under test here).
-        "recipe-plan": renderAppShell({
-            ...(chrome as never as Parameters<typeof renderAppShell>[0]),
-            title: "Chicken alfredo",
+        // The recipe page, and the pages its sheets and states lead to.
+        recipe: fixtureRecipePage(chrome),
+        "recipe-plan": fixtureRecipePage(chrome, { open: "plan" }),
+        "recipe-cook": fixtureRecipePage(chrome, { open: "cook" }),
+        "recipe-share-off": fixtureRecipePage(chrome, { share: false }),
+        "recipe-draft": fixtureRecipePage(chrome, { draft: true }),
+        "recipe-draft-refused": fixtureRecipePage(chrome, {
+            draft: true,
+            error: "Not saved yet. Fix what is listed below, then save it again.",
+        }),
+        "recipe-saved": fixtureRecipePage(chrome, { draft: true, saved: true }),
+        // The one screen that shows a new link's address.
+        "recipe-share-made": renderShareCreatedPage({
+            chrome: chrome as never,
+            url: "https://foodable.example.com/s/Qk3vZ8mXr1TnY0aLw5uHc9DfJ2bEeSgPiVoN7xRzA4M",
+            what: "recipe",
+            name: "Chicken alfredo",
+            expiresAt: "2026-12-12T10:00:00.000Z",
+            backHref: "/recipes/r-alfredo",
             active: "recipes",
-            body: `<div class="fd-recipe-detail">${renderPlanSheet({
-                recipeId: "r-alfredo",
-                recipeName: "Chicken alfredo",
-                yieldPortions: 4,
-                today: "2026-11-10",
-                date: "2026-11-10",
-                slot: "dinner",
-                servings: 4,
-                open: true,
-            })}</div>`,
         }),
         trends: previewTrendsPage(chrome),
         settings: renderSettingsHomeV2Page({
@@ -1488,6 +1711,11 @@ const ROUTE_BASE: Record<string, string> = {
     "/recipes?plan_date=2026-11-12": "recipes-pick",
     "/recipes?failed=1": "recipes-failed-link",
     "/recipes?share=off": "recipes-share-off",
+    "/recipes/r-alfredo": "recipe",
+    "/recipes/r-alfredo?cook=1": "recipe-cook",
+    "/recipes/r-alfredo?share=off": "recipe-share-off",
+    "/recipes/r-draft": "recipe-draft",
+    "/recipes/r-draft?saved=1": "recipe-saved",
     "/recipes/r-alfredo?plan=1": "recipe-plan",
     "/recipes/r-alfredo?plan=1&date=2026-11-12": "recipe-plan",
     "/trends": "trends",
@@ -1525,6 +1753,8 @@ const ROUTE_BASE: Record<string, string> = {
 
 /** Saved appearance from Settings › Account (null = system). */
 let accountTheme: "light" | "dark" | null = "dark";
+// How many times the draft's Save has posted: the first is refused.
+let draftSaves = 0;
 
 function themeFileSuffix(): "light" | "dark" {
     return accountTheme ?? "light";
@@ -1797,6 +2027,17 @@ const server = Bun.serve({
                 },
             );
         }
+        if (path === "/recipes/r-alfredo/cook/preview") {
+            // The cook sheet's re-read of what the cook takes.
+            return new Response(
+                renderCookPreviewRegion(
+                    FIXTURE_COOK_PREVIEW,
+                    undefined,
+                    FIXTURE_COOK_PLACES,
+                ),
+                { headers: { "content-type": "text/html; charset=utf-8" } },
+            );
+        }
         if (path === "/login-test") {
             const html = await loginDocument();
             return new Response(html, {
@@ -1851,6 +2092,43 @@ const server = Bun.serve({
                 const picked = entries.find(([k]) => k === "theme")?.[1];
                 accountTheme =
                     picked === "light" || picked === "dark" ? picked : null;
+            }
+            if (path === "/recipes/r-alfredo/share") {
+                // Like the route: a 200 page with the link's address, never cached.
+                const html = applyAccountTheme(
+                    await fileHtml(
+                        `recipe-share-made-${themeFileSuffix()}${inboxUnread ? "" : "-read"}.html`,
+                        path,
+                    ),
+                );
+                return new Response(html, {
+                    headers: {
+                        "content-type": "text/html; charset=utf-8",
+                        "cache-control": "no-store",
+                    },
+                });
+            }
+            if (path === "/recipes/r-draft/save") {
+                draftSaves += 1;
+                if (draftSaves === 1) {
+                    // Like the route: the check fails, so the draft's own page
+                    // answers 422 in place with what is left.
+                    const html = applyAccountTheme(
+                        await fileHtml(
+                            `recipe-draft-refused-${themeFileSuffix()}${inboxUnread ? "" : "-read"}.html`,
+                            path + "#refused",
+                        ),
+                    );
+                    return new Response(html, {
+                        status: 422,
+                        headers: { "content-type": "text/html; charset=utf-8" },
+                    });
+                }
+                // The check passes: saved, and the page reloads as a recipe.
+                return new Response(null, {
+                    status: 303,
+                    headers: { Location: "/recipes/r-draft?saved=1" },
+                });
             }
             if (path === "/settings/household/rotate-token") {
                 // Like the route: a 200 page with the token, never cached.
@@ -1962,6 +2240,8 @@ const server = Bun.serve({
             ? path + url.search
             : path;
         if (ROUTE_BASE[routeKey]) {
+            // A fresh look at the draft: its Save is refused once again.
+            if (routeKey === "/recipes/r-draft") draftSaves = 0;
             if (sessionMode === "guest") {
                 const login = await loginDocument();
                 return new Response(login, {

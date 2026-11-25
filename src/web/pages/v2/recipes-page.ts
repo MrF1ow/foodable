@@ -18,33 +18,35 @@ import {
 import type { AppChromeBase } from "../../attention.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { button } from "../../components/v2/button.js";
-import { confirmSheet, sheetTrigger } from "../../components/v2/sheet.js";
-import { esc } from "../../components/v2/html.js";
+import { detailBar } from "../../components/v2/detail-bar.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { pageHeader } from "../../components/v2/page-header.js";
+import { pageLayout } from "../../components/v2/page-layout.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
 import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
+import { APP_PATHS } from "../../route-map.js";
 import { renderAppShell } from "../../shell.js";
-import { favouriteStarForm } from "./recipes-favourite.js";
 import {
     renderMentionCards,
     stepWithMentions,
     type MentionWarningView,
 } from "./recipes-page-mentions.js";
 import {
+    COOK_SHEET_ID,
     renderCookSheet,
-    renderCookTrigger,
     type CookSheetView,
 } from "./recipes-page-cook.js";
 import {
+    PLAN_SHEET_ID,
     PLAN_SLOT_LABEL,
     planDayLabel,
     renderPlanSheet,
-    renderPlanTrigger,
     type PlanSheetView,
 } from "./recipes-plan.js";
-import {
-    RECIPE_SHARE_SHEET_ID,
-    renderShareSheet,
-    renderShareTrigger,
-} from "./share-sheet.js";
+import { RECIPE_SHARE_SHEET_ID, renderShareSheet } from "./share-sheet.js";
 
 export const RECIPE_NOT_IN_STOCK_ID = "__not_in_stock__";
 
@@ -61,19 +63,16 @@ export type RecipeIngredientPlaceGroup = {
     lines: RecipeIngredientPlaceLine[];
 };
 
-export type RecipeDetailV2Member = { userId: string; displayName: string };
-
 export type RecipeDetailV2View = {
     chrome: AppChromeBase;
     recipe: Recipe;
-    ingredients: RecipeIngredient[];
+    ingredients: IngredientRow[];
     ingredientGroups: RecipeIngredientPlaceGroup[];
     macrosPerPortion: RecipeMacros;
     /** One sentence per reason the macros are incomplete (from the recipe's notices). */
     gapReasons: string[];
-    members: RecipeDetailV2Member[];
-    viewerId: string;
-    portionCount: number;
+    /** How many portions of the recipe are the viewer's own; absent shows no line. */
+    portionCount?: number;
     /** The viewer has starred this recipe. Absent means not. */
     favourite?: boolean;
     /**
@@ -81,8 +80,10 @@ export type RecipeDetailV2View = {
      * Advice only; absent or empty shows nothing.
      */
     mentions?: MentionWarningView[];
-    /** The cook sheet. Absent when the recipe cannot be cooked (unverified). */
+    /** The cook sheet. Absent when the recipe cannot be cooked (a draft). */
     cook?: CookSheetView;
+    /** Ingredient food ids an unticked grocery line already covers. */
+    onList?: readonly string[];
     /** The Add to plan sheet. */
     plan?: PlanSheetView;
     /**
@@ -93,13 +94,13 @@ export type RecipeDetailV2View = {
     planned?: { date: string; slot: PlanSlot }[];
     /**
      * The Share sheet; a refused post re-renders the page with it open. Absent
-     * leaves the Share button and the sheet out (`mcp-share-links` is off).
+     * leaves the Share item and the sheet out (`mcp-share-links` is off).
      */
     share?: { open?: boolean; error?: string };
     /**
      * Set when the recipe is an imported draft nobody has saved: what the
-     * check still finds and when the sweep deletes it. The page then shows a
-     * Save form in place of Share, Plan and Cook.
+     * check still finds and when the sweep deletes it. The page then shows the
+     * draft bar, with Save, in place of Plan and Cook.
      */
     draft?: {
         problems: string[];
@@ -221,113 +222,185 @@ export function groupRecipeIngredientsByPlace(
     return out;
 }
 
-function macrosBlock(macros: RecipeMacros, gapReasons: string[]): string {
-    if (macros.incomplete && macros.calories == null) {
-        const reasons =
-            gapReasons.length > 0
-                ? `<ul class="fd-recipe-macro-gaps">${gapReasons
-                      .map((r) => `<li>${esc(r)}</li>`)
-                      .join("")}</ul>`
-                : "";
-        return `<p class="fd-recipe-macros-incomplete">Macros incomplete per portion</p>${reasons}`;
-    }
-    const tiles: StatTile[] = [];
-    if (macros.calories != null) {
-        tiles.push({
+function macroValue(value: number | null | undefined, grams: boolean) {
+    if (value == null) return "—";
+    return grams ? formatLogMacroGrams(value) : formatLogMacroKcal(value);
+}
+
+/**
+ * "Per serving" and the four tiles; a figure the recipe cannot give is a dash,
+ * never a zero. Each reason the totals are incomplete is a caption under them
+ * in the warning tone.
+ */
+function macrosBlock(
+    macros: RecipeMacros,
+    gapReasons: string[],
+    portionCount?: number,
+): string {
+    const tiles: StatTile[] = [
+        {
             label: "kcal",
-            value: formatLogMacroKcal(macros.calories),
+            value: macroValue(macros.calories, false),
             dot: "calories",
-        });
-    }
-    if (macros.protein_g != null) {
-        tiles.push({
+        },
+        {
             label: "Protein",
-            value: formatLogMacroGrams(macros.protein_g),
-            unit: "g",
+            value: macroValue(macros.protein_g, true),
+            ...(macros.protein_g != null ? { unit: "g" } : {}),
             dot: "protein",
-        });
-    }
-    if (macros.carbs_g != null) {
-        tiles.push({
+        },
+        {
             label: "Carbs",
-            value: formatLogMacroGrams(macros.carbs_g),
-            unit: "g",
+            value: macroValue(macros.carbs_g, true),
+            ...(macros.carbs_g != null ? { unit: "g" } : {}),
             dot: "carbs",
-        });
-    }
-    if (macros.fat_g != null) {
-        tiles.push({
+        },
+        {
             label: "Fat",
-            value: formatLogMacroGrams(macros.fat_g),
-            unit: "g",
+            value: macroValue(macros.fat_g, true),
+            ...(macros.fat_g != null ? { unit: "g" } : {}),
             dot: "fat",
-        });
-    }
-    const kicker =
-        tiles.length > 0
-            ? `<p class="fd-recipe-macros-kicker">Per serving</p>`
-            : "";
-    const grid =
-        tiles.length > 0
-            ? String(
-                  statTiles(tiles, {
-                      label: "Per serving",
-                      className: "fd-recipe-macro-tiles",
-                  }),
-              )
-            : "";
+        },
+    ];
+    const portions =
+        portionCount == null
+            ? ""
+            : `<p class="fd-recipe-caption fd-recipe-portions">${portionCount === 1 ? "1 portion for you" : `${portionCount} portions for you`}</p>`;
     const gaps =
-        macros.incomplete && gapReasons.length > 0
-            ? `<ul class="fd-recipe-macro-gaps">${gapReasons
-                  .map((r) => `<li>${esc(r)}</li>`)
-                  .join("")}</ul>`
+        macros.incomplete || macros.calories == null
+            ? gapReasons
+                  .map(
+                      (reason) =>
+                          `<p class="fd-recipe-caption fd-recipe-caption--warn">${esc(reason)}</p>`,
+                  )
+                  .join("")
             : "";
-    return `${kicker}${grid}${gaps}`;
+    return `<section class="fd-recipe-macros" aria-label="Per serving"><p class="fd-recipe-caption">Per serving</p>${String(
+        statTiles(tiles, {
+            label: "Per serving",
+            className: "fd-recipe-macro-tiles",
+        }),
+    )}${portions}${gaps}</section>`;
+}
+
+type IngredientPlace = {
+    amountLabel: string;
+    inStock: boolean;
+    places: string[];
+    expiresOn: string | null;
+};
+
+/** What each ingredient's row says about the kitchen, by ingredient id. */
+function placesByIngredient(
+    groups: readonly RecipeIngredientPlaceGroup[],
+): Map<string, IngredientPlace> {
+    const out = new Map<string, IngredientPlace>();
+    for (const group of groups) {
+        const inStock = group.placeId !== RECIPE_NOT_IN_STOCK_ID;
+        for (const line of group.lines) {
+            const known = out.get(line.ingredientId);
+            if (!known) {
+                out.set(line.ingredientId, {
+                    amountLabel: line.amountLabel,
+                    inStock,
+                    places: inStock ? [group.placeName] : [],
+                    expiresOn: line.expiresOn,
+                });
+                continue;
+            }
+            if (inStock) {
+                known.inStock = true;
+                if (!known.places.includes(group.placeName)) {
+                    known.places.push(group.placeName);
+                }
+            }
+            known.expiresOn = soonestExpiry([known.expiresOn, line.expiresOn]);
+        }
+    }
+    return out;
 }
 
 function ingredientSubline(
-    group: RecipeIngredientPlaceGroup,
-    line: RecipeIngredientPlaceLine,
+    place: IngredientPlace | undefined,
+    onList: boolean,
 ): string {
-    if (group.placeId === RECIPE_NOT_IN_STOCK_ID) {
-        return "Not in stock";
-    }
-    if (line.expiresOn) {
-        return `${group.placeName} · expires ${line.expiresOn}`;
-    }
-    return group.placeName;
+    const stock =
+        !place || !place.inStock
+            ? "Not in stock"
+            : place.expiresOn
+              ? `${place.places.join(", ")} · expires ${place.expiresOn}`
+              : place.places.join(", ");
+    return onList ? `${stock} · On the list` : stock;
 }
 
-function ingredientGroupsHtml(
-    groups: RecipeIngredientPlaceGroup[],
-    cards: string,
-): string {
-    if (groups.length === 0) {
-        return `${cards}<p class="fd-recipe-empty">No ingredients yet.</p>`;
+/**
+ * An ingredient's ⋯: Open food, and Add to grocery list on a saved recipe
+ * (a draft cannot be put on the list, and a food already on it says so). The add posts to this recipe's own
+ * route, which adds the food with its usual amount and store and comes back
+ * to the recipe.
+ */
+function ingredientMenu(
+    recipeId: string,
+    ingredient: Pick<RecipeIngredient, "foodId" | "displayName">,
+    draft: boolean,
+    onList: boolean,
+): Html {
+    const items: MenuItem[] = [
+        {
+            kind: "link",
+            label: "Open food",
+            href: `${APP_PATHS.product}/${ingredient.foodId}?from=${encodeURIComponent(`/recipes/${recipeId}`)}`,
+        },
+    ];
+    if (!draft && !onList) {
+        items.push({
+            kind: "post",
+            label: "Add to grocery list",
+            action: `/recipes/${recipeId}/ingredients/${ingredient.foodId}/add-to-grocery`,
+        });
     }
-    const count = groups.reduce((n, g) => n + g.lines.length, 0);
-    const body = groups
-        .map((group) => {
-            const rows = group.lines
-                .map((line) => {
-                    const sub = ingredientSubline(group, line);
-                    const inStock = group.placeId !== RECIPE_NOT_IN_STOCK_ID;
-                    const dotClass = inStock
-                        ? "fd-recipe-ing__dot"
-                        : "fd-recipe-ing__dot fd-recipe-ing__dot--miss";
-                    const noteClass = inStock
-                        ? "fd-recipe-ing__note"
-                        : "fd-recipe-ing__note fd-recipe-ing__note--miss";
-                    return `<li class="fd-recipe-ing"><span class="${dotClass}" aria-hidden="true"></span><span class="fd-recipe-ing__body"><span class="fd-recipe-ing__name">${esc(line.displayName)}</span><span class="${noteClass}">${esc(sub)}</span></span><span class="fd-recipe-ing__amount">${esc(line.amountLabel)}</span></li>`;
-                })
-                .join("");
-            return `<section class="fd-recipe-place" aria-label="${esc(group.placeName)}">
-<h3 class="fd-recipe-place__title">${esc(group.placeName)}</h3>
-<ul class="fd-recipe-ing-list">${rows}</ul>
-</section>`;
-        })
-        .join("");
-    return `<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title">Ingredients</h2><span class="fd-recipe-section-head__count">${esc(String(count))}</span></div>${cards}${body}`;
+    return menu({
+        label: `Actions for ${ingredient.displayName}`,
+        anchor: "more",
+        items,
+    });
+}
+
+function ingredientsSection(view: RecipeDetailV2View): string {
+    const places = placesByIngredient(view.ingredientGroups);
+    const listed = new Set(view.onList ?? []);
+    if (view.ingredients.length === 0) {
+        return `<p class="fd-recipe-empty">No ingredients yet.</p>`;
+    }
+    const rows = view.ingredients.map((ingredient) => {
+        const place = places.get(ingredient.id);
+        const onList =
+            ingredient.foodId != null && listed.has(ingredient.foodId);
+        return itemRow({
+            title: ingredient.displayName,
+            meta:
+                place?.amountLabel ??
+                ingredientAmountLabel(ingredient.quantity, ingredient.note),
+            subtitle: ingredientSubline(place, onList),
+            trailing: {
+                kind: "control",
+                html: ingredientMenu(
+                    view.recipe.id,
+                    ingredient,
+                    Boolean(view.draft),
+                    onList,
+                ),
+            },
+        });
+    });
+    return `<div class="fd-recipe-group">${String(
+        sectionHeader({
+            label: "Ingredients",
+            count: view.ingredients.length,
+            rule: false,
+            id: "fd-recipe-ingredients-heading",
+        }),
+    )}${String(listGroup({ rows, label: "Ingredients" }))}</div>`;
 }
 
 function instructionsHtml(
@@ -335,10 +408,17 @@ function instructionsHtml(
     mentions: readonly MentionWarningView[] | undefined,
 ): string {
     const steps = recipeSteps(instructions);
+    const head = String(
+        sectionHeader({
+            label: "Steps",
+            rule: false,
+            id: "fd-recipe-method-heading",
+        }),
+    );
     if (steps.length === 0) {
-        return `<p class="fd-recipe-empty">No steps yet.</p>`;
+        return `<div class="fd-recipe-group">${head}<p class="fd-recipe-empty">No steps yet.</p></div>`;
     }
-    return `<ol class="fd-recipe-steps">${steps.map((step, i) => `<li>${stepWithMentions(step, i, mentions)}</li>`).join("")}</ol>`;
+    return `<div class="fd-recipe-group">${head}<ol class="fd-recipe-steps">${steps.map((step, i) => `<li>${stepWithMentions(step, i, mentions)}</li>`).join("")}</ol></div>`;
 }
 
 function recipeSourceHint(sourceUrl: string | null): string {
@@ -364,82 +444,133 @@ function plannedLine(planned: RecipeDetailV2View["planned"]): string {
         );
     const more = planned.length - shown.length;
     const text = `Planned · ${shown.join(", ")}${more > 0 ? ` · +${more} more` : ""}`;
-    return `<p class="fd-recipe-meta fd-recipe-planned">${esc(text)}</p>\n`;
-}
-
-/**
- * A draft's panel: that it is not saved, when it goes, what the check still
- * finds, the Save form (`POST /recipes/:id/save`) and Discard draft, which
- * confirms and posts to the draft-only discard (`POST /recipes/:id/discard`).
- * Each shows only to a viewer who may use it.
- */
-function draftPanel(
-    recipeId: string,
-    draft: NonNullable<RecipeDetailV2View["draft"]>,
-): string {
-    const discardId = `recipe-discard-${recipeId}`;
-    const expires = draft.expiresOn
-        ? ` It is deleted on ${draft.expiresOn} unless you save it.`
-        : "";
-    const left =
-        draft.problems.length > 0
-            ? `<p class="fd-recipe-meta">Fix these before you save it:</p><ul>${draft.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`
-            : `<p class="fd-recipe-meta">It passes the check and is ready to save.</p>`;
-    const save = draft.canSave
-        ? `<form method="post" action="/recipes/${esc(recipeId)}/save" class="fd-inline-form">${String(button({ label: "Save", variant: "primary", type: "submit" }))}</form>`
-        : "";
-    const discard = draft.canDiscard
-        ? sheetTrigger({
-              target: discardId,
-              label: "Discard draft",
-              className: "fd-btn fd-btn--danger",
-          })
-        : "";
-    const actions =
-        save || discard
-            ? `<div class="fd-recipe-actions">${save}${discard}</div>`
-            : "";
-    return `<section class="fd-recipe-section" id="fd-recipe-draft" aria-labelledby="fd-recipe-draft-heading">
-<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title" id="fd-recipe-draft-heading">Draft</h2></div>
-<p class="fd-recipe-meta">This imported recipe is not saved yet, so it is not in your recipes, the plan or the grocery list.${esc(expires)}</p>
-${left}${actions}
-</section>
-${
-    draft.canDiscard
-        ? confirmSheet({
-              id: discardId,
-              title: "Discard draft",
-              message: "Discard this draft? This cannot be undone.",
-              action: `/recipes/${recipeId}/discard`,
-              confirmLabel: "Discard",
-          })
-        : ""
-}`;
+    return `<p class="fd-recipe-caption fd-recipe-planned">${esc(text)}</p>`;
 }
 
 function servingsMeta(portions: number): string {
     return portions === 1 ? "1 serving" : `${portions} servings`;
 }
 
+/**
+ * What is left on a draft: that it is not saved, when it goes, and what the
+ * check still finds. The draft bar's Save answers it.
+ */
+function draftCard(draft: NonNullable<RecipeDetailV2View["draft"]>): string {
+    const day = draft.expiresOn
+        ? /^\d{4}-\d{2}-\d{2}$/.test(draft.expiresOn)
+            ? planDayLabel(draft.expiresOn)
+            : draft.expiresOn
+        : null;
+    const expires = day ? ` It is deleted on ${day} unless you save it.` : "";
+    const left =
+        draft.problems.length > 0
+            ? `<p class="fd-recipe-caption">Fix these before you save it:</p><ul class="fd-recipe-draft__problems">${draft.problems.map((p) => `<li>${esc(p)}</li>`).join("")}</ul>`
+            : `<p class="fd-recipe-caption">It passes the check and is ready to save.</p>`;
+    return `<section class="fd-recipe-draft" id="fd-recipe-draft" aria-label="Draft">
+<p class="fd-recipe-draft__lead">Not saved yet.${esc(expires)}</p>
+${left}
+</section>`;
+}
+
+/**
+ * The bar at the foot of the phone (and under the Detail bar on desktop):
+ * Plan and Cook on a saved recipe; on a draft the draft bar, which is Save
+ * and how many things are left to fix.
+ */
+function actionBar(view: RecipeDetailV2View, recipeId: string): Html {
+    if (view.draft) {
+        if (!view.draft.canSave) return raw("");
+        const left = view.draft.problems.length;
+        const status =
+            left === 0
+                ? "Ready to save"
+                : left === 1
+                  ? "1 thing to fix"
+                  : `${left} things to fix`;
+        return raw(
+            `<div class="fd-recipe-bar fd-recipe-bar--draft" id="fd-recipe-draft-bar"><p class="fd-recipe-bar__status">${esc(status)}</p><form method="post" action="/recipes/${esc(recipeId)}/save" class="fd-recipe-bar__form">${button({ label: "Save", variant: "primary", type: "submit" })}</form></div>`,
+        );
+    }
+    const buttons = [
+        view.plan
+            ? button({
+                  label: "Plan",
+                  attrs: { command: "show-modal", commandfor: PLAN_SHEET_ID },
+              })
+            : "",
+        view.cook
+            ? button({
+                  label: "Cook",
+                  variant: "primary",
+                  attrs: { command: "show-modal", commandfor: COOK_SHEET_ID },
+              })
+            : "",
+    ];
+    if (!view.plan && !view.cook) return raw("");
+    return raw(
+        `<div class="fd-recipe-bar" id="fd-recipe-cook-heading">${join(buttons)}</div>`,
+    );
+}
+
+/**
+ * The Detail bar's ⋯: Share (with `mcp-share-links` on) and the viewer's
+ * star on a saved recipe, Discard on a draft. With nothing to offer there is
+ * no ⋯, and the bar keeps its title centred.
+ */
+function detailMenu(view: RecipeDetailV2View): Html | null {
+    const items: MenuItem[] = [];
+    if (view.draft) {
+        if (view.draft.canDiscard) {
+            items.push({
+                kind: "destructive",
+                label: "Discard draft",
+                confirmLabel: "Discard",
+                action: `/recipes/${view.recipe.id}/discard`,
+            });
+        }
+    } else {
+        if (view.share) {
+            items.push({
+                kind: "opens",
+                label: "Share",
+                sheetId: RECIPE_SHARE_SHEET_ID,
+            });
+        }
+        items.push({
+            kind: "post",
+            label: view.favourite
+                ? "Remove from favourites"
+                : "Add to favourites",
+            action: `/recipes/${view.recipe.id}/favourite`,
+            fields: { on: view.favourite ? "0" : "1", back: "recipe" },
+        });
+    }
+    if (items.length === 0) return null;
+    return menu({
+        label: `Actions for ${view.recipe.name}`,
+        anchor: "more",
+        items,
+    });
+}
+
 export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
-    const time = recipeTimeLabel(view.recipe);
-    const metaParts = [servingsMeta(view.recipe.yieldPortions)];
+    const recipe = view.recipe;
+    const time = recipeTimeLabel(recipe);
+    const metaParts = [servingsMeta(recipe.yieldPortions)];
     if (time) metaParts.push(time);
-    const source = recipeSourceHint(view.recipe.sourceUrl);
+    const source = recipeSourceHint(recipe.sourceUrl);
     if (source) metaParts.push(source);
-    const metaRow = metaParts.map((p) => esc(p)).join(" · ");
-    const portionNote =
-        view.portionCount === 1
-            ? "1 portion for you"
-            : `${view.portionCount} portions for you`;
-    const backChevron = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18 9 12 15 6"/></svg>`;
-    const backRound = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18 9 12 15 6"/></svg>`;
-    // The heading id is the anchor Today's "Cook it" link has always used.
-    // A draft has no Share, Plan or Cook: Save comes first.
-    const draft = view.draft ? draftPanel(view.recipe.id, view.draft) : "";
-    const actions = view.draft
-        ? ""
-        : `<div class="fd-recipe-actions" id="fd-recipe-cook-heading">${view.share ? String(renderShareTrigger(RECIPE_SHARE_SHEET_ID, "fd-recipe-plan-btn fd-recipe-share-btn")) : ""}${view.plan ? String(renderPlanTrigger()) : ""}${view.cook ? String(renderCookTrigger()) : ""}</div>`;
+    if (view.draft) metaParts.unshift("Draft");
+    const more = detailMenu(view);
+    const detail = detailBar({
+        back: { href: "/recipes", label: "Back to recipes" },
+        ...(more ? { trailing: { slot: more } } : { balance: true }),
+    });
+    const title = pageHeader({
+        title: recipe.name,
+        subtitle: metaParts.join(" · "),
+    });
+    const planned = plannedLine(view.planned);
     const pageError =
         view.error &&
         // A draft has no sheets to hold the error.
@@ -447,59 +578,39 @@ export function renderRecipeDetailBody(view: RecipeDetailV2View): string {
             (!view.cook?.open && !view.plan?.open && !view.share?.open))
             ? `<p class="fd-recipe-error" role="alert">${esc(view.error)}</p>`
             : "";
+    const header = join([
+        detail,
+        actionBar(view, recipe.id),
+        raw(`<div class="fd-recipe-head">${String(title)}${planned}</div>`),
+    ]);
+    const left = raw(
+        `${pageError}${view.draft ? draftCard(view.draft) : ""}${renderMentionCards(recipe.id, view.mentions)}${macrosBlock(view.macrosPerPortion, view.gapReasons, view.portionCount)}${ingredientsSection(view)}`,
+    );
+    const right = raw(instructionsHtml(recipe.instructions, view.mentions));
+    const layout = pageLayout({
+        layout: "two-columns",
+        className: "fd-recipe-layout",
+        header,
+        left,
+        right,
+    });
     return `<div class="fd-recipe-detail">
-${pageError}<p class="fd-recipe-back"><a class="fd-recipe-back__btn fd-settings-phone-back" href="/recipes" aria-label="Back to recipes">${backRound}</a><a class="fd-recipe-back__link" href="/recipes">${backChevron}<span>Recipes</span></a></p>
-${
-    // A draft is not in the list yet, so it has nothing to star.
-    view.draft
-        ? ""
-        : favouriteStarForm({
-              recipeId: view.recipe.id,
-              recipeName: view.recipe.name,
-              on: view.favourite === true,
-              back: { kind: "recipe" },
-              className: "fd-recipe-star",
-          })
-}
-<header class="fd-recipe-header">
-<h1 class="fd-recipe-title">${esc(view.recipe.name)}</h1>
-${metaRow ? `<p class="fd-recipe-meta">${metaRow}</p>` : ""}
-<p class="fd-recipe-meta fd-recipe-meta--you">${esc(portionNote)}</p>
-${plannedLine(view.planned)}</header>
-${draft}<div class="fd-recipe-layout">
-<div class="fd-recipe-col fd-recipe-col--primary">
-<section class="fd-recipe-section fd-recipe-section--macros" aria-label="Per serving">
-${macrosBlock(view.macrosPerPortion, view.gapReasons)}
-</section>
-<section class="fd-recipe-section" aria-labelledby="fd-recipe-ingredients-heading">
-<span class="fd-sr" id="fd-recipe-ingredients-heading">Ingredients</span>
-${ingredientGroupsHtml(view.ingredientGroups, renderMentionCards(view.recipe.id, view.mentions))}
-</section>
-</div>
-<div class="fd-recipe-col fd-recipe-col--secondary">
-<section class="fd-recipe-section" aria-labelledby="fd-recipe-method-heading">
-<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title" id="fd-recipe-method-heading">Steps</h2></div>
-${instructionsHtml(view.recipe.instructions, view.mentions)}
-</section>
-</div>
-</div>
-${actions}
-</div>
+${String(layout)}
 ${view.cook && !view.draft ? renderCookSheet(view.cook) : ""}
 ${view.plan && !view.draft ? renderPlanSheet(view.plan) : ""}
 ${
     view.share && !view.draft
         ? renderShareSheet({
               id: RECIPE_SHARE_SHEET_ID,
-              action: `/recipes/${view.recipe.id}/share`,
-              title: "Share recipe",
-              subtitle: view.recipe.name,
+              action: `/recipes/${recipe.id}/share`,
+              title: `Share ${recipe.name}`,
               what: "recipe",
               open: view.share.open,
               error: view.share.open ? view.error : undefined,
           })
         : ""
-}`;
+}
+</div>`;
 }
 
 export function renderRecipeDetailV2Page(view: RecipeDetailV2View): string {

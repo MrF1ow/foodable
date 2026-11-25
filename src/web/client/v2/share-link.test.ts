@@ -23,7 +23,16 @@ async function setup(opts: { clipboard: "ok" | "denied" | "none" }) {
     const button = {
         addEventListener: (_t: string, fn: Listener) => clicks.push(fn),
     };
+    const dialogListeners: Record<string, Listener[]> = {};
+    const dialog = {
+        addEventListener: (type: string, fn: Listener) => {
+            (dialogListeners[type] ||= []).push(fn);
+        },
+    };
     const box = {
+        closest: (sel: string) => (sel === "dialog" ? dialog : null),
+        getAttribute: (name: string) =>
+            name === "data-fd-share-back" ? "/recipes/r1" : null,
         parentNode: {
             querySelector: (sel: string) =>
                 sel === "[data-fd-share-status]" ? status : null,
@@ -63,7 +72,9 @@ async function setup(opts: { clipboard: "ok" | "denied" | "none" }) {
         },
     };
     let hook: ((scope: unknown) => void) | undefined;
+    const visited: string[] = [];
     const window = {
+        location: { assign: (to: string) => visited.push(to) },
         FoodableApp: {
             onLoad: (fn: (scope: unknown) => void) => {
                 hook = fn;
@@ -81,6 +92,8 @@ async function setup(opts: { clipboard: "ok" | "denied" | "none" }) {
     await flush();
     return {
         written,
+        visited,
+        closeSheet: () => (dialogListeners.close || []).forEach((fn) => fn()),
         status,
         clicks,
         selected: () => selected,
@@ -127,4 +140,11 @@ test("the address is cleared before Turbo caches the page for Back", async () =>
     expect(t.input.value).toBe("https://example.test/s/abc");
     t.fire("turbo:before-cache");
     expect(t.input.value).toBe("");
+});
+
+test("closing the sheet goes back to the page the link belongs to", async () => {
+    const t = await setup({ clipboard: "ok" });
+    expect(t.visited).toEqual([]);
+    t.closeSheet();
+    expect(t.visited).toEqual(["/recipes/r1"]);
 });

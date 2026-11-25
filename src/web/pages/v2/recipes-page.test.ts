@@ -171,87 +171,194 @@ describe("groupRecipeIngredientsByPlace", () => {
     });
 });
 
+const MACROS: RecipeMacros = {
+    calories: 200,
+    protein_g: 8,
+    carbs_g: 30,
+    fat_g: 5,
+    fiber_g: null,
+    sugar_g: null,
+    alcohol_g: null,
+    incomplete: false,
+};
+
+const PLAN = {
+    recipeId: "r1",
+    recipeName: "Pancakes",
+    yieldPortions: 4,
+    today: "2026-11-12",
+    date: "2026-11-12",
+    slot: "dinner",
+    servings: 4,
+};
+
+const COOK = {
+    recipeId: "r1",
+    recipeName: "Pancakes",
+    servings: 4,
+    yieldPortions: 4,
+    preview: {
+        totalPortions: 4,
+        lines: [],
+        movements: [],
+        shortfalls: [],
+        unmeasured: [],
+    },
+    slot: "dinner" as const,
+    viewerName: "Alice",
+    submitKey: "k1",
+};
+
+const FLOUR = {
+    id: "ing1",
+    foodId: "food-flour",
+    displayName: "Flour",
+    quantity: { amount: 200, unit: "g" } as const,
+    note: null,
+};
+const BUTTERMILK = {
+    id: "ing2",
+    foodId: "food-buttermilk",
+    displayName: "Buttermilk",
+    quantity: { amount: 200, unit: "ml" } as const,
+    note: null,
+};
+
+const viewBase = {
+    chrome,
+    recipe: RECIPE,
+    ingredients: [],
+    ingredientGroups: [],
+    macrosPerPortion: MACROS,
+    gapReasons: [],
+};
+
+/** The text of the first element a pattern finds; the test fails when none is. */
+function first(html: string, pattern: RegExp): string {
+    const found = html.match(pattern);
+    expect(found).not.toBeNull();
+    return found![0];
+}
+
 describe("renderRecipeDetailBody", () => {
-    const viewBase = {
-        chrome,
-        recipe: RECIPE,
-        ingredients: [],
-        ingredientGroups: [],
-        macrosPerPortion: {
-            calories: 200,
-            protein_g: 8,
-            carbs_g: 30,
-            fat_g: 5,
-            fiber_g: null,
-            sugar_g: null,
-            alcohol_g: null,
-            incomplete: false,
-        },
-        gapReasons: [],
-        members: [{ userId: "u1", displayName: "Alice" }],
-        viewerId: "u1",
-        portionCount: 2,
-    };
-
-    const cook = {
-        recipeId: "r1",
-        recipeName: "Pancakes",
-        servings: 4,
-        yieldPortions: 4,
-        preview: {
-            totalPortions: 4,
-            lines: [],
-            movements: [],
-            shortfalls: [],
-            unmeasured: [],
-        },
-        slot: "dinner" as const,
-        macrosPerPortion: viewBase.macrosPerPortion,
-        submitKey: "k1",
-    };
-
-    test("Cook opens the cook sheet instead of an inline form", () => {
-        const html = renderRecipeDetailBody({ ...viewBase, cook });
-        expect(html).toContain(
-            'commandfor="fd-recipe-cook-sheet" command="show-modal"',
+    test("Plan and Cook sit in the bar, Cook last, and open their sheets", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            cook: COOK,
+            plan: PLAN,
+        });
+        const bar = first(
+            html,
+            /<div class="fd-recipe-bar" id="fd-recipe-cook-heading">[\s\S]*?<\/div>/,
         );
+        const plan = bar.indexOf('commandfor="fd-recipe-plan-sheet"');
+        const cook = bar.indexOf('commandfor="fd-recipe-cook-sheet"');
+        expect(plan).toBeGreaterThan(-1);
+        expect(cook).toBeGreaterThan(plan);
+        expect(bar).not.toContain("Share");
         expect(html).toContain('id="fd-recipe-cook-sheet"');
         expect(html).toContain('action="/recipes/r1/cook/confirm"');
-        expect(html).not.toContain('action="/recipes/r1/cook"');
         expect(html).not.toContain('name="portion:u1"');
-        expect(html).toContain('id="fd-recipe-cook-heading"');
-        expect(html).toContain("fd-recipe-macro-tiles");
-        expect(html).toContain("fd-recipe-macros-kicker");
-        expect(html).toContain("Per serving");
-        expect(html).toContain('id="fd-recipe-method-heading">Steps</');
-        expect(html).toContain("fd-recipe-back__btn");
+        expect(html).toContain('id="fd-recipe-method-heading"');
+        expect(html).toContain(">Steps</h2>");
         expect(html).toContain("fd-dot--protein");
     });
 
-    test("the header actions run Share, Add to plan, Cook, with Cook last", () => {
-        const html = renderRecipeDetailBody({
+    test("the Detail bar goes back to Recipes, and a page with nothing else to offer has no empty menu", () => {
+        const html = renderRecipeDetailBody({ ...viewBase });
+        const bar = first(
+            html,
+            /<header class="fd-detail-bar[\s\S]*?<\/header>/,
+        );
+        expect(bar).toContain('href="/recipes"');
+        expect(bar).toContain('aria-label="Back to recipes"');
+        // The star is an item of the ⋯, so a saved recipe's ⋯ is never empty.
+        expect(bar).toContain("Add to favourites");
+        const draft = renderRecipeDetailBody({
             ...viewBase,
-            share: {},
-            cook,
-            plan: {
-                recipeId: "r1",
-                recipeName: "Pancakes",
-                yieldPortions: 4,
-                today: "2026-11-12",
-                date: "2026-11-12",
-                slot: "dinner",
-                servings: 4,
+            draft: {
+                problems: [],
+                expiresOn: null,
+                canSave: false,
+                canDiscard: false,
             },
         });
-        const row = html.match(
-            /<div class="fd-recipe-actions"[\s\S]*?<\/div>/,
-        )![0];
-        const share = row.indexOf('commandfor="fd-recipe-share-sheet"');
-        const plan = row.indexOf("fd-recipe-plan-sheet");
-        const cookAt = row.indexOf('commandfor="fd-recipe-cook-sheet"');
-        expect(share).toBeGreaterThan(-1);
-        expect(plan).toBeGreaterThan(share);
-        expect(cookAt).toBeGreaterThan(plan);
+        const draftBar = first(
+            draft,
+            /<header class="fd-detail-bar[\s\S]*?<\/header>/,
+        );
+        expect(draftBar).not.toContain("fd-menu");
+        expect(draftBar).not.toContain("more");
+        expect(draftBar).toContain("fd-detail-bar__balance");
+    });
+
+    test("Share is an item of the Detail bar's ⋯ only while the share view is there", () => {
+        const on = renderRecipeDetailBody({ ...viewBase, share: {} });
+        const bar = first(on, /<header class="fd-detail-bar[\s\S]*?<\/header>/);
+        expect(bar).toContain('commandfor="fd-recipe-share-sheet"');
+        expect(bar).toContain("Share");
+        const off = renderRecipeDetailBody({ ...viewBase });
+        expect(off).not.toContain("fd-recipe-share");
+        expect(off).not.toContain("/share");
+        expect(off).not.toContain("Share");
+    });
+
+    test("the share sheet asks how long the link works and posts to this recipe's route", () => {
+        const html = renderRecipeDetailBody({ ...viewBase, share: {} });
+        const sheet = first(
+            html,
+            /<dialog[^>]*id="fd-recipe-share-sheet"[\s\S]*?<\/dialog>/,
+        );
+        expect(sheet).toContain('action="/recipes/r1/share"');
+        expect(sheet).toContain("Share Pancakes");
+        expect(sheet).toContain("Link works for");
+        for (const label of [
+            "1 week",
+            "1 month",
+            "3 months",
+            "Never expires",
+        ]) {
+            expect(sheet).toContain(`>${label}<`);
+        }
+        expect(sheet).toContain('name="expires" value="never" checked');
+        expect(sheet).toContain(">Make link<");
+    });
+
+    test("a refused share shows its error in the open sheet, not above the page", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            error: "Choose how long the link should work.",
+            share: { open: true },
+        });
+        expect(html).toContain('id="fd-recipe-share-sheet"');
+        expect(html).toContain("data-sheet-open-on-load");
+        expect(
+            html.split("Choose how long the link should work.").length - 1,
+        ).toBe(1);
+    });
+
+    test("without a cook view there is no Cook button or sheet", () => {
+        const html = renderRecipeDetailBody({ ...viewBase, plan: PLAN });
+        expect(html).not.toContain("fd-recipe-cook-sheet");
+        expect(html).not.toContain(">Cook<");
+    });
+
+    test("the star is an item of the ⋯ that posts back to the recipe, and says which way it moves", () => {
+        const off = renderRecipeDetailBody({ ...viewBase });
+        const form = first(
+            off,
+            /<form[^>]*action="\/recipes\/r1\/favourite"[\s\S]*?<\/form>/,
+        );
+        expect(form).toContain('name="on" value="1"');
+        expect(form).toContain('name="back" value="recipe"');
+        expect(form).toContain("Add to favourites");
+        const on = renderRecipeDetailBody({ ...viewBase, favourite: true });
+        const unstar = first(
+            on,
+            /<form[^>]*action="\/recipes\/r1\/favourite"[\s\S]*?<\/form>/,
+        );
+        expect(unstar).toContain('name="on" value="0"');
+        expect(unstar).toContain("Remove from favourites");
     });
 
     test("a recipe with no upcoming plan shows no Planned line", () => {
@@ -270,10 +377,10 @@ describe("renderRecipeDetailBody", () => {
         });
         expect(html).toContain("Planned · Thu 26 Nov · dinner");
         expect(html.indexOf("fd-recipe-planned")).toBeGreaterThan(
-            html.indexOf("fd-recipe-title"),
+            html.indexOf("fd-page-header__title"),
         );
         expect(html.indexOf("fd-recipe-planned")).toBeLessThan(
-            html.indexOf("fd-recipe-layout"),
+            html.indexOf("fd-page-layout__columns"),
         );
     });
 
@@ -304,70 +411,159 @@ describe("renderRecipeDetailBody", () => {
         expect(html).toContain("+2 more");
     });
 
-    test("without a share view there is no Share button or sheet", () => {
-        const html = renderRecipeDetailBody({ ...viewBase });
-        expect(html).not.toContain("fd-recipe-share");
-        expect(html).not.toContain("/share");
-        expect(html).not.toContain("Share recipe");
-    });
-
-    test("Share opens a sheet that posts to this recipe's share route", () => {
-        const html = renderRecipeDetailBody({ ...viewBase, share: {} });
-        expect(html).toContain(
-            'commandfor="fd-recipe-share-sheet" command="show-modal"',
-        );
-        expect(html).toContain('id="fd-recipe-share-sheet"');
-        expect(html).toContain('action="/recipes/r1/share"');
-        expect(html).toContain("Share recipe");
-    });
-
-    test("a refused share shows its error in the open sheet, not above the page", () => {
+    test("the title carries the servings, time and source, and no portions-for-you line", () => {
         const html = renderRecipeDetailBody({
             ...viewBase,
-            error: "Choose how long the link should work.",
-            share: { open: true },
+            recipe: { ...RECIPE, sourceUrl: "https://www.example.com/p/1" },
         });
-        expect(html).toContain('id="fd-recipe-share-sheet"');
-        expect(html).toContain("data-sheet-open-on-load");
-        expect(html).not.toContain("fd-recipe-error");
+        expect(html).toContain("4 servings · 25 min · from example.com");
+        expect(html).not.toContain("for you");
+    });
+
+    test("ingredients are Item rows in the recipe's order, each with its place and a ⋯", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            ingredients: [BUTTERMILK, FLOUR],
+            ingredientGroups: [
+                {
+                    placeId: "loc-pantry",
+                    placeName: "Pantry",
+                    lines: [
+                        {
+                            ingredientId: "ing1",
+                            displayName: "Flour",
+                            amountLabel: "200 g",
+                            expiresOn: "2026-12-01",
+                        },
+                    ],
+                },
+                {
+                    placeId: RECIPE_NOT_IN_STOCK_ID,
+                    placeName: "Not in stock",
+                    lines: [
+                        {
+                            ingredientId: "ing2",
+                            displayName: "Buttermilk",
+                            amountLabel: "200 ml",
+                            expiresOn: null,
+                        },
+                    ],
+                },
+            ],
+        });
+        expect(html).toContain('id="fd-recipe-ingredients-heading"');
+        expect(html.indexOf("Buttermilk")).toBeLessThan(
+            html.indexOf(">Flour<"),
+        );
+        expect(html).toContain("Pantry · expires 2026-12-01");
+        expect(html).toContain("Not in stock");
+        expect(html).toContain('aria-label="Actions for Flour"');
+        const menu = first(
+            html,
+            /<[^>]*aria-label="Actions for Flour"[\s\S]*?<\/div>\s*<\/div>/,
+        );
+        expect(menu).toContain("/foods/food-flour?from=%2Frecipes%2Fr1");
+        // The add posts to the recipe's own route, so the person stays on it.
+        expect(menu).toContain(
+            'action="/recipes/r1/ingredients/food-flour/add-to-grocery"',
+        );
+        expect(menu).not.toContain('action="/foods/');
+        // No group headings by place any more: one flat list.
+        expect(html).not.toContain("fd-recipe-place");
+    });
+
+    test("an ingredient already on the list says so and offers no second add", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            ingredients: [FLOUR, BUTTERMILK],
+            onList: [FLOUR.foodId],
+        });
+        const rows = html.split('<li class="fd-item-row').slice(1);
+        const flour = rows.find((row) => row.includes("Flour"))!;
+        const other = rows.find((row) => row.includes("Buttermilk"))!;
+        expect(flour).toContain("On the list");
+        expect(flour).not.toContain("add-to-grocery");
+        expect(other).not.toContain("On the list");
+        expect(other).toContain("add-to-grocery");
+    });
+
+    test("a draft's ingredient menu has no Add to grocery list, only Open food", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: { ...RECIPE, verification: "unverified" },
+            ingredients: [FLOUR],
+            draft: {
+                problems: [],
+                expiresOn: null,
+                canSave: true,
+                canDiscard: true,
+            },
+        });
+        const menu = first(
+            html,
+            /<[^>]*aria-label="Actions for Flour"[\s\S]*?<\/div>\s*<\/div>/,
+        );
+        expect(menu).toContain("Open food");
+        expect(menu).not.toContain("Add to grocery list");
+        expect(menu).not.toContain("add-to-grocery");
+    });
+
+    test("the viewer's own portion count stays on the page under the per-serving tiles", () => {
+        const html = renderRecipeDetailBody({ ...viewBase, portionCount: 2 });
+        const macros = first(
+            html,
+            /<section class="fd-recipe-macros"[\s\S]*?<\/section>/,
+        );
+        expect(macros).toContain("2 portions for you");
+        expect(macros.indexOf("fd-recipe-macro-tiles")).toBeLessThan(
+            macros.indexOf("2 portions for you"),
+        );
         expect(
-            html.split("Choose how long the link should work.").length - 1,
-        ).toBe(1);
-    });
-
-    test("without a cook view there is no Cook button or sheet", () => {
-        const html = renderRecipeDetailBody({ ...viewBase });
-        expect(html).not.toContain("fd-recipe-cook-sheet");
-        expect(html).not.toContain("fd-recipe-cook-btn");
-    });
-
-    test("the star sits in the back row, outside the heading, and posts back to the recipe", () => {
-        const html = renderRecipeDetailBody({ ...viewBase });
-        const form = html.match(/<form[^>]*fd-star-form[\s\S]*?<\/form>/)![0];
-        expect(form).toContain('action="/recipes/r1/favourite"');
-        expect(form).toContain('name="on" value="1"');
-        expect(form).toContain('name="back" value="recipe"');
-        expect(form).toContain('aria-label="Add Pancakes to favourites"');
-        expect(form).not.toContain("fd-star--on");
-        const back = html.match(/<p class="fd-recipe-back">[\s\S]*?<\/p>/);
-        expect(back?.[0] ?? "").not.toContain("<form");
-        expect(html.indexOf("fd-recipe-back")).toBeLessThan(
-            html.indexOf("fd-star-form"),
-        );
-        expect(html.indexOf("fd-star-form")).toBeLessThan(
-            html.indexOf("fd-recipe-title"),
+            renderRecipeDetailBody({ ...viewBase, portionCount: 1 }),
+        ).toContain("1 portion for you");
+        expect(renderRecipeDetailBody({ ...viewBase })).not.toContain(
+            "for you",
         );
     });
 
-    test("a starred recipe shows a filled star that removes itself", () => {
-        const html = renderRecipeDetailBody({ ...viewBase, favourite: true });
-        const form = html.match(/<form[^>]*fd-star-form[\s\S]*?<\/form>/)![0];
-        expect(form).toContain('name="on" value="0"');
-        expect(form).toContain('aria-label="Remove Pancakes from favourites"');
-        expect(form).toContain("fd-star--on");
+    test("an ingredient in two places says both", () => {
+        const line = (name: string) => ({
+            ingredientId: "ing1",
+            displayName: "Flour",
+            amountLabel: name,
+            expiresOn: null,
+        });
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            ingredients: [FLOUR],
+            ingredientGroups: [
+                { placeId: "a", placeName: "Pantry", lines: [line("200 g")] },
+                { placeId: "b", placeName: "Fridge", lines: [line("200 g")] },
+            ],
+        });
+        expect(html).toContain("Pantry, Fridge");
     });
 
-    test("incomplete macros show missing-factor copy", () => {
+    test("no ingredients says so", () => {
+        expect(renderRecipeDetailBody({ ...viewBase })).toContain(
+            "No ingredients yet.",
+        );
+    });
+
+    test("Per serving shows four tiles, and a figure the recipe cannot give is a dash", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            macrosPerPortion: { ...MACROS, carbs_g: null },
+        });
+        expect(html).toContain("fd-recipe-macro-tiles");
+        expect(html).toContain("Per serving");
+        const tiles = first(html, /<dl class="fd-tiles[\s\S]*?<\/dl>/);
+        expect(tiles).toContain("Carbs");
+        expect(tiles.match(/—/g)).toHaveLength(1);
+        expect(tiles).toContain("Protein");
+    });
+
+    test("incomplete macros show their reasons under dashed tiles", () => {
         const macros: RecipeMacros = {
             calories: null,
             protein_g: null,
@@ -379,32 +575,155 @@ describe("renderRecipeDetailBody", () => {
             incomplete: true,
         };
         const html = renderRecipeDetailBody({
-            chrome,
-            recipe: RECIPE,
-            ingredients: [],
-            ingredientGroups: [
-                {
-                    placeId: RECIPE_NOT_IN_STOCK_ID,
-                    placeName: "Not in stock",
-                    lines: [
-                        {
-                            ingredientId: "ing1",
-                            displayName: "Buttermilk",
-                            amountLabel: "200 ml",
-                            expiresOn: null,
-                        },
-                    ],
-                },
-            ],
+            ...viewBase,
             macrosPerPortion: macros,
             gapReasons: ["Buttermilk: set grams per millilitre"],
-            members: [{ userId: "u1", displayName: "Alice" }],
-            viewerId: "u1",
-            portionCount: 1,
         });
-        expect(html).toContain("Macros incomplete per portion");
         expect(html).toContain("grams per millilitre");
-        expect(html).toContain("Not in stock");
+        expect(html).toContain("fd-recipe-caption--warn");
+        expect(
+            first(html, /<dl class="fd-tiles[\s\S]*?<\/dl>/).match(/—/g),
+        ).toHaveLength(4);
+    });
+});
+
+describe("a draft's page", () => {
+    const draft = {
+        problems: ["Add the steps.", "Resolve every ingredient line."],
+        expiresOn: "2026-12-01",
+        canSave: true,
+        canDiscard: true,
+    };
+    const draftRecipe: Recipe = { ...RECIPE, verification: "unverified" };
+
+    test("the draft bar is Save and how many things are left, in place of Plan and Cook", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft,
+            // A draft never gets these, even when the loader passes them.
+            cook: COOK,
+            plan: PLAN,
+            share: {},
+        });
+        const bar = first(
+            html,
+            /<div class="fd-recipe-bar fd-recipe-bar--draft"[\s\S]*?<\/form><\/div>/,
+        );
+        expect(bar).toContain('action="/recipes/r1/save"');
+        expect(bar).toContain(">Save<");
+        expect(bar).toContain("2 things to fix");
+        expect(html).not.toContain("fd-recipe-cook-sheet");
+        expect(html).not.toContain("fd-recipe-plan-sheet");
+        expect(html).not.toContain("fd-recipe-share-sheet");
+        expect(html).not.toContain(">Plan<");
+        expect(html).not.toContain(">Cook<");
+        expect(html).not.toContain("Add to list");
+        expect(html).not.toContain("Share");
+        expect(html).not.toContain("favourites");
+    });
+
+    test("it names what is left, when it goes, and says Draft under the title", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft,
+        });
+        const card = first(
+            html,
+            /<section class="fd-recipe-draft"[\s\S]*?<\/section>/,
+        );
+        expect(card).toContain("Add the steps.");
+        expect(card).toContain("Resolve every ingredient line.");
+        expect(card).toContain("deleted on Tue 1 Dec unless you save it");
+        expect(html).toContain("Draft · 4 servings");
+    });
+
+    test("one thing left, or none, reads right", () => {
+        const one = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft: { ...draft, problems: ["Add the steps."] },
+        });
+        expect(one).toContain("1 thing to fix");
+        const ready = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft: { ...draft, problems: [] },
+        });
+        expect(ready).toContain("Ready to save");
+        expect(ready).toContain("It passes the check and is ready to save.");
+    });
+
+    test("Discard is a ⋯ item that confirms in place, only for who may discard", () => {
+        const mine = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft,
+        });
+        const bar = first(
+            mine,
+            /<header class="fd-detail-bar[\s\S]*?<\/header>/,
+        );
+        expect(bar).toContain("Discard draft");
+        expect(bar).toContain('action="/recipes/r1/discard"');
+        const theirs = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft: { ...draft, canDiscard: false },
+        });
+        expect(theirs).not.toContain("Discard");
+        expect(theirs).not.toContain("/recipes/r1/discard");
+    });
+
+    test("someone who may not save sees no Save", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft: { ...draft, canSave: false },
+        });
+        expect(html).not.toContain("/recipes/r1/save");
+        expect(html).not.toContain("fd-recipe-bar");
+    });
+
+    test("a refused Save shows its reason on the page, in place", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            recipe: draftRecipe,
+            draft,
+            error: "Not saved yet. Fix what is listed below, then save it again.",
+        });
+        expect(html).toContain('role="alert">Not saved yet.');
+    });
+
+    test("no screen says unverified", () => {
+        const pages = [
+            renderRecipeDetailBody({
+                ...viewBase,
+                recipe: draftRecipe,
+                draft,
+            }),
+            renderRecipeDetailBody({
+                ...viewBase,
+                recipe: { ...RECIPE, verification: "verified" },
+                cook: COOK,
+                plan: PLAN,
+                share: {},
+            }),
+        ];
+        for (const html of pages) {
+            expect(html.toLowerCase()).not.toContain("unverified");
+        }
+    });
+
+    test("a saved recipe never shows the draft bar, or Save", () => {
+        const html = renderRecipeDetailBody({
+            ...viewBase,
+            cook: COOK,
+            plan: PLAN,
+        });
+        expect(html).not.toContain("fd-recipe-draft");
+        expect(html).not.toContain("/save");
     });
 });
 
@@ -421,31 +740,24 @@ describe("the steps-mention warnings on the recipe page", () => {
             vocabulary: [],
         }).filter((w) => w.key === "egg");
     const view = (over: Record<string, unknown> = {}) => ({
-        chrome,
+        ...viewBase,
         recipe,
-        ingredients: [],
-        ingredientGroups: [],
-        macrosPerPortion: {
-            calories: 200,
-            protein_g: 8,
-            carbs_g: 30,
-            fat_g: 5,
-            fiber_g: null,
-            sugar_g: null,
-            alcohol_g: null,
-            incomplete: false,
-        },
-        gapReasons: [],
-        members: [{ userId: "u1", displayName: "Alice" }],
-        viewerId: "u1",
-        portionCount: 2,
         ...over,
     });
 
-    test("a warning is a card at the top of Ingredients with Add and Dismiss", () => {
+    test("a warning is a card at the top of Ingredients with Dismiss and Add", () => {
         const html = renderRecipeDetailBody(
             view({
                 mentions: mentions(),
+                ingredients: [
+                    {
+                        id: "i1",
+                        foodId: "food-noodles",
+                        displayName: "Wide rice noodles",
+                        quantity: { amount: 7, unit: "oz" },
+                        note: null,
+                    },
+                ],
                 ingredientGroups: [
                     {
                         placeId: RECIPE_NOT_IN_STOCK_ID,
@@ -462,24 +774,28 @@ describe("the steps-mention warnings on the recipe page", () => {
                 ],
             }),
         );
-        const card = html.match(
-            /<aside class="fd-mention-card"[\s\S]*?<\/aside>/,
-        )![0];
-        expect(card).toContain(
-            "The steps mention egg, which isn't an ingredient.",
+        const card = first(
+            html,
+            /<div class="fd-card fd-mention-card"[\s\S]*?<\/form><\/div><\/div><\/div>/,
         );
+        expect(card).toContain(">Steps mention egg</p>");
         expect(card).toContain(
             '<span class="fd-mention-mark">egg</span> and scramble',
         );
         expect(card).toContain('action="/recipes/r1/mentions/add"');
         expect(card).toContain('action="/recipes/r1/mentions/dismiss"');
         expect(card.match(/name="key" value="egg"/g)).toHaveLength(2);
-        expect(card).toContain(">Add egg</button>");
-        expect(card).toContain(">Dismiss</button>");
-        // Above the ingredient list, below the section head.
-        const head = html.indexOf('fd-recipe-section-head__title">Ingredients');
-        expect(head).toBeGreaterThan(-1);
-        expect(html.indexOf("fd-mention-card")).toBeGreaterThan(head);
+        expect(card).toContain(">Add egg</span>");
+        expect(card).toContain(">Dismiss</span>");
+        // Dismiss first, Add (the primary) last.
+        expect(card.indexOf("Dismiss")).toBeLessThan(card.indexOf("Add egg"));
+        // Under the title and its subtitle, above the tiles and the ingredients.
+        expect(html.indexOf("fd-mention-card")).toBeGreaterThan(
+            html.indexOf("fd-recipe-head"),
+        );
+        expect(html.indexOf("fd-mention-card")).toBeLessThan(
+            html.indexOf("fd-recipe-macros"),
+        );
         expect(html.indexOf("fd-mention-card")).toBeLessThan(
             html.indexOf("Wide rice noodles"),
         );
@@ -487,9 +803,7 @@ describe("the steps-mention warnings on the recipe page", () => {
 
     test("the same food is underlined in its step and only there", () => {
         const html = renderRecipeDetailBody(view({ mentions: mentions() }));
-        const steps = html.match(
-            /<ol class="fd-recipe-steps">[\s\S]*?<\/ol>/,
-        )![0];
+        const steps = first(html, /<ol class="fd-recipe-steps">[\s\S]*?<\/ol>/);
         const items = [...steps.matchAll(/<li>([\s\S]*?)<\/li>/g)].map(
             (m) => m[1],
         );

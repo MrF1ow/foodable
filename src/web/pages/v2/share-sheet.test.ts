@@ -5,7 +5,6 @@ import {
     parseShareExpiry,
     renderShareCreatedBody,
     renderShareSheet,
-    renderShareTrigger,
     shareDateLabel,
     shareExpiryLabel,
 } from "./share-sheet.js";
@@ -37,20 +36,37 @@ describe("renderShareSheet", () => {
         );
     });
 
-    test("offers Never (selected), 7, 30 and 90 days", () => {
-        expect(html).toContain('<option value="never" selected>Never</option>');
-        for (const days of ["7", "30", "90"]) {
-            expect(html).toContain(
-                `<option value="${days}">${days} days</option>`,
-            );
+    test("asks how long the link works with chips, Never expires picked", () => {
+        expect(html).toContain("Link works for");
+        const chips = [
+            ["7", "1 week"],
+            ["30", "1 month"],
+            ["90", "3 months"],
+            ["never", "Never expires"],
+        ] as const;
+        for (const [value, label] of chips) {
+            expect(html).toContain(`name="expires" value="${value}"`);
+            expect(html).toContain(`>${label}<`);
         }
-        expect(html).toContain('name="expires"');
+        expect(html).toContain('name="expires" value="never" checked');
+        expect(html).not.toContain("<select");
     });
 
     test("the submit button is outside the form and names it", () => {
         expect(html).toMatch(
-            /<button type="submit" class="fd-btn fd-btn--primary" form="fd-grocery-share-sheet-form">Create link<\/button>/,
+            /<button type="submit" class="fd-btn fd-btn--primary" data-fd-btn form="fd-grocery-share-sheet-form"><span class="fd-btn__label">Make link<\/span><\/button>/,
         );
+    });
+
+    test("a recipe's sheet has a title and no line under it", () => {
+        const recipe = renderShareSheet({
+            id: "s",
+            action: "/x",
+            title: "Share Dal",
+            what: "recipe",
+        });
+        expect(recipe).toContain("Share Dal");
+        expect(recipe).not.toContain("fd-sheet__subtitle");
     });
 
     test("an error shows in the sheet, escaped, and the sheet reopens", () => {
@@ -67,12 +83,6 @@ describe("renderShareSheet", () => {
         expect(open).toContain("Pick &lt;one&gt;");
         expect(open).toContain("&lt;b&gt;");
     });
-});
-
-test("the trigger opens its sheet", () => {
-    expect(String(renderShareTrigger("my-sheet", "btn"))).toContain(
-        'commandfor="my-sheet" command="show-modal"',
-    );
 });
 
 describe("dates", () => {
@@ -101,17 +111,58 @@ describe("renderShareCreatedBody", () => {
 
     test("the address is in one read-only field and nowhere else", () => {
         const html = renderShareCreatedBody(view);
-        expect(html).toContain(
-            'readonly spellcheck="false" autocomplete="off" value="https://foodable.test/s/TOKEN-ABC_123"',
+        const input = html.match(
+            /<input[^>]*value="https:\/\/foodable.test\/s\/TOKEN-ABC_123"[^>]*>/,
         );
+        expect(input?.[0]).toContain("readonly");
         expect(html.split("TOKEN-ABC_123").length - 1).toBe(1);
-        expect(html).toContain("data-fd-share-copy");
-        expect(html).toContain('href="/recipes/r1"');
+        expect(html).toContain("data-fd-share-url");
     });
 
-    test("names the recipe (escaped) or the list, and the expiry", () => {
+    test("is a Link ready sheet, open over the page it belongs to", () => {
+        const html = renderShareCreatedBody(view);
+        expect(html).toMatch(/<dialog[^>]*data-sheet-open-on-load/);
+        expect(html).toContain(">Link ready</h2>");
+        // The recipe's name under the title, escaped.
+        expect(html).toContain("Dal &lt;tadka&gt;");
+        expect(html).not.toContain("<tadka>");
+        // The page behind: a Detail bar back to it, and its title.
+        expect(html).toContain('href="/recipes/r1"');
+        expect(html).toContain("fd-detail-bar");
+    });
+
+    test("Copy is an icon button in the box, and Done goes back to the page", () => {
+        const html = renderShareCreatedBody(view);
+        expect(html).toMatch(
+            /<button[^>]*aria-label="Copy link"[^>]*data-fd-share-copy/,
+        );
+        expect(html).toContain('data-fd-share-back="/recipes/r1"');
+        // Done closes the sheet, and closing goes to the page itself: no GET
+        // form, which would land on the address with a stray "?".
+        expect(html).not.toContain("<form");
+        expect(html).toMatch(
+            /<button[^>]*command="close"[^>]*commandfor="fd-share-made-sheet"[^>]*>(?:(?!<\/button>)[\s\S])*Done/,
+        );
+        expect(html).toContain(">Done</span>");
+    });
+
+    test("says anyone with the link can read it, and where to revoke it", () => {
+        const html = renderShareCreatedBody(view);
+        expect(html).toContain(
+            "Anyone with the link can read this recipe. Revoke it in Settings › Household.",
+        );
+        expect(
+            renderShareCreatedBody({
+                ...view,
+                name: null,
+                what: "grocery list",
+            }),
+        ).toContain("Anyone with the link can read this grocery list.");
+    });
+
+    test("says when it expires, and that it is shown only once", () => {
         expect(renderShareCreatedBody(view)).toContain(
-            "<strong>Dal &lt;tadka&gt;</strong>",
+            "Never expires · shown only once",
         );
         const list = renderShareCreatedBody({
             ...view,
@@ -119,7 +170,7 @@ describe("renderShareCreatedBody", () => {
             what: "grocery list",
             expiresAt: "2027-01-02T00:00:00.000Z",
         });
-        expect(list).toContain("the grocery list");
-        expect(list).toContain("Expires 2 Jan 2027");
+        expect(list).toContain("Grocery list");
+        expect(list).toContain("Expires 2 Jan 2027 · shown only once");
     });
 });

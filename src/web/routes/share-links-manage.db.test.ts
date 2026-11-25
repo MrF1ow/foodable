@@ -506,7 +506,10 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         const recipeOn = await page(recipePath);
         expect(recipeOn).toContain('id="fd-recipe-share-sheet"');
         expect(recipeOn).toContain(`action="/recipes/${recipe.id}/share"`);
-        expect(recipeOn).toContain("fd-recipe-share-btn");
+        // Share is an item of the Detail bar's ⋯, which opens the sheet.
+        expect(recipeOn).toContain(
+            'command="show-modal" commandfor="fd-recipe-share-sheet"',
+        );
         const groceriesOn = await page("/kitchen/groceries");
         expect(groceriesOn).toContain('id="fd-grocery-share-sheet"');
         expect(groceriesOn).toContain("Share list");
@@ -518,7 +521,7 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const recipeOff = await page(recipePath);
         expect(recipeOff).not.toContain("fd-recipe-share-sheet");
-        expect(recipeOff).not.toContain("fd-recipe-share-btn");
+        expect(recipeOff).not.toContain('commandfor="fd-recipe-share-sheet"');
         expect(recipeOff).not.toContain(`/recipes/${recipe.id}/share`);
         const groceriesOff = await page("/kitchen/groceries");
         expect(groceriesOff).not.toContain("fd-grocery-share-sheet");

@@ -552,7 +552,7 @@ const NAVS: readonly Nav[] = [
     {
         name: "recipes: recipe -> back to Recipes",
         start: `/recipes/${SEED_RECIPE}`,
-        click: ["a.fd-recipe-back__btn", "a.fd-recipe-back__link"],
+        click: ['.fd-detail-bar a[href="/recipes"]'],
         lands: "/recipes",
     },
     {

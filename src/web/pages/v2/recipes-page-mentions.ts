@@ -1,5 +1,7 @@
 import type { MentionWarning } from "../../../domain/recipe-mentions.js";
-import { esc } from "../../components/v2/html.js";
+import { button } from "../../components/v2/button.js";
+import { card } from "../../components/v2/card.js";
+import { esc, raw } from "../../components/v2/html.js";
 
 /**
  * The recipe page's "the steps mention a food the ingredients don't list"
@@ -59,42 +61,51 @@ export function stepWithMentions(
     return markSpans(step.normalize("NFC"), spans);
 }
 
-const WARN_ICON = `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5.5M12 16.4v.1"/></svg>`;
-
 function pillForm(
     recipeId: string,
     action: "add" | "dismiss",
     key: string,
-    button: string,
+    control: string,
 ): string {
-    return `<form class="fd-inline-form" method="post" action="/recipes/${esc(recipeId)}/mentions/${action}"><input type="hidden" name="key" value="${esc(key)}">${button}</form>`;
+    return `<form class="fd-inline-form" method="post" action="/recipes/${esc(recipeId)}/mentions/${action}"><input type="hidden" name="key" value="${esc(key)}">${control}</form>`;
 }
 
-/** One warning: what the steps said, with Add and Dismiss. */
+/** One warning: "Steps mention egg", what the step said, with Dismiss and Add. */
 function mentionCard(recipeId: string, warning: MentionWarningView): string {
     const excerpt = markSpans(warning.excerpt, [
         { start: warning.excerptStart, end: warning.excerptEnd },
     ]);
-    const add = pillForm(
-        recipeId,
-        "add",
-        warning.key,
-        `<button type="submit" class="fd-mention-pill fd-mention-pill--primary">Add ${esc(warning.food)}</button>`,
-    );
     const dismiss = pillForm(
         recipeId,
         "dismiss",
         warning.key,
-        `<button type="submit" class="fd-mention-pill">Dismiss</button>`,
+        String(button({ label: "Dismiss", size: "md", type: "submit" })),
     );
-    return `<aside class="fd-mention-card" aria-label="${esc(warning.message)}">
-<p class="fd-mention-card__title"><span class="fd-mention-card__icon">${WARN_ICON}</span><span>${esc(warning.message)}</span></p>
-<q class="fd-mention-card__excerpt">${excerpt}</q>
-<div class="fd-mention-card__actions">${add}${dismiss}</div>
-</aside>`;
+    const add = pillForm(
+        recipeId,
+        "add",
+        warning.key,
+        String(
+            button({
+                label: `Add ${warning.food}`,
+                variant: "primary",
+                size: "md",
+                type: "submit",
+            }),
+        ),
+    );
+    return String(
+        card({
+            label: `Steps mention ${warning.food}`,
+            className: "fd-mention-card",
+            children: raw(
+                `<p class="fd-mention-card__title">Steps mention ${esc(warning.food)}</p><q class="fd-mention-card__excerpt">${excerpt}</q><div class="fd-mention-card__actions">${dismiss}${add}</div>`,
+            ),
+        }),
+    );
 }
 
-/** The cards for the top of the Ingredients section; empty without warnings. */
+/** The cards under the page title; empty without warnings. */
 export function renderMentionCards(
     recipeId: string,
     warnings: readonly MentionWarningView[] | undefined,

@@ -75,6 +75,7 @@ import type { Notice } from "../domain/notices.js";
 import { defaultFreezeExpiry, listFridge } from "../domain/fridge.js";
 import {
     groceryAllergenWarning,
+    groceryFamilyOf,
     listGrocery,
     matchGroceryAllergens,
 } from "../domain/grocery.js";
@@ -2109,7 +2110,12 @@ export async function loadCookPreview(
     householdId: string,
     recipeId: string,
     servings: number,
-): Promise<{ preview: CookPreview | null; error?: string }> {
+): Promise<{
+    preview: CookPreview | null;
+    error?: string;
+    /** Where each fridge item the cook takes from is kept, by item id. */
+    places: Map<string, string>;
+}> {
     try {
         const preview = await previewCookRecipe(
             liveRecipesStore(),
@@ -2117,10 +2123,21 @@ export async function loadCookPreview(
             liveFoodsStore(),
             { householdId, recipeId, totalPortions: servings },
         );
-        return { preview };
+        const places = new Map<string, string>();
+        if (preview.lines.length > 0) {
+            const fridge = await listFridge(liveFridgeStore(), householdId);
+            const locations = new Map(
+                fridge.locations.map((loc) => [loc.id, loc.name]),
+            );
+            for (const item of fridge.items) {
+                const name = locations.get(item.locationId);
+                if (name) places.set(item.id, name);
+            }
+        }
+        return { preview, places };
     } catch (err) {
         if (isCookPreviewUnavailable(err)) {
-            return { preview: null, error: err.message };
+            return { preview: null, error: err.message, places: new Map() };
         }
         throw err;
     }
@@ -2311,6 +2328,22 @@ export async function renderRecipeDetailRoute(
         fridge.locations,
         familyFoodMap,
     );
+    const listedFoodIds = new Set(
+        (await liveGroceryStore().listLines(householdId))
+            .filter((line) => !line.checked && line.foodId)
+            .map((line) => line.foodId!),
+    );
+    const onList = ingredientRows.flatMap((row) => {
+        const id = row.foodId;
+        if (!id) return [];
+        const food = foodsById.get(id);
+        const covered = food
+            ? groceryFamilyOf(food, allFoods).foodIds.some((member) =>
+                  listedFoodIds.has(member),
+              )
+            : listedFoodIds.has(id);
+        return covered ? [id] : [];
+    });
     let cook: CookSheetView | undefined;
     if (view.verification !== "unverified") {
         const servings =
@@ -2319,11 +2352,11 @@ export async function renderRecipeDetailRoute(
             opts.cookServings > 0
                 ? opts.cookServings
                 : view.yieldPortions;
-        const { preview, error: previewError } = await loadCookPreview(
-            householdId,
-            recipeId,
-            servings,
-        );
+        const {
+            preview,
+            error: previewError,
+            places,
+        } = await loadCookPreview(householdId, recipeId, servings);
         const open =
             opts.openCook === true || opts.openModalId === COOK_SHEET_ID;
         cook = {
@@ -2338,7 +2371,10 @@ export async function renderRecipeDetailRoute(
                     ? profile.timezone
                     : "UTC",
             ) as CookSheetView["slot"],
-            macrosPerPortion: macrosPerPortion ?? macros,
+            viewerName:
+                members.find((member) => member.userId === viewerUserId)
+                    ?.displayName ?? "You",
+            places,
             submitKey: crypto.randomUUID(),
             open,
             error: open ? opts.error : undefined,
@@ -2351,18 +2387,14 @@ export async function renderRecipeDetailRoute(
             recipe: view,
             ingredients: ingredientRows,
             ingredientGroups,
+            onList,
             macrosPerPortion: macrosPerPortion ?? macros,
+            portionCount: view.portionCount,
             gapReasons: [
                 ...new Set(
                     notices.map((notice) => gapFromNotice(notice).message),
                 ),
             ],
-            members: members.map((member) => ({
-                userId: member.userId,
-                displayName: member.displayName,
-            })),
-            viewerId: viewerUserId,
-            portionCount: view.portionCount,
             favourite: (
                 await liveRecipesStore().listFavourites(
                     householdId,

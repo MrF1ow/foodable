@@ -51,7 +51,7 @@ export const TOASTS = {
     "notice.error": { kind: "warning", text: "{message}" },
     "recipes.unverified.blocked": {
         kind: "info",
-        text: "That recipe is a draft; save it first.",
+        text: "This recipe is a draft. Save it before you cook it.",
     },
     "recipes.import.duplicate": {
         kind: "info",

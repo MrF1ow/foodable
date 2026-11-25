@@ -64,6 +64,8 @@ export type ItemRowLead =
           /** What the box is named after. */
           label: string;
           checked?: boolean;
+          /** Drawn greyed and not pressable, in a row that is otherwise live (a line the cook cannot take). */
+          disabled?: boolean;
           /** Field the ticked box posts under. */
           name?: string;
           value?: string;
@@ -265,7 +267,7 @@ function leadSlot(lead: ItemRowLead, disabled: boolean): Html {
                 lead.name != null ? ` name="${esc(lead.name)}"` : "",
                 lead.value != null ? ` value="${esc(lead.value)}"` : "",
                 lead.checked ? " checked" : "",
-                disabled ? " disabled" : "",
+                disabled || lead.disabled ? " disabled" : "",
             ].join("");
             return raw(
                 `<label class="fd-item-row__lead fd-item-row__check"><input type="checkbox" class="fd-item-row__check-input"${attrs} aria-label="${esc(lead.label)}"><span class="fd-item-row__check-box" aria-hidden="true">${icon("check")}</span></label>`,

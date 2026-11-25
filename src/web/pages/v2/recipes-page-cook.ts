@@ -1,8 +1,8 @@
 /**
- * The recipe page's cook sheet (FigCraft Screens › Recipes › "Recipe · cook",
- * dark 22962, light 27874; desktop dark 48994, light 57877): a servings
- * stepper, the list of what leaves the kitchen for that many servings, a
- * "Log 1 serving to <slot>" switch and the Cook button.
+ * The recipe page's cook sheet (FigCraft "Recipe · cook", 402901 on the
+ * phone): a servings stepper, what the cook takes as rows with their
+ * checkboxes (a line the kitchen cannot cover keeps its box, greyed and
+ * unticked), who the portion is logged for, and the Cook button.
  *
  * The preview comes from `previewCookRecipe` (src/domain/stock.ts), the dry run
  * of the cook the confirm route then performs. It sits in one region
@@ -14,19 +14,28 @@
  * kitchen changed between the preview and the confirm, the confirm compares
  * what it is about to take with that field and the toast names the differences.
  */
-import type { RecipeMacros } from "../../../domain/recipes.js";
 import type { CookPreview } from "../../../domain/stock.js";
-import {
-    formatLogMacroGrams,
-    formatLogMacroKcal,
-} from "../../../domain/log-macro-format.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
-import { esc, raw, type Html } from "../../components/v2/html.js";
-import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
+import { choiceGroup } from "../../components/v2/chips.js";
+import { esc, join, raw } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { sheet, sheetSection } from "../../components/v2/sheet.js";
 import { stepper } from "../../components/v2/stepper.js";
 
 export const COOK_SHEET_ID = "fd-recipe-cook-sheet";
 const COOK_FORM_ID = "fd-recipe-cook-form";
+
+const SLOT_LABELS: Record<CookSlot, string> = {
+    breakfast: "Breakfast",
+    lunch: "Lunch",
+    dinner: "Dinner",
+    snack: "Snack",
+};
+
+function slotLabel(slot: CookSlot): string {
+    return SLOT_LABELS[slot];
+}
 
 export type CookSlot = "breakfast" | "lunch" | "dinner" | "snack";
 
@@ -39,9 +48,12 @@ export type CookSheetView = {
     /** Null when the preview could not be built (`previewError` says why). */
     preview: CookPreview | null;
     previewError?: string;
-    /** The meal slot "Log 1 serving" files under. */
+    /** The meal slot the logged portion files under. */
     slot: CookSlot;
-    macrosPerPortion: RecipeMacros;
+    /** The viewer's name: the portion is logged for them. */
+    viewerName: string;
+    /** Where each fridge item the cook takes from is kept, by item id. */
+    places?: ReadonlyMap<string, string>;
     /** One per render; the confirm turns it into the meal's idempotency key. */
     submitKey: string;
     /** A failed confirm re-renders the page with the sheet open. */
@@ -56,10 +68,6 @@ function tidy(n: number): number {
 
 function amountText(amount: number, unit: string): string {
     return formatQuantityDisplayParts(tidy(amount), unit);
-}
-
-function afterText(after: number, unit: string): string {
-    return after <= 0 ? "0" : amountText(after, unit);
 }
 
 /* ---- What the confirm compares: the preview as the sheet last showed it ---- */
@@ -201,56 +209,81 @@ export function cookPreviewChanges(
 
 /* ---- Markup ---- */
 
+/** Where each fridge item sits, by item id: the line under what the cook takes. */
+export type CookPlaces = ReadonlyMap<string, string>;
+
 /**
- * The "Takes from your kitchen" block: each fridge item the cook draws from
- * (before → after, "0" once it is used up), then any shortfall in the warning
- * colour and the ingredients with no amount to take. Also what the preview
- * endpoint returns.
+ * What the cook takes, as rows: each fridge item it draws from (the amount
+ * that leaves, and where it is kept) with a ticked box, then each shortfall
+ * in the warning tone with its box greyed and unticked, then the ingredients
+ * with no amount to take. Also what the preview endpoint returns, with the
+ * preview as a hidden `expected` field the confirm compares.
  */
 export function renderCookPreviewRegion(
     preview: CookPreview | null,
     error?: string,
+    places?: CookPlaces,
 ): string {
-    const head = `<p class="fd-recipe-cook-label">Takes from your kitchen</p>`;
+    const open = `<div class="fd-recipe-cook-region" data-fd-cook-region aria-live="polite">`;
     if (!preview) {
-        return `<div class="fd-recipe-cook-region" data-fd-cook-region aria-live="polite">${head}<p class="fd-recipe-cook-note fd-recipe-cook-note--warn">${esc(error ?? "Could not work out what this takes.")}</p></div>`;
+        return `${open}${String(sheetSection({ kind: "message", label: "Takes", text: error ?? "Could not work out what this takes." }))}</div>`;
     }
-    const rows: string[] = [];
-    for (const line of preview.lines) {
-        rows.push(
-            `<li class="fd-recipe-cook-use"><span class="fd-recipe-cook-use__name">${esc(line.displayName)}</span><span class="fd-recipe-cook-use__change">${esc(`${amountText(line.before, line.unit)} → ${afterText(line.after, line.unit)}`)}</span></li>`,
-        );
-    }
-    for (const short of preview.shortfalls) {
-        const lead = short.unknownFactor ? "may be short" : "short";
-        rows.push(
-            `<li class="fd-recipe-cook-use fd-recipe-cook-use--short"><span class="fd-recipe-cook-use__name">${esc(short.displayName)}</span><span class="fd-recipe-cook-use__change">${esc(`${lead} ${amountText(short.amount, short.unit)}`)}</span></li>`,
-        );
-    }
-    const list =
-        rows.length > 0
-            ? `<ul class="fd-recipe-cook-uses">${rows.join("")}</ul>`
-            : `<p class="fd-recipe-cook-note">Nothing in your kitchen to take.</p>`;
-    const unmeasured =
-        preview.unmeasured.length > 0
-            ? `<p class="fd-recipe-cook-note">${esc(preview.unmeasured.map((u) => u.displayName).join(", "))} — no amount, so nothing is taken.</p>`
-            : "";
-    return `<div class="fd-recipe-cook-region" data-fd-cook-region aria-live="polite">${head}${list}${unmeasured}<input type="hidden" name="expected" value="${esc(serializeExpectedCook(preview))}"></div>`;
-}
-
-function macroSubline(macros: RecipeMacros): string {
-    if (macros.calories == null) return "";
-    const parts = [`${formatLogMacroKcal(macros.calories)} kcal`];
-    const letters: [string, number | null][] = [
-        ["P", macros.protein_g],
-        ["C", macros.carbs_g],
-        ["F", macros.fat_g],
+    // An ingredient the kitchen only partly covers is one row: what it takes,
+    // and how much it is short.
+    const shortNames = new Set(preview.shortfalls.map((s) => s.displayName));
+    const rows = [
+        ...preview.lines
+            .filter((line) => !shortNames.has(line.displayName))
+            .map((line) => {
+                const place = places?.get(line.fromItemId);
+                return itemRow({
+                    title: line.displayName,
+                    meta: amountText(line.before - line.after, line.unit),
+                    ...(place ? { subtitle: place } : {}),
+                    lead: { kind: "done", label: `Takes ${line.displayName}` },
+                });
+            }),
+        ...preview.shortfalls.map((short) => {
+            const takes = preview.lines
+                .filter((line) => line.displayName === short.displayName)
+                .map((line) => amountText(line.before - line.after, line.unit));
+            return itemRow({
+                title: short.displayName,
+                ...(takes.length > 0 ? { meta: takes.join(" + ") } : {}),
+                state: "warning",
+                subtitle: `${short.unknownFactor ? "May be short" : "Short"} ${amountText(short.amount, short.unit)}`,
+                lead: {
+                    kind: "checkbox",
+                    label: `${short.displayName} is short`,
+                    disabled: true,
+                },
+            });
+        }),
+        ...preview.unmeasured.map((row) =>
+            itemRow({
+                title: row.displayName,
+                subtitle: "No amount, so nothing is taken",
+                lead: {
+                    kind: "checkbox",
+                    label: `${row.displayName} has no amount`,
+                    disabled: true,
+                },
+            }),
+        ),
     ];
-    const grams = letters
-        .filter(([, value]) => value != null)
-        .map(([letter, value]) => `${letter} ${formatLogMacroGrams(value)}`);
-    if (grams.length > 0) parts.push(grams.join(" "));
-    return parts.join(" · ");
+    const takes =
+        rows.length > 0
+            ? sheetSection({
+                  kind: "rows",
+                  label: "Takes",
+                  content: listGroup({ rows, label: "Takes" }),
+              })
+            : sheetSection({
+                  kind: "empty",
+                  label: "Takes",
+                  text: "Nothing in your kitchen to take.",
+              });
+    return `${open}${String(takes)}<input type="hidden" name="expected" value="${esc(serializeExpectedCook(preview))}"></div>`;
 }
 
 function servingsUnit(servings: number): string {
@@ -259,57 +292,61 @@ function servingsUnit(servings: number): string {
 
 export function renderCookSheet(view: CookSheetView): string {
     const recipeId = esc(view.recipeId);
-    const slot = esc(view.slot);
     const err = view.error
-        ? `<p class="fd-recipe-cook-error" role="alert">${esc(view.error)}</p>`
+        ? `<p class="fd-recipe-error" role="alert">${esc(view.error)}</p>`
         : "";
-    const subline = macroSubline(view.macrosPerPortion);
-    const body = `<form id="${COOK_FORM_ID}" class="fd-recipe-cook-form" method="post" action="/recipes/${recipeId}/cook/confirm" data-fd-cook-form data-fd-cook-preview-url="/recipes/${recipeId}/cook/preview">
-${err}<p class="fd-recipe-cook-label">Servings</p>
-${String(
-    stepper({
-        name: "servings",
+    const servings = sheetSection({
+        kind: "amount",
         label: "Servings",
-        value: view.servings,
-        step: 1,
-        inputStep: "any",
-        min: Math.min(1, view.yieldPortions),
-        unit: servingsUnit(view.servings),
-        id: "fd-recipe-cook-servings",
-        className: "fd-recipe-cook-stepper",
-    }),
-)}
-${renderCookPreviewRegion(view.preview, view.previewError)}
-<input type="hidden" name="meal_type" value="${slot}">
+        content: stepper({
+            name: "servings",
+            label: "Servings",
+            value: view.servings,
+            step: 1,
+            inputStep: "any",
+            min: Math.min(1, view.yieldPortions),
+            unit: servingsUnit(view.servings),
+            id: "fd-recipe-cook-servings",
+            className: "fd-recipe-cook-stepper",
+        }),
+    });
+    const logFor = sheetSection({
+        kind: "choice",
+        label: "Log a portion for",
+        content: join([
+            raw('<div class="fd-recipe-cook-logrow">'),
+            choiceGroup({
+                name: "log_serving",
+                legend: "Log a portion for",
+                options: [
+                    { value: "1", label: view.viewerName, selected: true },
+                    { value: "0", label: "No one" },
+                ],
+            }),
+            raw(
+                `<p class="fd-recipe-caption fd-recipe-cook-slot">to ${esc(slotLabel(view.slot).toLowerCase())}</p></div>`,
+            ),
+        ]),
+    });
+    const body = `<form id="${COOK_FORM_ID}" class="fd-recipe-cook-form" method="post" action="/recipes/${recipeId}/cook/confirm" data-fd-cook-form data-fd-cook-preview-url="/recipes/${recipeId}/cook/preview">
+${err}${String(servings)}
+${renderCookPreviewRegion(view.preview, view.previewError, view.places)}
+<input type="hidden" name="meal_type" value="${esc(view.slot)}">
 <input type="hidden" name="submit_key" value="${esc(view.submitKey)}">
-<label class="fd-recipe-cook-log"><span class="fd-recipe-cook-log__text"><span class="fd-recipe-cook-log__title">Log 1 serving to ${slot}</span>${subline ? `<span class="fd-recipe-cook-log__sub">${esc(subline)}</span>` : ""}</span><input type="checkbox" class="fd-recipe-cook-switch" role="switch" name="log_serving" value="1" checked></label>
+${String(logFor)}
 </form>`;
     // Focus parks on the panel: the first field is the stepper, and a focus
     // ring around the number is not in the design.
     return sheet({
         id: COOK_SHEET_ID,
-        kind: "confirm",
-        title: "Cook",
-        subtitle: view.recipeName,
-        body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${COOK_FORM_ID}">Cook</button>`,
+        placement: "dialog",
+        header: { kind: "title", title: `Cook ${view.recipeName}` },
+        body: raw(body),
+        actions: {
+            kind: "single",
+            primary: { label: "Cook", type: "submit", form: COOK_FORM_ID },
+        },
         openOnLoad: view.open,
         focus: "panel",
     });
-}
-
-const POT_ICON = raw(
-    `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 11h18v2.5a5.5 5.5 0 0 1-5.5 5.5h-7A5.5 5.5 0 0 1 3 13.5V11z"/><path d="M1.5 11h21"/><path d="M9 7.5c0-1 1-1.2 1-2.2M14 7.5c0-1 1-1.2 1-2.2"/></svg>`,
-);
-
-/** The Cook button that opens the sheet. */
-export function renderCookTrigger(): Html {
-    return raw(
-        sheetTrigger({
-            target: COOK_SHEET_ID,
-            label: "Cook",
-            className: "fd-recipe-cook-btn",
-            icon: `${String(POT_ICON)}<span>Cook</span>`,
-        }),
-    );
 }

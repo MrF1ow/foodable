@@ -1,141 +1,48 @@
-/* Share links made from the app: the "Link ready" screen that shows a new
- * link's address once, and the Shared links list in Settings › Household. The
- * Share button on a recipe reuses the recipe page's Plan button (recipes.css);
- * Groceries' Share list is an item of its tab row ⋯; the sheet reuses the Add
- * to plan sheet's form (fd-plan-*). The one desktop block is last. */
+/* Share links made from the app: the sheet that asks how long a link works,
+ * and the "Link ready" sheet that shows a new link's address once, over the
+ * page the link belongs to (FigCraft 406788, 407028, 407265). The Share item
+ * lives in a ⋯ menu (the recipe's Detail bar, Groceries' tab row). */
 
-.fd-share-note {
-    margin: 0;
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-}
-
-/* The Link ready screen. */
-.fd-share-made {
+.fd-share-form {
     display: flex;
     flex-direction: column;
-    gap: var(--space-gap);
-    max-width: 560px;
-    padding-top: var(--space-gap);
-}
-
-.fd-share-made__title {
+    gap: var(--space-lg);
     margin: 0;
-    font: 600 28px/34px var(--font-display);
-    letter-spacing: -0.5px;
-    color: var(--text-primary);
 }
 
-.fd-share-made__lead,
-.fd-share-made__meta {
-    margin: 0;
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
+/* The Link ready page: the page behind the sheet is a Detail bar and a
+   title, with no bell over the corner. */
+.fd-main:has(.fd-share-made) .fd-cluster {
+    display: none;
 }
 
-.fd-share-made__lead strong {
-    color: var(--text-primary);
-    font-weight: 600;
-}
-
+/* The address box: the read-only field with its Copy button inside its end. */
 .fd-share-made__box {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-6);
-    margin-top: var(--fd-s-6);
-    padding: var(--fd-s-14);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--surface-raised);
+    position: relative;
+    min-width: 0;
 }
-
 .fd-share-made__field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-6);
+    min-width: 0;
 }
-
-.fd-share-made__label {
-    font: 600 11px/14px var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-share-made__input {
-    box-sizing: border-box;
-    width: 100%;
-    min-height: 44px;
-    margin: 0 0 var(--fd-s-4);
-    padding: 0 var(--fd-s-12);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-md);
-    background: var(--surface-bg);
-    color: var(--text-primary);
-    font: 400 14px/20px var(--font-mono, ui-monospace, monospace);
+.fd-share-made__field .fd-field__input {
+    min-width: 0;
+    padding-right: calc(var(--control-md-height) + var(--space-sm));
     text-overflow: ellipsis;
 }
-
-.fd-share-made__input:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
-.fd-share-made .fd-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    box-sizing: border-box;
-    min-height: 44px;
-    margin: 0;
-    padding: 0 var(--space-gutter);
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font: 600 15px/20px var(--font-body);
-    text-decoration: none;
-    cursor: pointer;
-}
-
-.fd-share-made__box .fd-btn {
-    background: var(--accent-fill);
-    color: var(--accent-on);
-}
-
-.fd-share-made__done .fd-btn {
-    border: 1px solid var(--line);
+.fd-share-made__box > [data-fd-btn] {
+    position: absolute;
+    top: 50%;
+    right: var(--space-xs);
+    transform: translateY(-50%);
     background: transparent;
 }
 
-.fd-share-made .fd-btn:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
+.fd-share-made__meta {
+    margin: var(--space-sm) 0 0;
+    font: 400 var(--text-caption-size) / var(--text-caption-line)
+        var(--font-body);
+    color: var(--text-secondary);
 }
-
 .fd-share-made__status {
-    min-height: 20px;
     margin: 0;
-    font: 500 13px/20px var(--font-body);
-    color: var(--accent-text);
-}
-
-.fd-share-made__done {
-    margin: var(--fd-s-6) 0 0;
-}
-
-@media (min-width: 1024px) {
-    .fd-share-made__box {
-        flex-direction: row;
-        flex-wrap: wrap;
-        align-items: flex-end;
-    }
-
-    .fd-share-made__field {
-        flex: 1 1 280px;
-    }
-
-    .fd-share-made__input {
-        margin: 0;
-    }
 }
