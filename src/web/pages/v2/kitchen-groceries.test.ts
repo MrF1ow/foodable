@@ -439,12 +439,24 @@ describe("renderKitchenGroceriesV2Page", () => {
         );
     });
 
+    /** A fragment's text: every character inside a tag skipped. */
+    function textOf(html: string): string {
+        let out = "";
+        let inTag = false;
+        for (const ch of html) {
+            if (ch === "<") inTag = true;
+            else if (ch === ">") inTag = false;
+            else if (!inTag) out += ch;
+        }
+        return out.trim();
+    }
+
     /** The buttons of a markup fragment: each tag, with its label. */
     function buttonsOf(html: string): { tag: string; label: string }[] {
         return [...html.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/g)].map(
             (m) => ({
                 tag: m[1]!,
-                label: m[2]!.replace(/<[^>]*>/g, "").trim(),
+                label: textOf(m[2]!),
             }),
         );
     }
