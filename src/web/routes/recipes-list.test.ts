@@ -45,7 +45,7 @@ import { createMemoryPlansStore } from "../../domain/plan.js";
 import { addPlanDays } from "../../domain/plan-week.js";
 import { dateInTz } from "../../domain/tz.js";
 import { createGroceryStore } from "../../domain/settings.js";
-import { PLAN_UNKNOWN_LINE_NOTE } from "../../copy/toasts.js";
+import { PLAN_UNKNOWN_LINE_NOTE, TOASTS } from "../../copy/toasts.js";
 import { createMemoryNoticeDismissalsStore } from "../../domain/notice-dismissals.js";
 import { createMemoryGroceryStore } from "../../domain/grocery.js";
 import {
@@ -464,7 +464,7 @@ describe("renderRecipeDetailRoute", () => {
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(page.status).toBe(200);
         expect(page.html).toContain("fd-recipe-detail");
-        expect(page.html).toContain("fd-recipe-cook");
+        expect(page.html).toContain("fd-recipe-bar");
         expect(page.html).toContain("Pantry");
     });
 
@@ -473,19 +473,27 @@ describe("renderRecipeDetailRoute", () => {
         const off = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(off.html).not.toContain("fd-recipe-share");
         expect(off.html).not.toContain("/share");
+        // The ⋯ stays: the star is still in it.
+        expect(off.html).toContain('aria-label="Actions for Pancakes"');
+        expect(off.html).toContain("Add to favourites");
         setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         const on = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(on.html).toContain('id="fd-recipe-share-sheet"');
         expect(on.html).toContain(`action="/recipes/${db.recipeId}/share"`);
+        const start = on.html.indexOf('<header class="fd-detail-bar');
+        const bar = on.html.slice(start, on.html.indexOf("</header>", start));
+        expect(bar).toContain('commandfor="fd-recipe-share-sheet"');
     });
 
     test("the page carries the cook sheet with a preview of what the cook takes", async () => {
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         expect(page.html).toContain('id="fd-recipe-cook-sheet"');
-        expect(page.html).toContain("Takes from your kitchen");
-        // 2 portions of a 2-portion recipe: 100 g of the 500 g of flour.
-        expect(page.html).toContain("500 g → 400 g");
-        expect(page.html).toContain("Log 1 serving to ");
+        expect(page.html).toContain(">Takes</h3>");
+        // 2 portions of a 2-portion recipe: 100 g of the 500 g of flour
+        // leaves, from the pantry it is kept in.
+        expect(page.html).toContain(">100 g</span>");
+        expect(page.html).toContain(">Pantry</span>");
+        expect(page.html).toContain("Log a portion for");
         expect(page.html).toContain('name="servings"');
         expect(page.html).not.toContain("data-sheet-open-on-load");
     });
@@ -517,7 +525,12 @@ function cookSheetBody(html: string): URLSearchParams {
         const name = /name="([^"]+)"/.exec(attrs)?.[1];
         if (!name) continue;
         const type = /type="([^"]+)"/.exec(attrs)?.[1] ?? "text";
-        if (type === "checkbox" && !/\bchecked\b/.test(attrs)) continue;
+        if (
+            (type === "checkbox" || type === "radio") &&
+            !/\bchecked\b/.test(attrs)
+        ) {
+            continue;
+        }
         params.append(name, decode(/value="([^"]*)"/.exec(attrs)?.[1] ?? "on"));
     }
     return params;
@@ -566,8 +579,9 @@ describe("GET /recipes/:id/cook/preview", () => {
         expect(res.status).toBe(200);
         expect(res.headers.get("cache-control")).toContain("no-store");
         const html = await res.text();
-        // 4 servings of a 2-portion recipe: 200 g of the 500 g.
-        expect(html).toContain("500 g → 300 g");
+        // 4 servings of a 2-portion recipe: 200 g of the 500 g leave.
+        expect(html).toContain(">200 g</span>");
+        expect(html).toContain(">Pantry</span>");
         expect(html).toContain("data-fd-cook-region");
         expect(html).not.toContain("<html");
         expect(await flourLeft()).toBe(500);
@@ -575,7 +589,8 @@ describe("GET /recipes/:id/cook/preview", () => {
 
     test("names what is short when the kitchen cannot cover it", async () => {
         const html = await (await get("20")).text();
-        expect(html).toContain("fd-recipe-cook-use--short");
+        expect(html).toContain("fd-item-row--warning");
+        expect(html).toMatch(/<input[^>]*type="checkbox"[^>]*disabled/);
     });
 
     test("rejects junk servings without a preview", async () => {
@@ -632,7 +647,7 @@ describe("POST /recipes/:id/cook/confirm", () => {
     test("a double submit with the switch off cooks once", async () => {
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
-        body.delete("log_serving");
+        body.set("log_serving", "0");
         const first = await postConfirm(body);
         expect(first.status).toBe(303);
         expect(toastOf(first)).toBeNull();
@@ -651,7 +666,7 @@ describe("POST /recipes/:id/cook/confirm", () => {
     test("with the switch off it cooks and logs nothing", async () => {
         const page = await renderRecipeDetailRoute(ALICE, db.recipeId);
         const body = cookSheetBody(page.html);
-        body.delete("log_serving");
+        body.set("log_serving", "0");
         const res = await postConfirm(body);
         expect(res.status).toBe(303);
         expect(await flourLeft()).toBe(400);
@@ -964,9 +979,7 @@ describe("steps-mention warnings on the recipe page", () => {
         const id = await friedRice();
         const html = await pageOf(id);
         expect(html).toContain("fd-mention-card");
-        expect(html).toContain(
-            "The steps mention egg, which isn't an ingredient.",
-        );
+        expect(html).toContain(">Steps mention egg</p>");
         expect(html).toContain(`action="/recipes/${id}/mentions/add"`);
         expect(html).toContain(`action="/recipes/${id}/mentions/dismiss"`);
         expect(html).toContain('<span class="fd-mention-mark">eggs</span>');
@@ -1212,15 +1225,14 @@ describe("favourites on the pages", () => {
         expect(page.html).toContain("No favourites yet");
     });
 
-    test("the recipe page star reflects the viewer's own state", async () => {
+    test("the recipe page's star item reflects the viewer's own state", async () => {
         await db.recipesStore.setFavourite(HH, BOB, db.recipeId, true);
         const unstarred = await renderRecipeDetailRoute(ALICE, db.recipeId);
-        expect(unstarred.html).toContain("fd-star-form");
-        expect(unstarred.html).not.toContain("fd-star--on");
+        expect(unstarred.html).toContain("Add to favourites");
+        expect(unstarred.html).not.toContain("Remove from favourites");
         await db.recipesStore.setFavourite(HH, ALICE, db.recipeId, true);
         const starred = await renderRecipeDetailRoute(ALICE, db.recipeId);
-        expect(starred.html).toContain("fd-star--on");
-        expect(starred.html).toContain("Remove Pancakes from favourites");
+        expect(starred.html).toContain("Remove from favourites");
     });
 });
 
@@ -2194,6 +2206,101 @@ describe("a repeating plan: add, remove and move", () => {
     });
 });
 
+describe("POST /recipes/:id/ingredients/:foodId/add-to-grocery", () => {
+    function addIngredient(recipeId: string, foodId: string) {
+        return recipesApp().request(
+            `http://x/recipes/${recipeId}/ingredients/${foodId}/add-to-grocery`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: "",
+            },
+        );
+    }
+
+    test("puts the food on the list and lands back on the recipe, with no toast", async () => {
+        const market = await createGroceryStore(db.settingsStore, HH, "Market");
+        const res = await addIngredient(db.recipeId, db.flourId);
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${db.recipeId}`);
+        expect(toastOf(res)).toBeNull();
+        const lines = await db.groceryStore.listLines(HH);
+        expect(lines).toHaveLength(1);
+        expect(lines[0]).toMatchObject({
+            foodId: db.flourId,
+            storeId: market.id,
+        });
+    });
+
+    test("a second add folds into the unticked line, and the page says the food is on the list", async () => {
+        await createGroceryStore(db.settingsStore, HH, "Market");
+        expect((await addIngredient(db.recipeId, db.flourId)).status).toBe(303);
+        const again = await addIngredient(db.recipeId, db.flourId);
+        expect(again.status).toBe(303);
+        expect(toastOf(again)).toBeNull();
+        expect(await db.groceryStore.listLines(HH)).toHaveLength(1);
+        const html = (await renderRecipeDetailRoute(ALICE, db.recipeId)).html;
+        expect(html).toContain("On the list");
+        expect(html).not.toContain(
+            `/recipes/${db.recipeId}/ingredients/${db.flourId}/add-to-grocery`,
+        );
+    });
+
+    test("the page's ingredient menu posts exactly this route", async () => {
+        await createGroceryStore(db.settingsStore, HH, "Market");
+        const html = (await renderRecipeDetailRoute(ALICE, db.recipeId)).html;
+        expect(html).toContain(
+            `action="/recipes/${db.recipeId}/ingredients/${db.flourId}/add-to-grocery"`,
+        );
+    });
+
+    test("with no store to put it in the recipe answers in place, and nothing is written", async () => {
+        const res = await addIngredient(db.recipeId, db.flourId);
+        expect(res.status).toBe(400);
+        expect(await res.text()).toContain('class="fd-recipe-error"');
+        expect(await db.groceryStore.listLines(HH)).toHaveLength(0);
+    });
+
+    test("a food the recipe does not use, and a draft, put nothing on the list", async () => {
+        await createGroceryStore(db.settingsStore, HH, "Market");
+        const other = await db.foodsStore.insertFood(
+            newFood({
+                householdId: HH,
+                kind: "food",
+                name: "Salt",
+                calories: 0,
+                proteinG: 0,
+                carbsG: 0,
+                fatG: 0,
+                gramsPerMl: null,
+                gramsPerEach: null,
+            }),
+        );
+        expect((await addIngredient(db.recipeId, other.id)).status).toBe(404);
+        const draft = await createRecipe(db.recipesStore, {
+            householdId: HH,
+            creatorId: ALICE,
+            name: "Imported stew",
+            yieldPortions: 2,
+            verification: "unverified",
+            draftExpiresAt: "2026-12-01T12:00:00.000Z",
+        });
+        await addRecipeIngredientById(db.recipesStore, db.foodsStore, {
+            householdId: HH,
+            recipeId: draft.id,
+            foodId: db.flourId,
+            amount: 100,
+            unit: "g",
+        });
+        expect((await addIngredient(draft.id, db.flourId)).status).toBe(409);
+        expect((await addIngredient("nope", db.flourId)).status).toBe(404);
+        expect(await db.groceryStore.listLines(HH)).toHaveLength(0);
+    });
+});
+
 describe("POST /recipes/plan/add-missing", () => {
     function addMissing(back = "recipes") {
         return postPlanPath(
@@ -3013,6 +3120,7 @@ describe("drafts in the app", () => {
             name?: string;
             steps?: string | null;
             expiresAt?: string;
+            importedAt?: string;
         } = {},
     ): Promise<string> {
         const recipe = await createRecipe(db.recipesStore, {
@@ -3043,7 +3151,7 @@ describe("drafts in the app", () => {
             unresolvedLines: [],
             problems: [],
             dismissedMentions: [],
-            importedAt: "2026-11-24T12:00:00.000Z",
+            importedAt: opts.importedAt ?? "2026-11-24T12:00:00.000Z",
         });
         return recipe.id;
     }
@@ -3066,23 +3174,30 @@ describe("drafts in the app", () => {
         expect(html).toContain('id="fd-recipe-draft"');
         expect(html).toContain(`action="/recipes/${id}/save"`);
         expect(html).toContain("Add the steps.");
-        expect(html).toContain("deleted on 2026-12-01");
+        expect(html).toContain("deleted on Tue 1 Dec");
+        expect(html).toContain('id="fd-recipe-draft-bar"');
         expect(html).not.toContain('id="fd-recipe-cook-sheet"');
-        expect(html).not.toContain("fd-recipe-cook-btn");
-        expect(html).not.toContain("fd-recipe-plan-btn");
-        // A saved recipe's page has no Save.
+        expect(html).not.toContain('id="fd-recipe-plan-sheet"');
+        expect(html).not.toContain('id="fd-recipe-share-sheet"');
+        expect(html).not.toContain(">Cook<");
+        expect(html).not.toContain(">Plan<");
+        expect(html.toLowerCase()).not.toContain("unverified");
+        // A saved recipe's page has no Save and no draft bar.
         const saved = (await renderRecipeDetailRoute(ALICE, db.recipeId)).html;
         expect(saved).not.toContain("/save");
-        expect(saved).toContain("fd-recipe-cook-btn");
+        expect(saved).not.toContain("fd-recipe-draft");
+        expect(saved).toContain(">Cook<");
+        expect(saved.toLowerCase()).not.toContain("unverified");
     });
 
     test("Save refuses a failing check in place with what is left, and saves once it passes", async () => {
         const id = await draftOf();
         const refused = await postSave(id);
         expect(refused.status).toBe(422);
-        expect(await refused.text()).toContain(
-            "Not saved yet. Fix these first: Add the steps.",
-        );
+        const refusedHtml = await refused.text();
+        expect(refusedHtml).toContain("Not saved yet.");
+        // What is left is listed once, on the draft card.
+        expect(refusedHtml.split("Add the steps.")).toHaveLength(2);
         expect((await db.recipesStore.getRecipe(HH, id))?.verification).toBe(
             "unverified",
         );
@@ -3099,6 +3214,84 @@ describe("drafts in the app", () => {
         // Saving a saved recipe changes nothing.
         expect((await postSave(ready)).status).toBe(303);
         expect((await postSave("nope")).status).toBe(404);
+    });
+
+    test("an older import the backfill made a draft shows the draft bar, and Save verifies it once the check passes", async () => {
+        // Imported long before drafts, still unverified; the backfill gave it
+        // seven days from the day it ran.
+        const old = await draftOf({
+            name: "Old import",
+            steps: "1. Simmer",
+            importedAt: "2026-09-01T12:00:00.000Z",
+            expiresAt: "2026-12-01T12:00:00.000Z",
+        });
+        const html = (await renderRecipeDetailRoute(ALICE, old)).html;
+        expect(html).toContain('id="fd-recipe-draft-bar"');
+        expect(html).toContain(`action="/recipes/${old}/save"`);
+        expect(html).toContain("deleted on Tue 1 Dec");
+        expect(html).not.toContain(">Cook<");
+        expect(html).not.toContain(">Plan<");
+        expect(html.toLowerCase()).not.toContain("unverified");
+        // The check passes (it has its steps), so Save answers 303, no toast.
+        const res = await postSave(old);
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${old}`);
+        expect(toastOf(res)).toBeNull();
+        expect((await db.recipesStore.getRecipe(HH, old))?.verification).toBe(
+            "verified",
+        );
+        // After Save the page is a saved recipe's: no draft bar, Cook is back.
+        const saved = (await renderRecipeDetailRoute(ALICE, old)).html;
+        expect(saved).not.toContain("fd-recipe-draft");
+        expect(saved).toContain(">Cook<");
+    });
+
+    test("a Save that fails the check answers 4xx in place and lists what is left, and saves nothing", async () => {
+        const old = await draftOf({
+            name: "Old import",
+            importedAt: "2026-09-01T12:00:00.000Z",
+        });
+        const res = await postSave(old);
+        expect(res.status).toBe(422);
+        expect(toastOf(res)).toBeNull();
+        const html = await res.text();
+        expect(html).toContain("Not saved yet.");
+        // The page it answers with is still the draft's, with Save, and
+        // lists what is left once.
+        expect(html).toContain('id="fd-recipe-draft-bar"');
+        expect(html.split("Add the steps.")).toHaveLength(2);
+        expect((await db.recipesStore.getRecipe(HH, old))?.verification).toBe(
+            "unverified",
+        );
+    });
+
+    test("cooking a draft is refused with the toast that says to save it first", async () => {
+        const id = await draftOf({ steps: "1. Simmer" });
+        const res = await recipesApp().request(
+            `http://x/recipes/${id}/cook/confirm`,
+            {
+                method: "POST",
+                headers: {
+                    cookie: cookieFor(ALICE),
+                    "content-type": "application/x-www-form-urlencoded",
+                },
+                body: new URLSearchParams({
+                    servings: "2",
+                    meal_type: "dinner",
+                    log_serving: "1",
+                    submit_key: "k",
+                }).toString(),
+            },
+        );
+        expect(res.status).toBe(303);
+        expect(res.headers.get("location")).toBe(`/recipes/${id}`);
+        const toast = toastOf(res);
+        expect(toast?.key).toBe("recipes.unverified.blocked");
+        expect(TOASTS[toast!.key as keyof typeof TOASTS].text).toBe(
+            "This recipe is a draft. Save it before you cook it.",
+        );
+        expect(db.meals).toHaveLength(0);
+        expect(await flourLeft()).toBe(500);
     });
 
     test("the list shows a member their own drafts with their expiry, apart from the recipes", async () => {
@@ -3138,7 +3331,7 @@ describe("drafts in the app", () => {
         db.ownerTimezone = "America/New_York";
         const id = await draftOf({ expiresAt: "2026-12-01T02:00:00.000Z" });
         const page = (await renderRecipeDetailRoute(ALICE, id)).html;
-        expect(page).toContain("deleted on 2026-11-30");
+        expect(page).toContain("deleted on Mon 30 Nov");
         expect(page).not.toContain("2026-12-01");
         const list = (await renderRecipesListPage(ALICE, {})).html;
         expect(list).toContain("deleted Mon 30 Nov unless saved");
@@ -3158,9 +3351,9 @@ describe("drafts in the app", () => {
     test("a draft has no favourite star, and starring one is refused", async () => {
         const id = await draftOf();
         const html = (await renderRecipeDetailRoute(ALICE, id)).html;
-        expect(html).not.toContain("fd-recipe-star");
+        expect(html).not.toContain("favourites");
         const saved = (await renderRecipeDetailRoute(ALICE, db.recipeId)).html;
-        expect(saved).toContain("fd-recipe-star");
+        expect(saved).toContain("favourites");
         const res = await postFavourite(
             new URLSearchParams({ on: "1", back: "recipe" }),
             { recipeId: id },

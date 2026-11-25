@@ -35,11 +35,7 @@ import { listGroup } from "../../components/v2/list-group.js";
 import { menu, menuRow, type MenuItem } from "../../components/v2/menu.js";
 import { miniCard } from "../../components/v2/mini-card.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
-import {
-    sheet,
-    sheetSection,
-    sheetTrigger,
-} from "../../components/v2/sheet.js";
+import { sheet, sheetSection } from "../../components/v2/sheet.js";
 import { stepper } from "../../components/v2/stepper.js";
 
 export const PLAN_SHEET_ID = "fd-recipe-plan-sheet";
@@ -322,22 +318,6 @@ ${err}${planFields({
         openOnLoad: view.open,
         focus: "panel",
     });
-}
-
-const CALENDAR_ICON = raw(
-    `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3.5" y="5" width="17" height="15.5" rx="3"/><path d="M3.5 10h17M8 3.5v3M16 3.5v3"/></svg>`,
-);
-
-/** The Plan button that opens the sheet. */
-export function renderPlanTrigger(): Html {
-    return raw(
-        sheetTrigger({
-            target: PLAN_SHEET_ID,
-            label: "Plan",
-            className: "fd-recipe-plan-btn",
-            icon: `${String(CALENDAR_ICON)}<span>Plan</span>`,
-        }),
-    );
 }
 
 /** How many days ahead the Day pull-down reaches. */

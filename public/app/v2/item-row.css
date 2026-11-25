@@ -120,6 +120,16 @@ a.fd-item-row__face:focus-visible,
 .fd-item-row__select-input:checked + .fd-item-row__select-box .fd-icon {
     opacity: 1;
 }
+/* A box that cannot be ticked in a live row (a line the cook cannot take). */
+.fd-item-row__check:has(.fd-item-row__check-input:disabled) {
+    cursor: default;
+}
+.fd-item-row__check-input:disabled {
+    cursor: default;
+}
+.fd-item-row__check-input:disabled + .fd-item-row__check-box {
+    opacity: 0.4;
+}
 .fd-item-row__check-input:focus-visible + .fd-item-row__check-box,
 .fd-item-row__select-input:focus-visible + .fd-item-row__select-box {
     outline: 2px solid var(--accent-fill);

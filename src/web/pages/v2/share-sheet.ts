@@ -1,21 +1,21 @@
 /**
- * Making a share link from the app: the Share button and sheet on a recipe and
- * on the grocery list, and the screen that shows the new link's address once.
- *
- * FigCraft has no Share control. The recipe page's header row (desktop 48815
- * "Page header": Edit, Add to plan, Cook) and the phone's action row (22840:
- * Add to plan, Cook) keep the primary last, so Share goes first as one more
- * secondary button: Share, Add to plan, Cook. Groceries (phone
- * 21909 / 26821, desktop 47548 / 56431) takes it in the title row beside
- * "Add to list". The sheet is the app's own confirm sheet: an expiry choice
- * and Create link.
+ * Making a share link from the app: the sheet that asks how long the link
+ * works (opened from the Detail bar's ⋯ on a recipe, or the Groceries ⋯), and
+ * the screen that shows the new link's address once, as a "Link ready" sheet
+ * (FigCraft 406788, 407028 and 407265).
  *
  * The form opts out of Turbo. It answers with a 200 page that holds the
  * address, and Turbo drops a form response that is not a redirect; a redirect
  * would have to carry the address in a URL or a cookie, and it must not.
  */
-import { esc, raw, type Html } from "../../components/v2/html.js";
-import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
+import { button } from "../../components/v2/button.js";
+import { choiceGroup } from "../../components/v2/chips.js";
+import { detailBar } from "../../components/v2/detail-bar.js";
+import { field } from "../../components/v2/field.js";
+import { esc, raw } from "../../components/v2/html.js";
+import { pageHeader } from "../../components/v2/page-header.js";
+import { pageLayout } from "../../components/v2/page-layout.js";
+import { sheet, sheetSection } from "../../components/v2/sheet.js";
 import type { AppChromeBase } from "../../attention.js";
 import { renderAppShell } from "../../shell.js";
 
@@ -27,15 +27,27 @@ export type ShareExpiryChoice = {
     days: number | null;
 };
 
-/** Never first, and the default: a link someone was sent should keep working. */
+/** Never is the default: a link someone was sent should keep working. */
 export const SHARE_EXPIRY_CHOICES: readonly ShareExpiryChoice[] = [
-    { value: "never", label: "Never", days: null },
-    { value: "7", label: "7 days", days: 7 },
-    { value: "30", label: "30 days", days: 30 },
-    { value: "90", label: "90 days", days: 90 },
+    { value: "7", label: "1 week", days: 7 },
+    { value: "30", label: "1 month", days: 30 },
+    { value: "90", label: "3 months", days: 90 },
+    { value: "never", label: "Never expires", days: null },
 ];
 
 /** The days a posted choice stands for, or null when the form never offered it. */
+
+/**
+ * Where closing Link ready goes, as a key the script builds the path from
+ * (never a whole address read back off the page): "groceries" or
+ * "recipe:<id>"; anything else is "" and the sheet just closes.
+ */
+export function shareBackKey(backHref: string): string {
+    if (backHref === "/kitchen/groceries") return "groceries";
+    const m = /^\/recipes\/([^/?#]+)$/.exec(backHref);
+    return m ? `recipe:${decodeURIComponent(m[1]!)}` : "";
+}
+
 export function parseShareExpiry(
     value: string,
 ): { ok: true; days: number | null } | { ok: false } {
@@ -46,57 +58,55 @@ export function parseShareExpiry(
 export const RECIPE_SHARE_SHEET_ID = "fd-recipe-share-sheet";
 export const GROCERY_SHARE_SHEET_ID = "fd-grocery-share-sheet";
 
-const SHARE_ICON = raw(
-    `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 15V4"/><path d="M8 7.5 12 4l4 3.5"/><path d="M6 11H5.5A1.5 1.5 0 0 0 4 12.5v6A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5v-6a1.5 1.5 0 0 0-1.5-1.5H18"/></svg>`,
-);
-
-/** The Share button that opens the sheet. `className` styles it where it sits. */
-export function renderShareTrigger(target: string, className: string): Html {
-    return raw(
-        sheetTrigger({
-            target,
-            label: "Share",
-            className,
-            icon: `${String(SHARE_ICON)}<span>Share</span>`,
-        }),
-    );
-}
-
 export type ShareSheetView = {
     id: string;
     /** Where the form posts. */
     action: string;
     title: string;
-    /** The recipe's name, or what the list is. */
-    subtitle: string;
-    /** "recipe" or "grocery list": the sentence says who can read what. */
+    /** A line under the title; the recipe's sheet has none. */
+    subtitle?: string;
+    /** "recipe" or "grocery list". */
     what: string;
     /** A refused post re-renders the page with the sheet open. */
     open?: boolean;
     error?: string;
 };
 
-/** The sheet: how long the link works, and Create link. */
+/** The sheet: how long the link works, and Make link. */
 export function renderShareSheet(view: ShareSheetView): string {
     const formId = `${view.id}-form`;
     const err = view.error
-        ? `<p class="fd-plan-error" role="alert">${esc(view.error)}</p>`
+        ? `<p class="fd-recipe-error" role="alert">${esc(view.error)}</p>`
         : "";
-    const options = SHARE_EXPIRY_CHOICES.map(
-        (choice) =>
-            `<option value="${esc(choice.value)}"${choice.days === null ? " selected" : ""}>${esc(choice.label)}</option>`,
-    ).join("");
-    const body = `<form id="${esc(formId)}" class="fd-plan-form" method="post" action="${esc(view.action)}" data-turbo="false">
-${err}<p class="fd-share-note">Anyone who has the link can read this ${esc(view.what)}, without signing in. The link is shown once, when you create it.</p>
-<label class="fd-plan-field"><span class="fd-plan-field__label">Link expires</span><span class="fd-plan-select"><select name="expires">${options}</select></span></label>
+    const expiry = sheetSection({
+        kind: "choice",
+        label: "Link works for",
+        content: choiceGroup({
+            name: "expires",
+            legend: "Link works for",
+            options: SHARE_EXPIRY_CHOICES.map((choice) => ({
+                value: choice.value,
+                label: choice.label,
+                selected: choice.days === null,
+            })),
+        }),
+    });
+    const body = `<form id="${esc(formId)}" class="fd-share-form" method="post" action="${esc(view.action)}" data-turbo="false">
+${err}${String(expiry)}
 </form>`;
     return sheet({
         id: view.id,
-        kind: "confirm",
-        title: view.title,
-        subtitle: view.subtitle,
-        body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${esc(formId)}">Create link</button>`,
+        placement: "dialog",
+        header: {
+            kind: "title",
+            title: view.title,
+            ...(view.subtitle ? { subtitle: view.subtitle } : {}),
+        },
+        body: raw(body),
+        actions: {
+            kind: "single",
+            primary: { label: "Make link", type: "submit", form: formId },
+        },
         openOnLoad: view.open,
         focus: "panel",
     });
@@ -145,28 +155,72 @@ export type ShareCreatedView = {
     active: "recipes" | "grocery";
 };
 
+const MADE_SHEET_ID = "fd-share-made-sheet";
+
 /**
- * The one screen that shows a link's address. The address is in a single
- * read-only field and nowhere else in the markup (the Copy button and the
- * script read the field), and the page is sent no-store.
+ * The one screen that shows a link's address: the page the link belongs to,
+ * as a Detail bar and its title, with the "Link ready" sheet open over it.
+ * The address is in a single read-only field and nowhere else in the markup
+ * (the Copy button and the script read the field), and the page is sent
+ * no-store. Done goes back to the page; so does closing the sheet.
  */
 export function renderShareCreatedBody(view: ShareCreatedView): string {
-    const subject = view.name
-        ? `<strong>${esc(view.name)}</strong>`
-        : `the ${esc(view.what)}`;
-    return `<div class="fd-share-made">
-<h1 class="fd-share-made__title">Link ready</h1>
-<p class="fd-share-made__lead">Anyone who has this link can read ${subject}, without signing in. It is shown only now: copy it before you leave.</p>
-<div class="fd-share-made__box" data-fd-share-made>
-<label class="fd-share-made__field"><span class="fd-share-made__label">Share link</span>
-<input class="fd-share-made__input" type="text" readonly spellcheck="false" autocomplete="off" value="${esc(view.url)}" data-fd-share-url />
-</label>
-<button type="button" class="fd-btn fd-btn--primary fd-share-made__copy" data-fd-share-copy>Copy link</button>
-</div>
-<p class="fd-share-made__status" role="status" aria-live="polite" data-fd-share-status></p>
-<p class="fd-share-made__meta">${esc(shareExpiryLabel(view.expiresAt))}. Revoke it any time in Settings › Household.</p>
-<p class="fd-share-made__done"><a class="fd-btn" href="${esc(view.backHref)}" data-turbo="false">Done</a></p>
-</div>`;
+    const subtitle = view.name ?? "Grocery list";
+    const urlField = field({
+        id: "fd-share-made-url",
+        label: "Share link",
+        labelHidden: true,
+        name: "share_url",
+        type: "text",
+        value: view.url,
+        readonly: true,
+        spellcheck: false,
+        autocomplete: "off",
+        inputData: { "fd-share-url": "" },
+        className: "fd-share-made__field",
+    });
+    const copy = button({
+        round: true,
+        icon: "copy",
+        label: "Copy link",
+        attrs: { "data-fd-share-copy": "" },
+    });
+    const body = sheetSection({
+        kind: "custom",
+        label: "Share link",
+        content: raw(
+            `<div class="fd-share-made__box" data-fd-share-made data-fd-share-back="${esc(shareBackKey(view.backHref))}">${urlField}${copy}</div>
+<p class="fd-share-made__meta">${esc(shareExpiryLabel(view.expiresAt))} · shown only once</p>
+<p class="fd-share-made__meta">Anyone with the link can read this ${esc(view.what)}. Revoke it in Settings › Household.</p>
+<p class="fd-share-made__status fd-sr" role="status" aria-live="polite" data-fd-share-status></p>`,
+        ),
+    });
+    const made = sheet({
+        id: MADE_SHEET_ID,
+        placement: "dialog",
+        header: { kind: "title", title: "Link ready", subtitle },
+        body: body,
+        actions: {
+            kind: "single",
+            // Closing the sheet goes back to the page (share-link.js), so Done
+            // is a close, not a form: a GET form would add a stray "?".
+            primary: {
+                label: "Done",
+                attrs: { command: "close", commandfor: MADE_SHEET_ID },
+            },
+        },
+        openOnLoad: true,
+        focus: "panel",
+    });
+    const page = pageLayout({
+        layout: "single",
+        header: detailBar({
+            back: { href: view.backHref, attrs: { "data-turbo": "false" } },
+            balance: true,
+        }),
+        content: pageHeader({ title: subtitle }),
+    });
+    return `<div class="fd-share-made">${String(page)}${made}</div>`;
 }
 
 export function renderShareCreatedPage(view: ShareCreatedView): string {

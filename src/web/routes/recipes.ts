@@ -118,7 +118,7 @@ import {
     WEEK_PLAN_DAYS,
 } from "../../domain/plan-week.js";
 import { householdToday } from "../../db/restock.js";
-import { GroceryInputError } from "../../domain/grocery.js";
+import { addGroceryFoodById, GroceryInputError } from "../../domain/grocery.js";
 import { liveNotifier } from "../../db/notify.js";
 import { liveRecipePlansStore, planTransaction } from "../../db/plans.js";
 import { loadWeekPlanInputs } from "../loaders-plan.js";
@@ -495,12 +495,15 @@ recipesRoutes.get("/recipes/:id/cook/preview", requireMember, async (c) => {
             400,
         );
     }
-    const { preview, error } = await loadCookPreview(
+    const { preview, error, places } = await loadCookPreview(
         member.householdId,
         c.req.param("id"),
         servings,
     );
-    return c.html(renderCookPreviewRegion(preview, error), preview ? 200 : 400);
+    return c.html(
+        renderCookPreviewRegion(preview, error, places),
+        preview ? 200 : 400,
+    );
 });
 
 /**
@@ -703,6 +706,56 @@ recipesRoutes.post("/recipes/:id/favourite", requireMember, async (c) => {
     // toast: none (the star shows the new state)
     return c.redirect(`/recipes/${recipeId}`, 303);
 });
+
+/**
+ * An ingredient's Add to grocery list, from its ⋯ on the recipe page: the
+ * food goes on the list as `add_grocery_line` with only its `food_id` would
+ * (its usual amount and store, folded into an unticked line for the food),
+ * and the person stays on the recipe. A draft
+ * cannot be put on the list; a food that is not one of the recipe's
+ * ingredients is a 404.
+ */
+recipesRoutes.post(
+    "/recipes/:id/ingredients/:foodId/add-to-grocery",
+    requireMember,
+    async (c) => {
+        const userId = c.get("userId");
+        const member = siteMember(c);
+        const recipeId = c.req.param("id");
+        const foodId = c.req.param("foodId");
+        if (!UUID_SHAPE.test(recipeId) || !UUID_SHAPE.test(foodId)) {
+            return c.text("Not found", 404);
+        }
+        const recipes = liveRecipesStore();
+        const recipe = await recipes.getRecipe(member.householdId, recipeId);
+        if (!recipe) return c.text("Not found", 404);
+        // A draft is not on the list yet: Save it first.
+        if (isRecipeDraft(recipe)) return c.text(RECIPE_DRAFT_REFUSAL, 409);
+        const ingredients = await recipes.listIngredients(
+            member.householdId,
+            recipeId,
+        );
+        if (!ingredients.some((row) => row.foodId === foodId)) {
+            return c.text("Not found", 404);
+        }
+        try {
+            await addGroceryFoodById(
+                liveGroceryStore(),
+                liveSettingsStore(),
+                liveFoodsStore(),
+                // An unticked line for the food is the one this lands on, as
+                // `add_grocery_line` does; the page shows it as on the list.
+                { householdId: member.householdId, foodId, reuseListed: true },
+            );
+        } catch (err) {
+            if (!(err instanceof GroceryInputError)) throw err;
+            const page = await recipeFormError(userId, recipeId, err);
+            return c.html(page.html, page.status);
+        }
+        // toast: none (the row reads "On the list")
+        return c.redirect(`/recipes/${recipeId}`, 303);
+    },
+);
 
 /**
  * Add the food a warning names to the recipe, with the amount and note its step
@@ -1397,9 +1450,8 @@ recipesRoutes.post("/recipes/:id/save", requireMember, async (c) => {
         );
         if (!result.saved) {
             const page = await renderRecipeDetailRoute(userId, recipeId, {
-                error: `Not saved yet. Fix these first: ${result.problems
-                    .map((p) => p.message)
-                    .join(" ")}`,
+                // The draft card lists what is left; the banner only says so.
+                error: "Not saved yet. Fix what is listed below, then save it again.",
             });
             return c.html(page.html, 422);
         }

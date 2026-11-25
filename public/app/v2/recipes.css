@@ -167,195 +167,101 @@
     }
 }
 
-/* Recipe detail */
+/* Recipe page (FigCraft 402901, 405904, 403448 and the desktop twins): a
+ * Detail bar, the title, then the Per serving tiles, the Ingredients as Item
+ * rows and the Steps. On the phone Plan and Cook (or the draft bar's Save)
+ * float above the nav pill; from 1024 px the Page layout's two columns put
+ * the ingredients left and the steps right, and the bar sits under the Detail
+ * bar at the right. The page draws its own Detail bar over the corner the bell
+ * takes on the other pages. */
 
 .fd-recipe-detail {
+    padding: 0 0 var(--space-4xl);
+}
+.fd-recipe-layout .fd-page-layout__box {
+    gap: var(--space-md);
+}
+.fd-recipe-layout .fd-page-layout__header {
     display: flex;
     flex-direction: column;
-    gap: var(--space-section);
-    padding: 0 0 var(--fd-s-12);
+    gap: var(--space-md);
+}
+.fd-recipe-layout .fd-page-layout__columns {
+    flex-direction: column;
+    align-items: stretch;
+    gap: var(--space-2xl);
+}
+.fd-recipe-layout .fd-page-layout__column {
+    flex: none;
+    min-width: 0;
+    gap: var(--space-2xl);
+}
+/* A long title, link or step never widens the page. */
+.fd-recipe-detail,
+.fd-recipe-head,
+.fd-recipe-layout .fd-page-layout__column {
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
 }
 
-.fd-recipe-back {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-6);
-    margin: 0;
-    padding-top: var(--fd-s-4);
-}
-
-.fd-recipe-back__btn {
-    display: inline-flex;
-}
-
-.fd-recipe-back__link {
-    display: none;
-    align-items: center;
-    gap: var(--fd-s-4);
-    font: 500 14px/20px var(--font-body);
-    color: var(--text-primary);
-    text-decoration: none;
-}
-
-.fd-recipe-macros-kicker {
-    margin: 0 0 var(--fd-s-6);
-    font: 600 11px/14px var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-recipe-header {
+.fd-recipe-head {
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-6);
+    gap: var(--space-md);
+}
+.fd-recipe-head .fd-page-header {
+    padding: 0;
+}
+.fd-recipe-head .fd-page-header__titles {
+    gap: var(--space-md);
+}
+.fd-recipe-head .fd-page-header__subtitle {
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
 }
 
-.fd-recipe-title {
+.fd-recipe-caption {
     margin: 0;
-    font: 600 28px/34px var(--font-display);
-    color: var(--text-primary);
-    letter-spacing: -0.5px;
-}
-
-.fd-recipe-meta {
-    margin: 0;
-    font: 400 13px/17px var(--font-body);
+    font: 400 var(--text-caption-size) / var(--text-caption-line)
+        var(--font-body);
     color: var(--text-secondary);
 }
-
-.fd-recipe-meta--you {
-    font-size: 12px;
-    line-height: 16px;
-    color: var(--text-tertiary);
+.fd-recipe-portions {
+    margin-top: var(--space-sm);
+}
+.fd-recipe-cook-logrow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-sm);
+}
+.fd-recipe-caption--warn {
+    color: var(--status-warn);
 }
 
+.fd-recipe-macros {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
 .fd-recipe-macro-tiles {
     margin: 0;
 }
 
-.fd-recipe-macro-gaps {
-    margin: var(--fd-s-7) 0 0;
-    padding-left: 1.1em;
-    font: 400 13px/18px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-recipe-macros-incomplete {
-    margin: 0 0 var(--fd-s-7);
-    font: 500 14px/20px var(--font-body);
-    color: var(--status-warn);
-}
-
-.fd-recipe-layout {
+.fd-recipe-group {
     display: flex;
     flex-direction: column;
-    gap: var(--space-section);
+    gap: var(--space-md);
 }
 
-.fd-recipe-col {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-section);
-}
-
-.fd-recipe-section-head {
-    display: flex;
-    align-items: flex-end;
-    gap: var(--fd-s-10);
-    margin: 0 0 var(--fd-s-10);
-    padding: 0 0 var(--fd-s-7);
-    border-bottom: 1px solid var(--line);
-}
-
-.fd-recipe-section-head__title {
+.fd-recipe-error {
     margin: 0;
-    font: 600 11px/14px var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-recipe-section-head__count {
-    margin-left: auto;
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-recipe-place + .fd-recipe-place {
-    margin-top: var(--fd-s-14);
-}
-
-.fd-recipe-place__title {
-    margin: 0 0 var(--fd-s-7);
-    font: 600 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-recipe-ing-list {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-}
-
-.fd-recipe-ing {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    align-items: center;
-    gap: var(--fd-s-10);
-    min-height: 0;
-    padding: var(--space-row) 0;
-    border-radius: 0;
-    background: transparent;
-    border: 0;
-    border-bottom: 1px solid var(--line);
-}
-
-.fd-recipe-ing:last-child {
-    border-bottom: 0;
-}
-
-.fd-recipe-ing__dot {
-    flex: none;
-    width: 7px;
-    height: 7px;
-    border-radius: 999px;
-    background: var(--accent-fill);
-}
-
-.fd-recipe-ing__dot--miss {
-    background: var(--status-over);
-}
-
-.fd-recipe-ing__body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-2);
-    min-width: 0;
-}
-
-.fd-recipe-ing__name {
-    font: 400 15px/20px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-recipe-ing__note {
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-recipe-ing__note--miss {
+    padding: var(--space-md) var(--space-lg);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--status-over) 12%, transparent);
     color: var(--status-over);
-}
-
-.fd-recipe-ing__amount {
     font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-    text-align: right;
-    white-space: nowrap;
 }
 
 .fd-recipe-empty {
@@ -364,86 +270,147 @@
     color: var(--text-secondary);
 }
 
-/* Steps that name a food the ingredients never list: a warm card at the top
-   of Ingredients with Add and Dismiss, and the same dotted underline on the
-   food in its step. Advice only; nothing else on the page depends on it. */
+/* The steps: plain lines under hairlines. The public share page uses the same
+   list, with its own section head. */
+.fd-recipe-steps {
+    margin: 0;
+    padding-left: 1.25em;
+    font: 400 var(--text-body-size) / var(--text-body-line) var(--font-body);
+    color: var(--text-primary);
+}
+.fd-recipe-steps li + li {
+    margin-top: var(--space-md);
+}
+
+.fd-recipe-section-head {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-md);
+    margin: 0 0 var(--space-md);
+    padding: 0 0 var(--space-sm);
+    border-bottom: 1px solid var(--line);
+}
+.fd-recipe-section-head__title {
+    margin: 0;
+    font: 600 var(--text-micro-size) / var(--text-micro-line) var(--font-body);
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+    color: var(--text-tertiary);
+}
+.fd-recipe-section-head__count {
+    margin-left: auto;
+    font: 400 var(--text-caption-size) / var(--text-caption-line)
+        var(--font-body);
+    color: var(--text-secondary);
+}
+.fd-recipe-meta {
+    margin: 0;
+    font: 400 13px/17px var(--font-body);
+    color: var(--text-secondary);
+}
+
+/* A draft: what is left to fix, in a card under the title. */
+.fd-recipe-draft {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    padding: var(--space-lg);
+    border: 1px solid color-mix(in srgb, var(--status-warn) 35%, transparent);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--status-warn) 10%, transparent);
+}
+.fd-recipe-draft__lead {
+    margin: 0;
+    font: 600 14px/20px var(--font-body);
+    color: var(--text-primary);
+}
+.fd-recipe-draft__problems {
+    margin: 0;
+    padding-left: 1.25em;
+    font: 400 14px/20px var(--font-body);
+    color: var(--text-primary);
+}
+
+/* Plan and Cook, or the draft bar: fixed above the nav pill on the phone
+   (24 px + the 58 px pill + 12 px), a row under the Detail bar on desktop. */
+.fd-recipe-bar {
+    position: fixed;
+    z-index: 40;
+    left: 50%;
+    bottom: calc(94px + env(safe-area-inset-bottom, 0px));
+    transform: translateX(-50%);
+    box-sizing: border-box;
+    display: flex;
+    gap: var(--space-md);
+    width: min(100% - 2 * var(--space-gutter), 480px);
+}
+.fd-recipe-bar > [data-fd-btn],
+.fd-recipe-bar__form {
+    flex: 1 1 0;
+    min-width: 0;
+}
+.fd-recipe-bar__form,
+.fd-recipe-bar__form > [data-fd-btn] {
+    margin: 0;
+    width: 100%;
+}
+.fd-recipe-bar--draft {
+    align-items: center;
+    padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-lg);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--surface-panel);
+}
+.fd-recipe-bar__status {
+    flex: 1 1 auto;
+    margin: 0;
+    font: 600 14px/20px var(--font-body);
+    color: var(--text-primary);
+}
+.fd-recipe-bar--draft .fd-recipe-bar__form {
+    flex: none;
+    width: auto;
+}
+.fd-recipe-bar--draft .fd-recipe-bar__form > [data-fd-btn] {
+    width: auto;
+    min-width: 96px;
+}
+/* Room for the bar under the last row on the phone. */
+.fd-recipe-detail:has(.fd-recipe-bar) {
+    padding-bottom: calc(var(--space-4xl) + 52px + var(--space-md));
+}
+
+/* Steps that name a food the ingredients never list: a Card at the top of
+   Ingredients with Dismiss and Add, and the same dotted underline on the food
+   in its step. Advice only; nothing else on the page depends on it. */
 .fd-mention-cards {
     display: flex;
     flex-direction: column;
-    gap: var(--space-gap);
-    margin: 0 0 var(--fd-s-10);
+    gap: var(--space-md);
 }
-
-.fd-mention-card {
-    padding: var(--fd-s-10) var(--fd-s-12);
-    border: 1px solid color-mix(in srgb, var(--status-warn) 35%, transparent);
-    border-radius: var(--radius-sm);
-    background: color-mix(in srgb, var(--status-warn) 10%, transparent);
-}
-
-.fd-mention-card__title {
+.fd-mention-card .fd-card__content {
     display: flex;
-    align-items: flex-start;
-    gap: var(--fd-s-7);
+    flex-direction: column;
+    gap: var(--space-md);
+}
+.fd-mention-card__title {
     margin: 0;
-    font: 600 13px/18px var(--font-body);
+    font: 600 14px/20px var(--font-body);
     color: var(--text-primary);
 }
-
-.fd-mention-card__icon {
-    display: inline-flex;
-    flex: none;
-    margin-top: 1px;
-    color: var(--status-warn);
-}
-
-.fd-mention-card__icon .fd-icon {
-    width: 16px;
-    height: 16px;
-}
-
 .fd-mention-card__excerpt {
     display: block;
-    margin: var(--fd-s-4) 0 var(--fd-s-10) 23px;
-    font: 400 12px/17px var(--font-body);
+    margin: 0;
+    font: 400 var(--text-caption-size) / var(--text-caption-line)
+        var(--font-body);
     color: var(--text-secondary);
     quotes: "\201C" "\201D";
 }
-
 .fd-mention-card__actions {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--fd-s-7);
-    margin-left: 23px;
+    gap: var(--space-md);
 }
-
-.fd-mention-pill {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 36px;
-    margin: 0;
-    padding: 0 var(--fd-s-12);
-    border: 1px solid var(--line);
-    border-radius: var(--radius-pill);
-    background: var(--surface-panel);
-    color: var(--text-primary);
-    font: 600 12px/16px var(--font-body);
-    white-space: nowrap;
-    cursor: pointer;
-}
-
-.fd-mention-pill--primary {
-    border-color: transparent;
-    background: var(--accent-fill);
-    color: var(--accent-on);
-}
-
-.fd-mention-pill:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
 .fd-mention-mark {
     color: var(--text-primary);
     text-decoration: underline dotted var(--status-warn);
@@ -451,214 +418,19 @@
     text-underline-offset: 3px;
 }
 
-.fd-recipe-steps {
-    margin: 0;
-    padding-left: 1.25em;
-    font: 400 15px/22px var(--font-body);
-    color: var(--text-primary);
-}
-
-/* Cook: the button on the page (FigCraft 22840 bottom row, 48815 header) and
-   the sheet it opens (22962 / 27874 phone, 48994 / 57877 desktop). */
-
-.fd-recipe-actions {
-    display: flex;
-    gap: var(--fd-s-10);
-    margin: 0;
-}
-
-.fd-recipe-cook-btn {
-    display: inline-flex;
-    flex: 1 1 auto;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-gap);
-    min-height: 52px;
-    margin: 0;
-    padding: 0 18px;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--accent-fill);
-    color: var(--accent-on);
-    font: 600 15px/20px var(--font-body);
-    cursor: pointer;
-}
-
-.fd-recipe-cook-btn .fd-icon {
-    flex: none;
-    width: 24px;
-    height: 24px;
-}
-
-.fd-recipe-cook-btn:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
-.fd-recipe-error {
-    margin: 0 0 var(--fd-s-6);
-    padding: var(--fd-s-10) var(--fd-s-12);
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--status-over) 12%, transparent);
-    color: var(--status-over);
-    font: 400 14px/20px var(--font-body);
-}
-
+/* The cook sheet: its rows are what the cook takes, ticked or greyed. */
 .fd-recipe-cook-form {
     display: flex;
     flex-direction: column;
+    gap: var(--space-lg);
 }
-
-.fd-recipe-cook-label {
-    margin: 0;
-    font: 600 11px/14px var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-recipe-cook-stepper {
-    margin-top: var(--fd-s-4);
-}
-
 .fd-recipe-cook-region {
-    display: flex;
-    flex-direction: column;
-    transition: opacity 0.15s ease;
+    display: contents;
 }
 
-.fd-recipe-cook-region .fd-recipe-cook-label {
-    margin: var(--fd-s-12) 0 var(--fd-s-2);
-    padding-top: var(--fd-s-4);
-}
-
-.fd-recipe-cook-form[aria-busy="true"] .fd-recipe-cook-region {
-    opacity: 0.55;
-}
-
-.fd-recipe-cook-uses {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.fd-recipe-cook-use {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-row);
-    padding: var(--fd-s-10) 0;
-    border-bottom: 1px solid var(--line);
-}
-
-.fd-recipe-cook-use__name {
-    min-width: 0;
-    font: 400 15px/20px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-recipe-cook-use__change {
-    flex: none;
-    font: 400 13px/17px var(--font-body);
-    color: var(--text-secondary);
-    text-align: right;
-    white-space: nowrap;
-}
-
-.fd-recipe-cook-use--short .fd-recipe-cook-use__change {
-    color: var(--status-warn);
-}
-
-.fd-recipe-cook-note {
-    margin: var(--fd-s-10) 0 0;
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-recipe-cook-note--warn {
-    color: var(--status-warn);
-}
-
-.fd-recipe-cook-log {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-row);
-    padding: var(--fd-s-14) 0 var(--space-gutter);
-    cursor: pointer;
-}
-
-.fd-recipe-cook-log__text {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-2);
-    min-width: 0;
-}
-
-.fd-recipe-cook-log__title {
-    font: 400 15px/20px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-recipe-cook-log__sub {
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-/* A checkbox drawn as the design's toggle (46 x 28, 24 knob): it posts with
-   the form and needs no script. */
-.fd-recipe-cook-switch {
-    position: relative;
-    flex: none;
-    width: 46px;
-    height: 28px;
-    margin: 0;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-track);
-    appearance: none;
-    cursor: pointer;
-    transition: background 0.15s ease;
-}
-
-.fd-recipe-cook-switch::after {
-    content: "";
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 24px;
-    height: 24px;
-    border-radius: var(--radius-pill);
-    background: var(--text-secondary);
-    transition: transform 0.15s ease;
-}
-
-.fd-recipe-cook-switch:checked {
-    background: var(--accent-fill);
-}
-
-.fd-recipe-cook-switch:checked::after {
-    background: var(--accent-on);
-    transform: translateX(18px);
-}
-
-.fd-recipe-cook-switch:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
-/* The design's Cook button sits right under the toggle row. */
-#fd-recipe-cook-sheet .fd-sheet-actions {
-    margin-top: 0;
-}
-
-.fd-recipe-cook-error {
-    margin: 0 0 var(--fd-s-10);
-    padding: var(--fd-s-10) var(--fd-s-12);
-    border-radius: var(--radius-md);
-    background: color-mix(in srgb, var(--status-over) 12%, transparent);
-    color: var(--status-over);
-    font: 400 14px/20px var(--font-body);
+/* The page draws its own Detail bar over the corner the bell takes elsewhere. */
+.fd-main:has(.fd-recipe-detail) .fd-account-chip {
+    display: none;
 }
 
 /* Favourites: the star on a recipe row and on the recipe page. It is a button
@@ -709,56 +481,6 @@
     .fd-star:not(.fd-star--on):hover {
         color: var(--text-primary);
     }
-}
-
-/* On the recipe page it takes the top bar's right-hand slot (FigCraft 22849's
-   place), so the account chip steps aside for it, as on the product screen. */
-.fd-recipe-detail {
-    position: relative;
-}
-
-.fd-recipe-star {
-    position: absolute;
-    top: 4px;
-    right: 0;
-}
-
-.fd-recipe-star .fd-star {
-    background: var(--surface-panel);
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-main:has(.fd-recipe-detail) .fd-account-chip {
-    display: none;
-}
-
-.fd-recipe-plan-btn:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-    border-radius: var(--radius-sm);
-}
-
-.fd-recipe-plan-btn {
-    display: inline-flex;
-    flex: none;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-gap);
-    min-height: 52px;
-    margin: 0;
-    padding: 0 18px;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font: 600 15px/20px var(--font-body);
-    cursor: pointer;
-}
-
-.fd-recipe-plan-btn .fd-icon {
-    flex: none;
-    width: 22px;
-    height: 22px;
 }
 
 .fd-plan-form {
@@ -834,122 +556,35 @@
     color: var(--status-over);
 }
 
-@media (prefers-reduced-motion: reduce) {
-    .fd-recipe-back__link {
-        transition: none;
-    }
-}
-
 @media (min-width: 1024px) {
-    /* Beats `.fd-settings-phone-back { display: flex }`, which the round
-       button also carries and which loads after this sheet. */
-    .fd-recipe-back .fd-recipe-back__btn {
-        display: none;
+    .fd-recipe-layout .fd-page-layout__box {
+        gap: var(--space-2xl);
     }
-
-    .fd-recipe-back__link {
-        display: inline-flex;
-        color: var(--text-secondary);
+    .fd-recipe-layout .fd-page-layout__columns {
+        flex-direction: row;
+        align-items: flex-start;
     }
-
-    /* FigCraft 48815: Per serving and Ingredients cards on the left, Steps
-       on the right, each a white card with a sentence-case title. */
-    .fd-recipe-section {
-        padding: var(--fd-s-14) var(--fd-s-14);
-        border-radius: var(--radius-lg);
-        background: var(--surface-panel);
-        box-shadow: 0 4px 14px var(--overlay-shadow);
+    .fd-recipe-layout .fd-page-layout__column {
+        flex: 1 1 0;
     }
-
-    .fd-recipe-section-head {
-        border-bottom: 0;
-        padding-bottom: 0;
+    .fd-recipe-layout .fd-page-layout__header {
+        gap: var(--space-2xl);
     }
-
-    .fd-recipe-section-head__title,
-    .fd-recipe-section--macros .fd-recipe-macros-kicker {
-        font: 600 15px/20px var(--font-body);
-        letter-spacing: 0;
-        text-transform: none;
-        color: var(--text-primary);
-    }
-
-    .fd-recipe-section--macros .fd-recipe-macros-kicker {
-        margin-bottom: var(--fd-s-10);
-    }
-
-    .fd-recipe-layout {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-        gap: var(--space-section);
-        align-items: start;
-    }
-
-    /* FigCraft 48815: the title on the left, Cook on the right of its row. */
-    .fd-recipe-detail {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr) auto auto;
-        grid-template-areas:
-            "back back back"
-            "head star act"
-            "body body body";
-        align-items: end;
-    }
-
-    /* A draft's panel takes its own row under the title, never the action slot. */
-    .fd-recipe-detail:has(> #fd-recipe-draft) {
-        grid-template-areas:
-            "back back back"
-            "head star act"
-            "draft draft draft"
-            "body body body";
-    }
-
-    #fd-recipe-draft {
-        grid-area: draft;
-    }
-
-    .fd-recipe-back {
-        grid-area: back;
-    }
-
-    .fd-recipe-header {
-        grid-area: head;
-    }
-
-    .fd-recipe-layout {
-        grid-area: body;
-    }
-
-    .fd-recipe-actions {
-        grid-area: act;
-    }
-
-    .fd-recipe-cook-btn {
-        flex: none;
-        min-height: 42px;
-        padding: 0 18px;
-        font-size: 14px;
-        line-height: 18px;
-    }
-
-    /* The star sits left of Cook on the title row. */
-    .fd-recipe-star {
+    .fd-recipe-bar {
         position: static;
-        grid-area: star;
-        align-self: end;
-        margin-bottom: 3px;
+        z-index: auto;
+        transform: none;
+        align-self: flex-end;
+        width: auto;
     }
-
-    /* FigCraft 48994: a 560px centred dialog. */
-    #fd-recipe-cook-sheet.fd-sheet--confirm {
-        width: 560px;
+    .fd-recipe-bar > [data-fd-btn] {
+        flex: none;
+        min-width: 120px;
     }
-
-    .fd-recipe-plan-btn {
-        min-height: 42px;
-        padding: 0 18px;
-        font-size: 14px;
-        line-height: 18px;
+    .fd-recipe-bar--draft {
+        padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-lg);
+    }
+    .fd-recipe-detail:has(.fd-recipe-bar) {
+        padding-bottom: var(--space-4xl);
     }
 }

@@ -17921,7 +17921,8 @@ describe("authenticated dashboard HTTP", () => {
         const html = await detail.text();
         expect(html).toContain("Pasta");
         expect(html).toContain("400 g");
-        expect(html).toContain("Macros incomplete");
+        // No figures for it yet: dashes, and why, in the warning tone.
+        expect(html).toContain("fd-recipe-caption--warn");
 
         const refuse = await siteApp.request(
             `http://x/recipes/${recipeId}/delete`,
