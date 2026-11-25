@@ -40,11 +40,16 @@ function scalePer100g(value: number | null, amount: number): number | null {
     return Math.round((value * amount) / 10) / 10;
 }
 
-function formatMacroValue(value: number | null, unit: "kcal" | "g"): string {
-    if (value == null) return "–";
+/** A figure as text, or null when it is unknown (never a zero). */
+function macroText(value: number | null, unit: "kcal" | "g"): string | null {
+    if (value == null) return null;
     return unit === "kcal"
         ? formatLogMacroKcal(value)
         : formatLogMacroGrams(value);
+}
+
+function formatMacroValue(value: number | null, unit: "kcal" | "g"): string {
+    return macroText(value, unit) ?? "–";
 }
 
 /** Grams that define “one serving” for scaling catalog nutrition, or null. */
@@ -111,20 +116,10 @@ export function servingHeadingParts(serving: FoodServing): {
     };
 }
 
-/**
- * Heading for a pack serving: "Per portion · 30 ml". The name is the label's
- * text before any "(" with a leading "1 " dropped; a label that is only the
- * amount or a unit word ("30 g", "1 l") has no name, so it reads "serving".
- */
-export function servingHeading(serving: FoodServing): string {
-    const { name, amount } = servingHeadingParts(serving);
-    return `${name} · ${amount}`;
-}
-
 /** Where the serving column comes from, decided once per food. */
 type ServingSource =
     | { kind: "pack"; serving: FoodServing; values: FoodServingNutrition }
-    | { kind: "derived"; amount: number };
+    | { kind: "derived"; amount: number; label?: string };
 
 function servingSource(food: Food): ServingSource | null {
     const values = perServingFromFood(food);
@@ -141,7 +136,15 @@ function servingSource(food: Food): ServingSource | null {
         return null;
     }
     const grams = servingGramsForFood(food);
-    return grams != null ? { kind: "derived", amount: grams } : null;
+    if (grams == null) return null;
+    // A usual amount in ml keeps its own words in the heading ("250 ml"),
+    // as the subtitle says; the values still scale by its grams.
+    const usual = food.usualAmount;
+    const label =
+        usual != null && usual.unit === "ml" && usual.amount > 0
+            ? `${formatServingAmount(usual.amount)} ml`
+            : undefined;
+    return { kind: "derived", amount: grams, label };
 }
 
 /** The serving bit of the subtitle: none when the nutrition head names it. */
@@ -204,6 +207,65 @@ export function productNutrition(food: Food): ProductNutrition {
     return { head, table };
 }
 
-export function buildProductNutritionTable(food: Food): ProductNutritionTable {
-    return productNutrition(food).table;
+/** One body row of the nutrition Table: its label and one cell per column. */
+export type ProductNutritionTableRow = {
+    label: string;
+    /** Per serving first (when there is a serving column), then per 100; null is unknown. */
+    cols: (string | null)[];
+};
+
+export type ProductNutritionTableData = {
+    /** The header cells: "1 serving (30 ml)" and "100 ml", or "100 g" alone. */
+    head: string[];
+    rows: ProductNutritionTableRow[];
+};
+
+/**
+ * "1 serving (30 ml)": the serving column's heading. The pack's own unit of
+ * eating names it ("1 cup (240 ml)", "2 cookies (30 g)"); the generic words a
+ * label uses for any pack ("portion", "serving") read as "serving".
+ */
+function servingColumnHead(parts: { name: string; amount: string }): string {
+    const named = parts.name.replace(/^Per\s+/, "");
+    const name = /^(portion|serving)s?$/.test(named) ? "serving" : named;
+    // A mixed number or a fraction ("1 1/2 cup") already carries its count.
+    const counted = /^[\d½¼¾⅓⅔⅛]/.test(name);
+    return `${counted ? "" : "1 "}${name} (${parts.amount})`;
+}
+
+/**
+ * The Table's header and rows: the serving column leads when the food has a
+ * serving, then 100 g (100 ml for a liquid basis). Unknown cells are null; the
+ * Table draws them as a dash.
+ */
+export function productNutritionTable(food: Food): ProductNutritionTableData {
+    const source = servingSource(food);
+    const basisUnit = food.nutritionBasis === "100ml" ? "ml" : "g";
+    const head: string[] = [];
+    if (source?.kind === "pack") {
+        head.push(servingColumnHead(servingHeadingParts(source.serving)));
+    } else if (source?.kind === "derived") {
+        head.push(
+            `1 serving (${source.label ?? `${formatServingAmount(source.amount)} ${basisUnit}`})`,
+        );
+    }
+    head.push(`100 ${basisUnit}`);
+    // Grams carry their unit in the Table, as the design sets them ("17 g").
+    const cell = (value: number | null, unit: "kcal" | "g") => {
+        const text = macroText(value, unit);
+        return text != null && unit === "g" ? `${text} g` : text;
+    };
+    const rows = PRODUCT_MACRO_ROWS.map((row) => {
+        const cols: (string | null)[] = [];
+        if (source?.kind === "pack") {
+            cols.push(cell(source.values[row.key], row.unit));
+        } else if (source?.kind === "derived") {
+            cols.push(
+                cell(scalePer100g(food[row.key], source.amount), row.unit),
+            );
+        }
+        cols.push(cell(food[row.key], row.unit));
+        return { label: row.label, cols };
+    });
+    return { head, rows };
 }

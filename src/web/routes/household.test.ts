@@ -2565,7 +2565,7 @@ describe("product routes (v2 foods)", () => {
             );
             expect(res.status).toBe(200);
             const html = await res.text();
-            return /fd-product-top__back" href="([^"]*)"/.exec(html)?.[1];
+            return /aria-label="Back"[^>]*href="([^"]*)"/.exec(html)?.[1];
         };
         // iOS Safari: the service worker's script URL as the referrer.
         expect(await backFor("http://x/sw.js")).toBe(PRODUCT_DEFAULT_BACK);
@@ -2593,7 +2593,7 @@ describe("product routes (v2 foods)", () => {
                 })
             ).text();
         const before = await page();
-        expect(before).toContain("<span>Add to groceries</span>");
+        expect(before).toContain(`action="/foods/${food.id}/add-to-grocery"`);
         expect(before).not.toContain("On your list");
         const res = await productApp().request(
             `http://x/foods/${food.id}/add-to-grocery`,
@@ -2603,7 +2603,7 @@ describe("product routes (v2 foods)", () => {
         expect(res.headers.get("location")).toBe(`/foods/${food.id}`);
         const after = await page();
         expect(after).toContain("On your list");
-        expect(after).not.toContain("<span>Add to groceries</span>");
+        expect(after).not.toContain("/add-to-grocery");
         resetFlagsForTests();
     });
 
@@ -2622,7 +2622,8 @@ describe("product routes (v2 foods)", () => {
                 headers: { cookie: cookieFor(ALICE) },
             })
         ).text();
-        expect(html).toContain("<span>Add to groceries</span>");
+        expect(html).toContain(`action="/foods/${food.id}/add-to-grocery"`);
+        expect(html).not.toContain("On your list");
         resetFlagsForTests();
     });
 
@@ -2657,7 +2658,6 @@ describe("product routes (v2 foods)", () => {
                 })
             ).text();
         const sibling = await page(kirkland.id);
-        expect(sibling).toContain("<span>Add to groceries</span>");
         expect(sibling).toContain(`/foods/${kirkland.id}/add-to-grocery`);
         expect(sibling).not.toContain("On your list");
         expect(await page(egglands.id)).toContain("On your list");

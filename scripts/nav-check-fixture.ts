@@ -61,6 +61,10 @@ import type { NotificationRow } from "../src/domain/notifications.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
 import { newFood } from "../src/domain/foods.js";
+import {
+    buildPreviewProductPageView,
+    renderProductV2Page,
+} from "../src/web/pages/v2/product.js";
 import { SCORE_PRESETS } from "../src/domain/product-score.js";
 import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
 import { goalsDraftFrom } from "../src/web/pages/v2/settings-goals-form.js";
@@ -587,6 +591,35 @@ async function pages(
             ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
             plan: fixtureWeekPlan(true),
         }),
+        // /foods/f-chicken: a product with a serving from its piece weight,
+        // stock in the fridge and no score, built here so the page exists
+        // without a preview run.
+        "product-full": renderProductV2Page(
+            buildPreviewProductPageView(
+                chrome as never,
+                {
+                    ...newFood({
+                        householdId: H,
+                        kind: "food",
+                        name: "Greek yogurt, plain 2%",
+                        brand: "Fage",
+                        calories: 59,
+                        proteinG: 10,
+                        carbsG: 4,
+                        fatG: 0.4,
+                        fiberG: 0,
+                        sugarG: 4,
+                        gramsPerEach: 170,
+                    }),
+                    id: "f-product-full",
+                },
+                {
+                    barcodes: ["5201054017463"],
+                    stock: [{ locationName: "Fridge", quantityLabel: "2" }],
+                    score: null,
+                },
+            ),
+        ),
         fridge: renderKitchenFridgeV2Page(
             buildPreviewKitchenFridgeView(chrome as never, "2026-11-10"),
         ),
@@ -789,6 +822,7 @@ const ROUTE_BASE: Record<string, string> = {
         "settings-ai-changes",
     "/settings/help?q=zip": "help-search",
     "/create-household": "create-household",
+    "/foods/f-chicken": "product-full",
 };
 
 /** Saved appearance from Settings › Account (null = system). */

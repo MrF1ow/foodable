@@ -234,6 +234,11 @@ async function setMarker() {
 }
 await send("Runtime.enable");
 await send("Page.enable");
+// The profile is kept between runs: with the cache on, it served an older
+// /app-v2.css under the current ?v= and failed a layout check that passed in
+// a fresh browser. Every run loads what the fixture serves now.
+await send("Network.enable");
+await send("Network.setCacheDisabled", { cacheDisabled: true });
 await send("Emulation.setDeviceMetricsOverride", {
     width: 430,
     height: 800,
@@ -1361,6 +1366,66 @@ try {
         "v2 log search: tapping a result row opens its page",
         rowOpened === "/foods/f-chicken",
         { rowOpened, ex: drain() },
+    );
+
+    // The product page: a Detail bar with Back and a ⋯, a nutrition Table, and
+    // two actions that go where they always went.
+    await goto("/foods/f-chicken");
+    await setMarker();
+    await control("reset=posts");
+    const productPage = await ev<{
+        back: string | null;
+        title: string | null;
+        header: string[];
+        rows: number;
+        buttons: string[];
+        widths: number[];
+        gap: number;
+    }>(`({
+        back: document.querySelector(".fd-product-page .fd-detail-bar a[aria-label='Back']")?.getAttribute("href") ?? null,
+        title: document.querySelector(".fd-product-page .fd-page-header__title")?.textContent ?? null,
+        header: [...document.querySelectorAll(".fd-product-page .fd-table-row--header [role='columnheader']")].map((c) => c.textContent.trim()).filter(Boolean),
+        rows: document.querySelectorAll(".fd-product-page .fd-table-row:not(.fd-table-row--header)").length,
+        buttons: [...document.querySelectorAll(".fd-product-actions [data-fd-btn]")].map((b) => b.textContent.trim()),
+        widths: [...document.querySelectorAll(".fd-product-actions [data-fd-btn]")].map((b) => Math.round(b.getBoundingClientRect().width)),
+        gap: (() => { const [a, b] = [...document.querySelectorAll(".fd-product-actions [data-fd-btn]")].map((x) => x.getBoundingClientRect()); return a && b ? Math.round(b.left - a.right) : -1; })(),
+    })`);
+    await clickSel(".fd-product-detail [data-fd-menu-trigger]");
+    await sleep(150);
+    const productMenu = await ev<{ items: string[]; hrefs: string[] }>(`({
+        items: [...document.querySelectorAll(".fd-product-detail [role='menuitem']")].map((i) => i.textContent.trim()),
+        hrefs: [...document.querySelectorAll(".fd-product-detail [role='menuitem']")].map((i) => i.getAttribute("href") ?? ""),
+    })`);
+    await clickSel("[data-fd-log-pick]");
+    await sleep(400);
+    const productLog = await ev<{ open: boolean; title: string | null }>(`({
+        open: document.getElementById("fd-log-amount").open,
+        title: document.querySelector("#fd-log-amount .fd-sheet__title")?.textContent ?? null,
+    })`);
+    await ev(`document.getElementById("fd-log-amount").close()`);
+    await clickSel(".fd-product-actions form button");
+    await sleep(500);
+    const productPosts = (await stats()).posts.filter((p) =>
+        p.path.startsWith("/foods/"),
+    );
+    record(
+        "v2 product page: Back and a ⋯ in the Detail bar, the Table reads '1 serving' beside '100 g', the ⋯ edits in Saved foods, Log it opens the amount sheet and Add to groceries posts its route; the two actions are equal with a gap",
+        productPage.back !== null &&
+            productPage.title === "Greek yogurt, plain 2%" &&
+            productPage.header.join("|") === "1 serving (170 g)|100 g" &&
+            productPage.rows === 6 &&
+            productPage.buttons.join("|") === "Add to groceries|Log it" &&
+            productPage.widths.length === 2 &&
+            Math.abs(productPage.widths[0]! - productPage.widths[1]!) <= 1 &&
+            productPage.gap >= 8 &&
+            productMenu.items.join("|") === "Edit in Saved foods" &&
+            productMenu.hrefs[0]!.startsWith("/settings/saved?q=") &&
+            productLog.open &&
+            productLog.title === "Greek yogurt, plain 2%" &&
+            productPosts.length === 1 &&
+            productPosts[0]!.path === "/foods/f-product-full/add-to-grocery" &&
+            productPosts[0]!.entries.length === 0,
+        { productPage, productMenu, productLog, productPosts, ex: drain() },
     );
 
     // Quick add and water post the routes they always did.
