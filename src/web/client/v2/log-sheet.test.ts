@@ -1,6 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { formatLogMacroGrams } from "../../../domain/log-macro-format.js";
+import { logResultRow, unitSegmentLabel } from "../../pages/v2/log-sheet.js";
+import { macroTiles } from "../../components/v2/macro-tile.js";
+import { segmented } from "../../components/v2/segmented.js";
 
 type LogMacroApi = {
     formatLogMacroGrams: (value: number) => string;
@@ -36,6 +39,16 @@ type LogMacroApi = {
         form: { querySelector: (sel: string) => unknown },
         units: string[],
         selected: string,
+    ) => void;
+    isRecipeLink: (text: unknown) => boolean;
+    unitSegmentLabel: (unit: string, item?: Record<string, unknown>) => string;
+    currentUnit: (
+        form: { querySelector: (sel: string) => { value?: string } | null },
+        item?: Record<string, unknown>,
+    ) => string;
+    renderMacroTiles: (
+        container: { innerHTML: string } | null,
+        m: Record<string, number | null> | null,
     ) => void;
 };
 
@@ -510,19 +523,203 @@ test("nextSearchRowIndex wraps at the ends", () => {
     expect(keyboard.nextSearchRowIndex(0, 0, 1)).toBe(-1);
 });
 
-test("rebuildUnitChips creates only allowed unit radios", () => {
-    const fieldset = { innerHTML: "" };
+test("rebuildUnitChips writes the small Segmented, the server's markup", () => {
+    const slot = { innerHTML: "" };
     const form = {
         querySelector() {
-            return fieldset;
+            return slot;
+        },
+    };
+    api.rebuildUnitChips(form, ["g", "ml"], "ml");
+    expect(slot.innerHTML).toBe(
+        String(
+            segmented({
+                label: "Unit",
+                size: "small",
+                name: "unit",
+                segments: [
+                    { value: "g", label: "g" },
+                    { value: "ml", label: "ml", selected: true },
+                ],
+            }),
+        ),
+    );
+});
+
+test("a piece says what it weighs, the server's label", () => {
+    expect(api.unitSegmentLabel("each", { grams_per_each: 174 })).toBe(
+        "each · 174 g",
+    );
+    expect(api.unitSegmentLabel("each", { grams_per_each: 57.25 })).toBe(
+        "each · 57.3 g",
+    );
+    expect(api.unitSegmentLabel("each", {})).toBe("each");
+    expect(api.unitSegmentLabel("g", { grams_per_each: 174 })).toBe("g");
+    for (const g of [174, 57.25, null, undefined]) {
+        expect(api.unitSegmentLabel("each", { grams_per_each: g })).toBe(
+            unitSegmentLabel("each", g),
+        );
+    }
+});
+
+test("a food with one unit posts it from a hidden field, not a one-segment control", () => {
+    const slot = { innerHTML: "" };
+    const form = {
+        querySelector() {
+            return slot;
         },
     };
     api.rebuildUnitChips(form, ["portion"], "portion");
-    expect(fieldset.innerHTML).toContain('value="portion" checked');
-    expect(fieldset.innerHTML).not.toContain('value="g"');
-    api.rebuildUnitChips(form, ["g", "ml"], "ml");
-    expect(fieldset.innerHTML).toContain('value="g"');
-    expect(fieldset.innerHTML).toContain('value="ml" checked');
+    expect(slot.innerHTML).toBe(
+        '<input type="hidden" name="unit" value="portion">',
+    );
+    api.rebuildUnitChips(form, [], "g");
+    expect(slot.innerHTML).toBe("");
+});
+
+test("currentUnit reads the checked segment, then a lone hidden unit, then the food's first", () => {
+    const form = (hits: Record<string, string | null>) => ({
+        querySelector: (sel: string) =>
+            hits[sel] != null ? { value: hits[sel] as string } : null,
+    });
+    expect(api.currentUnit(form({ 'input[name="unit"]:checked': "ml" }))).toBe(
+        "ml",
+    );
+    expect(
+        api.currentUnit(
+            form({ 'input[type="hidden"][name="unit"]': "portion" }),
+        ),
+    ).toBe("portion");
+    expect(api.currentUnit(form({}), { unit_hints: ["each", "g"] })).toBe(
+        "each",
+    );
+    expect(api.currentUnit(form({}))).toBe("g");
+});
+
+test("the amount sheet's macro tiles are the server's Macro tiles, an unknown figure a dash", () => {
+    const box = { innerHTML: "" };
+    api.renderMacroTiles(box, {
+        kcal: 248,
+        protein_g: 46.5,
+        carbs_g: null,
+        fat_g: 4.95,
+    });
+    expect(box.innerHTML).toBe(
+        String(
+            macroTiles({
+                label: "This amount",
+                tiles: [
+                    { kind: "kcal", value: "248" },
+                    { kind: "protein", value: "47 g" },
+                    { kind: "carbs", value: null },
+                    { kind: "fat", value: "5 g" },
+                ],
+            }),
+        ),
+    );
+});
+
+test("a pasted link is an http(s) address and nothing else", () => {
+    expect(api.isRecipeLink("https://hot-thai-kitchen.com/pad-see-ew")).toBe(
+        true,
+    );
+    expect(api.isRecipeLink("  http://a.co/x  ")).toBe(true);
+    expect(api.isRecipeLink("chicken")).toBe(false);
+    expect(api.isRecipeLink("https://a.co/x and more")).toBe(false);
+    expect(api.isRecipeLink("ftp://a.co")).toBe(false);
+    expect(api.isRecipeLink("")).toBe(false);
+});
+
+describe("result rows are the Item row the server draws", () => {
+    // `logResultRow` is the server's row for the preview; the script writes the
+    // same markup for live results, so they stay one design.
+    const sameRow = (
+        item: Record<string, unknown>,
+        kind: string,
+        subtitle: string,
+        score?: number,
+    ) => {
+        const pick = { ...item, kind };
+        const server = String(
+            logResultRow(
+                {
+                    name: String(item.name),
+                    subtitle,
+                    score,
+                    // A past meal opens the log form, not a page.
+                    open:
+                        kind === "history" ? undefined : (item.open as string),
+                    pick,
+                },
+                2,
+            ),
+        );
+        return { server, client: api.searchRowHtml(item, kind, 2) };
+    };
+
+    test("a food that opens and logs", () => {
+        const item = {
+            name: "Chicken breast, grilled",
+            food_id: "f-chicken",
+            kcal_per_100g: 165,
+            unit_hints: ["g"],
+            open: "/foods/f-chicken",
+            loggable: true,
+        };
+        const { server, client } = sameRow(
+            item,
+            "food",
+            "Generic · 165 / 100 g kcal",
+        );
+        expect(client).toBe(server);
+    });
+
+    test("a scored product", () => {
+        const item = {
+            name: "Chicken noodle soup",
+            food_id: "f-soup",
+            brand: "Campbell's",
+            product_score: 41,
+            open: "/foods/f-soup",
+            loggable: true,
+        };
+        const { server, client } = sameRow(item, "food", "Campbell's", 41);
+        expect(client).toBe(server);
+    });
+
+    test("a past meal that only logs", () => {
+        const item = {
+            name: "Chicken caesar wrap",
+            food_id: "f-wrap",
+            log_count: 3,
+            meal_kcal: 540,
+            open: "/?log=meal:m9",
+            loggable: true,
+        };
+        const { server, client } = sameRow(
+            item,
+            "history",
+            "Logged 3 times · 540 kcal",
+        );
+        expect(client).toBe(server);
+        expect(client).not.toContain("<a ");
+    });
+
+    test("a result that cannot be logged is a link with no plus", () => {
+        const row = api.searchRowHtml(
+            {
+                name: "Draft stew",
+                recipe_id: "r-draft",
+                open: "/recipes/r-draft",
+                loggable: false,
+            },
+            "recipe",
+            0,
+        );
+        expect(row).toContain('href="/recipes/r-draft"');
+        expect(row).not.toContain("fd-item-row__add");
+        expect(row).not.toContain("data-fd-log-pick");
+    });
 });
 
 test("switching from or to portion resets the amount, between g and ml it stays", () => {
@@ -589,7 +786,7 @@ describe("?log=meal:<id>", () => {
             this.open = false;
         }
         querySelector(sel: string) {
-            return sel === ".fd-sheet-title" ? this.title : null;
+            return sel === ".fd-sheet__title" ? this.title : null;
         }
     }
 
@@ -697,6 +894,9 @@ describe("?log=meal:<id>", () => {
         expect(row).toContain('aria-label="Add Pasta and salad"');
         expect(row).not.toContain("data-fd-log-pick");
         expect(row).not.toContain("data-fd-log-row-pick");
+        // Its face opens the meal's own search, by id, never a whole address.
+        expect(row).toContain('data-fd-log-row-meal="m1"');
+        expect(row).not.toContain("data-fd-log-row-open");
         // A history row with nothing to log again has no add action.
         const bare = api.searchRowHtml(
             { name: "Mystery", source: "meal", loggable: true },

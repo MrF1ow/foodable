@@ -6,7 +6,7 @@
  * Styles: `public/app/v2/quick-action.css`.
  */
 import { icon, type IconName } from "./icon.js";
-import { cls, esc, raw, safeHref, type Html } from "./html.js";
+import { cls, dataAttrs, esc, raw, safeHref, type Html } from "./html.js";
 
 export type QuickActionOptions = {
     label: string;
@@ -15,6 +15,10 @@ export type QuickActionOptions = {
     /** Show caption; default on. */
     caption?: boolean;
     disabled?: boolean;
+    /** A button that submits the form around it (Water +250 ml). */
+    submit?: boolean;
+    /** `data-*` hooks for a script (`fd-open-sheet`). */
+    data?: Readonly<Record<string, string>>;
     className?: string;
 };
 
@@ -28,9 +32,11 @@ export function quickAction(opts: QuickActionOptions): Html {
             ? ` role="link" aria-disabled="true" tabindex="-1"`
             : ` href="${safeHref(opts.href)}"`;
         if (opts.disabled) safeHref(opts.href);
-        return raw(`<a class="${classes}"${name}${state}>${inner}</a>`);
+        return raw(
+            `<a class="${classes}"${name}${state}${dataAttrs(opts.data)}>${inner}</a>`,
+        );
     }
     return raw(
-        `<button type="button" class="${classes}"${name}${opts.disabled ? " disabled" : ""}>${inner}</button>`,
+        `<button type="${opts.submit ? "submit" : "button"}" class="${classes}"${name}${opts.disabled ? " disabled" : ""}${dataAttrs(opts.data)}>${inner}</button>`,
     );
 }

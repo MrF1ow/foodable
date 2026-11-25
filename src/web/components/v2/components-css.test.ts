@@ -306,11 +306,9 @@ const LEGACY_PARTIALS = [
     "components.css",
     "gallery.css",
     "kitchen.css",
-    "log-sheet.css",
     "menu.css",
     "product.css",
     "recipes.css",
-    "scanner.css",
     "select.css",
     "settings.css",
     "share-links.css",
@@ -413,4 +411,20 @@ test("the compare page's buttons wrap inside their box and its value segments ar
     expect(settings).toMatch(
         /\.fd-dup-segment \.fd-segmented__option \{[^}]*flex:\s*1 1 0/,
     );
+});
+
+test("sheet.css: the log sheets' unflexed section buttons leave other sheets' section buttons alone", () => {
+    const sheetRules = readFileSync(
+        join(import.meta.dir, "../../../../public/app/v2/sheet.css"),
+        "utf8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = sheetRules.match(
+        /([^{}]*)\.fd-sheet__section\s+\.fd-btn\[data-fd-btn\]\s*\{[^}]*flex:\s*none/,
+    );
+    expect(rule).not.toBeNull();
+    // Scoped by the log and scanner sheets' ids, so a store's delete button
+    // (`.fd-store-delete > .fd-btn { flex: 1 }`) still stretches.
+    const scope = (rule?.[1] ?? "").replace(/\s+/g, "");
+    expect(scope).toContain(":where(#fd-log-search,");
+    expect(scope).toContain("#fd-barcode-scan");
 });

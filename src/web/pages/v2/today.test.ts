@@ -446,8 +446,19 @@ describe("renderTodayV2Page", () => {
     test("the empty slot's plus is a link to the log, so it works with no script", () => {
         const html = String(renderTodayBody(data));
         expect(html).toMatch(
-            /<a class="fd-item-row__trail fd-item-row__add" href="\/#nutrition-log-meal" aria-label="Log dinner" data-fd-open-sheet="fd-log-search">/,
+            /<a class="fd-item-row__trail fd-item-row__add" href="\/#nutrition-log-meal" aria-label="Log dinner" data-fd-open-sheet="fd-log-search" data-fd-log-meal="dinner">/,
         );
+    });
+
+    test("each empty slot's plus carries its own meal, for the search's ADD TO", () => {
+        const html = String(renderTodayBody(data));
+        const plus = (label: string) =>
+            html.match(
+                new RegExp(
+                    `aria-label="${label}"[^>]*data-fd-log-meal="(\\w+)"`,
+                ),
+            )?.[1];
+        expect(plus("Log dinner")).toBe("dinner");
     });
 });
 

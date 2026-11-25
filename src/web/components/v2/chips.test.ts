@@ -125,3 +125,25 @@ test("chipLink only takes app paths, queries, fragments and http(s) URLs", () =>
         expect(() => chipLink({ label: "x", href })).toThrow("unsafe href");
     }
 });
+
+test("a choice's label can carry data for a script that rewrites it", () => {
+    const html = String(
+        choiceGroup({
+            name: "when",
+            legend: "When",
+            options: [
+                {
+                    value: "now",
+                    label: "Today 5:10 PM",
+                    selected: true,
+                    labelData: { "fd-log-today-label": "" },
+                },
+                { value: "pick", label: "Pick a time" },
+            ],
+        }),
+    );
+    expect(html).toContain(
+        '<span class="fd-chip__label" data-fd-log-today-label="">Today 5:10 PM</span>',
+    );
+    expect(html).toContain('<span class="fd-chip__label">Pick a time</span>');
+});

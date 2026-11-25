@@ -1,4 +1,3 @@
-import { escapeHtml } from "../../../html.js";
 import {
     formatLocalDateTime,
     guessMealType,
@@ -14,12 +13,17 @@ import {
     type LogBasis,
     type LogServing,
 } from "../../../domain/log-macro-format.js";
-import { fdIcon } from "../../components/fd-icons.js";
+import { button } from "../../components/v2/button.js";
 import { choiceGroup } from "../../components/v2/chips.js";
-import { stepper } from "../../components/v2/stepper.js";
-import { statTiles, type StatTile } from "../../components/v2/stat-tiles.js";
-import { sheet } from "../../components/v2/sheet.js";
-import { searchResultRow } from "../../components/v2/rows.js";
+import { field } from "../../components/v2/field.js";
+import { esc, join, raw, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { macroTiles } from "../../components/v2/macro-tile.js";
+import { quickAction } from "../../components/v2/quick-action.js";
+import { segmented } from "../../components/v2/segmented.js";
+import { sheet, sheetSection } from "../../components/v2/sheet.js";
+import { stepperControl } from "../../components/v2/stepper-control.js";
 import {
     FD_BARCODE_SCAN_SHEET_ID,
     renderBarcodeScannerSheet,
@@ -33,6 +37,8 @@ export const FD_LOG_POST = "/log";
 export const FD_LOG_QUICK_POST = "/log/quick";
 export const FD_LOG_WATER_POST = "/log/water";
 export const FD_LOG_WEIGHT_POST = "/log/weight";
+/** Where a recipe link pasted into the search field goes: Recipes' own import. */
+export const FD_LOG_IMPORT_POST = "/recipes/import";
 
 /** Whether `value` satisfies an `<input type="number">` with these constraints. */
 export function isStepValid(
@@ -60,13 +66,6 @@ const MEAL_SUBMIT_LABEL: Record<string, string> = {
     lunch: "Add to lunch",
     dinner: "Add to dinner",
     snack: "Add to snacks",
-};
-
-const MEAL_ADDING_LABEL: Record<string, string> = {
-    breakfast: "Adding to breakfast",
-    lunch: "Adding to lunch",
-    dinner: "Adding to dinner",
-    snack: "Adding to snacks",
 };
 
 export type LogAmountPrefill = {
@@ -144,7 +143,13 @@ export type RenderLogSheetsOpts = {
     previewSearch?: "empty" | "results";
     /** Preview-only: pre-filled search query (e.g. "chick"). */
     previewQuery?: string;
-    /** Kill switch `barcode-camera`: when false, hide Scan actions. */
+    /** Preview-only: the pasted-link state of the search field. */
+    previewLink?: boolean;
+    /**
+     * Kill switch `barcode-camera`: when false, the sheet draws no Scan
+     * barcode tile, no barcode button in the search field and no "Not here?
+     * Scan the barcode" link.
+     */
     barcodeCamera?: boolean;
     /** Lazy decoder chunk URLs for the scanner sheet. */
     scannerZxingHref?: string;
@@ -165,6 +170,7 @@ function defaultLoggedAtLocal(tz: string): string {
     return datetimeLocalValue(formatLocalDateTime(new Date(), tz));
 }
 
+/** "Today 5:10 PM": the When chip that logs at submit time. */
 function todayTimeLabel(tz: string): string {
     const raw = formatLocalDateTime(new Date(), tz);
     const time = raw.slice(11, 16);
@@ -173,12 +179,6 @@ function todayTimeLabel(tz: string): string {
     const ap = h >= 12 ? "PM" : "AM";
     const h12 = h % 12 || 12;
     return `Today ${h12}:${m} ${ap}`;
-}
-
-/** 24-hour “Today 7:10” label for weigh-in time chips. */
-export function todayTimeLabel24(tz: string): string {
-    const time = formatLocalDateTime(new Date(), tz).slice(11, 16);
-    return `Today ${time}`;
 }
 
 export function weighInLastSubtitle(
@@ -193,43 +193,81 @@ export function weighInLastSubtitle(
     return `Last: ${text} ${unit} · ${day}`;
 }
 
-function mealChoiceHtml(
-    name: string,
-    selected: string,
-    className: string,
-): string {
+/** The ADD TO chips: a radio group, the caps label is the section's. */
+function mealChoice(name: string, selected: string): Html {
     return choiceGroup({
         name,
-        legend: "ADD TO",
-        showLegend: true,
+        legend: "Add to",
         options: MEAL_TYPES.map((t) => ({
             ...t,
             selected: t.value === selected,
         })),
         required: true,
-        className,
-    }).toString();
+    });
 }
 
-function searchFieldHtml(query = ""): string {
-    const q = escapeHtml(query);
-    const clearHidden = query ? "" : " hidden";
-    return `<div class="fd-log-search-field">
-${fdIcon("search")}
-<input class="fd-log-search-input" id="fd-log-search-q" type="search" name="q" value="${q}" autocomplete="off" enterkeyhint="search" placeholder="Search foods, recipes, barcodes" aria-label="Search foods, recipes, and barcodes" />
-<button type="button" class="fd-log-search-clear" data-fd-log-search-clear aria-label="Clear search"${clearHidden}><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>
-</div>`;
+/** The WHEN chips: Today (logs at submit time) or Pick a time. */
+function whenChoice(
+    name: string,
+    usePick: boolean,
+    todayLabel: string,
+    labelHook: string,
+): Html {
+    return choiceGroup({
+        name,
+        legend: "When",
+        required: true,
+        options: [
+            {
+                value: "now",
+                label: todayLabel,
+                selected: !usePick,
+                labelData: { [labelHook]: "" },
+            },
+            { value: "pick", label: "Pick a time", selected: usePick },
+        ],
+    });
 }
 
-function filterChipsHtml(hidden: boolean): string {
-    const filters = ["All", "Foods", "Recipes", "My foods"] as const;
-    const chips = filters
-        .map(
-            (f, i) =>
-                `<button type="button" class="fd-chip fd-log-filter${i === 0 ? " fd-chip--selected" : ""}" data-fd-log-filter="${escapeHtml(f)}" aria-pressed="${i === 0 ? "true" : "false"}"><span class="fd-chip__label">${f}</span></button>`,
-        )
-        .join("");
-    return `<div class="fd-chips fd-log-filters" role="group" aria-label="Filter results"${hidden ? " hidden" : ""} data-fd-log-filters>${chips}</div>`;
+/**
+ * The time box behind Pick a time. A disabled field is not submitted, so
+ * "Today" logs at submit time; the script enables it with the second chip.
+ */
+function timeField(id: string, value: string, usePick: boolean): Html {
+    const box = field({
+        id,
+        label: "Time",
+        labelHidden: true,
+        name: "logged_at",
+        type: "datetime-local",
+        value,
+        required: true,
+        disabled: !usePick,
+    });
+    return raw(
+        `<div class="fd-log-time-pick" data-fd-log-time-pick${usePick ? "" : " hidden"}>${box}</div>`,
+    );
+}
+
+function whenSection(
+    mode: { name: string; hook: string },
+    ids: { time: string },
+    pick: { usePick: boolean; todayLabel: string; loggedAt: string },
+): Html {
+    return sheetSection({
+        kind: "chips",
+        label: "When",
+        content: join([
+            whenChoice(mode.name, pick.usePick, pick.todayLabel, mode.hook),
+            timeField(ids.time, pick.loggedAt, pick.usePick),
+        ]),
+    });
+}
+
+function errorLine(message: string | undefined): string {
+    return message
+        ? `<p class="fd-log-error" role="alert">${esc(message)}</p>`
+        : "";
 }
 
 const PREVIEW_RECENTS: Array<{
@@ -267,102 +305,75 @@ const PREVIEW_RECENTS: Array<{
         kcal: 105,
         payload: { name: "Banana", food_id: "f-banana", kcal: 105 },
     },
-    {
-        name: "Oatmeal",
-        kcal: 150,
-        payload: { name: "Oatmeal", food_id: "f-oats", kcal: 150 },
-    },
-    {
-        name: "Avocado toast",
-        kcal: 320,
-        payload: { name: "Avocado toast", food_id: "f-avo", kcal: 320 },
-    },
-    {
-        name: "Salmon bowl",
-        kcal: 540,
-        payload: { name: "Salmon bowl", recipe_id: "r-salmon", kcal: 540 },
-    },
-    {
-        name: "Cottage cheese",
-        kcal: 110,
-        payload: { name: "Cottage cheese", food_id: "f-cottage", kcal: 110 },
-    },
-    {
-        name: "Peanut butter",
-        kcal: 190,
-        payload: { name: "Peanut butter", food_id: "f-pb", kcal: 190 },
-    },
 ];
 
-function quickIconBolt(): string {
-    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M13 2L4.5 13.5H11L9 22l10.5-12.5H13.5L13 2z"/></svg>`;
+/** The Recent chips: one button per recently logged food, its kcal as the count. */
+function recentChips(items: typeof PREVIEW_RECENTS): string {
+    return items
+        .map(
+            (r) =>
+                `<button type="button" class="fd-chip" data-fd-log-pick="${esc(JSON.stringify(r.payload))}"><span class="fd-chip__label">${esc(r.name)}</span><span class="fd-chip__count">${r.kcal}</span></button>`,
+        )
+        .join("");
 }
 
-function quickIconWater(): string {
-    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3c-4.5 6-7 9.8-7 13a7 7 0 1 0 14 0c0-3.2-2.5-7-7-13z"/></svg>`;
-}
-
-function quickIconScan(): string {
-    return fdIcon("scan");
-}
-
-function quickIconScale(): string {
-    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M6 20h12M7 20v-2h10v2M8.5 18V10a3.5 3.5 0 0 1 7 0v8"/><path d="M10 8h4"/></svg>`;
-}
-
-function quickIconCopy(): string {
-    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 9h10v11H9z"/><path d="M15 9V5H5v11h4"/></svg>`;
-}
-
-/**
- * Posts to the route behind Today's "Same as yesterday?" prompt, so a repeat
- * is the same idempotent write. Disabled (not hidden) while the chosen meal has
- * nothing to copy; copy-yesterday.js re-points it when the meal changes.
- */
-/** The Groceries tab with its add sheet open (log-sheet.js opens it on load). */
+/** Where "Add to groceries" lands: the Groceries tab with its add sheet open. */
 export const FD_GROCERY_ADD_HREF = "/kitchen/groceries?add=1";
 
-function quickIconPot(): string {
-    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 11h16v5a4 4 0 0 1-4 4H8a4 4 0 0 1-4-4z"/><path d="M2.5 11h19"/><path d="M9 7.5c0-1.4 1-1.4 1-2.8M14 7.5c0-1.4 1-1.4 1-2.8"/></svg>`;
-}
-
-function quickIconCart(): string {
-    return `<svg class="fd-icon fd-quick-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 4h2.5l2 11h10l2-8H7"/><circle cx="9.5" cy="19" r="1.2"/><circle cx="16.5" cy="19" r="1.2"/></svg>`;
-}
-
-function copyYesterdayTile(copy: CopyYesterdayOpts, selected: string): string {
-    const disabled = copy.slots.includes(selected) ? "" : " disabled";
-    return `<form class="fd-quick-form" method="post" action="/log/copy-yesterday" data-fd-copy-yesterday data-fd-copy-yesterday-slots="${escapeHtml(copy.slots.join(" "))}"><input type="hidden" name="slot" value="${escapeHtml(selected)}" /><input type="hidden" name="return_to" value="${escapeHtml(copy.returnTo)}" /><button type="submit" class="fd-quick-tile" data-fd-copy-yesterday-button${disabled}><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconCopy()}</span><span class="fd-quick-tile__label">Copy yesterday</span></button></form>`;
-}
-
-function quickActionsHtml(
+function quickTiles(
     barcodeCamera: boolean,
-    copy?: CopyYesterdayOpts,
-    selectedMeal = "dinner",
-): string {
-    const water = `<form class="fd-quick-form" method="post" action="${FD_LOG_WATER_POST}"><input type="hidden" name="amount_ml" value="250" /><input type="hidden" name="return_to" value="/" /><button type="submit" class="fd-quick-tile"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconWater()}</span><span class="fd-quick-tile__label">Water +250 ml</span></button></form>`;
-    const cal = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_QUICK_CAL_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconBolt()}</span><span class="fd-quick-tile__label">Quick calories</span></button>`;
-    const weight = `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_LOG_WEIGH_IN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScale()}</span><span class="fd-quick-tile__label">Weigh in</span></button>`;
-    const scan = barcodeCamera
-        ? `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Scan barcode</span></button>`
-        : `<button type="button" class="fd-quick-tile" data-fd-open-sheet="${FD_BARCODE_SCAN_SHEET_ID}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconScan()}</span><span class="fd-quick-tile__label">Enter barcode</span></button>`;
-    // Cook a recipe goes to the recipes, where each one has its Cook step; Add
-    // to groceries opens the Groceries tab's add sheet (log-sheet.js reads add=1).
-    const cook = `<a class="fd-quick-tile" href="/recipes"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconPot()}</span><span class="fd-quick-tile__label">Cook a recipe</span></a>`;
-    const groceries = `<a class="fd-quick-tile" href="${FD_GROCERY_ADD_HREF}"><span class="fd-quick-tile__icon" aria-hidden="true">${quickIconCart()}</span><span class="fd-quick-tile__label">Add to groceries</span></a>`;
-    return `<p class="fd-log-section-label">QUICK</p><div class="fd-log-quick-grid">${scan}${cal}${water}${weight}${cook}${copy ? copyYesterdayTile(copy, selectedMeal) : ""}${groceries}</div>`;
-}
-
-function macroField(
-    id: string,
-    name: string,
-    label: string,
-    value: number | string | undefined = "",
-): string {
-    const v = escapeHtml(
-        value === undefined || value === "" ? "" : String(value),
+    copy: CopyYesterdayOpts | undefined,
+    selectedMeal: string,
+): Html {
+    const tiles: Html[] = [];
+    if (barcodeCamera) {
+        tiles.push(
+            quickAction({
+                label: "Scan barcode",
+                icon: "scan",
+                data: { "fd-open-sheet": FD_BARCODE_SCAN_SHEET_ID },
+            }),
+        );
+    }
+    tiles.push(
+        quickAction({
+            label: "Quick calories",
+            icon: "bolt",
+            data: { "fd-open-sheet": FD_LOG_QUICK_CAL_SHEET_ID },
+        }),
+        raw(
+            `<form class="fd-log-quick-form" method="post" action="${FD_LOG_WATER_POST}"><input type="hidden" name="amount_ml" value="250"><input type="hidden" name="return_to" value="/">${quickAction({ label: "Water +250 ml", icon: "drop", submit: true })}</form>`,
+        ),
+        quickAction({
+            label: "Weigh in",
+            icon: "scale",
+            data: { "fd-open-sheet": FD_LOG_WEIGH_IN_SHEET_ID },
+        }),
+        // Cook a recipe goes to the recipes, where each one has its Cook step;
+        // Add to groceries opens the Groceries tab's add sheet (log-sheet.js
+        // reads add=1).
+        quickAction({ label: "Cook a recipe", icon: "pot", href: "/recipes" }),
     );
-    return `<label class="fd-log-macro-field"><span class="fd-log-macro-field__label">${escapeHtml(label)}</span><input class="fd-log-macro-field__input" id="${escapeHtml(id)}" type="number" name="${escapeHtml(name)}" value="${v}" min="0" step="0.1" inputmode="decimal" /></label>`;
+    // Posts to the route behind Today's "Same as yesterday?" prompt, so a
+    // repeat is the same idempotent write. With no yesterday to copy in any
+    // meal there is no tile (the design's "no yesterday"); disabled while the
+    // chosen meal alone has nothing to copy; copy-yesterday.js re-points it
+    // when the meal changes.
+    if (copy && copy.slots.length > 0) {
+        tiles.push(
+            raw(
+                `<form class="fd-log-quick-form" method="post" action="/log/copy-yesterday" data-fd-copy-yesterday data-fd-copy-yesterday-slots="${esc(copy.slots.join(" "))}"><input type="hidden" name="slot" value="${esc(selectedMeal)}"><input type="hidden" name="return_to" value="${esc(copy.returnTo)}">${quickAction({ label: "Copy yesterday", icon: "copy", submit: true, disabled: !copy.slots.includes(selectedMeal), data: { "fd-copy-yesterday-button": "" } })}</form>`,
+            ),
+        );
+    }
+    tiles.push(
+        quickAction({
+            label: "Add to groceries",
+            icon: "cart",
+            href: FD_GROCERY_ADD_HREF,
+        }),
+    );
+    return join(tiles);
 }
 
 function logQuickCaloriesSheet(opts: RenderLogSheetsOpts): string {
@@ -376,28 +387,65 @@ function logQuickCaloriesSheet(opts: RenderLogSheetsOpts): string {
     const calories = prefill?.calories ?? 350;
     const description = prefill?.description ?? "Quick calories";
     const formId = `${FD_LOG_QUICK_CAL_SHEET_ID}-form`;
-    const error = opts.quickCaloriesError
-        ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.quickCaloriesError)}</p>`
-        : "";
-    const body = `${error}<form id="${formId}" class="fd-log-quick-cal-form" method="post" action="${FD_LOG_QUICK_POST}">
-<input type="hidden" name="return_to" value="/" />
-<div class="fd-log-kcal-hero"><input class="fd-log-kcal-input" id="fd-log-kcal" type="number" name="calories" value="${escapeHtml(String(calories))}" min="1" step="1" inputmode="numeric" required aria-label="Calories" /><span class="fd-log-kcal-suffix">kcal</span></div>
-<div class="fd-log-macro-grid">${macroField("fd-log-protein", "protein_g", "Protein g", prefill?.protein_g ?? "")}${macroField("fd-log-carbs", "carbs_g", "Carbs g", prefill?.carbs_g ?? "")}${macroField("fd-log-fat", "fat_g", "Fat g", prefill?.fat_g ?? "")}</div>
-<label class="fd-log-name-field"><span class="fd-log-name-field__label">Name</span><input class="fd-log-name-field__input" id="fd-log-quick-name" type="text" name="description" value="${escapeHtml(description)}" autocomplete="off" /></label>
-${mealChoiceHtml("meal_type", meal, "fd-log-meals-quick")}
+    const macro = (name: string, label: string, value: number | undefined) =>
+        field({
+            id: `${FD_LOG_QUICK_CAL_SHEET_ID}-${name}`,
+            label,
+            name,
+            type: "number",
+            value: value == null ? "" : String(value),
+            min: 0,
+            step: 0.1,
+            inputmode: "decimal",
+        });
+    const body = `${errorLine(opts.quickCaloriesError)}<form id="${formId}" class="fd-log-form" method="post" action="${FD_LOG_QUICK_POST}">
+<input type="hidden" name="return_to" value="/">
+${sheetSection({
+    kind: "amount",
+    content: stepperControl({
+        name: "calories",
+        label: "Calories",
+        value: calories,
+        min: 1,
+        step: 10,
+        inputStep: "any",
+        unit: "kcal",
+        id: "fd-log-kcal",
+    }),
+})}
+${sheetSection({
+    kind: "fields",
+    content: raw(
+        `<div class="fd-log-macro-fields">${macro("protein_g", "Protein g", prefill?.protein_g)}${macro("carbs_g", "Carbs g", prefill?.carbs_g)}${macro("fat_g", "Fat g", prefill?.fat_g)}</div>`,
+    ),
+})}
+${sheetSection({
+    kind: "fields",
+    content: field({
+        id: "fd-log-quick-name",
+        label: "Name",
+        name: "description",
+        value: description,
+        autocomplete: "off",
+    }),
+})}
+${sheetSection({ kind: "chips", label: "Add to", content: mealChoice("meal_type", meal) })}
 </form>`;
-    const submitLabel =
-        MEAL_SUBMIT_LABEL[meal] ?? MEAL_SUBMIT_LABEL.dinner ?? "Log";
-    const actions = `<button type="submit" class="fd-btn fd-btn--primary fd-log-submit" form="${formId}" data-fd-quick-cal-submit>${escapeHtml(submitLabel)}</button>`;
     return sheet({
         id: FD_LOG_QUICK_CAL_SHEET_ID,
-        kind: "edit",
-        title: "Quick calories",
-        subtitle: "Log without picking a food",
-        body,
-        actions,
+        placement: "dialog",
+        header: { kind: "title", title: "Quick calories" },
+        body: raw(body),
+        actions: {
+            kind: "single",
+            primary: {
+                label: MEAL_SUBMIT_LABEL[meal] ?? "Log",
+                type: "submit",
+                form: formId,
+                attrs: { "data-fd-quick-cal-submit": "" },
+            },
+        },
         openOnLoad: opts.quickCaloriesOpenOnLoad,
-        closeLabel: "Close",
         className: "fd-log-quick-cal-sheet",
         focus: "panel",
     });
@@ -408,133 +456,303 @@ function logWeighInSheet(opts: RenderLogSheetsOpts): string {
     const prefill = opts.weighIn ?? {};
     const unit = prefill.unit ?? "kg";
     const weight = prefill.weight ?? (unit === "lb" ? 165 : 75);
-    const usePickTime = Boolean(prefill.logged_at);
+    const usePick = Boolean(prefill.logged_at);
     const loggedAt = prefill.logged_at
         ? datetimeLocalValue(prefill.logged_at)
         : defaultLoggedAtLocal(tz);
-    const todayLabel = todayTimeLabel24(tz);
     const subtitle = weighInLastSubtitle(
         prefill.lastWeightG,
         prefill.lastLoggedAt,
         prefill.preferredUnit ?? unit,
         tz,
     );
-    const error = opts.weighInError
-        ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.weighInError)}</p>`
-        : "";
     const formId = `${FD_LOG_WEIGH_IN_SHEET_ID}-form`;
-    const body = `${error}<form id="${formId}" class="fd-log-weigh-in-form" method="post" action="${FD_LOG_WEIGHT_POST}">
-<input type="hidden" name="return_to" value="/" />
-<input type="hidden" name="unit" value="${escapeHtml(unit)}" />
-${stepper({
-    name: "weight",
-    label: "Weight",
-    value: weight,
-    min: 0,
-    step: 0.1,
-    inputStep: "any",
-    unit,
-    id: "fd-log-weight-value",
-    className: "fd-log-stepper",
-}).toString()}
-<fieldset class="fd-choice-group fd-log-time">
-<legend class="fd-sr">When</legend>
-<div class="fd-chips fd-log-time-chips">
-<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" name="fd_weigh_time_mode" value="now"${usePickTime ? "" : " checked"} data-fd-weigh-time-mode><span class="fd-chip__face"><span class="fd-chip__label" data-fd-weigh-today-label>${escapeHtml(todayLabel)}</span></span></label>
-<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" name="fd_weigh_time_mode" value="pick"${usePickTime ? " checked" : ""} data-fd-weigh-time-mode><span class="fd-chip__face"><span class="fd-chip__label">Pick a time</span></span></label>
-</div>
-<input class="fd-log-time-input" id="fd-weigh-time" type="datetime-local" name="logged_at" value="${escapeHtml(loggedAt)}" required aria-label="Time"${usePickTime ? "" : " hidden disabled"} />
-</fieldset>
+    const body = `${errorLine(opts.weighInError)}<form id="${formId}" class="fd-log-form" method="post" action="${FD_LOG_WEIGHT_POST}">
+<input type="hidden" name="return_to" value="/">
+<input type="hidden" name="unit" value="${esc(unit)}">
+${sheetSection({
+    kind: "amount",
+    content: stepperControl({
+        name: "weight",
+        label: "Weight",
+        value: weight,
+        min: 0,
+        step: 0.1,
+        inputStep: "any",
+        unit,
+        id: "fd-log-weight-value",
+    }),
+})}
+${whenSection(
+    { name: "fd_weigh_time_mode", hook: "fd-weigh-today-label" },
+    { time: "fd-weigh-time" },
+    { usePick, todayLabel: todayTimeLabel(tz), loggedAt },
+)}
 </form>`;
-    const actions = `<button type="submit" class="fd-btn fd-btn--primary fd-log-submit" form="${formId}">Save</button>`;
     return sheet({
         id: FD_LOG_WEIGH_IN_SHEET_ID,
-        kind: "edit",
-        title: "Weigh in",
-        subtitle,
-        body,
-        actions,
+        placement: "dialog",
+        header: { kind: "title", title: "Weigh in", subtitle },
+        body: raw(body),
+        actions: {
+            kind: "single",
+            primary: { label: "Save", type: "submit", form: formId },
+        },
         openOnLoad: opts.weighInOpenOnLoad,
-        closeLabel: "Close",
         className: "fd-log-weigh-in-sheet",
         focus: "panel",
     });
 }
 
-function recentChipsHtml(items: typeof PREVIEW_RECENTS): string {
-    if (items.length === 0) return "";
-    return items
-        .map(
-            (r) =>
-                `<button type="button" class="fd-chip fd-log-recent" data-fd-log-pick="${escapeHtml(JSON.stringify(r.payload))}"><span class="fd-chip__label">${escapeHtml(r.name)}</span><span class="fd-chip__count">${r.kcal}</span></button>`,
-        )
-        .join("");
+/** What one row of search results carries: where it opens and what + logs. */
+type PreviewResult = {
+    name: string;
+    subtitle: string;
+    score?: number;
+    open?: string;
+    pick: Record<string, unknown>;
+};
+
+const PREVIEW_RESULTS: PreviewResult[] = [
+    {
+        name: "Chicken thighs",
+        subtitle: "In your fridge · 0.5 lb · 209 / 100 g kcal",
+        open: "/kitchen/fridge?item=s1",
+        pick: { name: "Chicken thighs", food_id: "f-thighs", kind: "stock" },
+    },
+    {
+        name: "Chicken alfredo",
+        subtitle: "Your recipe · 1 serving · 690 kcal",
+        open: "/recipes/r-alfredo",
+        pick: {
+            name: "Chicken alfredo",
+            recipe_id: "r-alfredo",
+            unit_hints: ["portion"],
+            kind: "recipe",
+        },
+    },
+    {
+        name: "Chicken breast, grilled",
+        subtitle: "Generic · 165 / 100 g kcal",
+        open: "/foods/f-chicken",
+        pick: {
+            name: "Chicken breast, grilled",
+            food_id: "f-chicken",
+            kcal_per_100g: 165,
+            protein_per_100g: 31,
+            carbs_per_100g: 0,
+            fat_per_100g: 3.3,
+            unit_hints: ["g"],
+            kind: "food",
+        },
+    },
+    {
+        name: "Chicken noodle soup",
+        subtitle: "Campbell's · 1 cup · 90 kcal",
+        score: 41,
+        open: "/foods/f-soup",
+        pick: { name: "Chicken noodle soup", food_id: "f-soup", kind: "food" },
+    },
+    {
+        name: "Chicken caesar wrap",
+        subtitle: "Logged 3 times · 540 kcal",
+        pick: {
+            name: "Chicken caesar wrap",
+            food_id: "f-wrap",
+            kind: "history",
+        },
+    },
+];
+
+/**
+ * One search result, as the design draws it: the face opens the thing (a link
+ * with a chevron), the + beside it logs it. A result that only logs (a past
+ * meal) has no chevron, and its face picks like its plus. `client/v2/log-sheet.js`
+ * writes the same markup for live results.
+ */
+export function logResultRow(row: PreviewResult, index: number): Html {
+    const pick = JSON.stringify(row.pick);
+    const add = {
+        kind: "add" as const,
+        label: `Add ${row.name}`,
+        data: { "fd-log-pick": pick },
+    };
+    return itemRow({
+        title: row.name,
+        score: row.score,
+        subtitle: row.subtitle,
+        id: `fd-log-result-${index}`,
+        role: "option",
+        data: { "fd-log-row-pick": pick },
+        ...(row.open != null
+            ? {
+                  href: row.open,
+                  trailing: { kind: "chevron" as const },
+                  add,
+              }
+            : { trailing: add }),
+    });
 }
 
-function previewResultRows(): string {
-    const rows = [
-        searchResultRow({
-            title: "Chicken thighs",
-            subtitle: "In your fridge · 0.5 lb · 209 / 100 g kcal",
-            macros: { protein: 26, carbs: 0, fat: 11 },
-            add: {
-                label: "Add Chicken thighs",
-                data: {
-                    "fd-log-pick": '{"name":"Chicken thighs","kind":"stock"}',
-                },
-            },
+function resultsList(rows: Html[]): Html {
+    return listGroup({
+        rows,
+        id: "fd-log-result-listbox",
+        role: "listbox",
+        label: "Search results",
+        data: { "fd-log-result-list": "" },
+    });
+}
+
+function logSearchSheet(opts: RenderLogSheetsOpts): string {
+    const meal = guessMealType(opts.timezone);
+    const preview = opts.previewSearch;
+    const query = opts.previewQuery ?? (preview === "results" ? "chick" : "");
+    const link = opts.previewLink === true;
+    const showResults = preview === "results" && !link;
+    const cameraOn = opts.barcodeCamera !== false;
+    const recents = preview === "empty" ? recentChips(PREVIEW_RECENTS) : "";
+    const hide = (hidden: boolean) => (hidden ? " hidden" : "");
+
+    const importForm = `<form class="fd-log-import" method="post" action="${FD_LOG_IMPORT_POST}" data-fd-log-import data-busy-form hidden><input type="hidden" name="url" value=""></form>`;
+
+    const filters = sectionBlock(
+        "data-fd-log-filters",
+        !showResults,
+        sheetSection({
+            kind: "chips",
+            content: choiceGroup({
+                name: "fd_log_filter",
+                legend: "Filter results",
+                options: ["All", "Foods", "Recipes", "My foods"].map(
+                    (label, i) => ({
+                        value: label,
+                        label,
+                        selected: i === 0,
+                    }),
+                ),
+            }),
         }),
-        searchResultRow({
-            title: "Chicken rice bowl",
-            subtitle: "Your recipe · 1 serving · 852 kcal",
-            macros: { protein: 69, carbs: 76, fat: 25 },
-            add: {
-                label: "Add Chicken rice bowl",
-                data: {
-                    "fd-log-pick":
-                        '{"name":"Chicken rice bowl","recipe_id":"r1","unit_hints":["portion"]}',
-                },
-            },
+    );
+
+    const scanLink = cameraOn
+        ? button({
+              variant: "link",
+              size: "md",
+              icon: "scan",
+              label: "Not here? Scan the barcode",
+              attrs: { "data-fd-open-sheet": FD_BARCODE_SCAN_SHEET_ID },
+          })
+        : "";
+    const onlineButton = button({
+        variant: "link",
+        size: "md",
+        icon: "search",
+        label: "Search online",
+        attrs: {
+            "data-fd-log-online": "",
+            ...(showResults ? {} : { hidden: "" }),
+        },
+    });
+    const results = sectionBlock(
+        "data-fd-log-results",
+        !showResults,
+        sheetSection({
+            kind: "results",
+            content: join([
+                resultsList(
+                    showResults
+                        ? PREVIEW_RESULTS.map((r, i) => logResultRow(r, i))
+                        : [],
+                ),
+                onlineButton,
+                scanLink,
+            ]),
         }),
-        searchResultRow({
-            title: "Chicken breast, grilled",
-            subtitle: "Generic · 165 / 100 g kcal",
-            macros: { protein: 31, carbs: 0, fat: 4 },
-            add: {
-                label: "Add Chicken breast, grilled",
-                data: {
-                    "fd-log-pick":
-                        '{"name":"Chicken breast, grilled","food_id":"f-chicken","kcal_per_100g":165,"protein_per_100g":31,"carbs_per_100g":0,"fat_per_100g":3.3,"unit_hints":["g"]}',
+    );
+
+    const empty = sectionBlock(
+        "data-fd-log-empty",
+        showResults,
+        join([
+            sheetSection({
+                kind: "chips",
+                label: "Add to",
+                content: mealChoice("search_meal_type", meal),
+            }),
+            raw(
+                `<div class="fd-log-recent-section" data-fd-log-recent-section${hide(recents === "")}>${sheetSection(
+                    {
+                        kind: "chips",
+                        label: "Recent",
+                        content: raw(
+                            `<div class="fd-chips" data-fd-log-recent>${recents}</div>`,
+                        ),
+                    },
+                )}</div>`,
+            ),
+            sheetSection({
+                kind: "tiles",
+                label: "Quick",
+                content: quickTiles(cameraOn, opts.copyYesterday, meal),
+            }),
+        ]),
+    );
+
+    const body = join([
+        raw(errorLine(opts.searchError)),
+        raw(importForm),
+        filters,
+        results,
+        empty,
+    ]);
+    return sheet({
+        id: FD_LOG_SEARCH_SHEET_ID,
+        placement: "dialog",
+        header: {
+            kind: "search",
+            title: "Search",
+            search: {
+                name: "q",
+                id: "fd-log-search-q",
+                label: "Search foods, recipes, and barcodes",
+                placeholder: "Search foods, recipes, barcodes",
+                value: query,
+                clear: {
+                    label: "Clear search",
+                    attrs: {
+                        "data-fd-log-search-clear": "",
+                        ...(query ? {} : { hidden: "" }),
+                    },
                 },
-            },
-        }),
-        searchResultRow({
-            title: "Chicken noodle soup",
-            score: 41,
-            subtitle: "Campbell's · 1 cup · 90 kcal",
-            macros: { protein: 5, carbs: 12, fat: 2 },
-            add: {
-                label: "Add Chicken noodle soup",
-                data: {
-                    "fd-log-pick":
-                        '{"name":"Chicken noodle soup","food_id":"f-soup"}',
+                go: {
+                    label: "Import recipe",
+                    attrs: { "data-fd-log-import-go": "" },
                 },
+                scan: cameraOn
+                    ? {
+                          label: "Scan a barcode",
+                          attrs: {
+                              "data-fd-open-sheet": FD_BARCODE_SCAN_SHEET_ID,
+                          },
+                      }
+                    : undefined,
             },
-        }),
-        searchResultRow({
-            title: "Chicken caesar wrap",
-            subtitle: "Logged 3 times · 540 kcal",
-            macros: { protein: 32, carbs: 41, fat: 26 },
-            add: {
-                label: "Add Chicken caesar wrap",
-                data: {
-                    "fd-log-pick":
-                        '{"name":"Chicken caesar wrap","kind":"history"}',
-                },
-            },
-        }),
-    ];
-    return `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" aria-label="Search results">${rows.map((r) => r.toString()).join("")}</ul>`;
+        },
+        body,
+        openOnLoad: opts.searchOpenOnLoad,
+        className: `fd-log-search-sheet${link ? " fd-log-search-sheet--link" : ""}`,
+        // Focus goes to the panel; log-sheet.js focuses the search field only
+        // with a fine pointer, so a phone's keyboard waits for a tap.
+        focus: "panel",
+    });
+}
+
+/** A wrapper the search script shows and hides as a whole. */
+function sectionBlock(hook: string, hidden: boolean, content: Html): Html {
+    return raw(
+        `<div class="fd-log-block" ${hook}${hidden ? " hidden" : ""}>${content}</div>`,
+    );
 }
 
 function amountSubtitle(prefill: LogAmountPrefill | undefined): string {
@@ -558,11 +776,41 @@ function amountSubtitle(prefill: LogAmountPrefill | undefined): string {
         : "Generic";
 }
 
+type MacroFigures = {
+    kcal?: number | null;
+    protein_g?: number | null;
+    carbs_g?: number | null;
+    fat_g?: number | null;
+} | null;
+
+/** The four tiles for one amount; an unknown figure is a dash, never a zero. */
+function macroTilesFor(m: MacroFigures): Html {
+    const grams = (v: number | null | undefined) =>
+        v == null || !Number.isFinite(Number(v))
+            ? null
+            : `${formatLogMacroGrams(v)} g`;
+    return macroTiles({
+        label: "This amount",
+        tiles: [
+            {
+                kind: "kcal",
+                value:
+                    m?.kcal == null || !Number.isFinite(Number(m.kcal))
+                        ? null
+                        : formatLogMacroKcal(m.kcal),
+            },
+            { kind: "protein", value: grams(m?.protein_g) },
+            { kind: "carbs", value: grams(m?.carbs_g) },
+            { kind: "fat", value: grams(m?.fat_g) },
+        ],
+    });
+}
+
 function macroTilesForAmount(
     prefill: LogAmountPrefill | undefined,
     amount: number,
     unit: string,
-): StatTile[] {
+): Html {
     const macroItem = prefill
         ? prefill.recipe_id
             ? {
@@ -584,72 +832,7 @@ function macroTilesForAmount(
               }
         : null;
     const m = macroItem ? macrosForLogItem(macroItem, amount, unit) : null;
-    return [
-        {
-            label: "kcal",
-            value: formatLogMacroKcal(m?.kcal),
-            dot: "calories",
-        },
-        {
-            label: "Protein",
-            value: formatLogMacroGrams(m?.protein_g),
-            unit: "g",
-            dot: "protein",
-        },
-        {
-            label: "Carbs",
-            value: formatLogMacroGrams(m?.carbs_g),
-            unit: "g",
-            dot: "carbs",
-        },
-        {
-            label: "Fat",
-            value: formatLogMacroGrams(m?.fat_g),
-            unit: "g",
-            dot: "fat",
-        },
-    ];
-}
-
-function logSearchSheet(opts: RenderLogSheetsOpts): string {
-    const meal = guessMealType(opts.timezone);
-    const preview = opts.previewSearch;
-    const query = opts.previewQuery ?? (preview === "results" ? "chick" : "");
-    const showEmpty = preview !== "results";
-    const showResults = preview === "results";
-    const emptyHidden = showResults ? " hidden" : "";
-    const resultsHidden = showResults ? "" : " hidden";
-    const previewRecents = preview === "empty" ? PREVIEW_RECENTS : [];
-    const searchError = opts.searchError
-        ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.searchError)}</p>`
-        : "";
-    const cameraOn = opts.barcodeCamera !== false;
-    const emptyBody = `${searchError}${mealChoiceHtml("search_meal_type", meal, "fd-log-meals-search")}<p class="fd-log-section-label">Recent</p><div class="fd-chips fd-log-recents" data-fd-log-recent>${recentChipsHtml(previewRecents)}</div>${quickActionsHtml(cameraOn, opts.copyYesterday, meal)}`;
-    const resultsBody = showResults
-        ? previewResultRows()
-        : `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" data-fd-log-result-list></ul>`;
-    const onlineHidden = showResults ? "" : " hidden";
-    const body = `<div class="fd-log-search-panel">
-${searchFieldHtml(query)}
-${filterChipsHtml(!showResults)}
-<div class="fd-log-search-results" data-fd-log-results${resultsHidden}>${resultsBody}</div>
-<div class="fd-log-search-empty" data-fd-log-empty${emptyHidden}>${emptyBody}</div>
-<button type="button" class="fd-btn fd-btn--primary fd-log-online" data-fd-log-online${onlineHidden}>${fdIcon("search", 2)}<span>Search online</span></button>
-</div>`;
-    return sheet({
-        id: FD_LOG_SEARCH_SHEET_ID,
-        kind: "edit",
-        title: "Log food",
-        subtitle: MEAL_ADDING_LABEL[meal] ?? MEAL_ADDING_LABEL.dinner,
-        body,
-        openOnLoad: opts.searchOpenOnLoad,
-        closeLabel: "Close search",
-        showClose: true,
-        className: "fd-log-search-sheet",
-        // Focus goes to the panel; log-sheet.js focuses the search field only
-        // with a fine pointer, so a phone's keyboard waits for a tap.
-        focus: "panel",
-    });
+    return macroTilesFor(m);
 }
 
 function amountHiddenFields(prefill: LogAmountPrefill | undefined): string {
@@ -660,49 +843,67 @@ function amountHiddenFields(prefill: LogAmountPrefill | undefined): string {
     return fields
         .map(
             ([name, value]) =>
-                `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}" />`,
+                `<input type="hidden" name="${esc(name)}" value="${esc(value)}">`,
         )
         .join("\n");
 }
 
-function unitChoiceHtml(
+/** "each · 174 g": a piece says what it weighs when the food knows. */
+export function unitSegmentLabel(
+    unit: string,
+    gramsPerEach: number | null | undefined,
+): string {
+    if (unit !== "each" || gramsPerEach == null || !(gramsPerEach > 0)) {
+        return unit;
+    }
+    return `each · ${Math.round(gramsPerEach * 10) / 10} g`;
+}
+
+/**
+ * The unit as the design's small Segmented: one segment per unit the food can
+ * be logged in. A food with one unit has nothing to choose, so it posts the
+ * unit from a hidden field instead. The script rebuilds it when a food is
+ * picked, into the same `[data-fd-log-units]` slot.
+ */
+function unitControl(
     hints: string[],
     selected: string,
-    opts: { empty?: boolean } = {},
-): string {
-    const options = hints.map((unit) => ({
-        value: unit,
-        label: unit,
-        selected: unit === selected,
-    }));
-    if (opts.empty || hints.length === 0) {
-        return `<fieldset class="fd-choice-group fd-log-units" data-fd-log-unit-chips><legend class="fd-sr">Unit</legend></fieldset>`;
-    }
-    return choiceGroup({
-        name: "unit",
-        legend: "Unit",
-        options,
-        required: true,
-        className: "fd-log-units",
-    })
-        .toString()
-        .replace(
-            'class="fd-choice-group fd-log-units"',
-            'class="fd-choice-group fd-log-units" data-fd-log-unit-chips',
+    gramsPerEach: number | null | undefined,
+): Html {
+    if (hints.length < 2) {
+        return raw(
+            `<div class="fd-log-units" data-fd-log-units>${
+                hints.length === 1
+                    ? `<input type="hidden" name="unit" value="${esc(hints[0]!)}">`
+                    : ""
+            }</div>`,
         );
+    }
+    return raw(
+        `<div class="fd-log-units" data-fd-log-units>${segmented({
+            label: "Unit",
+            size: "small",
+            name: "unit",
+            segments: hints.map((unit) => ({
+                value: unit,
+                label: unitSegmentLabel(unit, gramsPerEach),
+                selected: unit === selected,
+            })),
+        })}</div>`,
+    );
 }
 
 /**
  * "1 portion · 30 ml": what the amount is in the pack serving's own unit.
  * Always rendered (empty), so the client can fill it when a food is picked.
  */
-function portionEchoHtml(
+function portionEcho(
     serving: LogServing | null,
     amount: number,
     unit: string,
 ): string {
     const shown = serving != null && unit === "portion" && amount > 0;
-    return `<p class="fd-log-portion" data-fd-log-portion${shown ? "" : " hidden"}>${shown ? escapeHtml(portionLabel(serving, amount)) : ""}</p>`;
+    return `<p class="fd-log-portion" data-fd-log-portion${shown ? "" : " hidden"}>${shown ? esc(portionLabel(serving, amount)) : ""}</p>`;
 }
 
 function logAmountSheet(opts: RenderLogSheetsOpts): string {
@@ -736,65 +937,62 @@ function logAmountSheet(opts: RenderLogSheetsOpts): string {
         MEAL_TYPES.some((t) => t.value === prefill.meal_type)
             ? prefill.meal_type!
             : guessMealType(tz);
-    const usePickTime = Boolean(prefill?.logged_at);
+    const usePick = Boolean(prefill?.logged_at);
     const loggedAt = prefill?.logged_at
         ? datetimeLocalValue(prefill.logged_at)
         : defaultLoggedAtLocal(tz);
-    const todayLabel = todayTimeLabel(tz);
-    const error = opts.amountError
-        ? `<p class="fd-log-error" role="alert">${escapeHtml(opts.amountError)}</p>`
-        : "";
     const formId = `${FD_LOG_AMOUNT_SHEET_ID}-form`;
-    const tiles = statTiles(macroTilesForAmount(prefill, amount, unit), {
-        className: "fd-log-macros",
-    }).toString();
-    const body = `${error}<form id="${formId}" class="fd-log-amount-form" method="post" action="${FD_LOG_POST}">
+    const body = `${errorLine(opts.amountError)}<form id="${formId}" class="fd-log-form" method="post" action="${FD_LOG_POST}">
 ${amountHiddenFields(prefill)}
-<input type="hidden" name="return_to" value="/" />
-<input type="hidden" name="display_name" value="${escapeHtml(prefill?.name ?? "Food")}" data-fd-log-display-name />
-${stepper({
-    name: "amount",
-    label: "Amount",
-    value: amount,
-    min: 0,
-    step: unit === "portion" ? 0.25 : 1,
-    inputStep: "any",
-    unit,
-    id: "fd-log-amount-value",
-    className: "fd-log-stepper",
-}).toString()}
-${portionEchoHtml(prefill?.serving ?? null, amount, unit)}
-${unitChoiceHtml(hints, unit, { empty: !prefill })}
-<div data-fd-log-macros>${tiles}</div>
-${mealChoiceHtml("meal_type", meal, "fd-log-meals")}
-<fieldset class="fd-choice-group fd-log-time">
-<legend class="fd-sr">When</legend>
-<div class="fd-chips fd-log-time-chips">
-<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" name="fd_log_time_mode" value="now"${usePickTime ? "" : " checked"} data-fd-log-time-mode><span class="fd-chip__face"><span class="fd-chip__label" data-fd-log-today-label>${escapeHtml(todayLabel)}</span></span></label>
-<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" name="fd_log_time_mode" value="pick"${usePickTime ? " checked" : ""} data-fd-log-time-mode><span class="fd-chip__face"><span class="fd-chip__label">Pick a time</span></span></label>
-</div>
-<input class="fd-log-time-input" id="fd-log-time" type="datetime-local" name="logged_at" value="${escapeHtml(loggedAt)}" required aria-label="Time"${usePickTime ? "" : " hidden disabled"} />
-</fieldset>
+<input type="hidden" name="return_to" value="/">
+<input type="hidden" name="display_name" value="${esc(prefill?.name ?? "Food")}" data-fd-log-display-name>
+${sheetSection({
+    kind: "amount",
+    content: raw(
+        `${stepperControl({
+            name: "amount",
+            label: "Amount",
+            value: amount,
+            min: 0,
+            step: unit === "portion" ? 0.25 : 1,
+            inputStep: "any",
+            unit,
+            id: "fd-log-amount-value",
+        })}${portionEcho(prefill?.serving ?? null, amount, unit)}${unitControl(hints, unit, prefill?.grams_per_each)}<div data-fd-log-macros>${macroTilesForAmount(prefill, amount, unit)}</div>`,
+    ),
+})}
+${sheetSection({ kind: "chips", label: "Add to", content: mealChoice("meal_type", meal) })}
+${whenSection(
+    { name: "fd_log_time_mode", hook: "fd-log-today-label" },
+    { time: "fd-log-time" },
+    { usePick, todayLabel: todayTimeLabel(tz), loggedAt },
+)}
 </form>`;
-    const submitLabel =
-        MEAL_SUBMIT_LABEL[meal] ?? MEAL_SUBMIT_LABEL.dinner ?? "Log";
-    const actions = `<button type="submit" class="fd-btn fd-btn--primary fd-log-submit" form="${formId}" data-fd-log-submit>${escapeHtml(submitLabel)}</button>`;
-    const foodName = prefill?.name ?? "Food";
     return sheet({
         id: FD_LOG_AMOUNT_SHEET_ID,
-        kind: "edit",
-        title: foodName,
-        subtitle: amountSubtitle(prefill),
-        body,
-        actions,
+        placement: "dialog",
+        header: {
+            kind: "title",
+            title: prefill?.name ?? "Food",
+            subtitle: amountSubtitle(prefill) || undefined,
+        },
+        body: raw(body),
+        actions: {
+            kind: "single",
+            primary: {
+                label: MEAL_SUBMIT_LABEL[meal] ?? "Log",
+                type: "submit",
+                form: formId,
+                attrs: { "data-fd-log-submit": "" },
+            },
+        },
         openOnLoad: opts.amountOpenOnLoad,
-        closeLabel: "Close",
         className: "fd-log-amount-sheet",
         focus: "panel",
     });
 }
 
-/** Search and amount sheets included once in the v2 shell. */
+/** Search, amount, quick calories, weigh in and scanner sheets, once in the v2 shell. */
 export function renderLogSheets(opts: RenderLogSheetsOpts): string {
     const scanner = renderBarcodeScannerSheet({
         barcodeCamera: opts.barcodeCamera,

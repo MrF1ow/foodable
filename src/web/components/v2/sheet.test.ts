@@ -782,3 +782,47 @@ test("the results section spaces its list rows 12px apart", () => {
     expect(tokens).toMatch(/--space-md:\s*12px/);
     expect(stripped).not.toMatch(/fd-sheet-sample__(slot|tile)/);
 });
+
+test("the search header can carry an id, and a Go button hidden until a link is detected", () => {
+    const html = String(
+        sheetHeader({
+            sheetId: "s",
+            kind: "search",
+            title: "Search",
+            search: {
+                name: "q",
+                id: "s-q",
+                label: "Search",
+                placeholder: "Search",
+                go: { label: "Import recipe", attrs: { "data-fd-go": "" } },
+            },
+        }),
+    );
+    expect(html).toContain('<input class="fd-sheet__search-input" id="s-q"');
+    expect(html).toContain("fd-sheet__search-icon--link");
+    expect(html).toMatch(
+        /<button[^>]*fd-btn--go[^>]*aria-label="Import recipe"[^>]*data-fd-go=""[^>]*hidden/,
+    );
+    // Without Go the lead is the one magnifier.
+    expect(
+        String(
+            sheetHeader({
+                sheetId: "s",
+                kind: "search",
+                title: "Search",
+                search: { name: "q", label: "x", placeholder: "x" },
+            }),
+        ),
+    ).not.toContain("search-icon--link");
+});
+
+test("the quick grid is four columns on the phone and a tight row of six on the wide dialog", () => {
+    const css = readFileSync("public/app/v2/sheet.css", "utf8");
+    expect(css).toMatch(
+        /\.fd-sheet__section--tiles \.fd-sheet__content \{[^}]*repeat\(4, minmax\(0, 1fr\)\)/,
+    );
+    const wide = css.slice(css.indexOf("@media (min-width: 1024px)"));
+    expect(wide).toMatch(
+        /\.fd-sheet--dialog \.fd-sheet__section--tiles \.fd-sheet__content \{[^}]*repeat\(6, minmax\(0, 1fr\)\)/,
+    );
+});

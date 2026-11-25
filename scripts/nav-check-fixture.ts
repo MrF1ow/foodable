@@ -571,6 +571,18 @@ async function pages(
             ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
             plan: fixtureWeekPlan(),
         }),
+        // `barcode-camera` off: the log sheet draws no Scan barcode tile, no
+        // barcode button and no scan link.
+        "nutrition-camera-off": renderTodayV2Page({
+            ...buildPreviewTodayPageData(
+                {
+                    ...chrome,
+                    flags: { ...chrome.flags, barcodeCamera: false },
+                } as never,
+                "2026-11-10",
+            ),
+            plan: fixtureWeekPlan(),
+        }),
         "nutrition-plan-moved": renderTodayV2Page({
             ...buildPreviewTodayPageData(chrome as never, "2026-11-10"),
             plan: fixtureWeekPlan(true),
@@ -743,6 +755,7 @@ for (const theme of ["light", "dark"] as const) {
 
 const ROUTE_BASE: Record<string, string> = {
     "/": "nutrition",
+    "/?camera=off": "nutrition-camera-off",
     "/kitchen/fridge": "fridge",
     "/kitchen/groceries": "grocery",
     "/recipes": "recipes",
@@ -974,6 +987,68 @@ const server = Bun.serve({
                         default_unit: "each",
                     },
                 ],
+            });
+        }
+        if (path === "/api/log/search") {
+            // What the log search answers: a few foods, a recipe and a past
+            // meal for "chick", the latest logs for the empty query.
+            const q = (url.searchParams.get("q") ?? "").toLowerCase();
+            const chicken = {
+                id: "f-chicken",
+                name: "Chicken breast, grilled",
+                food_id: "f-chicken",
+                unit_hints: ["g"],
+                kcal_per_100g: 165,
+                protein_per_100g: 31,
+                carbs_per_100g: 0,
+                fat_per_100g: 3.3,
+                source: "food",
+                open: "/foods/f-chicken",
+                loggable: true,
+            };
+            const alfredo = {
+                id: "r-alfredo",
+                name: "Chicken alfredo",
+                recipe_id: "r-alfredo",
+                unit_hints: ["portion"],
+                kcal: 690,
+                source: "recipe",
+                open: "/recipes/r-alfredo",
+                loggable: true,
+            };
+            const wrap = {
+                id: "m-wrap",
+                meal_id: "m-wrap",
+                name: "Chicken caesar wrap",
+                food_id: "f-wrap",
+                unit_hints: ["g"],
+                log_count: 3,
+                meal_kcal: 540,
+                source: "meal",
+                open: "/?log=meal:m-wrap",
+                loggable: true,
+            };
+            const eggs = {
+                id: "m-eggs",
+                meal_id: "m-eggs",
+                name: "Scrambled eggs",
+                food_id: "f-eggs",
+                unit_hints: ["g"],
+                meal_kcal: 216,
+                source: "meal",
+                open: "/?log=meal:m-eggs",
+                loggable: true,
+            };
+            return Response.json({
+                groups: q.includes("chick")
+                    ? [
+                          { kind: "food", items: [chicken] },
+                          { kind: "recipe", items: [alfredo] },
+                          { kind: "history", items: [wrap] },
+                      ]
+                    : q === ""
+                      ? [{ kind: "history", items: [eggs] }]
+                      : [],
             });
         }
         if (path === "/logout") {

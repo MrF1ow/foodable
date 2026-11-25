@@ -35,16 +35,14 @@ class FakeEl {
         for (const fn of [...(this.listeners[type] ?? [])]) fn(event);
     }
     querySelector(sel: string): FakeEl | null {
-        if (sel === ".fd-scanner-video" && this.tag === "dialog") {
+        if (sel === "[data-fd-camera-video]" && this.tag === "dialog") {
             return this.video;
         }
         if (sel === "[data-fd-scanner-error]") return this.errorEl;
-        if (sel === "[data-fd-scanner-type-panel]") return this.typePanel;
-        if (sel === ".fd-scanner-help") return this.help;
-        if (sel === ".fd-scanner-camera") return this.camera;
-        if (sel === ".fd-scanner-type-input") return this.typeInput;
+        if (sel === "[data-fd-camera-view]") return this.camera;
+        if (sel === ".fd-scanner__type input") return this.typeInput;
+        if (sel === "[data-fd-scanner-form]") return this.form;
         if (sel === "[data-fd-scanner-torch]") return this.torch;
-        if (sel === "[data-fd-scanner-submit]") return this.submitBtn;
         if (sel === "input") return this.typeInput;
         for (const ch of this.children) {
             const hit = ch.querySelector(sel);
@@ -68,24 +66,20 @@ class FakeEl {
     }
     video!: FakeEl;
     errorEl!: FakeEl;
-    typePanel!: FakeEl;
-    help!: FakeEl;
+    form!: FakeEl;
     camera!: FakeEl;
     typeInput!: FakeEl;
     torch!: FakeEl;
-    submitBtn!: FakeEl;
 }
 
 function makeScannerDialog(): FakeEl {
     const dialog = new FakeEl("dialog", null, ["fd-scanner"]);
     dialog.video = new FakeEl("video", dialog);
     dialog.errorEl = new FakeEl("p", dialog);
-    dialog.typePanel = new FakeEl("div", dialog);
-    dialog.help = new FakeEl("div", dialog);
+    dialog.form = new FakeEl("form", dialog);
     dialog.camera = new FakeEl("div", dialog);
     dialog.typeInput = new FakeEl("input", dialog);
     dialog.torch = new FakeEl("button", dialog);
-    dialog.submitBtn = new FakeEl("button", dialog);
     return dialog;
 }
 
@@ -337,15 +331,7 @@ describe("scanner camera lifecycle", () => {
     test("short typed code shows inline error", async () => {
         const ctx = await loadScannerModule();
         ctx.dialog.typeInput.value = "123";
-        for (const fn of ctx.dialog.listeners.click ?? []) {
-            fn({
-                target: {
-                    closest: (sel: string) =>
-                        sel === "[data-fd-scanner-submit]" ? {} : null,
-                },
-                preventDefault: () => {},
-            });
-        }
+        ctx.dialog.form.fire("submit", { preventDefault: () => {} });
         expect(ctx.assigns).toEqual([]);
         expect(ctx.dialog.errorEl.textContent).toContain("8 digits");
     });
@@ -510,15 +496,7 @@ describe("scanner target", () => {
         digits: string,
     ) {
         ctx.dialog.typeInput.value = digits;
-        ctx.dialog.fire("click", {
-            preventDefault: () => {},
-            target: {
-                closest: (sel: string) =>
-                    sel === "[data-fd-scanner-submit]"
-                        ? ctx.dialog.submitBtn
-                        : null,
-            },
-        });
+        ctx.dialog.form.fire("submit", { preventDefault: () => {} });
         await flushPromises();
     }
 

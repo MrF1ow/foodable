@@ -80,7 +80,10 @@ describe("settings home v2", () => {
     });
 
     test("the rows, in the design's three lists", () => {
-        const html = renderSettingsHomeV2Page(view);
+        // The page's own lists: the search sheet after the shell has a list of
+        // its own (the results), which is not one of the three.
+        const html =
+            renderSettingsHomeV2Page(view).split('id="fd-log-search"')[0]!;
         const lists = html.split('<ul class="fd-list-group"').slice(1);
         expect(lists).toHaveLength(3);
         expect(rowLabels(lists[0]!)).toEqual([

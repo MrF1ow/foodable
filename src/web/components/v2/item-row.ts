@@ -181,8 +181,18 @@ export type ItemRowOptions = {
     macros?: Macros;
     trailing?: ItemRowTrailing;
     state?: ItemRowState;
-    /** Whole-row link; the row then holds no other control. */
+    /** Whole-row link; the row then holds no other control, except `add`. */
     href?: string;
+    /**
+     * A search result's plus: a link row's second control. The face opens
+     * `href`; this button, drawn beside it and not inside it, does the other
+     * thing (logs the food). Needs `href`.
+     */
+    add?: Extract<ItemRowTrailing, { kind: "add" }>;
+    /** `data-*` on the row itself (what a script reads when the row is picked). */
+    data?: Readonly<Record<string, string>>;
+    /** The row's ARIA role: `option` in a combobox's listbox (search results). */
+    role?: "option";
     /** `data-*` on the link of a link row (`turbo: "false"` for a response
      *  Turbo cannot follow, such as Log out). */
     linkData?: Readonly<Record<string, string>>;
@@ -504,6 +514,12 @@ export function itemRow(opts: ItemRowOptions): Html {
     ) {
         throw new Error("itemRow: a row is a link or a button, not both");
     }
+    if (opts.add != null && opts.href == null) {
+        throw new Error("itemRow: add needs an href (a link row's plus)");
+    }
+    if (opts.add != null && (opts.select != null || opts.swipe != null)) {
+        throw new Error("itemRow: a link row with a plus is not selectable");
+    }
     if (opts.href != null || opts.submit != null || opts.opens != null) {
         const control =
             opts.lead?.kind === "checkbox" ||
@@ -565,15 +581,19 @@ export function itemRow(opts: ItemRowOptions): Html {
                 ? opts.lead?.kind === "radio" && !opts.select
                     ? `<label class="fd-item-row__face fd-item-row__face--choice">${content}</label>`
                     : `<div class="fd-item-row__face">${pick}${content}</div>`
-                : opts.select
-                  ? `<div class="fd-item-row__face fd-item-row__face--link">${pick}<a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a></div>`
-                  : `<a class="fd-item-row__face fd-item-row__face--link" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>`;
+                : opts.add != null
+                  ? `<div class="fd-item-row__face fd-item-row__face--link"><a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>${trailingSlot(opts.add, disabled)}</div>`
+                  : opts.select
+                    ? `<div class="fd-item-row__face fd-item-row__face--link">${pick}<a class="fd-item-row__anchor" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a></div>`
+                    : `<a class="fd-item-row__face fd-item-row__face--link" href="${safeHref(href)}"${dataAttrs(opts.linkData)}>${content}</a>`;
 
     const attrs = [
         opts.id != null ? ` id="${esc(opts.id)}"` : "",
         disabled ? ` aria-disabled="true"` : "",
         open ? ` data-swipe-open="${open}"` : "",
         pickable ? " data-fd-select-row" : "",
+        opts.role != null ? ` role="${opts.role}"` : "",
+        dataAttrs(opts.data),
     ].join("");
     return raw(
         `<li class="${cls(

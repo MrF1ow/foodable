@@ -116,12 +116,20 @@ export type SheetHeaderOptions = {
 export type SheetSearchOptions = {
     /** Field name. */
     name: string;
+    /** The input's id (a label or a test can name it). */
+    id?: string;
     /** Accessible name of the field. */
     label: string;
     placeholder: string;
     value?: string;
     /** A clear button shown inside the box; the caller wires it. */
     clear?: { label: string; attrs?: Readonly<Record<string, string>> };
+    /**
+     * The Go button of the link-detected state, hidden until the caller's
+     * script sets `data-link-detected` on the box (it swaps the lead icon for
+     * the link icon and shows Go).
+     */
+    go?: { label: string; attrs?: Readonly<Record<string, string>> };
     /** A barcode button at the end of the box; a link when it has `href`. */
     scan?: {
         label: string;
@@ -249,6 +257,13 @@ function searchBox(search: SheetSearchOptions): Html {
                   })
                   .join("")
             : "";
+    const go = search.go
+        ? button({
+              variant: "go",
+              label: search.go.label,
+              attrs: { ...search.go.attrs, hidden: "" },
+          })
+        : "";
     const clear = search.clear
         ? `<button type="button" class="fd-sheet__search-action" aria-label="${esc(search.clear.label)}"${attrs(search.clear.attrs)}>${icon("close")}</button>`
         : "";
@@ -257,8 +272,12 @@ function searchBox(search: SheetSearchOptions): Html {
             ? `<a class="fd-sheet__search-action" href="${esc(search.scan.href)}" aria-label="${esc(search.scan.label)}"${attrs(search.scan.attrs)}>${icon("scan")}</a>`
             : `<button type="button" class="fd-sheet__search-action" aria-label="${esc(search.scan.label)}"${attrs(search.scan.attrs)}>${icon("scan")}</button>`
         : "";
+    const id = search.id != null ? ` id="${esc(search.id)}"` : "";
+    const lead = search.go
+        ? `<span class="fd-sheet__search-icon" aria-hidden="true"><span class="fd-sheet__search-icon--search">${icon("search")}</span><span class="fd-sheet__search-icon--link">${icon("link")}</span></span>`
+        : `<span class="fd-sheet__search-icon" aria-hidden="true">${icon("search")}</span>`;
     return raw(
-        `<div class="fd-sheet__search"><span class="fd-sheet__search-icon" aria-hidden="true">${icon("search")}</span><input class="fd-sheet__search-input" type="search" name="${esc(search.name)}"${value} placeholder="${esc(search.placeholder)}" aria-label="${esc(search.label)}" autocomplete="off" enterkeyhint="search">${clear}${scan}</div>`,
+        `<div class="fd-sheet__search">${lead}<input class="fd-sheet__search-input"${id} type="search" name="${esc(search.name)}"${value} placeholder="${esc(search.placeholder)}" aria-label="${esc(search.label)}" autocomplete="off" enterkeyhint="search">${clear}${scan}${go}</div>`,
     );
 }
 

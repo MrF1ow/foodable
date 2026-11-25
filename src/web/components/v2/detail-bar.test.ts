@@ -69,3 +69,17 @@ test("every string is escaped", async () => {
     expect(await injectedAttributes(html)).toEqual([]);
     expect(html).not.toContain("<script>");
 });
+
+test("a back button that is not a link carries the attributes of a dialog's close hook", () => {
+    const html = String(
+        detailBar({
+            title: "Scan a barcode",
+            back: {
+                label: "Close scanner",
+                attrs: { "data-fd-scanner-close": "" },
+            },
+        }),
+    );
+    expect(html).toContain('aria-label="Close scanner"');
+    expect(html).toContain("data-fd-scanner-close");
+});
