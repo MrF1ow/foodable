@@ -2197,8 +2197,9 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             () =>
                 `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
         );
-    const planRow = (name: string) =>
-        `#fd-recipe-plan-sheet [data-anchor="row"]:has([data-fd-menu-field][name="${name}"])`;
+    // The Plan sheet's row for a field, as page code: the selector is built in
+    // the page, so no value is spliced into the script.
+    const planRowJs = `const planRow = (name) => '#fd-recipe-plan-sheet [data-anchor="row"]:has([data-fd-menu-field][name="' + name + '"])';`;
     const fridgePage = (
         extra: Partial<
             Parameters<typeof buildPreviewKitchenFridgeView>[2]
@@ -2676,16 +2677,16 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         ),
         "recipe-plan-meal": driven(
             recipeV2(cookSheet, true),
-            `document.querySelector(${JSON.stringify(planRow("slot"))} + " [data-fd-menu-trigger]").click()`,
+            `${planRowJs} document.querySelector(planRow("slot") + " [data-fd-menu-trigger]").click()`,
         ),
         "recipe-plan-repeat": driven(
             recipeV2(cookSheet, true),
-            `document.querySelector(${JSON.stringify(planRow("repeat"))} + " [data-fd-menu-trigger]").click()`,
+            `${planRowJs} document.querySelector(planRow("repeat") + " [data-fd-menu-trigger]").click()`,
         ),
         "recipe-plan-days": driven(
             recipeV2(cookSheet, true),
-            `document.querySelector(${JSON.stringify(planRow("repeat"))} + " [data-fd-menu-trigger]").click();
-document.querySelector(${JSON.stringify(planRow("repeat"))} + ' [data-fd-menu-value="days"]').click();
+            `${planRowJs} document.querySelector(planRow("repeat") + " [data-fd-menu-trigger]").click();
+document.querySelector(planRow("repeat") + ' [data-fd-menu-value="days"]').click();
 for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet [data-fd-plan-days] [data-value="' + day + '"]').click();`,
         ),
         "recipe-share": recipeV2(cookSheet, false, true),
