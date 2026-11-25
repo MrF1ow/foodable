@@ -19,7 +19,15 @@ export type FieldOptions = {
     id: string;
     label: string;
     name: string;
-    type?: "text" | "email" | "password" | "search" | "number" | "tel" | "url";
+    type?:
+        | "text"
+        | "email"
+        | "password"
+        | "search"
+        | "number"
+        | "tel"
+        | "url"
+        | "time";
     value?: string;
     placeholder?: string;
     autocomplete?: string;

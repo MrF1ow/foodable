@@ -4,8 +4,10 @@
  * carbs and fat as arcs from the left, together as long as the share of the
  * target already eaten.
  *
- * Numbers are inputs. An unknown eaten amount or target shows a dash and only
- * the track, never a zero. Past the target the ring is full and the text says
+ * Numbers are inputs. An unknown eaten amount shows a dash and only the
+ * track, never a zero. With the eaten amount known and no target, the figure is
+ * what was eaten ("kcal eaten") beside the note that there is no goal, and the
+ * ring stays a bare track. Past the target the ring is full and the text says
  * "over". The ring is decorative (`aria-hidden`); the figures are real text, and
  * a spoken line says what was eaten.
  *
@@ -66,6 +68,14 @@ export function calorieGauge(opts: CalorieGaugeOptions): Html {
     // `+ 0` turns a negative zero (`-0 >= 0` passes the check above) into 0, which
     // Intl would otherwise print as "-0".
     const eaten = Math.round(consumed) + 0;
+    // Eaten known, no goal: the day's total still shows, without a "left".
+    const eatenOnly =
+        !known &&
+        typeof opts.consumed === "number" &&
+        Number.isFinite(opts.consumed) &&
+        opts.consumed >= 0 &&
+        !usableTarget(opts.target);
+    const eatenNoGoal = eatenOnly ? Math.round(opts.consumed!) + 0 : 0;
     const goal = Math.round(target);
     const over = known && eaten > goal;
 
@@ -99,16 +109,24 @@ export function calorieGauge(opts: CalorieGaugeOptions): Html {
         .join("");
 
     const figure = valueText(
-        known ? number.format(Math.abs(goal - eaten)) : null,
+        known
+            ? number.format(Math.abs(goal - eaten))
+            : eatenOnly
+              ? number.format(eatenNoGoal)
+              : null,
     );
     const sub = known
         ? `kcal ${over ? "over" : "left of"} ${number.format(goal)}`
-        : usableTarget(opts.target)
-          ? `kcal left of ${number.format(opts.target)}`
-          : "no calorie goal";
+        : eatenOnly
+          ? "kcal eaten · no calorie goal"
+          : usableTarget(opts.target)
+            ? `kcal left of ${number.format(opts.target)}`
+            : "no calorie goal";
     const summary = known
         ? srOnly(`Eaten ${number.format(eaten)} of ${number.format(goal)} kcal`)
-        : "";
+        : eatenOnly
+          ? srOnly(`Eaten ${number.format(eatenNoGoal)} kcal, no calorie goal`)
+          : "";
     return raw(
         `<div class="${cls("fd-calorie-gauge", over && "fd-calorie-gauge--over", opts.className)}"><svg class="fd-calorie-gauge__ring" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 196 103.5" fill="none" stroke-width="11" stroke-linecap="round" aria-hidden="true" focusable="false"><path class="fd-calorie-gauge__arc fd-calorie-gauge__arc--track" d="${TRACK}"/>${arcs}</svg><div class="fd-calorie-gauge__text"><span class="fd-calorie-gauge__figure">${figure}</span><span class="fd-calorie-gauge__sub">${esc(sub)}</span></div>${summary}</div>`,
     );

@@ -2,19 +2,15 @@ import type { Meal } from "../db/nutrition.js";
 import type { HouseholdMember } from "../household.js";
 import {
     getGoalsForRange,
-    getLatestWeight,
     getMealsByDate,
     getMealLoggedLocalDatesInRange,
     getMealsInRangeWithoutItems,
     getWaterInRange,
     getWaterLoggedLocalDatesInRange,
-    getWeightInRange,
     type NutritionGoals,
     type WaterEntry,
-    type WeightEntry,
 } from "../db/nutrition.js";
 import { getProfile, hiddenNutrientsFromProfile } from "../db/profiles.js";
-import { liveFridgeStore } from "../db/fridge.js";
 import { householdClock } from "../db/restock.js";
 import {
     activeCalorieGoal,
@@ -61,23 +57,14 @@ import {
     todayInTz,
     validateTz,
 } from "../domain/tz.js";
-import type { WeightUnit } from "../domain/units.js";
 import { loadHouseholdNotices } from "./attention.js";
-import type { FridgeItem, FridgeLocation } from "../domain/fridge.js";
 import type { Notice } from "../domain/notices.js";
-
-export type TodayWeightPoint = {
-    date: string;
-    weight_g: number;
-};
 
 export type TodayView = {
     date: string;
-    /** Household calendar date when the view was built (expiring-soon list). */
+    /** Household calendar date when the view was built. */
     householdDate: string;
     timezone: string;
-    fridgeLocationNames: ReadonlyMap<string, string>;
-    preferredWeightUnit: WeightUnit;
     alcoholTrackingEnabled: boolean;
     /** Optional nutrients the member switched off (Settings › Nutrients shown). */
     hiddenNutrients?: readonly string[];
@@ -88,21 +75,12 @@ export type TodayView = {
     meals: MealTypeGroup[];
     week: WeekStripLayout & { dots: WeekDot[] };
     streak: number;
-    expiringFridge: FridgeItem[];
     /** The household's open notices: the shell's chrome reuses them instead of reading them again. */
     notices: Notice[];
-    weight: {
-        latest: WeightEntry | null;
-        series30d: TodayWeightPoint[];
-    };
     /** Per-slot copy-yesterday hints when today's slot is empty (today view only). */
     yesterdayCopy: Partial<Record<MealTypeSlot, YesterdayCopyHint>>;
     /** Up to two recipes that fit, per empty slot (today view only). */
     slotSuggestions: Partial<Record<MealTypeSlot, SlotSuggestion[]>>;
-    /** For each item in `expiringFridge`, the recipes that use it. */
-    useSoonUses: ExpiringUse[];
-    /** One recipe that uses several of the expiring items, when there is one. */
-    useSoonHighlight: UseSoonHighlight | null;
 };
 
 export type UseSoonHighlight = {
@@ -212,14 +190,9 @@ export type LoadTodayDeps = {
     getMealLoggedLocalDatesInRange: typeof getMealLoggedLocalDatesInRange;
     getWaterLoggedLocalDatesInRange: typeof getWaterLoggedLocalDatesInRange;
     getGoalsForRange: typeof getGoalsForRange;
-    getLatestWeight: typeof getLatestWeight;
-    getWeightInRange: typeof getWeightInRange;
     loadHouseholdNotices: typeof loadHouseholdNotices;
     householdClock: typeof householdClock;
     todayInTz: typeof todayInTz;
-    listFridgeLocations: (
-        householdId: string,
-    ) => Promise<readonly FridgeLocation[]>;
 };
 
 const defaultTodayDeps = (): LoadTodayDeps => ({
@@ -230,13 +203,9 @@ const defaultTodayDeps = (): LoadTodayDeps => ({
     getMealLoggedLocalDatesInRange,
     getWaterLoggedLocalDatesInRange,
     getGoalsForRange,
-    getLatestWeight,
-    getWeightInRange,
     loadHouseholdNotices,
     householdClock,
     todayInTz,
-    listFridgeLocations: (householdId) =>
-        liveFridgeStore().listLocations(householdId),
 });
 
 function tzFromProfile(
@@ -256,26 +225,6 @@ function sumWaterForDate(
         if (dateInTz(e.logged_at, tz) === date) total += e.amount_ml;
     }
     return total;
-}
-
-function weightSeries30d(
-    entries: WeightEntry[],
-    tz: string,
-): TodayWeightPoint[] {
-    const daily = new Map<string, { total: number; count: number }>();
-    for (const e of entries) {
-        const date = dateInTz(e.logged_at, tz);
-        const cur = daily.get(date) ?? { total: 0, count: 0 };
-        cur.total += e.weight_g;
-        cur.count += 1;
-        daily.set(date, cur);
-    }
-    return [...daily.entries()]
-        .map(([date, { total, count }]) => ({
-            date,
-            weight_g: total / count,
-        }))
-        .sort((a, b) => a.date.localeCompare(b.date));
 }
 
 async function loggedDatesForStreak(
@@ -306,7 +255,6 @@ export async function loadToday(
     const weekStart = sundayWeekStart(targetDate);
     const weekEnd = shiftLocalDate(weekStart, 6);
     const streakLookbackStart = shiftLocalDate(today, -STREAK_LOOKBACK_DAYS);
-    const weightStart = shiftLocalDate(today, -29);
 
     const householdId = viewer.householdId;
     const userId = viewer.userId;
@@ -325,8 +273,6 @@ export async function loadToday(
         weekMeals,
         weekWater,
         weekGoals,
-        latestWeight,
-        weightRange,
         mealLogDates,
         waterLogDates,
         noticeResult,
@@ -338,8 +284,6 @@ export async function loadToday(
         deps.getMealsInRangeWithoutItems(userId, weekStart, weekEnd, tz),
         deps.getWaterInRange(userId, weekStart, weekEnd, tz),
         deps.getGoalsForRange(userId, weekStart, weekEnd),
-        deps.getLatestWeight(userId),
-        deps.getWeightInRange(userId, weightStart, today, tz),
         deps.getMealLoggedLocalDatesInRange(
             userId,
             streakLookbackStart,
@@ -390,14 +334,6 @@ export async function loadToday(
         3,
     );
 
-    const preferredWeightUnit =
-        profile?.preferred_weight_unit === "lb" ? "lb" : "kg";
-
-    const fridgeLocations = await deps.listFridgeLocations(householdId);
-    const fridgeLocationNames = new Map(
-        fridgeLocations.map((loc) => [loc.id, loc.name]),
-    );
-
     const yesterdayCopy = yesterdayCopyHints(
         wantsCopyHint,
         dayMeals,
@@ -419,17 +355,11 @@ export async function loadToday(
               expiring: expiringFridge,
           })
         : {};
-    const useSoon = useSoonFor(
-        noticeResult.recipesListPrefetch,
-        expiringFridge,
-    );
 
     return {
         date: targetDate,
         householdDate,
         timezone: tz,
-        fridgeLocationNames,
-        preferredWeightUnit,
         alcoholTrackingEnabled: profile?.alcohol_tracking_enabled === true,
         hiddenNutrients: hiddenNutrientsFromProfile(profile),
         totals,
@@ -438,15 +368,8 @@ export async function loadToday(
         meals,
         week,
         streak,
-        expiringFridge,
         notices: [...noticeResult.notices],
-        weight: {
-            latest: latestWeight,
-            series30d: weightSeries30d(weightRange, tz),
-        },
         yesterdayCopy,
         slotSuggestions,
-        useSoonUses: useSoon.uses,
-        useSoonHighlight: useSoon.highlight,
     };
 }

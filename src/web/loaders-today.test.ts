@@ -1,14 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import type { HouseholdMember } from "../household.js";
-import type { Meal, NutritionGoals, WeightEntry } from "../db/nutrition.js";
+import type { Meal, NutritionGoals } from "../db/nutrition.js";
 import type { NoticesForResult } from "../domain/notices-for.js";
 import { newFood, type EffectiveFood } from "../domain/foods.js";
 import type { FridgeItem } from "../domain/fridge.js";
 import type { Recipe, RecipeIngredient } from "../domain/recipes.js";
+import { listExpiring } from "../domain/stock.js";
 import { dateInTz } from "../domain/tz.js";
 import {
     loadToday,
     macrosLeftFor,
+    useSoonFor,
     type LoadTodayDeps,
 } from "./loaders-today.js";
 
@@ -108,12 +110,9 @@ function fakeDeps(over: Partial<LoadTodayDeps>): LoadTodayDeps {
             defaults: goals,
             forDate: () => goals,
         }),
-        getLatestWeight: async () => null,
-        getWeightInRange: async () => [],
         loadHouseholdNotices: async () => emptyNotices(),
         householdClock: async () => ({ today: "2026-03-03", timezone: "UTC" }),
         todayInTz: () => "2026-03-03",
-        listFridgeLocations: async () => [],
         ...over,
     };
 }
@@ -343,7 +342,6 @@ describe("loadToday", () => {
         });
         const view = await loadToday(viewer, "2026-03-03", deps);
         expect(view.notices).toEqual([notice]);
-        expect(view.preferredWeightUnit).toBe("lb");
         expect(view.alcoholTrackingEnabled).toBe(true);
     });
 
@@ -473,11 +471,19 @@ describe("loadToday slot suggestions", () => {
             "lunch",
             "snack",
         ]);
-        expect(view.useSoonUses.map((u) => u.recipes[0]?.name)).toEqual([
+    });
+
+    test("Use soon names the recipes that use the expiring items", () => {
+        const prefetch = noticesWithRecipes().recipesListPrefetch;
+        const use = useSoonFor(
+            prefetch,
+            listExpiring(prefetch.fridgeItems, "2026-03-03", 3),
+        );
+        expect(use.uses.map((u) => u.recipes[0]?.name)).toEqual([
             "Salmon & rice",
             "Salmon & rice",
         ]);
-        expect(view.useSoonHighlight).toEqual({
+        expect(use.highlight).toEqual({
             recipeId: "r-salmon-rice",
             name: "Salmon & rice",
             itemCount: 2,

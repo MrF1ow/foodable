@@ -1,4 +1,4 @@
-// Today: week-strip swipe navigation, meal row → edit sheet, live edit macros.
+// Today: week-strip swipe, a meal or plan row → its sheet, live edit macros.
 const MQ_REDUCED = "(prefers-reduced-motion: reduce)";
 const WEEK_SWIPE_SLOP = 12;
 const WEEK_SWIPE_MIN = 48;
@@ -95,8 +95,9 @@ function initWeekSwipe(strip) {
     strip.dataset.fdWeekSwipeInit = "1";
     // A swipe clicks the server-rendered chevron link, so navigation follows
     // the anchor's own href (Turbo or the browser) and no DOM string is used.
-    const prev = strip.querySelector(".fd-today-week__chev--prev");
-    const next = strip.querySelector(".fd-today-week__chev--next");
+    const end = (el) => (el && el.classList.contains("fd-btn") ? el : null);
+    const prev = end(strip.firstElementChild);
+    const next = end(strip.lastElementChild);
     let startX = 0;
     let startY = 0;
     let tracking = false;
@@ -137,24 +138,25 @@ function openSheet(id) {
     dialog.showModal();
 }
 
-function initMealRows(root) {
-    root.querySelectorAll("[data-fd-meal-row]").forEach((row) => {
-        if (row.dataset.fdMealRowInit === "1") return;
-        row.dataset.fdMealRowInit = "1";
-        const sheetId = row.getAttribute("data-sheet-id");
-        if (!sheetId) return;
-        const open = () => openSheet(sheetId);
-        row.addEventListener("click", (e) => {
-            if (e.target.closest("button, form, a.fd-swipe-btn")) return;
-            open();
-        });
-        row.addEventListener("keydown", (e) => {
-            if (e.target !== row) return;
-            if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                open();
-            }
-        });
+// One handler on the document, bound once: a Turbo morph reuses a row under a
+// new sheet id, so the id is read from the row when it is tapped.
+let sheetRowsBound = false;
+function initSheetRows() {
+    if (sheetRowsBound) return;
+    sheetRowsBound = true;
+    document.addEventListener("click", (e) => {
+        const row = e.target.closest?.("[data-fd-sheet-row]");
+        if (!row || e.target.closest("button, form, a, [data-fd-menu]")) return;
+        const id = row.getAttribute("data-sheet-id");
+        if (id) openSheet(id);
+    });
+    document.addEventListener("keydown", (e) => {
+        const row = e.target.closest?.("[data-fd-sheet-row]");
+        if (!row || e.target !== row) return;
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        const id = row.getAttribute("data-sheet-id");
+        if (id) openSheet(id);
     });
 }
 
@@ -212,11 +214,33 @@ function initEditMacros(root) {
     });
 }
 
+// The edit sheet's Time chips (CSS shows the field); the meal's chip puts its
+// time back. A plan sheet's pull-down row shows the list's choice.
+function initPicks(root) {
+    root.querySelectorAll("[data-fd-edit-time]").forEach((host) => {
+        const input = host.querySelector('input[name="logged_time"]');
+        host.addEventListener("change", (e) => {
+            if (e.target.name !== "time_mode" || !input) return;
+            if (e.target.value === "keep") input.value = input.defaultValue;
+            else input.focus();
+        });
+    });
+    root.querySelectorAll(".fd-plan-edit-row__select").forEach((select) => {
+        select.addEventListener("change", () => {
+            const v = select
+                .closest(".fd-item-row")
+                .querySelector(".fd-item-row__value");
+            v.textContent = select.options[select.selectedIndex].textContent;
+        });
+    });
+}
+
 function initToday(root) {
     const scope = root && root.querySelector ? root : document;
     scope.querySelectorAll("[data-fd-week-strip]").forEach(initWeekSwipe);
-    initMealRows(scope);
+    initSheetRows();
     initEditMacros(scope);
+    initPicks(scope);
 }
 
 window.FoodableApp.onLoad(initToday);

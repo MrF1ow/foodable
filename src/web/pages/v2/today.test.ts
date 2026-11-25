@@ -8,7 +8,6 @@ import {
 } from "../../../domain/today.js";
 import { shiftLocalDate } from "../../../domain/tz.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
-import { noticeHref } from "../../components/notices.js";
 import {
     attributeValues,
     DOLLAR_PAYLOADS,
@@ -18,7 +17,6 @@ import type { Notice } from "../../../domain/notices.js";
 import {
     buildPreviewTodayPageData,
     buildPreviewTodayView,
-    buildPreviewTodayViewWithRail,
     buildPreviewTodayViewWithSuggestions,
     buildPreviewTodayViewWithYesterdayHint,
     parseTodayDateParam,
@@ -27,11 +25,6 @@ import {
     todayHref,
 } from "./today.js";
 import { buildWeekPlanView } from "./recipes-plan.js";
-import {
-    formatExpiryWhen,
-    renderTodayRail,
-    weightChange30d,
-} from "./today-rail.js";
 
 describe("parseTodayDateParam", () => {
     test("a year outside 1970-2999 falls back to today", () => {
@@ -69,15 +62,15 @@ describe("todayHref", () => {
     });
 });
 
+const chrome = {
+    theme: "light" as const,
+    flags: FIXTURE_APP_CHROME_FLAGS,
+};
+const today = "2026-11-10";
+const peerChrome = { ...chrome, subjectLabel: "Sam" };
+
 describe("Today header goal name", () => {
-    const today = "2026-11-10";
-    const base = buildPreviewTodayPageData(
-        {
-            theme: "light",
-            flags: FIXTURE_APP_CHROME_FLAGS,
-        },
-        today,
-    );
+    const base = buildPreviewTodayPageData(chrome, today);
     function withGoals(
         goal_name: string | null,
         goals_set_on: string | null,
@@ -92,30 +85,28 @@ describe("Today header goal name", () => {
     }
     function header(html: string): string {
         return html.match(
-            /<header class="fd-today-header">[\s\S]*?<\/header>/,
+            /<header class="fd-page-header fd-today-header">[\s\S]*?<\/header>/,
         )![0];
     }
 
     test("the name sits in the subtitle between the date and the streak", () => {
         const html = renderTodayV2Page(withGoals("Recomp", "2026-10-02"));
         expect(header(html)).toContain(
-            '<p class="fd-today-subtitle">10 November · Recomp · 4-day streak</p>',
+            '<p class="fd-page-header__subtitle">10 November · Recomp · 4-day streak</p>',
         );
-        // One h1 (the day) and one subtitle, on every width: no second desktop line.
+        // One h1 (the day) and one subtitle, on every width.
         expect(header(html)).toContain(
-            '<h1 class="fd-today-title">Tuesday</h1>',
+            '<h1 class="fd-page-header__title">Tuesday</h1>',
         );
-        expect(header(html)).not.toContain("fd-today-title-desk");
         // "Since" belongs to Settings › Goals only, and there is no extra line.
         expect(header(html)).not.toContain("Since");
-        expect(header(html)).not.toContain("fd-today-goal");
     });
 
     test("no name leaves the subtitle as it was", () => {
         for (const name of [null, "", "  "]) {
             const html = renderTodayV2Page(withGoals(name, "2026-10-02"));
             expect(header(html)).toContain(
-                '<p class="fd-today-subtitle">10 November · 4-day streak</p>',
+                '<p class="fd-page-header__subtitle">10 November · 4-day streak</p>',
             );
             expect(header(html)).not.toContain("Since");
         }
@@ -127,7 +118,7 @@ describe("Today header goal name", () => {
             view: { ...base.view, goals: null },
         });
         expect(header(html)).toContain(
-            '<p class="fd-today-subtitle">10 November · 4-day streak</p>',
+            '<p class="fd-page-header__subtitle">10 November · 4-day streak</p>',
         );
     });
 
@@ -139,80 +130,148 @@ describe("Today header goal name", () => {
 });
 
 describe("renderTodayV2Page", () => {
-    const today = "2026-11-10";
-    const data = buildPreviewTodayPageData(
-        {
-            theme: "light",
-            flags: FIXTURE_APP_CHROME_FLAGS,
-        },
-        today,
-    );
+    const data = buildPreviewTodayPageData(chrome, today);
 
-    test("pins fd- classes and semantic structure", () => {
+    test("is one Two columns Page layout of the shared components", () => {
         const html = renderTodayV2Page(data);
-        expect(html).toContain("fd-today-page");
-        expect(html).toContain("fd-today-week");
-        expect(html).toContain("fd-today-gauge");
-        expect(html).toContain("fd-today-macros");
-        expect(html).toContain("fd-today-also");
-        expect(html).toContain("fd-today-section");
-        expect(html).toContain('aria-current="date"');
+        expect(html).toContain(
+            'class="fd-page-layout fd-page-layout--two-columns fd-today-page"',
+        );
+        expect(html).toContain("fd-page-header");
+        expect(html).toContain("fd-week-strip");
+        expect(html).toContain("fd-calorie-gauge");
+        expect(html).toContain("fd-macro-bar");
+        expect(html).toContain("fd-nutrient-line");
+        expect(html).toContain("fd-section-header");
+        expect(html).toContain("fd-list-group");
+        expect(html).toContain("fd-item-row");
+        // The day is the left column, the meals the right.
+        const left = html.indexOf("fd-today-day");
+        const right = html.indexOf("fd-today-meals");
+        expect(left).toBeGreaterThan(-1);
+        expect(right).toBeGreaterThan(left);
+        // The phone's bell and the account chip come from the shell.
         expect(html).toContain("fd-account-chip");
+        expect(html).toContain("fd-bell");
+        // The old rail and its cards are gone.
+        for (const gone of [
+            "fd-today-rail",
+            "fd-today-card",
+            "fd-today-main",
+            "fd-today-gauge",
+            "fd-today-also",
+            "fd-today-week__",
+        ]) {
+            expect(html).not.toContain(gone);
+        }
     });
 
-    test("a hidden nutrient is left out of the also-tracked line and columns", () => {
+    test("brings back nothing the bell replaced", () => {
+        const withNotices = {
+            ...data,
+            view: {
+                ...data.view,
+                notices: [
+                    {
+                        code: "nutrition.weigh_in_due",
+                        severity: "info",
+                        subject: { kind: "member", id: "m1" },
+                        related: [{ kind: "member", id: "m1", name: "Alex" }],
+                        params: { name: "Alex", days: 9, dismissScope: "" },
+                    },
+                    {
+                        code: "grocery.running_low",
+                        severity: "info",
+                        subject: { kind: "food", id: "f-eggs" },
+                        related: [],
+                        params: {
+                            name: "Eggs",
+                            reason: "1 left, wants 6",
+                            dismissScope: "",
+                        },
+                    },
+                ] as Notice[],
+            },
+            plan: buildWeekPlanView({
+                today,
+                plans: [],
+                recipes: [],
+                stock: [],
+                foodsById: new Map(),
+            }),
+        };
+        const body = String(renderTodayBody(withNotices));
+        for (const gone of [
+            "Needs attention",
+            "needs-attention",
+            "Weigh in",
+            "weigh-in",
+            "Weight",
+            "Use soon",
+            "fd-today-notices",
+            "fd-today-agent",
+            "notice-dot",
+            "fd-toast",
+            "Undo",
+            "plan-missing",
+        ]) {
+            expect(body).not.toContain(gone);
+        }
+        // Success is never announced on this page: no toast region of its own.
+        expect(body).not.toContain("toast-region");
+    });
+
+    test("a hidden nutrient is left out of the nutrient line", () => {
         const shown = renderTodayV2Page(data);
         for (const label of ["Fiber", "Sugar", "Caffeine"]) {
-            expect(shown).toContain(`>${label}</span>`);
+            expect(shown).toMatch(new RegExp(`${label} \\d`));
         }
-        expect(shown).toContain("fd-today-also-col--sugar");
-
         const hidden = renderTodayV2Page({
             ...data,
             view: { ...data.view, hiddenNutrients: ["sugar", "caffeine"] },
         });
-        // Phone line: "Sugar 31 g" is gone, Fiber stays.
         expect(hidden).not.toMatch(/Sugar \d/);
         expect(hidden).not.toMatch(/Caffeine \d/);
         expect(hidden).toMatch(/Fiber \d/);
-        // Desktop columns: no sugar or caffeine column, fiber stays.
-        expect(hidden).not.toContain("fd-today-also-col--sugar");
-        expect(hidden).not.toContain("fd-today-also-col--caffeine");
-        expect(hidden).toContain("fd-today-also-col--fiber");
-        expect(hidden).toContain("fd-today-also-col--water");
+        // Water is always there, and the line is still a link to Trends.
+        expect(hidden).toContain('<a class="fd-nutrient-line"');
+        expect(hidden).toContain('href="/trends"');
+        expect(hidden).toContain("1.6 / 3 L");
     });
 
-    test("gauge's accessible name matches its hero number", () => {
+    test("the gauge says what is left, and its spoken line says what was eaten", () => {
         const html = renderTodayV2Page(data);
-        const hero = html.match(/fd-today-gauge__hero">([^<]+)</)?.[1];
-        const label = html.match(
-            /class="fd-today-gauge" role="img" aria-label="([^"]+)"/,
-        )?.[1];
-        expect(hero).toBeTruthy();
-        expect(label?.startsWith(`${hero} kcal`)).toBe(true);
+        expect(html).toContain('fd-calorie-gauge__figure">1,132<');
+        expect(html).toContain("kcal left of 2,421");
+        expect(html).toContain("Eaten 1,289 of 2,421 kcal");
     });
 
-    test("renders week dot states", () => {
+    test("three macro bars carry the day's figures and goals", () => {
         const body = String(renderTodayBody(data));
-        expect(body).toContain('data-fd-dot="hit"');
-        expect(body).toContain('data-fd-dot="off"');
-        expect(body).toContain('data-fd-dot="empty"');
+        expect(body.match(/class="fd-macro-bar /g)).toHaveLength(3);
+        expect(body).toContain("/ 210 g");
+        expect(body).toContain("/ 213 g");
+        expect(body).toContain("/ 81 g");
     });
 
-    test("the selected day shows no dot; every other day does", () => {
+    test("the week strip marks the days with something logged and selects one", () => {
         const body = String(renderTodayBody(data));
         const days = [
-            ...body.matchAll(
-                /<a class="fd-today-week__day[^"]*"[^>]*>[\s\S]*?<\/a>/g,
-            ),
+            ...body.matchAll(/<a class="fd-week-day[^"]*"[^>]*>[\s\S]*?<\/a>/g),
         ].map((m) => m[0]);
         expect(days.length).toBe(7);
         const selected = days.filter((d) => d.includes('aria-current="date"'));
-        expect(selected.length).toBe(1);
-        expect(selected[0]).not.toContain("fd-today-week__dot");
-        for (const d of days.filter((d) => !selected.includes(d))) {
-            expect(d).toContain("fd-today-week__dot");
-        }
+        expect(selected).toHaveLength(1);
+        expect(selected[0]).toContain("fd-week-day--selected");
+        // The fixture logs six of the seven days.
+        expect(
+            days.filter((d) => d.includes("fd-week-day__dot--on")),
+        ).toHaveLength(6);
+        expect(days.filter((d) => d.includes(", logged"))).toHaveLength(6);
+        // The swipe script finds the strip and its neighbouring weeks.
+        expect(body).toContain("data-fd-week-strip");
+        expect(body).toContain('data-fd-week-prev="/?date=2026-11-01"');
+        expect(body).toContain('data-fd-week-next="/?date=2026-11-15"');
     });
 
     test("null macros render as em dash", () => {
@@ -236,12 +295,7 @@ describe("renderTodayV2Page", () => {
             items: [],
         };
         view.meals = mealRows([meal]);
-        const html = String(
-            renderTodayBody({
-                ...data,
-                view,
-            }),
-        );
+        const html = String(renderTodayBody({ ...data, view }));
         expect(html).toContain("—");
         expect(html).not.toMatch(/fd-macro[^>]+>P 0/);
     });
@@ -301,193 +355,65 @@ describe("renderTodayV2Page", () => {
             expect(
                 await attributeValues(
                     html,
-                    "li[data-fd-meal-row]",
+                    "li[data-fd-sheet-row]",
                     "data-fd-meal-id",
                 ),
             ).toEqual([payload]);
         }
     });
 
-    test("multi-item meal shows item list subtitle", () => {
+    test("a multi-item meal lists its items under the title", () => {
         const html = String(renderTodayBody(data));
         expect(html).toContain("Chicken breast");
         expect(html).toContain("data-fd-meal-id=");
+        expect(html).toContain("fd-item-row__subtitle");
     });
 
     test("selected calendar date uses UTC weekday title regardless of member tz", () => {
-        const data = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            "2026-11-10",
-        );
-        const view = buildPreviewTodayView("2026-11-10");
+        const view = buildPreviewTodayView(today);
         view.date = "2026-11-09";
         view.timezone = "Pacific/Auckland";
         const html = String(renderTodayBody({ ...data, view }));
-        expect(html).toContain('fd-today-title">Monday</');
-        expect(html).not.toContain("Tuesday");
+        expect(html).toContain('fd-page-header__title">Monday</');
+        expect(html).not.toContain('fd-page-header__title">Tuesday<');
     });
 
-    test("gauge shows em dash when calories are unknown", () => {
-        const data = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            "2026-11-10",
-        );
-        const view = buildPreviewTodayView("2026-11-10");
+    test("the gauge shows an em dash when calories are unknown", () => {
+        const view = buildPreviewTodayView(today);
         view.totals = { ...view.totals, calories: null };
         const html = String(renderTodayBody({ ...data, view }));
-        expect(html).toContain('fd-today-gauge__hero">—</');
-        expect(html).not.toContain("2,421 left");
+        expect(html).toContain(
+            'fd-calorie-gauge__figure"><span aria-hidden="true">—</',
+        );
+        expect(html).not.toContain("Eaten");
     });
 
-    test("multi-item meal list uses fd-row__sub not fd-row__meta", () => {
+    test("with no calorie goal and meals logged the gauge still states the day's total", () => {
+        const view = buildPreviewTodayView(today);
+        view.goals = null;
+        const html = String(renderTodayBody({ ...data, view }));
+        expect(html).toContain(
+            `fd-calorie-gauge__figure">${Math.round(view.totals.calories!).toLocaleString("en-US")}<`,
+        );
+        expect(html).toContain("kcal eaten · no calorie goal");
+        expect(html).toContain('fd-sr">Eaten ');
+        expect(html).not.toContain("left of");
+    });
+
+    test("meal sections are labelled, with the section's kcal beside the label", () => {
         const html = String(renderTodayBody(data));
-        expect(html).toContain("fd-row__sub");
-        expect(html).toContain("Chicken breast");
+        for (const label of ["Breakfast", "Lunch", "Dinner", "Snacks"]) {
+            expect(html).toContain(`fd-section-header__label">${label}</`);
+            expect(html).toContain(`aria-label="${label}"`);
+        }
+        expect(html).toContain('fd-section-header__count">437<');
+        expect(html).toContain('fd-section-header__count">852<');
+        // An empty section has no total.
+        const snacks = html.slice(html.indexOf(">Snacks<"));
+        expect(snacks).not.toContain("fd-section-header__count");
     });
 
-    test("desktop rail escapes expiring item names", () => {
-        const view = buildPreviewTodayViewWithRail("2026-11-10");
-        const data = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            "2026-11-10",
-        );
-        const rail = String(renderTodayRail({ ...data, view }));
-        expect(rail).not.toContain("<spinach>");
-        expect(rail).toContain("&lt;spinach&gt;");
-        expect(rail).toContain("Salmon");
-        expect(rail).toContain('href="/kitchen/fridge"');
-    });
-
-    test("a notice with an action is not drawn in the rail", () => {
-        const notice: Notice = {
-            code: "fridge.expiring",
-            severity: "info",
-            subject: { kind: "fridge_item", id: "fr-eggs" },
-            related: [],
-            params: {
-                name: "Eggs",
-                amount: 6,
-                unit: "each",
-                expiresOn: "2026-11-10",
-                daysLeft: 0,
-                onGroceryList: "no",
-            },
-        };
-        const href = noticeHref(notice, { from: "/", foods: new Map() });
-        const view = buildPreviewTodayView("2026-11-10");
-        view.notices = [notice];
-        const data = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            "2026-11-10",
-        );
-        const rail = String(renderTodayRail({ ...data, view }));
-        expect(href).toBe("/kitchen/fridge/items/fr-eggs/add-to-grocery");
-        expect(rail).not.toContain(
-            "/kitchen/fridge/items/fr-eggs/add-to-grocery",
-        );
-    });
-
-    test("weight card uses lb and includes sparkline", () => {
-        const view = buildPreviewTodayViewWithRail("2026-11-10");
-        view.preferredWeightUnit = "lb";
-        const data = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            "2026-11-10",
-        );
-        const rail = String(renderTodayRail({ ...data, view }));
-        expect(rail).toContain("fd-today-weight__chart");
-        expect(rail).toContain('fd-today-weight__unit">lb</');
-        expect(rail).toContain("182.1");
-        expect(weightChange30d(view.weight.series30d, "lb")).not.toBeNull();
-    });
-
-    test("rail empty states and this week placeholder", () => {
-        const view = buildPreviewTodayView("2026-11-10");
-        const data = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            "2026-11-10",
-        );
-        const rail = String(renderTodayRail({ ...data, view }));
-        expect(rail).toContain("Nothing expiring soon");
-        expect(rail).not.toContain("Needs attention");
-        expect(rail).toContain("Nothing planned");
-        expect(rail).toContain("No weigh-ins yet");
-    });
-
-    test("peer view shows weight only", () => {
-        const view = buildPreviewTodayViewWithRail("2026-11-10");
-        const data = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-                subjectLabel: "Sam",
-            },
-            "2026-11-10",
-        );
-        const rail = String(renderTodayRail({ ...data, view }));
-        expect(rail).toContain("fd-today-card--weight");
-        expect(rail).not.toContain("Use soon");
-        expect(rail).not.toContain("Needs attention");
-        expect(rail).not.toContain("This week");
-    });
-
-    test("meal section titles are title case in markup", () => {
-        const html = String(renderTodayBody(data));
-        expect(html).toContain('fd-today-section__title">Breakfast</');
-        expect(html).not.toContain(">BREAKFAST</");
-    });
-
-    test("phone layout keeps fd-today-top and section gap wrapper", () => {
-        const body = String(renderTodayBody(data));
-        expect(body).toContain("fd-today-top");
-        expect(body).toContain("fd-today-main");
-        const page = body.indexOf("fd-today-page");
-        const main = body.indexOf("fd-today-main");
-        const header = body.indexOf("fd-today-header");
-        const week = body.indexOf("fd-today-week");
-        expect(page).toBeLessThan(main);
-        expect(main).toBeLessThan(header);
-        expect(header).toBeLessThan(week);
-    });
-
-    test("body keeps phone structure with rail wrapper", () => {
-        const data = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            "2026-11-10",
-        );
-        const body = String(renderTodayBody(data));
-        expect(body).toContain("fd-today-main");
-        expect(body).toContain("fd-today-week");
-        expect(body).toContain("fd-today-gauge");
-        expect(body).toContain("fd-today-rail");
-    });
-
-    test("formatExpiryWhen labels tomorrow", () => {
-        expect(formatExpiryWhen("2026-11-10", "2026-11-11")).toBe("Tomorrow");
-    });
-
-    test("empty day still renders meal sections and remaining calories", () => {
+    test("an empty day still renders every meal section and the calories left", () => {
         const weekStart = sundayWeekStart(today);
         const dates = weekDates(weekStart);
         const view = {
@@ -503,62 +429,124 @@ describe("renderTodayV2Page", () => {
             },
         };
         const html = String(renderTodayBody({ ...data, view }));
-        expect(html).not.toContain("fd-today-empty");
-        expect(html).toContain('id="fd-today-breakfast"');
-        expect(html).toContain('id="fd-today-lunch"');
-        expect(html).toContain('id="fd-today-dinner"');
-        expect(html).toContain('id="fd-today-snack"');
-        expect(html).toContain("Nothing yet");
-        const hero = html.match(/fd-today-gauge__hero">([^<]+)</)?.[1];
-        expect(hero).not.toBe("—");
-        expect(html).toContain('fd-today-macro__actual">0</');
+        for (const label of ["Breakfast", "Lunch", "Dinner", "Snacks"]) {
+            expect(html).toContain(`aria-label="${label}"`);
+        }
+        expect(html.match(/>Nothing yet</g)).toHaveLength(4);
+        expect(html).toContain('fd-calorie-gauge__figure">2,421<');
+        expect(html).not.toContain("fd-week-day__dot--on");
     });
 
-    test("meal row swipe exposes Again", () => {
+    test("an empty slot offers a plus that opens the log sheet", () => {
         const html = String(renderTodayBody(data));
-        expect(html).toMatch(/data-swipe-right="\/meals\/[^"]+\/again\tAgain"/);
-        expect(html).toContain("fd-swipe-btn--accent");
+        expect(html).toContain('aria-label="Log dinner"');
+        expect(html).toContain('data-fd-open-sheet="fd-log-search"');
     });
 
-    test("empty slot shows copy-yesterday when hinted", () => {
-        const hinted = buildPreviewTodayViewWithYesterdayHint(today);
-        const html = String(
-            renderTodayBody({
-                ...data,
-                view: hinted,
-            }),
+    test("the empty slot's plus is a link to the log, so it works with no script", () => {
+        const html = String(renderTodayBody(data));
+        expect(html).toMatch(
+            /<a class="fd-item-row__trail fd-item-row__add" href="\/#nutrition-log-meal" aria-label="Log dinner" data-fd-open-sheet="fd-log-search">/,
         );
-        expect(html).toContain("fd-today-yesterday");
-        expect(html).toContain("/log/copy-yesterday");
-        expect(html).toContain('name="slot" value="dinner"');
-        expect(html).toContain("Same as yesterday?");
-        expect(html).toContain("Eggs &amp; toast");
-        expect(html).toContain("· 432");
+    });
+});
+
+describe("a meal row", () => {
+    const data = buildPreviewTodayPageData(chrome, today);
+    const html = String(renderTodayBody(data));
+    const row = (id: string) =>
+        html.match(
+            new RegExp(`<li data-fd-meal-id="${id}"[^>]*>[\\s\\S]*?</li>`),
+        )![0];
+
+    test("opens its edit sheet when pressed", () => {
+        expect(row("m3")).toContain("data-fd-sheet-row");
+        expect(row("m3")).toContain('data-sheet-id="fd-edit-meal-m3"');
     });
 
-    test("copy-yesterday hint replaces Nothing yet in the slot row", () => {
+    test("swipes right to Again and left to Delete, on the phone", () => {
+        const r = row("m3");
+        expect(r).toContain("fd-item-row--swipe");
+        expect(r).toMatch(
+            /fd-item-row__bed--again[^]*?action="\/meals\/m3\/again"/,
+        );
+        expect(r).toMatch(
+            /fd-item-row__bed--delete[^]*?action="\/meals\/m3\/delete"/,
+        );
+    });
+
+    test("its ⋯ menu is Again, Edit and Delete (confirmed in place)", () => {
+        const r = row("m3");
+        expect(r).toContain('data-anchor="more"');
+        expect(r).toContain('aria-label="Actions for Chicken bowl"');
+        const items = [
+            ...r.matchAll(
+                /role="menuitem"[^>]*>[\s\S]*?fd-menu__label">([^<]+)</g,
+            ),
+        ].map((m) => m[1]);
+        expect(items.slice(0, 3)).toEqual(["Again", "Edit", "Delete"]);
+        expect(r).toContain('commandfor="fd-edit-meal-m3"');
+        expect(r).toContain("data-fd-menu-confirm");
+        // Again carries its own submit key and the way back.
+        expect(r).toMatch(/name="submit_key" value="[0-9a-f-]{36}"/);
+        expect(r).toContain('name="return_to" value="/?date=2026-11-10"');
+    });
+
+    test("a peer's row is plain: no menu, no swipe, no sheet", () => {
+        const peer = buildPreviewTodayPageData(peerChrome, today);
+        const body = String(renderTodayBody(peer));
+        expect(body).toContain("Chicken breast");
+        for (const gone of [
+            "fd-menu",
+            "fd-item-row--swipe",
+            "data-fd-sheet-row",
+            "fd-sheet",
+            "/meals/",
+            "fd-open-sheet",
+        ]) {
+            expect(body).not.toContain(gone);
+        }
+        expect(body).toContain("Viewing Sam");
+    });
+});
+
+describe("copy yesterday", () => {
+    const data = buildPreviewTodayPageData(chrome, today);
+
+    test("an empty slot shows a Same as yesterday row when hinted", () => {
         const hinted = buildPreviewTodayViewWithYesterdayHint(today);
         const html = String(renderTodayBody({ ...data, view: hinted }));
-        const row = html.match(
-            /<div class="fd-today-section__empty-row"><form class="fd-today-yesterday"[\s\S]*?<\/form><a class="fd-icon-btn fd-today-section__add"/,
-        );
-        expect(row).not.toBeNull();
-        expect(row![0]).not.toContain("Nothing yet");
+        expect(html).toContain("fd-today-yesterday");
+        expect(html).toContain("Same as yesterday");
+        expect(html).toContain("Eggs &amp; toast · 432 kcal");
+        expect(html).toContain('action="/log/copy-yesterday"');
+        expect(html).toContain('name="slot" value="dinner"');
+        expect(html).toContain('aria-label="Copy yesterday\'s dinner"');
     });
 
-    test("copy-yesterday hint is hidden in a read-only peer view", () => {
+    test("the hint replaces Nothing yet in its slot", () => {
         const hinted = buildPreviewTodayViewWithYesterdayHint(today);
-        const peer = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-                subjectLabel: "Sam",
-            },
-            today,
+        const html = String(renderTodayBody({ ...data, view: hinted }));
+        const dinner = html.slice(
+            html.indexOf('aria-label="Dinner"'),
+            html.indexOf('aria-label="Snacks"'),
         );
+        expect(dinner).toContain("fd-today-yesterday");
+        expect(dinner).not.toContain("Nothing yet");
+    });
+
+    test("is hidden in a read-only peer view", () => {
+        const hinted = buildPreviewTodayViewWithYesterdayHint(today);
+        const peer = buildPreviewTodayPageData(peerChrome, today);
         const html = String(renderTodayBody({ ...peer, view: hinted }));
         expect(html).not.toContain("fd-today-yesterday");
         expect(html).not.toContain("/log/copy-yesterday");
+    });
+
+    test("is hidden when the slot has rows", () => {
+        expect(String(renderTodayBody(data))).not.toContain(
+            "fd-today-yesterday",
+        );
     });
 
     test("the log sheet gets the Copy yesterday tile on the member's own today", () => {
@@ -578,14 +566,7 @@ describe("renderTodayV2Page", () => {
 
     test("the log sheet has no tile in a peer's view or on a past day", () => {
         const hinted = buildPreviewTodayViewWithYesterdayHint(today);
-        const peer = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-                subjectLabel: "Sam",
-            },
-            today,
-        );
+        const peer = buildPreviewTodayPageData(peerChrome, today);
         expect(renderTodayV2Page({ ...peer, view: hinted })).not.toContain(
             "data-fd-copy-yesterday",
         );
@@ -603,35 +584,25 @@ describe("renderTodayV2Page", () => {
             "data-fd-copy-yesterday",
         );
     });
-
-    test("copy-yesterday hint hidden when slot has rows", () => {
-        const html = String(renderTodayBody(data));
-        expect(html).not.toContain("fd-today-yesterday");
-    });
 });
 
 describe("empty slot suggestions", () => {
-    const today = "2026-11-10";
-    const data = buildPreviewTodayPageData(
-        {
-            theme: "light",
-            flags: FIXTURE_APP_CHROME_FLAGS,
-        },
-        today,
-    );
+    const data = buildPreviewTodayPageData(chrome, today);
+    const dinner = (html: string) =>
+        html.slice(
+            html.indexOf('aria-label="Dinner"'),
+            html.indexOf('aria-label="Snacks"'),
+        );
 
-    test("an empty slot shows the recipe that fits, linked to it", () => {
+    test("an empty slot shows the recipe that fits, with a plus to it", () => {
         const view = buildPreviewTodayViewWithSuggestions(today);
         const html = String(renderTodayBody({ ...data, view }));
-        expect(html).toContain(
-            '<a class="fd-today-suggest" href="/recipes/r-salmon-rice">Salmon &amp; rice fits · uses 2 things expiring</a>',
-        );
-        // It replaces "Nothing yet" in the dinner row.
-        const dinner = html.slice(
-            html.indexOf('id="fd-today-dinner"'),
-            html.indexOf('id="fd-today-snack"'),
-        );
-        expect(dinner).not.toContain("Nothing yet");
+        expect(dinner(html)).toContain("Salmon &amp; rice fits");
+        expect(dinner(html)).toContain("Uses 2 things expiring");
+        expect(dinner(html)).toContain('href="/recipes/r-salmon-rice"');
+        expect(dinner(html)).toContain('aria-label="Open Salmon &amp; rice"');
+        // It replaces "Nothing yet" in the dinner section.
+        expect(dinner(html)).not.toContain("Nothing yet");
     });
 
     test("it follows the copy-yesterday hint in the same slot", () => {
@@ -639,8 +610,8 @@ describe("empty slot suggestions", () => {
         view.slotSuggestions = { breakfast: view.slotSuggestions.dinner! };
         const html = String(renderTodayBody({ ...data, view }));
         const breakfast = html.slice(
-            html.indexOf('id="fd-today-breakfast"'),
-            html.indexOf('id="fd-today-lunch"'),
+            html.indexOf('aria-label="Breakfast"'),
+            html.indexOf('aria-label="Lunch"'),
         );
         const yesterday = breakfast.indexOf("fd-today-yesterday");
         const suggest = breakfast.indexOf("fd-today-suggest");
@@ -648,7 +619,7 @@ describe("empty slot suggestions", () => {
         expect(suggest).toBeGreaterThan(yesterday);
     });
 
-    test("at most two lines, one per suggestion", () => {
+    test("one row per suggestion", () => {
         const view = buildPreviewTodayViewWithSuggestions(today);
         const [first] = view.slotSuggestions.dinner!;
         view.slotSuggestions = {
@@ -663,9 +634,9 @@ describe("empty slot suggestions", () => {
             ],
         };
         const html = String(renderTodayBody({ ...data, view }));
-        expect(html.match(/class="fd-today-suggest"/g)).toHaveLength(2);
-        expect(html).toContain("Rice bowl fits</a>");
-        expect(html).toContain("Salmon &amp; rice fits · uses 2 things");
+        expect(html.match(/fd-today-suggest/g)).toHaveLength(2);
+        expect(html).toContain("Rice bowl fits");
+        expect(html).toContain("Uses 2 things expiring");
     });
 
     test("one expiring item reads in the singular", () => {
@@ -677,7 +648,7 @@ describe("empty slot suggestions", () => {
             ],
         };
         expect(String(renderTodayBody({ ...data, view }))).toContain(
-            "uses 1 thing expiring",
+            "Uses 1 thing expiring",
         );
     });
 
@@ -704,123 +675,19 @@ describe("empty slot suggestions", () => {
 
     test("a peer's day shows none", () => {
         const view = buildPreviewTodayViewWithSuggestions(today);
-        const peer = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-                subjectLabel: "Sam",
-            },
-            today,
-        );
+        const peer = buildPreviewTodayPageData(peerChrome, today);
         expect(String(renderTodayBody({ ...peer, view }))).not.toContain(
             "fd-today-suggest",
         );
     });
 });
 
-describe("Use soon recipe lines", () => {
-    const today = "2026-11-10";
-    const chrome = {
-        theme: "light" as const,
-        flags: FIXTURE_APP_CHROME_FLAGS,
-    };
-
-    test("each expiring item with a recipe shows Use in", () => {
-        const view = buildPreviewTodayViewWithSuggestions(today);
-        const rail = String(
-            renderTodayRail({
-                ...buildPreviewTodayPageData(chrome, today),
-                view,
-            }),
-        );
-        expect(rail.match(/<a class="fd-today-rail-row__use"/g)).toHaveLength(
-            2,
-        );
-        expect(rail).toContain(
-            '<a class="fd-today-rail-row__use" href="/recipes/r-salmon-rice">Use in: Salmon &amp; rice</a>',
-        );
-    });
-
-    test("an item no recipe uses has no line", () => {
-        const view = buildPreviewTodayViewWithSuggestions(today);
-        view.useSoonUses = view.useSoonUses.map((use, i) =>
-            i === 0 ? { ...use, recipes: [] } : use,
-        );
-        const rail = String(
-            renderTodayRail({
-                ...buildPreviewTodayPageData(chrome, today),
-                view,
-            }),
-        );
-        expect(rail.match(/<a class="fd-today-rail-row__use"/g)).toHaveLength(
-            1,
-        );
-    });
-
-    test("no recipes at all leaves the rail as it was", () => {
-        const view = buildPreviewTodayViewWithRail(today);
-        const rail = String(
-            renderTodayRail({
-                ...buildPreviewTodayPageData(chrome, today),
-                view,
-            }),
-        );
-        expect(rail).not.toContain("Use in:");
-        expect(rail).not.toContain("fd-today-useall");
-    });
-
-    test("the card for a recipe using several items links to its cook step", () => {
-        const view = buildPreviewTodayViewWithSuggestions(today);
-        const rail = String(
-            renderTodayRail({
-                ...buildPreviewTodayPageData(chrome, today),
-                view,
-            }),
-        );
-        expect(rail).toContain("Uses both");
-        expect(rail).toContain("25 min · 640 kcal per serving");
-        expect(rail).toContain(
-            'href="/recipes/r-salmon-rice#fd-recipe-cook-heading">Cook it</a>',
-        );
-        expect(rail).not.toContain("Plan");
-    });
-
-    test("with the week plan on, Plan sits beside Cook it and opens the recipe's plan sheet", () => {
-        const view = buildPreviewTodayViewWithSuggestions(today);
-        const base = buildPreviewTodayPageData(chrome, today);
-        const rail = String(
-            renderTodayRail({
-                ...base,
-                plan: {
-                    today,
-                    days: [],
-                    plannedCount: 0,
-                    missing: [],
-                },
-                view,
-            }),
-        );
-        expect(rail).toContain(
-            '<a class="fd-today-useall__plan" href="/recipes/r-salmon-rice?plan=1">Plan</a>',
-        );
-        expect(rail.indexOf("Cook it")).toBeLessThan(rail.indexOf(">Plan<"));
-    });
-});
-
-describe("today edit sheet Again", () => {
-    test("edit sheet posts Again beside save and delete", () => {
-        const today = "2026-11-10";
-        const data = buildPreviewTodayPageData(
-            {
-                theme: "light",
-                flags: FIXTURE_APP_CHROME_FLAGS,
-            },
-            today,
-        );
+describe("the edit sheet", () => {
+    test("posts Again beside Save, with its own submit key", () => {
+        const data = buildPreviewTodayPageData(chrome, today);
         data.openEditMealId = "m3";
         const html = renderTodayV2Page(data);
         expect(html).toContain('action="/meals/m3/again"');
-        // Each rendered Again form carries its own submit key.
         const keys = [
             ...html.matchAll(
                 /\/meals\/m3\/again"[^]*?name="submit_key" value="([^"]+)"/g,
@@ -828,100 +695,194 @@ describe("today edit sheet Again", () => {
         ].map((m) => m[1]);
         expect(keys.length).toBeGreaterThan(0);
         expect(keys[0]).toMatch(/^[0-9a-f-]{36}$/);
-        expect(html).toContain("fd-btn--accent");
-        expect(html).toMatch(/Again<\/span><\/button>/);
+        expect(html).toMatch(
+            /<button[^>]*form="fd-edit-meal-m3-again"[^>]*>[\s\S]*?Again/,
+        );
+        // Delete is the row's menu and swipe; the sheet has Again and Save.
+        expect(html).not.toContain('id="fd-edit-meal-m3-delete"');
+        expect(html).toContain("fd-sheet--side");
+        expect(html).toContain('form="fd-edit-meal-m3-form"');
+    });
+
+    test("Time is the meal's own time and a Pick a time chip over a time field that posts logged_time", () => {
+        const data = buildPreviewTodayPageData(chrome, today);
+        data.openEditMealId = "m3";
+        const html = renderTodayV2Page(data);
+        const sheet = html.slice(html.indexOf('id="fd-edit-meal-m3"'));
+        const time = sheet.slice(sheet.indexOf("data-fd-edit-time"));
+        // Two chips: the time as it reads on a clock, and Pick a time.
+        expect(time).toMatch(
+            /name="time_mode" value="keep" checked[^]*?fd-chip__label">\d{1,2}:\d\d (AM|PM)</,
+        );
+        expect(time).toMatch(
+            /name="time_mode" value="pick"[^>]*>[^]*?fd-chip__label">Pick a time</,
+        );
+        // The field is still there and posts what it posted before.
+        expect(time).toMatch(
+            /<input[^>]*type="time"[^>]*name="logged_time"|<input[^>]*name="logged_time"[^>]*type="time"/,
+        );
+    });
+
+    test("the subtitle reads the meal and its kcal", () => {
+        const data = buildPreviewTodayPageData(chrome, today);
+        data.openEditMealId = "m3";
+        const html = renderTodayV2Page(data);
+        const sheet = html.slice(html.indexOf('id="fd-edit-meal-m3"'));
+        expect(sheet).toMatch(
+            /fd-sheet__subtitle[^>]*>(Breakfast|Lunch|Dinner|Snacks) · \d+ kcal</,
+        );
     });
 });
 
 describe("This week on Today", () => {
-    const today = "2026-11-10";
-    const chrome = {
-        theme: "light" as const,
-        flags: FIXTURE_APP_CHROME_FLAGS,
-    };
-    const week = buildWeekPlanView({
-        today,
-        plans: [
-            {
-                id: "p1",
-                householdId: "hh",
-                recipeId: "r1",
-                date: "2026-11-11",
-                slot: "dinner",
-                servings: 2,
-                createdBy: null,
-                createdAt: "2026-11-09T10:00:00+00:00",
-            },
-        ],
-        recipes: [
-            {
-                id: "r1",
-                name: "Beef chili",
-                yieldPortions: 2,
-                ingredients: [
-                    {
-                        displayName: "Kidney beans",
-                        foodId: "f1",
-                        quantity: { amount: 400, unit: "g" },
-                    },
-                ],
-            },
-        ],
-        stock: [],
-        foodsById: new Map(),
+    const plan = (
+        id: string,
+        date: string,
+        slot: "breakfast" | "lunch" | "dinner" | "snack",
+        ruleId?: string,
+    ) => ({
+        id,
+        householdId: "hh",
+        recipeId: "r1",
+        date,
+        slot,
+        servings: 2,
+        createdBy: null,
+        createdAt: "2026-11-09T10:00:00+00:00",
+        ...(ruleId ? { ruleId } : {}),
     });
-
-    test("the rail card and the phone section list the seven days with the plan", () => {
-        const data = {
-            ...buildPreviewTodayPageData(chrome, today),
-            plan: week,
-        };
-        const body = String(renderTodayBody(data));
-        const rail = String(renderTodayRail(data));
-        for (const html of [body, rail]) {
-            expect(html).toContain("Beef chili");
-            expect(html).toContain("Nothing planned");
-            expect(html).toContain("1 ingredient missing");
-        }
-        // Once on the phone, once in the rail.
-        expect(body.match(/<li class="fd-plan-day/g)).toHaveLength(14);
-        expect(body).toContain('class="fd-today-section fd-plan-phone"');
-        // The sheets its buttons and links open are on the page once.
-        expect(body.match(/id="fd-plan-edit-p1"/g)).toHaveLength(1);
-        expect(body.match(/id="fd-plan-missing-sheet"/g)).toHaveLength(1);
-        expect(body).toContain('name="back" value="today"');
-    });
-
-    test("an empty week says nothing is planned", () => {
-        const empty = buildWeekPlanView({
+    const weekOf = (plans: ReturnType<typeof plan>[]) =>
+        buildWeekPlanView({
             today,
-            plans: [],
-            recipes: [],
+            plans,
+            recipes: [
+                {
+                    id: "r1",
+                    name: "Beef chili",
+                    yieldPortions: 2,
+                    ingredients: [
+                        {
+                            displayName: "Kidney beans",
+                            foodId: "f1",
+                            quantity: { amount: 400, unit: "g" },
+                        },
+                    ],
+                },
+            ],
             stock: [],
             foodsById: new Map(),
         });
-        const data = {
-            ...buildPreviewTodayPageData(chrome, today),
-            plan: empty,
-        };
-        const body = String(renderTodayBody(data));
-        expect(body.match(/Nothing planned/g)!.length).toBeGreaterThanOrEqual(
-            14,
+    const body = (week: ReturnType<typeof weekOf>) =>
+        String(
+            renderTodayBody({
+                ...buildPreviewTodayPageData(chrome, today),
+                plan: week,
+            }),
         );
-        expect(body).not.toContain("fd-plan-missing-sheet");
-        expect(body).not.toContain("fd-plan-edit-");
+    const rows = (html: string) =>
+        [
+            ...html.matchAll(
+                /<li data-fd-sheet-row data-sheet-id="fd-plan-edit-[^"]+"[\s\S]*?<\/li>/g,
+            ),
+        ].map((m) => m[0]);
+
+    test("lists the planned entries under a This week header with Plan", () => {
+        const html = body(weekOf([plan("p1", "2026-11-11", "dinner")]));
+        expect(html).toContain('fd-section-header__label">This week<');
+        expect(html).toContain(
+            '<a class="fd-section-header__action" href="/recipes">Plan</a>',
+        );
+        const listed = rows(html);
+        expect(listed).toHaveLength(1);
+        expect(listed[0]).toContain("Beef chili");
+        expect(listed[0]).toContain("Dinner");
+        expect(listed[0]).toContain(">Wed<");
+        expect(listed[0]).toContain('data-sheet-id="fd-plan-edit-p1"');
+        // Only the days with something planned are listed.
+        expect(html).not.toContain("fd-plan-day");
+        expect(html).toContain("1 ingredient missing");
+        // The sheets its rows and link open are on the page once each.
+        expect(html.match(/ id="fd-plan-edit-p1"/g)).toHaveLength(1);
+        expect(html.match(/ id="fd-plan-missing-sheet"/g)).toHaveLength(1);
+        expect(html).toContain('name="back" value="today"');
+        expect(html).toContain("Add 1 to groceries");
+    });
+
+    test("two entries of one recipe on one day in different meals stay two rows", () => {
+        const html = body(
+            weekOf([
+                plan("p1", "2026-11-11", "lunch"),
+                plan("p2", "2026-11-11", "dinner"),
+            ]),
+        );
+        const listed = rows(html);
+        expect(listed).toHaveLength(2);
+        expect(listed[0]).toContain("Lunch");
+        expect(listed[1]).toContain("Dinner");
+        expect(html.match(/ id="fd-plan-edit-p[12]"/g)).toHaveLength(2);
+    });
+
+    test("a one-off entry's ⋯ is Edit and Remove, with no series item", () => {
+        const r = rows(body(weekOf([plan("p1", "2026-11-11", "dinner")])))[0]!;
+        expect(r).toContain('data-anchor="more"');
+        expect(r).toContain("Actions for Beef chili, Wed 11 Nov");
+        expect(r).toContain('commandfor="fd-plan-edit-p1"');
+        expect(r).toContain('action="/recipes/plan/p1/remove"');
+        expect(r).toContain('fd-menu__label">Remove<');
+        expect(r).not.toContain("The whole series");
+        expect(r).not.toContain("This day");
+        expect(r).not.toContain('name="scope"');
+    });
+
+    test("an entry that is a day of a repeat offers This day and The whole series", () => {
+        const id = "rule:rl1:2026-11-11";
+        const r = rows(
+            body(weekOf([plan(id, "2026-11-11", "dinner", "rl1")])),
+        )[0]!;
+        expect(r).toContain(">Dinner<");
+        expect(r).not.toContain("repeats");
+        expect(r).toContain(`action="/recipes/plan/${id}/remove"`);
+        expect(r).toContain('fd-menu__label">This day<');
+        expect(r).toContain('fd-menu__label">The whole series<');
+        expect(r).toContain('name="scope" value="day"');
+        expect(r).toContain('name="scope" value="series"');
+        // Both confirm in place.
+        expect(r.match(/data-fd-menu-confirm/g)).toHaveLength(2);
+        // No heading dressed as a disabled action.
+        expect(r).not.toContain("fd-menu__note");
+        expect(r).not.toContain('aria-disabled="true"');
+    });
+
+    test("entries are shown as stored: a repeat day and a one-off of the same recipe and day are not merged", () => {
+        const html = body(
+            weekOf([
+                plan("rule:rl1:2026-11-11", "2026-11-11", "lunch", "rl1"),
+                plan("p2", "2026-11-11", "dinner"),
+            ]),
+        );
+        const listed = rows(html);
+        expect(listed).toHaveLength(2);
+        expect(listed[0]).toContain("The whole series");
+        expect(listed[1]).not.toContain("The whole series");
+    });
+
+    test("an empty week says nothing is planned and has no sheets", () => {
+        const html = body(weekOf([]));
+        expect(html).toContain("Nothing planned");
+        expect(html).toContain('fd-section-header__label">This week<');
+        expect(html).not.toContain("fd-plan-missing-sheet");
+        expect(html).not.toContain("fd-plan-edit-");
+        expect(html).not.toContain("ingredient");
     });
 
     test("a peer's read-only day has no plan", () => {
-        const data = {
-            ...buildPreviewTodayPageData(
-                { ...chrome, subjectLabel: "Sam" },
-                today,
-            ),
-            plan: week,
-        };
-        const body = String(renderTodayBody(data));
-        expect(body).not.toContain("fd-plan-");
-        expect(body).not.toContain("This week");
+        const html = String(
+            renderTodayBody({
+                ...buildPreviewTodayPageData(peerChrome, today),
+                plan: weekOf([plan("p1", "2026-11-11", "dinner")]),
+            }),
+        );
+        expect(html).not.toContain("fd-plan-");
+        expect(html).not.toContain("This week");
     });
 });

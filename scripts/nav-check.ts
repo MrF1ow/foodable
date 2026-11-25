@@ -512,19 +512,513 @@ try {
         { v2Desktop, sidebarW, exposedNavs, v2DesktopKitchen, ex: drain() },
     );
 
+    await control("reset=posts");
     await goto("/");
     await setMarker();
-    const v2TodayDesk = await ev<string>(
-        `document.querySelector(".fd-today-rail") ? getComputedStyle(document.querySelector(".fd-today-rail")).display : "missing"`,
+    const todayDesk = await ev<{
+        layout: string;
+        direction: string;
+        columns: number;
+        leftRight: number;
+        rightLeft: number;
+        topGap: number;
+        rail: boolean;
+        left: string;
+        right: string;
+    }>(`(() => {
+        const page = document.querySelector(".fd-today-page.fd-page-layout--two-columns");
+        const cols = page ? [...page.querySelectorAll(".fd-page-layout__column")] : [];
+        const box = (el) => el.getBoundingClientRect();
+        return {
+            layout: page ? getComputedStyle(page).display : "missing",
+            direction: page ? getComputedStyle(page.querySelector(".fd-page-layout__columns")).flexDirection : "missing",
+            columns: cols.length,
+            leftRight: cols[0] ? Math.round(box(cols[0]).right) : -1,
+            rightLeft: cols[1] ? Math.round(box(cols[1]).left) : -1,
+            topGap: cols.length === 2 ? Math.abs(Math.round(box(cols[0].querySelector("h1")).top - box(cols[1].querySelector(".fd-section-header")).top)) : -1,
+            rail: !!document.querySelector(".fd-today-rail, .fd-today-card"),
+            left: cols[0] ? [...cols[0].querySelectorAll("h1, .fd-week-strip, .fd-calorie-gauge, .fd-macro-bar, .fd-nutrient-line")].map((e) => e.className.split(" ")[0] || e.tagName).join("|") : "",
+            right: cols[1] ? [...cols[1].querySelectorAll(".fd-section-header__label")].map((e) => e.textContent).join("|") : "",
+        };
+    })()`);
+    record(
+        "v2 today at 1440px: Two columns, the title, week strip, gauge, macros and nutrient line on the left and the meals and This week on the right, side by side, with no rail",
+        todayDesk.layout === "flex" &&
+            todayDesk.direction === "row" &&
+            todayDesk.columns === 2 &&
+            todayDesk.leftRight <= todayDesk.rightLeft &&
+            todayDesk.rightLeft > 600 &&
+            todayDesk.topGap <= 30 &&
+            !todayDesk.rail &&
+            todayDesk.left ===
+                "fd-page-header__title|fd-week-strip|fd-calorie-gauge|fd-macro-bar|fd-macro-bar|fd-macro-bar|fd-nutrient-line" &&
+            todayDesk.right === "Breakfast|Lunch|Dinner|Snacks|This week",
+        { todayDesk, ex: drain() },
     );
-    const v2TodayGrid = await ev<string>(
-        `document.querySelector(".fd-today-page") ? getComputedStyle(document.querySelector(".fd-today-page")).display : "missing"`,
+
+    // A meal's ⋯ on the desktop: Again, Edit and Delete; Edit opens the edit
+    // sheet beside the page, Again posts, Delete asks in place and then posts.
+    const mealRow = 'li[data-fd-meal-id="m1"]';
+    await clickSel(`${mealRow} [data-fd-menu-trigger]`);
+    await sleep(150);
+    const mealMenu = await ev<{
+        items: string[];
+        open: boolean;
+        sheet: boolean;
+    }>(`({
+        items: [...document.querySelectorAll('li[data-fd-meal-id="m1"] .fd-menu__panel .fd-menu__label')].map((e) => e.textContent),
+        open: document.querySelector('li[data-fd-meal-id="m1"] .fd-menu__panel')?.hidden === false,
+        sheet: !!document.querySelector("dialog[open]"),
+    })`);
+    await clickSel(`${mealRow} [commandfor="fd-edit-meal-m1"]`);
+    await sleep(300);
+    const mealEdit = await ev<{
+        open: boolean;
+        side: boolean;
+        title: string | null;
+    }>(`(() => {
+        const d = document.getElementById("fd-edit-meal-m1");
+        return {
+            open: !!d?.open,
+            side: d?.classList.contains("fd-sheet--side") ?? false,
+            title: d?.querySelector(".fd-sheet__title")?.textContent ?? null,
+        };
+    })()`);
+    await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+    });
+    await sleep(250);
+    await control("reset=posts");
+    await clickSel(`${mealRow} [data-fd-menu-trigger]`);
+    await sleep(150);
+    await clickSel(
+        `${mealRow} .fd-menu__panel form[action="/meals/m1/again"] button`,
+    );
+    await sleep(500);
+    const againPosts = (await stats()).posts.filter(
+        (p) => p.path === "/meals/m1/again",
+    );
+    await clickSel(`${mealRow} [data-fd-menu-trigger]`);
+    await sleep(150);
+    await clickSel(`${mealRow} [data-fd-menu-arm]`);
+    await sleep(150);
+    const confirming = await ev<string[]>(
+        `[...document.querySelectorAll('li[data-fd-meal-id="m1"] .fd-menu__confirm-row:not([hidden]) .fd-menu__label')].map((e) => e.textContent)`,
+    );
+    const deleteBefore = (await stats()).posts.filter(
+        (p) => p.path === "/meals/m1/delete",
+    ).length;
+    await clickSel(
+        `${mealRow} .fd-menu__confirm-row form[action="/meals/m1/delete"] button`,
+    );
+    await sleep(500);
+    const mealDeletePosts = (await stats()).posts.filter(
+        (p) => p.path === "/meals/m1/delete",
+    );
+    const afterMenu = await ev<{ marker: string | null }>(
+        `({ marker: window.__marker ?? null })`,
     );
     record(
-        "v2 today at 1440px: two-column layout and right-hand rail",
-        v2TodayDesk === "flex" && v2TodayGrid === "grid",
-        { v2TodayDesk, v2TodayGrid, ex: drain() },
+        "v2 today at 1440px: a meal row's ⋯ is Again, Edit and Delete; Edit opens the side sheet, Again posts, and Delete asks in place (Cancel and Delete) before it posts, all over Turbo",
+        mealMenu.items.slice(0, 3).join("|") === "Again|Edit|Delete" &&
+            mealMenu.open &&
+            !mealMenu.sheet &&
+            mealEdit.open &&
+            mealEdit.side &&
+            mealEdit.title === "Scrambled eggs" &&
+            againPosts.length === 1 &&
+            confirming.join("|") === "Cancel|Delete" &&
+            deleteBefore === 0 &&
+            mealDeletePosts.length === 1 &&
+            afterMenu.marker === "stay",
+        {
+            mealMenu,
+            mealEdit,
+            againPosts,
+            confirming,
+            mealDeletePosts,
+            afterMenu,
+            ex: drain(),
+        },
     );
+
+    // An open ⋯ menu stands above everything after its row: every item it
+    // shows is the topmost thing at its own centre (a later row, its swipe
+    // face or a section painting over it would be hit instead), and its
+    // Delete asks again in place with the same guarantee.
+    const menuEsc = async () => {
+        for (const type of ["keyDown", "keyUp"]) {
+            await send("Input.dispatchKeyEvent", {
+                type,
+                key: "Escape",
+                code: "Escape",
+                windowsVirtualKeyCode: 27,
+            });
+        }
+        await sleep(250);
+    };
+    const menuOnTop = async (rowSel: string) => {
+        const trigger = `${rowSel} [data-fd-menu-trigger]`;
+        await ev(
+            `document.querySelector(${JSON.stringify(trigger)}).scrollIntoView({ block: "center" })`,
+        );
+        await sleep(120);
+        await clickSel(trigger);
+        await sleep(250);
+        const probe = () =>
+            ev<{
+                open: boolean;
+                items: {
+                    label: string;
+                    hit: string;
+                    top: boolean;
+                    inView: boolean;
+                }[];
+            }>(`(() => {
+                const row = document.querySelector(${JSON.stringify(rowSel)});
+                const panel = row.querySelector(".fd-menu__panel");
+                const items = [...panel.querySelectorAll(".fd-menu__item")].filter((i) => i.getClientRects().length > 0);
+                return {
+                    open: !panel.hidden,
+                    items: items.map((i) => {
+                        const r = i.getBoundingClientRect();
+                        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+                        return {
+                            label: i.textContent.trim(),
+                            hit: hit ? hit.tagName + "." + String(hit.className).slice(0, 60) : "none",
+                            top: !!hit && i.contains(hit),
+                            inView: r.top >= 0 && r.bottom <= innerHeight && r.left >= 0 && r.right <= innerWidth,
+                        };
+                    }),
+                };
+            })()`);
+        const menu = await probe();
+        await clickSel(`${rowSel} [data-fd-menu-arm]`);
+        await sleep(200);
+        const confirm = await probe();
+        await menuEsc();
+        await sleep(150);
+        const ok = (p: typeof menu) =>
+            p.open &&
+            p.items.length >= 2 &&
+            p.items.every((i) => i.top && i.inView);
+        return { menu, confirm, ok: ok(menu) && ok(confirm) };
+    };
+
+    const deskMenu = await menuOnTop(
+        `li[data-fd-meal-id="${await ev<string>(`[...document.querySelectorAll("li[data-fd-meal-id]")].find((li) => li.nextElementSibling)?.dataset.fdMealId ?? "m1"`)}"]`,
+    );
+    record(
+        "v2 today at 1440px: a meal row's open ⋯ menu and its Delete confirm sit above the rows after them (each item is the topmost thing at its centre)",
+        deskMenu.ok,
+        { deskMenu, ex: drain() },
+    );
+
+    // The plan entries under This week: a one-off's ⋯ has Remove alone; a day
+    // of a repeat has This day and The whole series for that one repeat.
+    const planItems = await ev<{
+        oneOff: string[];
+        repeat: string[];
+        rows: number;
+    }>(`(() => {
+        const labels = (row) => [...row.querySelectorAll(".fd-menu__panel > .fd-menu__item .fd-menu__label, .fd-menu__panel > .fd-menu__confirm > .fd-menu__item .fd-menu__label")].map((e) => e.textContent);
+        const rows = [...document.querySelectorAll(".fd-plan-week [data-fd-sheet-row]")];
+        const repeat = rows.find((r) => /The whole series/.test(r.textContent));
+        const oneOff = rows.find((r) => !/The whole series/.test(r.textContent));
+        return { oneOff: oneOff ? labels(oneOff) : [], repeat: repeat ? labels(repeat) : [], rows: rows.length };
+    })()`);
+    record(
+        "v2 today: each plan entry under This week is one row with a ⋯; a one-off offers Remove, and a day of a repeat offers This day and The whole series",
+        planItems.rows >= 2 &&
+            planItems.oneOff.join("|") === "Edit|Remove" &&
+            planItems.repeat.join("|") === "Edit|This day|The whole series",
+        { planItems, ex: drain() },
+    );
+
+    // The meal's edit sheet: Time is the meal's own time and a Pick a time
+    // chip, which shows the time field; the meal's chip puts the field away.
+    const pressEsc = async () => {
+        for (const type of ["keyDown", "keyUp"]) {
+            await send("Input.dispatchKeyEvent", {
+                type,
+                key: "Escape",
+                code: "Escape",
+                windowsVirtualKeyCode: 27,
+            });
+        }
+        await sleep(250);
+    };
+    await clickSel(`${mealRow} [data-fd-menu-trigger]`);
+    await sleep(150);
+    await clickSel(`${mealRow} [commandfor="fd-edit-meal-m1"]`);
+    await sleep(300);
+    const timeState = () =>
+        ev<{
+            chips: string[];
+            fieldShown: boolean;
+            value: string | null;
+        }>(`(() => {
+            const sheet = document.getElementById("fd-edit-meal-m1");
+            const field = sheet?.querySelector('input[name="logged_time"]');
+            return {
+                chips: [...(sheet?.querySelectorAll("[data-fd-edit-time] .fd-chip__label") ?? [])].map((e) => e.textContent),
+                fieldShown: !!field && field.getClientRects().length > 0,
+                value: field?.value ?? null,
+            };
+        })()`);
+    const timeBefore = await timeState();
+    await clickSel(
+        '#fd-edit-meal-m1 [data-fd-edit-time] .fd-chip--choice:has(input[value="pick"])',
+    );
+    await sleep(150);
+    const timePicking = await timeState();
+    await ev(`(() => {
+        const f = document.querySelector('#fd-edit-meal-m1 input[name="logged_time"]');
+        f.value = "23:15";
+        f.dispatchEvent(new Event("input", { bubbles: true }));
+        return f.value;
+    })()`);
+    await clickSel(
+        '#fd-edit-meal-m1 [data-fd-edit-time] .fd-chip--choice:has(input[value="keep"])',
+    );
+    await sleep(150);
+    const timeKept = await timeState();
+    await pressEsc();
+    record(
+        "v2 today: the edit sheet's Time is the meal's time and a Pick a time chip; Pick a time shows the time field, the meal's own chip hides it and puts its time back",
+        timeBefore.chips.length === 2 &&
+            /^\d{1,2}:\d\d (AM|PM)$/.test(timeBefore.chips[0] ?? "") &&
+            timeBefore.chips[1] === "Pick a time" &&
+            !timeBefore.fieldShown &&
+            timePicking.fieldShown &&
+            !timeKept.fieldShown &&
+            timeKept.value === timeBefore.value,
+        { timeBefore, timePicking, timeKept, ex: drain() },
+    );
+
+    // A plan entry's edit sheet: titled with the day, the meal under it, Day
+    // and Meal as rows with pull-downs (the row's value follows the choice).
+    await clickSel(".fd-plan-week [data-fd-sheet-row] [data-fd-menu-trigger]");
+    await sleep(150);
+    await clickSel(
+        '.fd-plan-week [data-fd-sheet-row] [commandfor^="fd-plan-edit-"]',
+    );
+    await sleep(300);
+    const planSheet = await ev<{
+        open: boolean;
+        side: boolean;
+        title: string | null;
+        subtitle: string | null;
+        rows: string[];
+        dayChoices: number;
+        valueAfter: string | null;
+    }>(`(() => {
+        const d = document.querySelector("dialog[id^='fd-plan-edit-'][open]");
+        const rows = [...(d?.querySelectorAll(".fd-plan-edit-row") ?? [])];
+        const select = rows[0]?.querySelector("select");
+        if (select) {
+            select.selectedIndex = select.options.length - 1;
+            select.dispatchEvent(new Event("change", { bubbles: true }));
+        }
+        return {
+            open: !!d,
+            side: d?.classList.contains("fd-sheet--side") ?? false,
+            title: d?.querySelector(".fd-sheet__title")?.textContent ?? null,
+            subtitle: d?.querySelector(".fd-sheet__subtitle")?.textContent ?? null,
+            rows: rows.map((r) => r.querySelector(".fd-item-row__title")?.textContent ?? ""),
+            dayChoices: select?.options.length ?? 0,
+            valueAfter: rows[0]?.querySelector(".fd-item-row__value")?.textContent ?? null,
+        };
+    })()`);
+    await pressEsc();
+    record(
+        "v2 today: a plan entry's edit sheet is a side sheet titled with the day and the meal, with Day and Meal as rows with pull-downs whose value follows the choice",
+        planSheet.open &&
+            planSheet.side &&
+            /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}$/.test(
+                planSheet.title ?? "",
+            ) &&
+            ["Breakfast", "Lunch", "Dinner", "Snacks"].includes(
+                planSheet.subtitle ?? "",
+            ) &&
+            planSheet.rows.join("|") === "Day|Meal" &&
+            planSheet.dayChoices >= 14 &&
+            planSheet.valueAfter != null &&
+            planSheet.valueAfter !== planSheet.title,
+        { planSheet, ex: drain() },
+    );
+
+    // A plan edit saved over Turbo morphs the week: the rows are reused under
+    // each other's sheets, and a tap on a row still opens exactly its sheet.
+    await goto("/");
+    await setMarker();
+    const planRowSel = ".fd-plan-week [data-fd-sheet-row]";
+    const sheetIdsBefore = await ev<string[]>(
+        `[...document.querySelectorAll(${JSON.stringify(planRowSel)})].map((r) => r.dataset.sheetId)`,
+    );
+    await clickSel(`${planRowSel} [data-fd-menu-trigger]`);
+    await sleep(150);
+    await clickSel(`${planRowSel} [commandfor^="fd-plan-edit-"]`);
+    await sleep(300);
+    await ev(
+        `[...document.querySelectorAll("dialog[open] button")].find((b) => b.textContent.trim() === "Save").click()`,
+    );
+    await sleep(700);
+    const tapRow = async (index: number) => {
+        await ev(
+            `document.querySelectorAll(${JSON.stringify(planRowSel)})[${index}].querySelector(".fd-item-row__title").click()`,
+        );
+        await sleep(300);
+        const state = await ev<{ open: string[]; want: string }>(`({
+            open: [...document.querySelectorAll("dialog[open]")].map((d) => d.id),
+            want: document.querySelectorAll(${JSON.stringify(planRowSel)})[${index}].dataset.sheetId,
+        })`);
+        await menuEsc();
+        await sleep(100);
+        return state;
+    };
+    const sheetIdsAfter = await ev<string[]>(
+        `[...document.querySelectorAll(${JSON.stringify(planRowSel)})].map((r) => r.dataset.sheetId)`,
+    );
+    const morphDone = await ev<{ done: boolean; marker: string | null }>(
+        `({ done: !!document.getElementById("done"), marker: window.__marker ?? null })`,
+    );
+    const tapSecond = await tapRow(1);
+    const tapFirst = await tapRow(0);
+    record(
+        "v2 today: after a plan edit is saved and the week morphs, a tap on a plan row opens exactly one sheet, the row's own",
+        morphDone.done &&
+            morphDone.marker === "stay" &&
+            sheetIdsBefore.length === 2 &&
+            sheetIdsAfter.join("|") !== sheetIdsBefore.join("|") &&
+            tapSecond.open.join("|") === tapSecond.want &&
+            tapFirst.open.join("|") === tapFirst.want,
+        {
+            sheetIdsBefore,
+            sheetIdsAfter,
+            morphDone,
+            tapSecond,
+            tapFirst,
+            ex: drain(),
+        },
+    );
+    await goto("/");
+    await setMarker();
+
+    // The phone: a swipe right on a meal row posts Again, a swipe left posts
+    // Delete, and a tap opens the edit sheet.
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+    await send("Emulation.setTouchEmulationEnabled", {
+        enabled: true,
+        maxTouchPoints: 1,
+    });
+    await goto("/");
+    await setMarker();
+    await control("reset=posts");
+    const coarse = await ev<boolean>(`matchMedia("(pointer: coarse)").matches`);
+    const swipeRow = async (id: string, fromFrac: number, toFrac: number) => {
+        const box = await ev<{ x: number; y: number; w: number }>(`(() => {
+            const r = document.querySelector('li[data-fd-meal-id="${id}"] .fd-item-row__face').getBoundingClientRect();
+            return { x: r.left, y: r.top + r.height / 2, w: r.width };
+        })()`);
+        const x0 = box.x + box.w * fromFrac;
+        const x1 = box.x + box.w * toFrac;
+        await send("Input.dispatchTouchEvent", {
+            type: "touchStart",
+            touchPoints: [{ x: x0, y: box.y }],
+        });
+        for (let i = 1; i <= 8; i++) {
+            await send("Input.dispatchTouchEvent", {
+                type: "touchMove",
+                touchPoints: [{ x: x0 + ((x1 - x0) * i) / 8, y: box.y }],
+            });
+            await sleep(16);
+        }
+        await send("Input.dispatchTouchEvent", {
+            type: "touchEnd",
+            touchPoints: [],
+        });
+        await sleep(500);
+    };
+    await swipeRow("m2", 0.15, 0.85);
+    await swipeRow("m3", 0.85, 0.15);
+    const swipePosts = (await stats()).posts.map((p) => p.path);
+    const beds = await ev<{ again: boolean; del: boolean; swipe: boolean }>(`({
+        again: !!document.querySelector('li[data-fd-meal-id="m2"] .fd-item-row__bed--again form[action="/meals/m2/again"]'),
+        del: !!document.querySelector('li[data-fd-meal-id="m3"] .fd-item-row__bed--delete form[action="/meals/m3/delete"]'),
+        swipe: document.querySelectorAll("li[data-fd-meal-id].fd-item-row--swipe").length >= 3,
+    })`);
+    await send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [
+            {
+                x: 120,
+                y: await ev<number>(
+                    `(() => { const r = document.querySelector('li[data-fd-meal-id="m1"] .fd-item-row__face').getBoundingClientRect(); return r.top + r.height / 2; })()`,
+                ),
+            },
+        ],
+    });
+    await send("Input.dispatchTouchEvent", {
+        type: "touchEnd",
+        touchPoints: [],
+    });
+    // The swipes' posts may still be morphing the page: wait for the sheet.
+    let tapped: string[] = [];
+    for (let i = 0; i < 20 && tapped.length === 0; i++) {
+        await sleep(100);
+        tapped = await ev<string[]>(
+            `[...document.querySelectorAll("dialog[open]")].map((d) => d.id)`,
+        );
+    }
+    const afterSwipe = await ev<{ marker: string | null }>(
+        `({ marker: window.__marker ?? null })`,
+    );
+    record(
+        "v2 today on the phone: swiping a meal row right posts Again and left posts Delete, over Turbo, and a tap opens its edit sheet",
+        coarse &&
+            beds.again &&
+            beds.del &&
+            beds.swipe &&
+            swipePosts.includes("/meals/m2/again") &&
+            swipePosts.includes("/meals/m3/delete") &&
+            swipePosts.length === 2 &&
+            tapped.join("|") === "fd-edit-meal-m1" &&
+            afterSwipe.marker === "stay",
+        { coarse, beds, swipePosts, tapped, afterSwipe, ex: drain() },
+    );
+    await menuEsc();
+    const phoneMenu = await menuOnTop(
+        `li[data-fd-meal-id="${await ev<string>(`[...document.querySelectorAll("li[data-fd-meal-id]")].find((li) => li.nextElementSibling)?.dataset.fdMealId ?? "m1"`)}"]`,
+    );
+    record(
+        "v2 today on the phone: a meal row's open ⋯ menu is not clipped by the swipe row, and it and its Delete confirm sit above the rows after it",
+        phoneMenu.ok,
+        { phoneMenu, ex: drain() },
+    );
+    await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 1440,
+        height: 960,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await goto("/");
+    await setMarker();
 
     const modK = process.platform === "darwin" ? 4 : 2;
     await send("Input.dispatchKeyEvent", {

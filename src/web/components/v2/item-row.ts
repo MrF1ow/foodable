@@ -94,7 +94,12 @@ type ButtonHooks = {
 export type ItemRowTrailing =
     | { kind: "chevron" }
     | ({ kind: "more"; label: string } & Pick<ButtonHooks, "data">)
-    | ({ kind: "add"; label: string } & ButtonHooks)
+    | ({
+          kind: "add";
+          label: string;
+          /** A link instead of a button: where the plus goes with no script. */
+          href?: string;
+      } & ButtonHooks)
     | ({
           kind: "toggle";
           on: boolean;
@@ -283,6 +288,11 @@ function trailingSlot(
                 extraAttrs: ` aria-haspopup="menu"`,
             });
         case "add":
+            if (trailing.href != null) {
+                return raw(
+                    `<a class="fd-item-row__trail fd-item-row__add" href="${safeHref(trailing.href)}" aria-label="${esc(trailing.label)}"${dataAttrs(trailing.data)}>${icon("plus")}</a>`,
+                );
+            }
             return actionButton({
                 label: trailing.label,
                 iconOnly: true,
