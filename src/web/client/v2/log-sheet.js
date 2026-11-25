@@ -14,6 +14,19 @@ const MEAL_LABEL = {
     snack: "Add to snacks",
 };
 
+// A row's own link, only when it stays on this site (an attribute is never
+// trusted to name a javascript: or another origin's address).
+function sameOriginPath(raw) {
+    if (!raw) return null;
+    try {
+        const url = new URL(raw, window.location.href);
+        if (url.origin !== window.location.origin) return null;
+        return url.pathname + url.search + url.hash;
+    } catch (_) {
+        return null;
+    }
+}
+
 function round1(n) {
     return Math.round(n * 10) / 10;
 }
@@ -1180,7 +1193,9 @@ function bindOpeners() {
                     pickItem(JSON.parse(raw));
                 } catch (_) {}
             } else {
-                const open = row.getAttribute("data-fd-log-row-open");
+                const open = sameOriginPath(
+                    row.getAttribute("data-fd-log-row-open"),
+                );
                 if (open && window.Turbo?.visit) window.Turbo.visit(open);
                 else if (open) window.location.assign(open);
             }

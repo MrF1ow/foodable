@@ -974,3 +974,28 @@ describe("?log=meal:<id>", () => {
         expect(out.replaced).toEqual([]);
     });
 });
+
+test("a row's own link is followed only when it stays on this site", () => {
+    const source = readFileSync("./src/web/client/v2/log-sheet.js", "utf8");
+    const body = source.match(
+        /function sameOriginPath\(raw\) \{[\s\S]*?\n\}/,
+    )?.[0];
+    expect(body).toBeDefined();
+    const win = {
+        location: {
+            href: "https://food.example/?date=2026-11-10",
+            origin: "https://food.example",
+        },
+    };
+    // oxlint-disable-next-line no-new-func -- the client function, built alone to test it
+    const sameOriginPath = new Function(
+        "window",
+        `${body}; return sameOriginPath;`,
+    )(win) as (raw: string | null) => string | null;
+    expect(sameOriginPath("/?log=meal:m1")).toBe("/?log=meal:m1");
+    expect(sameOriginPath("/foods/f1#top")).toBe("/foods/f1#top");
+    expect(sameOriginPath("javascript:alert(1)")).toBeNull();
+    expect(sameOriginPath("//evil.example/x")).toBeNull();
+    expect(sameOriginPath("https://evil.example/")).toBeNull();
+    expect(sameOriginPath(null)).toBeNull();
+});
