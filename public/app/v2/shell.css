@@ -60,9 +60,9 @@ html:has(body.fd-body) {
     align-items: center;
     gap: var(--space-md);
 }
-/* The product and recipe pages draw their own top bar over this corner (the
-   chip is hidden there in product.css and recipes.css), so the bell goes too. */
-.fd-main:has(.fd-product-top) .fd-cluster,
+/* The recipe page draws its own top bar over this corner (the chip is hidden
+   there in recipes.css), so the bell goes too; the product page does the same
+   in product.css. */
 .fd-main:has(.fd-recipe-detail) .fd-cluster {
     display: none;
 }

@@ -1,310 +1,95 @@
-/* Product screen (phone + desktop) */
+/* Product page (phone and desktop): a Detail bar over the content in the
+   Page layout's single column. The content is groups (a header and its list,
+   12 px apart) spaced by one gap: 12 px on the phone, 24 px on desktop where
+   the Detail bar also sits 32 px above them, as the design sets them. The
+   rows, score card and table style themselves; this file only spaces them and
+   lays the two actions side by side. */
 
 .fd-product-page {
+    --fd-product-gap: var(--space-md);
+}
+.fd-product-page .fd-page-layout__box {
+    gap: var(--fd-product-gap);
+}
+.fd-product-page .fd-page-layout__content,
+.fd-product-score {
+    gap: var(--fd-product-gap);
+}
+.fd-product-group {
     display: flex;
     flex-direction: column;
-    gap: var(--space-section);
-    padding: 0 0 var(--fd-s-12);
+    gap: var(--space-md);
+}
+@media (min-width: 1024px) {
+    .fd-product-page {
+        --fd-product-gap: var(--space-2xl);
+    }
+    .fd-product-page .fd-page-layout__box {
+        gap: var(--space-3xl);
+    }
 }
 
-.fd-product-top {
-    padding-top: 0;
+/* The title and its caption sit 12 px apart, flat on the page (the design's
+   Content frame spaces them like every other child). */
+.fd-product-page .fd-page-header {
+    padding: 0;
+}
+.fd-product-page .fd-page-header__titles {
+    gap: var(--space-md);
+}
+.fd-product-page .fd-page-header__subtitle {
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
 }
 
-/* The design's product screen has its own top bar (back, groceries) in place
-   of the account chip. */
-.fd-main:has(.fd-product-top) .fd-account-chip {
+/* The page draws its own Detail bar over the corner the bell and the account
+   chip take on the other pages. */
+.fd-main:has(.fd-product-page) .fd-cluster {
     display: none;
-}
-
-.fd-product-top__cart .fd-icon {
-    width: 20px;
-    height: 20px;
-}
-
-.fd-product-page .fd-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    margin: 0;
-    padding: 0 var(--space-gutter);
-    border: 0;
-    border-radius: var(--radius-pill);
-    font: 600 15px/20px var(--font-body);
-    cursor: pointer;
-    text-decoration: none;
-    background: var(--surface-raised);
-    color: var(--text-primary);
-}
-
-.fd-product-page .fd-btn--primary {
-    background: var(--accent-fill);
-    color: var(--accent-on);
-}
-
-.fd-product-page .fd-btn:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
-.fd-product-header {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding-top: var(--space-gap);
-}
-
-.fd-product-title {
-    margin: 0;
-    font: 600 28px/34px var(--font-display);
-    letter-spacing: -0.5px;
-    color: var(--text-primary);
-}
-
-.fd-product-subtitle {
-    margin: 0;
-    padding-top: 4px;
-    font: 400 13px/17px var(--font-body);
-    color: var(--text-secondary);
 }
 
 .fd-product-score {
     display: flex;
     flex-direction: column;
-    gap: var(--space-section);
-}
-
-.fd-product-score__hero {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-gap);
-    padding-top: var(--fd-s-2);
-}
-
-.fd-product-score__hero-aside {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 4px;
-}
-
-.fd-product-score__weights {
-    margin: 0;
-    text-align: right;
-    font: 400 12px/16px var(--font-body);
-    color: var(--accent-text);
-}
-
-.fd-product-score__parts-block {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.fd-product-score__parts {
-    margin: var(--fd-s-2) 0 0;
-    font: 600 13px/17px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-product-score__parts-hint {
-    margin: 0;
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-row--member .fd-avatar--row {
-    box-sizing: border-box;
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    width: 36px;
-    height: 36px;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-primary);
-    font: 600 13px/36px var(--font-body);
-}
-
-.fd-member-verdict {
-    flex: none;
-    font: 600 13px/17px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-member-verdict--good {
-    color: var(--accent-text);
-}
-
-.fd-member-verdict--careful {
-    color: var(--status-warn);
-}
-
-.fd-member-verdict--avoid {
-    color: var(--status-over);
 }
 
 .fd-product-error {
     margin: 0;
-    padding: var(--fd-s-4) var(--fd-s-6);
+    padding: var(--space-md) var(--space-lg);
     border-radius: var(--radius-lg);
     background: color-mix(in srgb, var(--status-over) 12%, transparent);
     color: var(--status-over);
     font: 400 14px/20px var(--font-body);
 }
 
-.fd-product-nutrition {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
-}
-
-.fd-product-nutrition__serving {
-    margin: 0 0 var(--fd-s-4);
-    font: 400 12px/16px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-product-nutrition__head {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 6.5rem 6.5rem;
-    gap: 0 12px;
-    align-items: end;
-    padding: 0 0 var(--fd-s-2);
-    border-bottom: 1px solid var(--line);
-    font: 600 11px/14px var(--font-body);
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-
-.fd-product-nutrition__head--one {
-    grid-template-columns: 1fr minmax(4.5rem, auto);
-}
-
-.fd-product-nutrition__head > span {
-    min-width: 0;
-    overflow-wrap: break-word;
-}
-
-.fd-product-nutrition__head-name,
-.fd-product-nutrition__head-amount {
-    display: block;
-}
-
-.fd-product-nutrition__head-spacer {
-    display: block;
-}
-
-.fd-product-nutrition__head span:not(.fd-product-nutrition__head-spacer) {
-    text-align: right;
-}
-
-.fd-product-nutrition__row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 6.5rem 6.5rem;
-    gap: 0 12px;
-    align-items: center;
-    min-height: 43px;
-    border-bottom: 1px solid var(--line);
-    font: 400 15px/20px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-product-nutrition__row--one {
-    grid-template-columns: 1fr minmax(4.5rem, auto);
-}
-
-.fd-product-nutrition__label {
-    color: var(--text-primary);
-}
-
-.fd-product-nutrition__val {
-    text-align: right;
-    color: var(--text-secondary);
-    font-size: 13px;
-    line-height: 17px;
-}
-
+/* Log it and Add to groceries: two equal buttons. */
+/* A grid, not flex: a button's padding and a bare form would split unevenly. */
 .fd-product-actions {
-    display: flex;
-    flex-direction: row;
-    gap: 10px;
-    padding-top: 22px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-md);
+}
+.fd-product-actions > [data-fd-btn],
+.fd-product-actions > form > [data-fd-btn] {
+    width: 100%;
+    min-width: 0;
 }
 
-.fd-product-actions__grocery {
-    display: contents;
-}
-
-.fd-product-actions__add,
-.fd-product-actions__log {
-    flex: 1 1 0;
-    min-height: 52px;
-    padding: 0 12px;
-    border-radius: var(--radius-pill);
-    font: 600 15px/20px var(--font-body);
-    white-space: nowrap;
-}
-
-.fd-product-actions__add {
-    background: var(--surface-raised);
-    color: var(--text-primary);
-}
-
-.fd-product-actions__add .fd-icon {
-    width: 20px;
-    height: 20px;
-    flex: none;
-}
-
-.fd-product-unknown-copy {
-    margin: 0;
-    font: 400 15px/22px var(--font-body);
-    color: var(--text-secondary);
-}
-
+/* The unknown barcode's name field and its button; the field's label is the
+   design's small caps line. */
 .fd-product-unknown-form {
     display: flex;
     flex-direction: column;
-    gap: var(--fd-s-6);
-    max-width: 24rem;
+    gap: var(--space-md);
+}
+.fd-product-unknown-form .fd-field__label {
+    font-size: var(--text-micro-size);
+    letter-spacing: 0.1em;
+    line-height: var(--text-micro-line);
+    text-transform: uppercase;
 }
 
-.fd-text-link {
-    color: var(--accent-text);
-    text-decoration: none;
-}
-
-.fd-text-link:hover {
-    text-decoration: underline;
-}
-
-@media (min-width: 1024px) {
-    .fd-product-page {
-        max-width: 40rem;
-    }
-
-    .fd-product-actions {
-        max-width: 28rem;
-    }
-
-    .fd-row--member .fd-avatar--row {
-        width: 32px;
-        height: 32px;
-        font: 600 13px/32px var(--font-body);
-    }
-}
-
-.fd-product-actions__add--listed {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    color: var(--accent-text);
-    text-decoration: none;
+/* A serving heading ("1 serving (170 g)") breaks into even lines. */
+.fd-product-page .fd-table-row--header .fd-table-row__col {
+    text-wrap: balance;
 }

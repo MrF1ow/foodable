@@ -74,18 +74,32 @@ describe("renderProductScoreSection", () => {
         const section = buildProductScoreSection(food, cards)!;
         const html = renderProductScoreSection(food, section);
         expect(html).toContain("fd-product-score");
-        expect(html).toContain("fd-score-big");
         expect(html).toContain("/ 100");
         expect(html).toContain("Your weights: Balanced");
         expect(html).toContain("Why this score");
         expect(html).toContain("Nutri-Score");
         expect(html).toContain("Green-Score");
         expect(html).toContain("For your household");
-        expect(html).not.toContain("scored on");
-        expect(html).toContain(
-            "Parts with no data are left out, not counted against it.",
-        );
-        expect(html).toContain("fd-product-score__hero-aside");
+        expect(html).not.toContain("Scored on");
+        expect(html).not.toContain("No data");
+        // The help line under the list is cut.
+        expect(html).not.toContain("Parts with no data");
+    });
+
+    test("the breakdown and the household are flat lists under caps headers", () => {
+        const food = scoredFood();
+        const section = buildProductScoreSection(
+            food,
+            previewMemberCards(food, members),
+        )!;
+        const html = renderProductScoreSection(food, section);
+        expect(html).toContain('aria-label="Score breakdown"');
+        expect(html).toContain('aria-label="Household members"');
+        expect(html.match(/fd-section-header__label/g)?.length).toBe(2);
+        expect(html).not.toContain("fd-section-header--rule");
+        // Ethan has nothing to flag, so his row has no line under the name.
+        expect(html).toContain(">Good<");
+        expect(html).not.toContain("No issues found");
     });
 
     test("breakdown lists sugar before Green-Score", () => {
@@ -121,10 +135,34 @@ describe("renderProductScoreSection", () => {
             previewMemberCards(food, members),
         )!;
         const html = renderProductScoreSection(food, section);
-        expect(html).toMatch(/scored on \d+ of 4/);
-        expect(html).toContain(
-            "Parts with no data are left out, not counted against it.",
-        );
+        expect(html).toMatch(/Scored on \d+ of 4/);
+        expect(html).not.toContain("Your weights");
+        expect(html).not.toContain("Parts with no data");
+    });
+
+    test("a part with no data is named last, as No data", () => {
+        const food = scoredFood({ ecoscoreGrade: null, additives: null });
+        const section = buildProductScoreSection(
+            food,
+            previewMemberCards(food, [members[0]!]),
+        )!;
+        const html = renderProductScoreSection(food, section);
+        const titles = [
+            ...html.matchAll(
+                /fd-item-row__title" title="([^"]*)"[^>]*>[^<]*<\/span><\/span>(?:<span class="fd-item-row__subtitle">[^<]*<\/span>)?<\/span><span class="fd-item-row__value">([^<]*)</g,
+            ),
+        ].map((m) => `${m[1]}: ${m[2]}`);
+        expect(titles.slice(0, 4)).toEqual([
+            "Nutri-Score: A",
+            "Processing: NOVA 1 · unprocessed",
+            "Sugar: 4 g per 100 g · low",
+            "Saturated fat: 2.0 g per 100 g · moderate",
+        ]);
+        expect(titles.slice(4)).toEqual([
+            "Additives: No data",
+            "Green-Score: No data",
+            "Ethan Flow: Good",
+        ]);
     });
 
     test("no score block when OFF data cannot score", () => {
@@ -152,8 +190,8 @@ describe("renderProductScoreSection", () => {
             food,
             buildProductScoreSection(food, cards)!,
         );
-        expect(html).toContain("fd-member-verdict--avoid");
-        expect(html).toContain(">Avoid<");
+        expect(html).toContain('fd-item-row__value">Avoid<');
+        expect(html).toContain("Contains Peanut");
     });
 });
 
@@ -172,7 +210,7 @@ describe("renderProductV2Page score integration", () => {
             }),
         );
         const scoreAt = html.indexOf("fd-product-score");
-        const nutritionAt = html.indexOf("fd-product-nutrition");
+        const nutritionAt = html.indexOf('aria-label="Nutrition"');
         expect(scoreAt).toBeGreaterThan(-1);
         expect(nutritionAt).toBeGreaterThan(scoreAt);
     });
@@ -227,6 +265,6 @@ describe("the viewer's weights and switches on the product screen", () => {
             { ...allergic, warnTraces: false },
         ])[0]!;
         expect(on.reason).toContain("May contain traces of peanut");
-        expect(off.reason).toBe("No issues found for this product.");
+        expect(off.reason).toBe("");
     });
 });

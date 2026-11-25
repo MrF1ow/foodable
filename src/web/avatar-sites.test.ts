@@ -3,7 +3,6 @@
 import { describe, expect, test } from "bun:test";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 import type { HouseholdMember } from "../household.js";
-import { memberCheckRow } from "./components/v2/rows.js";
 import { renderSettingsAccountV2Page } from "./pages/v2/settings-account.js";
 import { renderSettingsHomeV2Page } from "./pages/v2/settings-home.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
@@ -215,27 +214,11 @@ describe("Product score member rows", () => {
         expect(html).toContain(imgFor(PEER));
         expect(html).not.toContain(imgFor(ME));
         expect(html).toContain(
-            '<span class="fd-avatar fd-avatar--row" aria-hidden="true">EF</span>',
+            '<span class="fd-item-row__lead fd-item-row__avatar" aria-hidden="true">EF</span>',
         );
     });
     test("no versions given: initials only", () => {
         expect(render(undefined)).not.toContain("/avatars/");
-    });
-});
-
-describe("memberCheckRow", () => {
-    test("renders the picture only when given an avatar with a version", () => {
-        const row = (avatar?: { userId: string; version: Date | null }) =>
-            memberCheckRow({
-                name: "Sam",
-                initials: "S",
-                verdict: "good",
-                reason: "ok",
-                avatar,
-            });
-        expect(row({ userId: PEER, version: T })).toContain(imgFor(PEER));
-        expect(row({ userId: PEER, version: null })).not.toContain("<img");
-        expect(row()).not.toContain("<img");
     });
 });
 

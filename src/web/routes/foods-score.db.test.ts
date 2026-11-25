@@ -100,7 +100,7 @@ describeDb(pgAvailable !== null, "product screen score", (getCtx) => {
     }
 
     function score(html: string): number {
-        const match = html.match(/fd-score-big[^>]*>\s*(?:<[^>]+>\s*)*(\d+)/);
+        const match = html.match(/fd-score-card__num"[^>]*>(\d+)</);
         expect(match).not.toBeNull();
         return Number(match![1]);
     }
@@ -167,6 +167,6 @@ describeDb(pgAvailable !== null, "product screen score", (getCtx) => {
         );
         const html = await screen();
         expect(html).not.toContain("Fits today");
-        expect(html).toContain("No issues found for this product.");
+        expect(html).not.toContain("No issues found");
     });
 });

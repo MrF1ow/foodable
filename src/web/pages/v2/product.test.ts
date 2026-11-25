@@ -10,14 +10,16 @@ import {
     productOnGroceryList,
     productStockForFood,
     renderProductBody,
+    renderProductBarcodeInvalidPage,
     renderProductBarcodeUnknownPage,
     renderProductV2Page,
 } from "./product.js";
 import {
-    buildProductNutritionTable as buildTable,
+    productNutrition,
     servingGramsForFood as servingG,
-    servingHeading,
 } from "./product-nutrition.js";
+
+const buildTable = (f: Food) => productNutrition(f).table;
 
 const HH = "hh-1";
 const chrome: AppChromeBase = {
@@ -46,36 +48,31 @@ function food(over: Partial<Food> & Pick<Food, "name">): Food {
 }
 
 /**
- * The text content of each top-level `<span>` in the nth element carrying
- * `cls`, with nested tags stripped (what a screen reader reads).
+ * The nutrition Table as a person reads it: one array per row, the label then
+ * each cell's text (an unknown cell is "—"). The header row comes first.
  */
-function spans(html: string, cls: string, nth = 0): string[] {
-    const found = [
+function nutritionTable(html: string): string[][] {
+    const text = (cell: string) =>
+        cell
+            .replace(/<span class="fd-sr">[^<]*<\/span>/g, "")
+            .replace(/<[^>]+>/g, "")
+            .trim();
+    return [
         ...html.matchAll(
-            new RegExp(`class="${cls}[^"]*"[^>]*>([\\s\\S]*?)</div>`, "g"),
+            /<div class="fd-table-row[^"]*" role="row">(.*?)<\/div>/g,
         ),
-    ];
-    const inner = found[nth]?.[1] ?? "";
-    const cells: string[] = [];
-    let depth = 0;
-    let cur = "";
-    for (const tok of inner.split(/(<\/?span[^>]*>)/)) {
-        if (tok.startsWith("</span")) {
-            depth -= 1;
-            if (depth === 0) {
-                cells.push(cur);
-                cur = "";
-            }
-        } else if (tok.startsWith("<span")) {
-            depth += 1;
-        } else if (depth > 0) {
-            // Cells hold only spans, which are split out above, so any
-            // angle bracket left here is stray: drop it.
-            cur += tok.replace(/[<>]/g, "");
-        }
-    }
-    return cells;
+    ].map((row) =>
+        row[1]!
+            .split(/(?=<span class="fd-table-row__)/)
+            .filter(Boolean)
+            .map(text),
+    );
 }
+
+const page = (
+    f: Food,
+    opts?: Parameters<typeof buildPreviewProductPageView>[2],
+) => renderProductBody(buildPreviewProductPageView(chrome, f, opts));
 
 const HALF_AND_HALF = {
     name: "Half & Half",
@@ -88,7 +85,7 @@ const HALF_AND_HALF = {
     nutritionBasis: "100ml" as const,
 };
 
-describe("buildProductNutritionTable", () => {
+describe("productNutrition per-serving and per-100 values", () => {
     test("full data shows per 100 g and scaled per serving", () => {
         const f = food({
             name: "Yogurt",
@@ -122,63 +119,46 @@ describe("buildProductNutritionTable", () => {
         expect(table.proteinG.per100g).toBe("–");
         expect(table.proteinG.perServing).toBeNull();
     });
-
-    test("no serving grams yields single column", () => {
-        const f = food({ name: "Salt", calories: null });
-        expect(servingG(f)).toBeNull();
-        const view = buildPreviewProductPageView(chrome, f);
-        const html = renderProductBody(view);
-        expect(html).toContain("fd-product-nutrition__head--one");
-        expect(html).not.toContain("Per serving");
-    });
-
-    test("nutrition header cells align with value columns", () => {
-        const f = food({
-            name: "Yogurt",
-            calories: 59,
-            proteinG: 10,
-            gramsPerEach: 170,
-        });
-        const withServing = renderProductBody(
-            buildPreviewProductPageView(chrome, f),
-        );
-        const headServing = (withServing.match(
-            /fd-product-nutrition__head[^>]*>[\s\S]*?<\/div>/,
-        ) ?? [""])[0];
-        expect(headServing.match(/<span/g)?.length).toBe(3);
-        const rowServing = (withServing.match(
-            /fd-product-nutrition__row[^>]*>[\s\S]*?<\/div>/,
-        ) ?? [""])[0];
-        expect(rowServing.match(/<span/g)?.length).toBe(3);
-
-        const partial = food({ name: "Salt", calories: 120 });
-        const noServing = renderProductBody(
-            buildPreviewProductPageView(chrome, partial),
-        );
-        const headOne = (noServing.match(
-            /fd-product-nutrition__head[^>]*>[\s\S]*?<\/div>/,
-        ) ?? [""])[0];
-        expect(headOne.match(/<span/g)?.length).toBe(2);
-    });
 });
 
-describe("nutrition heads lead with the pack serving", () => {
-    test("100 ml product with a ml serving: serving first, then per 100 ml", () => {
-        const html = renderProductBody(
-            buildPreviewProductPageView(chrome, food(HALF_AND_HALF)),
+describe("the nutrition Table", () => {
+    test("a liquid with a serving: '1 serving (30 ml)' over '100 ml', serving first", () => {
+        const html = page(food(HALF_AND_HALF));
+        expect(nutritionTable(html).slice(0, 2)).toEqual([
+            ["", "1 serving (30 ml)", "100 ml"],
+            ["Calories", "40", "133"],
+        ]);
+        expect(html).not.toContain("100 g");
+        expect(html).not.toContain("Per 100");
+    });
+
+    test("an unknown figure is a dash with a spoken 'no data', never a zero", () => {
+        const html = page(
+            food({ name: "Mystery", calories: 120, gramsPerEach: 100 }),
         );
-        expect(spans(html, "fd-product-nutrition__head")).toEqual([
+        const rows = nutritionTable(html);
+        expect(rows[1]).toEqual(["Calories", "120", "120"]);
+        expect(rows[2]).toEqual(["Protein", "—", "—"]);
+        expect(html).toContain(">no data<");
+        // A real zero stays a zero.
+        const zero = nutritionTable(
+            page(food({ name: "Water", calories: 0, fiberG: 0 })),
+        );
+        expect(zero[1]).toEqual(["Calories", "0"]);
+        expect(zero[5]).toEqual(["Fiber", "0 g"]);
+    });
+
+    test("every macro row of the design is there, in order", () => {
+        const rows = nutritionTable(page(food({ name: "Salt", calories: 1 })));
+        expect(rows.map((row) => row[0])).toEqual([
             "",
-            "Per portion · 30 ml",
-            "Per 100 ml",
-        ]);
-        expect(spans(html, "fd-product-nutrition__row")).toEqual([
             "Calories",
-            "40",
-            "133",
+            "Protein",
+            "Carbs",
+            "Fat",
+            "Fiber",
+            "Sugar",
         ]);
-        expect(html).not.toContain("fd-product-nutrition__serving");
-        expect(html).not.toContain("Per 100 g");
     });
 
     test("100 g product with a g serving scales the values", () => {
@@ -189,22 +169,10 @@ describe("nutrition heads lead with the pack serving", () => {
             serving: { label: "2 cookies (30 g)", amount: 30, unit: "g" },
             nutritionBasis: "100g",
         });
-        const html = renderProductBody(buildPreviewProductPageView(chrome, f));
-        expect(spans(html, "fd-product-nutrition__head")).toEqual([
-            "",
-            "Per 2 cookies · 30 g",
-            "Per 100 g",
-        ]);
-        expect(spans(html, "fd-product-nutrition__row")).toEqual([
-            "Calories",
-            "144",
-            "480",
-        ]);
-        expect(spans(html, "fd-product-nutrition__row", 1)).toEqual([
-            "Protein",
-            "1.8",
-            "6",
-        ]);
+        const rows = nutritionTable(page(f));
+        expect(rows[0]).toEqual(["", "2 cookies (30 g)", "100 g"]);
+        expect(rows[1]).toEqual(["Calories", "144", "480"]);
+        expect(rows[2]).toEqual(["Protein", "1.8 g", "6 g"]);
     });
 
     test("a g serving on a per-100 ml product is not scaled (no density guess)", () => {
@@ -214,14 +182,9 @@ describe("nutrition heads lead with the pack serving", () => {
             serving: { label: "250 g", amount: 250, unit: "g" },
             nutritionBasis: "100ml",
         });
-        const html = renderProductBody(buildPreviewProductPageView(chrome, f));
-        expect(html).toContain("fd-product-nutrition__head--one");
-        expect(spans(html, "fd-product-nutrition__head")).toEqual([
-            "",
-            "Per 100 ml",
-        ]);
-        expect(html).not.toContain("Per serving");
-        expect(html).not.toContain("Per 250");
+        const rows = nutritionTable(page(f));
+        expect(rows[0]).toEqual(["", "100 ml"]);
+        expect(rows[1]).toEqual(["Calories", "45"]);
     });
 
     test("per-100 ml values are not scaled by gramsPerEach either", () => {
@@ -231,11 +194,7 @@ describe("nutrition heads lead with the pack serving", () => {
             gramsPerEach: 330,
             nutritionBasis: "100ml",
         });
-        const html = renderProductBody(buildPreviewProductPageView(chrome, f));
-        expect(spans(html, "fd-product-nutrition__head")).toEqual([
-            "",
-            "Per 100 ml",
-        ]);
+        expect(nutritionTable(page(f))[0]).toEqual(["", "100 ml"]);
     });
 
     test("per-100 ml values scale by a usual amount in ml, with no density", () => {
@@ -245,17 +204,9 @@ describe("nutrition heads lead with the pack serving", () => {
             usualAmount: { amount: 250, unit: "ml" },
             nutritionBasis: "100ml",
         });
-        const html = renderProductBody(buildPreviewProductPageView(chrome, f));
-        expect(spans(html, "fd-product-nutrition__head")).toEqual([
-            "",
-            "Per serving",
-            "Per 100 ml",
-        ]);
-        expect(spans(html, "fd-product-nutrition__row")).toEqual([
-            "Calories",
-            "150",
-            "60",
-        ]);
+        const rows = nutritionTable(page(f));
+        expect(rows[0]).toEqual(["", "1 serving (250 ml)", "100 ml"]);
+        expect(rows[1]).toEqual(["Calories", "150", "60"]);
     });
 
     test("per-100 ml values are not scaled by a usual amount in grams or each", () => {
@@ -270,144 +221,112 @@ describe("nutrition heads lead with the pack serving", () => {
                 gramsPerMl: 1,
                 nutritionBasis: "100ml",
             });
-            const html = renderProductBody(
-                buildPreviewProductPageView(chrome, f),
-            );
-            expect(spans(html, "fd-product-nutrition__head")).toEqual([
-                "",
-                "Per 100 ml",
-            ]);
+            expect(nutritionTable(page(f))[0]).toEqual(["", "100 ml"]);
         }
     });
 
-    test("no serving at all: one per 100 g column", () => {
-        const f = food({ name: "Salt", calories: 0.5 });
-        const html = renderProductBody(buildPreviewProductPageView(chrome, f));
-        expect(spans(html, "fd-product-nutrition__head")).toEqual([
-            "",
-            "Per 100 g",
-        ]);
+    test("a per-100 g food served in ml names the ml in its heading, scaled by its density", () => {
+        const f = food({
+            name: "Soup",
+            calories: 40,
+            usualAmount: { amount: 250, unit: "ml" },
+            gramsPerMl: 1.03,
+        });
+        const rows = nutritionTable(page(f));
+        expect(rows[0]).toEqual(["", "1 serving (250 ml)", "100 g"]);
+        expect(rows[1]).toEqual(["Calories", "103", "40"]);
     });
 
-    test("a gramsPerEach food with no pack serving renders as before", () => {
+    test("no serving at all: one 100 g column", () => {
+        const rows = nutritionTable(
+            page(food({ name: "Salt", calories: 0.5 })),
+        );
+        expect(rows[0]).toEqual(["", "100 g"]);
+        expect(rows[1]).toEqual(["Calories", "1"]);
+    });
+
+    test("a gramsPerEach food with no pack serving: a derived serving beside 100 g", () => {
         const f = food({ name: "Yogurt", calories: 59, gramsPerEach: 170 });
-        const html = renderProductBody(buildPreviewProductPageView(chrome, f));
-        expect(spans(html, "fd-product-nutrition__head")).toEqual([
-            "",
-            "Per serving",
-            "Per 100 g",
-        ]);
-        expect(spans(html, "fd-product-nutrition__row")).toEqual([
-            "Calories",
-            "100",
-            "59",
-        ]);
-        expect(html).toContain(
-            '<p class="fd-product-nutrition__serving">170 g serving</p>',
-        );
+        const rows = nutritionTable(page(f));
+        expect(rows[0]).toEqual(["", "1 serving (170 g)", "100 g"]);
+        expect(rows[1]).toEqual(["Calories", "100", "59"]);
     });
 
-    test("servingHeading names the serving from the pack label", () => {
-        const h = (label: string, amount: number, unit: "g" | "ml") =>
-            servingHeading({ label, amount, unit });
-        expect(h("1 portion (30 ml)", 30, "ml")).toBe("Per portion · 30 ml");
-        expect(h("2 cookies (30 g)", 30, "g")).toBe("Per 2 cookies · 30 g");
-        expect(h("30 g", 30, "g")).toBe("Per serving · 30 g");
-        expect(h("30ml", 30, "ml")).toBe("Per serving · 30 ml");
-        expect(h("", 30, "g")).toBe("Per serving · 30 g");
-        expect(h("(30 g)", 30, "g")).toBe("Per serving · 30 g");
-        expect(h("1 serving (28.5 g)", 28.5, "g")).toBe("Per serving · 28.5 g");
-    });
-
-    test("servingHeading rounds the printed amount", () => {
-        const h = (label: string, amount: number, unit: "g" | "ml") =>
-            servingHeading({ label, amount, unit });
-        expect(h("2 tbsp (1 fl oz)", 29.5735, "ml")).toBe(
-            "Per 2 tbsp · 29.6 ml",
-        );
-        expect(h("1 cup (8 fl oz)", 236.588, "ml")).toBe("Per cup · 236.6 ml");
-        expect(h("1 bar (40g)", 40.04, "g")).toBe("Per bar · 40 g");
-    });
-
-    test("servingHeading keeps the whole part of a mixed number", () => {
-        const h = (label: string, amount: number) =>
-            servingHeading({ label, amount, unit: "ml" });
-        expect(h("1 1/2 cups (360 ml)", 360)).toBe("Per 1 1/2 cups · 360 ml");
-        expect(h("1 ½ cups (360 ml)", 360)).toBe("Per 1 ½ cups · 360 ml");
-        expect(h("1 2/3 cup (400 ml)", 400)).toBe("Per 1 2/3 cup · 400 ml");
-        expect(h("1/2 cup (120 ml)", 120)).toBe("Per 1/2 cup · 120 ml");
-    });
-
-    test("servingHeading treats a bare unit word as no name and lowercases", () => {
-        const h = (label: string, amount: number, unit: "g" | "ml") =>
-            servingHeading({ label, amount, unit });
-        expect(h("1 l", 1000, "ml")).toBe("Per serving · 1000 ml");
-        expect(h("1 kg", 1000, "g")).toBe("Per serving · 1000 g");
-        expect(h("1 fl oz", 30, "ml")).toBe("Per serving · 30 ml");
-        expect(h("1 SERVING (30 G)", 30, "g")).toBe("Per serving · 30 g");
-        expect(h("1 Portion (30 ml)", 30, "ml")).toBe("Per portion · 30 ml");
-    });
-
-    test("servingHeading cuts at '=' and reads a count form as a serving", () => {
-        const h = (label: string, amount: number, unit: "g" | "ml") =>
-            servingHeading({ label, amount, unit });
-        expect(h("1 bottle = 500 ml", 500, "ml")).toBe("Per bottle · 500 ml");
-        expect(h("1 x 25 g", 25, "g")).toBe("Per serving · 25 g");
-        expect(h("2 x 15 g", 30, "g")).toBe("Per serving · 30 g");
-    });
-
-    test("servingHeading does not say 'Per' twice when the pack label starts with it", () => {
-        const h = (label: string, amount: number, unit: "g" | "ml") =>
-            servingHeading({ label, amount, unit });
-        expect(h("Per serving (30g)", 30, "g")).toBe("Per serving · 30 g");
-        expect(h("PER Portion (30 ml)", 30, "ml")).toBe("Per portion · 30 ml");
-        expect(h("per 100g", 100, "g")).toBe("Per serving · 100 g");
-        expect(h("Per cup (240 ml)", 240, "ml")).toBe("Per cup · 240 ml");
-        expect(h("Personal pizza (100 g)", 100, "g")).toBe(
-            "Per personal pizza · 100 g",
-        );
-    });
-
-    test("the serving head is a name line and an amount line, read as one", () => {
-        const html = renderProductBody(
-            buildPreviewProductPageView(chrome, food(HALF_AND_HALF)),
-        );
-        expect(html).toContain(
-            '<span class="fd-product-nutrition__head-name">Per portion</span>',
-        );
-        expect(html).toContain(
-            '<span class="fd-product-nutrition__head-amount">30 ml</span>',
-        );
-        expect(spans(html, "fd-product-nutrition__head")[1]).toBe(
-            "Per portion · 30 ml",
-        );
-    });
-
-    test("a null-basis food with an ml serving has one per 100 g column", () => {
+    test("a null-basis food with an ml serving has one 100 g column", () => {
         const f = food({
             name: "Mystery",
             calories: 50,
             serving: { label: "1 cup (240 ml)", amount: 240, unit: "ml" },
         });
-        const html = renderProductBody(buildPreviewProductPageView(chrome, f));
-        expect(html).toContain("fd-product-nutrition__head--one");
-        expect(spans(html, "fd-product-nutrition__head")).toEqual([
-            "",
-            "Per 100 g",
-        ]);
-        expect(spans(html, "fd-product-nutrition__row")).toEqual([
-            "Calories",
-            "50",
-        ]);
+        const rows = nutritionTable(page(f));
+        expect(rows[0]).toEqual(["", "100 g"]);
+        expect(rows[1]).toEqual(["Calories", "50"]);
     });
 
-    test("subtitle carries no serving bit when the head names the pack serving", () => {
+    test("head and rows agree on how many columns there are", () => {
+        const foods = [
+            food(HALF_AND_HALF),
+            food({ name: "Yogurt", calories: 59, gramsPerEach: 170 }),
+            food({ name: "Salt", calories: 1 }),
+            food({
+                name: "Drink",
+                calories: 45,
+                gramsPerEach: 330,
+                nutritionBasis: "100ml",
+            }),
+            food({
+                name: "Mystery",
+                calories: 50,
+                serving: { label: "1 cup (240 ml)", amount: 240, unit: "ml" },
+            }),
+        ];
+        for (const f of foods) {
+            const rows = nutritionTable(page(f));
+            const two = rows[0]!.length === 3;
+            for (const row of rows) expect(row.length).toBe(two ? 3 : 2);
+            expect(buildTable(f).calories.perServing != null).toBe(two);
+        }
+    });
+
+    test("the serving column is named for the pack's own unit, generic words read as serving", () => {
+        const head = (label: string, amount: number, unit: "g" | "ml") =>
+            nutritionTable(
+                page(
+                    food({
+                        name: "Thing",
+                        calories: 100,
+                        serving: { label, amount, unit },
+                        nutritionBasis: unit === "ml" ? "100ml" : "100g",
+                    }),
+                ),
+            )[0]![1];
+        expect(head("1 portion (30 ml)", 30, "ml")).toBe("1 serving (30 ml)");
+        expect(head("Per serving (30g)", 30, "g")).toBe("1 serving (30 g)");
+        expect(head("30 g", 30, "g")).toBe("1 serving (30 g)");
+        expect(head("", 30, "g")).toBe("1 serving (30 g)");
+        expect(head("1 cup (8 fl oz)", 236.588, "ml")).toBe("1 cup (236.6 ml)");
+        expect(head("2 tbsp (1 fl oz)", 29.5735, "ml")).toBe(
+            "2 tbsp (29.6 ml)",
+        );
+        expect(head("1 1/2 cups (360 ml)", 360, "ml")).toBe(
+            "1 1/2 cups (360 ml)",
+        );
+        expect(head("1/2 cup (120 ml)", 120, "ml")).toBe("1/2 cup (120 ml)");
+        expect(head("1 bottle = 500 ml", 500, "ml")).toBe("1 bottle (500 ml)");
+        expect(head("Personal pizza (100 g)", 100, "g")).toBe(
+            "1 personal pizza (100 g)",
+        );
+    });
+
+    test("a food with no serving grams has no serving column to scale", () => {
+        expect(servingG(food({ name: "Salt", calories: null }))).toBeNull();
+    });
+
+    test("subtitle carries no serving bit when the Table names the pack serving", () => {
         const sub = (over: Parameters<typeof food>[0]) =>
-            renderProductBody(
-                buildPreviewProductPageView(chrome, food(over), {
-                    barcodes: ["0193968379117"],
-                }),
-            ).match(/<p class="fd-product-subtitle">([^<]*)<\/p>/)?.[1];
+            page(food(over), { barcodes: ["0193968379117"] }).match(
+                /<p class="fd-page-header__subtitle">([^<]*)<\/p>/,
+            )?.[1];
         expect(
             sub({
                 name: "Bar",
@@ -437,34 +356,6 @@ describe("nutrition heads lead with the pack serving", () => {
                 gramsPerEach: 170,
             }),
         ).toContain("170 g serving");
-    });
-
-    test("head and table agree on whether there is a serving column", () => {
-        const foods = [
-            food(HALF_AND_HALF),
-            food({ name: "Yogurt", calories: 59, gramsPerEach: 170 }),
-            food({ name: "Salt", calories: 1 }),
-            food({
-                name: "Drink",
-                calories: 45,
-                gramsPerEach: 330,
-                nutritionBasis: "100ml",
-            }),
-            food({
-                name: "Mystery",
-                calories: 50,
-                serving: { label: "1 cup (240 ml)", amount: 240, unit: "ml" },
-            }),
-        ];
-        for (const f of foods) {
-            const html = renderProductBody(
-                buildPreviewProductPageView(chrome, f),
-            );
-            const two = spans(html, "fd-product-nutrition__head").length === 3;
-            const rowCells = spans(html, "fd-product-nutrition__row").length;
-            expect(rowCells).toBe(two ? 3 : 2);
-            expect(buildTable(f).calories.perServing != null).toBe(two);
-        }
     });
 });
 
@@ -497,11 +388,43 @@ describe("productStockForFood", () => {
         const lines = productStockForFood(snapshot, "f1");
         expect(lines).toEqual([{ locationName: "Fridge", quantityLabel: "2" }]);
     });
+
+    test("lists places in the household's own order, not by name", () => {
+        const place = (id: string, name: string, sortOrder: number) => ({
+            id,
+            householdId: HH,
+            name,
+            sortOrder,
+        });
+        const item = (id: string, locationId: string) => ({
+            id,
+            householdId: HH,
+            locationId,
+            kind: "food" as const,
+            displayName: "Yogurt",
+            quantity: { amount: 1, unit: "each" },
+            foodId: "f1",
+            expiresOn: null,
+            purchasedOn: null,
+            openedOn: null,
+        });
+        const snapshot = {
+            locations: [
+                place("a", "Costco Shelf", 2),
+                place("b", "Fridge", 0),
+                place("c", "Freezer", 1),
+            ],
+            items: [item("i1", "a"), item("i2", "b"), item("i3", "c")],
+        } as FridgeSnapshot;
+        expect(
+            productStockForFood(snapshot, "f1").map((l) => l.locationName),
+        ).toEqual(["Fridge", "Freezer", "Costco Shelf"]);
+    });
 });
 
 describe("renderProductV2Page", () => {
-    test("renders stock, nutrition, and actions without score when unscored", () => {
-        const f = food({
+    const yogurt = () =>
+        food({
             name: "Greek yogurt, plain 2%",
             brand: "Fage",
             calories: 59,
@@ -512,41 +435,123 @@ describe("renderProductV2Page", () => {
             sugarG: 4,
             gramsPerEach: 170,
         });
-        const view = buildPreviewProductPageView(chrome, f, {
-            barcodes: ["5201054017463"],
-            stock: [{ locationName: "Fridge", quantityLabel: "2" }],
-        });
-        const html = renderProductV2Page(view);
-        expect(html).toContain("Greek yogurt, plain 2%");
-        expect(html).toContain("Fage");
-        expect(html).toContain("5 201054 017463");
-        expect(html).toContain("fd-product-top");
-        expect(html).toContain('href="/kitchen/groceries"');
-        expect(html).toContain("fd-btn--primary");
-        expect(html).toContain("In the kitchen");
+
+    test("a Detail bar with Back and a ⋯, the title and caption, then the sections", () => {
+        const f = yogurt();
+        const html = renderProductV2Page(
+            buildPreviewProductPageView(chrome, f, {
+                barcodes: ["5201054017463"],
+                stock: [{ locationName: "Fridge", quantityLabel: "2" }],
+                backHref: "/kitchen/groceries",
+            }),
+        );
+        expect(html).toContain("fd-detail-bar");
+        expect(html).toMatch(
+            /<a [^>]*aria-label="Back"[^>]*href="\/kitchen\/groceries"/,
+        );
+        expect(html).toContain(
+            'aria-label="Actions for Greek yogurt, plain 2%"',
+        );
+        expect(html).toContain(
+            '<h1 class="fd-page-header__title">Greek yogurt, plain 2%</h1>',
+        );
+        expect(html).toContain("Fage · 170 g serving · 5 201054 017463");
+        expect(html).toContain("fd-page-layout--single");
+        expect(html).not.toContain("fd-product-top");
         expect(html).not.toContain("fd-product-score");
-        expect(html).toContain("Add to groceries");
-        expect(html).toContain("data-fd-log-pick");
-        expect(html).toContain(`/foods/${f.id}/add-to-grocery`);
+    });
+
+    test("the ⋯ edits the food where the saved foods live", () => {
+        const html = renderProductBody(
+            buildPreviewProductPageView(chrome, yogurt()),
+        );
+        expect(html).toContain(
+            'href="/settings/saved?q=Greek%20yogurt%2C%20plain%202%25"',
+        );
+        expect(html).toContain(">Edit in Saved foods<");
+    });
+
+    test("stock is one linked row per place, the quantity beside the title", () => {
+        const html = renderProductBody(
+            buildPreviewProductPageView(chrome, yogurt(), {
+                stock: [
+                    { locationName: "Fridge", quantityLabel: "2" },
+                    { locationName: "Freezer", quantityLabel: "1 box" },
+                ],
+            }),
+        );
+        expect(html).toContain('href="/kitchen/fridge"');
+        expect(html).toContain(">In the fridge<");
+        expect(html).toContain('<span class="fd-item-row__meta">2</span>');
+        expect(html).toContain(">In the freezer<");
+        expect(html).toContain(">1 box<");
+        const none = renderProductBody(
+            buildPreviewProductPageView(chrome, yogurt()),
+        );
+        expect(none).not.toContain("In the fridge");
+    });
+
+    test("actions: Add to groceries posts to the same route, Log it opens the log pick", () => {
+        const f = yogurt();
+        const html = renderProductBody(buildPreviewProductPageView(chrome, f));
+        expect(html).toContain(
+            `<form method="post" action="/foods/${f.id}/add-to-grocery">`,
+        );
+        expect(html).toMatch(
+            /<button type="submit" class="fd-btn"[^>]*>(?:<span[^>]*>)?Add to groceries/,
+        );
+        expect(html).toMatch(
+            /<button type="button" class="fd-btn fd-btn--primary" data-fd-btn data-fd-log-pick="[^"]+"[^>]*>(?:<span[^>]*>)?Log it/,
+        );
     });
 
     test("Add to groceries becomes On your list once the food is on the list", () => {
         const f = food({ name: "Milk" });
-        const off = renderProductV2Page(buildPreviewProductPageView(chrome, f));
-        expect(off).toContain("<span>Add to groceries</span>");
+        const off = renderProductBody(buildPreviewProductPageView(chrome, f));
+        expect(off).toContain("Add to groceries");
         expect(off).toContain(`action="/foods/${f.id}/add-to-grocery"`);
         expect(off).not.toContain("On your list");
-        const on = renderProductV2Page({
+        const on = renderProductBody({
             ...buildPreviewProductPageView(chrome, f),
             onGroceryList: true,
         });
         expect(on).toContain("On your list");
-        expect(on).not.toContain("<span>Add to groceries</span>");
+        expect(on).not.toContain("Add to groceries");
         expect(on).not.toContain("/add-to-grocery");
         // The control opens the list; it is not a second way to add.
-        expect(on).toMatch(
-            /<a class="fd-btn [^"]*fd-product-actions__add[^"]*" href="\/kitchen\/groceries">/,
+        expect(on).toMatch(/<a class="fd-btn"[^>]*href="\/kitchen\/groceries"/);
+    });
+
+    test("a refused add shows the reason in place", () => {
+        const html = renderProductBody({
+            ...buildPreviewProductPageView(chrome, yogurt()),
+            error: "That is already on the list",
+        });
+        expect(html).toContain(
+            '<p class="fd-product-error" role="alert">That is already on the list</p>',
         );
+    });
+
+    test("a food with nothing known says so under its empty Table", () => {
+        const html = page(food({ name: "Spice blend" }));
+        expect(html).toContain("No score yet");
+        expect(html).toContain("Add nutrition to score it");
+        expect(nutritionTable(html)[1]).toEqual(["Calories", "—"]);
+        // Some figures known: the Table alone, no empty state.
+        expect(page(food({ name: "Half", calories: 10 }))).not.toContain(
+            "No score yet",
+        );
+    });
+
+    test("no notice dot, attention strip, toast or success banner", () => {
+        const html = renderProductBody(
+            buildPreviewProductPageView(chrome, yogurt(), {
+                stock: [{ locationName: "Fridge", quantityLabel: "2" }],
+            }),
+        );
+        expect(html).not.toContain("fd-notice");
+        expect(html).not.toContain("needs-attention");
+        expect(html).not.toContain("toast");
     });
 
     test("log pick opens on one portion when the food has a pack serving", () => {
@@ -557,14 +562,14 @@ describe("renderProductV2Page", () => {
         expect(pick.amount).toBe(1);
         expect(pick.basis).toBe("100ml");
         expect(pick.serving).toEqual(half.serving);
-        const yogurt = food({
+        const yogurtFood = food({
             name: "Yogurt",
             calories: 59,
             gramsPerEach: 170,
             serving: { label: "1 cup (245 g)", amount: 245, unit: "g" },
             nutritionBasis: "100g",
         });
-        const yogurtPick = productLogPickPayload(yogurt, undefined);
+        const yogurtPick = productLogPickPayload(yogurtFood, undefined);
         expect(yogurtPick.unit_hints).toEqual(["portion", "g", "each"]);
         expect(yogurtPick.unit).toBe("portion");
         expect(yogurtPick.amount).toBe(1);
@@ -599,27 +604,62 @@ describe("renderProductV2Page", () => {
 });
 
 describe("renderProductBarcodeUnknownPage", () => {
-    test("offers add-as-new form posting to by-barcode path", () => {
-        const html = renderProductBarcodeUnknownPage({
+    const unknown = (over: { lookupFailed?: boolean; error?: string } = {}) =>
+        renderProductBarcodeUnknownPage({
             chrome,
             barcode: "9999999999999",
             backHref: "/kitchen/fridge",
+            ...over,
         });
+
+    test("the Detail bar names it, the code and why sit in an empty state", () => {
+        const html = unknown();
+        expect(html).toContain(
+            '<h1 class="fd-detail-bar__title">Unknown barcode</h1>',
+        );
+        expect(html).toContain("fd-detail-bar__balance");
+        expect(html).toContain("9 999999 999999");
+        expect(html).toContain("Not in Open Food Facts yet");
+        expect(html).not.toContain("Open Food Facts does not know");
+    });
+
+    test("offers add-as-new form posting to by-barcode path", () => {
+        const html = unknown();
         expect(html).toContain("Add as a new food");
         expect(html).toContain('action="/foods/by-barcode/9999999999999"');
         expect(html).toContain('name="name"');
-        expect(html).toContain("Open Food Facts does not know");
+        expect(html).toMatch(/<input[^>]*name="name"[^>]*required/);
+        expect(html).toContain("fd-btn--primary");
     });
 
     test("lookup failure copy does not claim OFF is empty", () => {
-        const html = renderProductBarcodeUnknownPage({
-            chrome,
-            barcode: "8880001112222",
-            backHref: "/kitchen/fridge",
-            lookupFailed: true,
-        });
+        const html = unknown({ lookupFailed: true });
         expect(html).toContain("Could not look up this barcode");
-        expect(html).not.toContain("Open Food Facts does not know");
+        expect(html).not.toContain("Not in Open Food Facts yet");
+    });
+
+    test("a refused add shows the reason in place", () => {
+        expect(unknown({ error: "Name is too long" })).toContain(
+            '<p class="fd-product-error" role="alert">Name is too long</p>',
+        );
+    });
+});
+
+describe("renderProductBarcodeInvalidPage", () => {
+    test("names the bad code and what a code looks like, with Back in the bar", () => {
+        const html = renderProductBarcodeInvalidPage({
+            chrome,
+            barcode: "12ab",
+            backHref: "/kitchen/fridge",
+        });
+        expect(html).toContain(
+            '<h1 class="fd-detail-bar__title">Invalid barcode</h1>',
+        );
+        expect(html).toContain("12ab");
+        expect(html).toContain("Enter 8–14 digits");
+        expect(html).toContain('href="/kitchen/fridge"');
+        expect(html).not.toContain("Add as a new food");
+        expect(html).not.toContain('name="name"');
     });
 });
 
@@ -685,4 +725,12 @@ describe("productOnGroceryList", () => {
             ]),
         ).toBe(false);
     });
+});
+
+test("a fridge place reads as the household wrote it, plain places in lower case", async () => {
+    const { stockPlaceTitle } = await import("./product.js");
+    expect(stockPlaceTitle("Fridge")).toBe("In the fridge");
+    expect(stockPlaceTitle("pantry")).toBe("In the pantry");
+    expect(stockPlaceTitle("The cellar")).toBe("In the cellar");
+    expect(stockPlaceTitle("Costco Shelf")).toBe("In the Costco Shelf");
 });

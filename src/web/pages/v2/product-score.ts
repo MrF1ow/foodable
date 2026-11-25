@@ -22,7 +22,7 @@ import {
 import type { ProductCheckMember } from "../../../domain/product-checks.js";
 import {
     breakdownValue,
-    levelStatus,
+    SCORE_PART_LABELS,
 } from "../../../domain/product-score-display.js";
 import {
     memberProductVerdict,
@@ -30,14 +30,11 @@ import {
     scoreQualityFromFoodQuality,
     type MemberProductVerdict,
 } from "../../../domain/product-screen.js";
-import { esc, raw, type Html } from "../../components/v2/html.js";
-import {
-    memberCheckRow,
-    partRow,
-    rowList,
-    sectionHeader,
-} from "../../components/v2/rows.js";
-import { scoreBig, scoreVerdict } from "../../components/v2/score-badge.js";
+import type { Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { scoreCard } from "../../components/v2/score-card.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
 import { initialsOf } from "../../shell-v2.js";
 import { listHouseholdMembers } from "../../../db/household.js";
 import { liveRulesStore } from "../../../db/rules.js";
@@ -86,31 +83,29 @@ function pushInfoRow(
     if (info == null || (info.per100g == null && info.level == null)) return;
     const amount = formatInfoAmount(info.kind, info.per100g);
     const level = info.level != null ? ` · ${info.level}` : "";
-    rows.push(
-        partRow({
-            label,
-            value: `${amount}${level}`,
-            status: levelStatus(info.level),
-        }),
-    );
+    rows.push(itemRow({ title: label, value: `${amount}${level}` }));
 }
+
+/** The score parts in the order the page lists them; a part with no data is named last. */
+const SCORE_PARTS = ["nutrition", "processing", "additives"] as const;
+
+const VERDICT_LABEL: Record<MemberProductVerdict, string> = {
+    good: "Good",
+    careful: "Careful",
+    avoid: "Avoid",
+};
 
 export function whyScoreRows(food: Food, scored: ProductScore): Html[] {
     if (food.offQuality == null) return [];
     const quality = scoreQualityFromFoodQuality(food.offQuality);
     const rows: Html[] = [];
-    for (const part of ["nutrition", "processing", "additives"] as const) {
-        const row = breakdownValue(part, quality, scored);
-        if (row) {
-            rows.push(
-                partRow({
-                    label: row.label,
-                    value: row.value,
-                    status: row.status,
-                }),
-            );
-        }
-    }
+    const missing: string[] = [];
+    const part = (name: (typeof SCORE_PARTS)[number] | "environment") => {
+        const row = breakdownValue(name, quality, scored);
+        if (row) rows.push(itemRow({ title: row.label, value: row.value }));
+        else missing.push(SCORE_PART_LABELS[name]);
+    };
+    for (const name of SCORE_PARTS) part(name);
     const infos = productInfoRows({
         sugarG: food.sugarG,
         saturatedFatG: food.saturatedFatG,
@@ -126,17 +121,13 @@ export function whyScoreRows(food: Food, scored: ProductScore): Html[] {
         infos.find((row) => row.kind === "saturated-fat"),
         "Saturated fat",
     );
-    const env = breakdownValue("environment", quality, scored);
-    if (env) {
-        rows.push(
-            partRow({
-                label: env.label,
-                value: env.value,
-                status: env.status,
-            }),
-        );
-    }
-    return rows;
+    // The Green-Score sits after the nutrients, as the design lists it.
+    part("environment");
+    // Parts with no data stay in the list, last, so the gap is stated.
+    return [
+        ...rows,
+        ...missing.map((label) => itemRow({ title: label, value: "No data" })),
+    ];
 }
 
 export function buildProductMemberCards(
@@ -153,7 +144,9 @@ export function buildProductMemberCards(
             name: member.name,
             initials: initialsOf(member.name),
             verdict: memberProductVerdict(notices),
-            reason: productMemberReasonLine(notices),
+            // Nothing to say is nothing shown: "Good" alone says it.
+            reason:
+                notices.length === 0 ? "" : productMemberReasonLine(notices),
             ...(avatarVersions
                 ? {
                       avatar: {
@@ -191,35 +184,32 @@ export function renderProductScoreSection(
     section: ProductScoreSection,
 ): string {
     const { score: scored, presetLabel, memberCards } = section;
-    const partsCount =
-        scored.partsUsed < scored.partsTotal
-            ? `<p class="fd-product-score__parts">scored on ${scored.partsUsed} of ${scored.partsTotal}</p>`
-            : "";
-    const partsHint = `<p class="fd-product-score__parts-hint">Parts with no data are left out, not counted against it.</p>`;
+    const partial = scored.partsUsed < scored.partsTotal;
+    const note = partial
+        ? `Scored on ${scored.partsUsed} of ${scored.partsTotal}`
+        : `Your weights: ${presetLabel}`;
     const whyRows = whyScoreRows(food, scored);
     const memberRows = memberCards.map((card) =>
-        memberCheckRow({
-            name: card.name,
-            initials: card.initials,
-            verdict: card.verdict,
-            reason: card.reason,
-            avatar: card.avatar,
+        itemRow({
+            title: card.name,
+            subtitle: card.reason,
+            value: VERDICT_LABEL[card.verdict],
+            lead: {
+                kind: "avatar",
+                initials: card.initials,
+                picture: card.avatar,
+            },
         }),
     );
-    return `<section class="fd-product-score" aria-label="Product score">
-<div class="fd-product-score__hero">
-${String(scoreBig(scored.score))}
-<div class="fd-product-score__hero-aside">
-${String(scoreVerdict(scored.score))}
-<p class="fd-product-score__weights">Your weights: ${esc(presetLabel)}</p>
-</div>
-</div>
-${String(sectionHeader({ title: "Why this score", level: 2 }))}
-${String(rowList(whyRows, { label: "Score breakdown" }))}
-<div class="fd-product-score__parts-block">${partsCount}${partsHint}</div>
-${String(sectionHeader({ title: "For your household", level: 2 }))}
-${String(rowList(memberRows, { label: "Household members" }))}
-</section>`;
+    const why =
+        whyRows.length > 0
+            ? `<div class="fd-product-group">${sectionHeader({ label: "Why this score", rule: false })}${listGroup({ rows: whyRows, label: "Score breakdown" })}</div>`
+            : "";
+    const household =
+        memberRows.length > 0
+            ? `<div class="fd-product-group">${sectionHeader({ label: "For your household", rule: false })}${listGroup({ rows: memberRows, label: "Household members" })}</div>`
+            : "";
+    return `<section class="fd-product-score" aria-label="Product score">${scoreCard({ score: scored.score, note })}${why}${household}</section>`;
 }
 
 export async function loadProductScoreSection(

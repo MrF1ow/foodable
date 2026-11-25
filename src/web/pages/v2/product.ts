@@ -14,19 +14,26 @@ import { liveFoodsStore } from "../../../db/foods.js";
 import { liveFridgeStore } from "../../../db/fridge.js";
 import { liveGroceryStore } from "../../../db/grocery.js";
 import type { GroceryLine } from "../../../domain/grocery.js";
-import { esc } from "../../components/v2/html.js";
-import { iconCart, iconCheck } from "../../components/v2/icons.js";
-import { foodRow, rowList, sectionHeader } from "../../components/v2/rows.js";
+import { button } from "../../components/v2/button.js";
+import { detailBar } from "../../components/v2/detail-bar.js";
+import { emptyState } from "../../components/v2/empty-state.js";
+import { field } from "../../components/v2/field.js";
+import { esc, raw, type Html } from "../../components/v2/html.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu } from "../../components/v2/menu.js";
+import { pageHeader } from "../../components/v2/page-header.js";
+import { pageLayout } from "../../components/v2/page-layout.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
+import { tableRows } from "../../components/v2/table-row.js";
 import { renderAppShell } from "../../shell.js";
 import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import { APP_PATHS } from "../../route-map.js";
 import { formatBarcodeDisplay } from "./format-barcode-display.js";
 import {
-    PRODUCT_MACRO_ROWS,
-    productNutrition,
+    productNutritionTable,
     subtitleServingLabel,
-    type ProductNutritionHead,
-    type ProductNutritionTable,
+    type ProductNutritionTableData,
 } from "./product-nutrition.js";
 import type { ProductScoreSection } from "./product-score.js";
 import {
@@ -44,8 +51,7 @@ export type ProductPageView = {
     food: Food;
     barcodes: string[];
     stock: ProductStockLine[];
-    nutrition: ProductNutritionTable;
-    nutritionHead: ProductNutritionHead;
+    nutrition: ProductNutritionTableData;
     score: ProductScoreSection | null;
     backHref: string;
     /** The food (or its usual product) has an unchecked grocery line. */
@@ -119,7 +125,7 @@ export function productStockForFood(
         bucket.push(item);
         byLocation.set(item.locationId, bucket);
     }
-    const lines: ProductStockLine[] = [];
+    const lines: (ProductStockLine & { order: number })[] = [];
     for (const [locationId, items] of byLocation) {
         const loc = locById.get(locationId);
         const locationName = loc?.name ?? "Kitchen";
@@ -127,10 +133,21 @@ export function productStockForFood(
             formatQuantityDisplayParts(row.quantity.amount, row.quantity.unit),
         );
         const quantityLabel = parts.length === 1 ? parts[0]! : parts.join(", ");
-        lines.push({ locationName, quantityLabel });
+        lines.push({
+            locationName,
+            quantityLabel,
+            order: loc?.sortOrder ?? Number.MAX_SAFE_INTEGER,
+        });
     }
-    lines.sort((a, b) => a.locationName.localeCompare(b.locationName));
-    return lines;
+    // The household's own order of places, as the fridge lists them.
+    lines.sort(
+        (a, b) =>
+            a.order - b.order || a.locationName.localeCompare(b.locationName),
+    );
+    return lines.map(({ locationName, quantityLabel }) => ({
+        locationName,
+        quantityLabel,
+    }));
 }
 
 export function productLogPickPayload(
@@ -160,11 +177,8 @@ export function productLogPickPayload(
     };
 }
 
-function productNutritionView(
-    food: Food,
-): Pick<ProductPageView, "nutrition" | "nutritionHead"> {
-    const { table, head } = productNutrition(food);
-    return { nutrition: table, nutritionHead: head };
+function productNutritionView(food: Food): Pick<ProductPageView, "nutrition"> {
+    return { nutrition: productNutritionTable(food) };
 }
 
 function productSubtitle(food: Food, barcodes: string[]): string {
@@ -177,56 +191,51 @@ function productSubtitle(food: Food, barcodes: string[]): string {
     return bits.join(" · ");
 }
 
-function productBackIcon(): string {
-    return `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15 18 9 12 15 6"/></svg>`;
+/**
+ * The page: a Detail bar and the title block over the content, in the single
+ * 720 column. The bar's back button goes where the person came from.
+ */
+function productPage(opts: {
+    detail: Html;
+    content: string;
+    className?: string;
+}): string {
+    return `<article class="fd-product-page${opts.className ? ` ${opts.className}` : ""}">${pageLayout({ layout: "single", header: opts.detail, content: raw(opts.content) })}</article>`;
 }
 
-function productTopBar(backHref: string): string {
-    const cart = String(iconCart());
-    return `<header class="fd-product-top fd-settings-phone-top">
-<a class="fd-settings-phone-back fd-product-top__back" href="${esc(backHref)}" aria-label="Back">${productBackIcon()}</a>
-<span class="fd-settings-phone-top__balance" aria-hidden="true"></span>
-<a class="fd-settings-phone-back fd-product-top__cart" href="${esc(APP_PATHS.kitchenGroceries)}" aria-label="Groceries">${cart}</a>
-</header>`;
+/** A header and its list, kept 12 px apart; the page spaces the groups. */
+function productGroup(...parts: string[]): string {
+    return `<div class="fd-product-group">${parts.join("")}</div>`;
 }
 
-/** "Per portion" over "30 ml"; a screen reader hears "Per portion · 30 ml". */
-function servingHeadCell(serving: { name: string; amount: string | null }) {
-    if (serving.amount == null) return `<span>${esc(serving.name)}</span>`;
-    return `<span><span class="fd-product-nutrition__head-name">${esc(serving.name)}</span><span class="visually-hidden"> · </span><span class="fd-product-nutrition__head-amount">${esc(serving.amount)}</span></span>`;
-}
-
-function nutritionSection(view: ProductPageView): string {
-    const { serving, per100, servingNote } = view.nutritionHead;
-    const hasServing = serving != null;
-    const head = hasServing
-        ? `<div class="fd-product-nutrition__head"><span class="fd-product-nutrition__head-spacer" aria-hidden="true"></span>${servingHeadCell(serving)}<span>${esc(per100)}</span></div>`
-        : `<div class="fd-product-nutrition__head fd-product-nutrition__head--one"><span class="fd-product-nutrition__head-spacer" aria-hidden="true"></span><span>${esc(per100)}</span></div>`;
-    const rowClass = hasServing
-        ? "fd-product-nutrition__row"
-        : "fd-product-nutrition__row fd-product-nutrition__row--one";
-    const rows = PRODUCT_MACRO_ROWS.map((row) => {
-        const col = view.nutrition[row.key];
-        const lead = hasServing
-            ? `<span class="fd-product-nutrition__val">${esc(col.perServing ?? "–")}</span>`
-            : "";
-        return `<div class="${rowClass}"><span class="fd-product-nutrition__label">${esc(row.label)}</span>${lead}<span class="fd-product-nutrition__val">${esc(col.per100g)}</span></div>`;
-    }).join("");
-    const note = servingNote
-        ? `<p class="fd-product-nutrition__serving">${esc(servingNote)}</p>`
+function productError(message: string | undefined): string {
+    return message
+        ? `<p class="fd-product-error" role="alert">${esc(message)}</p>`
         : "";
-    return `${String(sectionHeader({ title: "Nutrition", level: 2 }))}<section class="fd-product-nutrition" aria-label="Nutrition">${note}${head}${rows}</section>`;
+}
+
+/** "In the fridge" for a plain place, the household's own words otherwise. */
+export function stockPlaceTitle(locationName: string): string {
+    const name = locationName.trim().replace(/^the\s+/i, "");
+    const plain = /^[A-Z]?[a-z]+$/.test(name) ? name.toLowerCase() : name;
+    return `In the ${plain}`;
 }
 
 function stockSection(stock: ProductStockLine[]): string {
     if (stock.length === 0) return "";
     const rows = stock.map((line) =>
-        foodRow({
-            title: line.locationName,
-            trailing: line.quantityLabel,
+        itemRow({
+            title: stockPlaceTitle(line.locationName),
+            meta: line.quantityLabel,
+            lead: {
+                kind: "icon",
+                name: /freez/i.test(line.locationName) ? "snowflake" : "fridge",
+            },
+            href: APP_PATHS.kitchenFridge,
+            trailing: { kind: "chevron" },
         }),
     );
-    return `${String(sectionHeader({ title: "In the kitchen", level: 2 }))}${String(rowList(rows))}`;
+    return String(listGroup({ rows, label: "In the kitchen" }));
 }
 
 function scoreBlock(view: ProductPageView): string {
@@ -234,43 +243,88 @@ function scoreBlock(view: ProductPageView): string {
     return renderProductScoreSection(view.food, view.score);
 }
 
+/** Every figure the page could show is unknown: nothing to score from. */
+function hasNoNutrition(table: ProductNutritionTableData): boolean {
+    return table.rows.every((row) => row.cols.every((col) => col == null));
+}
+
+function nutritionSection(view: ProductPageView): string {
+    const { head, rows } = view.nutrition;
+    const table = tableRows({
+        label: "Nutrition",
+        rows: [
+            { kind: "header", label: " ", cols: head },
+            ...rows.map((row) => ({ label: row.label, cols: row.cols })),
+        ],
+    });
+    // Nothing to score from: say so under the empty table.
+    const noScore =
+        !view.score && hasNoNutrition(view.nutrition)
+            ? String(
+                  emptyState({
+                      title: "No score yet",
+                      body: "Add nutrition to score it",
+                  }),
+              )
+            : "";
+    return `${sectionHeader({ label: "Nutrition", rule: false })}${table}${noScore}`;
+}
+
 function productActions(view: ProductPageView): string {
-    const pick = esc(
-        JSON.stringify(productLogPickPayload(view.food, view.barcodes[0])),
+    const pick = JSON.stringify(
+        productLogPickPayload(view.food, view.barcodes[0]),
     );
-    const grocery = productGroceryPostPath(view.food.id);
-    const cart = String(iconCart());
     // On the list already: the control says so and opens the list, so a second
     // press cannot add a duplicate line.
     const add = view.onGroceryList
-        ? `<a class="fd-btn fd-product-actions__add fd-product-actions__add--listed" href="${esc(APP_PATHS.kitchenGroceries)}">${String(iconCheck())}<span>On your list</span></a>`
-        : `<form class="fd-product-actions__grocery" method="post" action="${esc(grocery)}">
-<button type="submit" class="fd-btn fd-product-actions__add">${cart}<span>Add to groceries</span></button>
-</form>`;
-    return `<div class="fd-product-actions">
-${add}
-<button type="button" class="fd-btn fd-btn--primary fd-product-actions__log" data-fd-log-pick="${pick}">Log it</button>
-</div>`;
+        ? button({
+              label: "On your list",
+              icon: "check",
+              href: APP_PATHS.kitchenGroceries,
+          })
+        : raw(
+              `<form method="post" action="${esc(productGroceryPostPath(view.food.id))}">${button({ label: "Add to groceries", type: "submit" })}</form>`,
+          );
+    const log = button({
+        label: "Log it",
+        variant: "primary",
+        attrs: { "data-fd-log-pick": pick },
+    });
+    return `<div class="fd-product-actions">${add}${log}</div>`;
+}
+
+/** The Detail bar's ⋯: the food's own edit, which lives with the saved foods. */
+function productMenu(food: Food): Html {
+    return menu({
+        label: `Actions for ${food.name}`,
+        anchor: "more",
+        items: [
+            {
+                kind: "link",
+                label: "Edit in Saved foods",
+                href: `${APP_PATHS.settingsSaved}?q=${encodeURIComponent(food.name)}`,
+            },
+        ],
+    });
 }
 
 export function renderProductBody(view: ProductPageView): string {
-    const subtitle = productSubtitle(view.food, view.barcodes);
-    const error = view.error
-        ? `<p class="fd-product-error" role="alert">${esc(view.error)}</p>`
-        : "";
-    const stockFirst = view.stock.length > 0 ? stockSection(view.stock) : "";
-    return `<article class="fd-product-page">
-${productTopBar(view.backHref)}
-<header class="fd-product-header">
-<h1 class="fd-product-title">${esc(view.food.name)}</h1>
-${subtitle ? `<p class="fd-product-subtitle">${esc(subtitle)}</p>` : ""}
-</header>
-${error}
-${stockFirst}
-${scoreBlock(view)}
-${nutritionSection(view)}
-${productActions(view)}
-</article>`;
+    const detail = detailBar({
+        back: { href: view.backHref },
+        trailing: { slot: productMenu(view.food) },
+        className: "fd-product-detail",
+    });
+    const title = pageHeader({
+        title: view.food.name,
+        subtitle: productSubtitle(view.food, view.barcodes) || undefined,
+    });
+    const content = [
+        productError(view.error),
+        productGroup(String(title), stockSection(view.stock)),
+        scoreBlock(view),
+        productGroup(nutritionSection(view), productActions(view)),
+    ].join("");
+    return productPage({ detail, content });
 }
 
 export function renderProductV2Page(view: ProductPageView): string {
@@ -283,56 +337,65 @@ export function renderProductV2Page(view: ProductPageView): string {
     });
 }
 
+/** A barcode with nothing to open: the code, one line of why, and what comes next. */
+function barcodePage(opts: {
+    chrome: AppChromeBase;
+    title: string;
+    /** What the page names: the code as the person should read it. */
+    heading: string;
+    body: string;
+    backHref: string;
+    content?: string;
+}): string {
+    const detail = detailBar({
+        title: opts.title,
+        back: { href: opts.backHref },
+        balance: true,
+        className: "fd-product-detail",
+    });
+    const content = productGroup(
+        String(emptyState({ title: opts.heading, body: opts.body })),
+        opts.content ?? "",
+    );
+    return renderAppShell({
+        ...opts.chrome,
+        title: opts.title,
+        active: "none",
+        v2Active: "none",
+        body: productPage({
+            detail,
+            content,
+            className: "fd-product-page--unknown",
+        }),
+    });
+}
+
 export function renderProductBarcodeUnknownPage(
     view: ProductBarcodeUnknownView,
 ): string {
-    const error = view.error
-        ? `<p class="fd-product-error" role="alert">${esc(view.error)}</p>`
-        : "";
     const action = productBarcodeUnknownPostPath(view.barcode);
-    const copy = view.lookupFailed
-        ? "Could not look up this barcode right now. Try again, or add it as a new food."
-        : "Open Food Facts does not know this barcode yet. Add it as a new food and the barcode will stay attached.";
-    const body = `<article class="fd-product-page fd-product-page--unknown">
-${productTopBar(view.backHref)}
-<header class="fd-product-header">
-<h1 class="fd-product-title">Unknown barcode</h1>
-<p class="fd-product-subtitle">${esc(formatBarcodeDisplay(view.barcode))}</p>
-</header>
-${error}
-<p class="fd-product-unknown-copy">${esc(copy)}</p>
-<form class="fd-product-unknown-form native" method="post" action="${esc(action)}">
-<label class="field">Name<input name="name" required autocomplete="off" placeholder="Food name" /></label>
-<button type="submit" class="fd-btn fd-btn--primary">Add as a new food</button>
-</form>
-</article>`;
-    return renderAppShell({
-        ...view.chrome,
+    const form = `<form class="fd-product-unknown-form" method="post" action="${esc(action)}">${field({ id: "product-name", label: "Name", name: "name", required: true, autocomplete: "off", placeholder: "Food name" })}${button({ label: "Add as a new food", variant: "primary", type: "submit" })}</form>`;
+    return barcodePage({
+        chrome: view.chrome,
         title: "Unknown barcode",
-        active: "none",
-        v2Active: "none",
-        body,
+        heading: formatBarcodeDisplay(view.barcode),
+        body: view.lookupFailed
+            ? "Could not look up this barcode right now"
+            : "Not in Open Food Facts yet",
+        backHref: view.backHref,
+        content: `${productError(view.error)}${form}`,
     });
 }
 
 export function renderProductBarcodeInvalidPage(
     view: ProductBarcodeInvalidView,
 ): string {
-    const body = `<article class="fd-product-page fd-product-page--unknown">
-${productTopBar(view.backHref)}
-<header class="fd-product-header">
-<h1 class="fd-product-title">Invalid barcode</h1>
-<p class="fd-product-subtitle">${esc(view.barcode)}</p>
-</header>
-<p class="fd-product-unknown-copy">Enter 8–14 digits.</p>
-<p><a class="fd-text-link" href="${esc(view.backHref)}">Back</a></p>
-</article>`;
-    return renderAppShell({
-        ...view.chrome,
+    return barcodePage({
+        chrome: view.chrome,
         title: "Invalid barcode",
-        active: "none",
-        v2Active: "none",
-        body,
+        heading: view.barcode,
+        body: "Enter 8–14 digits",
+        backHref: view.backHref,
     });
 }
 
@@ -384,7 +447,7 @@ export async function loadProductBarcodeUnknownData(
     if (!member) return null;
     const profile = await getProfile(userId);
     const chrome = await viewerChromeWithAttention(profile, member);
-    return { chrome, barcode, backHref: PRODUCT_DEFAULT_BACK };
+    return { chrome, barcode, backHref };
 }
 
 export async function loadProductBarcodeInvalidData(
