@@ -15,6 +15,9 @@ export type TabOptions = {
     active?: boolean;
     /** Shown after the label: "Groceries · 8". */
     count?: number | string;
+    className?: string;
+    /** `data-*` on the tab (what a script that switches in place reads). */
+    data?: Readonly<Record<string, string>>;
 };
 
 export function tab(opts: TabOptions): Html {
@@ -23,7 +26,7 @@ export function tab(opts: TabOptions): Html {
             ? `${esc(opts.label)} · ${esc(opts.count)}`
             : esc(opts.label);
     return raw(
-        `<a class="${cls("fd-tab-row__tab", opts.active && "fd-tab-row__tab--active")}" href="${safeHref(opts.href)}"${opts.active ? ' aria-current="page"' : ""}>${text}</a>`,
+        `<a class="${cls("fd-tab-row__tab", opts.active && "fd-tab-row__tab--active", opts.className)}" href="${safeHref(opts.href)}"${opts.active ? ' aria-current="page"' : ""}${dataAttrs(opts.data)}>${text}</a>`,
     );
 }
 

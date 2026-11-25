@@ -141,12 +141,13 @@ describe("GET /trends", () => {
         expect(res.status).toBe(200);
         const html = await res.text();
         expect(html).toContain('data-fd-trends-range="7"');
+        // The tab for the asked range is the current one.
         expect(html).toMatch(
-            /data-fd-trends-range="7"[^>]*aria-pressed="true"/,
+            /aria-current="page"[^>]*data-fd-trends-range="7"/,
         );
     });
 
-    test("month query is accepted and drives prev link range param", async () => {
+    test("a month query is still accepted and the page keeps the range", async () => {
         const res = await hono.request(
             "http://test/trends?month=2026-06&range=90",
             {
@@ -155,10 +156,10 @@ describe("GET /trends", () => {
         );
         expect(res.status).toBe(200);
         const html = await res.text();
-        expect(html).toContain('data-fd-trends-range="90"');
-        expect(html).toContain("fd-trends-month");
         expect(html).toMatch(
-            /href="\/trends\?month=2026-05(?:&amp;|&)range=90/,
+            /aria-current="page"[^>]*data-fd-trends-range="90"/,
         );
+        // The page has no month card to page through.
+        expect(html).not.toContain("fd-trends-month");
     });
 });

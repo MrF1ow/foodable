@@ -11,42 +11,41 @@ import { FOOD_QUANTITY_UNITS } from "../../../domain/quantity.js";
 import { WEEKDAY_NAMES } from "../../../domain/weekdays.js";
 import type { GroceryStore } from "../../../domain/settings.js";
 import type { AppChromeBase } from "../../attention.js";
-import { formatQuantityDisplayParts } from "../../display-quantity.js";
-import { quantityUnitOptionLabel } from "../../display-quantity.js";
-import { chipLink, chipNav } from "../../components/v2/chips.js";
+import {
+    formatQuantityDisplayParts,
+    quantityUnitOptionLabel,
+} from "../../display-quantity.js";
+import { choiceGroup } from "../../components/v2/chips.js";
+import { emptyState } from "../../components/v2/empty-state.js";
+import { field } from "../../components/v2/field.js";
 import { esc, raw, type Html } from "../../components/v2/html.js";
-import { iconChevronRight } from "../../components/v2/icons.js";
-import { iconBolt, iconRefresh } from "../../components/v2/icons.js";
+import { itemRow } from "../../components/v2/item-row.js";
+import { listGroup } from "../../components/v2/list-group.js";
+import { menu, menuRow, type MenuItem } from "../../components/v2/menu.js";
+import { pageLayout } from "../../components/v2/page-layout.js";
+import { searchField } from "../../components/v2/search-field.js";
+import { sectionHeader } from "../../components/v2/section-header.js";
+import { sheet, sheetSection } from "../../components/v2/sheet.js";
+import { stepperControl } from "../../components/v2/stepper-control.js";
+import { toggle } from "../../components/v2/toggle.js";
+import { renderAppShell } from "../../shell.js";
 import {
-    rowList,
-    sectionHeader,
-    usualRow,
-    type UsualPart,
-} from "../../components/v2/rows.js";
-import { confirmSheet, sheet } from "../../components/v2/sheet.js";
-import {
-    addUsualSheet,
     addUsualButton,
+    addUsualSheet,
+    knownUsualAmounts,
     USUAL_ADD_SHEET_ID,
     type UsualAddView,
 } from "./kitchen-usuals-add.js";
+import { kitchenTopTools, renderKitchenHead } from "./kitchen-head.js";
+import { selectionBars } from "./select-mode.js";
+import { settingsErrorBanner } from "./settings-shared.js";
 
 export { USUAL_ADD_SHEET_ID };
-import { selectMode } from "./select-mode.js";
-import { stepper } from "../../components/v2/stepper.js";
-import { renderAppShell } from "../../shell.js";
-import { kitchenTopTools, renderKitchenHead } from "./kitchen-head.js";
-import { settingsErrorBanner } from "./settings-shared.js";
 
 export const USUALS_V2_RETURN_TO = "/kitchen/usuals";
 
-export const USUALS_INTRO =
-    "What you usually buy, where, and how much. Adding a food to the list fills these in.";
-
-export const USUALS_EDIT_SUBTITLE = "Your usual product, store and amount";
-
 export const USUAL_SCHEDULE_PATH_SUFFIX = "schedule";
-/** The edit sheet's "Add when it runs low" checkbox, and the marker that says the sheet posted it (an unchecked box posts nothing). */
+/** The edit sheet's "Add when it runs low" switch, and the marker that says the sheet posted it (an unchecked box posts nothing). */
 export const USUAL_WHEN_LOW_FIELD = "restock_when_low";
 export const USUAL_WHEN_LOW_MARKER = "restock_when_low_present";
 
@@ -61,31 +60,6 @@ export const USUAL_WEIGHTS_MARKER = "weights_present";
 
 function formatFactor(value: number | null | undefined): string {
     return value != null && value > 0 ? String(value) : "";
-}
-
-/**
- * Grams per ml and grams per item for the plain food: what lets a recipe's
- * cups, spoons, cloves or cans turn into grams. The usual product's own
- * factor wins over the plain food's when it has one, so that value shows as
- * the placeholder.
- */
-function weightFields(formId: string, row: UsualProductRow): string {
-    const field = (opts: {
-        name: string;
-        label: string;
-        own: number | null;
-        fromProduct: number | null | undefined;
-    }) =>
-        `<p class="fd-kitchen-sheet-label">${esc(opts.label)}</p>
-<div class="fd-kitchen-restock-level">
-<input class="fd-kitchen-restock-level__input" aria-label="${esc(opts.label)}" type="number" inputmode="decimal" min="0" step="any" name="${esc(opts.name)}" form="${esc(formId)}" value="${esc(formatFactor(opts.own))}" placeholder="${esc(formatFactor(opts.fromProduct))}" />
-<span class="fd-kitchen-restock-level__unit">g</span>
-</div>`;
-    return `<input type="hidden" name="${USUAL_WEIGHTS_MARKER}" value="1" />
-${field({ name: USUAL_GRAMS_PER_ML_FIELD, label: "Grams per ml", own: row.food.gramsPerMl, fromProduct: row.usual?.gramsPerMl })}
-<p class="fd-kitchen-restock-hint">For cups and spoons. Water is 1, oil about 0.92, flour about 0.53.</p>
-${field({ name: USUAL_GRAMS_PER_EACH_FIELD, label: "Grams per item", own: row.food.gramsPerEach, fromProduct: row.usual?.gramsPerEach })}
-<p class="fd-kitchen-restock-hint">What one weighs, for counts like a clove, a slice, a can or a bunch.</p>`;
 }
 
 /** The route a usual's restock settings post to. */
@@ -105,22 +79,6 @@ export function usualSheetId(foodId: string): string {
 
 function productPickerSheetId(foodId: string): string {
     return `${usualSheetId(foodId)}-product`;
-}
-
-export function usualRemoveSheetId(foodId: string): string {
-    return `${usualSheetId(foodId)}-remove`;
-}
-
-/** Asks before taking one usual off the list; posts to its remove route. */
-function removeUsualSheet(row: UsualProductRow, returnTo: string): string {
-    return confirmSheet({
-        id: usualRemoveSheetId(row.food.id),
-        title: "Remove from usuals",
-        message: `Remove ${row.food.name} from your usuals?`,
-        action: `${USUALS_V2_RETURN_TO}/${row.food.id}/remove`,
-        confirmLabel: "Remove",
-        hiddenFields: { return_to: returnTo },
-    });
 }
 
 export function usualRestockSheetId(foodId: string): string {
@@ -189,16 +147,12 @@ export function formatLowLevel(level: number): string {
     return String(Math.round(level * 100) / 100);
 }
 
-/** The row's restock parts: the schedule, then the low level when adding on low. */
-export function usualRestockParts(view: UsualRestockView): UsualPart[] {
+/** The row's restock part: the schedule, "When low" with none, or "Paused". The level lives in the Restock sheet. */
+export function usualRestockParts(view: UsualRestockView): string[] {
     const label = usualScheduleLabel(view);
     if (label == null && !view.whenLow) return [];
-    if (view.paused) return [{ text: "Paused", tone: "muted" }];
-    const parts: UsualPart[] = [label ?? "When low"];
-    if (view.whenLow && view.effectiveLowLevel != null) {
-        parts.push(`below ${formatLowLevel(view.effectiveLowLevel)}`);
-    }
-    return parts;
+    if (view.paused) return ["Paused"];
+    return [label ?? "When low"];
 }
 
 export type KitchenUsualsRowMeta = {
@@ -219,14 +173,15 @@ export type KitchenUsualsV2View = {
     stores: GroceryStore[];
     rowMeta: ReadonlyMap<string, KitchenUsualsRowMeta>;
     addable: Food[];
-    selectedStoreId?: string | null;
+    /** The stores the list is filtered to; none is every store. */
+    selectedStoreIds?: readonly string[];
     error?: string;
     openFoodId?: string;
     /** A restock-form error reopens the Restock sheet, not just the usual's. */
     openRestock?: boolean;
     /** "Sundays": the household's restock day, when restocking is on. */
     restockDay?: string | null;
-    /** The Add a usual sheet's state; absent leaves it closed on Scan. */
+    /** The Add a usual sheet's state; absent leaves it closed. */
     add?: UsualAddView;
     openGroceriesCount?: number;
 };
@@ -258,6 +213,7 @@ function resolvePurchase(row: UsualProductRow): {
     };
 }
 
+/** The usual product as the sheet's Product row says it ("Any brand" with none). */
 export function kitchenUsualProductLabel(row: UsualProductRow): string {
     if (row.usual) return productDisplayName(row.usual);
     return "Any brand";
@@ -301,15 +257,14 @@ export function kitchenUsualRowMeta(
     };
 }
 
-export function kitchenUsualRowParts(
-    meta: KitchenUsualsRowMeta,
-): readonly UsualPart[] {
-    const parts: UsualPart[] = [];
+/** The line under a usual's name: store, amount, restock, then what is happening to it. */
+export function kitchenUsualRowParts(meta: KitchenUsualsRowMeta): string[] {
+    const parts: string[] = [];
     if (meta.storeName) parts.push(meta.storeName);
     if (meta.amountLabel) parts.push(meta.amountLabel);
     if (meta.restock) parts.push(...usualRestockParts(meta.restock));
-    if (meta.lowNow) parts.push({ text: "low now", tone: "warn" });
-    if (meta.onList) parts.push({ text: "on the list", tone: "accent" });
+    if (meta.lowNow) parts.push("low now");
+    if (meta.onList) parts.push("on the list");
     return parts;
 }
 
@@ -332,126 +287,132 @@ export function kitchenUsualsResolvedOpenFoodId(
 }
 
 export function kitchenUsualsEmptyMessage(
-    view: Pick<KitchenUsualsV2View, "rows" | "selectedStoreId" | "stores"> & {
+    view: Pick<KitchenUsualsV2View, "rows" | "selectedStoreIds" | "stores"> & {
         filteredCount: number;
     },
 ): string {
+    const selected = view.selectedStoreIds ?? [];
     if (
-        view.selectedStoreId &&
+        selected.length > 0 &&
         view.rows.length > 0 &&
         view.filteredCount === 0
     ) {
-        const name =
-            view.stores.find((s) => s.id === view.selectedStoreId)?.name ??
-            "this store";
-        return `No usuals at ${name}`;
+        const names = selected
+            .map((id) => view.stores.find((s) => s.id === id)?.name)
+            .filter((name): name is string => name != null);
+        return `No usuals at ${names.length > 0 ? names.join(" or ") : "this store"}`;
     }
     return "No usual products yet.";
 }
 
-function storeFilterChips(view: KitchenUsualsV2View): string {
-    const counts = new Map<string, number>();
-    let all = 0;
-    for (const row of view.rows) {
-        const meta = view.rowMeta.get(row.food.id);
-        if (!meta) continue;
-        all += 1;
-        if (meta.storeId) {
-            counts.set(meta.storeId, (counts.get(meta.storeId) ?? 0) + 1);
-        }
+/**
+ * Where an action comes back to: the list with the stores it was filtered to.
+ * The stores ride in one `store` value, comma-separated, so the list route
+ * (which reads one `store`) and a refused post's return path both keep them.
+ */
+export function usualsReturnTo(
+    selected?: readonly string[] | string | null,
+): string {
+    const ids = (typeof selected === "string" ? [selected] : (selected ?? []))
+        .filter(Boolean)
+        .join(",");
+    return ids === ""
+        ? USUALS_V2_RETURN_TO
+        : `${USUALS_V2_RETURN_TO}?store=${encodeURIComponent(ids)}`;
+}
+
+/** The stores a `store` query names: known ids only, in the order given. */
+export function parseUsualsStoreFilter(
+    value: string | undefined,
+    stores: readonly { id: string }[],
+): string[] {
+    if (!value) return [];
+    const known = new Set(stores.map((store) => store.id));
+    const out: string[] = [];
+    for (const part of value.split(",")) {
+        const id = part.trim();
+        if (id !== "" && known.has(id) && !out.includes(id)) out.push(id);
     }
-    const chips = [
-        chipLink({
-            label: "All",
-            href: USUALS_V2_RETURN_TO,
-            count: all,
-            selected: !view.selectedStoreId,
-        }),
-        ...sortStoresByName(view.stores).map((store) =>
-            chipLink({
-                label: store.name,
-                href: `${USUALS_V2_RETURN_TO}?store=${encodeURIComponent(store.id)}`,
-                count: counts.get(store.id) ?? 0,
-                selected: view.selectedStoreId === store.id,
-            }),
-        ),
-    ];
-    return String(
-        chipNav(chips, {
-            label: "Filter usuals by store",
-            className: "fd-kitchen-usual-stores",
-        }),
-    );
+    return out;
 }
 
 function filteredRows(view: KitchenUsualsV2View): UsualProductRow[] {
-    if (!view.selectedStoreId) return view.rows;
+    const selected = view.selectedStoreIds ?? [];
+    if (selected.length === 0) return view.rows;
     return view.rows.filter((row) => {
-        const meta = view.rowMeta.get(row.food.id);
-        return meta?.storeId === view.selectedStoreId;
+        const storeId = view.rowMeta.get(row.food.id)?.storeId;
+        return storeId != null && selected.includes(storeId);
     });
 }
 
-function partsMarkup(parts: readonly UsualPart[]): string {
-    return parts
-        .map((part) =>
-            typeof part === "object"
-                ? `<span class="fd-tone fd-tone--${part.tone}">${esc(part.text)}</span>`
-                : `<span>${esc(part)}</span>`,
+function hiddenInputs(fields: Readonly<Record<string, string>>): string {
+    return Object.entries(fields)
+        .map(
+            ([name, value]) =>
+                `<input type="hidden" name="${esc(name)}" value="${esc(value)}" />`,
         )
-        .join(`<span class="fd-sep" aria-hidden="true"> · </span>`);
+        .join("");
 }
 
-/**
- * The desktop table's cells (FigCraft 48217: product, store, amount, restock).
- * They show from 1024px, where the phone's meta and sub-line are hidden; the
- * restock cell takes the row's status tone, "low now" or "on the list".
- */
-export function usualTableCells(meta: KitchenUsualsRowMeta): string {
-    const product =
-        meta.productLabel === "Any brand"
-            ? `<span class="fd-usual-cell fd-usual-cell--product fd-usual-cell--muted">${esc(meta.productLabel)}</span>`
-            : `<span class="fd-usual-cell fd-usual-cell--product">${esc(meta.productLabel)}</span>`;
-    const restock: UsualPart[] = meta.restock
-        ? usualRestockParts(meta.restock)
-        : [];
-    const status = meta.lowNow
-        ? { text: "low now", tone: "warn" as const }
-        : meta.onList
-          ? { text: "on the list", tone: "accent" as const }
-          : null;
-    if (status) restock.push(status.text);
-    const tone = status ? ` fd-tone fd-tone--${status.tone}` : "";
-    return `${product}<span class="fd-usual-cell fd-usual-cell--store">${esc(meta.storeName ?? "")}</span><span class="fd-usual-cell fd-usual-cell--amount">${esc(meta.amountLabel ?? "")}</span><span class="fd-usual-cell fd-usual-cell--restock${tone}">${status ? restock.map((part) => esc(typeof part === "object" ? part.text : part)).join(" · ") : partsMarkup(restock)}</span>`;
-}
-
-/** The desktop table's column titles; the phone list has none. */
-const USUAL_TABLE_HEAD = `<div class="fd-kitchen-usual-thead" aria-hidden="true"><span>Food</span><span>Product</span><span>Store</span><span>Amount</span><span>Restock</span></div>`;
-
-function usualListRow(row: UsualProductRow, view: KitchenUsualsV2View): Html {
-    const meta = view.rowMeta.get(row.food.id)!;
-    const sheetId = usualSheetId(row.food.id);
-    const rowHtml = String(
-        usualRow({
-            title: row.food.name,
-            meta: meta.productLabel,
-            parts: kitchenUsualRowParts(meta),
-            select: { name: "ids[]", value: row.food.id, label: row.food.name },
+/** The store filter: a tick for each store shown, Clear to show them all. */
+function storeFilter(view: KitchenUsualsV2View): string {
+    if (view.stores.length < 2) return "";
+    const selected = new Set(view.selectedStoreIds ?? []);
+    const stores = sortStoresByName(view.stores);
+    const items: MenuItem[] = stores.map((store) => {
+        const next = stores
+            .filter((row) =>
+                row.id === store.id
+                    ? !selected.has(row.id)
+                    : selected.has(row.id),
+            )
+            .map((row) => row.id);
+        return {
+            kind: "checked" as const,
+            label: store.name,
+            checked: selected.has(store.id),
+            href: usualsReturnTo(next),
+        };
+    });
+    if (selected.size > 0) {
+        items.push({
+            kind: "link",
+            label: "Clear",
+            href: USUALS_V2_RETURN_TO,
+        });
+    }
+    return String(
+        menu({
+            label: "Filter by store",
+            anchor: "filter",
+            filterCount: selected.size,
+            items,
         }),
     );
-    // Function replacements: a string would read `$` in an id as a pattern.
-    return raw(
-        rowHtml
-            .replace(
-                "<li ",
-                () =>
-                    `<li id="fd-usual-row-${esc(row.food.id)}" data-fd-usual-row data-sheet-id="${esc(sheetId)}" tabindex="0" `,
-            )
-            .replace(
-                '<span class="fd-row__chevron"',
-                () => `${usualTableCells(meta)}<span class="fd-row__chevron"`,
-            ),
-    );
+}
+
+/** The row of one usual: name, its product, then store, amount and restock. */
+function usualListRow(row: UsualProductRow, meta: KitchenUsualsRowMeta): Html {
+    const sheetId = usualSheetId(row.food.id);
+    const product = row.usual
+        ? productDisplayName(row.usual)
+        : "No usual product yet";
+    const sub = kitchenUsualRowParts(meta).join(" · ");
+    return itemRow({
+        title: row.food.name,
+        meta: product,
+        ...(sub
+            ? {
+                  subtitle: sub,
+                  ...(meta.lowNow ? { state: "warning" as const } : {}),
+              }
+            : {}),
+        trailing: { kind: "chevron" },
+        select: { name: "ids[]", value: row.food.id },
+        id: `fd-usual-row-${row.food.id}`,
+        focusable: true,
+        data: { "fd-sheet-row": "", "sheet-id": sheetId },
+    });
 }
 
 function pickerDataForRow(row: UsualProductRow): {
@@ -474,90 +435,145 @@ function pickerDataForRow(row: UsualProductRow): {
     };
 }
 
-function productPickerRadios(
-    formId: string,
-    row: UsualProductRow,
-    usualProductId: string | null,
-): string {
-    const options: { value: string; label: string; selected: boolean }[] = [
-        {
-            value: "",
-            label: "Any brand",
-            selected: usualProductId == null,
-        },
-        ...row.products.map((product) => ({
-            value: product.id,
-            label: productDisplayName(product),
-            selected: usualProductId === product.id,
-        })),
-    ];
-    const chips = options
-        .map((option) => {
-            const autofocus = option.selected ? " autofocus" : "";
-            return `<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" form="${esc(formId)}" name="product_food_id" value="${esc(option.value)}"${option.selected ? " checked" : ""}${autofocus}><span class="fd-chip__face"><span class="fd-chip__label">${esc(option.label)}</span></span></label>`;
-        })
-        .join("");
-    return `<fieldset class="fd-choice-group"><legend class="fd-sr">Usual product</legend><div class="fd-chips fd-chips--stack">${chips}</div></fieldset>`;
-}
-
+/** The product picker: one radio row for each product and "Any brand". */
 function productPickerSheet(
     row: UsualProductRow,
     formId: string,
-    pick: ReturnType<typeof pickerDataForRow>,
+    usualProductId: string | null,
 ): string {
     const pickerId = productPickerSheetId(row.food.id);
-    const body = productPickerRadios(formId, row, pick.usualProductId);
+    const radio = (opts: {
+        value: string;
+        title: string;
+        subtitle: string;
+        checked: boolean;
+        filter: string;
+    }) =>
+        itemRow({
+            title: opts.title,
+            subtitle: opts.subtitle,
+            lead: {
+                kind: "radio",
+                label: opts.title,
+                name: "product_food_id",
+                value: opts.value,
+                checked: opts.checked,
+                form: formId,
+            },
+            data: { "fd-usual-product": opts.filter.toLowerCase() },
+        });
+    const rows = [
+        // The chosen product first, then the rest in the order they came.
+        ...[...row.products]
+            .sort(
+                (a, b) =>
+                    Number(b.id === usualProductId) -
+                    Number(a.id === usualProductId),
+            )
+            .map((product) =>
+                radio({
+                    value: product.id,
+                    title: product.name,
+                    // "Kirkland · 1 gal": the brand, then what is bought of it.
+                    subtitle:
+                        [
+                            product.brand?.trim(),
+                            product.usualAmount
+                                ? formatQuantityDisplayParts(
+                                      product.usualAmount.amount,
+                                      product.usualAmount.unit,
+                                  )
+                                : null,
+                        ]
+                            .filter(Boolean)
+                            .join(" · ") || "In your foods",
+                    checked: usualProductId === product.id,
+                    filter: productDisplayName(product),
+                }),
+            ),
+        radio({
+            value: "",
+            title: "Any brand",
+            subtitle: "No usual product",
+            checked: usualProductId == null,
+            filter: "any brand",
+        }),
+    ];
+    const search = searchField({
+        label: "Search products",
+        placeholder: "Search products",
+        name: "pq",
+        id: `${pickerId}-q`,
+        style: "boxed",
+        data: { "fd-usual-product-search": "" },
+    });
     return sheet({
         id: pickerId,
-        kind: "edit",
-        title: "Product",
-        subtitle: row.food.name,
-        body,
-        actions: `<button type="button" class="fd-btn fd-btn--primary" commandfor="${esc(pickerId)}" command="close">Done</button>`,
+        placement: "dialog",
+        className: "fd-kitchen-sheet",
+        header: {
+            kind: "title",
+            title: "Product",
+            subtitle: row.food.name,
+        },
+        body: raw(
+            `${sheetSection({ kind: "fields", content: raw(`<div data-fd-usual-product-find>${search}</div>`) })}${sheetSection(
+                {
+                    kind: "choice",
+                    content: listGroup({ rows, label: "Products" }),
+                },
+            )}`,
+        ),
+        actions: {
+            kind: "single",
+            primary: {
+                label: "Done",
+                attrs: { command: "close", commandfor: pickerId },
+            },
+        },
+        focus: "panel",
     });
 }
 
-function storeChoiceGroup(
-    formId: string,
+function storeChips(
     pick: ReturnType<typeof pickerDataForRow>,
     stores: GroceryStore[],
-): string {
-    const options = [
-        {
-            value: "",
-            label: "Any store",
-            selected: !pick.prefillStoreId,
-        },
-        ...sortStoresByName(stores).map((store) => ({
-            value: store.id,
-            label: store.name,
-            selected: pick.prefillStoreId === store.id,
-        })),
-    ];
-    const chips = options
-        .map((option) => {
-            return `<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" form="${esc(formId)}" name="usual_store_id" value="${esc(option.value)}"${option.selected ? " checked" : ""}><span class="fd-chip__face"><span class="fd-chip__label">${esc(option.label)}</span></span></label>`;
-        })
-        .join("");
-    return `<fieldset class="fd-choice-group fd-kitchen-usual-store-field"><legend class="fd-sr">Store</legend><div class="fd-chips">${chips}</div></fieldset>`;
+): Html {
+    return choiceGroup({
+        name: "usual_store_id",
+        legend: "Store",
+        options: [
+            { value: "", label: "Any store", selected: !pick.prefillStoreId },
+            ...sortStoresByName(stores).map((store) => ({
+                value: store.id,
+                label: store.name,
+                selected: pick.prefillStoreId === store.id,
+            })),
+        ],
+    });
 }
 
-function unitField(
-    formId: string,
-    unitValue: string,
-    stepperUnitId: string,
-): string {
-    const hiddenId = `${formId}-unit`;
-    // A blank choice leaves the usual amount unset, as the old picker could.
-    const blank = `<option value=""${unitValue === "" ? " selected" : ""}>No amount</option>`;
-    const opts =
-        blank +
-        FOOD_QUANTITY_UNITS.map((unit) => {
-            const label = quantityUnitOptionLabel(unit);
-            const sel = unitValue === unit ? " selected" : "";
-            return `<option value="${esc(unit)}"${sel}>${esc(label)}</option>`;
-        }).join("");
-    return `<input type="hidden" name="usual_unit" value="${esc(unitValue)}" id="${esc(hiddenId)}" form="${esc(formId)}" /><select class="fd-kitchen-usual-unit" aria-labelledby="${esc(stepperUnitId)}" data-fd-usual-unit data-fd-usual-unit-target="${esc(hiddenId)}">${opts}</select>`;
+/** The unit as a pull-down on a row; its choice rides in `usual_unit`. */
+function unitPulldown(unit: string): Html {
+    const choices = [
+        { value: "", label: "No amount" },
+        ...FOOD_QUANTITY_UNITS.map((u) => ({
+            value: u,
+            label: quantityUnitOptionLabel(u),
+        })),
+    ];
+    const current = choices.find((c) => c.value === unit) ?? choices[0]!;
+    return menuRow({
+        label: "Unit",
+        row: { title: "Unit", value: current.label },
+        field: { name: "usual_unit", value: current.value },
+        items: choices.map((choice) => ({
+            kind: "checked" as const,
+            label: choice.label,
+            checked: choice.value === current.value,
+            value: choice.value,
+        })),
+    });
 }
 
 const SCHEDULE_CHOICES: ReadonlyArray<{
@@ -570,33 +586,10 @@ const SCHEDULE_CHOICES: ReadonlyArray<{
     { value: "monthly", label: "Every month" },
 ];
 
-function scheduleChoiceGroup(formId: string, view: UsualRestockView): string {
-    const current = view.schedule ?? "";
-    const chips = SCHEDULE_CHOICES.map(
-        (choice) =>
-            `<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" form="${esc(formId)}" name="restock_schedule" value="${esc(choice.value)}"${choice.value === current ? " checked" : ""}><span class="fd-chip__face"><span class="fd-chip__label">${esc(choice.label)}</span></span></label>`,
-    ).join("");
-    return `<fieldset class="fd-choice-group fd-kitchen-restock-schedule"><legend class="fd-sr">Restock schedule</legend><div class="fd-chips">${chips}</div></fieldset>`;
-}
-
-/** A switch that submits with its form: a checkbox drawn like `.fd-switch`. */
-function restockCheckSwitch(opts: {
-    formId: string;
-    name: string;
-    label: string;
-    checked: boolean;
-}): string {
-    return `<label class="fd-kitchen-sheet-row fd-kitchen-restock-switch"><span class="fd-kitchen-sheet-row__label">${esc(opts.label)}</span><input type="checkbox" class="fd-kitchen-switch" role="switch" form="${esc(opts.formId)}" name="${esc(opts.name)}" value="1"${opts.checked ? " checked" : ""}></label>`;
-}
-
 function restockSheet(
     row: UsualProductRow,
     view: UsualRestockView,
-    ctx: {
-        returnTo: string;
-        open: boolean;
-        error: string;
-    },
+    ctx: { returnTo: string; open: boolean; error: string },
 ): string {
     const sheetId = usualRestockSheetId(row.food.id);
     const formId = `${sheetId}-form`;
@@ -607,68 +600,79 @@ function restockSheet(
     const unit = view.unit ? quantityUnitOptionLabel(view.unit) : "";
     const weeks = view.everyWeeks ?? 2;
     const levelValue = view.lowLevel != null ? String(view.lowLevel) : "";
-    const body = `${ctx.error}<form id="${esc(formId)}" method="post" action="${esc(usualSchedulePath(row.food.id))}" class="fd-kitchen-usual-sheet-form fd-kitchen-restock-form">
-<input type="hidden" name="return_to" value="${esc(ctx.returnTo)}" />
-<input type="hidden" name="scope" value="schedule" />
-<p class="fd-kitchen-sheet-label">How often</p>
-${scheduleChoiceGroup(formId, view)}
-<div class="fd-kitchen-restock-weeks">
-<p class="fd-kitchen-sheet-label">Weeks between</p>
-${String(
-    stepper({
-        name: "restock_every_weeks",
-        label: "Weeks between restocks",
-        value: weeks,
-        min: 1,
-        max: RESTOCK_MAX_EVERY_WEEKS,
-        step: 1,
-        unit: weeks === 1 ? "week" : "weeks",
-        id: `${sheetId}-weeks`,
-    }),
-)}
-</div>
-<div class="fd-kitchen-sheet-rows">
-${restockCheckSwitch({ formId, name: "restock_paused", label: "Paused", checked: view.paused })}
-</div>
-<p class="fd-kitchen-restock-hint">Paused: not added on schedule or when it runs low.</p>
-<p class="fd-kitchen-sheet-label">Low level</p>
-<div class="fd-kitchen-restock-level">
-<input class="fd-kitchen-restock-level__input" type="number" inputmode="decimal" min="0" step="any" name="restock_low_level" form="${esc(formId)}" value="${esc(levelValue)}" placeholder="${esc(placeholder)}" aria-label="Low level" />
-${unit ? `<span class="fd-kitchen-restock-level__unit">${esc(unit)}</span>` : ""}
-</div>
-<p class="fd-kitchen-restock-hint">When the fridge has less than this, “Add when it runs low” puts the usual on the list. Left blank, it is a quarter of the usual amount.</p>
-</form>`;
+    const current = view.schedule ?? "";
+    const how = choiceGroup({
+        name: "restock_schedule",
+        legend: "How often",
+        options: SCHEDULE_CHOICES.map((choice) => ({
+            value: choice.value,
+            label: choice.label,
+            selected: choice.value === current,
+        })),
+    });
+    const body = `${ctx.error}<form id="${esc(formId)}" method="post" action="${esc(usualSchedulePath(row.food.id))}">${hiddenInputs({ return_to: ctx.returnTo, scope: "schedule" })}${sheetSection({ kind: "chips", label: "How often", content: how })}<div data-fd-restock-weeks>${sheetSection(
+        {
+            kind: "amount",
+            label: "Weeks between",
+            content: stepperControl({
+                name: "restock_every_weeks",
+                label: "Weeks between restocks",
+                value: weeks,
+                min: 1,
+                max: RESTOCK_MAX_EVERY_WEEKS,
+                step: 1,
+                unit: weeks === 1 ? "week" : "weeks",
+                id: `${sheetId}-weeks`,
+            }),
+        },
+    )}</div>${sheetSection({
+        kind: "rows",
+        content: listGroup({
+            label: "Paused",
+            rows: [
+                itemRow({
+                    title: "Paused",
+                    trailing: {
+                        kind: "control",
+                        html: toggle({
+                            label: "Paused",
+                            name: "restock_paused",
+                            value: "1",
+                            on: view.paused,
+                        }),
+                    },
+                }),
+            ],
+        }),
+    })}${sheetSection({
+        kind: "fields",
+        label: unit ? `Low below · ${unit}` : "Low below",
+        content: field({
+            id: `${sheetId}-low`,
+            label: "Low below",
+            labelHidden: true,
+            name: "restock_low_level",
+            type: "number",
+            inputmode: "decimal",
+            min: 0,
+            step: "any",
+            value: levelValue,
+            placeholder,
+        }),
+    })}</form>`;
     return sheet({
         id: sheetId,
-        kind: "edit",
-        title: "Restock",
-        subtitle: row.food.name,
-        body,
-        actions: `<button type="submit" class="fd-btn fd-btn--primary" form="${esc(formId)}">Save</button>`,
+        placement: "dialog",
+        className: "fd-kitchen-sheet",
+        header: { kind: "title", title: "Restock", subtitle: row.food.name },
+        body: raw(body),
+        actions: {
+            kind: "single",
+            primary: { label: "Save", type: "submit", form: formId },
+        },
         openOnLoad: ctx.open,
+        focus: "panel",
     });
-}
-
-/**
- * The two design rows under Amount: Restock (opens its sheet) and the switch.
- * The switch is a checkbox of the edit sheet's own form (`editFormId`), so one
- * Save commits it together with the store and the amount.
- */
-function restockGroup(
-    row: UsualProductRow,
-    view: UsualRestockView,
-    editFormId: string,
-): string {
-    const restockId = usualRestockSheetId(row.food.id);
-    const summary =
-        view.paused && (view.schedule || view.whenLow)
-            ? "Paused"
-            : (usualScheduleLabel(view) ?? "No schedule");
-    const lowLabel = "Add when it runs low";
-    return `<div class="fd-kitchen-sheet-rows fd-kitchen-restock-group">
-<button type="button" class="fd-kitchen-sheet-row" commandfor="${esc(restockId)}" command="show-modal"><span class="fd-kitchen-sheet-row__icon">${String(iconRefresh())}</span><span class="fd-kitchen-sheet-row__label">Restock</span><span class="fd-kitchen-sheet-row__value"><span class="fd-kitchen-sheet-row__meta">${esc(summary)}</span><span class="fd-kitchen-sheet-row__chev" aria-hidden="true">${String(iconChevronRight())}</span></span></button>
-<label class="fd-kitchen-sheet-row fd-kitchen-restock-low"><span class="fd-kitchen-sheet-row__icon">${String(iconBolt())}</span><span class="fd-kitchen-sheet-row__label">${lowLabel}</span><input type="checkbox" class="fd-kitchen-switch" role="switch" form="${esc(editFormId)}" name="${USUAL_WHEN_LOW_FIELD}" value="1"${view.whenLow ? " checked" : ""}></label>
-</div>`;
 }
 
 function editUsualSheet(
@@ -679,64 +683,144 @@ function editUsualSheet(
     const open = resolvedOpenFoodId === row.food.id;
     const sheetId = usualSheetId(row.food.id);
     const pick = pickerDataForRow(row);
-    const returnTo = view.selectedStoreId
-        ? `${USUALS_V2_RETURN_TO}?store=${encodeURIComponent(view.selectedStoreId)}`
-        : USUALS_V2_RETURN_TO;
+    const returnTo = usualsReturnTo(view.selectedStoreIds);
     const errorHtml =
         open && view.error
             ? `<p class="fd-kitchen-sheet-error" role="alert">${esc(view.error)}</p>`
             : "";
     const restockOpen = open && view.openRestock === true;
-    const error = restockOpen ? "" : errorHtml;
     const restock = usualRestockView(row);
     const formId = `${sheetId}-form`;
-    const productLabel = kitchenUsualProductLabel(row);
-    const pickerId = productPickerSheetId(row.food.id);
-    const stepperId = `${sheetId}-amount`;
-    const unitValue = pick.prefillAmount ? (pick.prefillAmount.unit ?? "") : "";
+    const unitValue = pick.prefillAmount?.unit ?? "";
     const amountValue = pick.prefillAmount?.amount ?? 1;
-    const productRow = `<div class="fd-kitchen-sheet-rows"><button type="button" class="fd-kitchen-sheet-row" commandfor="${esc(pickerId)}" command="show-modal"><span class="fd-kitchen-sheet-row__label">Product</span><span class="fd-kitchen-sheet-row__value"><span class="fd-kitchen-sheet-row__meta">${esc(productLabel)}</span><span class="fd-kitchen-sheet-row__chev" aria-hidden="true">${String(iconChevronRight())}</span></span></button></div>`;
-    const body = `${error}<form id="${esc(formId)}" method="post" action="/kitchen/usuals/${esc(row.food.id)}" class="fd-kitchen-usual-sheet-form">
-<input type="hidden" name="return_to" value="${esc(returnTo)}" />
-<input type="hidden" name="${USUAL_WHEN_LOW_MARKER}" value="1" />
-${productRow}
-<p class="fd-kitchen-sheet-label">Store</p>
-${storeChoiceGroup(formId, pick, view.stores)}
-<p class="fd-kitchen-sheet-label">Usually buy</p>
-<div class="fd-kitchen-usual-amount">
-${String(
-    stepper({
-        name: "usual_amount",
-        label: "Amount",
-        value: amountValue,
-        min: 0,
-        step: 1,
-        inputStep: "any",
-        unit: quantityUnitOptionLabel(unitValue),
-        id: stepperId,
-    }),
-)}
-${unitField(formId, unitValue, `${stepperId}-unit`)}
-</div>
-${weightFields(formId, row)}
-</form>
-${restockGroup(row, restock, formId)}
-${productPickerSheet(row, formId, pick)}
-${removeUsualSheet(row, returnTo)}
-${restockSheet(row, restock, { returnTo, open: restockOpen, error: restockOpen ? errorHtml : "" })}`;
-    return sheet({
-        id: sheetId,
-        kind: "edit",
-        title: row.food.name,
-        subtitle: USUALS_EDIT_SUBTITLE,
-        body,
-        actions: `<button type="button" class="fd-btn fd-btn--danger" commandfor="${esc(usualRemoveSheetId(row.food.id))}" command="show-modal">Remove</button>
-<button type="submit" class="fd-btn fd-btn--primary" form="${esc(formId)}">Save</button>`,
-        openOnLoad: open,
+    const summary =
+        restock.paused && (restock.schedule || restock.whenLow)
+            ? "Paused"
+            : (usualScheduleLabel(restock) ?? "No schedule");
+
+    const product = sheetSection({
+        kind: "rows",
+        content: listGroup({
+            label: "Usual product",
+            rows: [
+                itemRow({
+                    title: "Product",
+                    value: kitchenUsualProductLabel(row),
+                    trailing: { kind: "chevron" },
+                    opens: productPickerSheetId(row.food.id),
+                }),
+            ],
+        }),
     });
+    const store = view.stores.length
+        ? sheetSection({
+              kind: "chips",
+              label: "Store",
+              content: storeChips(pick, view.stores),
+          })
+        : "";
+    const amount = sheetSection({
+        kind: "amount",
+        label: "Usually buy",
+        content: raw(
+            `${stepperControl({
+                name: "usual_amount",
+                label: "Amount",
+                value: amountValue,
+                min: 0,
+                step: 1,
+                inputStep: "any",
+                unit: quantityUnitOptionLabel(unitValue),
+                id: `${sheetId}-amount`,
+            })}${listGroup({ rows: [unitPulldown(unitValue)], label: "Unit" })}`,
+        ),
+    });
+    const restockRows = sheetSection({
+        kind: "rows",
+        content: listGroup({
+            label: "Restock",
+            rows: [
+                itemRow({
+                    title: "Restock",
+                    value: summary,
+                    trailing: { kind: "chevron" },
+                    opens: usualRestockSheetId(row.food.id),
+                }),
+                itemRow({
+                    title: "Add when it runs low",
+                    trailing: {
+                        kind: "control",
+                        html: toggle({
+                            label: "Add when it runs low",
+                            name: USUAL_WHEN_LOW_FIELD,
+                            value: "1",
+                            on: restock.whenLow,
+                        }),
+                    },
+                }),
+            ],
+        }),
+    });
+    const weight = sheetSection({
+        kind: "fields",
+        label: "Weight",
+        content: raw(
+            `<div class="fd-kitchen-weight">${field({
+                id: `${sheetId}-g-ml`,
+                label: "Grams per ml",
+                name: USUAL_GRAMS_PER_ML_FIELD,
+                type: "number",
+                inputmode: "decimal",
+                min: 0,
+                step: "any",
+                value: formatFactor(row.food.gramsPerMl),
+                placeholder: formatFactor(row.usual?.gramsPerMl) || "–",
+            })}${field({
+                id: `${sheetId}-g-each`,
+                label: "Grams per item",
+                name: USUAL_GRAMS_PER_EACH_FIELD,
+                type: "number",
+                inputmode: "decimal",
+                min: 0,
+                step: "any",
+                value: formatFactor(row.food.gramsPerEach),
+                placeholder: formatFactor(row.usual?.gramsPerEach) || "–",
+            })}</div>`,
+        ),
+    });
+    const form = `<form id="${esc(formId)}" method="post" action="/kitchen/usuals/${esc(row.food.id)}" data-fd-usual-edit>${hiddenInputs({ return_to: returnTo, [USUAL_WHEN_LOW_MARKER]: "1", [USUAL_WEIGHTS_MARKER]: "1" })}${product}${store}${amount}${restockRows}${weight}</form>`;
+    const remove = menu({
+        label: `Actions for ${row.food.name}`,
+        anchor: "more",
+        items: [
+            {
+                kind: "destructive",
+                label: "Remove",
+                action: `${USUALS_V2_RETURN_TO}/${row.food.id}/remove`,
+                fields: { return_to: returnTo },
+            },
+        ],
+    });
+    return `${sheet({
+        id: sheetId,
+        placement: "side",
+        className: "fd-kitchen-sheet",
+        header: { kind: "title", title: row.food.name, menu: remove },
+        body: raw(`${restockOpen ? "" : errorHtml}${form}`),
+        actions: {
+            kind: "single",
+            primary: { label: "Save", type: "submit", form: formId },
+        },
+        openOnLoad: open,
+        focus: "panel",
+    })}${productPickerSheet(row, formId, pick.usualProductId)}${restockSheet(row, restock, { returnTo, open: restockOpen, error: restockOpen ? errorHtml : "" })}`;
 }
 
-function renderUsualsHead(view: KitchenUsualsV2View): string {
+function renderUsualsHead(
+    view: KitchenUsualsV2View,
+    tools: string,
+    addDesktop: string,
+): string {
     const subtitle = kitchenUsualsHeaderSubtitle(
         view.rows.length,
         view.restockDay,
@@ -744,27 +828,81 @@ function renderUsualsHead(view: KitchenUsualsV2View): string {
     return renderKitchenHead({
         active: "usuals",
         phoneSubtitle: subtitle,
-        desktopSubtitle: subtitle,
-        desktopTools: addUsualButton().desktop,
+        desktopTools: `${tools}${addDesktop}`,
     });
 }
 
 export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
     const resolvedOpen = kitchenUsualsResolvedOpenFoodId(view);
     const rows = filteredRows(view);
-    const emptyMsg = kitchenUsualsEmptyMessage({
-        ...view,
-        filteredCount: rows.length,
+    const returnTo = usualsReturnTo(view.selectedStoreIds);
+    const select = selectionBars({
+        scope: "usuals",
+        returnTo,
+        actions: [
+            {
+                kind: "confirm",
+                key: "remove",
+                label: "Remove",
+                action: "/kitchen/usuals/bulk/remove",
+            },
+        ],
+    });
+    const selectable = rows.length > 0;
+    // The ⋯ holds only what applies: Select with rows to pick; with none, no ⋯.
+    const more = selectable
+        ? String(
+              menu({
+                  label: "Usuals options",
+                  anchor: "more",
+                  items: [select.menuItem],
+              }),
+          )
+        : "";
+    const tools = `${storeFilter(view)}${more}`;
+    const add = addUsualButton();
+    const head = renderUsualsHead(view, tools, add.desktop);
+
+    const addRow = listGroup({
+        label: "Add a usual",
+        data: { "fd-usual-add-row": "" },
+        rows: [
+            itemRow({
+                title: "Add a usual",
+                lead: { kind: "icon", name: "plus" },
+                opens: USUAL_ADD_SHEET_ID,
+            }),
+        ],
     });
     const list =
         rows.length === 0
-            ? `<p class="fd-kitchen-usual-empty">${esc(emptyMsg)}</p>`
-            : String(
-                  rowList(
-                      rows.map((row) => usualListRow(row, view)),
-                      { label: "Usual products" },
-                  ),
-              );
+            ? String(
+                  emptyState({
+                      title: kitchenUsualsEmptyMessage({
+                          ...view,
+                          filteredCount: rows.length,
+                      }),
+                  }),
+              )
+            : `${String(
+                  sectionHeader({
+                      label: "Usuals",
+                      count: rows.length,
+                      rule: false,
+                  }),
+              )}${String(
+                  listGroup({
+                      label: "Usual products",
+                      rows: rows.map((row) =>
+                          usualListRow(row, view.rowMeta.get(row.food.id)!),
+                      ),
+                  }),
+              )}`;
+    const layout = pageLayout({
+        layout: "single",
+        content: raw(`${list}${String(addRow)}`),
+        className: "fd-kitchen-usuals-layout",
+    });
     const pageError =
         view.error && !resolvedOpen
             ? String(settingsErrorBanner(view.error))
@@ -772,47 +910,30 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
     const sheets = view.rows
         .map((row) => editUsualSheet(row, view, resolvedOpen))
         .join("");
-    const returnTo = view.selectedStoreId
-        ? `${USUALS_V2_RETURN_TO}?store=${encodeURIComponent(view.selectedStoreId)}`
-        : USUALS_V2_RETURN_TO;
     const addSheet = addUsualSheet({
         add: view.add,
         addable: view.addable,
         stores: view.stores,
-        selectedStoreId: view.selectedStoreId,
-        returnTo,
+        selectedStoreIds: view.selectedStoreIds,
+        known: knownUsualAmounts([
+            ...view.rows.map((row) => row.food),
+            ...view.addable,
+        ]),
+        // One store filtered: the add posts that store and returns to it. Two or
+        // more cannot name one store, so an add returns to the whole list.
+        returnTo:
+            (view.selectedStoreIds ?? []).length === 1
+                ? returnTo
+                : USUALS_V2_RETURN_TO,
         barcodeCamera: view.chrome.flags.barcodeCamera,
     });
-    const select = selectMode({
-        scope: "usuals",
-        returnTo: view.selectedStoreId
-            ? `${USUALS_V2_RETURN_TO}?store=${encodeURIComponent(view.selectedStoreId)}`
-            : USUALS_V2_RETURN_TO,
-        actions: [
-            {
-                kind: "confirm",
-                key: "remove",
-                label: "Remove",
-                action: "/kitchen/usuals/bulk/remove",
-                title: "Remove usuals",
-                one: "Remove 1 usual from the list?",
-                many: "Remove {n} usuals from the list?",
-                confirmLabel: "Remove",
-            },
-        ],
-    });
-    const selectable = rows.length > 0;
-    return `${renderUsualsHead(view)}
+    return `${head}
 <div class="fd-kitchen-usuals-page"${select.rootAttrs}>
-${kitchenTopTools(addUsualButton().phone)}
+${kitchenTopTools(tools, add.phone)}
 ${pageError}
-<p class="fd-kitchen-usual-intro">${esc(USUALS_INTRO)}</p>
-${view.stores.length > 0 ? storeFilterChips(view) : ""}
-${selectable ? select.tools + select.bar : ""}
-${rows.length > 0 ? String(sectionHeader({ title: "Usuals", count: rows.length })) : ""}
-<div class="fd-kitchen-usual-table">${rows.length > 0 ? USUAL_TABLE_HEAD : ""}${list}</div>
+${selectable ? `${String(select.bars)}${String(select.head)}` : ""}
+${String(layout)}
 ${sheets}
-${selectable ? select.sheets : ""}
 ${addSheet}
 </div>`;
 }
@@ -834,7 +955,7 @@ export function buildPreviewKitchenUsualsView(
         Partial<KitchenUsualsV2View>,
 ): KitchenUsualsV2View {
     return {
-        selectedStoreId: null,
+        selectedStoreIds: [],
         openGroceriesCount: 3,
         addable: [],
         ...view,

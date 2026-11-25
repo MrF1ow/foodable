@@ -91,6 +91,8 @@ export type ItemRowLead =
           name: string;
           value: string;
           checked?: boolean;
+          /** The id of a form the radio belongs to, when its row sits outside that form. */
+          form?: string;
       }
     | {
           kind: "avatar";
@@ -214,6 +216,10 @@ export type ItemRowOptions = {
     data?: Readonly<Record<string, string>>;
     /** The row's ARIA role: `option` in a combobox's listbox (search results). */
     role?: "option";
+    /** Puts the row in the tab order, for a row that opens a sheet by script. */
+    focusable?: boolean;
+    /** A control laid over the whole row (Go to a day's date input); trusted markup. */
+    overlay?: Html;
     /** `data-*` on the link of a link row (`turbo: "false"` for a response
      *  Turbo cannot follow, such as Log out). */
     linkData?: Readonly<Record<string, string>>;
@@ -280,6 +286,7 @@ function leadSlot(lead: ItemRowLead, disabled: boolean): Html {
             const attrs = [
                 ` name="${esc(lead.name)}"`,
                 ` value="${esc(lead.value)}"`,
+                lead.form != null ? ` form="${esc(lead.form)}"` : "",
                 lead.checked ? " checked" : "",
                 disabled ? " disabled" : "",
             ].join("");
@@ -631,6 +638,7 @@ export function itemRow(opts: ItemRowOptions): Html {
         open ? ` data-swipe-open="${open}"` : "",
         pickable ? " data-fd-select-row" : "",
         opts.role != null ? ` role="${opts.role}"` : "",
+        opts.focusable ? ` tabindex="0"` : "",
         dataAttrs(opts.data),
     ].join("");
     return raw(
@@ -644,6 +652,7 @@ export function itemRow(opts: ItemRowOptions): Html {
             swipe?.right ? bed("right", swipe.right) : "",
             faceEl,
             swipe?.left ? bed("left", swipe.left) : "",
+            opts.overlay ?? "",
         ])}</li>`,
     );
 }

@@ -1270,6 +1270,14 @@ function previewUsualsCatalog() {
             { restockSchedule: "monthly", restockPaused: true },
         ),
     ];
+    // Foods that are not usuals yet: what the Add a usual sheet lists.
+    for (const [id, name] of [
+        ["f-butter", "Butter"],
+        ["f-sourdough", "Sourdough bread"],
+        ["f-spinach", "Spinach"],
+    ] as const) {
+        catalog.push(food(id, name, null));
+    }
     return { catalog, usual: usualProductRows({ foods: catalog }) };
 }
 
@@ -2138,6 +2146,18 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             () =>
                 `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
         );
+    // A Usuals state driven by a script after load, as a person would.
+    const usualsDriven = (
+        steps: string,
+        extra: Parameters<typeof previewKitchenUsualsView>[1] = {},
+    ) =>
+        renderKitchenUsualsV2Page(
+            previewKitchenUsualsView(chrome as never, extra),
+        ).replace(
+            "</body>",
+            () =>
+                `<script>addEventListener("load",()=>setTimeout(()=>{${steps}},400))</script></body>`,
+        );
     return {
         nutrition,
         "nutrition-edit-sheet": nutritionEditSheet,
@@ -2230,8 +2250,89 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             `document.querySelector("#fd-grocery-line-g4 .fd-list-group > li:nth-child(2) [data-fd-menu-trigger]").click()`,
             { openLineId: "g4" },
         ),
+        // Usuals (frames 395819, 397013): Eggs run low and say so in the
+        // warning tone, Greek yogurt is on the list.
         "kitchen-usuals": renderKitchenUsualsV2Page(
             previewKitchenUsualsView(chrome as never),
+        ),
+        // The store filter pull-down (frame 395819's filter) with both stores ticked.
+        "kitchen-usuals-filter": usualsDriven(
+            `[...document.querySelectorAll('[data-anchor="filter"] [data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
+            { selectedStoreIds: ["s-costco", "s-tj"] },
+        ),
+        // The tab row's ⋯ (Select), then picking and the Remove asking in place.
+        "kitchen-usuals-menu": usualsDriven(
+            `[...document.querySelectorAll('[aria-label="Usuals options"][data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
+        ),
+        "kitchen-usuals-select": usualsDriven(
+            `document.querySelector('[data-fd-select-toggle="usuals"]').click();for(const id of ["u-oil","u-coffee"])document.querySelector("#fd-usual-row-"+id+" .fd-item-row__face").click()`,
+        ),
+        "kitchen-usuals-remove": usualsDriven(
+            `document.querySelector('[data-fd-select-toggle="usuals"]').click();for(const id of ["u-oil","u-coffee"])document.querySelector("#fd-usual-row-"+id+" .fd-item-row__face").click();for(const b of document.querySelectorAll("[data-fd-select-ask]"))b.click()`,
+        ),
+        // Edit a usual (frame 395980) and the Restock sheet (397529).
+        "kitchen-usual-edit": renderKitchenUsualsV2Page(
+            previewKitchenUsualsView(chrome as never, {
+                openFoodId: "u-milk",
+            }),
+        ),
+        "kitchen-usual-restock": renderKitchenUsualsV2Page(
+            previewKitchenUsualsView(chrome as never, {
+                openFoodId: "u-eggs",
+                openRestock: true,
+            }),
+        ),
+        // The sheet's header ⋯ with Remove asking in place.
+        "kitchen-usual-remove": usualsDriven(
+            `document.querySelector("#fd-usual-u-milk .fd-sheet__menu [data-fd-menu-trigger]").click();document.querySelector("#fd-usual-u-milk [data-fd-menu-arm]").click()`,
+            { openFoodId: "u-milk" },
+        ),
+        // The product picker (frame 400123), over the usual's sheet.
+        "kitchen-usual-picker": usualsDriven(
+            `document.getElementById("fd-usual-u-milk-product").showModal()`,
+            { openFoodId: "u-milk" },
+        ),
+        // The unit pull-down inside the sheet.
+        "kitchen-usual-unit-menu": usualsDriven(
+            `document.querySelector('#fd-usual-u-milk [data-fd-menu-field][name="usual_unit"]').closest("[data-fd-menu]").querySelector("[data-fd-menu-trigger]").click()`,
+            { openFoodId: "u-milk" },
+        ),
+        // Add a usual (frame 399135), Type it (399655), and with no camera.
+        "kitchen-usuals-add": renderKitchenUsualsV2Page(
+            previewKitchenUsualsView(chrome as never, {
+                add: { tab: "search" },
+            }),
+        ),
+        "kitchen-usuals-add-type": renderKitchenUsualsV2Page(
+            previewKitchenUsualsView(chrome as never, {
+                add: {
+                    tab: "type",
+                    type: {
+                        values: {
+                            name: "Oat milk",
+                            basis: "per_100ml",
+                            calories: "46",
+                            protein_g: "1",
+                            carbs_g: "6.7",
+                            fat_g: "1.5",
+                            usual_amount: "64",
+                            usual_unit: "fl oz",
+                        },
+                    },
+                },
+            }),
+        ),
+        "kitchen-usuals-add-camera-off": renderKitchenUsualsV2Page(
+            previewKitchenUsualsView(
+                {
+                    ...(chrome as object),
+                    flags: {
+                        ...(chrome as { flags: object }).flags,
+                        barcodeCamera: false,
+                    },
+                } as never,
+                { add: { tab: "search" } },
+            ),
         ),
         // Eggs run low (frame 396429): the row says so under its name.
         "kitchen-fridge-low": fridgePage({
@@ -2247,17 +2348,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             week: previewWeekPlan(),
             notices: previewOneTapNotices(),
         }),
-        "kitchen-usual-edit": renderKitchenUsualsV2Page(
-            previewKitchenUsualsView(chrome as never, {
-                openFoodId: "u-milk",
-            }),
-        ),
-        "kitchen-usual-restock": renderKitchenUsualsV2Page(
-            previewKitchenUsualsView(chrome as never, {
-                openFoodId: "u-eggs",
-                openRestock: true,
-            }),
-        ),
         recipes: recipesListV2({ week: previewWeekPlan() }),
         "recipes-favourites": renderRecipesListV2Page({
             chrome,
@@ -3300,6 +3390,9 @@ for (const theme of ["light", "dark"] as const) {
         `grocery-put-away-${theme}`,
         `kitchen-usual-edit-${theme}`,
         `kitchen-usual-restock-${theme}`,
+        `kitchen-usuals-add-${theme}`,
+        `kitchen-usuals-add-type-${theme}`,
+        `kitchen-usuals-add-camera-off-${theme}`,
         `settings-store-delete-${theme}`,
         `settings-store-delete-only-${theme}`,
     );

@@ -64,7 +64,6 @@ import * as actualDbSocialReaders from "../../db/social-readers.js";
 import * as actualDbFetchMemory from "../../db/fetch-memory.js";
 import { createMemoryFetchMemoryStore } from "../../domain/fetch-memory.js";
 import { resetFlagsForTests } from "../../flags.js";
-import { USUALS_INTRO } from "../pages/v2/kitchen-usuals.js";
 import { decodeToastFlash } from "../components/toast.js";
 
 process.env.OAUTH_CLIENT_SECRET ||= "test-client-secret";
@@ -1423,7 +1422,6 @@ describe("kitchen usuals", () => {
         const html = await res.text();
         expect(html).toContain("fd-kitchen-usuals-page");
         expect(html).not.toContain("usual-product-add");
-        expect(html).toContain(USUALS_INTRO);
         expect(html).toContain("fd-kitchen-tabs");
     });
 
@@ -1840,7 +1838,7 @@ describe("add a usual routes", () => {
 
     test("scan of an Open Food Facts product offers the matching food as a suggestion", async () => {
         const cream = await plain("Cream");
-        await plain("Flour");
+        const flour = await plain("Flour");
         db.barcodeFoods[HALF_CODE] = heavyCream();
         const res = await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`);
         expect(res.status).toBe(200);
@@ -1849,7 +1847,13 @@ describe("add a usual routes", () => {
         expect(html).toMatch(
             new RegExp(`name="food_choice" value="${cream.id}" checked`),
         );
-        expect(html).not.toContain("Flour</span>");
+        // Foods that do not match are not offered for the scanned product
+        // (Flour is still listed, under Search, as a food to add).
+        const scan = html.slice(
+            html.indexOf('data-fd-usual-add-panel="scan"'),
+            html.indexOf('data-fd-usual-add-panel="search"'),
+        );
+        expect(scan).not.toContain(`name="food_choice" value="${flour.id}"`);
         // The scanned product is a catalog row now, not yet a usual.
         const rows = await db.foodsStore.listFoods(HH);
         expect(rows.some((f) => f.brand === "Kirkland")).toBe(true);
@@ -1866,9 +1870,7 @@ describe("add a usual routes", () => {
             await get(`/kitchen/usuals/add/barcode/${HALF_CODE}`)
         ).text();
         expect(html).toMatch(/name="food_choice" value="new" checked/);
-        expect(html).toContain(
-            'name="new_food_name" autocomplete="off" value="Heavy Cream"',
-        );
+        expect(html).toMatch(/name="new_food_name"[^>]*value="Heavy Cream"/);
         resetFlagsForTests();
     });
 
@@ -1969,9 +1971,9 @@ describe("add a usual routes", () => {
         const html = await res.text();
         expect(html).toContain("No product found for this barcode.");
         expect(html).toContain('name="barcode" value="0123456789012"');
-        expect(html).toMatch(
-            /data-fd-usual-add-tab="type"[^>]*aria-selected="true"/,
-        );
+        // Type it is the view that shows; Search is hidden.
+        expect(html).not.toMatch(/data-fd-usual-add-panel="type"[^>]*hidden/);
+        expect(html).toMatch(/data-fd-usual-add-panel="search"[^>]*hidden/);
         resetFlagsForTests();
     });
 
@@ -2140,8 +2142,8 @@ describe("add a usual routes", () => {
         const flour = await plain("Flour");
         const listed = await (await get("/kitchen/usuals?q=flo")).text();
         expect(listed).toContain(`name="product_id" value="${flour.id}"`);
-        expect(listed).toMatch(
-            /data-fd-usual-add-tab="search"[^>]*aria-selected="true"/,
+        expect(listed).not.toMatch(
+            /data-fd-usual-add-panel="search"[^>]*hidden/,
         );
         const res = await post("/kitchen/usuals/add/product", {
             product_id: flour.id,
@@ -2346,11 +2348,14 @@ describe("add a usual routes", () => {
         });
         expect(res.status).toBe(400);
         const html = await res.text();
-        expect(html).toMatch(
-            new RegExp(`name="usual_store_id" value="${costco.id}" checked`),
+        // The store and unit ride in their pull-downs' fields.
+        expect(html).toContain(
+            `<input type="hidden" name="usual_store_id" value="${costco.id}" data-fd-menu-field>`,
         );
         expect(html).toMatch(/name="usual_amount" value="12"/);
-        expect(html).toMatch(/<option value="each" selected>/);
+        expect(html).toContain(
+            '<input type="hidden" name="usual_unit" value="each" data-fd-menu-field>',
+        );
         resetFlagsForTests();
     });
 
@@ -2417,9 +2422,9 @@ describe("add a usual routes", () => {
         expect(html).toContain('value="Oat milk"');
         expect(html).toContain('name="barcode" value="0123456789012"');
         expect(html).toMatch(/name="basis" value="per_100ml" checked/);
-        expect(html).toMatch(
-            /data-fd-usual-add-tab="type"[^>]*aria-selected="true"/,
-        );
+        // Type it is the view that shows; Search is hidden.
+        expect(html).not.toMatch(/data-fd-usual-add-panel="type"[^>]*hidden/);
+        expect(html).toMatch(/data-fd-usual-add-panel="search"[^>]*hidden/);
         expect(toastOf(res)).toBeNull();
         expect((await db.foodsStore.listFoods(HH)).length).toBe(0);
         resetFlagsForTests();

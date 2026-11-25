@@ -1,4 +1,4 @@
-// Kitchen page scripts: the Fridge's Use soon cards, the Add searches of the Fridge and Groceries, the Expires chips, the usual rows, and the Add a usual tabs. The row sheets open from `[data-fd-sheet-row]` (today.js).
+// Kitchen page scripts: the Fridge's Use soon cards, the Add searches of the Fridge and Groceries, the Expires chips, the Usuals' unit, product and Add a usual pieces. The row sheets open from `[data-fd-sheet-row]` (today.js).
 function openSheet(id) {
     const dialog = document.getElementById(id);
     if (!dialog || typeof dialog.showModal !== "function" || dialog.open)
@@ -37,6 +37,15 @@ const ADD_SEARCHES = [
         rowAttr: "data-fd-grocery-usual",
         none: "[data-fd-grocery-none]",
     },
+    // Add a usual: the box narrows the foods listed; Enter searches them all.
+    {
+        input: "#fd-usual-add-q",
+        name: "#fd-usual-add-none-name",
+        rows: "[data-fd-usual-food]",
+        rowAttr: "data-fd-usual-food",
+        none: "[data-fd-usual-none]",
+        serverSearch: true,
+    },
 ];
 
 function initAddSearch(root) {
@@ -68,6 +77,22 @@ function initAddSearch(root) {
                 });
                 const none = sheet.querySelector(spec.none);
                 if (none) none.hidden = q === "" || shown > 0;
+                // Only the first foods are listed: when none of them match and
+                // more exist, ask the server, which searches them all.
+                if (spec.serverSearch) {
+                    clearTimeout(input._fdServerSearch);
+                    if (
+                        q !== "" &&
+                        shown === 0 &&
+                        sheet.querySelector("[data-fd-usual-more]")
+                    ) {
+                        input._fdServerSearch = setTimeout(() => {
+                            if (input.value.trim() !== "") {
+                                input.form?.requestSubmit();
+                            }
+                        }, 400);
+                    }
+                }
             });
         });
     });
@@ -92,32 +117,33 @@ function initExpires(root) {
     });
 }
 
-function syncUsualUnitLabels(root) {
-    root.querySelectorAll("[data-fd-usual-unit]").forEach((select) => {
-        if (select.dataset.fdUsualUnitInit === "1") return;
-        select.dataset.fdUsualUnitInit = "1";
-        const formId = select.getAttribute("form");
-        const form = formId
-            ? document.getElementById(formId)
-            : select.closest("form");
-        const unitEl = form?.querySelector(".fd-stepper__unit");
-        if (!unitEl) return;
-        const hiddenId = select.getAttribute("data-fd-usual-unit-target");
-        const hidden = hiddenId ? document.getElementById(hiddenId) : null;
-        const amount = form?.querySelector('input[name="usual_amount"]');
-        const sync = () => {
-            const opt = select.options[select.selectedIndex];
-            if (opt) {
-                // "No amount" sends neither amount nor unit.
-                unitEl.textContent =
-                    opt.value === "" ? "" : (opt.textContent ?? "");
-                if (hidden) hidden.value = opt.value;
-                if (amount) amount.disabled = opt.value === "";
-            }
-        };
-        sync();
-        select.addEventListener("change", sync);
-    });
+// The unit pull-down of a usual's amount names the stepper's unit; "No amount"
+// sends neither an amount nor a unit.
+function syncUsualUnit(field) {
+    const form = field.closest("form");
+    const unitEl = form?.querySelector(".fd-stepper-control__unit");
+    const amount = form?.querySelector('input[name="usual_amount"]');
+    const checked = field
+        .closest("[data-fd-menu]")
+        ?.querySelector('[aria-checked="true"] .fd-menu__label');
+    const value = field.value;
+    if (unitEl) {
+        // "No amount" leaves the figure bare.
+        unitEl.textContent =
+            value === "" ? "" : (checked?.textContent ?? value);
+    }
+    if (amount) amount.disabled = value === "";
+}
+
+function initUsualUnits(root) {
+    root.querySelectorAll('[data-fd-menu-field][name="usual_unit"]').forEach(
+        (field) => {
+            if (field.dataset.fdUsualUnitInit === "1") return;
+            field.dataset.fdUsualUnitInit = "1";
+            syncUsualUnit(field);
+            field.addEventListener("change", () => syncUsualUnit(field));
+        },
+    );
 }
 
 // The Product row shows the product picked in its picker before Save.
@@ -130,46 +156,80 @@ function syncUsualProductRows(root) {
         radio.addEventListener("change", () => {
             const picker = radio.closest("dialog");
             if (!picker?.id || !radio.checked) return;
-            const meta = document.querySelector(
-                `[commandfor="${CSS.escape(picker.id)}"] .fd-kitchen-sheet-row__meta`,
+            const value = document.querySelector(
+                `[commandfor="${CSS.escape(picker.id)}"] .fd-item-row__value`,
             );
-            const label = radio.closest("label")?.textContent?.trim();
-            if (meta && label) meta.textContent = label;
+            const label = radio
+                .closest(".fd-item-row")
+                ?.querySelector(".fd-item-row__title")
+                ?.textContent?.trim();
+            if (value && label) value.textContent = label;
         });
     });
 }
 
-function initUsualRows(root) {
-    root.querySelectorAll("[data-fd-usual-row]").forEach((row) => {
-        if (row.dataset.fdUsualRowInit === "1") return;
-        row.dataset.fdUsualRowInit = "1";
-        const sheetId = row.getAttribute("data-sheet-id");
-        if (!sheetId) return;
-        const open = () => openSheet(sheetId);
-        row.addEventListener("click", (e) => {
-            if (e.target.closest("button, form, a.fd-swipe-btn")) return;
-            e.preventDefault();
-            open();
-        });
-        row.addEventListener("keydown", (e) => {
-            if (e.target !== row) return;
-            if (e.key === "Enter" || e.key === " ") {
-                e.preventDefault();
-                open();
-            }
-        });
+// The picker's search box narrows the products listed as it is typed.
+function initUsualProductSearch(root) {
+    root.querySelectorAll("[data-fd-usual-product-search] input").forEach(
+        (input) => {
+            if (input.dataset.fdProductSearchInit === "1") return;
+            input.dataset.fdProductSearchInit = "1";
+            const sheet = input.closest("dialog");
+            input.addEventListener("input", () => {
+                const q = input.value.trim().toLowerCase();
+                sheet
+                    ?.querySelectorAll("[data-fd-usual-product]")
+                    .forEach((row) => {
+                        row.hidden =
+                            q !== "" &&
+                            !(
+                                row.getAttribute("data-fd-usual-product") || ""
+                            ).includes(q);
+                    });
+            });
+            // The box is not a form: Enter must not submit the sheet's page.
+            input.addEventListener("keydown", (event) => {
+                if (event.key === "Enter") event.preventDefault();
+            });
+        },
+    );
+}
+
+// Add a usual: Search your foods and Type it are two views of one sheet. The
+// server renders the right one showing and the others `hidden`; the quick
+// actions swap them. (Scan a barcode opens the scanner, not a view.)
+// Restock: "Weeks between" shows only while "Every N weeks" is chosen. With no
+// script it always shows, and the form posts the same fields either way.
+function syncRestockWeeks(form) {
+    const box = form.querySelector("[data-fd-restock-weeks]");
+    const chosen = form.querySelector('input[name="restock_schedule"]:checked');
+    if (box) box.hidden = chosen?.value !== "every_n_weeks";
+}
+
+function initRestockWeeks(root) {
+    root.querySelectorAll("form").forEach((form) => {
+        if (form.querySelector("[data-fd-restock-weeks]"))
+            syncRestockWeeks(form);
     });
 }
 
-// Add a usual: Scan, Search and Type it are tabs of one sheet. The server
-// renders the right one selected and the others `hidden`; this swaps them.
+document.addEventListener("change", (event) => {
+    const radio = event.target?.closest?.('input[name="restock_schedule"]');
+    const form = radio?.closest("form");
+    if (form) syncRestockWeeks(form);
+});
+
 const USUAL_ADD_TAB = "[data-fd-usual-add-tab]";
 
 function selectUsualAddTab(dialog, tab) {
     dialog.querySelectorAll(USUAL_ADD_TAB).forEach((button) => {
         const on = button.getAttribute("data-fd-usual-add-tab") === tab;
-        button.setAttribute("aria-selected", on ? "true" : "false");
-        button.setAttribute("tabindex", on ? "0" : "-1");
+        if (button.hasAttribute("aria-pressed"))
+            button.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    // Type it shows its form alone; Back (a tab button for Search) restores the tiles.
+    dialog.querySelectorAll("[data-fd-usual-add-tiles]").forEach((tiles) => {
+        tiles.hidden = tab === "type";
     });
     dialog.querySelectorAll("[data-fd-usual-add-panel]").forEach((panel) => {
         panel.hidden = panel.getAttribute("data-fd-usual-add-panel") !== tab;
@@ -183,20 +243,73 @@ document.addEventListener("click", (event) => {
     selectUsualAddTab(dialog, button.getAttribute("data-fd-usual-add-tab"));
 });
 
-// Arrow keys move between the tabs, as a tablist does.
-document.addEventListener("keydown", (event) => {
-    if (event.key !== "ArrowRight" && event.key !== "ArrowLeft") return;
-    const current = event.target?.closest?.(USUAL_ADD_TAB);
-    const dialog = current?.closest("dialog");
-    if (!current || !dialog) return;
-    const tabs = Array.from(dialog.querySelectorAll(USUAL_ADD_TAB));
-    const step = event.key === "ArrowRight" ? 1 : -1;
-    const next =
-        tabs[(tabs.indexOf(current) + step + tabs.length) % tabs.length];
-    if (!next) return;
-    event.preventDefault();
-    selectUsualAddTab(dialog, next.getAttribute("data-fd-usual-add-tab"));
-    next.focus();
+// Add a usual offers the usual amount of the food being added, so adding a
+// food that already has one never changes it unseen. A food picked from the
+// scan's choices, or a name typed that a food already has, fills the amount and
+// unit; a new food starts at one each. Once the person edits either, it stays.
+const PURCHASE_TOUCHED = "fdUsualPurchaseTouched";
+
+function setUsualPurchase(form, amount, unit) {
+    const field = form.querySelector('[data-fd-menu-field][name="usual_unit"]');
+    const input = form.querySelector('input[name="usual_amount"]');
+    if (!field || !input || form.dataset[PURCHASE_TOUCHED]) return;
+    const menu = field.closest("[data-fd-menu]");
+    const item = menu?.querySelector(
+        `[data-fd-menu-value="${CSS.escape(unit)}"]`,
+    );
+    if (item) {
+        menu.querySelectorAll("[data-fd-menu-value]").forEach((other) => {
+            other.setAttribute(
+                "aria-checked",
+                other === item ? "true" : "false",
+            );
+        });
+        const shown = menu.querySelector(".fd-item-row__value");
+        const label = item.querySelector(".fd-menu__label");
+        if (shown && label) shown.textContent = label.textContent;
+    }
+    field.value = unit;
+    input.value = amount;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    field.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+document.addEventListener("input", (event) => {
+    if (!event.isTrusted) return;
+    const target = event.target;
+    if (target?.matches?.('input[name="usual_amount"]')) {
+        const form = target.closest("form");
+        if (form) form.dataset[PURCHASE_TOUCHED] = "1";
+    }
+});
+
+document.addEventListener("click", (event) => {
+    if (!event.isTrusted) return;
+    const target = event.target;
+    const form = target?.closest?.("form");
+    if (!form?.querySelector('input[name="usual_amount"]')) return;
+    if (
+        target.closest(".fd-stepper-control") ||
+        target.closest("[data-fd-menu]")?.querySelector('[name="usual_unit"]')
+    ) {
+        form.dataset[PURCHASE_TOUCHED] = "1";
+    }
+});
+
+function applyChoiceAmount(radio) {
+    const row = radio.closest("[data-fd-usual-amount]");
+    const form = radio.closest("form");
+    if (!row || !form || !radio.checked) return;
+    setUsualPurchase(
+        form,
+        row.getAttribute("data-fd-usual-amount") || "",
+        row.getAttribute("data-fd-usual-unit") || "",
+    );
+}
+
+document.addEventListener("change", (event) => {
+    const radio = event.target?.closest?.('input[name="food_choice"]');
+    if (radio) applyChoiceAmount(radio);
 });
 
 // Typing a name for a new food picks "A new food" for the person.
@@ -204,7 +317,28 @@ document.addEventListener("input", (event) => {
     const input = event.target?.closest?.("[data-fd-usual-add-newname]");
     const form = input?.closest("form");
     const radio = form?.querySelector('input[name="food_choice"][value="new"]');
-    if (radio) radio.checked = true;
+    if (radio && !radio.checked) {
+        radio.checked = true;
+        applyChoiceAmount(radio);
+    }
+});
+
+// Type it: a name a food already has brings that food's usual amount.
+document.addEventListener("input", (event) => {
+    const input = event.target?.closest?.('input[name="name"]');
+    const form = input?.closest("form[data-fd-usual-known]");
+    if (!form) return;
+    let known;
+    try {
+        known = JSON.parse(form.getAttribute("data-fd-usual-known") || "{}");
+    } catch {
+        return;
+    }
+    const key = input.value.trim().replace(/\s+/g, " ").toLowerCase();
+    const usual = Object.prototype.hasOwnProperty.call(known, key)
+        ? known[key]
+        : ["1", "each"];
+    setUsualPurchase(form, String(usual[0]), String(usual[1]));
 });
 
 window.FoodableApp.onLoad((root) => {
@@ -217,9 +351,11 @@ window.FoodableApp.onLoad((root) => {
         initExpires(root);
     }
     if (root.querySelector(".fd-kitchen-usuals-page")) {
-        initUsualRows(root);
-        syncUsualUnitLabels(root);
+        initAddSearch(root);
+        initUsualUnits(root);
         syncUsualProductRows(root);
+        initUsualProductSearch(root);
+        initRestockWeeks(root);
     }
 });
 

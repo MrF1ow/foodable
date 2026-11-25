@@ -1,8 +1,9 @@
 /**
  * Select mode on a list: a Select button, then rows with a checkbox each, a
  * "N selected" bar with the list's bulk actions and Cancel, and a confirm sheet
- * for the ones that cannot be undone. One markup for Groceries, Fridge, Usuals
- * and Saved foods & recipes; the rows come from `components/v2/rows.ts`
+ * for the ones that cannot be undone. Saved foods & recipes still use it (the
+ * lists that confirm in place use `selectionBars` below); the rows come from
+ * `components/v2/rows.ts`
  * (`select`), the behaviour from `src/web/client/v2/select-mode.js`.
  *
  * The picked ids are not in the markup. The forms here sit outside the rows,

@@ -26,7 +26,7 @@ watches:
 
 ## Isolated stack (one-off verification)
 
-Shell variables do not survive between tool calls: begin **every** command block with `STACK=<path printed by the first block>; . "$STACK/env"`. `init` creates the cluster, starts it, creates the database and migrates.
+Shell variables do not survive tool calls: begin **every** block with `STACK=<path printed by the first block>; . "$STACK/env"`. `init` creates the cluster, starts it, creates the database and migrates.
 
 ```bash
 free_port() { bun -e 'const s=Bun.listen({hostname:"127.0.0.1",port:0,socket:{open(){},data(){}}});console.log(s.port);s.stop(true)'; }
@@ -54,9 +54,9 @@ curl -s -o /dev/null -w "%{http_code}\n" "http://127.0.0.1:$APP_PORT/"   # 200 =
 
 For row level security, set a throwaway `foodable_app` password (`psql`) and add `DATABASE_APP_URL` (user `foodable_app`).
 
-It binds `0.0.0.0` (LAN): keep runs short. No answer: `$STACK/server.log`. App: `http://127.0.0.1:$APP_PORT`; the first sign-up on an empty database is the owner (`docs/self-hosting.md`, "First-user flow").
+It binds `0.0.0.0` (LAN): keep runs short. Log: `$STACK/server.log`. App: `http://127.0.0.1:$APP_PORT`; the first sign-up on an empty database is the owner (`docs/self-hosting.md`, "First-user flow").
 
-Not `bun run dev`/`start`: `dev` runs `gen:all` (rewrites tracked files) and `--watch`, and its inner `bun` loads `.env`. Run `gen:all` only in a fresh worktree or after login/token changes.
+Not `bun run dev`/`start`: `dev` runs `gen:all` (rewrites tracked files) and `--watch`; its inner `bun` loads `.env`. Run `gen:all` only in a fresh worktree or after login/token changes.
 
 Stop everything:
 
@@ -75,7 +75,7 @@ bun run db:dev status   # "stopped", exit 1
 - **App look:** `bun run preview:app --shots [--only=grocery]`: `-390.png`/`-1440.png` per page in tmp/app-preview. Without it: serves :4787 (`PREVIEW_PORT`), pages `/<name>-<light|dark>.html`; clock, caret pinned.
 - **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`) compares base and branch; exit 1 on a diff. Clean commits are cached in `~/.cache/foodable/preview-diff` (`rm -rf` old).
 - **WebKit:** WPE `MiniBrowser` needs a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH`, `WEBKIT_FORCE_COMPLEX_TEXT=1` and `LD_LIBRARY_PATH` (its `lib`, `sys/lib`, ICU 74).
-- **Barcode scans** hit live Open Food Facts (tests stub it); `barcode-camera` off: `/?camera=off`, `*-camera-off` previews.
+- **Barcode scans** hit live Open Food Facts (tests stub it); `barcode-camera` off: check:nav fixture pages take `?camera=off`, a real server `FOODABLE_FLAGS=barcode-camera:off`; `*-camera-off` previews.
 - **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
 - **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`; `attention` paints a populated inbox. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
 - **App-wide middleware (body limit, CORS):** import `app` from `src/index.ts` (`src/index.test.ts`).
@@ -85,7 +85,7 @@ bun run db:dev status   # "stopped", exit 1
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
 - **Types, lint, format:** `bun run typecheck`, `lint`, `format:check` (`format` fixes). `bun fmt` needs Bun ≥ 1.4.4: put `$(mise where bun@1.4.4)/bin` first on PATH.
 
-`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if that is the user's server, stop and ask. The scenarios (one: no logging for another member) need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
+`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback): **set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if that is the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Settings › Household, sign Grok in. Snapshots need `pg_dump`, `psql` (`PG_BIN`).
 
 ## Never touch
 
@@ -97,4 +97,4 @@ bun run db:dev status   # "stopped", exit 1
 
 ## When this skill is out of date
 
-The `watches:` list in the frontmatter names the files this skill describes. If your change touches one, update this skill in the same PR, or **skill-drift** fails (`bun scripts/conventions/skill-drift.ts`). Skills and CLAUDE.md also have a size budget (`bun scripts/conventions/context-budget.ts`); growing past it needs the `agent-context-increase` label.
+The `watches:` list in the frontmatter names the files this skill describes. If your change touches one, update this skill in the same PR, or **skill-drift** fails (`bun scripts/conventions/skill-drift.ts`). Skills and CLAUDE.md have a size budget (`bun scripts/conventions/context-budget.ts`); growing past it needs the `agent-context-increase` label.

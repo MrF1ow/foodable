@@ -56,6 +56,8 @@ export type MenuItem =
           fields?: Readonly<Record<string, string>>;
           /** The value already chosen: picking it again only closes the menu, posting nothing. */
           current?: boolean;
+          /** What choosing it puts in the menu's `field` (a pull-down inside a form). */
+          value?: string;
       }
     /** Opens a sheet or dialog on the page (Make owner opens its confirm sheet). */
     | {
@@ -172,6 +174,9 @@ function anchoredItem(item: MenuItem, checks: boolean): string {
             if (item.current) {
                 return `<button type="button" class="fd-menu__item" ${state} data-fd-menu-close>${body}</button>`;
             }
+            if (item.value != null) {
+                return `<button type="button" class="fd-menu__item" ${state} data-fd-menu-value="${esc(item.value)}">${body}</button>`;
+            }
             if (item.action != null) {
                 return `<form class="fd-menu__form" method="post" action="${esc(item.action)}">${hiddenFields(item.fields)}<button type="submit" class="fd-menu__item" ${state}>${body}</button></form>`;
             }
@@ -223,6 +228,13 @@ export function menu(opts: {
     filterCount?: number;
     /** The row a `row` menu's trigger draws (required with `anchor: "row"`). */
     row?: { title: string; value: string; subtitle?: string };
+    /**
+     * Makes the menu a pull-down that sets a field of the form around it: a
+     * hidden input of this `name` and `value` rides inside the menu, and a
+     * `checked` item with a `value` puts its value there (and its label in the
+     * row) without leaving the page. `client/v2/menu.js` does it.
+     */
+    field?: { name: string; value: string };
 }): Html {
     const anchor =
         opts.anchor ??
@@ -270,7 +282,21 @@ export function menu(opts: {
                     attrs,
                 });
     const checks = opts.items.some((i) => i.kind === "checked");
+    const field = opts.field
+        ? `<input type="hidden" name="${esc(opts.field.name)}" value="${esc(opts.field.value)}" data-fd-menu-field>`
+        : "";
     return raw(
-        `<div class="${cls("fd-menu fd-menu--anchored", `fd-menu--${anchor}`, opts.className)}" data-fd-menu data-anchor="${anchor}"${dataAttrs(opts.data)}>${trigger}<div class="fd-menu__panel" role="menu" aria-label="${esc(opts.label)}" hidden>${opts.items.map((i) => anchoredItem(i, checks)).join("")}</div></div>`,
+        `<div class="${cls("fd-menu fd-menu--anchored", `fd-menu--${anchor}`, opts.className)}" data-fd-menu data-anchor="${anchor}"${dataAttrs(opts.data)}>${field}${trigger}<div class="fd-menu__panel" role="menu" aria-label="${esc(opts.label)}" hidden>${opts.items.map((i) => anchoredItem(i, checks)).join("")}</div></div>`,
+    );
+}
+
+/**
+ * A row menu in its list item: the pull-down row of a sheet or a settings
+ * list. The menu draws the whole row, so it is the item's only content. Needs
+ * `anchor: "row"`.
+ */
+export function menuRow(opts: Parameters<typeof menu>[0]): Html {
+    return raw(
+        `<li class="fd-item-row">${menu({ ...opts, anchor: "row" })}</li>`,
     );
 }

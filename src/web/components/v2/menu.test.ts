@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { injectedAttributes, XSS, XSS_ESCAPED } from "./test-helpers.js";
-import { menu, type MenuItem } from "./menu.js";
+import { menu, menuRow, type MenuItem } from "./menu.js";
 
 test("menu is a details with a named summary trigger and a labelled group panel", () => {
     const html = menu({
@@ -589,4 +589,39 @@ test("the tick column is a flex box, so the 24 px tick centres on the label's li
     expect(check).toContain("display: flex");
     expect(check).toContain("align-items: center");
     expect(check).not.toContain("display: grid");
+});
+
+test("a pull-down with a field keeps its choice in a hidden input and tags each item with its value", () => {
+    const html = menu({
+        label: "Unit",
+        anchor: "row",
+        row: { title: "Unit", value: "count" },
+        field: { name: "usual_unit", value: "each" },
+        items: [
+            { kind: "checked", label: "count", checked: true, value: "each" },
+            { kind: "checked", label: "No amount", checked: false, value: "" },
+        ],
+    });
+    expect(html).toContain(
+        '<input type="hidden" name="usual_unit" value="each" data-fd-menu-field>',
+    );
+    expect(html).toContain('data-fd-menu-value="each"');
+    expect(html).toContain('data-fd-menu-value=""');
+    // No form is posted: the items are buttons the menu script reads.
+    expect(html).not.toContain("<form");
+});
+
+test("a menu row is the row menu in its list item, and nothing else", () => {
+    const html = String(
+        menuRow({
+            label: "Store",
+            row: { title: "Store", value: "Costco" },
+            items: [{ kind: "checked", label: "Costco", checked: true }],
+        }),
+    );
+    expect(html.startsWith('<li class="fd-item-row"><div class="fd-menu')).toBe(
+        true,
+    );
+    expect(html.endsWith("</div></li>")).toBe(true);
+    expect(html).toContain('data-anchor="row"');
 });

@@ -268,10 +268,12 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
         // app.css for one rule, select-mode.test.ts reads select.css and the v2 token sheets,
         // avatar-sites.test.ts reads settings.css for the Photo card,
         // notifications.test.ts reads layout.css for the inbox gaps and
-        // settings-notifications.test.ts reads settings.css for the sections.
+        // settings-notifications.test.ts reads settings.css for the sections,
+        // kitchen-usuals.test.ts reads kitchen.css for the Add a usual grids and
+        // trends.test.ts reads trends.css for the Calories by day bars.
         {
             when: /^public\/app\//,
-            tests: /^src\/web\/(avatar-sites|components\/field|components\/v2\/[^/]+|pages\/recipes|pages\/v2\/(select-mode|notifications|settings-notifications))\.test\.ts$/,
+            tests: /^src\/web\/(avatar-sites|components\/field|components\/v2\/[^/]+|pages\/recipes|pages\/v2\/(select-mode|notifications|settings-notifications|kitchen-usuals|trends))\.test\.ts$/,
         },
         // turbo-forms.test.ts reads the generated login page.
         {
