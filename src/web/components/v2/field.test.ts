@@ -170,3 +170,34 @@ test("autofocus and input data land on the input, not the wrapper", () => {
         "autofocus",
     );
 });
+
+test("a number box takes its bounds, step and keypad; a date-time box is a type", () => {
+    const num = String(
+        field({
+            id: "p",
+            label: "Protein g",
+            name: "protein_g",
+            type: "number",
+            min: 0,
+            step: 0.1,
+            inputmode: "decimal",
+        }),
+    );
+    expect(num).toContain('type="number"');
+    expect(num).toContain('min="0"');
+    expect(num).toContain('step="0.1"');
+    expect(num).toContain('inputmode="decimal"');
+    expect(
+        String(
+            field({
+                id: "t",
+                label: "Time",
+                name: "logged_at",
+                type: "datetime-local",
+            }),
+        ),
+    ).toContain('type="datetime-local"');
+    expect(
+        String(field({ id: "a", label: "A", name: "a", step: "any" })),
+    ).toContain('step="any"');
+});

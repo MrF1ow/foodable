@@ -474,6 +474,29 @@
     display: none;
 }
 
+/* The link-detected state of the search box (the caller sets
+ * data-link-detected): the link icon and Go in place of the barcode button and
+ * Clear. */
+.fd-sheet__search-icon--link {
+    display: none;
+}
+.fd-sheet__search[data-link-detected] .fd-sheet__search-icon--search {
+    display: none;
+}
+.fd-sheet__search[data-link-detected] .fd-sheet__search-icon--link {
+    display: inline-flex;
+    color: var(--accent-text);
+}
+.fd-sheet__search[data-link-detected] .fd-sheet__search-action {
+    display: none;
+}
+.fd-sheet__search [hidden] {
+    display: none;
+}
+.fd-sheet__search .fd-btn--go {
+    flex: none;
+}
+
 /* ---- Sheet section ---- */
 
 .fd-sheet__section {
@@ -590,9 +613,58 @@
     color: var(--accent-text);
 }
 
+/* The buttons inside a log or scanner sheet's section (a Stepper's round
+ * pair, a link under the results) are the design's, not the old flexing pill.
+ * Other sheets' sections (a store's delete button) keep their own layout. */
+:where(
+        #fd-log-search,
+        #fd-log-amount,
+        #fd-log-quick-cal,
+        #fd-log-weigh-in,
+        #fd-barcode-scan
+    )
+    .fd-sheet__section
+    .fd-btn[data-fd-btn] {
+    flex: none;
+    margin: 0;
+}
+
+.fd-sheet__section .fd-btn--icon[data-fd-btn] {
+    width: var(--control-lg-height);
+    height: var(--control-lg-height);
+    padding: 0;
+    border-radius: var(--radius-pill);
+    color: var(--text-secondary);
+}
+
+.fd-sheet__section .fd-btn--link[data-fd-btn] {
+    height: var(--control-md-height);
+    padding: 0 var(--control-md-padding);
+    border-radius: var(--control-md-radius);
+    background: transparent;
+    color: var(--accent-text);
+    font-size: var(--control-md-text);
+}
+
+/* Go, in the search box: the design's 32 px circle, not a header button. */
+.fd-sheet__search .fd-btn--go[data-fd-btn] {
+    width: var(--control-sm-height);
+    height: var(--control-sm-height);
+    padding: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent-fill);
+    color: var(--accent-on);
+}
+
 @media (min-width: 1024px) {
     :is(.fd-sheet--dialog, .fd-sheet--side) .fd-sheet-panel {
         padding: var(--space-2xl);
+    }
+
+    /* Quick actions sit in a tight row of six on the wide dialog, wrapping
+     * into a second row, as the design draws it. */
+    .fd-sheet--dialog .fd-sheet__section--tiles .fd-sheet__content {
+        grid-template-columns: repeat(6, minmax(0, 1fr));
     }
 
     /* Dialog: a centred card, the width of a quick task (a search sheet is wider). */

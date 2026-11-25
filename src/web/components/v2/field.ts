@@ -27,7 +27,8 @@ export type FieldOptions = {
         | "number"
         | "tel"
         | "url"
-        | "time";
+        | "time"
+        | "datetime-local";
     value?: string;
     placeholder?: string;
     autocomplete?: string;
@@ -39,6 +40,11 @@ export type FieldOptions = {
     maxlength?: number;
     required?: boolean;
     disabled?: boolean;
+    /** A number box's bounds and the step its value must sit on (`"any"` for none). */
+    min?: number;
+    step?: number | "any";
+    /** Phone keyboards: the keypad a number box raises. */
+    inputmode?: "numeric" | "decimal" | "text";
     /** Shown and copyable, not editable (a prompt to copy). */
     readonly?: boolean;
     /** Takes focus when the page renders (a field the person asked to edit). */
@@ -88,6 +94,9 @@ export function field(opts: FieldOptions): Html {
         opts.spellcheck != null ? `spellcheck="${opts.spellcheck}"` : "",
         opts.minlength != null ? `minlength="${opts.minlength}"` : "",
         opts.maxlength != null ? `maxlength="${opts.maxlength}"` : "",
+        opts.min != null ? `min="${opts.min}"` : "",
+        opts.step != null ? `step="${opts.step}"` : "",
+        opts.inputmode != null ? `inputmode="${opts.inputmode}"` : "",
         opts.required ? "required" : "",
         opts.disabled ? "disabled" : "",
         opts.readonly ? "readonly" : "",

@@ -10,7 +10,7 @@
  * - `choiceGroup`: a choice inside a form. Real radio inputs (visually hidden,
  *   still focusable and arrow-key navigable), so it submits with no JS.
  */
-import { cls, esc, raw, safeHref, type Html } from "./html.js";
+import { cls, dataAttrs, esc, raw, safeHref, type Html } from "./html.js";
 
 export type ChipLabel = string | number;
 
@@ -52,6 +52,8 @@ export type ChoiceOption = {
     count?: ChipLabel;
     selected?: boolean;
     disabled?: boolean;
+    /** `data-*` on the label's text (a script that rewrites it, "Today 5:10 PM"). */
+    labelData?: Readonly<Record<string, string>>;
 };
 
 /**
@@ -76,7 +78,7 @@ export function choiceGroup(opts: {
                 option.count != null && option.count !== ""
                     ? `<span class="fd-chip__count">${esc(option.count)}</span>`
                     : "";
-            return `<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" name="${esc(opts.name)}" value="${esc(option.value)}"${option.selected ? " checked" : ""}${option.disabled ? " disabled" : ""}${opts.required ? " required" : ""}><span class="fd-chip__face"><span class="fd-chip__label">${esc(option.label)}</span>${count}</span></label>`;
+            return `<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" name="${esc(opts.name)}" value="${esc(option.value)}"${option.selected ? " checked" : ""}${option.disabled ? " disabled" : ""}${opts.required ? " required" : ""}><span class="fd-chip__face"><span class="fd-chip__label"${dataAttrs(option.labelData)}>${esc(option.label)}</span>${count}</span></label>`;
         })
         .join("");
     const legend = opts.showLegend

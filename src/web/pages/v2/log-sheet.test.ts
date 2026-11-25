@@ -6,8 +6,8 @@ import {
     FD_LOG_WEIGH_IN_SHEET_ID,
     isStepValid,
     logAmountUnitChips,
+    logResultRow,
     renderLogSheets,
-    todayTimeLabel24,
     weighInLastSubtitle,
 } from "./log-sheet.js";
 
@@ -29,17 +29,63 @@ describe("renderLogSheets", () => {
         const html = renderLogSheets({ timezone: "UTC" });
         const ids = [...html.matchAll(/\sid="([^"]+)"/g)].map((m) => m[1]);
         expect(ids.length).toBe(new Set(ids).size);
-        const time = html.match(/<input class="fd-log-time-input"[^>]*>/)![0];
+        const time = html.match(/<input[^>]*type="datetime-local"[^>]*>/)![0];
         expect(time).toContain(" disabled");
-        expect(time).toContain(" hidden");
+        expect(html).toContain("data-fd-log-time-pick hidden");
     });
 
-    test("search sheet has pill field and ADD TO section", () => {
+    test("every sheet is built from the sheet parts and places as a dialog", () => {
         const html = renderLogSheets({ timezone: "UTC" });
-        expect(html).toContain("fd-log-search-field");
-        expect(html).toContain("Search foods, recipes, barcodes");
-        expect(html).toContain("ADD TO");
-        expect(html).toContain("Recent");
+        for (const id of [
+            FD_LOG_SEARCH_SHEET_ID,
+            FD_LOG_AMOUNT_SHEET_ID,
+            FD_LOG_QUICK_CAL_SHEET_ID,
+            FD_LOG_WEIGH_IN_SHEET_ID,
+        ]) {
+            expect(html).toMatch(
+                new RegExp(
+                    `<dialog class="fd-sheet fd-sheet--dialog[^"]*" id="${id}"`,
+                ),
+            );
+        }
+        // Nothing of the old sheet: no `fd-sheet-sub`, no `fd-sheet--edit`, no
+        // hand-written chips or tiles.
+        expect(html).not.toContain("fd-sheet--edit");
+        expect(html).not.toContain("fd-sheet-sub");
+        expect(html).not.toContain("fd-log-meals");
+        expect(html).not.toContain("fd-quick-tile");
+        expect(html).not.toContain("fd-log-search-field");
+        // And no menu, so none can render empty.
+        expect(html).not.toContain('aria-haspopup="menu"');
+    });
+
+    test("search sheet is a search header over ADD TO, Recent and Quick", () => {
+        const html = renderLogSheets({ timezone: "UTC" });
+        const search = html.slice(0, html.indexOf(FD_LOG_AMOUNT_SHEET_ID));
+        expect(search).toContain("fd-sheet--search");
+        expect(search).toContain("fd-sheet__header--search");
+        expect(search).toContain('id="fd-log-search-q"');
+        expect(search).toContain(
+            'placeholder="Search foods, recipes, barcodes"',
+        );
+        for (const label of ["Add to", "Recent", "Quick"]) {
+            expect(search).toContain(
+                `<h3 class="fd-sheet__label">${label}</h3>`,
+            );
+        }
+        // The sheet's title is only its accessible name, and it has no subtitle.
+        expect(search).toContain(
+            '<h2 class="fd-sr" id="fd-log-search-title">Search</h2>',
+        );
+        expect(search).not.toContain("Adding to");
+        expect(search).not.toContain("Log food");
+    });
+
+    test("the search header offers Go for a pasted recipe link, hidden until one is", () => {
+        const html = renderLogSheets({ timezone: "UTC" });
+        expect(html).toMatch(/<button[^>]*data-fd-log-import-go[^>]*hidden/);
+        expect(html).toContain('action="/recipes/import"');
+        expect(html).toContain("data-fd-log-import");
     });
 
     test("amount stepper accepts default 100 g with step any", () => {
@@ -74,7 +120,8 @@ describe("renderLogSheets", () => {
         expect(html).toContain('value="g"');
         expect(html).toContain('value="ml"');
         expect(html).not.toContain('value="each"');
-        expect(html).toContain("fd-stepper");
+        expect(html).toContain("fd-stepper-control");
+        expect(html).toContain("fd-segmented--small");
         expect(html).toContain("data-fd-log-submit");
         expect(html).not.toContain(">Cancel</button>");
     });
@@ -109,7 +156,7 @@ describe("renderLogSheets", () => {
         expect(html).toContain("per 100 ml");
         expect(html).not.toContain("per 100 g");
         // The kcal tile: one 30 ml portion is 40 kcal.
-        expect(html).toMatch(/kcal<\/dt><dd class="fd-tile__value">40</);
+        expect(html).toMatch(/kcal<\/dt><dd class="fd-macro-tile__value">40</);
     });
 
     test("a per-100 ml food without a serving defaults to 100 ml", () => {
@@ -124,7 +171,9 @@ describe("renderLogSheets", () => {
         });
         const amountInput = html.match(/id="fd-log-amount-value"[^>]*>/)?.[0];
         expect(amountInput).toContain('value="100"');
-        expect(html).toMatch(/value="ml"[^>]*checked/);
+        // One unit has nothing to choose: it posts from a hidden field.
+        expect(html).toContain('<input type="hidden" name="unit" value="ml">');
+        expect(html).not.toContain("fd-segmented");
         expect(html).toMatch(/data-fd-log-portion hidden>/);
     });
 
@@ -138,8 +187,23 @@ describe("renderLogSheets", () => {
             },
         });
         expect(html).toContain('value="100"');
-        expect(html).toMatch(/value="g"[^>]*checked/);
+        expect(html).toContain('<input type="hidden" name="unit" value="g">');
         expect(html).toMatch(/data-fd-log-portion hidden>/);
+    });
+
+    test("a food with a piece weight labels the each segment with it", () => {
+        const html = renderLogSheets({
+            timezone: "UTC",
+            amount: {
+                name: "Chicken breast",
+                food_id: "f-breast",
+                grams_per_each: 174,
+                unit_hints: ["g", "each"],
+            },
+        });
+        expect(html).toContain(">g</span></label>");
+        expect(html).toContain(">each · 174 g</span></label>");
+        expect(html).toContain('value="each"');
     });
 
     test("a per-100 g food with a serving in g defaults to 1 portion", () => {
@@ -165,7 +229,7 @@ describe("renderLogSheets", () => {
     test("the Quick grid has Cook a recipe and Add to groceries, and no Photo tile", () => {
         const html = renderLogSheets({ timezone: "UTC" });
         expect(html).toContain(
-            '<a class="fd-quick-tile" href="/recipes"><span class="fd-quick-tile__icon" aria-hidden="true">',
+            '<a class="fd-quick-action" href="/recipes"><span class="fd-quick-action__box">',
         );
         expect(html).toContain(">Cook a recipe</span>");
         expect(html).toContain('href="/kitchen/groceries?add=1"');
@@ -182,6 +246,22 @@ describe("renderLogSheets", () => {
         }
     });
 
+    test("Water +250 ml and the sheet openers post and open what they did", () => {
+        const html = renderLogSheets({ timezone: "UTC" });
+        const water = html.match(
+            /<form class="fd-log-quick-form" method="post" action="\/log\/water">[\s\S]*?<\/form>/,
+        )![0];
+        expect(water).toContain('name="amount_ml" value="250"');
+        expect(water).toContain('name="return_to" value="/"');
+        expect(water).toContain('type="submit"');
+        expect(html).toContain(
+            `data-fd-open-sheet="${FD_LOG_QUICK_CAL_SHEET_ID}"`,
+        );
+        expect(html).toContain(
+            `data-fd-open-sheet="${FD_LOG_WEIGH_IN_SHEET_ID}"`,
+        );
+    });
+
     test("recipe amount sheet is portion-only", () => {
         const html = renderLogSheets({
             timezone: "UTC",
@@ -195,12 +275,17 @@ describe("renderLogSheets", () => {
         expect(html).not.toContain('value="g"');
     });
 
-    test("search sheet titles the dialog and shows which meal is selected", () => {
-        const html = renderLogSheets({ timezone: "UTC" });
-        const searchOnly = html.slice(0, html.indexOf(FD_LOG_AMOUNT_SHEET_ID));
-        expect(searchOnly).toContain(">Log food</h2>");
-        expect(searchOnly).toMatch(/fd-sheet-sub[^>]*>Adding to /);
-        expect(searchOnly).toContain("fd-sheet-close");
+    test("the amount sheet's title and subtitle are the food, and a close button", () => {
+        const html = renderLogSheets({
+            timezone: "UTC",
+            amount: { name: "Milk", food_id: "f1", unit_hints: ["g"] },
+        });
+        const amount = html.slice(
+            html.indexOf(`id="${FD_LOG_AMOUNT_SHEET_ID}"`),
+        );
+        expect(amount).toContain(">Milk</h2>");
+        expect(amount).toContain('class="fd-sheet__subtitle"');
+        expect(amount).toContain('commandfor="fd-log-amount"');
     });
 
     test("preview amount macros use fixture nutrition", () => {
@@ -218,9 +303,9 @@ describe("renderLogSheets", () => {
                 fat_per_100g: 3.3,
             },
         });
-        expect(html).toContain(">248</");
-        expect(html).toContain(">47<span");
-        expect(html).toContain(">5<span");
+        expect(html).toContain('fd-macro-tile__value">248<');
+        expect(html).toContain('fd-macro-tile__value">47 g<');
+        expect(html).toContain('fd-macro-tile__value">5 g<');
     });
 
     test("shell amount sheet starts with no unit radios", () => {
@@ -228,8 +313,9 @@ describe("renderLogSheets", () => {
         const amountStart = html.indexOf(FD_LOG_AMOUNT_SHEET_ID);
         const amountEnd = html.indexOf(FD_LOG_QUICK_CAL_SHEET_ID, amountStart);
         const amount = html.slice(amountStart, amountEnd);
-        expect(amount).toContain("data-fd-log-unit-chips");
+        expect(amount).toContain("data-fd-log-units");
         expect(amount).not.toMatch(/name="unit"[^>]*value="/);
+        expect(amount).not.toMatch(/value="[^"]*"[^>]*name="unit"/);
     });
 
     test("live shell omits preview recent demo names", () => {
@@ -252,7 +338,7 @@ describe("renderLogSheets", () => {
             },
         });
         const sub = html.match(
-            /id="fd-log-amount"[\s\S]*?class="fd-sheet-sub"[^>]*>([^<]*)</,
+            /id="fd-log-amount"[\s\S]*?class="fd-sheet__subtitle"[^>]*>([^<]*)</,
         )?.[1];
         expect(sub).toBe("Generic");
     });
@@ -271,14 +357,13 @@ describe("renderLogSheets", () => {
             },
         });
         const amount = html.slice(html.indexOf(FD_LOG_AMOUNT_SHEET_ID));
-        expect(amount).toContain(
-            'name="fd_log_time_mode" value="pick" checked',
-        );
+        expect(amount).toMatch(/name="fd_log_time_mode" value="pick" checked/);
         expect(amount).not.toMatch(
             /name="fd_log_time_mode" value="now"[^>]*checked/,
         );
         expect(amount).toContain('name="logged_at"');
         expect(amount).not.toContain('name="logged_at" value=""');
+        expect(amount).toContain("data-fd-log-time-pick>");
     });
 
     test("preview empty mode still shows fixture recents", () => {
@@ -296,8 +381,7 @@ describe("renderLogSheets", () => {
             previewSearch: "results",
             previewQuery: "chick",
         });
-        expect(html).toContain("fd-log-online");
-        expect(html).toMatch(/data-fd-log-online[^>]*(?<! hidden)/);
+        expect(html).toMatch(/<button[^>]*data-fd-log-online(?![^>]*hidden)/);
         expect(html).toContain("Search online");
     });
 
@@ -307,10 +391,12 @@ describe("renderLogSheets", () => {
             previewSearch: "results",
             previewQuery: "chick",
         });
-        expect(html).toContain("fd-log-filters");
+        // The filter chips are a radio group of four.
+        expect(html.match(/name="fd_log_filter"/g)).toHaveLength(4);
         expect(html).toContain("Chicken breast, grilled");
-        expect(html).toContain("fd-row--search");
+        expect(html).toContain('class="fd-item-row"');
         expect(html).toContain('role="listbox"');
+        expect(html).toContain('role="option"');
     });
 
     test("water validation error shows in the search sheet", () => {
@@ -330,14 +416,73 @@ describe("renderLogSheets", () => {
             previewSearch: "empty",
             barcodeCamera: true,
         });
-        expect(html).toContain("fd-log-quick-grid");
         expect(html).toContain("Quick calories");
         expect(html).toContain("Water +250 ml");
         expect(html).toContain("Weigh in");
         expect(html).toContain("Scan barcode");
-        const tiles = html.match(/\bclass="fd-quick-tile"/g) ?? [];
+        const tiles = html.match(/\bclass="fd-quick-action"/g) ?? [];
         // Four actions, then Cook a recipe and Add to groceries.
         expect(tiles).toHaveLength(6);
+    });
+
+    describe("search results", () => {
+        const results = () =>
+            renderLogSheets({
+                timezone: "UTC",
+                previewSearch: "results",
+                previewQuery: "chick",
+                barcodeCamera: true,
+            });
+        const rows = (html: string) =>
+            html.match(/<li class="fd-item-row"[\s\S]*?<\/li>/g) ?? [];
+
+        test("a row opens its thing and its plus logs it", () => {
+            const [thighs, alfredo, , soup, wrap] = rows(results());
+            expect(thighs).toContain(
+                '<a class="fd-item-row__anchor" href="/kitchen/fridge?item=s1">',
+            );
+            expect(thighs).toContain("fd-item-row__chevron");
+            expect(thighs).toContain('aria-label="Add Chicken thighs"');
+            expect(thighs).toContain("data-fd-log-pick=");
+            expect(alfredo).toContain('href="/recipes/r-alfredo"');
+            expect(soup).toContain('href="/foods/f-soup"');
+            expect(soup).toContain("fd-score");
+            // A past meal only logs: no link, no chevron, a plus and a pick.
+            expect(wrap).not.toContain("<a ");
+            expect(wrap).not.toContain("fd-item-row__chevron");
+            expect(wrap).toContain("data-fd-log-pick=");
+            expect(wrap).toContain("data-fd-log-row-pick=");
+        });
+
+        test("rows carry no macro line, as the design draws them", () => {
+            expect(results()).not.toContain("fd-macros");
+        });
+
+        test("the sheet ends in the barcode link with the camera on and has none with it off", () => {
+            expect(results()).toContain("Not here? Scan the barcode");
+            const off = renderLogSheets({
+                timezone: "UTC",
+                previewSearch: "results",
+                previewQuery: "chick",
+                barcodeCamera: false,
+            });
+            expect(off).not.toContain("Not here?");
+        });
+
+        test("a row that cannot be logged has a link and no plus", () => {
+            const html = String(
+                logResultRow(
+                    {
+                        name: "Mystery",
+                        subtitle: "Generic",
+                        open: "/foods",
+                        pick: { name: "Mystery" },
+                    },
+                    0,
+                ),
+            );
+            expect(html).toContain("fd-item-row__add");
+        });
     });
 
     describe("Copy yesterday tile", () => {
@@ -376,9 +521,7 @@ describe("renderLogSheets", () => {
 
         test("follows the design order: Scan, Quick calories, Water, Weigh in, Cook, Copy yesterday, Add to groceries", () => {
             const html = withHints(["breakfast"]);
-            const grid = html.match(
-                /<div class="fd-log-quick-grid">([\s\S]*?)<\/div><\/div>/,
-            )![1]!;
+            const grid = html.slice(html.indexOf(">Quick</h3>"));
             const order = [
                 "Scan barcode",
                 "Quick calories",
@@ -390,7 +533,7 @@ describe("renderLogSheets", () => {
             ].map((label) => grid.indexOf(label));
             expect(order.every((i) => i >= 0)).toBe(true);
             expect(order).toEqual([...order].sort((a, b) => a - b));
-            expect(html.match(/\bclass="fd-quick-tile"/g) ?? []).toHaveLength(
+            expect(html.match(/\bclass="fd-quick-action"/g) ?? []).toHaveLength(
                 7,
             );
         });
@@ -413,21 +556,57 @@ describe("renderLogSheets", () => {
             }
         });
 
+        test("with nothing to copy in any meal there is no tile, as in the design's no-yesterday frame", () => {
+            const html = withHints([]);
+            expect(html).not.toContain("Copy yesterday");
+            expect(html).not.toContain("/log/copy-yesterday");
+            expect(html.match(/\bclass="fd-quick-action"/g) ?? []).toHaveLength(
+                6,
+            );
+        });
+
         test("never adds the frame's Photo of meal tile: no feature is behind it", () => {
             const html = withHints(["breakfast"]);
             expect(html).not.toContain("Photo of meal");
         });
     });
 
-    test("barcode-camera off hides Scan but keeps Enter barcode", () => {
-        const html = renderLogSheets({
+    describe("barcode-camera", () => {
+        const on = renderLogSheets({
+            timezone: "UTC",
+            previewSearch: "empty",
+            barcodeCamera: true,
+        });
+        const off = renderLogSheets({
             timezone: "UTC",
             previewSearch: "empty",
             barcodeCamera: false,
         });
-        expect(html).not.toContain("Scan barcode");
-        expect(html).toContain("Enter barcode");
-        expect(html).toContain("fd-scanner--type-only");
+        const scanOpeners = (html: string) =>
+            html.match(/data-fd-open-sheet="fd-barcode-scan"/g) ?? [];
+
+        test("on: the Scan barcode tile and the search field's barcode button open the scanner", () => {
+            expect(on).toContain(">Scan barcode</span>");
+            expect(on).toContain('aria-label="Scan a barcode"');
+            // The tile, the field button and the link under the results.
+            expect(scanOpeners(on)).toHaveLength(3);
+            expect(on).not.toContain("fd-scanner--type-only");
+            expect(on).toContain("data-fd-camera-video");
+        });
+
+        test("off: no Scan tile, no barcode button, no scan link, and no camera in the scanner", () => {
+            expect(off).not.toContain("Scan barcode");
+            expect(off).not.toContain("Enter barcode");
+            expect(scanOpeners(off)).toHaveLength(0);
+            expect(off).toContain("fd-scanner--type-only");
+            expect(off).not.toContain("data-fd-camera-video");
+            expect(off).not.toContain("data-fd-scanner-torch");
+        });
+
+        test("either way the sheets hold no menu that could be empty", () => {
+            expect(on).not.toContain("fd-menu");
+            expect(off).not.toContain("fd-menu");
+        });
     });
 
     test("quick calories and weigh-in sheets render their fields", () => {
@@ -450,6 +629,12 @@ describe("renderLogSheets", () => {
         expect(html).toContain('action="/log/quick"');
         expect(html).toContain('action="/log/weight"');
         expect(html).toContain("data-fd-quick-cal-submit");
+        // Calories and weight are the design's Stepper, not a bare box.
+        expect(html).toMatch(/fd-stepper-control[^>]*>[\s\S]*name="calories"/);
+        expect(html).toMatch(/fd-stepper-control[^>]*>[\s\S]*name="weight"/);
+        // The subtitle that restated the title is gone; the last weigh-in stays.
+        expect(html).not.toContain("Log without picking a food");
+        expect(html).toContain("Last: 183.0 lb");
     });
 
     test("weighInLastSubtitle formats last entry", () => {
@@ -463,7 +648,15 @@ describe("renderLogSheets", () => {
         ).toMatch(/^Last: 183\.0 lb ·/);
     });
 
-    test("todayTimeLabel24 is 24-hour Today prefix", () => {
-        expect(todayTimeLabel24("UTC")).toMatch(/^Today \d{2}:\d{2}$/);
+    test("the weigh-in's Today chip reads like the log sheet's, in 12 hours", () => {
+        setSystemTime(new Date("2026-11-12T17:23:00Z"));
+        try {
+            const html = renderLogSheets({ timezone: "UTC" });
+            expect(html).toContain(
+                '<span class="fd-chip__label" data-fd-weigh-today-label="">Today 5:23 PM</span>',
+            );
+        } finally {
+            setSystemTime();
+        }
     });
 });

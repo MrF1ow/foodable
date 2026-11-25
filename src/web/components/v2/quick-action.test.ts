@@ -87,3 +87,29 @@ describe("quick action button style", () => {
         expect(rule).toContain("font-size: var(--text-caption-size)");
     });
 });
+
+test("a submit button posts the form around it, and data hooks reach the element", () => {
+    const button = String(
+        quickAction({ label: "Water +250 ml", icon: "drop", submit: true }),
+    );
+    expect(button).toStartWith(
+        '<button type="submit" class="fd-quick-action">',
+    );
+    const opener = String(
+        quickAction({
+            label: "Weigh in",
+            icon: "scale",
+            data: { "fd-open-sheet": "fd-log-weigh-in" },
+        }),
+    );
+    expect(opener).toContain(' data-fd-open-sheet="fd-log-weigh-in"');
+    const link = String(
+        quickAction({
+            label: "x",
+            icon: "scan",
+            href: "/a",
+            data: { "fd-x": "1" },
+        }),
+    );
+    expect(link).toContain(' data-fd-x="1"');
+});

@@ -104,3 +104,21 @@ test("the search landmark is named with the field's label", () => {
     const html = searchField({ ...base, label: "Search foods" });
     expect(html).toContain('role="search" aria-label="Search foods"');
 });
+
+test("a lead icon other than the magnifier and a numeric keypad", () => {
+    const html = String(
+        searchField({
+            label: "Barcode number",
+            lead: "scan",
+            inputmode: "numeric",
+            go: true,
+        }),
+    );
+    expect(html).toContain("fd-icon--scan");
+    expect(html).not.toContain("fd-icon--search");
+    expect(html).toContain('inputmode="numeric"');
+    // A detected link still wins the lead.
+    expect(
+        String(searchField({ label: "x", lead: "scan", linkDetected: true })),
+    ).toContain("fd-icon--link");
+});

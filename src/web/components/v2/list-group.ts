@@ -11,6 +11,8 @@ export type ListGroupOptions = {
     /** Accessible name of the list. */
     label?: string;
     id?: string;
+    /** `listbox` for the rows of a combobox (search results); they are `option`s. */
+    role?: "listbox";
     className?: string;
     /** `data-*` on the list (the hook of a script that reads its rows). */
     data?: Readonly<Record<string, string>>;
@@ -19,11 +21,12 @@ export type ListGroupOptions = {
 export function listGroup(opts: ListGroupOptions): Html {
     const aria = opts.label != null ? ` aria-label="${esc(opts.label)}"` : "";
     const id = opts.id != null ? ` id="${esc(opts.id)}"` : "";
+    const role = opts.role != null ? ` role="${opts.role}"` : "";
     return raw(
         `<ul class="${cls(
             "fd-list-group",
             opts.style === "card" && "fd-list-group--card",
             opts.className,
-        )}"${id}${aria}${dataAttrs(opts.data)}>${join(opts.rows)}</ul>`,
+        )}"${id}${role}${aria}${dataAttrs(opts.data)}>${join(opts.rows)}</ul>`,
     );
 }

@@ -13,7 +13,7 @@
  */
 import { button, filterButton } from "./button.js";
 import { cls, dataAttrs, esc, raw, safeHref, type Html } from "./html.js";
-import { icon } from "./icon.js";
+import { icon, type IconName } from "./icon.js";
 import { keyboardHint } from "./keyboard-hint.js";
 
 export type SearchFieldOptions = {
@@ -39,6 +39,12 @@ export type SearchFieldOptions = {
     go?: { label?: string } | true;
     /** The link-detected state: link icon and Go. */
     linkDetected?: boolean;
+    /** The lead icon when it is not the magnifier (the barcode's scan icon). */
+    lead?: IconName;
+    /** The keypad a phone raises (`numeric` for a barcode). */
+    inputmode?: "numeric" | "decimal" | "text" | "search" | "url";
+    /** The label of a phone keyboard's Enter key (`go` for a barcode). */
+    enterkeyhint?: "go" | "search" | "done";
     className?: string;
     data?: Readonly<Record<string, string>>;
 };
@@ -67,6 +73,8 @@ export function searchField(opts: SearchFieldOptions): Html {
             : "",
         opts.value != null ? `value="${esc(opts.value)}"` : "",
         `autocomplete="off"`,
+        opts.inputmode != null ? `inputmode="${opts.inputmode}"` : "",
+        opts.enterkeyhint != null ? `enterkeyhint="${opts.enterkeyhint}"` : "",
         opts.keyShortcuts != null
             ? `aria-keyshortcuts="${esc(opts.keyShortcuts)}"`
             : "",
@@ -84,7 +92,7 @@ export function searchField(opts: SearchFieldOptions): Html {
               })
             : "";
     const parts = [
-        `<span class="fd-search-field__lead">${icon(opts.linkDetected ? "link" : "search")}</span>`,
+        `<span class="fd-search-field__lead">${icon(opts.linkDetected ? "link" : (opts.lead ?? "search"))}</span>`,
         `<input ${input}>`,
         opts.shortcut?.trim()
             ? keyboardHint({

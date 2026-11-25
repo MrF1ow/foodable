@@ -905,3 +905,59 @@ test("a disclosure row is only a title and its answer", () => {
         ).toThrow(/disclosure row/);
     }
 });
+
+test("a link row can carry a plus beside its face: the link opens, the plus does the other thing", () => {
+    const html = String(
+        itemRow({
+            title: "Chicken alfredo",
+            subtitle: "Your recipe · 1 serving · 690 kcal",
+            href: "/recipes/r1",
+            trailing: { kind: "chevron" },
+            add: {
+                kind: "add",
+                label: "Add Chicken alfredo",
+                data: { "fd-log-pick": "{}" },
+            },
+            id: "fd-log-result-0",
+            role: "option",
+            data: { "fd-log-row-pick": "{}" },
+        }),
+    );
+    // The plus is the face's sibling, not inside the link.
+    expect(html).toContain(
+        '<div class="fd-item-row__face fd-item-row__face--link"><a class="fd-item-row__anchor" href="/recipes/r1">',
+    );
+    expect(html).toMatch(
+        /<\/a><button type="button" class="fd-item-row__trail fd-item-row__add" aria-label="Add Chicken alfredo" data-fd-log-pick="\{\}">/,
+    );
+    expect(html.indexOf("fd-item-row__chevron")).toBeLessThan(
+        html.indexOf("</a>"),
+    );
+    expect(html).toContain(
+        ' id="fd-log-result-0" role="option" data-fd-log-row-pick="{}"',
+    );
+});
+
+test("a plus needs a link to sit beside, and is not selectable or swipeable", () => {
+    const add = { kind: "add", label: "Add" } as const;
+    expect(() => itemRow({ title: "T", add })).toThrow(/needs an href/);
+    expect(() =>
+        itemRow({ title: "T", href: "/x", add, select: true }),
+    ).toThrow(/not selectable/);
+    expect(() =>
+        itemRow({
+            title: "T",
+            href: "/x",
+            add,
+            swipe: { left: { label: "Delete" } },
+        }),
+    ).toThrow(/not selectable/);
+});
+
+test("a row's own data and role are escaped", () => {
+    const html = String(
+        itemRow({ title: "T", role: "option", data: { "fd-x": XSS } }),
+    );
+    expect(html).toContain('role="option"');
+    expect(html).toContain(`data-fd-x="${XSS_ESCAPED}"`);
+});

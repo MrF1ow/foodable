@@ -954,6 +954,40 @@ try {
         });
         await sleep(500);
     };
+    // A tap on a row opens its edit sheet: tapped first, on the fresh page,
+    // and closed again before the swipes.
+    const tapY = await ev<number>(
+        `(() => { const r = document.querySelector('li[data-fd-meal-id="m1"] .fd-item-row__face').getBoundingClientRect(); return r.top + r.height / 2; })()`,
+    );
+    await send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ x: 120, y: tapY }],
+    });
+    await sleep(60);
+    await send("Input.dispatchTouchEvent", {
+        type: "touchEnd",
+        touchPoints: [],
+    });
+    let tapped: string[] = [];
+    for (let i = 0; i < 20 && tapped.length === 0; i++) {
+        await sleep(100);
+        tapped = await ev<string[]>(
+            `[...document.querySelectorAll("dialog[open]")].map((d) => d.id)`,
+        );
+    }
+    await send("Input.dispatchKeyEvent", {
+        type: "keyDown",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+    });
+    await send("Input.dispatchKeyEvent", {
+        type: "keyUp",
+        key: "Escape",
+        code: "Escape",
+        windowsVirtualKeyCode: 27,
+    });
+    await sleep(300);
     await swipeRow("m2", 0.15, 0.85);
     await swipeRow("m3", 0.85, 0.15);
     const swipePosts = (await stats()).posts.map((p) => p.path);
@@ -962,29 +996,6 @@ try {
         del: !!document.querySelector('li[data-fd-meal-id="m3"] .fd-item-row__bed--delete form[action="/meals/m3/delete"]'),
         swipe: document.querySelectorAll("li[data-fd-meal-id].fd-item-row--swipe").length >= 3,
     })`);
-    await send("Input.dispatchTouchEvent", {
-        type: "touchStart",
-        touchPoints: [
-            {
-                x: 120,
-                y: await ev<number>(
-                    `(() => { const r = document.querySelector('li[data-fd-meal-id="m1"] .fd-item-row__face').getBoundingClientRect(); return r.top + r.height / 2; })()`,
-                ),
-            },
-        ],
-    });
-    await send("Input.dispatchTouchEvent", {
-        type: "touchEnd",
-        touchPoints: [],
-    });
-    // The swipes' posts may still be morphing the page: wait for the sheet.
-    let tapped: string[] = [];
-    for (let i = 0; i < 20 && tapped.length === 0; i++) {
-        await sleep(100);
-        tapped = await ev<string[]>(
-            `[...document.querySelectorAll("dialog[open]")].map((d) => d.id)`,
-        );
-    }
     const afterSwipe = await ev<{ marker: string | null }>(
         `({ marker: window.__marker ?? null })`,
     );
@@ -1237,6 +1248,312 @@ try {
             escapeAfterCtrlK,
             ex: drain(),
         },
+    );
+
+    // ---- The log sheets: a result row opens its thing, its plus logs it ----
+    // The rows are the Item row: the face is a link with a chevron that opens
+    // the food or recipe, the plus beside it opens the amount sheet and Add
+    // posts /log with the fields the route reads. A past meal has no link.
+    const openLogSearch = async () => {
+        await ev(
+            `(() => { const d = document.getElementById("fd-log-search"); if (!d.open) d.showModal(); })()`,
+        );
+        await sleep(300);
+    };
+    const typeIntoSearch = async (text: string) => {
+        await ev(`(() => {
+            const i = document.getElementById("fd-log-search-q");
+            i.value = ${JSON.stringify(text)};
+            i.dispatchEvent(new Event("input", { bubbles: true }));
+        })()`);
+        await sleep(900);
+    };
+    await goto("/");
+    await setMarker();
+    await control("reset=posts");
+    await openLogSearch();
+    await typeIntoSearch("chick");
+    const logRows = await ev<{
+        rows: {
+            title: string | null;
+            href: string | null;
+            chevron: boolean;
+            add: boolean;
+            option: string | null;
+        }[];
+        filters: number;
+        filtersShown: boolean;
+        listbox: string | null;
+    }>(`({
+        rows: [...document.querySelectorAll("#fd-log-search .fd-item-row")].map((r) => ({
+            title: r.querySelector(".fd-item-row__title")?.textContent ?? null,
+            href: r.querySelector("a.fd-item-row__anchor")?.getAttribute("href") ?? null,
+            chevron: !!r.querySelector(".fd-item-row__chevron"),
+            add: !!r.querySelector(".fd-item-row__add"),
+            option: r.getAttribute("role"),
+        })),
+        filters: document.querySelectorAll('#fd-log-search input[name="fd_log_filter"]').length,
+        filtersShown: !document.querySelector("[data-fd-log-filters]").hidden,
+        listbox: document.querySelector("#fd-log-search [data-fd-log-result-list]")?.getAttribute("role") ?? null,
+    })`);
+    // The plus of the first row opens the amount sheet; Add posts what main posts.
+    await clickSel("#fd-log-search .fd-item-row .fd-item-row__add");
+    await sleep(500);
+    const amountOpen = await ev<{
+        open: boolean;
+        title: string | null;
+        searchOpen: boolean;
+        amount: string | null;
+        macros: number;
+    }>(`({
+        open: document.getElementById("fd-log-amount").open,
+        title: document.querySelector("#fd-log-amount .fd-sheet__title")?.textContent ?? null,
+        searchOpen: document.getElementById("fd-log-search").open,
+        amount: document.getElementById("fd-log-amount-value")?.value ?? null,
+        macros: document.querySelectorAll("#fd-log-amount .fd-macro-tile").length,
+    })`);
+    await clickSel("[data-fd-log-submit]");
+    await sleep(600);
+    const logPost = (await stats()).posts.find((p) => p.path === "/log");
+    const logFields = Object.fromEntries(logPost?.entries ?? []);
+    record(
+        "v2 log search: rows open their food, recipe or fridge item and a plus logs it; the plus opens the amount sheet and Add posts /log",
+        logRows.rows.length === 3 &&
+            logRows.rows[0]!.title === "Chicken breast, grilled" &&
+            logRows.rows[0]!.href === "/foods/f-chicken" &&
+            logRows.rows[0]!.chevron &&
+            logRows.rows[0]!.add &&
+            logRows.rows[1]!.href === "/recipes/r-alfredo" &&
+            // A past meal only logs: no link, no chevron, a plus.
+            logRows.rows[2]!.href === null &&
+            !logRows.rows[2]!.chevron &&
+            logRows.rows[2]!.add &&
+            logRows.rows.every((r) => r.option === "option") &&
+            logRows.listbox === "listbox" &&
+            logRows.filters === 4 &&
+            logRows.filtersShown &&
+            amountOpen.open &&
+            amountOpen.title === "Chicken breast, grilled" &&
+            !amountOpen.searchOpen &&
+            amountOpen.amount === "100" &&
+            amountOpen.macros === 4 &&
+            logFields.food_id === "f-chicken" &&
+            logFields.amount === "100" &&
+            logFields.unit === "g" &&
+            logFields.return_to === "/" &&
+            logFields.display_name === "Chicken breast, grilled" &&
+            ["breakfast", "lunch", "dinner", "snack"].includes(
+                logFields.meal_type ?? "",
+            ) &&
+            !("logged_at" in logFields),
+        { logRows, amountOpen, logFields, ex: drain() },
+    );
+
+    // A row's face opens its page.
+    await goto("/");
+    await setMarker();
+    await openLogSearch();
+    await typeIntoSearch("chick");
+    await clickSel("#fd-log-search a.fd-item-row__anchor");
+    await sleep(500);
+    const rowOpened = await ev<string>(`location.pathname`);
+    record(
+        "v2 log search: tapping a result row opens its page",
+        rowOpened === "/foods/f-chicken",
+        { rowOpened, ex: drain() },
+    );
+
+    // Quick add and water post the routes they always did.
+    await goto("/");
+    await setMarker();
+    await control("reset=posts");
+    await openLogSearch();
+    await clickSel('#fd-log-search [data-fd-open-sheet="fd-log-quick-cal"]');
+    await sleep(400);
+    const quickOpen = await ev<{ open: boolean; searchOpen: boolean }>(`({
+        open: document.getElementById("fd-log-quick-cal").open,
+        searchOpen: document.getElementById("fd-log-search").open,
+    })`);
+    await clickSel("[data-fd-quick-cal-submit]");
+    await sleep(600);
+    const quickPost = (await stats()).posts.find(
+        (p) => p.path === "/log/quick",
+    );
+    const quickFields = Object.fromEntries(quickPost?.entries ?? []);
+    await goto("/");
+    await control("reset=posts");
+    await openLogSearch();
+    await clickSel('#fd-log-search form[action="/log/water"] button');
+    await sleep(600);
+    const waterPost = (await stats()).posts.find(
+        (p) => p.path === "/log/water",
+    );
+    record(
+        "v2 log sheet: Quick calories posts /log/quick and Water +250 ml posts /log/water",
+        quickOpen.open &&
+            !quickOpen.searchOpen &&
+            quickFields.calories === "350" &&
+            quickFields.description === "Quick calories" &&
+            quickFields.return_to === "/" &&
+            waterPost !== undefined &&
+            Object.fromEntries(waterPost.entries).amount_ml === "250",
+        { quickOpen, quickFields, waterPost, ex: drain() },
+    );
+
+    // A meal's plus on Today opens the search with that meal under ADD TO; the
+    // Top bar or the Search tab opens it on the default meal again.
+    await goto("/");
+    const mealPlus = await ev<{
+        meal: string | null;
+        dflt: string | null;
+    }>(`(() => {
+        const plusses = [...document.querySelectorAll("a[data-fd-log-meal]")];
+        const dflt = [...document.querySelectorAll('#fd-log-search input[name="search_meal_type"]')].find((r) => r.defaultChecked)?.value ?? null;
+        const other = plusses.find((a) => a.getAttribute("data-fd-log-meal") !== dflt) ?? plusses[0];
+        other?.setAttribute("data-fd-nav-probe", "");
+        return { meal: other?.getAttribute("data-fd-log-meal") ?? null, dflt };
+    })()`);
+    await ev(`document.querySelector("[data-fd-nav-probe]")?.click()`);
+    await sleep(400);
+    const fromPlus = await ev<{ open: boolean; checked: string | null }>(`({
+        open: document.getElementById("fd-log-search").open,
+        checked: document.querySelector('#fd-log-search input[name="search_meal_type"]:checked')?.value ?? null,
+    })`);
+    await ev(`document.getElementById("fd-log-search").close()`);
+    await ev(`(() => {
+        const open = [...document.querySelectorAll("a.fd-log[data-fd-open-sheet], .fd-top-bar [data-fd-open-sheet]")].find((el) => el.offsetParent !== null);
+        open?.click();
+    })()`);
+    await sleep(400);
+    const fromBar = await ev<{ open: boolean; checked: string | null }>(`({
+        open: document.getElementById("fd-log-search").open,
+        checked: document.querySelector('#fd-log-search input[name="search_meal_type"]:checked')?.value ?? null,
+    })`);
+    record(
+        "v2 today: a meal's plus opens the search with that meal checked under ADD TO; the Top bar and Search tab keep the default",
+        mealPlus.meal !== null &&
+            fromPlus.open &&
+            fromPlus.checked === mealPlus.meal &&
+            fromBar.open &&
+            fromBar.checked === mealPlus.dflt,
+        { mealPlus, fromPlus, fromBar, ex: drain() },
+    );
+    await ev(`document.getElementById("fd-log-search")?.close()`);
+
+    // A recipe link pasted into the search: the link icon and Go, which imports.
+    await goto("/");
+    await control("reset=posts");
+    await openLogSearch();
+    await typeIntoSearch("https://hot-thai-kitchen.com/pad-see-ew");
+    const linkState = await ev<{
+        detected: boolean;
+        goShown: boolean;
+        linkIcon: boolean;
+        searchIcon: boolean;
+        scanShown: boolean;
+        rows: number;
+    }>(`(() => {
+        const box = document.querySelector("#fd-log-search .fd-sheet__search");
+        const shown = (el) => !!el && el.getClientRects().length > 0;
+        return {
+            detected: box.hasAttribute("data-link-detected"),
+            goShown: shown(box.querySelector("[data-fd-log-import-go]")),
+            linkIcon: shown(box.querySelector(".fd-sheet__search-icon--link")),
+            searchIcon: shown(box.querySelector(".fd-sheet__search-icon--search")),
+            scanShown: shown(box.querySelector("[data-fd-open-sheet]")),
+            rows: document.querySelectorAll("#fd-log-search [data-fd-log-results]:not([hidden]) .fd-item-row").length,
+        };
+    })()`);
+    await clickSel("[data-fd-log-import-go]");
+    await sleep(600);
+    const importPost = (await stats()).posts.find(
+        (p) => p.path === "/recipes/import",
+    );
+    record(
+        "v2 log search: a pasted recipe link shows the link icon and Go instead of the barcode button, and Go posts /recipes/import",
+        linkState.detected &&
+            linkState.goShown &&
+            linkState.linkIcon &&
+            !linkState.searchIcon &&
+            !linkState.scanShown &&
+            linkState.rows === 0 &&
+            importPost !== undefined &&
+            Object.fromEntries(importPost.entries).url ===
+                "https://hot-thai-kitchen.com/pad-see-ew",
+        { linkState, importPost, ex: drain() },
+    );
+
+    // The scanner (barcode-camera on): the Scan tile and the field's barcode
+    // button open it; it is a Detail bar, a Camera view and the number field,
+    // and a typed number looks the product up.
+    await goto("/");
+    await setMarker();
+    await openLogSearch();
+    const scanOpeners = await ev<number>(
+        `document.querySelectorAll('#fd-log-search [data-fd-open-sheet="fd-barcode-scan"]').length`,
+    );
+    await clickSel(
+        '#fd-log-search .fd-sheet__search [data-fd-open-sheet="fd-barcode-scan"]',
+    );
+    await sleep(900);
+    const scanner = await ev<{
+        open: boolean;
+        title: string | null;
+        camera: number;
+        explains: boolean;
+        field: boolean;
+    }>(`({
+        open: document.getElementById("fd-barcode-scan").open,
+        title: document.querySelector("#fd-barcode-scan .fd-detail-bar__title")?.textContent ?? null,
+        camera: document.querySelectorAll("#fd-barcode-scan [data-fd-camera-view]").length,
+        explains: /Hold steady|Point at a barcode|Use your camera/i.test(document.getElementById("fd-barcode-scan").textContent),
+        field: !!document.querySelector("#fd-barcode-scan #fd-scanner-manual"),
+    })`);
+    await ev(`(() => {
+        const i = document.getElementById("fd-scanner-manual");
+        i.value = "5449000000996";
+        i.dispatchEvent(new Event("input", { bubbles: true }));
+    })()`);
+    await clickSel("#fd-barcode-scan .fd-btn--go");
+    await sleep(600);
+    const scanned = await ev<string>(`location.pathname`);
+    record(
+        "v2 scanner (barcode-camera on): opens from the search field with a title, a camera view and a number field, no instructions, and a typed number opens its product",
+        scanOpeners === 3 &&
+            scanner.open &&
+            scanner.title === "Scan a barcode" &&
+            scanner.camera === 1 &&
+            !scanner.explains &&
+            scanner.field &&
+            scanned === "/foods/by-barcode/5449000000996",
+        { scanOpeners, scanner, scanned, ex: drain() },
+    );
+
+    // barcode-camera off: no Scan tile, no barcode button, no scan link, and
+    // the scanner has no camera (it stays for Add a usual's Enter a barcode).
+    await goto("/?camera=off");
+    await openLogSearch();
+    const cameraOff = await ev<{
+        openers: number;
+        scanTile: boolean;
+        video: number;
+        typeOnly: boolean;
+        menus: number;
+    }>(`({
+        openers: document.querySelectorAll('[data-fd-open-sheet="fd-barcode-scan"]').length,
+        scanTile: /Scan barcode|Not here/.test(document.getElementById("fd-log-search").textContent),
+        video: document.querySelectorAll("#fd-barcode-scan video").length,
+        typeOnly: document.getElementById("fd-barcode-scan").classList.contains("fd-scanner--type-only"),
+        menus: document.querySelectorAll('#fd-log-search [aria-haspopup="menu"]').length,
+    })`);
+    record(
+        "v2 scanner (barcode-camera off): the log sheet draws no Scan tile, barcode button or scan link, and the scanner has no camera",
+        cameraOff.openers === 0 &&
+            !cameraOff.scanTile &&
+            cameraOff.video === 0 &&
+            cameraOff.typeOnly &&
+            cameraOff.menus === 0,
+        { cameraOff, ex: drain() },
     );
 
     // A Kitchen section link keeps the Kitchen group marked the moment it is

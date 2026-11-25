@@ -17,6 +17,8 @@ export type DetailBarOptions = {
         /** Accessible name; default "Back". */
         label?: string;
         href?: string;
+        /** Attributes of a back button that is not a link (a dialog's close hook). */
+        attrs?: Readonly<Record<string, string>>;
     };
     trailing?:
         | {
@@ -39,6 +41,7 @@ export function detailBar(opts: DetailBarOptions): Html {
         icon: "chevron-left",
         label: opts.back.label ?? "Back",
         href: opts.back.href,
+        attrs: opts.back.attrs,
     });
     const trailing = opts.trailing
         ? "slot" in opts.trailing

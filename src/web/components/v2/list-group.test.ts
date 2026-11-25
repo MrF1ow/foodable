@@ -37,3 +37,9 @@ test("data attributes land on the list", () => {
         `<ul class="fd-list-group" data-fd-order-list="">`,
     );
 });
+
+test("a listbox names its role", () => {
+    expect(listGroup({ rows, role: "listbox", id: "results" })).toStartWith(
+        `<ul class="fd-list-group" id="results" role="listbox">`,
+    );
+});

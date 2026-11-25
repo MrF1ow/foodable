@@ -1,5 +1,6 @@
-// Log search + amount sheets. Search hits /api/log/search;
-// amount posts to /log.
+// Log search, amount, quick calories and weigh-in sheets (the markup is
+// src/web/pages/v2/log-sheet.ts; the rows written here are the same as its
+// `logResultRow`). Search hits /api/log/search; amount posts to /log.
 const SEARCH_ID = "fd-log-search";
 const AMOUNT_ID = "fd-log-amount";
 const QUICK_CAL_ID = "fd-log-quick-cal";
@@ -175,13 +176,6 @@ const FILTER = {
     "My foods": new Set(["food", "stock"]),
 };
 
-const MEAL_ADDING_LABEL = {
-    breakfast: "Adding to breakfast",
-    lunch: "Adding to lunch",
-    dinner: "Adding to dinner",
-    snack: "Adding to snacks",
-};
-
 /** @param {EventTarget | null} el */
 function isEditableTarget(el) {
     if (!el || !(el instanceof Element)) return false;
@@ -240,22 +234,6 @@ function esc(s) {
         .replace(/"/g, "&quot;");
 }
 
-function macroLineHtml(m) {
-    if (!m) return "";
-    const one = (key, letter, name, val) =>
-        val != null && Number.isFinite(Number(val))
-            ? `<span class="fd-macro fd-macro--${key}"><span aria-hidden="true">${letter} </span><span class="fd-sr">${name} </span>${esc(val)}</span>`
-            : "";
-    const parts = [
-        one("protein", "P", "Protein", m.protein_g),
-        one("carbs", "C", "Carbs", m.carbs_g),
-        one("fat", "F", "Fat", m.fat_g),
-    ].filter(Boolean);
-    return parts.length
-        ? `<span class="fd-macros">${parts.join("")}</span>`
-        : "";
-}
-
 function formatAmountUnit(amount, unit) {
     if (amount == null || unit == null) return "";
     const n = Number(amount);
@@ -303,41 +281,12 @@ function itemSubtitle(item, kind) {
         : "Generic";
 }
 
-function rowPreviewMacros(item, kind) {
-    const unit =
-        item.unit && allowedUnits(item).includes(String(item.unit))
-            ? String(item.unit)
-            : allowedUnits(item)[0];
-    const amount =
-        item.amount != null && Number.isFinite(Number(item.amount))
-            ? Number(item.amount)
-            : kind === "recipe"
-              ? 1
-              : 100;
-    const m = macrosFor(item, amount, unit);
-    if (m) return m;
-    if (kind === "recipe" && item.kcal != null) {
-        return {
-            protein_g: item.protein_g,
-            carbs_g: item.carbs_g,
-            fat_g: item.fat_g,
-            kcal: item.kcal,
-        };
-    }
-    return null;
-}
-
-function macroParts(m) {
-    if (!m) return null;
-    return {
-        protein: m.protein_g ?? null,
-        carbs: m.carbs_g ?? null,
-        fat: m.fat_g ?? null,
-    };
-}
-
 function plusIcon() {
-    return `<svg class="fd-icon" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 5v14M5 12h14"/></svg>`;
+    return `<svg class="fd-icon fd-icon--plus" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path vector-effect="non-scaling-stroke" d="M12 5L12 19M5 12L19 12"/></svg>`;
+}
+
+function chevronIcon() {
+    return `<svg class="fd-icon fd-icon--chevron-right" xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path vector-effect="non-scaling-stroke" d="M9 6L15 12L9 18"/></svg>`;
 }
 
 function scoreBadgeHtml(score) {
@@ -347,32 +296,46 @@ function scoreBadgeHtml(score) {
     return `<span class="fd-score fd-score--${band}" role="img" aria-label="Product score ${value} of 100, ${band}"><span class="fd-score__dot" aria-hidden="true"></span><span class="fd-score__num" aria-hidden="true">${value}</span></span>`;
 }
 
+// One search result, as the design draws it: the face opens the thing (a link
+// with a chevron), the + beside it logs it. A result that only logs (a past
+// meal) has no chevron, and its face picks like its plus. A result that cannot
+// be logged has no plus.
 function searchRowHtml(item, kind, rowIndex) {
     const relivable =
         item.loggable !== false &&
         (kind !== "history" || logItemIsRelivable(item));
     const subtitle = itemSubtitle(item, kind);
-    const macros = macroLineHtml(macroParts(rowPreviewMacros(item, kind)));
     // Several items or free text has no single food to pick, so its add action
     // logs the whole meal again.
     const againMealId =
         kind === "history" && !relivable && item.loggable !== false
             ? String(item.meal_id ?? "").trim()
             : "";
+    const payload = esc(JSON.stringify({ ...item, kind }));
+    const addLabel = `Add ${esc(item.name)}`;
+    const addIcon = plusIcon();
     const add = relivable
-        ? `<button type="button" class="fd-icon-btn" aria-label="Add ${esc(item.name)}" data-fd-log-pick="${esc(JSON.stringify({ ...item, kind }))}">${plusIcon()}</button>`
+        ? `<button type="button" class="fd-item-row__trail fd-item-row__add" aria-label="${addLabel}" data-fd-log-pick="${payload}">${addIcon}</button>`
         : againMealId
           ? againFormHtml(
                 againMealId,
-                `<button type="submit" class="fd-icon-btn" aria-label="Add ${esc(item.name)}">${plusIcon()}</button>`,
+                `<button type="submit" class="fd-item-row__trail fd-item-row__add" aria-label="${addLabel}">${addIcon}</button>`,
             )
           : "";
     const rowId = rowIndex != null ? ` id="fd-log-result-${rowIndex}"` : "";
     const pickAttr = relivable
-        ? ` data-fd-log-row-pick="${esc(JSON.stringify({ ...item, kind }))}"`
-        : "";
-    const badge = scoreBadgeHtml(item.product_score);
-    return `<li class="fd-row fd-row--search" role="option"${rowId}${pickAttr}><div class="fd-row__body"><div class="fd-row__main"><span class="fd-row__line"><span class="fd-row__title">${esc(item.name)}</span>${badge}</span><span class="fd-row__sub">${esc(subtitle)}</span>${macros}</div>${add}</div></li>`;
+        ? ` data-fd-log-row-pick="${payload}"`
+        : againMealId
+          ? ` data-fd-log-row-open="${esc(item.open ?? "")}"`
+          : "";
+    const open = typeof item.open === "string" ? item.open : "";
+    // A past meal opens the log form, not a page: its row is no link.
+    const link = open !== "" && kind !== "history";
+    const main = `<span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="${esc(item.name)}">${esc(item.name)}</span>${scoreBadgeHtml(item.product_score)}</span><span class="fd-item-row__subtitle">${esc(subtitle)}</span></span>`;
+    const face = link
+        ? `<div class="fd-item-row__face fd-item-row__face--link"><a class="fd-item-row__anchor" href="${esc(open)}">${main}<span class="fd-item-row__trail fd-item-row__chevron" aria-hidden="true">${chevronIcon()}</span></a>${add}</div>`
+        : `<div class="fd-item-row__face">${main}${add}</div>`;
+    return `<li class="fd-item-row"${rowId} role="option"${pickAttr}>${face}</li>`;
 }
 
 // The past meal a ?log=meal:<id> link landed on when it has no single food to
@@ -440,39 +403,65 @@ function recentChipHtml(item) {
         // Several items or free text: log the whole meal again as it was.
         return againFormHtml(
             mealId,
-            `<button type="submit" class="fd-chip fd-log-recent"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button>`,
+            `<button type="submit" class="fd-chip"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button>`,
         );
     }
     const payload = { ...item, kind: item.kind || "history" };
-    return `<button type="button" class="fd-chip fd-log-recent" data-fd-log-pick="${esc(JSON.stringify(payload))}"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button>`;
+    return `<button type="button" class="fd-chip" data-fd-log-pick="${esc(JSON.stringify(payload))}"><span class="fd-chip__label">${esc(item.name)}</span>${count}</button>`;
+}
+
+// The four tiles of the amount sheet (the server's `macroTiles`): an unknown
+// figure is a dash, never a zero.
+function macroValueHtml(text) {
+    return text == null
+        ? `<span aria-hidden="true">—</span><span class="fd-sr">no data</span>`
+        : esc(text);
 }
 
 function renderMacroTiles(container, m) {
     if (!container) return;
-    const vals = m || {
-        kcal: null,
-        protein_g: null,
-        carbs_g: null,
-        fat_g: null,
-    };
-    container.innerHTML = `<dl class="fd-tiles fd-log-macros" aria-label="This amount">
-<div class="fd-tile"><dt class="fd-tile__label"><span class="fd-dot fd-dot--sm fd-dot--calories" aria-hidden="true"></span>kcal</dt><dd class="fd-tile__value">${formatLogMacroKcal(vals.kcal)}</dd></div>
-<div class="fd-tile"><dt class="fd-tile__label"><span class="fd-dot fd-dot--sm fd-dot--protein" aria-hidden="true"></span>Protein</dt><dd class="fd-tile__value">${formatLogMacroGrams(vals.protein_g)}<span class="fd-stat__unit"> g</span></dd></div>
-<div class="fd-tile"><dt class="fd-tile__label"><span class="fd-dot fd-dot--sm fd-dot--carbs" aria-hidden="true"></span>Carbs</dt><dd class="fd-tile__value">${formatLogMacroGrams(vals.carbs_g)}<span class="fd-stat__unit"> g</span></dd></div>
-<div class="fd-tile"><dt class="fd-tile__label"><span class="fd-dot fd-dot--sm fd-dot--fat" aria-hidden="true"></span>Fat</dt><dd class="fd-tile__value">${formatLogMacroGrams(vals.fat_g)}<span class="fd-stat__unit"> g</span></dd></div>
-</dl>`;
+    const known = (v) => v != null && Number.isFinite(Number(v));
+    const kcal = m && known(m.kcal) ? formatLogMacroKcal(m.kcal) : null;
+    const grams = (v) => (known(v) ? `${formatLogMacroGrams(v)} g` : null);
+    const tile = (kind, dotColor, label, text) =>
+        `<div class="fd-macro-tile fd-macro-tile--${kind}"><dt class="fd-macro-tile__label"><span class="fd-dot fd-dot--${dotColor} fd-dot--sm" aria-hidden="true"></span>${label}</dt><dd class="fd-macro-tile__value">${macroValueHtml(text)}</dd></div>`;
+    container.innerHTML = `<dl class="fd-macro-tiles" aria-label="This amount">${tile("kcal", "calories", "kcal", kcal)}${tile("protein", "protein", "Protein", grams(m?.protein_g))}${tile("carbs", "carbs", "Carbs", grams(m?.carbs_g))}${tile("fat", "fat", "Fat", grams(m?.fat_g))}</dl>`;
 }
 
-function rebuildUnitChips(form, units, selected) {
-    const fieldset = form?.querySelector("[data-fd-log-unit-chips]");
-    if (!fieldset) return;
-    const chips = units
+// The unit as the small Segmented (the server's `unitControl`); one unit has
+// nothing to choose, so it posts from a hidden field.
+// "each · 174 g": a piece says what it weighs when the food knows.
+function unitSegmentLabel(unit, item) {
+    const g = item?.grams_per_each;
+    if (unit !== "each" || g == null || !(g > 0)) return unit;
+    return `each · ${Math.round(g * 10) / 10} g`;
+}
+
+function rebuildUnitChips(form, units, selected, item) {
+    const slot = form?.querySelector("[data-fd-log-units]");
+    if (!slot) return;
+    if (units.length < 2) {
+        slot.innerHTML = units.length
+            ? `<input type="hidden" name="unit" value="${esc(units[0])}">`
+            : "";
+        return;
+    }
+    const segments = units
         .map(
             (unit) =>
-                `<label class="fd-chip fd-chip--choice"><input class="fd-chip__input" type="radio" name="unit" value="${esc(unit)}"${unit === selected ? " checked" : ""} required><span class="fd-chip__face"><span class="fd-chip__label">${esc(unit)}</span></span></label>`,
+                `<label class="fd-segmented__option"><input class="fd-segmented__input" type="radio" name="unit" value="${esc(unit)}"${unit === selected ? " checked" : ""}><span class="fd-segmented__segment">${esc(unitSegmentLabel(unit, item))}</span></label>`,
         )
         .join("");
-    fieldset.innerHTML = `<legend class="fd-sr">Unit</legend><div class="fd-chips">${chips}</div>`;
+    slot.innerHTML = `<div class="fd-segmented fd-segmented--small" role="radiogroup" aria-label="Unit" data-fd-segmented>${segments}</div>`;
+}
+
+// The unit the amount is in: the checked segment, or the one a lone unit posts.
+function currentUnit(form, item) {
+    return (
+        form.querySelector('input[name="unit"]:checked')?.value ||
+        form.querySelector('input[type="hidden"][name="unit"]')?.value ||
+        (item ? allowedUnits(item)[0] : "g")
+    );
 }
 
 let lastLogOpener = null;
@@ -494,8 +483,12 @@ function isLogTriggerInput(el) {
     );
 }
 
+// Quick calories and Weigh in replace the search sheet, so one sheet shows.
+const REPLACES_SEARCH = new Set([QUICK_CAL_ID, WEIGH_IN_ID]);
+
 function openSheet(id, opener) {
     if (opener) lastLogOpener = focusableOpener(opener);
+    if (REPLACES_SEARCH.has(id)) closeSheet(SEARCH_ID);
     const d = document.getElementById(id);
     if (d instanceof HTMLDialogElement && typeof d.showModal === "function") {
         if (!d.open) d.showModal();
@@ -504,9 +497,12 @@ function openSheet(id, opener) {
 
 // Touch: no auto-focus, so the keyboard waits for a tap (sheet.js focused the panel).
 function focusLogSearchInput(dialog, query) {
-    const input = dialog?.querySelector(".fd-log-search-input");
+    const input = dialog?.querySelector("#fd-log-search-q");
     if (!(input instanceof HTMLInputElement)) return;
-    if (query != null && query !== "") input.value = query;
+    if (query != null && query !== "") {
+        input.value = query;
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+    }
     const touch =
         typeof window.matchMedia === "function" &&
         window.matchMedia("(pointer: coarse)").matches;
@@ -526,7 +522,29 @@ function visibleLogOpener() {
     );
 }
 
+// A meal's plus opens the search with that meal under ADD TO; any other way
+// in (the Top bar, the shortcut, the Search tab) gets the server's default
+// back when the last open chose another.
+let searchMealChosenByOpener = false;
+
+function preselectSearchMeal(dialog, opener) {
+    const meal = opener?.getAttribute?.("data-fd-log-meal");
+    if (!meal && !searchMealChosenByOpener) return;
+    const radios = [
+        ...dialog.querySelectorAll('input[name="search_meal_type"]'),
+    ];
+    const target = meal
+        ? radios.find((r) => r.value === meal)
+        : radios.find((r) => r.defaultChecked);
+    searchMealChosenByOpener = Boolean(meal && target);
+    if (!target || target.checked) return;
+    target.checked = true;
+    target.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
 function openLogSearchSheet(opener, initialQuery) {
+    const existing = document.getElementById(SEARCH_ID);
+    if (existing && !existing.open) preselectSearchMeal(existing, opener);
     openSheet(SEARCH_ID, opener ?? visibleLogOpener());
     const dialog = document.getElementById(SEARCH_ID);
     if (dialog?.open) focusLogSearchInput(dialog, initialQuery);
@@ -535,6 +553,12 @@ function openLogSearchSheet(opener, initialQuery) {
 function closeSheet(id) {
     const d = document.getElementById(id);
     if (d instanceof HTMLDialogElement) d.close();
+}
+
+// A recipe link pasted into the search: the lead icon becomes a link and Go
+// imports it as a draft, as Recipes' own search does.
+function isRecipeLink(text) {
+    return /^https?:\/\/\S+$/i.test(String(text ?? "").trim());
 }
 
 function searchMealType(root) {
@@ -549,7 +573,13 @@ function syncMealToAmount(root, mealType) {
         if (el.value === mealType) el.checked = true;
     }
     const submit = amount.querySelector("[data-fd-log-submit]");
-    if (submit) submit.textContent = MEAL_LABEL[mealType] ?? MEAL_LABEL.dinner;
+    if (submit) setSubmitLabel(submit, mealType);
+}
+
+// The submit button's text is its label span, not the button itself.
+function setSubmitLabel(button, mealType) {
+    const label = button.querySelector(".fd-btn__label") ?? button;
+    label.textContent = MEAL_LABEL[mealType] ?? MEAL_LABEL.dinner;
 }
 
 const searchSheetInit = new WeakSet();
@@ -564,11 +594,15 @@ function bindSearchSheet(root) {
     // Keyed on the dialog: Turbo replaces it on a visit, and the new one binds.
     if (searchSheetInit.has(dialog)) return;
     searchSheetInit.add(dialog);
-    const input = dialog.querySelector(".fd-log-search-input");
+    const input = dialog.querySelector("#fd-log-search-q");
+    const box = dialog.querySelector(".fd-sheet__search");
     const clearBtn = dialog.querySelector("[data-fd-log-search-clear]");
+    const goBtn = dialog.querySelector("[data-fd-log-import-go]");
+    const importForm = dialog.querySelector("[data-fd-log-import]");
     const results = dialog.querySelector("[data-fd-log-results]");
     const empty = dialog.querySelector("[data-fd-log-empty]");
     const recentRoot = dialog.querySelector("[data-fd-log-recent]");
+    const recentSection = dialog.querySelector("[data-fd-log-recent-section]");
     const filters = dialog.querySelector("[data-fd-log-filters]");
     const onlineBtn = dialog.querySelector("[data-fd-log-online]");
     const list = dialog.querySelector("[data-fd-log-result-list]");
@@ -588,7 +622,7 @@ function bindSearchSheet(root) {
     function resultRows() {
         const root = resultListRoot();
         return /** @type {HTMLElement[]} */ ([
-            ...(root?.querySelectorAll(".fd-row--search") ?? []),
+            ...(root?.querySelectorAll(".fd-item-row") ?? []),
         ]);
     }
 
@@ -596,7 +630,7 @@ function bindSearchSheet(root) {
         const rows = resultRows();
         for (let i = 0; i < rows.length; i++) {
             const on = i === activeRow;
-            rows[i].classList.toggle("fd-row--active", on);
+            rows[i].classList.toggle("fd-item-row--active", on);
         }
         if (input instanceof HTMLInputElement) {
             if (activeRow >= 0 && rows[activeRow]?.id) {
@@ -624,17 +658,30 @@ function bindSearchSheet(root) {
         } catch (_) {}
     }
 
-    function syncSearchSubtitle() {
-        const meal = searchMealType(dialog);
-        const sub = dialog.querySelector(".fd-sheet-sub");
-        if (sub)
-            sub.textContent =
-                MEAL_ADDING_LABEL[meal] ?? MEAL_ADDING_LABEL.dinner;
+    const isPreview = !!dialog.querySelector(
+        "[data-fd-log-results]:not([hidden]) .fd-item-row",
+    );
+
+    // A pasted recipe link swaps the lead icon for the link and shows Go.
+    function syncLink() {
+        const link = isRecipeLink(input?.value);
+        if (box) {
+            if (link) box.setAttribute("data-link-detected", "");
+            else box.removeAttribute("data-link-detected");
+        }
+        if (goBtn) goBtn.hidden = !link;
+        return link;
     }
 
-    const isPreview = !!dialog.querySelector(
-        ".fd-log-search-results:not([hidden]) .fd-row",
-    );
+    function importLink() {
+        const url = String(input?.value ?? "").trim();
+        if (!isRecipeLink(url) || !importForm) return;
+        const field = importForm.querySelector('input[name="url"]');
+        if (field) field.value = url;
+        if (typeof importForm.requestSubmit === "function")
+            importForm.requestSubmit();
+        else importForm.submit();
+    }
 
     async function fetchResults(q) {
         // Only the empty query is capped: it lists the ten latest distinct logs.
@@ -671,21 +718,20 @@ function bindSearchSheet(root) {
             pinnedFor(String(input?.value || "")),
         );
         activeRow = -1;
-        if (list) {
-            list.innerHTML = html;
-        } else if (results) {
-            results.innerHTML = `<ul class="fd-list" id="fd-log-result-listbox" role="listbox" data-fd-log-result-list>${html}</ul>`;
-        }
+        if (list) list.innerHTML = html;
         syncActiveRow();
     }
 
     function paintEmpty(data) {
         if (!recentRoot) return;
         const hist = (data?.groups || []).find((g) => g.kind === "history");
-        recentRoot.innerHTML =
+        const chips =
             hist?.items
                 ?.map((i) => recentChipHtml({ ...i, kind: "history" }))
                 .join("") || "";
+        recentRoot.innerHTML = chips;
+        // No recent logs: no Recent label over nothing.
+        if (recentSection) recentSection.hidden = chips === "";
     }
 
     function setMode(hasQuery) {
@@ -725,11 +771,19 @@ function bindSearchSheet(root) {
 
     async function run() {
         const q = String(input?.value || "").trim();
+        const link = syncLink();
         if (clearBtn) clearBtn.hidden = q.length === 0;
+        // A link is not a search: the sheet reads as it does empty, and Go
+        // imports it.
         const seq = ++fetchSeq;
-        const data = await fetchResults(q);
+        const data = await fetchResults(link ? "" : q);
         if (seq !== fetchSeq) return;
-        if (data) paint(data);
+        if (!data) return;
+        if (link) {
+            lastData = data;
+            setMode(false);
+            paintEmpty(data);
+        } else paint(data);
     }
 
     function schedule() {
@@ -739,8 +793,13 @@ function bindSearchSheet(root) {
 
     input?.addEventListener("input", () => {
         online = false;
+        syncLink();
+        if (clearBtn)
+            clearBtn.hidden = String(input.value || "").trim().length === 0;
         schedule();
     });
+
+    goBtn?.addEventListener("click", importLink);
 
     clearBtn?.addEventListener("click", () => {
         if (input) {
@@ -751,15 +810,10 @@ function bindSearchSheet(root) {
         run();
     });
 
-    filters?.addEventListener("click", (event) => {
-        const btn = event.target.closest?.("[data-fd-log-filter]");
-        if (!btn) return;
-        activeFilter = btn.getAttribute("data-fd-log-filter") || "All";
-        for (const chip of filters.querySelectorAll(".fd-log-filter")) {
-            const on = chip === btn;
-            chip.classList.toggle("fd-chip--selected", on);
-            chip.setAttribute("aria-pressed", on ? "true" : "false");
-        }
+    filters?.addEventListener("change", (event) => {
+        const radio = event.target;
+        if (radio?.name !== "fd_log_filter") return;
+        activeFilter = radio.value || "All";
         if (lastData) paintRows(lastData);
     });
 
@@ -788,6 +842,11 @@ function bindSearchSheet(root) {
     });
 
     input?.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" && !event.shiftKey && syncLink()) {
+            event.preventDefault();
+            importLink();
+            return;
+        }
         const rows = resultRows();
         if (rows.length === 0 || results?.hidden) return;
         if (event.key === "ArrowDown") {
@@ -816,12 +875,12 @@ function bindSearchSheet(root) {
     input?.setAttribute("aria-controls", "fd-log-result-listbox");
     if (list && !list.id) list.id = "fd-log-result-listbox";
 
-    dialog
-        .querySelector(".fd-log-meals-search")
-        ?.addEventListener("change", () => {
+    dialog.addEventListener("change", (event) => {
+        if (event.target?.name === "search_meal_type") {
             syncMealToAmount(root, searchMealType(dialog));
-            syncSearchSubtitle();
-        });
+        }
+    });
+    syncLink();
 }
 
 let selectedItem = null;
@@ -868,19 +927,40 @@ function syncAmountHidden(form, item) {
     set("display_name", item.name || "");
 }
 
+// "Today 5:10 PM": the When chip that logs at submit time.
+function todayLabelNow() {
+    const now = new Date();
+    const h = now.getHours();
+    const mm = String(now.getMinutes()).padStart(2, "0");
+    return `Today ${h % 12 || 12}:${mm} ${h >= 12 ? "PM" : "AM"}`;
+}
+
+// Pick a time shows the time box. A disabled field is not submitted, so
+// "Today" logs at submit time.
+function syncTimePick(form, modeName) {
+    const wrap = form.querySelector("[data-fd-log-time-pick]");
+    const input = wrap?.querySelector("input");
+    if (!wrap || !input) return;
+    const pick = form.querySelector(
+        `input[name="${modeName}"][value="pick"]:checked`,
+    );
+    wrap.hidden = !pick;
+    input.disabled = !pick;
+}
+
 function bindQuickCalSheet(root) {
     const dialog = document.getElementById(QUICK_CAL_ID);
     if (!(dialog instanceof HTMLDialogElement)) return;
     if (quickCalSheetInit.has(dialog)) return;
     quickCalSheetInit.add(dialog);
-    const form = dialog.querySelector(".fd-log-quick-cal-form");
+    const form = dialog.querySelector("#fd-log-quick-cal-form");
     const submit = dialog.querySelector("[data-fd-quick-cal-submit]");
     form?.addEventListener("change", (event) => {
         if (event.target?.name === "meal_type" && submit) {
             const meal = form.querySelector(
                 'input[name="meal_type"]:checked',
             )?.value;
-            submit.textContent = MEAL_LABEL[meal] ?? MEAL_LABEL.dinner;
+            setSubmitLabel(submit, meal);
         }
     });
 }
@@ -890,25 +970,14 @@ function bindWeighInSheet(root) {
     if (!(dialog instanceof HTMLDialogElement)) return;
     if (weighInSheetInit.has(dialog)) return;
     weighInSheetInit.add(dialog);
-    const form = dialog.querySelector(".fd-log-weigh-in-form");
-    const timeInput = dialog.querySelector("#fd-weigh-time");
+    const form = dialog.querySelector("#fd-log-weigh-in-form");
     const todayLabel = dialog.querySelector("[data-fd-weigh-today-label]");
-    if (todayLabel?.textContent) {
-        const m = todayLabel.textContent.match(/^Today /);
-        if (m) {
-            const now = new Date();
-            const hh = String(now.getHours()).padStart(2, "0");
-            const mm = String(now.getMinutes()).padStart(2, "0");
-            todayLabel.textContent = `Today ${hh}:${mm}`;
-        }
+    if (todayLabel?.textContent?.startsWith("Today ")) {
+        todayLabel.textContent = todayLabelNow();
     }
     form?.addEventListener("change", (event) => {
-        if (event.target?.name === "fd_weigh_time_mode" && timeInput) {
-            const pick = form.querySelector(
-                'input[name="fd_weigh_time_mode"][value="pick"]:checked',
-            );
-            timeInput.hidden = !pick;
-            timeInput.disabled = !pick;
+        if (event.target?.name === "fd_weigh_time_mode") {
+            syncTimePick(form, "fd_weigh_time_mode");
         }
     });
 }
@@ -918,20 +987,15 @@ function bindAmountSheet(root) {
     if (!(dialog instanceof HTMLDialogElement)) return;
     if (amountSheetInit.has(dialog)) return;
     amountSheetInit.add(dialog);
-    const form = dialog.querySelector(".fd-log-amount-form");
+    const form = dialog.querySelector("#fd-log-amount-form");
     const macroRoot = dialog.querySelector("[data-fd-log-macros]");
-    const title = dialog.querySelector(".fd-sheet-title");
-    const sub = dialog.querySelector(".fd-sheet-sub");
     const submit = dialog.querySelector("[data-fd-log-submit]");
-    const timeInput = dialog.querySelector(".fd-log-time-input");
-    const stepperUnit = dialog.querySelector(".fd-stepper__unit");
+    const stepperUnit = dialog.querySelector(".fd-stepper-control__unit");
 
     function refreshMacros() {
         if (!selectedItem || !form) return;
         const amount = Number(form.querySelector('[name="amount"]')?.value);
-        const unit =
-            form.querySelector('input[name="unit"]:checked')?.value ||
-            allowedUnits(selectedItem)[0];
+        const unit = currentUnit(form, selectedItem);
         renderMacroTiles(macroRoot, macrosFor(selectedItem, amount, unit));
         if (stepperUnit) stepperUnit.textContent = unit;
         form.dataset.fdUnit = unit;
@@ -944,7 +1008,7 @@ function bindAmountSheet(root) {
             const meal = form.querySelector(
                 'input[name="meal_type"]:checked',
             )?.value;
-            submit.textContent = MEAL_LABEL[meal] ?? MEAL_LABEL.dinner;
+            setSubmitLabel(submit, meal);
         }
         if (event.target?.name === "unit") {
             // A portion count and a mass or volume are different scales:
@@ -959,13 +1023,8 @@ function bindAmountSheet(root) {
             }
             refreshMacros();
         }
-        if (event.target?.name === "fd_log_time_mode" && timeInput) {
-            const pick = form.querySelector(
-                'input[name="fd_log_time_mode"][value="pick"]:checked',
-            );
-            timeInput.hidden = !pick;
-            // A disabled field is not submitted: "Today" logs at submit time.
-            timeInput.disabled = !pick;
+        if (event.target?.name === "fd_log_time_mode") {
+            syncTimePick(form, "fd_log_time_mode");
         }
     });
     dialog.addEventListener("toggle", () => {
@@ -988,10 +1047,11 @@ function bindAmountSheet(root) {
 /** @param {EventTarget | null} target */
 function shouldAmountEnterSubmit(target) {
     if (!(target instanceof HTMLElement)) return false;
-    if (target.closest(".fd-log-time-input")) return false;
+    if (target.closest("[data-fd-log-time-pick]")) return false;
     if (target.closest("[data-fd-step]")) return false;
     if (target.closest(".fd-chip")) return false;
-    if (target.closest(".fd-icon-btn")) return false;
+    if (target.closest(".fd-segmented")) return false;
+    if (target.closest(".fd-item-row__add")) return false;
     if (target.closest('button[type="submit"]')) return false;
     if (target.matches('input[type="number"]')) return true;
     if (target.classList.contains("fd-sheet-panel")) return true;
@@ -1018,6 +1078,21 @@ function amountFormSubmitButton(form, dialog) {
     return dialog?.querySelector("[data-fd-log-submit]") ?? null;
 }
 
+// The amount sheet has no subtitle until a food is picked: it is made here.
+function setAmountSubtitle(dialog, text) {
+    let sub = dialog?.querySelector(".fd-sheet__subtitle");
+    if (!sub) {
+        const titles = dialog?.querySelector(".fd-sheet__titles");
+        if (!titles) return;
+        sub = document.createElement("p");
+        sub.className = "fd-sheet__subtitle";
+        sub.id = `${AMOUNT_ID}-sub`;
+        titles.appendChild(sub);
+        dialog.setAttribute("aria-describedby", sub.id);
+    }
+    sub.textContent = text;
+}
+
 function pickItem(item) {
     if (!logItemIsRelivable(item)) return;
     selectedItem = item;
@@ -1025,12 +1100,11 @@ function pickItem(item) {
     const searchMeal = searchDialog ? searchMealType(searchDialog) : "dinner";
     closeSheet(SEARCH_ID);
     const amountDialog = document.getElementById(AMOUNT_ID);
-    const form = amountDialog?.querySelector(".fd-log-amount-form");
-    const title = amountDialog?.querySelector(".fd-sheet-title");
-    const sub = amountDialog?.querySelector(".fd-sheet-sub");
+    const form = amountDialog?.querySelector("#fd-log-amount-form");
+    const title = amountDialog?.querySelector(".fd-sheet__title");
     const submit = amountDialog?.querySelector("[data-fd-log-submit]");
     if (title) title.textContent = item.name || "Food";
-    if (sub) sub.textContent = amountSubtitleLine(item);
+    setAmountSubtitle(amountDialog, amountSubtitleLine(item));
     if (form) {
         syncAmountHidden(form, item);
         const units = allowedUnits(item);
@@ -1044,17 +1118,18 @@ function pickItem(item) {
                     ? String(item.amount)
                     : String(defaultAmountForUnit(unit));
         }
-        rebuildUnitChips(form, units, unit);
+        rebuildUnitChips(form, units, unit, item);
         const mealInput = form.querySelector(
             `input[name="meal_type"][value="${searchMeal}"]`,
         );
         if (mealInput) mealInput.checked = true;
-        if (submit)
-            submit.textContent = MEAL_LABEL[searchMeal] ?? MEAL_LABEL.dinner;
-        const stepperUnit = form.querySelector(".fd-stepper__unit");
+        if (submit) setSubmitLabel(submit, searchMeal);
+        const stepperUnit = form.querySelector(".fd-stepper-control__unit");
         if (stepperUnit) stepperUnit.textContent = unit;
         form.dataset.fdUnit = unit;
         syncPortionEcho(amountDialog, item, Number(amountInput?.value), unit);
+        // The stepper sizes its box by the figure's length.
+        amountInput?.dispatchEvent(new Event("input", { bubbles: true }));
     }
     openSheet(AMOUNT_ID);
 }
@@ -1086,6 +1161,29 @@ function bindOpeners() {
                 const item = JSON.parse(raw);
                 pickItem(item);
             } catch (_) {}
+            return;
+        }
+        // A result whose face is no link (a past meal) acts like its plus: it
+        // opens the log form, or the meal's own search when it has no single
+        // food. The row's links and its plus act for themselves.
+        const row = event.target.closest?.(
+            "[data-fd-log-row-pick], [data-fd-log-row-open]",
+        );
+        if (
+            row &&
+            !modifiedClick &&
+            !event.target.closest?.("a, button, form")
+        ) {
+            const raw = row.getAttribute("data-fd-log-row-pick");
+            if (raw) {
+                try {
+                    pickItem(JSON.parse(raw));
+                } catch (_) {}
+            } else {
+                const open = row.getAttribute("data-fd-log-row-open");
+                if (open && window.Turbo?.visit) window.Turbo.visit(open);
+                else if (open) window.location.assign(open);
+            }
         }
     });
     document.addEventListener(
@@ -1235,10 +1333,15 @@ if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_LOG_MACROS) {
         formatLogMacroKcal,
         formatLogMacroGrams,
         rebuildUnitChips,
+        unitSegmentLabel,
         recentChipHtml,
         searchRowHtml,
         searchRowsHtml,
         linkedMealFor,
+        isRecipeLink,
+        currentUnit,
+        macroValueHtml,
+        renderMacroTiles,
     });
 }
 

@@ -102,7 +102,6 @@ describe("/app-v2.css", () => {
         for (const selector of [
             ".fd-sheet .fd-sheet-close",
             ".fd-icon-btn",
-            ".fd-scanner-icon-btn",
             ".fd-star",
             ".fd-shell .modal-close",
         ]) {
@@ -307,7 +306,9 @@ describe("/app-v2.js", () => {
         // +~1.4 KB Menu: a shared sheet filled for the item that opens it (Edit and Merge on Saved foods), and a button item that closes the menu (Select).
         // +~3.5 KB Menu and Select: a refusal a shared sheet showed goes when another row opens it, the food going in is left out of Keep, a menu panel that is longer than the screen scrolls inside it, and a Select in a ⋯ reads Cancel selection while picking (focus to the ⋯ that shows); a confirm words itself for the kind of row picked.
         // +~0.9 KB Today: the edit sheet's Time chips put the meal's time back, and a plan sheet's pull-down row shows the list's choice.
-        expect(js.length).toBeLessThan(208_500);
+        // +~1.2 KB Log sheet: a search row is the Item row (open link, plus), a pasted recipe link shows Go, the unit is a Segmented (a piece names its weight) and the macro tiles are the Macro tiles.
+        // +~1.1 KB Log sheet: a meal's plus opens the search with that meal checked, and Quick calories and Weigh in replace the search sheet.
+        expect(js.length).toBeLessThan(211_100);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });

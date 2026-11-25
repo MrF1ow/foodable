@@ -72,10 +72,10 @@ bun run db:dev status   # "stopped", exit 1
 - **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off). Page loads sync `notifications`; db-less route tests log `sync failed`.
 - **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs `CHROME_BIN`. Ports :4791, :9223, one at a time ("harness crashed" = port held). No DB: `scripts/nav-check-fixture.ts` keys pages by query, flags on, POSTs 303 back. Swipe: touch emulation.
 - **Flicker:** `bun scripts/flicker-check.ts --base http://<tailscale ip -4>:$APP_PORT` on an isolated stack: remote browserless Chromium, 390 px, both themes.
-- **App look:** `bun run preview:app --shots`: `-390.png`/`-1440.png` per page in tmp/app-preview (slow; clear first). Without `--shots`: serves :4787 (`PREVIEW_PORT`), pages `/<name>-<light|dark>.html`; clock, caret pinned.
-- **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`) compares base and branch; exit 1 on a diff. Clean commits are cached in `~/.cache/foodable/preview-diff`: `rm -rf` old.
+- **App look:** `bun run preview:app --shots`: `-390.png`/`-1440.png` per page in tmp/app-preview. Without `--shots`: serves :4787 (`PREVIEW_PORT`), pages `/<name>-<light|dark>.html`; clock, caret pinned.
+- **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`) compares base and branch; exit 1 on a diff. Clean commits are cached in `~/.cache/foodable/preview-diff` (`rm -rf` old).
 - **WebKit (Safari-class):** WPE `MiniBrowser` needs a wrapper exporting `WEBKIT_EXEC_PATH`, `WEBKIT_INJECTED_BUNDLE_PATH`, `WEBKIT_INSPECTOR_RESOURCES_PATH`, `WEBKIT_FORCE_COMPLEX_TEXT=1` and `LD_LIBRARY_PATH` (its `lib`, `sys/lib`, ICU 74).
-- **Barcode scans** hit live Open Food Facts; unit tests stub it.
+- **Barcode scans** hit live Open Food Facts (tests stub it); `barcode-camera` off: `/?camera=off`, `*-camera-off` previews.
 - **A flag off for one run:** `FOODABLE_FLAGS=<flag>:off` in the server's env (`all`, `internal`, comma lists).
 - **Chat widgets:** background `bun run harness` (:8787, or `HARNESS_PORT`); `/host?widget=<key>&theme=dark`, plus `&state=` for product-score `full|partial|none`, restock-nudge `costco|stores|onlist|empty`, week-plan `design|busy|future|empty`; `attention` paints a populated inbox. CDP eval inside the widget iframe needs Chromium `--disable-site-isolation-trials`.
 - **App-wide middleware (body limit, CORS):** import `app` from `src/index.ts` (`src/index.test.ts`).
@@ -83,7 +83,7 @@ bun run db:dev status   # "stopped", exit 1
 - **MCP end to end through a real agent:** `bun run e2e:agent --list`, then `--only <ids>`; only when asked.
 - **Migrations:** `bun run db:dryrun` (throwaway Postgres; needs `initdb`). `bun run db:rehearse` (production copy via `railway ssh`): only when asked.
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
-- **Types, lint, format:** `bun run typecheck`, `lint`, `format:check` (`format` fixes). `bun fmt` needs Bun ≥ 1.4.4: put `$(mise where bun@1.4.4)/bin` first on PATH (`mise exec` misses the `bun` inside scripts).
+- **Types, lint, format:** `bun run typecheck`, `lint`, `format:check` (`format` fixes). `bun fmt` needs Bun ≥ 1.4.4: put `$(mise where bun@1.4.4)/bin` first on PATH.
 
 `e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback). **Set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if that is the user's server, stop and ask. The scenarios (one: no logging for another member) need two household members: sign up the owner, create the household, add a member in Settings › Household, then sign Grok in. Snapshots need `pg_dump` and `psql` (`PG_BIN`).
 

@@ -2926,6 +2926,16 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "nutrition-log-quick-cal": await logSheetPreview(theme, "quick-cal"),
         "nutrition-log-weigh-in": await logSheetPreview(theme, "weigh-in"),
         "nutrition-log-scanner": await logScannerPreview(theme),
+        "nutrition-log-scanner-off": await logScannerPreview(theme, false),
+        "nutrition-log-search-link": await logSheetPreview(theme, "link"),
+        "nutrition-log-search-camera-off": await logSheetPreview(
+            theme,
+            "empty-no-camera",
+        ),
+        "nutrition-log-results-camera-off": await logSheetPreview(
+            theme,
+            "results-no-camera",
+        ),
         "trends-v2": previewTrendsPage(chrome),
         // The public /s/:token pages (no shell, no session).
         "share-recipe": renderShareViewPage(
@@ -3072,7 +3082,10 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
     };
 }
 
-async function logScannerPreview(theme: "light" | "dark"): Promise<string> {
+async function logScannerPreview(
+    theme: "light" | "dark",
+    camera = true,
+): Promise<string> {
     const chrome = {
         ...previewChrome(theme),
         v2Timezone: "America/Los_Angeles",
@@ -3085,7 +3098,7 @@ async function logScannerPreview(theme: "light" | "dark"): Promise<string> {
         v2LogSheet: {
             scannerOpenOnLoad: true,
             previewScanner: true,
-            barcodeCamera: true,
+            barcodeCamera: camera,
         },
     });
 }
@@ -3095,7 +3108,10 @@ async function logSheetPreview(
     mode:
         | "empty"
         | "empty-no-yesterday"
+        | "empty-no-camera"
+        | "link"
         | "results"
+        | "results-no-camera"
         | "amount"
         | "quick-cal"
         | "weigh-in",
@@ -3119,6 +3135,7 @@ async function logSheetPreview(
                     name: "Chicken breast, grilled",
                     food_id: "f-chicken",
                     unit_hints: ["g", "each"],
+                    grams_per_each: 174,
                     amount: 150,
                     unit: "g",
                     meal_type: "dinner",
@@ -3163,7 +3180,7 @@ async function logSheetPreview(
     // Today's own sheet carries the Copy yesterday tile: enabled for every
     // meal, or (empty-no-yesterday) disabled because yesterday had no meals.
     const copyYesterday =
-        mode === "empty"
+        mode === "empty" || mode === "link"
             ? {
                   slots: ["breakfast", "lunch", "snack", "dinner"],
                   returnTo: "/",
@@ -3171,12 +3188,20 @@ async function logSheetPreview(
             : mode === "empty-no-yesterday"
               ? { slots: [], returnTo: "/" }
               : undefined;
+    // `barcode-camera` off: no Scan barcode tile, barcode button or link.
+    const noCamera = mode === "empty-no-camera" || mode === "results-no-camera";
+    const results = mode === "results" || mode === "results-no-camera";
     return renderAppShell({
         ...base,
         v2LogSheet: {
             searchOpenOnLoad: true,
-            previewSearch: mode === "results" ? "results" : "empty",
-            previewQuery: mode === "results" ? "chick" : "",
+            previewSearch: results ? "results" : "empty",
+            previewQuery: results
+                ? "chick"
+                : mode === "link"
+                  ? "https://hot-thai-kitchen.com/pad-see-ew"
+                  : "",
+            ...(noCamera ? { barcodeCamera: false } : {}),
             ...(copyYesterday ? { copyYesterday } : {}),
         },
     });

@@ -143,10 +143,6 @@ function loadDecoderBundle(dialog) {
     return decoderLoadPromise;
 }
 
-function scannerDesktopLayout() {
-    return window.matchMedia("(min-width: 1024px)").matches;
-}
-
 function discardSessionAttempt(session, stream) {
     turnTorchOff(session);
     stopTracks(stream);
@@ -167,7 +163,7 @@ function stopSession() {
     if (startupStream) {
         stopTracks(startupStream);
         startupStream = null;
-        detachVideo(scannerDialog()?.querySelector(".fd-scanner-video"));
+        detachVideo(scannerDialog()?.querySelector("[data-fd-camera-video]"));
     }
     const session = activeSession;
     activeSession = null;
@@ -192,55 +188,28 @@ function setError(dialog, message) {
     }
 }
 
+function cameraOf(dialog) {
+    return dialog.querySelector("[data-fd-camera-view]");
+}
+
+function numberInput(dialog) {
+    return dialog.querySelector(".fd-scanner__type input");
+}
+
+// The camera is shown whenever there is one; the number field is always there.
 function resetScannerPanels(dialog) {
-    const help = dialog.querySelector(".fd-scanner-help");
-    const panel = dialog.querySelector("[data-fd-scanner-type-panel]");
-    const camera = dialog.querySelector(".fd-scanner-camera");
-    const or = dialog.querySelector(".fd-scanner-or");
-    const desktop =
-        scannerDesktopLayout() &&
-        !dialog.classList.contains("fd-scanner--type-only");
-    if (desktop) {
-        if (panel) panel.hidden = false;
-        if (help) help.hidden = true;
-        if (or) or.hidden = false;
-        if (camera) camera.hidden = false;
-        return;
-    }
-    if (panel) panel.hidden = true;
-    if (help) help.hidden = false;
-    if (or) or.hidden = true;
+    const camera = cameraOf(dialog);
     if (camera && !dialog.classList.contains("fd-scanner--type-only")) {
         camera.hidden = false;
     }
 }
 
-function showTypePanel(dialog, on) {
-    const help = dialog.querySelector(".fd-scanner-help");
-    const panel = dialog.querySelector("[data-fd-scanner-type-panel]");
-    const camera = dialog.querySelector(".fd-scanner-camera");
-    if (
-        scannerDesktopLayout() &&
-        !dialog.classList.contains("fd-scanner--type-only")
-    ) {
-        if (on) panel?.querySelector("input")?.focus();
-        return;
-    }
-    if (!panel) return;
-    if (on) {
-        stopSession();
-        panel.hidden = false;
-        if (help) help.hidden = true;
-        if (camera) camera.hidden = true;
-        panel.querySelector("input")?.focus();
-    } else {
-        panel.hidden = true;
-        if (help) help.hidden = false;
-        if (camera && !dialog.classList.contains("fd-scanner--type-only")) {
-            camera.hidden = false;
-            startScanner(dialog);
-        }
-    }
+// The camera could not start (or never existed): only the number field is left.
+function showTypePanel(dialog) {
+    stopSession();
+    const camera = cameraOf(dialog);
+    if (camera) camera.hidden = true;
+    numberInput(dialog)?.focus();
 }
 
 async function decodeNative(detector, video) {
@@ -310,7 +279,7 @@ function startScanner(dialog) {
     startCamera(dialog).catch(() => {
         stopSession();
         setError(dialog, "Scanner could not start. Type the number instead.");
-        showTypePanel(dialog, true);
+        showTypePanel(dialog);
     });
 }
 
@@ -322,7 +291,7 @@ async function startCamera(dialog) {
             dialog,
             "Camera needs a secure connection (HTTPS). Type the number instead.",
         );
-        showTypePanel(dialog, true);
+        showTypePanel(dialog);
         return;
     }
     if (!navigator.mediaDevices?.getUserMedia) {
@@ -330,7 +299,7 @@ async function startCamera(dialog) {
             dialog,
             "Camera is not available here. Type the number instead.",
         );
-        showTypePanel(dialog, true);
+        showTypePanel(dialog);
         return;
     }
     setError(dialog, "");
@@ -348,7 +317,7 @@ async function startCamera(dialog) {
             dialog,
             "Camera permission was denied. Type the number instead.",
         );
-        showTypePanel(dialog, true);
+        showTypePanel(dialog);
         return;
     }
     if (!startupStillValid(generation)) {
@@ -356,7 +325,7 @@ async function startCamera(dialog) {
         return;
     }
     startupStream = stream;
-    const video = dialog.querySelector(".fd-scanner-video");
+    const video = dialog.querySelector("[data-fd-camera-video]");
     if (!video) {
         stopTracks(stream);
         startupStream = null;
@@ -428,7 +397,7 @@ async function startCamera(dialog) {
                 dialog,
                 "Scanner could not load. Type the number instead.",
             );
-            showTypePanel(dialog, true);
+            showTypePanel(dialog);
             stopSession();
             return;
         }
@@ -480,11 +449,11 @@ function bindScannerDialog(dialog) {
         openerTarget = null;
         stopSession();
         if (dialog.classList.contains("fd-scanner--type-only")) {
-            showTypePanel(dialog, true);
+            showTypePanel(dialog);
         } else {
             resetScannerPanels(dialog);
         }
-        const input = dialog.querySelector(".fd-scanner-type-input");
+        const input = numberInput(dialog);
         if (input) input.value = "";
         setError(dialog, "");
         navigating = false;
@@ -492,7 +461,7 @@ function bindScannerDialog(dialog) {
     dialog.addEventListener("toggle", (event) => {
         if (event.newState === "open") {
             if (dialog.classList.contains("fd-scanner--type-only")) {
-                showTypePanel(dialog, true);
+                showTypePanel(dialog);
             } else {
                 resetScannerPanels(dialog);
                 startScanner(dialog);
@@ -506,25 +475,6 @@ function bindScannerDialog(dialog) {
         if (close) {
             event.preventDefault();
             dialog.close();
-            return;
-        }
-        const showType = event.target.closest?.("[data-fd-scanner-show-type]");
-        if (showType) {
-            event.preventDefault();
-            showTypePanel(dialog, true);
-            return;
-        }
-        const back = event.target.closest?.("[data-fd-scanner-back-type]");
-        if (back) {
-            event.preventDefault();
-            showTypePanel(dialog, false);
-            return;
-        }
-        const submit = event.target.closest?.("[data-fd-scanner-submit]");
-        if (submit) {
-            event.preventDefault();
-            const input = dialog.querySelector(".fd-scanner-type-input");
-            goBarcode(input?.value ?? "");
             return;
         }
         const torch = event.target.closest?.("[data-fd-scanner-torch]");
@@ -542,13 +492,13 @@ function bindScannerDialog(dialog) {
                 .catch(() => {});
         }
     });
-    const input = dialog.querySelector(".fd-scanner-type-input");
-    input?.addEventListener("keydown", (event) => {
-        if (event.key === "Enter") {
+    // Enter in the number field and the Go button are the same submit.
+    dialog
+        .querySelector("[data-fd-scanner-form]")
+        ?.addEventListener("submit", (event) => {
             event.preventDefault();
-            goBarcode(input.value);
-        }
-    });
+            goBarcode(numberInput(dialog)?.value ?? "");
+        });
 }
 
 function initScanner() {
@@ -557,7 +507,7 @@ function initScanner() {
     bindScannerDialog(dialog);
     if (dialog.open) {
         if (dialog.classList.contains("fd-scanner--type-only")) {
-            showTypePanel(dialog, true);
+            showTypePanel(dialog);
         } else if (dialog.classList.contains("fd-scanner--preview")) {
             resetScannerPanels(dialog);
         } else {

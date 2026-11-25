@@ -298,8 +298,12 @@ function rowMacros(row: MealRow): Macros {
     };
 }
 
-/** The log sheet's search, opened from a plus. */
-const OPEN_LOG = { "fd-open-sheet": FD_LOG_SEARCH_SHEET_ID } as const;
+/** The log sheet's search, opened from a meal's plus with that meal chosen. */
+const openLog = (mealType: MealTypeSlot) =>
+    ({
+        "fd-open-sheet": FD_LOG_SEARCH_SHEET_ID,
+        "fd-log-meal": mealType,
+    }) as const;
 
 function mealRowMarkup(row: MealRow, data: TodayPageData): Html {
     const base = {
@@ -444,7 +448,7 @@ function emptySlotRows(mealType: MealTypeSlot, data: TodayPageData): Html[] {
                       label: `Log ${MEAL_SECTION_LABEL[mealType].toLowerCase()}`,
                       // A link, so it still goes to the log with no script.
                       href: FD_LOG_HREF,
-                      data: OPEN_LOG,
+                      data: openLog(mealType),
                   },
               }),
     ];
