@@ -70,10 +70,37 @@ function pillForm(
     return `<form class="fd-inline-form" method="post" action="/recipes/${esc(recipeId)}/mentions/${action}"><input type="hidden" name="key" value="${esc(key)}">${control}</form>`;
 }
 
+/**
+ * The quote a card shows: the step from the clause the food is in, so "Push
+ * the noodles aside, pour in the lightly beaten egg…" reads "…pour in the
+ * lightly beaten egg…" (405904). The food's offsets move with the cut.
+ */
+export function trimmedExcerpt(
+    warning: Pick<
+        MentionWarningView,
+        "excerpt" | "excerptStart" | "excerptEnd"
+    >,
+): { text: string; start: number; end: number } {
+    const { excerpt, excerptStart, excerptEnd } = warning;
+    const comma = excerpt.lastIndexOf(", ", excerptStart - 1);
+    if (comma <= 0 || excerptStart < 0 || excerptEnd > excerpt.length) {
+        return { text: excerpt, start: excerptStart, end: excerptEnd };
+    }
+    const from = comma + 2;
+    const lead = excerpt.startsWith("…") ? "" : "…";
+    const shift = from - lead.length;
+    return {
+        text: `${lead}${excerpt.slice(from)}`,
+        start: excerptStart - shift,
+        end: excerptEnd - shift,
+    };
+}
+
 /** One warning: "Steps mention egg", what the step said, with Dismiss and Add. */
 function mentionCard(recipeId: string, warning: MentionWarningView): string {
-    const excerpt = markSpans(warning.excerpt, [
-        { start: warning.excerptStart, end: warning.excerptEnd },
+    const quote = trimmedExcerpt(warning);
+    const excerpt = markSpans(quote.text, [
+        { start: quote.start, end: quote.end },
     ]);
     const dismiss = pillForm(
         recipeId,

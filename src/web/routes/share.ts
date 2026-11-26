@@ -5,7 +5,6 @@ import { renderRecipesListPage } from "../loaders.js";
 import { shareImportPrefill } from "../share-import-prefill.js";
 import { shareArrivedDisclosure } from "../components/share-arrived.js";
 import { renderBarePage, type ThemePref } from "../shell.js";
-import { pageHeader, panel } from "../components/ui.js";
 import { getProfile } from "../../db/profiles.js";
 
 export const shareRoutes = new Hono();
@@ -33,11 +32,10 @@ shareRoutes.get("/share/probe", requireSiteUser, async (c) => {
         profile?.theme === "light" || profile?.theme === "dark"
             ? profile.theme
             : "system";
-    const body = `${pageHeader({
-        title: "Share probe",
-        sub: "Read-only view of what the share target received.",
-    })}${panel({
-        body: shareArrivedDisclosure(share, { open: true }),
-    })}`;
+    const body = `<h1>Share probe</h1>
+<p class="muted">Read-only view of what the share target received.</p>
+<section class="panel">
+${shareArrivedDisclosure(share, { open: true })}
+</section>`;
     return c.html(renderBarePage("Share probe", body, theme));
 });

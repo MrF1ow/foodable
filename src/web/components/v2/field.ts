@@ -6,8 +6,7 @@
  * A `<label>` wraps the label text and the box, so the text names the input with
  * no `for`/`id` pairing to keep in step. The hint or error sits outside it, in
  * the field's `<div>`: inside the label it would join the input's name. Classes
- * are `fd-field*`; `field()` in `components/ui.ts` is the older builder (class
- * `field`) and stays until the pages move. An error marks the input
+ * are `fd-field*`. An error marks the input
  * `aria-invalid` and is what the input is described by, in place of the hint.
  * Styles: `public/app/v2/field.css`.
  */

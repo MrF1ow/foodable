@@ -115,14 +115,15 @@ describe("renderProductScoreSection", () => {
         expect(greenAt).toBeGreaterThan(sugarAt);
     });
 
-    test("saturated fat shows one decimal", () => {
+    test("a nutrient level reads short, as frame 389805: whole grams, no per 100 g", () => {
         const food = scoredFood();
         const section = buildProductScoreSection(
             food,
             previewMemberCards(food, [members[0]!]),
         )!;
         const html = renderProductScoreSection(food, section);
-        expect(html).toContain("2.0 g per 100 g");
+        expect(html).toContain(">2 g · moderate<");
+        expect(html).not.toContain("per 100 g");
     });
 
     test("partial data shows scored on N of 4", () => {
@@ -155,8 +156,8 @@ describe("renderProductScoreSection", () => {
         expect(titles.slice(0, 4)).toEqual([
             "Nutri-Score: A",
             "Processing: NOVA 1 · unprocessed",
-            "Sugar: 4 g per 100 g · low",
-            "Saturated fat: 2.0 g per 100 g · moderate",
+            "Sugar: 4 g · low",
+            "Saturated fat: 2 g · moderate",
         ]);
         expect(titles.slice(4)).toEqual([
             "Additives: No data",
@@ -191,7 +192,7 @@ describe("renderProductScoreSection", () => {
             buildProductScoreSection(food, cards)!,
         );
         expect(html).toContain('fd-item-row__value">Avoid<');
-        expect(html).toContain("Contains Peanut");
+        expect(html).toContain("Contains peanut · allergy");
     });
 });
 
@@ -264,7 +265,7 @@ describe("the viewer's weights and switches on the product screen", () => {
         const off = previewMemberCards(food, [
             { ...allergic, warnTraces: false },
         ])[0]!;
-        expect(on.reason).toContain("May contain traces of peanut");
+        expect(on.reason).toBe("May contain peanut");
         expect(off.reason).toBe("");
     });
 });

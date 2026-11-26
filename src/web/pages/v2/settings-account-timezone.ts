@@ -20,11 +20,22 @@ import { listGroup } from "../../components/v2/list-group.js";
 import { searchField } from "../../components/v2/search-field.js";
 import { APP_PATHS } from "../../route-map.js";
 import { renderHouseholdLayout } from "./settings-household-layout.js";
-import { timeZoneOptions } from "./settings-household-rows.js";
 import {
     renderSettingsV2Page,
     settingsErrorBanner,
 } from "./settings-shared.js";
+
+/**
+ * The IANA names a time zone picker lists: what the runtime supports, plus the
+ * stored value when it is missing (aliases such as `US/Pacific` are valid and
+ * stored but not in the supported list), so a re-save keeps it.
+ */
+function timeZoneOptions(stored: string | null): string[] {
+    const zones = Intl.supportedValuesOf("timeZone");
+    const list = zones.includes("UTC") ? [...zones] : ["UTC", ...zones];
+    if (stored && !list.includes(stored)) list.push(stored);
+    return list.sort((a, b) => a.localeCompare(b));
+}
 
 /** The zones shown before anything is typed, after the person's own. */
 export const COMMON_TIME_ZONES: readonly string[] = [

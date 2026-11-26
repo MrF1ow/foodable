@@ -95,12 +95,10 @@ test("a row's name is one line ending in an ellipsis; its neighbours keep their 
             /\.fd-row__line > :not\(\.fd-row__title\)\s*\{([^}]*)\}/,
         )?.[1],
     ).toContain("flex: none");
-    // The row body and the manage row's actions never wrap below the name.
+    // The row body never wraps below the name.
     expect(rules).not.toMatch(
         /\.fd-row[\w-]*\s+\.fd-row__body\s*\{[^}]*flex-wrap:\s*wrap/,
     );
-    expect(block(".fd-row--manage .fd-row__main")).toMatch(/flex:\s*1 1 0/);
-    expect(block(".fd-row__actions")).toContain("flex: none");
 });
 
 test("a title line fills its row's text column, so the inline meta cap measures the column", () => {
@@ -119,17 +117,6 @@ const settingsRules = readFileSync(
     join(import.meta.dir, "../../../../public/app/v2/settings.css"),
     "utf8",
 ).replace(/\/\*[\s\S]*?\*\//g, "");
-
-test("a wrapping action group can shrink", () => {
-    const block = (selector: string) =>
-        settingsRules.match(
-            new RegExp(`${escapeRegExp(selector)}\\s*\\{([^}]*)\\}`),
-        )?.[1] ?? "";
-    const wrap = block(".fd-row__actions--wrap");
-    expect(wrap).toMatch(/flex:\s*0 1 auto/);
-    expect(wrap).toContain("flex-wrap: wrap");
-    expect(wrap).toContain("min-width: 0");
-});
 
 const planted = (decl: string) => scaleViolations(`.fd-x { ${decl} }`);
 

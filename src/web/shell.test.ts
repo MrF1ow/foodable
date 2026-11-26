@@ -13,6 +13,7 @@ import {
     themeColorMeta,
 } from "./shell.js";
 import { THEME_COLOR, THEME_NAV_COLOR } from "../tokens.js";
+import { getAppCss, getAppJs, getAppV2Css, getAppV2Js } from "../widgets.js";
 import { FIXTURE_APP_CHROME_FLAGS } from "../test-support/chrome-flags.js";
 
 // A bare tab page: the shell around one heading, with no tab content.
@@ -63,7 +64,10 @@ test("unset theme follows the system", () => {
     expect(resolveTheme("light")).toBe("light");
 });
 
-test("a tab page uses the shell and marks its tab active", () => {
+test("a tab page uses the shell and marks its tab active", async () => {
+    // The hrefs carry a content hash that exists once the bundles are built,
+    // so build them here rather than lean on an earlier test file having done it.
+    await Promise.all([getAppCss(), getAppJs(), getAppV2Css(), getAppV2Js()]);
     const html = shellPage();
     expect(html).toContain("<h1>Fridge</h1>");
     expect(html).toMatch(

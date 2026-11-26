@@ -146,18 +146,13 @@ describe("renderShareCreatedBody", () => {
         expect(html).toContain(">Done</span>");
     });
 
-    test("says anyone with the link can read it, and where to revoke it", () => {
-        const html = renderShareCreatedBody(view);
-        expect(html).toContain(
-            "Anyone with the link can read this recipe. Revoke it in Settings › Household.",
-        );
-        expect(
-            renderShareCreatedBody({
-                ...view,
-                name: null,
-                what: "grocery list",
-            }),
-        ).toContain("Anyone with the link can read this grocery list.");
+    test("adds no line the frame does not draw: no who-can-read or where-to-revoke (407028, 407265)", () => {
+        for (const what of ["recipe", "grocery list"] as const) {
+            const html = renderShareCreatedBody({ ...view, what });
+            expect(html).not.toContain("Anyone with the link");
+            expect(html).not.toContain("Revoke it in");
+            expect(html.match(/class="fd-share-made__meta"/g)?.length).toBe(1);
+        }
     });
 
     test("says when it expires, and that it is shown only once", () => {

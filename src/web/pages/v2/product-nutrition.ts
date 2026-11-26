@@ -215,22 +215,23 @@ export type ProductNutritionTableRow = {
 };
 
 export type ProductNutritionTableData = {
-    /** The header cells: "1 serving (30 ml)" and "100 ml", or "100 g" alone. */
+    /** The header cells: "1 serving · 30 ml" and "100 ml", or "100 g" alone. */
     head: string[];
     rows: ProductNutritionTableRow[];
 };
 
 /**
- * "1 serving (30 ml)": the serving column's heading. The pack's own unit of
- * eating names it ("1 cup (240 ml)", "2 cookies (30 g)"); the generic words a
- * label uses for any pack ("portion", "serving") read as "serving".
+ * "1 serving · 30 ml": the serving column's heading, as frames 391040 and
+ * 391131 set it. The pack's own unit of eating names it ("1 cup · 240 ml",
+ * "2 cookies · 30 g"); the generic words a label uses for any pack ("portion",
+ * "serving") read as "serving".
  */
 function servingColumnHead(parts: { name: string; amount: string }): string {
     const named = parts.name.replace(/^Per\s+/, "");
     const name = /^(portion|serving)s?$/.test(named) ? "serving" : named;
     // A mixed number or a fraction ("1 1/2 cup") already carries its count.
     const counted = /^[\d½¼¾⅓⅔⅛]/.test(name);
-    return `${counted ? "" : "1 "}${name} (${parts.amount})`;
+    return `${counted ? "" : "1 "}${name} · ${parts.amount}`;
 }
 
 /**
@@ -246,7 +247,7 @@ export function productNutritionTable(food: Food): ProductNutritionTableData {
         head.push(servingColumnHead(servingHeadingParts(source.serving)));
     } else if (source?.kind === "derived") {
         head.push(
-            `1 serving (${source.label ?? `${formatServingAmount(source.amount)} ${basisUnit}`})`,
+            `1 serving · ${source.label ?? `${formatServingAmount(source.amount)} ${basisUnit}`}`,
         );
     }
     head.push(`100 ${basisUnit}`);
@@ -267,5 +268,14 @@ export function productNutritionTable(food: Food): ProductNutritionTableData {
         cols.push(cell(food[row.key], row.unit));
         return { label: row.label, cols };
     });
-    return { head, rows };
+    // A food with no nutrition at all lists the four basics, as frame 392480.
+    const known = rows.some((row) => row.cols.some((c) => c != null));
+    return {
+        head,
+        rows: known
+            ? rows
+            : rows.filter(
+                  (row) => row.label !== "Fiber" && row.label !== "Sugar",
+              ),
+    };
 }

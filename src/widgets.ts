@@ -405,8 +405,6 @@ export async function getAppCss(): Promise<string> {
 export const APP_JS_SOURCES = [
     "./src/web/client/shell.js",
     "./src/web/client/toast.js",
-    "./src/web/client/food-picker.js",
-    "./src/web/client/modal.js",
     "./src/web/client/copy-prompt.js",
     "./src/web/client/busy-submit.js",
     "./src/web/client/sw-register.js",
@@ -515,7 +513,6 @@ export const APP_V2_JS_SOURCES = [
     "./src/web/client/v2/kitchen.js",
     "./src/web/client/v2/select-mode.js",
     "./src/web/client/v2/stores.js",
-    "./src/web/client/v2/score-settings.js",
     "./src/web/client/v2/share-link.js",
     "./src/web/client/v2/copy-address.js",
     "./src/web/client/v2/copy-yesterday.js",

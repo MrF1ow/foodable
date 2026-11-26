@@ -21,7 +21,6 @@ import {
     lookupDismissalKey,
 } from "./notice-dismissals.js";
 import {
-    dismissalSubjectLabel,
     dismissNotice,
     noticesFor,
     possibleDuplicateNotices,
@@ -824,14 +823,11 @@ describe("possibleDuplicateNotices and noticesFor", () => {
                 (n) => n.code === "food.possible_duplicate",
             ),
         ).toBe(true);
-        const row = withDismissed.dismissals.find(
-            (d) => d.code === "food.possible_duplicate",
-        )!;
-        const sub = row.subjectId === a.id ? a.name : b.name;
-        const rel = row.relatedKey === a.id ? a.name : b.name;
-        expect(dismissalSubjectLabel(row, withDismissed.subjectNames)).toBe(
-            `${sub} · ${rel}`,
-        );
+        expect(
+            withDismissed.dismissals.some(
+                (d) => d.code === "food.possible_duplicate",
+            ),
+        ).toBe(true);
         const tripleStore = createMemoryFoodsStore();
         for (let i = 0; i < 3; i++) {
             await tripleStore.insertFood({

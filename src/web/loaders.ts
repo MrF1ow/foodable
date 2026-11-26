@@ -94,7 +94,10 @@ import {
     recipeNotices,
 } from "../domain/recipes.js";
 import { verifyRecipe } from "../domain/recipe-import.js";
-import { renderRecipesListV2Page } from "./pages/v2/recipes-list.js";
+import {
+    recipesSearchTerm,
+    renderRecipesListV2Page,
+} from "./pages/v2/recipes-list.js";
 import {
     applyFilters,
     matchesRecipeQuery,
@@ -129,6 +132,7 @@ import {
     parseUsualsStoreFilter,
     renderKitchenUsualsV2Page,
     restockWeekdayLabel,
+    usualScheduleLabel,
     type KitchenUsualsRowMeta,
 } from "./pages/v2/kitchen-usuals.js";
 import { renderSettingsHouseholdV2Page } from "./pages/v2/settings-household.js";
@@ -602,6 +606,7 @@ function groceryAddUsuals(
     const onList = new Set(
         lines.flatMap((line) => (line.foodId ? [line.foodId] : [])),
     );
+    const plainById = new Map(foods.map((food) => [food.id, food]));
     return addableUsualRows(foods)
         .filter(
             (row) => !onList.has(row.plainId) && !onList.has(row.add.foodId),
@@ -611,11 +616,21 @@ function groceryAddUsuals(
             const left = low.left.get(row.plainId);
             const storeName =
                 row.storeId != null ? storeNames.get(row.storeId) : undefined;
+            // The schedule lives on the plain food, already loaded with it.
+            const plain = plainById.get(row.plainId);
+            const cadence =
+                plain && !plain.restockPaused
+                    ? usualScheduleLabel({
+                          schedule: plain.restockSchedule,
+                          everyWeeks: plain.restockEveryWeeks,
+                      })
+                    : null;
             return {
                 ...row.add,
                 ...(below != null ? { lowBelow: below } : {}),
                 ...(below != null && left != null ? { lowLeft: left } : {}),
                 ...(storeName != null ? { storeName } : {}),
+                ...(cadence != null ? { cadence: cadence.toLowerCase() } : {}),
             };
         })
         .sort(
@@ -2070,7 +2085,9 @@ export async function renderRecipesListPage(
     }));
     const kept = new Set(
         applyFilters(
-            recipes.filter((recipe) => matchesRecipeQuery(recipe, v2Query)),
+            recipes.filter((recipe) =>
+                matchesRecipeQuery(recipe, recipesSearchTerm(v2Query)),
+            ),
             v2Filters,
             {
                 flags: new Map(

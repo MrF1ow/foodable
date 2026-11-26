@@ -170,3 +170,11 @@ describe("recipe link readers page", () => {
         expect(html).not.toContain('role="switch"');
     });
 });
+
+test("only TikTok carries the Public post captions line; Facebook has none (412254)", () => {
+    const html = body({ socialReaders: { tiktok: true, facebook: true } });
+    expect(html.split("Public post captions").length - 1).toBe(1);
+    const facebook = html.split("<li").find((li) => li.includes(">Facebook<"));
+    expect(facebook).toBeDefined();
+    expect(facebook).not.toContain("fd-item-row__subtitle");
+});

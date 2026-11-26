@@ -1,4 +1,5 @@
 import type { FridgeItem, FridgeLocation } from "../../../domain/fridge.js";
+import { formatFridgeExpiryLabel } from "./kitchen-fridge.js";
 import type { PlanSlot } from "../../../domain/plan.js";
 import {
     recipeSteps,
@@ -16,7 +17,7 @@ import {
     formatLogMacroKcal,
 } from "../../../domain/log-macro-format.js";
 import type { AppChromeBase } from "../../attention.js";
-import { formatQuantityDisplayParts } from "../../display-quantity.js";
+import { formatRecipeAmountParts } from "./amount-text.js";
 import { button } from "../../components/v2/button.js";
 import { detailBar } from "../../components/v2/detail-bar.js";
 import { esc, join, raw, type Html } from "../../components/v2/html.js";
@@ -221,7 +222,7 @@ function ingredientAmountLabel(
     note: string | null,
 ): string {
     if (quantity == null) return note?.trim() || "to taste";
-    return formatQuantityDisplayParts(quantity.amount, quantity.unit);
+    return formatRecipeAmountParts(quantity.amount, quantity.unit);
 }
 
 function soonestExpiry(dates: Array<string | null | undefined>): string | null {
@@ -434,7 +435,7 @@ export function ingredientVersionNote(
 ): string {
     if (change === "add" || !base) return `${who} · not in base`;
     const amount = base.quantity
-        ? formatQuantityDisplayParts(base.quantity.amount, base.quantity.unit)
+        ? formatRecipeAmountParts(base.quantity.amount, base.quantity.unit)
         : "to taste";
     return change === "food"
         ? `${who} · base ${base.displayName} ${amount}`
@@ -511,7 +512,7 @@ function ingredientSubline(
         !place || !place.inStock
             ? "Not in stock"
             : place.expiresOn
-              ? `${place.places.join(", ")} · expires ${place.expiresOn}`
+              ? `${place.places.join(", ")} · expires ${formatFridgeExpiryLabel(place.expiresOn)}`
               : place.places.join(", ");
     const line = onList ? `${stock} · On the list` : stock;
     return versionNote ? `${versionNote} · ${line}` : line;

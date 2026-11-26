@@ -7,7 +7,6 @@ import {
     agentActivityRows,
     aiUndoPath,
     appFilterKey,
-    parseAiUndoBack,
     renderSettingsAiV2Body,
     renderSettingsAiV2Page,
     resolveAppFilter,
@@ -732,7 +731,7 @@ describe("the activity list", () => {
     });
 });
 
-describe("activityWhen and parseAiUndoBack", () => {
+describe("activityWhen", () => {
     test("how long ago, counted in the member's zone", () => {
         const at = (iso: string, zone = "UTC") =>
             activityWhen(new Date(iso), NOW, zone);
@@ -744,17 +743,6 @@ describe("activityWhen and parseAiUndoBack", () => {
         expect(at("2026-11-12T13:04:00.000Z", "America/New_York")).toBe(
             "1 hour ago",
         );
-    });
-
-    test("an Undo goes back to AI connections and nowhere else", () => {
-        expect(parseAiUndoBack("/")).toBe("/settings/ai-connections");
-        expect(parseAiUndoBack("/settings/ai-connections")).toBe(
-            "/settings/ai-connections",
-        );
-        expect(parseAiUndoBack("https://evil.example/")).toBe(
-            "/settings/ai-connections",
-        );
-        expect(parseAiUndoBack(undefined)).toBe("/settings/ai-connections");
     });
 });
 

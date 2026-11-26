@@ -255,7 +255,9 @@ test("Score and Macros sit in the text block, the score on the title line", () =
         macros: MACROS,
     });
     const main = html.slice(html.indexOf("fd-item-row__main"));
-    expect(main.indexOf("fd-score")).toBeLessThan(main.indexOf("__subtitle"));
+    expect(main.indexOf("fd-score-pill")).toBeLessThan(
+        main.indexOf("__subtitle"),
+    );
     expect(main.indexOf("__subtitle")).toBeLessThan(main.indexOf("fd-macros"));
     expect(html).toContain(`<span class="fd-sr">Protein </span>26`);
     expect(html).toContain(`aria-label="Product score 74 of 100, good"`);

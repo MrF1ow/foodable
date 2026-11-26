@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test";
-import * as legacyIcons from "../icons.js";
 import * as fdIcons from "../fd-icons.js";
 import * as v2Icons from "./icons.js";
 import { ICON_NAMES, icon } from "./icon.js";
@@ -94,16 +93,15 @@ test("the dots of more, target and help fill with currentColor and no stroke", (
     expect(icon("help").match(/<path /g)?.length).toBe(2);
 });
 
-test("iconRefresh, iconList, iconSettings and iconLogOut have no FigCraft icon", () => {
+test("refresh, list, settings and log-out have no FigCraft icon", () => {
     for (const name of ["refresh", "list", "settings", "log-out", "logout"]) {
         expect(ICON_NAMES as readonly string[]).not.toContain(name);
     }
 });
 
-test("the old icon modules still emit today's exact markup", () => {
+test("the two older icon modules still emit today's exact markup", () => {
     const parts: string[] = [];
     const mods = [
-        ["icons", legacyIcons],
         ["fd-icons", fdIcons],
         ["v2/icons", v2Icons],
     ] as const;
@@ -124,12 +122,12 @@ test("the old icon modules still emit today's exact markup", () => {
             }
         }
     }
-    expect(parts.length).toBe(22);
+    expect(parts.length).toBe(15);
     const digest = new Bun.CryptoHasher("sha256")
         .update(parts.join("\n"))
         .digest("hex");
     expect(digest).toBe(
-        "b3943c6d208a3f25f64e77da2e34b24b8a842f66658cc790a19c9269b5a21fc7",
+        "c3fa034e592d477731a50b4cbd57da2a4fbbe473601ca414711c7e7af166af5f",
     );
 });
 

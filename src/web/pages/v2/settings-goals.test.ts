@@ -166,6 +166,8 @@ describe("settings goals v2 in-place fields", () => {
         const name = fieldForm(html, "goal_name");
         expect(name).toContain('placeholder="Name this goal"');
         expect(html).toContain("fd-item-row--input-chevron");
+        // The row reads in the title tone, as frame 419204 (settings.css).
+        expect(html).toContain("fd-goals-name-row");
         // No note field, card or since line until the goal has a name.
         expect(html).not.toContain('value="goal_note"');
         expect(html).not.toContain("since ");

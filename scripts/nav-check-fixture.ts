@@ -382,7 +382,7 @@ const FIXTURE_GOALS: NutritionGoals = {
     ...FIXTURE_TRENDS_GOALS,
     daily_alcohol_g: 28,
     goal_name: "Recomp",
-    goal_note: "maintenance minus 5%",
+    goal_note: "Maintenance minus 5%",
     goals_set_on: "2026-10-02",
 };
 
@@ -1666,9 +1666,22 @@ async function pages(
             ),
         }),
         "recipes-pick": fixtureRecipesList(chrome, { planDate: "2026-11-12" }),
+        // A share link pasted in the search field that failed: the card
+        // answers right under the field (403910).
         "recipes-failed-link": fixtureRecipesList(chrome, {
             // Three planned cards are wider than the phone: the row scrolls
             // inside its own box, never the page.
+            week: fixtureWeekPlan(false, true),
+            sharedImport: {
+                error: "That share link doesn't work any more",
+                reason: "Revoked, expired, or not a recipe link",
+                input: "https://kitchen.example/s/q7Wm4xTz2LpR9vYb1KcN8dFhJ3sGaE5uOiXt6ZeBnVw",
+                via: "field",
+            },
+        }),
+        // The same failure from the Import from another Foodable box: it
+        // answers inside the open box.
+        "recipes-failed-box": fixtureRecipesList(chrome, {
             week: fixtureWeekPlan(false, true),
             importUrl:
                 "https://kitchen.example/s/q7Wm4xTz2LpR9vYb1KcN8dFhJ3sGaE5uOiXt6ZeBnVw",
@@ -1950,6 +1963,7 @@ const ROUTE_BASE: Record<string, string> = {
     "/recipes?filter=protein": "recipes-protein",
     "/recipes?plan_date=2026-11-12": "recipes-pick",
     "/recipes?failed=1": "recipes-failed-link",
+    "/recipes?failed=box": "recipes-failed-box",
     "/recipes?share=off": "recipes-share-off",
     "/recipes/r-alfredo": "recipe",
     "/recipes/r-alfredo?cook=1": "recipe-cook",

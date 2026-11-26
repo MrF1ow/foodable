@@ -1,10 +1,10 @@
 /**
  * The design's Table row (FigCraft 381695): a label and right-aligned columns,
- * for the "1 serving (30 ml) | 100 ml" nutrition table (rule 15). `Row` is a
+ * for the "1 serving · 30 ml | 100 ml" nutrition table (rule 15). `Row` is a
  * body row; `Header` is the small caps line over the columns.
  *
  * `tableRows` wraps rows in a named table, so a screen reader hears a table.
- * An unknown body cell is a dash, never a zero; a header cell is plain text,
+ * An unknown body cell is an en dash ("–", as 392480 sets it), never a zero; a header cell is plain text,
  * so an empty heading stays empty.
  *
  * Styles: `public/app/v2/cards.css`.
@@ -25,7 +25,7 @@ function tableRow(opts: TableRowOptions): Html {
     const cols = opts.cols
         .map(
             (c) =>
-                `<span class="fd-table-row__col" role="${role}">${header ? esc(c ?? "") : valueText(c)}</span>`,
+                `<span class="fd-table-row__col" role="${role}">${header ? esc(c ?? "") : valueText(c, "–")}</span>`,
         )
         .join("");
     return raw(

@@ -280,11 +280,10 @@ function accountChip(chrome: AppChrome): string {
     return `<a class="fd-account-chip" href="${APP_PATHS.settings}" aria-label="${escapeHtml(label)}" title="Settings">${escapeHtml(name ? initialsOf(name) : "Me")}</a>`;
 }
 
-/** The page's own header is what its first element writes: a bare <h1>, a
- *  <header class="dash-head"> (`pageHeader` in components/ui.ts) or the
+/** The page's own header is what its first element writes: a bare <h1> or the
  *  design's Page header (`components/v2/page-header.ts`). */
 const LEADING_PAGE_HEADER =
-    /^\s*(?:<h1(?:\s[^>]*)?>[\s\S]*?<\/h1>|<header class="dash-head">[\s\S]*?<\/header>|<header class="fd-page-header(?:\s[^"]*)?"[^>]*>[\s\S]*?<\/header>)/;
+    /^\s*(?:<h1(?:\s[^>]*)?>[\s\S]*?<\/h1>|<header class="fd-page-header(?:\s[^"]*)?"[^>]*>[\s\S]*?<\/header>)/;
 
 /** The Kitchen text tabs go directly under the page header, as in the design.
  *  A body that does not start with one gets them first. */

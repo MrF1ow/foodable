@@ -29,7 +29,7 @@ Hotwire Turbo 8 is bundled into `/app.js` (not a CDN). The shell advertises morp
 Response codes:
 
 - Form POST success redirects use **303**.
-- Validation errors render **4xx** HTML in place (modals reopen via `data-modal-open-on-load`).
+- Validation errors render **4xx** HTML in place (sheets reopen via `data-sheet-open-on-load`).
 - Expired-session login on POST is **401** (GET stays **200**), so Turbo renders the login page instead of dropping the response.
 
 Flows that opt out of Turbo (each answers with something Turbo cannot render as a page, or must be a real load):

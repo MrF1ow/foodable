@@ -14,7 +14,11 @@ import { esc, raw, type Html } from "../../components/v2/html.js";
 import type { MenuItem } from "../../components/v2/menu.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import { selectionBar } from "../../components/v2/selection-bar.js";
-import { sheet, sheetTrigger } from "../../components/v2/sheet.js";
+import {
+    sheet,
+    sheetSection,
+    sheetTrigger,
+} from "../../components/v2/sheet.js";
 
 export type BulkActionSpec =
     | {
@@ -96,15 +100,20 @@ function confirmSheet(
     const formId = `${id}-form`;
     // Until the client counts, the message names no number.
     const message = spec.many.replace("{n}", () => "the selected");
-    const body = `<form id="${esc(formId)}" method="post" action="${esc(spec.action)}" data-fd-select-form>${returnField(returnTo)}<p class="fd-sheet-message" data-fd-select-message data-one="${esc(spec.one)}" data-many="${esc(spec.many)}"${spec.ifPicked ? ` data-if-name="${esc(spec.ifPicked.name)}" data-if-one="${esc(spec.ifPicked.one)}" data-if-many="${esc(spec.ifPicked.many)}"` : ""}>${esc(message)}</p></form>`;
-    const actions = `<button type="button" class="fd-btn" command="close" commandfor="${esc(id)}">Cancel</button>
-<button type="submit" class="fd-btn fd-btn--danger" form="${esc(formId)}">${esc(spec.confirmLabel)}</button>`;
+    const form = `<form id="${esc(formId)}" method="post" action="${esc(spec.action)}" data-fd-select-form>${returnField(returnTo)}<p class="fd-sheet__text" data-fd-select-message data-one="${esc(spec.one)}" data-many="${esc(spec.many)}"${spec.ifPicked ? ` data-if-name="${esc(spec.ifPicked.name)}" data-if-one="${esc(spec.ifPicked.one)}" data-if-many="${esc(spec.ifPicked.many)}"` : ""}>${esc(message)}</p></form>`;
     return sheet({
         id,
-        kind: "confirm",
-        title: spec.title,
-        body,
-        actions,
+        placement: "dialog",
+        header: { kind: "title", title: spec.title },
+        body: sheetSection({ kind: "custom", content: raw(form) }),
+        actions: {
+            kind: "destructive",
+            danger: {
+                label: spec.confirmLabel,
+                type: "submit",
+                form: formId,
+            },
+        },
     });
 }
 

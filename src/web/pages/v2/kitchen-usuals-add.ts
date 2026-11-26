@@ -671,7 +671,8 @@ ${panel("search", active, searchPanel(ctx))}
 ${panel("type", active, typePanel(ctx))}`;
     return sheet({
         id: USUAL_ADD_SHEET_ID,
-        placement: "dialog",
+        // A side panel at 1024 px and up, as 663648 and 664580 draw it.
+        placement: "side",
         className: "fd-kitchen-sheet fd-usual-add",
         header: { kind: "title", title: "Add a usual" },
         body: raw(body),

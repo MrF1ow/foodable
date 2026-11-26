@@ -293,7 +293,7 @@ function scoreBadgeHtml(score) {
     if (typeof score !== "number" || !Number.isFinite(score)) return "";
     const value = Math.min(100, Math.max(0, Math.round(score)));
     const band = value >= 70 ? "good" : value >= 40 ? "middling" : "poor";
-    return `<span class="fd-score fd-score--${band}" role="img" aria-label="Product score ${value} of 100, ${band}"><span class="fd-score__dot" aria-hidden="true"></span><span class="fd-score__num" aria-hidden="true">${value}</span></span>`;
+    return `<span class="fd-score-pill fd-score-pill--${band}" role="img" aria-label="Product score ${value} of 100, ${band}"><span class="fd-score-pill__dot" aria-hidden="true"></span><span class="fd-score-pill__num" aria-hidden="true">${value}</span></span>`;
 }
 
 // One search result, as the design draws it: the face opens the thing (a link

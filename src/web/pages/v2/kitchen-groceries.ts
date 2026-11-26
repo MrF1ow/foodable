@@ -19,7 +19,7 @@ import { field } from "../../components/v2/field.js";
 import { esc, join, raw, type Html } from "../../components/v2/html.js";
 import { itemRow } from "../../components/v2/item-row.js";
 import { listGroup } from "../../components/v2/list-group.js";
-import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { menu, menuRow, type MenuItem } from "../../components/v2/menu.js";
 import { pageLayout } from "../../components/v2/page-layout.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import { sheet, sheetSection } from "../../components/v2/sheet.js";
@@ -77,6 +77,8 @@ export type GroceryAddUsual = FridgeAddUsual & {
     lowLeft?: string;
     /** The store its own settings send it to, when it has one. */
     storeName?: string;
+    /** How often it is restocked ("every week"), when it has a schedule. */
+    cadence?: string;
 };
 
 export const GROCERY_V2_RETURN_TO = "/kitchen/groceries";
@@ -467,22 +469,19 @@ function lineSheet(
         choices: readonly { id: string; name: string; current: boolean }[],
         name: "store_id" | "section",
     ) =>
-        raw(
-            `<li class="fd-item-row">${menu({
-                label: title,
-                anchor: "row",
-                row: { title, value },
-                items: choices.map((choice) => ({
-                    kind: "checked" as const,
-                    label: choice.name,
-                    checked: choice.current,
-                    // The value already chosen only closes the menu.
-                    current: choice.current,
-                    action: editAction,
-                    fields: { [name]: choice.id, return_to: comeBack },
-                })),
-            })}</li>`,
-        );
+        menuRow({
+            label: title,
+            row: { title, value },
+            items: choices.map((choice) => ({
+                kind: "checked" as const,
+                label: choice.name,
+                checked: choice.current,
+                // The value already chosen only closes the menu.
+                current: choice.current,
+                action: editAction,
+                fields: { [name]: choice.id, return_to: comeBack },
+            })),
+        });
     const rows: Html[] = [];
     if (view.stores.length > 0) {
         rows.push(
@@ -753,7 +752,11 @@ function usualAddForm(
     };
 }
 
-/** What a suggestion says it is, and where it goes when that is known. */
+/**
+ * What a suggestion says it is, and where it goes when that is known: "Low · 9
+ * left" or "Usual · every week" as 394843 words them. Without a count left the
+ * level it is below stands in; without a schedule, the amount that goes in.
+ */
 function usualSubtitle(
     usual: GroceryAddUsual,
     store: GroceryStoreView | null,
@@ -763,7 +766,7 @@ function usualSubtitle(
             ? `Low · ${usual.lowLeft}`
             : usual.lowBelow != null
               ? `Low, below ${usual.lowBelow}`
-              : `Usual · ${usual.subtitle}`;
+              : `Usual · ${usual.cadence ?? usual.subtitle}`;
     const where = store?.name ?? usual.storeName;
     return where ? `${what} · ${where}` : what;
 }
@@ -983,9 +986,9 @@ function putAwayDock(view: KitchenGroceriesV2View): string {
             attrs: CONFIRM_ARM_ATTRS,
         }),
     )}${String(
+        // The frame's words and its grey (secondary) tone (394511).
         button({
-            label: `Put away ${n}`,
-            variant: "primary",
+            label: `Put ${n} away in the kitchen`,
             attrs: {
                 ...CONFIRM_IDLE_ATTRS,
                 command: "show-modal",

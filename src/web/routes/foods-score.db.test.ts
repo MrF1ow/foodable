@@ -137,7 +137,7 @@ describeDb(pgAvailable !== null, "product screen score", (getCtx) => {
     });
 
     test("turning off may-contain removes the trace line and only that", async () => {
-        expect(await screen()).toContain("May contain traces of peanut");
+        expect(await screen()).toContain("May contain peanut");
         await updateMemberScoreSettings(
             liveScoreSettingsStore(),
             householdId,

@@ -318,11 +318,15 @@ export function menu(opts: {
 
 /**
  * A row menu in its list item: the pull-down row of a sheet or a settings
- * list. The menu draws the whole row, so it is the item's only content. Needs
- * `anchor: "row"`.
+ * list. The menu draws the whole row, so it is the item's only content. The
+ * menu is always the row's (`anchor: "row"`); `rowClass` adds a class to the
+ * item for a page's own hook.
  */
-export function menuRow(opts: Parameters<typeof menu>[0]): Html {
+export function menuRow(
+    opts: Omit<Parameters<typeof menu>[0], "anchor">,
+    rowClass?: string,
+): Html {
     return raw(
-        `<li class="fd-item-row">${menu({ ...opts, anchor: "row" })}</li>`,
+        `<li class="${cls("fd-item-row", rowClass)}">${menu({ ...opts, anchor: "row" })}</li>`,
     );
 }

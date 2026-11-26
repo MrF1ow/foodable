@@ -13,7 +13,6 @@ import {
     listExpiring,
 } from "../../../domain/stock.js";
 import type { AppChromeBase } from "../../attention.js";
-import { formatQuantityDisplayParts } from "../../display-quantity.js";
 import {
     type DidYouMeanModal,
     renderDidYouMeanBlock,
@@ -28,6 +27,7 @@ import { listGroup } from "../../components/v2/list-group.js";
 import { menu, type MenuItem } from "../../components/v2/menu.js";
 import { miniCard, type MiniCardTone } from "../../components/v2/mini-card.js";
 import { pageLayout } from "../../components/v2/page-layout.js";
+import { formatAmountText } from "./amount-text.js";
 import { quickAction } from "../../components/v2/quick-action.js";
 import { searchField } from "../../components/v2/search-field.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
@@ -237,7 +237,7 @@ function useSoonStrip(view: KitchenFridgeV2View): Html {
             miniCard({
                 label: formatExpiryWhen(view.today, expiresOn),
                 title: item.displayName,
-                meta: formatQuantityDisplayParts(
+                meta: formatAmountText(
                     item.quantity.amount,
                     item.quantity.unit,
                 ),
@@ -298,10 +298,7 @@ function fridgeItemRow(item: FridgeItem, view: KitchenFridgeV2View): Html {
     const rowHtml = String(
         itemRow({
             title: item.displayName,
-            meta: formatQuantityDisplayParts(
-                item.quantity.amount,
-                item.quantity.unit,
-            ),
+            meta: formatAmountText(item.quantity.amount, item.quantity.unit),
             score,
             ...(warning
                 ? { state: "warning" as const, subtitle }
@@ -736,9 +733,10 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
     });
     const sections = renderFridgeLocationSections(view);
     const useSoon = useSoonStrip(view);
-    const [first, ...rest] = sections;
-    const left = raw(`${String(useSoon)}${first ? String(first) : ""}`);
-    const right = raw(rest.map(String).join(""));
+    // Use soon alone on the left, every place on the right (629226); on the
+    // phone the columns stack in that order.
+    const left = raw(String(useSoon));
+    const right = raw(sections.map(String).join(""));
     const empty =
         view.locations.length === 0
             ? emptyState({

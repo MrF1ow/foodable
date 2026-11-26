@@ -69,3 +69,21 @@ export function productMemberReasonLine(notices: readonly Notice[]): string {
             return "No issues found for this product.";
     }
 }
+
+/**
+ * The same line in the product page's shorter words (frame 391131): "Contains
+ * milk · allergy", "May contain tree nut". The chat widget and the MCP tool
+ * keep {@link productMemberReasonLine}.
+ */
+export function productMemberReasonShort(notices: readonly Notice[]): string {
+    const notice = notices[0];
+    if (notice?.code === "food.product_allergen") {
+        const allergens = (notice.params.allergens ?? []) as string[];
+        return `Contains ${allergenPhrase(allergens).toLowerCase()} · allergy`;
+    }
+    if (notice?.code === "food.product_trace") {
+        const allergens = (notice.params.allergens ?? []) as string[];
+        return `May contain ${allergenPhrase(allergens).toLowerCase()}`;
+    }
+    return productMemberReasonLine(notices);
+}

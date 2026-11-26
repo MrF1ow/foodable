@@ -39,15 +39,6 @@ export function aiUndoPath(actionId: string): string {
     return `${AI_PAGE_PATH}/actions/${actionId}/undo`;
 }
 
-/** The one page an Undo sends the person back to. */
-export const AI_UNDO_BACK_PATHS = [AI_PAGE_PATH] as const;
-export type AiUndoBack = (typeof AI_UNDO_BACK_PATHS)[number];
-
-/** A path from a form, if it is one of ours; never an address taken from the request. */
-export function parseAiUndoBack(value: string | undefined): AiUndoBack {
-    return AI_UNDO_BACK_PATHS.find((path) => path === value) ?? AI_PAGE_PATH;
-}
-
 /** One line of the activity list, ready to render. */
 export type AgentActivityRow = {
     id: string;

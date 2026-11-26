@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test";
 import type { Notice } from "../domain/notices.js";
-import { productMemberReasonLine } from "./product-member-reason.js";
+import {
+    productMemberReasonLine,
+    productMemberReasonShort,
+} from "./product-member-reason.js";
 
 function notice(over: Partial<Notice> & Pick<Notice, "code">): Notice {
     return {
@@ -47,4 +50,33 @@ test("goal fit line uses daily target", () => {
         }),
     ]);
     expect(line).toBe("Fits today · 17 g protein toward your 114 g");
+});
+
+test("the product page's short lines read as frame 391131", () => {
+    expect(
+        productMemberReasonShort([
+            notice({
+                code: "food.product_allergen",
+                severity: "block",
+                params: { allergens: ["milk"] },
+            }),
+        ]),
+    ).toBe("Contains milk · allergy");
+    expect(
+        productMemberReasonShort([
+            notice({
+                code: "food.product_trace",
+                severity: "warn",
+                params: { allergens: ["tree nut"] },
+            }),
+        ]),
+    ).toBe("May contain tree nut");
+    expect(
+        productMemberReasonShort([
+            notice({
+                code: "food.product_dislike",
+                params: { dislike: "olives" },
+            }),
+        ]),
+    ).toBe("Matches dislike · olives");
 });

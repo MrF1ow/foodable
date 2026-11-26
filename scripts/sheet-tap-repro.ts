@@ -20,9 +20,10 @@ declare const MouseEvent: any;
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { existsSync, readdirSync } from "node:fs";
+import { raw } from "../src/web/components/v2/html.js";
 import {
-    confirmSheet,
     sheet,
+    sheetSection,
     sheetTrigger,
 } from "../src/web/components/v2/sheet.js";
 import { getAppV2Css, getAppV2Js } from "../src/widgets.js";
@@ -73,24 +74,32 @@ ${sheetTrigger({ target: CLEAR_ID, label: "Open" })}
 ${sheetTrigger({ target: TALL_ID, label: "Open tall" })}
 ${sheet({
     id: CLEAR_ID,
-    kind: "edit",
-    title: "Chicken rice bowl",
-    body: '<p id="inside-body">Inside the sheet</p>',
-    actions:
-        '<button type="button" class="fd-btn fd-btn--primary">Save</button>',
+    placement: "side",
+    header: { kind: "title", title: "Chicken rice bowl" },
+    body: sheetSection({
+        kind: "custom",
+        content: raw('<p id="inside-body">Inside the sheet</p>'),
+    }),
+    actions: { kind: "single", primary: { label: "Save" } },
 })}
 ${sheet({
     id: TALL_ID,
-    kind: "edit",
-    title: "Tall",
-    body: `<div id="tall-scroll">${filler}</div>`,
+    placement: "side",
+    header: { kind: "title", title: "Tall" },
+    body: sheetSection({
+        kind: "custom",
+        content: raw(`<div id="tall-scroll">${filler}</div>`),
+    }),
 })}
-${confirmSheet({
-    id: "tap-confirm",
-    title: "Delete?",
-    message: "Sure?",
-    action: "/x",
-    confirmLabel: "Delete",
+${sheet({
+    id: CONFIRM_ID,
+    placement: "dialog",
+    header: { kind: "title", title: "Delete?" },
+    body: sheetSection({ kind: "message", text: "Sure?" }),
+    actions: {
+        kind: "destructive",
+        danger: { label: "Delete" },
+    },
 })}
 <script>window.FoodableApp = window.FoodableApp || { onLoad(fn) { fn(document); document.addEventListener("turbo:load", () => fn(document)); } };</script>
 <script src="/app-v2.js"></script>

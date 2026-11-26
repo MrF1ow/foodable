@@ -63,11 +63,6 @@ export type TrendsPageData = {
     empty: boolean;
 };
 
-function monthOf(date: string): { year: number; month: number } {
-    const [y, m] = date.split("-").map(Number);
-    return { year: y!, month: m! };
-}
-
 export function parseTrendsRangeParam(raw: string | undefined): TrendsRange {
     if (raw === "7" || raw === "30" || raw === "90" || raw === "365") {
         return Number(raw) as TrendsRange;
@@ -91,7 +86,6 @@ export function buildTrendsViews(
             weights,
             range,
             unit,
-            monthOf(today),
             today,
         );
     }

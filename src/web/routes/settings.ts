@@ -44,7 +44,6 @@ import {
     AI_DISCONNECT_PATH,
     AI_PAGE_PATH,
     AI_WIDGETS_PATH,
-    parseAiUndoBack,
     UNKNOWN_APP_MARKER,
 } from "../pages/v2/settings-ai.js";
 import { liveAgentActionDeps } from "../../db/agent-actions.js";
@@ -580,8 +579,6 @@ settingsRoutes.post(
     async (c) => {
         const member = siteMember(c);
         const id = c.req.param("id");
-        const body = await c.req.parseBody();
-        const back = parseAiUndoBack(formText(body, "back").trim());
         const result = UUID.test(id)
             ? await undoAgentAction(liveAgentActionDeps(), {
                   householdId: member.householdId,
@@ -595,7 +592,7 @@ settingsRoutes.post(
               } as const);
         if (result.status === "undone") {
             // toast: none
-            return c.redirect(back, 303);
+            return c.redirect(AI_PAGE_PATH, 303);
         }
         const page = await renderSettingsAiV2Route(member.userId, {
             mcpUrl: `${getBaseUrl(c)}/mcp`,

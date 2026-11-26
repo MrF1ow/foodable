@@ -69,10 +69,10 @@ test("a confirm action opens a sheet that states the count, and its form takes t
     );
     expect(THINGS.bar).toContain("data-fd-select-action");
     const sheets = THINGS.sheets;
-    expect(sheets).toContain(`<dialog class="fd-sheet fd-sheet--confirm`);
+    expect(sheets).toContain(`<dialog class="fd-sheet fd-sheet--dialog"`);
     expect(sheets).toContain('id="fd-select-things-remove"');
     expect(sheets).toContain(
-        `<p class="fd-sheet-message" data-fd-select-message data-one="Delete 1 item?" data-many="Delete {n} items?">Delete the selected items?</p>`,
+        `<p class="fd-sheet__text" data-fd-select-message data-one="Delete 1 item?" data-many="Delete {n} items?">Delete the selected items?</p>`,
     );
     expect(sheets).toContain(
         `<form id="fd-select-things-remove-form" method="post" action="/kitchen/things/bulk/remove" data-fd-select-form>`,
@@ -81,10 +81,10 @@ test("a confirm action opens a sheet that states the count, and its form takes t
         `<input type="hidden" name="return_to" value="/kitchen/things?store=s1">`,
     );
     expect(sheets).toContain(
-        `<button type="button" class="fd-btn" command="close" commandfor="fd-select-things-remove">Cancel</button>`,
+        `<button type="button" class="fd-btn" data-fd-btn command="close" commandfor="fd-select-things-remove"><span class="fd-btn__label">Cancel</span></button>`,
     );
     expect(sheets).toContain(
-        `<button type="submit" class="fd-btn fd-btn--danger" form="fd-select-things-remove-form">Delete</button>`,
+        `<button type="submit" class="fd-btn fd-btn--danger" data-fd-btn form="fd-select-things-remove-form"><span class="fd-btn__label">Delete</span></button>`,
     );
 });
 

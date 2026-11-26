@@ -100,32 +100,10 @@ html:has(body.fd-body) {
     color: var(--text-primary);
     font: 600 11px/13px var(--font-body);
 }
-/* Keep the title, and any actions beside it, clear of the cluster: 32px bell
+/* Keep a bare title clear of the cluster: 32px bell
    + gap + 38px chip + 10px gap. */
-.fd-main > h1,
-.fd-main > .dash-head > h1,
-.fd-main > .dash-head > .dash-head-title-row {
+.fd-main > h1 {
     padding-right: calc(80px + var(--space-md));
-}
-
-/* The old app's dialog (components/ui.ts modal) shows up on v2 pages too, on
-   Settings › Household › Invites. Its close is the same 32px circle as a v2
-   sheet's, scoped to the v2 shell so the old app keeps its own look. */
-.fd-shell .modal-close {
-    width: 32px;
-    height: 32px;
-    min-width: 0;
-    min-height: 0;
-    aspect-ratio: 1;
-    margin: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-secondary);
-}
-
-.fd-shell .modal-close:hover {
-    background: var(--surface-raised);
-    color: var(--text-primary);
 }
 
 /* Underline text tabs (design: Kitchen tabs), shared by the Kitchen sections
@@ -292,9 +270,7 @@ body.fd-body .toast-region {
     .fd-kitchen-tabs {
         display: none;
     }
-    .fd-main > h1,
-    .fd-main > .dash-head > h1,
-    .fd-main > .dash-head > .dash-head-title-row {
+    .fd-main > h1 {
         padding-right: 0;
     }
     .fd-shell {

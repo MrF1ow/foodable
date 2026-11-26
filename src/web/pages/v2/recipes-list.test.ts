@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { FIXTURE_APP_CHROME_FLAGS } from "../../../test-support/chrome-flags.js";
 import { IMPORT_MESSAGES } from "../../../copy/recipe-import.js";
 import type { Recipe } from "../../../domain/recipes.js";
 import {
     recipesListV2Href,
+    recipesSearchTerm,
     renderRecipesListBody,
     type RecipesListV2View,
 } from "./recipes-list.js";
@@ -217,13 +220,28 @@ describe("recipes list: header and search", () => {
 
     test("a pasted link shows the link state and Go; plain text hides Go", () => {
         const link = renderRecipesListBody(
-            base({ query: "https://example.com/dish", totalCount: 3 }),
+            base({
+                query: "https://example.com/dish",
+                totalCount: 3,
+                cards: [
+                    card("r1", "Shakshuka"),
+                    card("r2", "Pad see ew"),
+                    card("r3", "Banana bread"),
+                ],
+            }),
         );
         expect(link).toContain("data-link-detected");
         expect(link).toMatch(
             /<button[^>]*data-fd-recipes-import-go(?![^>]*hidden)/,
         );
         expect(link).toContain('action="/recipes/import"');
+        // A link imports rather than searches: the heading stays All recipes (402324).
+        expect(link).toContain(">All recipes<");
+        expect(link).not.toContain(" of 3 recipes");
+        // Every recipe stays listed under the link, not "No recipes match".
+        expect(link).toContain(">Shakshuka<");
+        expect(link).toContain(">Banana bread<");
+        expect(link).not.toContain("No recipes match");
         const text = renderRecipesListBody(
             base({ query: "egg", totalCount: 3 }),
         );
@@ -290,7 +308,7 @@ describe("recipes list: rows", () => {
         expect(html).not.toContain("kcal");
     });
 
-    test("a short recipe says what is missing, in the warning state", () => {
+    test("a short recipe says what is missing in the muted tone, as frame 403617", () => {
         const html = renderRecipesListBody(
             base({
                 totalCount: 1,
@@ -302,8 +320,10 @@ describe("recipes list: rows", () => {
                 ],
             }),
         );
-        expect(html).toContain("Missing 2 · Avocado, Lime");
-        expect(html).toContain("fd-item-row--warning");
+        expect(html).toContain(
+            '<span class="fd-item-row__subtitle">Missing 2 · Avocado, Lime</span>',
+        );
+        expect(html).not.toContain("fd-item-row--warning");
         expect(html).not.toContain("You have everything");
     });
 
@@ -720,6 +740,35 @@ describe("recipes list: mcp-share-links", () => {
         expect(occurrences(html, SHARE)).toBe(1);
     });
 
+    test("a refused link from the search field sits right under the field, above the planned week, the list in the other column (403910, 638135)", () => {
+        const html = renderRecipesListBody(
+            base({
+                totalCount: 1,
+                cards: [card("r1", "Shakshuka")],
+                week: week(),
+                sharedImportEnabled: true,
+                sharedImport: {
+                    error: "That share link doesn't work any more",
+                    input: SHARE,
+                    via: "field",
+                },
+            }),
+        );
+        expect(html).toContain("fd-page-layout--two-columns");
+        const field = html.indexOf('id="fd-recipes-search-form"');
+        const card_ = html.indexOf("fd-recipes-import-shared-error");
+        const planned = html.indexOf("fd-plan-planned");
+        const list = html.indexOf("fd-recipes-all");
+        expect(field).toBeLessThan(card_);
+        expect(card_).toBeLessThan(planned);
+        expect(planned).toBeLessThan(list);
+        // The card and the week share the first column; the list the second.
+        const columns = html.split('<div class="fd-page-layout__column">');
+        expect(columns[1]).toContain("fd-recipes-import-shared-error");
+        expect(columns[1]).toContain("fd-plan-planned");
+        expect(columns[2]).toContain("fd-recipes-all");
+    });
+
     test("with the flag off a refusal is not shown", () => {
         const html = renderRecipesListBody(
             base({
@@ -774,4 +823,27 @@ describe("the import flow's copy", () => {
         );
         expect(html.toLowerCase()).not.toContain("unverified");
     });
+});
+
+describe("recipesSearchTerm", () => {
+    test("a pasted link filters nothing, plain words filter by themselves", () => {
+        expect(recipesSearchTerm("https://example.com/dish")).toBe("");
+        expect(recipesSearchTerm("  http://x.test/a  ")).toBe("");
+        expect(recipesSearchTerm(" egg ")).toBe("egg");
+        expect(recipesSearchTerm("")).toBe("");
+    });
+});
+
+test("recipes.css: the row's Missing line stays on one line and ends in an ellipsis (403617)", () => {
+    const css = readFileSync(
+        join(import.meta.dir, "../../../../public/app/v2/recipes.css"),
+        "utf8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "");
+    const rule = css.match(
+        /\.fd-recipes-row \.fd-item-row__subtitle\s*\{([^}]*)\}/,
+    )?.[1];
+    expect(rule).toBeDefined();
+    expect(rule).toMatch(/white-space:\s*nowrap/);
+    expect(rule).toMatch(/text-overflow:\s*ellipsis/);
+    expect(rule).toMatch(/overflow:\s*hidden/);
 });

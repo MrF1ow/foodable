@@ -10,7 +10,7 @@ import {
     type NoticeSubjectKind,
 } from "./notice-dismissals.js";
 import type { Notice } from "./notices.js";
-import { dismissNotice, noticesFor, undoDismissal } from "./notices-for.js";
+import { dismissNotice, noticesFor } from "./notices-for.js";
 import {
     createMemoryFoodsStore,
     findOrCreateManualFood,

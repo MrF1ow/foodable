@@ -110,7 +110,6 @@
     cursor: pointer;
 }
 [data-fd-selecting] .fd-row--selectable > .fd-row__action,
-[data-fd-selecting] .fd-row--selectable > .fd-row__body > .fd-row__actions,
 [data-fd-selecting] .fd-row--selectable > .fd-row__body > .fd-row__chevron {
     display: none;
 }
@@ -204,21 +203,5 @@
     .fd-select-bar__actions .fd-btn {
         flex: none;
         height: 34px;
-    }
-    /* The Usuals table is a grid of columns: the box leaves the grid and sits
-       in a gutter made at the table's left, so no column moves. */
-    [data-fd-selecting] .fd-kitchen-usual-table {
-        padding-left: 56px;
-    }
-    [data-fd-selecting]
-        .fd-kitchen-usual-table
-        .fd-row--usual
-        > .fd-row__body
-        > .fd-row__select {
-        position: absolute;
-        top: 50%;
-        left: -46px;
-        margin: 0;
-        transform: translateY(-50%);
     }
 }

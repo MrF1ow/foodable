@@ -71,7 +71,7 @@ The rules that come up most in review:
 - **Small PRs.** One change per PR. Moving files and changing behaviour go in separate PRs.
 - **Changing MCP tools.** Adding, renaming or removing a tool means updating `src/mcp/tools-list.snapshot.json` and `TOOLS` in `src/copy/tools.ts` in the same PR, or `src/mcp.test.ts` fails. Tools that render a widget must return `structuredContent` on every path.
 - **Generated files are not hand-edited.** `public/login.html`, `public/widgets/src/shared/tokens.css`, `public/app/brand.css` and the brand icons each come from a script. Edit the source and regenerate.
-- **The UI uses shared components.** Pages build their chrome from `src/web/components/ui.ts`. Don't hand-write panels, modals or banners.
+- **The UI uses shared components.** Pages build their chrome from the `fd-` components in `src/web/components/v2/` (see `docs/agents/app-styling.md`). Don't hand-write sheets, rows or banners.
 
 ## Database migrations
 

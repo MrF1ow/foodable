@@ -36,9 +36,8 @@
     box-sizing: border-box;
 }
 
-/* `hidden` must beat any display rule. Without this, `.food-picker-panel
-   { display: grid }` overrode the attribute and every picker showed all three
-   tabs at once. */
+/* `hidden` must beat any display rule: a component that sets `display` would
+   otherwise override the attribute and show what the page hid. */
 [hidden] {
     display: none !important;
 }
@@ -112,10 +111,6 @@ body {
             #000 calc(env(safe-area-inset-top, 0px) + 120px)
         );
     }
-}
-
-html:has(dialog.modal[open]) {
-    overflow: hidden;
 }
 
 .visually-hidden {
@@ -239,7 +234,7 @@ html:has(dialog.modal[open]) {
     gap: var(--gap-section);
 }
 /* Element defaults for page content, at element-only specificity so any
-   class wins (.row-meta's margin-left: auto lost to `.app-main p` before). */
+   class wins (a margin on a class lost to `.app-main p` before). */
 :where(.app-main) h1 {
     margin: 0;
     font-size: var(--fs-24);
@@ -315,8 +310,8 @@ html:has(dialog.modal[open]) {
      --gap-label  4px   a label to its own control
      --gap-col    8px   side-by-side fields, and a control beside its button
      --gap-field 12px   one field (or button, or form) to the next
-   A field is either a .field (field() in src/web/components/ui.ts renders
-   the shared form.css block: a label then its control) or a wrapping label (<label>Text<input></label>). Both are
+   A field is either a .field (the shared form.css block: a label then its
+   control) or a wrapping label (<label>Text<input></label>). Both are
    one grid that owns its --gap-label, so the label-to-control gap never
    depends on the container. Containers stack fields on --gap-field. No rule
    here uses a negative margin: a pair that leaned on its parent's gap broke
@@ -402,62 +397,12 @@ html:has(dialog.modal[open]) {
     color: var(--text);
 }
 
-/* ---- notices and quiet text ---- */
+/* ---- quiet text ---- */
 
-.error-banner {
-    padding: 9px 11px;
-    border: 1px solid color-mix(in srgb, var(--over) 45%, var(--panel-border));
-    border-radius: var(--r-10);
-    background: color-mix(in srgb, var(--over) 9%, var(--panel));
-    color: var(--over);
-    font-size: var(--fs-13-5);
-    font-weight: 600;
-}
-/* The allergen retry (warning + Add anyway) is one wrapper; space its
-   children like the rest of the modal body. */
-.modal-body > [data-fill-transient] {
-    display: grid;
-    gap: var(--gap-field);
-}
-
-/* Empty states and secondary text. The empty-* classes are pinned by tests,
-   so they are listed here rather than given a second class in markup. */
+/* Secondary text. */
 .muted {
     color: var(--text-dim);
     font-size: var(--fs-13-5);
-}
-
-/* ---- page header and segmented links ---- */
-
-.dash-head {
-    display: grid;
-    gap: 10px;
-}
-.dash-head-title-row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px 12px;
-    min-width: 0;
-}
-.dash-head-title-row h1 {
-    flex: 0 1 auto;
-    min-width: 0;
-}
-.dash-head-title-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 8px;
-}
-.page-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-}
-.page-actions :is(.btn-primary, .btn-danger, button) {
-    width: fit-content;
 }
 
 details.more > summary .count {
@@ -472,120 +417,6 @@ details.more > summary .count {
     font-size: var(--fs-12);
     font-weight: 700;
     font-variant-numeric: tabular-nums;
-}
-
-/* Household sub-navigation: links styled as the widgets' segmented control. */
-.subnav {
-    display: inline-flex;
-    flex-wrap: wrap;
-    gap: 2px;
-    width: fit-content;
-    padding: 3px;
-    border-radius: var(--r-999);
-    background: var(--track);
-}
-.subnav a {
-    padding: 6px 14px;
-    border-radius: var(--r-999);
-    color: var(--text-dim);
-    font-size: var(--fs-13);
-    font-weight: 600;
-}
-.subnav a[aria-current="page"] {
-    background: var(--accent);
-    color: var(--on-accent);
-}
-
-/* ---- shared form components ---- */
-
-/* Amount and unit side by side, two .field columns. */
-.quantity-field {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--gap-col);
-}
-
-.food-picker,
-.food-picker-panel,
-.food-picker-panel > form {
-    display: grid;
-    gap: var(--gap-field);
-}
-.food-picker-results {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: grid;
-    gap: 6px;
-}
-.food-picker-results:empty {
-    display: none;
-}
-.food-picker-results button {
-    width: 100%;
-    text-align: left;
-}
-
-/* ---- lists and rows ---- */
-
-.list {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-}
-.list > li {
-    display: grid;
-    gap: 8px;
-    padding: 10px 0;
-    border-top: 1px solid var(--panel-border);
-}
-.list > li:first-child {
-    border-top: 0;
-    padding-top: 2px;
-}
-.list:empty {
-    display: none;
-}
-
-/* Title left, figure pushed right; wraps under the title on a narrow card. */
-.row {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px 12px;
-}
-.row-title {
-    min-width: 0;
-    font-size: var(--fs-16);
-    font-weight: 600;
-    overflow-wrap: anywhere;
-}
-.row-meta {
-    margin-left: auto;
-    color: var(--text-dim);
-    font-size: var(--fs-13);
-    font-variant-numeric: tabular-nums;
-    white-space: nowrap;
-}
-
-/* One wrapping line of row buttons. Each action is its own POST form; with
-   display: contents the buttons sit in the line as if the forms were not
-   there. An opened disclosure takes the whole width below them. */
-.row-actions {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-}
-.row-actions > form {
-    display: contents;
-}
-.row-actions > details[open] {
-    flex-basis: 100%;
-}
-.row-actions > select {
-    width: auto;
-    flex: 1 1 140px;
 }
 
 /* ---- disclosure ---- */
@@ -644,43 +475,12 @@ details.more > summary > :is(h2, h3) {
     letter-spacing: normal;
 }
 
-/* ---- food picker tabs ---- */
-
-.food-picker .seg {
-    display: flex;
-    margin: 0;
-}
-.food-picker .seg-btn {
-    flex: 1;
-    min-height: 36px;
-}
-
-/* ---- compact form layouts ---- */
-
-/* Two columns of <label>Text<input></label> pairs. */
-.field-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: var(--gap-field) var(--gap-col);
-    align-items: end;
-}
-.field-grid > :is(button, fieldset, .span-2) {
-    grid-column: 1 / -1;
-}
-
 /* ---- polish ---- */
 
-/* A control nested in its <label> (field-grid, meal items) would otherwise
+/* A control nested in its <label> (meal items) would otherwise
    inherit the label's bold, dimmed weight. */
 :where(.native label :is(input, select, textarea)) {
     font-weight: 400;
-}
-
-/* Keep a control and its button the same height on one line. */
-.row-actions > select {
-    min-height: 34px;
-    padding-top: 4px;
-    padding-bottom: 4px;
 }
 
 /* ---- brand: the marketing site's look ----
@@ -794,101 +594,6 @@ html.fx.fx-enter .app-main > :nth-child(n + 6) {
     animation-delay: 0.2s;
 }
 
-/* ---- modals (native <dialog> + invoker commands) ---- */
-
-.modal {
-    border: none;
-    padding: 0;
-    margin: auto;
-    max-width: min(560px, 100vw - 32px);
-    width: calc(100% - 32px);
-    background: transparent;
-    color: inherit;
-    overflow: visible;
-}
-.modal::backdrop {
-    background: color-mix(in srgb, #000 40%, transparent);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
-}
-.modal-sheet {
-    display: flex;
-    flex-direction: column;
-    max-height: min(85dvh, 100%);
-    border: 1px solid var(--panel-border);
-    border-radius: var(--radius);
-    background: var(--panel);
-    box-shadow: var(--shadow);
-    overflow: hidden;
-}
-.modal-handle {
-    display: none;
-    flex: none;
-}
-.modal-head {
-    flex: none;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: var(--gap-field) 16px 10px;
-    border-bottom: 1px solid var(--panel-border);
-}
-.modal-title {
-    margin: 0;
-    font-family: var(--font-heading);
-    font-size: var(--fs-18);
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    line-height: 1.25;
-}
-.modal-close {
-    flex-shrink: 0;
-    display: grid;
-    place-items: center;
-    min-height: 0;
-    width: 36px;
-    height: 36px;
-    margin: 0 -6px 0 0;
-    padding: 0;
-    align-self: center;
-    border: none;
-    border-radius: var(--r-12);
-    background: transparent;
-    color: var(--text-dim);
-    font-size: var(--fs-21);
-    line-height: 1;
-    cursor: pointer;
-}
-.modal-close:hover {
-    background: var(--track);
-    color: var(--text);
-}
-.modal-body {
-    flex: 1 1 auto;
-    min-height: 0;
-    padding: 16px;
-    overflow: auto;
-    overscroll-behavior: contain;
-    display: grid;
-    gap: var(--gap-field);
-    align-content: start;
-}
-.modal-body .seg {
-    margin: 0;
-}
-.modal-message {
-    margin: 0 0 16px;
-    font-size: var(--fs-14);
-    line-height: 1.45;
-    color: var(--text);
-}
-.modal-actions {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    gap: 8px;
-}
 :where(.native) .btn-icon {
     display: inline-grid;
     place-items: center;
@@ -908,76 +613,8 @@ html.fx.fx-enter .app-main > :nth-child(n + 6) {
     background: color-mix(in srgb, var(--over) 12%, transparent);
 }
 
-@media (max-width: 640px) {
-    .modal {
-        margin: 0;
-        width: 100%;
-        max-width: none;
-        max-height: 90dvh;
-        height: auto;
-        inset: auto 0 0 0;
-        top: auto;
-        bottom: 0;
-    }
-    .modal-sheet {
-        max-height: 90dvh;
-        border-radius: var(--radius) var(--radius) 0 0;
-    }
-    .modal-body {
-        padding-bottom: calc(16px + env(safe-area-inset-bottom, 0px));
-    }
-    .modal-handle {
-        display: block;
-        width: 36px;
-        height: 4px;
-        margin: 10px auto 0;
-        border-radius: var(--r-999);
-        background: color-mix(in srgb, var(--text-dim) 35%, transparent);
-        touch-action: none;
-    }
-    .modal-head {
-        touch-action: none;
-        cursor: grab;
-    }
-    .modal-head:active {
-        cursor: grabbing;
-    }
-}
-
 .turbo-progress-bar {
     background: var(--accent);
-}
-
-@keyframes modal-in {
-    from {
-        opacity: 0;
-        transform: translateY(12px);
-    }
-}
-@keyframes modal-backdrop-in {
-    from {
-        opacity: 0;
-    }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-    html.fx .modal[open] {
-        animation: modal-in 0.22s ease-out both;
-    }
-    html.fx .modal[open]::backdrop {
-        animation: modal-backdrop-in 0.2s ease-out both;
-    }
-    @media (max-width: 640px) {
-        html.fx .modal[open] {
-            animation: modal-in 0.26s ease-out both;
-        }
-        @keyframes modal-in {
-            from {
-                opacity: 0;
-                transform: translateY(100%);
-            }
-        }
-    }
 }
 
 /* Global toast confirmations (flash + FoodableApp.toast). */
@@ -1145,34 +782,4 @@ html.fx .toast-item--out {
     :where(.native input[type="checkbox"][role="switch"])::after {
         transition: none;
     }
-}
-
-/* "Did you mean" (web add forms): the question sits above the picker as its
-   own card, so it does not read as part of the picker below it. */
-.did-you-mean-block {
-    padding: 11px;
-    border: 1px solid var(--panel-border);
-    border-radius: var(--r-10);
-    background: var(--panel);
-}
-.did-you-mean-heading {
-    margin: 0;
-    font-weight: 600;
-}
-.did-you-mean-form {
-    display: grid;
-    gap: var(--gap-field);
-    justify-items: start;
-}
-.did-you-mean-candidates {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-}
-.did-you-mean-remember {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: var(--fs-13-5);
-    color: var(--text-dim);
 }

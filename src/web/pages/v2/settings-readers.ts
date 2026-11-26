@@ -65,7 +65,9 @@ export function blockedLinksLabel(count: number): string {
 function readerRow(view: SettingsReadersV2View, reader: SocialReaderId): Html {
     const label = SOCIAL_READER_LABELS[reader];
     const enabled = view.socialReaders[reader];
-    const subtitle = enabled ? "Public post captions" : undefined;
+    // Only TikTok carries the line under its name, as 412254 draws it.
+    const subtitle =
+        enabled && reader === "tiktok" ? "Public post captions" : undefined;
     if (!view.isOwner) {
         return itemRow({
             title: label,

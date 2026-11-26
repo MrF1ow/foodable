@@ -9,8 +9,8 @@
  * Colour comes from the parent's `color`, so one icon
  * serves every state.
  *
- * The older icon modules (`../icons.ts`, `../fd-icons.ts`, `./icons.ts`) keep
- * their own markup; this module is the one new components use.
+ * The two older icon modules (`../fd-icons.ts`, `./icons.ts`) keep their own
+ * markup; this module is the one new components use.
  */
 import { raw, type Html } from "./html.js";
 

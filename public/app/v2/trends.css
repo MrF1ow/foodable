@@ -26,7 +26,6 @@
     display: none;
 }
 
-.fd-trends-empty,
 .fd-trends-range-empty {
     margin: var(--space-xl) 0;
     font: 400 15px/22px var(--font-body);

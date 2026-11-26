@@ -6,7 +6,7 @@ import {
     type GoalsByDate,
     nonEmpty,
 } from "./insights.js";
-import { macroRings, type MacroKey } from "./geometry.js";
+import type { MacroKey } from "./geometry.js";
 import { fromGrams, type WeightUnit } from "./units.js";
 import type { NutritionGoals } from "../db/nutrition.js";
 
@@ -44,11 +44,6 @@ export type TrendsTiles = {
     longestStreak: number;
 };
 
-export type TrendsDayRing = {
-    date: string;
-    rings: ReturnType<typeof macroRings>;
-};
-
 export type MacroAverageVsGoal = {
     actual: number | null;
     goal: number | null;
@@ -64,22 +59,6 @@ export type TrendsCalorieBar = {
     calories: number;
     goal: number | null;
     status: CalorieBarStatus;
-};
-
-export type MonthCellStatus =
-    "on-target" | "logged" | "empty" | "outside-month";
-
-export type MonthGridCell = {
-    date: string;
-    status: MonthCellStatus;
-};
-
-export type MonthGrid = {
-    year: number;
-    month: number;
-    prev: { year: number; month: number };
-    next: { year: number; month: number };
-    weeks: MonthGridCell[][];
 };
 
 export type TrendsWeightPoint = {
@@ -101,10 +80,8 @@ export type TrendsView = {
     rangeStart: string;
     rangeEnd: string;
     tiles: TrendsTiles;
-    rings: TrendsDayRing[];
     averagesVsGoals: TrendsAveragesVsGoals;
     bars: TrendsCalorieBar[];
-    monthGrid: MonthGrid;
     weight: TrendsWeightSeries;
 };
 
@@ -153,111 +130,6 @@ function calorieBarStatus(
     const diff = Math.abs(day.calories - goal);
     if (diff <= KCAL_NEAR_BAND) return "near";
     return "off";
-}
-
-function monthCellStatus(
-    day: TrendsDay | undefined,
-    goal: number | null,
-    inMonth: boolean,
-): MonthCellStatus {
-    if (!inMonth) return "outside-month";
-    if (!day?.logged) return "empty";
-    if (goal == null) return "logged";
-    const diff = Math.abs(day.calories - goal);
-    if (diff <= KCAL_NEAR_BAND) return "on-target";
-    return "logged";
-}
-
-function shiftMonth(
-    year: number,
-    month: number,
-    delta: number,
-): {
-    year: number;
-    month: number;
-} {
-    let m = month + delta;
-    let y = year;
-    while (m < 1) {
-        m += 12;
-        y -= 1;
-    }
-    while (m > 12) {
-        m -= 12;
-        y += 1;
-    }
-    return { year: y, month: m };
-}
-
-function daysInMonth(year: number, month: number): number {
-    return new Date(Date.UTC(year, month, 0)).getUTCDate();
-}
-
-/** Week rows start on Sunday (same as `insights` day-of-week labels and household weekday pickers). */
-function buildMonthGrid(
-    days: readonly TrendsDay[],
-    goalsByDay: GoalsByDate,
-    year: number,
-    month: number,
-): MonthGrid {
-    const byDate = new Map(days.map((d) => [d.date, d]));
-    const firstDom = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
-    const dim = daysInMonth(year, month);
-    const cells: MonthGridCell[] = [];
-
-    for (let i = 0; i < firstDom; i++) {
-        const date = addDays(
-            `${year}-${String(month).padStart(2, "0")}-01`,
-            -firstDom + i,
-        );
-        cells.push({
-            date,
-            status: monthCellStatus(
-                byDate.get(date),
-                activeCalorieGoal(goalsByDay(date)),
-                false,
-            ),
-        });
-    }
-
-    for (let d = 1; d <= dim; d++) {
-        const date = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
-        const day = byDate.get(date);
-        cells.push({
-            date,
-            status: monthCellStatus(
-                day,
-                activeCalorieGoal(goalsByDay(date)),
-                true,
-            ),
-        });
-    }
-
-    while (cells.length % 7 !== 0) {
-        const last = cells[cells.length - 1]!.date;
-        const date = addDays(last, 1);
-        cells.push({
-            date,
-            status: monthCellStatus(
-                byDate.get(date),
-                activeCalorieGoal(goalsByDay(date)),
-                false,
-            ),
-        });
-    }
-
-    const weeks: MonthGridCell[][] = [];
-    for (let i = 0; i < cells.length; i += 7) {
-        weeks.push(cells.slice(i, i + 7));
-    }
-
-    return {
-        year,
-        month,
-        prev: shiftMonth(year, month, -1),
-        next: shiftMonth(year, month, 1),
-        weeks,
-    };
 }
 
 function emptyTrendsDay(date: string): TrendsDay {
@@ -450,7 +322,6 @@ export function trendsView(
     weights: readonly TrendsWeightInput[],
     range: TrendsRange,
     weightUnit: WeightUnit,
-    month: { year: number; month: number },
     today: string,
 ): TrendsView {
     const byDate = daysByDate(days);
@@ -472,27 +343,6 @@ export function trendsView(
         longestStreak: longestStreak(rangeDays, isLogged),
     };
 
-    const rings: TrendsDayRing[] = rangeDays.map((day) => {
-        const g = goalsByDay(day.date);
-        return {
-            date: day.date,
-            rings: macroRings({
-                protein: {
-                    value: day.protein_g,
-                    goal: activeMacroGoal(g, "daily_protein_g"),
-                },
-                carbs: {
-                    value: day.carbs_g,
-                    goal: activeMacroGoal(g, "daily_carbs_g"),
-                },
-                fat: {
-                    value: day.fat_g,
-                    goal: activeMacroGoal(g, "daily_fat_g"),
-                },
-            }),
-        };
-    });
-
     const bars: TrendsCalorieBar[] = rangeDays.map((day) => {
         const goal = activeCalorieGoal(goalsByDay(day.date));
         return {
@@ -508,10 +358,8 @@ export function trendsView(
         rangeStart: rangeDays[0]?.date ?? today,
         rangeEnd: rangeDays[rangeDays.length - 1]?.date ?? today,
         tiles,
-        rings,
         averagesVsGoals: buildAveragesVsGoals(rangeDays, goalsByDay),
         bars,
-        monthGrid: buildMonthGrid(days, goalsByDay, month.year, month.month),
         weight: buildWeightSeries(weights, rangeDays, weightUnit),
     };
 }

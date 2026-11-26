@@ -227,9 +227,13 @@ function stockSection(stock: ProductStockLine[]): string {
         itemRow({
             title: stockPlaceTitle(line.locationName),
             meta: line.quantityLabel,
+            // A cold place reads as the snowflake, as 391131 draws "In the
+            // fridge"; a cupboard or pantry keeps the fridge glyph.
             lead: {
                 kind: "icon",
-                name: /freez/i.test(line.locationName) ? "snowflake" : "fridge",
+                name: /freez|fridge|refrig/i.test(line.locationName)
+                    ? "snowflake"
+                    : "fridge",
             },
             href: APP_PATHS.kitchenFridge,
             trailing: { kind: "chevron" },

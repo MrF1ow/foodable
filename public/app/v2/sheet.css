@@ -1,6 +1,6 @@
 /* The redesign's sheet (UI-6): dialog.fd-sheet from src/web/components/v2/sheet.ts.
- * Below 1024px every kind is a bottom sheet. At 1024px and up `edit` is a 480px
- * panel from the right and `confirm` is a centred dialog. Tokens only, from
+ * Below 1024px every placement is a bottom sheet. At 1024px and up `side` is a
+ * 480px panel from the right and `dialog` is a centred card. Tokens only, from
  * tokens.css; nothing here reads /app.css, brand.css or the `.native` element
  * styles, so it looks the same whether or not they are loaded. The .fd-btn
  * rules are scoped under .fd-sheet until the shell (UI-3) lifts them. */
@@ -78,12 +78,6 @@
     outline: none;
 }
 
-.fd-sheet-handle,
-.fd-sheet-head {
-    /* The drag grip: the browser must not claim the touch for scrolling. */
-    touch-action: none;
-}
-
 .fd-sheet-handle {
     flex: none;
     width: 40px;
@@ -91,56 +85,6 @@
     margin: 0 auto 14px;
     border-radius: 3px;
     background: var(--text-tertiary);
-}
-
-.fd-sheet-head {
-    display: flex;
-    flex: none;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: var(--space-row);
-    margin-bottom: 14px;
-}
-
-.fd-sheet-heading {
-    min-width: 0;
-}
-
-.fd-sheet-title {
-    margin: 0;
-    font-family: var(--font-display);
-    font-size: 22px;
-    font-weight: 600;
-    line-height: 1.2;
-    color: var(--text-primary);
-}
-
-.fd-sheet-sub {
-    margin: 3px 0 0;
-    font-family: var(--font-body);
-    font-size: 13px;
-    line-height: 1.35;
-    color: var(--text-secondary);
-}
-
-.fd-sheet .fd-sheet-close {
-    display: grid;
-    flex: none;
-    place-items: center;
-    width: 32px;
-    height: 32px;
-    /* /app.css floors every .native button at min-height: 44px, which turns
-       this circle into a tall oval. */
-    min-width: 0;
-    min-height: 0;
-    aspect-ratio: 1;
-    margin: 0;
-    padding: 0;
-    border: 0;
-    border-radius: var(--radius-pill);
-    background: var(--surface-raised);
-    color: var(--text-secondary);
-    cursor: pointer;
 }
 
 .fd-sheet-body {
@@ -152,22 +96,6 @@
     padding: 4px;
     overflow-y: auto;
     overscroll-behavior: contain;
-}
-
-.fd-sheet-message {
-    margin: 0;
-    font-size: 15px;
-    line-height: 1.45;
-    color: var(--text-secondary);
-}
-
-.fd-sheet-actions {
-    position: sticky;
-    bottom: 0;
-    display: flex;
-    flex: none;
-    gap: 10px;
-    margin-top: 18px;
 }
 
 .fd-sheet .fd-btn {
@@ -199,24 +127,11 @@
     color: var(--status-over);
 }
 
-.fd-sheet .fd-btn--accent {
-    flex: 0.85 1 0;
-    gap: 6px;
-    background: var(--surface-raised);
-    color: var(--accent-text);
-}
-
-.fd-sheet .fd-btn--accent .fd-icon {
-    width: 16px;
-    height: 16px;
-}
-
 .fd-sheet .fd-btn:disabled {
     opacity: 0.5;
     cursor: default;
 }
 
-.fd-sheet .fd-sheet-close:focus-visible,
 .fd-sheet .fd-btn:focus-visible {
     outline: 2px solid var(--accent-text);
     outline-offset: 2px;
@@ -229,57 +144,6 @@
 
     .fd-sheet-panel {
         padding: 28px;
-    }
-
-    .fd-sheet-head {
-        margin-bottom: 16px;
-    }
-
-    .fd-sheet .fd-sheet-close {
-        width: 34px;
-        height: 34px;
-    }
-
-    /* Edit: a 480px panel from the right edge, full height. */
-    .fd-sheet--edit {
-        inset: 0 0 0 auto;
-        margin: 0;
-        width: 480px;
-        max-width: 480px;
-        height: 100vh;
-        height: 100dvh;
-        max-height: 100vh;
-        max-height: 100dvh;
-        border-radius: 0;
-    }
-
-    .fd-sheet--edit .fd-sheet-panel {
-        border-top: 0;
-        border-left: 1px solid var(--line);
-        border-radius: 0;
-    }
-
-    .fd-sheet--edit[open] {
-        animation-name: fd-sheet-in-right;
-    }
-
-    /* Confirm: centred, same card as the desktop modals. */
-    .fd-sheet--confirm {
-        inset: 0;
-        margin: auto;
-        width: 480px;
-        max-width: calc(100% - 2 * var(--space-gutter));
-        border-radius: var(--radius-sheet);
-        box-shadow: 0 24px 60px var(--fd-sheet-shadow);
-    }
-
-    .fd-sheet--confirm .fd-sheet-panel {
-        border: 1px solid var(--line);
-        border-radius: var(--radius-sheet);
-    }
-
-    .fd-sheet--confirm[open] {
-        animation-name: fd-sheet-pop;
     }
 }
 
@@ -347,6 +211,12 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-xl);
+}
+/* A form the actions post through (empty, or only hidden fields) draws
+   nothing, so it takes no gap either: 403448's message sits 20 px under the
+   header. It still submits while hidden. */
+.fd-sheet-body > form:not(:has(:not(input[type="hidden"]))) {
+    display: none;
 }
 
 /* ---- Sheet header ---- */
