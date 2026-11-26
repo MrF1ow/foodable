@@ -1,14 +1,15 @@
 /**
- * Select several rows, act once: one POST per list action, each taking the
- * ticked rows as `ids[]` (Saved foods & recipes: `food_ids[]` and
- * `recipe_ids[]`) and running them as one transaction (`src/db/bulk.ts`).
+ * Select several rows, act once. Saved foods & recipes is the one list with a
+ * select mode: its POST takes the ticked rows as `food_ids[]` and
+ * `recipe_ids[]` and runs them as one transaction (`src/db/bulk.ts`). The
+ * Kitchen tabs have none (their bulk routes are gone).
  *
  * Success is a 303 back to the list, with no toast: the list shows what
  * changed. A batch with nothing left to do (`already`: a double submit, or a
  * page that was stale) is the same 303. A refusal (a row that is gone,
  * nothing selected, a recipe the member may not delete) re-renders the list
  * with the reason at 400 and writes nothing, so Turbo shows it in place. The
- * list comes back with the filter it was on (`store`, `q` from `return_to`).
+ * list comes back with the search it was on (`q` from `return_to`).
  */
 import { Hono } from "hono";
 import {
@@ -19,20 +20,9 @@ import {
 import { FoodsInputError } from "../../domain/foods.js";
 import { can } from "../../domain/permissions.js";
 import { RecipeForbiddenError } from "../../domain/recipes.js";
-import { StockInputError } from "../../domain/stock.js";
-import {
-    bulkDeleteGroceryLines,
-    bulkDeleteSavedItems,
-    bulkDiscardFridgeItems,
-    bulkRemoveUsuals,
-} from "../../db/bulk.js";
+import { bulkDeleteSavedItems } from "../../db/bulk.js";
 import { formText } from "../form.js";
-import {
-    renderFridgeInventoryPage,
-    renderGroceryListPage,
-    renderSettingsSavedV2Route,
-    renderUsualProductsListPage,
-} from "../loaders.js";
+import { renderSettingsSavedV2Route } from "../loaders.js";
 import { requireMember, siteMember } from "../middleware.js";
 import { safeReturnPath } from "../usual-products-path.js";
 
@@ -46,7 +36,6 @@ const GENERIC_ERROR = "Could not complete that. Try again.";
 function refusal(err: unknown): string {
     if (
         err instanceof BulkSelectionError ||
-        err instanceof StockInputError ||
         err instanceof FoodsInputError ||
         err instanceof RecipeForbiddenError
     ) {
@@ -54,11 +43,6 @@ function refusal(err: unknown): string {
     }
     console.error("bulk action failed", err);
     return GENERIC_ERROR;
-}
-
-/** `ids[]` as posted, or a single `ids` for a client that sends no brackets. */
-function postedIds(body: FormBody, name = "ids"): unknown {
-    return body[`${name}[]`] ?? body[name];
 }
 
 function returnPath(
@@ -94,7 +78,7 @@ function savedReturnPath(raw: string): string {
 }
 
 /** A filter the list was on, read back from `return_to`; blank counts as none. */
-function filterOf(path: string, name: "store" | "q"): string | undefined {
+function filterOf(path: string, name: "q"): string | undefined {
     try {
         const value = new URL(path, "http://foodable.local").searchParams.get(
             name,
@@ -102,19 +86,6 @@ function filterOf(path: string, name: "store" | "q"): string | undefined {
         return value && value.trim() !== "" ? value : undefined;
     } catch {
         return undefined;
-    }
-}
-
-const storeOf = (path: string) => filterOf(path, "store");
-
-/** Every store the Groceries list was filtered to (it takes several). */
-function storesOf(path: string): string[] {
-    try {
-        return new URL(path, "http://foodable.local").searchParams
-            .getAll("store")
-            .filter((id) => id.trim() !== "");
-    } catch {
-        return [];
     }
 }
 
@@ -142,55 +113,6 @@ async function act(
     // toast: none. The list shows what changed.
     return c.redirect(returnTo, 303);
 }
-
-bulkRoutes.post("/kitchen/fridge/bulk/discard", requireMember, (c) => {
-    const member = siteMember(c);
-    return act(c, {
-        fallback: "/kitchen/fridge",
-        run: (body) =>
-            bulkDiscardFridgeItems({
-                householdId: member.householdId,
-                itemIds: parseBulkIds(postedIds(body)),
-                actorUserId: c.get("userId"),
-            }),
-        render: (error) => renderFridgeInventoryPage(c.get("userId"), error),
-    });
-});
-
-bulkRoutes.post("/kitchen/groceries/bulk/delete", requireMember, (c) => {
-    const member = siteMember(c);
-    return act(c, {
-        fallback: "/kitchen/groceries",
-        run: (body) =>
-            bulkDeleteGroceryLines({
-                householdId: member.householdId,
-                lineIds: parseBulkIds(postedIds(body)),
-            }),
-        render: (error, returnTo) =>
-            renderGroceryListPage(c.get("userId"), {
-                error,
-                storeFilter: storesOf(returnTo),
-            }),
-    });
-});
-
-bulkRoutes.post("/kitchen/usuals/bulk/remove", requireMember, (c) => {
-    const member = siteMember(c);
-    return act(c, {
-        fallback: "/kitchen/usuals",
-        run: (body) =>
-            bulkRemoveUsuals({
-                householdId: member.householdId,
-                foodIds: parseBulkIds(postedIds(body)),
-            }),
-        render: (error, returnTo) =>
-            renderUsualProductsListPage(c.get("userId"), {
-                error,
-                from: returnTo,
-                storeFilter: storeOf(returnTo),
-            }),
-    });
-});
 
 bulkRoutes.post("/settings/saved/bulk/delete", requireMember, (c) => {
     const member = siteMember(c);

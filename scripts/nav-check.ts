@@ -3319,8 +3319,8 @@ try {
         { productPage, productMenu, productLog, productPosts, ex: drain() },
     );
 
-    // Kitchen › Fridge on the phone: rows, the row ⋯ and its posts, swipe, the
-    // Select ⋯ beside the tabs, and select mode with the Selection bar.
+    // Kitchen › Fridge on the phone: rows, the row ⋯ and its posts, swipe, and
+    // the + beside the tabs (no ⋯, no select mode).
     await send("Emulation.setDeviceMetricsOverride", {
         width: 390,
         height: 844,
@@ -3409,14 +3409,14 @@ try {
         (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
     );
     record(
-        "v2 fridge on the phone: Use soon cards, rows by place with the date at the end, the low words and a score, Select and + beside the tabs; a row's ⋯ is Eat, Add to grocery list, Edit amount or expiry and Discard (confirmed in place); Eat and Discard and both swipes post the routes and fields they always did",
+        "v2 fridge on the phone: Use soon cards, rows by place with the date at the end, the low words and a score, only + beside the tabs; a row's ⋯ is Eat, Add to grocery list, Edit amount or expiry and Discard (confirmed in place); Eat and Discard and both swipes post the routes and fields they always did",
         fridgePhone.rows === 6 &&
             fridgePhone.sections.join("|") === "Fridge|Pantry" &&
             fridgePhone.cards === 3 &&
             fridgePhone.eggs === "Tomorrow · low, below 6" &&
             fridgePhone.cheeseValue === "Nov 23" &&
             fridgePhone.scores === 2 &&
-            fridgePhone.topTools.join("|") === "Fridge options|Add item" &&
+            fridgePhone.topTools.join("|") === "Add item" &&
             fridgePhone.toolsLevel <= 8 &&
             !fridgePhone.tabsHidden &&
             fridgePhone.headActions === "none" &&
@@ -3433,165 +3433,8 @@ try {
         { fridgePhone, fridgeRowMenu, fridgeConfirm, fridgePosts, ex: drain() },
     );
 
-    // Select mode on the phone: Select is the tab row's ⋯, the Selection bar
-    // floats above the nav, a Discard asks in place and posts the picked ids.
-    await goto("/kitchen/fridge");
-    await setMarker();
-    await control("reset=posts");
-    await clickSel(".fd-kitchen-fridge-top [data-fd-menu-trigger]");
-    await sleep(150);
-    await clickSel('.fd-kitchen-fridge-top [data-fd-select-toggle="fridge"]');
-    await sleep(150);
-    const fridgeSel0 = await ev<{
-        selecting: boolean;
-        head: string;
-        phoneBar: string;
-        desktopBar: string;
-        aboveNav: boolean;
-        fixed: boolean;
-        discard: string;
-        menuItem: string;
-    }>(`({
-        selecting: document.querySelector(".fd-kitchen-fridge-page").hasAttribute("data-fd-selecting"),
-        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
-        phoneBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).display,
-        desktopBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--desktop")).display,
-        aboveNav: (() => {
-            const bar = document.querySelector(".fd-select-bar-slot--phone").getBoundingClientRect();
-            const nav = document.querySelector(".fd-tabs").getBoundingClientRect();
-            return bar.bottom <= nav.top + 1 && bar.width > 0;
-        })(),
-        fixed: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).position === "fixed",
-        discard: [...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
-        menuItem: document.querySelector('.fd-kitchen-fridge-top [data-fd-select-toggle="fridge"] .fd-menu__label')?.textContent ?? "",
-    })`);
-    // The phone's bar is its buttons: Discard fills the width, no count drawn.
-    const fridgeBarShape = await ev<{
-        w: number;
-        h: number;
-        barW: number;
-        count: number;
-    }>(`(() => {
-        const slot = document.querySelector(".fd-select-bar-slot--phone");
-        const btn = [...slot.querySelectorAll(".fd-btn")].find((b) => b.offsetParent !== null).getBoundingClientRect();
-        return {
-            w: Math.round(btn.width),
-            h: Math.round(btn.height),
-            barW: Math.round(slot.getBoundingClientRect().width),
-            count: Math.round(slot.querySelector(".fd-selection-bar__count").getBoundingClientRect().width),
-        };
-    })()`);
-    // Escape leaves select mode with focus on the ⋯ that opened it, like Cancel.
-    const pressEscape = async () => {
-        for (const type of ["keyDown", "keyUp"]) {
-            await send("Input.dispatchKeyEvent", {
-                type,
-                key: "Escape",
-                code: "Escape",
-                windowsVirtualKeyCode: 27,
-            });
-        }
-        await sleep(250);
-    };
-    await pressEscape();
-    const fridgeEsc = await ev<{ selecting: boolean; focus: string }>(`({
-        selecting: document.querySelector(".fd-kitchen-fridge-page").hasAttribute("data-fd-selecting"),
-        focus: document.activeElement?.getAttribute("aria-label") ?? document.activeElement?.tagName ?? "",
-    })`);
-    await clickSel(".fd-kitchen-fridge-top [data-fd-menu-trigger]");
-    await sleep(150);
-    await clickSel('.fd-kitchen-fridge-top [data-fd-select-toggle="fridge"]');
-    await sleep(150);
-    await clickSel("#fd-fridge-row-it-eggs .fd-item-row__face");
-    await clickSel("#fd-fridge-row-it-lime .fd-item-row__face");
-    await sleep(100);
-    const fridgeSel2 = await ev<{
-        head: string;
-        opened: number;
-        ticked: string[];
-        buttons: string;
-    }>(`({
-        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
-        opened: document.querySelectorAll("dialog[open]").length,
-        ticked: [...document.querySelectorAll("input[data-fd-select-item]:checked")].map((i) => i.value),
-        buttons: [...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
-    })`);
-    await clickSel(".fd-select-bar-slot--phone [data-fd-select-ask]");
-    await sleep(100);
-    const fridgeAsk = await ev<string>(
-        `[...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|")`,
-    );
-    // Focus moves with the question: to Cancel, then back to the action.
-    const selectFocus = `(() => {
-        const el = document.activeElement;
-        const kind = el?.hasAttribute("data-fd-select-ask") ? "ask" : el?.hasAttribute("data-fd-select-unask") ? "unask" : "other";
-        return kind + ":" + (el?.textContent ?? "").trim();
-    })()`;
-    const fridgeAskFocus = await ev<string>(selectFocus);
-    await clickSel(".fd-select-bar-slot--phone [data-fd-select-unask]");
-    await sleep(100);
-    const fridgeBack = await ev<string>(
-        `[...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|")`,
-    );
-    const fridgeBackFocus = await ev<string>(selectFocus);
-    await clickSel(".fd-select-bar-slot--phone [data-fd-select-ask]");
-    await sleep(100);
-    const fridgeAskWidths = await ev<number[]>(
-        `[...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => Math.round(b.getBoundingClientRect().width))`,
-    );
-    await sleep(100);
-    await clickSel(
-        '.fd-select-bar-slot--phone [data-fd-select-when="ask"][type="submit"]',
-    );
-    await sleep(600);
-    const fridgeBulk = (await stats()).posts.map(
-        (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
-    );
-    record(
-        "v2 fridge select mode on the phone: Select (the tab row's ⋯) shows the count row and a Selection bar fixed above the nav, rows pick without opening a sheet, Discard asks in place (Cancel, Discard 2) with focus on Cancel and back on Discard after it, the bar is full-width buttons with no drawn count, Escape leaves with focus on the ⋯, and the bulk route is posted with both ids",
-        fridgeSel0.selecting &&
-            fridgeSel0.head === "0 selectedCancel" &&
-            fridgeSel0.phoneBar !== "none" &&
-            fridgeSel0.desktopBar === "none" &&
-            fridgeSel0.fixed &&
-            fridgeSel0.aboveNav &&
-            fridgeSel0.discard === "Discard" &&
-            fridgeSel0.menuItem === "Cancel selection" &&
-            fridgeSel2.head === "2 selectedCancel" &&
-            fridgeSel2.opened === 0 &&
-            fridgeSel2.ticked.join("|") === "it-eggs|it-lime" &&
-            fridgeSel2.buttons === "Discard 2" &&
-            fridgeAsk === "Cancel|Discard 2" &&
-            fridgeAskFocus === "unask:Cancel" &&
-            fridgeBack === "Discard 2" &&
-            fridgeBackFocus === "ask:Discard 2" &&
-            fridgeBarShape.w >= fridgeBarShape.barW - 2 &&
-            fridgeBarShape.h >= 44 &&
-            fridgeBarShape.count <= 1 &&
-            fridgeAskWidths.length === 2 &&
-            fridgeAskWidths.every((w) => w >= fridgeBarShape.barW / 2 - 12) &&
-            !fridgeEsc.selecting &&
-            fridgeEsc.focus === "Fridge options" &&
-            fridgeBulk.join("\n") ===
-                "/kitchen/fridge/bulk/discard return_to=/kitchen/fridge&ids[]=it-eggs&ids[]=it-lime",
-        {
-            fridgeSel0,
-            fridgeSel2,
-            fridgeAsk,
-            fridgeAskFocus,
-            fridgeBack,
-            fridgeBackFocus,
-            fridgeBarShape,
-            fridgeAskWidths,
-            fridgeEsc,
-            fridgeBulk,
-            ex: drain(),
-        },
-    );
-
     // Kitchen › Fridge at 1440: the sections are the sidebar's sub-links, the
-    // header's Actions slot holds Select and +, two columns, and select mode
-    // puts the Selection bar inline above one list.
+    // header's Actions slot holds only +, and the two columns sit side by side.
     await send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await send("Emulation.setDeviceMetricsOverride", {
         width: 1440,
@@ -3628,83 +3471,20 @@ try {
         })(),
         cards: [...document.querySelectorAll(".fd-kitchen-use-soon .fd-mini-card")].filter((c) => c.offsetParent !== null).length,
     })`);
-    await clickSel(
-        ".fd-kitchen-head .fd-page-header__actions [data-fd-menu-trigger]",
-    );
-    await sleep(150);
-    await clickSel('.fd-kitchen-head [data-fd-select-toggle="fridge"]');
-    await sleep(150);
-    await clickSel("#fd-fridge-row-it-cheese .fd-item-row__face");
-    await clickSel("#fd-fridge-row-it-milk .fd-item-row__face");
-    await sleep(100);
-    const fridgeDeskSel = await ev<{
-        inline: boolean;
-        phoneBar: string;
-        useSoon: string;
-        oneColumn: boolean;
-        width: number;
-        buttons: string;
-        head: string;
-        listW: number;
-    }>(`({
-        listW: Math.round(document.querySelector(".fd-kitchen-fridge-layout .fd-page-layout__columns").getBoundingClientRect().width),
-        inline: (() => {
-            const slot = document.querySelector(".fd-select-bar-slot--desktop");
-            return getComputedStyle(slot).display !== "none" && getComputedStyle(slot.firstElementChild).position === "static";
-        })(),
-        phoneBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).display,
-        useSoon: getComputedStyle(document.querySelector(".fd-kitchen-use-soon")).display,
-        oneColumn: (() => {
-            const cols = [...document.querySelectorAll(".fd-kitchen-fridge-layout .fd-page-layout__column")].filter((c) => c.offsetParent !== null).map((c) => c.getBoundingClientRect());
-            return cols.length >= 1 && cols.every((c) => Math.abs(c.left - cols[0].left) < 2);
-        })(),
-        width: Math.round(document.querySelector(".fd-select-bar-slot--desktop .fd-selection-bar").getBoundingClientRect().width),
-        buttons: [...document.querySelectorAll(".fd-select-bar-slot--desktop .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
-        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
-    })`);
-    await clickSel(".fd-select-bar-slot--desktop [data-fd-select-ask]");
-    await sleep(100);
-    const fridgeDeskAsk = await ev<string>(
-        `[...document.querySelectorAll(".fd-select-bar-slot--desktop .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|")`,
-    );
-    const fridgeDeskAskFocus = await ev<string>(selectFocus);
-    await clickSel(
-        '.fd-select-bar-slot--desktop [data-fd-select-when="ask"][type="submit"]',
-    );
-    await sleep(600);
-    const fridgeDeskPosts = (await stats()).posts.map(
-        (p) => `${p.path} ${p.entries.map((e) => e.join("=")).join("&")}`,
-    );
     record(
-        "v2 fridge at 1440px: Kitchen's sections are the sidebar's sub-links (Fridge current, no tab row), Select and + sit in the header, Use soon (cards at their 150px) and the first place are the left column; select mode shows the Selection bar inline above one 720px list, a Discard asks in place and posts both ids",
+        "v2 fridge at 1440px: Kitchen's sections are the sidebar's sub-links (Fridge current, no tab row), only + sits in the header, Use soon (cards at their 150px) and the first place are the left column",
         fridgeDesk.subs.join("|") === "Fridge|Groceries|Usuals" &&
             fridgeDesk.current === "Fridge" &&
             fridgeDesk.tabs === "none" &&
-            fridgeDesk.actions.join("|") === "Fridge options|Add item" &&
+            fridgeDesk.actions.join("|") === "Add item" &&
             fridgeDesk.phoneTools === "none" &&
             fridgeDesk.leftHas.join("|") === "Use soon" &&
             fridgeDesk.rightHas.join("|") === "Fridge|Pantry" &&
             fridgeDesk.sideBySide &&
             fridgeDesk.cards === 3 &&
-            fridgeDesk.cardWidths.every((w) => w === 150) &&
-            fridgeDeskSel.listW >= 700 &&
-            fridgeDeskSel.inline &&
-            fridgeDeskSel.phoneBar === "none" &&
-            fridgeDeskSel.useSoon === "none" &&
-            fridgeDeskSel.oneColumn &&
-            fridgeDeskSel.width <= 721 &&
-            fridgeDeskSel.buttons === "Discard 2" &&
-            fridgeDeskSel.head === "2 selectedCancel" &&
-            fridgeDeskAsk === "Cancel|Discard 2" &&
-            fridgeDeskAskFocus === "unask:Cancel" &&
-            fridgeDeskPosts.join("\n") ===
-                "/kitchen/fridge/bulk/discard return_to=/kitchen/fridge&ids[]=it-cheese&ids[]=it-milk",
+            fridgeDesk.cardWidths.every((w) => w === 150),
         {
             fridgeDesk,
-            fridgeDeskSel,
-            fridgeDeskAsk,
-            fridgeDeskAskFocus,
-            fridgeDeskPosts,
             ex: drain(),
         },
     );
@@ -4032,8 +3812,7 @@ try {
             grocPhone.chickenWarn &&
             grocPhone.eggsScore &&
             grocPhone.rings.join("|") === "false|true|true|false|false|false" &&
-            grocPhone.topTools.join("|") ===
-                "Filter by store|Groceries options|Add to list" &&
+            grocPhone.topTools.join("|") === "Filter by store|Add to list" &&
             grocPhone.toolsLevel <= 8 &&
             grocPhone.tabsShown &&
             grocPhone.headActions === "none" &&
@@ -4042,7 +3821,7 @@ try {
             grocPhone.dockFixed &&
             grocPhone.dockAboveNav &&
             grocPhone.dockWidths.every((w) => w >= 120) &&
-            grocPhone.addRow &&
+            !grocPhone.addRow &&
             grocPhone.oldBits === 0 &&
             grocRowMenu.slice(0, 3).join("|") === "Check off|Edit|Delete" &&
             grocConfirm.join("|") === "Cancel|Delete" &&
@@ -4118,46 +3897,20 @@ try {
         { filter0, filterOne, filter1, filterBoth, filterCleared, ex: drain() },
     );
 
-    // The tab row ⋯: Share list (flag on), Select, Clear checked (confirmed
-    // in place, posting its route); with Share off the ⋯ has no Share list.
+    // The tab row has no ⋯, with the share flag on or off: Clear checked lives
+    // on the checked bar (its own record below), and Share list has no entry.
     await goto("/kitchen/groceries");
-    await setMarker();
-    await control("reset=posts");
-    await clickSel(
-        ".fd-kitchen-fridge-top [aria-label='Groceries options'][data-fd-menu-trigger]",
+    const tabMenuOn = await ev<number>(
+        `document.querySelectorAll(".fd-kitchen-fridge-top [data-anchor='more'], [aria-label='Groceries options']").length`,
     );
-    await sleep(150);
-    const tabMenu = await ev<string[]>(
-        `[...document.querySelectorAll(".fd-kitchen-fridge-top [data-anchor='more'] [role='menuitem']")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
-    );
-    await clickSel(
-        ".fd-kitchen-fridge-top [data-anchor='more'] [data-fd-menu-arm]",
-    );
-    await sleep(100);
-    const tabConfirm = await ev<string[]>(
-        `[...document.querySelectorAll(".fd-kitchen-fridge-top [data-anchor='more'] .fd-menu__confirm-row [role='menuitem']")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
-    );
-    await clickSel(
-        ".fd-kitchen-fridge-top [data-anchor='more'] .fd-menu__confirm-row [type='submit']",
-    );
-    await sleep(500);
-    const tabClearPosts = await asPosts();
     await goto("/kitchen/groceries?share=off");
-    await clickSel(
-        ".fd-kitchen-fridge-top [aria-label='Groceries options'][data-fd-menu-trigger]",
-    );
-    await sleep(150);
-    const tabMenuOff = await ev<string[]>(
-        `[...document.querySelectorAll(".fd-kitchen-fridge-top [data-anchor='more'] [role='menuitem']")].filter((i) => i.offsetParent !== null).map((i) => i.textContent.trim())`,
+    const tabMenuOff = await ev<number>(
+        `document.querySelectorAll(".fd-kitchen-fridge-top [data-anchor='more'], [aria-label='Groceries options']").length`,
     );
     record(
-        "v2 groceries tab row ⋯: Share list, Select and Clear checked (a confirm in place that posts the route), and no Share list with mcp-share-links off",
-        tabMenu.join("|") === "Share list|Select|Clear checked" &&
-            tabConfirm.join("|") === "Cancel|Clear checked" &&
-            tabClearPosts.join("\n") ===
-                "/kitchen/groceries/clear-checked return_to=/kitchen/groceries" &&
-            tabMenuOff.join("|") === "Select|Clear checked",
-        { tabMenu, tabConfirm, tabClearPosts, tabMenuOff, ex: drain() },
+        "v2 groceries tab row has no ⋯ (share flag on or off): Clear checked is only on the checked bar",
+        tabMenuOn === 0 && tabMenuOff === 0,
+        { tabMenuOn, tabMenuOff, ex: drain() },
     );
 
     // The line sheet from a row: amount, Store and Section pull-downs, Note,
@@ -4770,98 +4523,10 @@ try {
         { addPhone, addDesk, ex: drain() },
     );
 
-    // Select mode on the phone: Select (the tab row's ⋯) hides the dock,
-    // shows the count row and a floating Selection bar, rows pick without
-    // opening a sheet, Delete asks in place and posts the picked ids.
-    await send("Emulation.setDeviceMetricsOverride", {
-        width: 390,
-        height: 844,
-        deviceScaleFactor: 1,
-        mobile: true,
-    });
-    await send("Emulation.setTouchEmulationEnabled", {
-        enabled: true,
-        maxTouchPoints: 1,
-    });
-    await goto("/kitchen/groceries");
-    await setMarker();
-    await control("reset=posts");
-    await ev(`document.getAnimations().forEach((a) => a.finish())`);
-    await clickSel(
-        ".fd-kitchen-fridge-top [aria-label='Groceries options'][data-fd-menu-trigger]",
-    );
-    await sleep(150);
-    await clickSel(
-        '.fd-kitchen-fridge-top [data-fd-select-toggle="groceries"]',
-    );
-    await sleep(150);
-    await clickSel("#fd-grocery-row-gl-milk .fd-item-row__face");
-    await clickSel("#fd-grocery-row-gl-rice .fd-item-row__face");
-    await sleep(100);
-    const grocSel = await ev<{
-        selecting: boolean;
-        head: string;
-        dock: string;
-        addRow: string;
-        opened: number;
-        ticked: string[];
-        buttons: string;
-        phoneBar: string;
-        fixed: boolean;
-        aboveNav: boolean;
-        rects: unknown;
-    }>(`({
-        selecting: document.querySelector(".fd-kitchen-groceries-page").hasAttribute("data-fd-selecting"),
-        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
-        dock: getComputedStyle(document.querySelector(".fd-kitchen-grocery-dock")).display,
-        addRow: getComputedStyle(document.querySelector("[data-fd-grocery-add-row]")).display,
-        opened: document.querySelectorAll("dialog[open]").length,
-        ticked: [...document.querySelectorAll("input[data-fd-select-item]:checked")].map((i) => i.value),
-        buttons: [...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
-        phoneBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).display,
-        fixed: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).position === "fixed",
-        aboveNav: (() => {
-            const bar = document.querySelector(".fd-select-bar-slot--phone").getBoundingClientRect();
-            const nav = document.querySelector(".fd-tabs").getBoundingClientRect();
-            return bar.bottom <= nav.top + 1 && bar.width > 0;
-        })(),
-        rects: (() => {
-            const r = (s) => { const b = document.querySelector(s).getBoundingClientRect(); return [Math.round(b.top), Math.round(b.bottom), Math.round(b.width)].join(","); };
-            return { bar: r(".fd-select-bar-slot--phone"), nav: r(".fd-tabs"), win: innerHeight };
-        })(),
-    })`);
-    await clickSel(".fd-select-bar-slot--phone [data-fd-select-ask]");
-    await sleep(100);
-    const grocAsk = await ev<string>(
-        `[...document.querySelectorAll(".fd-select-bar-slot--phone .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|")`,
-    );
-    await clickSel(
-        '.fd-select-bar-slot--phone [data-fd-select-when="ask"][type="submit"]',
-    );
-    await sleep(600);
-    const grocBulk = await asPosts();
-    record(
-        "v2 groceries select mode on the phone: Select (the tab row's ⋯) hides the dock and Add to list, shows the count row and a Selection bar fixed above the nav, rows pick without opening a sheet, Delete asks in place (Cancel, Delete 2) and the bulk route is posted with both ids",
-        grocSel.selecting &&
-            grocSel.head === "2 selectedCancel" &&
-            grocSel.dock === "none" &&
-            grocSel.addRow === "none" &&
-            grocSel.opened === 0 &&
-            grocSel.ticked.join("|") === "gl-milk|gl-rice" &&
-            grocSel.buttons === "Delete 2" &&
-            grocSel.phoneBar !== "none" &&
-            grocSel.fixed &&
-            grocSel.aboveNav &&
-            grocAsk === "Cancel|Delete 2" &&
-            grocBulk.join("\n") ===
-                "/kitchen/groceries/bulk/delete return_to=/kitchen/groceries&ids[]=gl-milk&ids[]=gl-rice",
-        { grocSel, grocAsk, grocBulk, ex: drain() },
-    );
-
     // Kitchen › Groceries at 1440: Groceries is the sidebar's current
-    // sub-link, the header holds the filter, ⋯ and Add to list, the first
-    // section is the left column and the rest the right, the dock is a row
-    // under the header, and select mode shows the Selection bar inline.
+    // sub-link, the header holds the filter and Add to list (no ⋯), the first
+    // section is the left column and the rest the right, and the dock is a
+    // row under the header.
     await send("Emulation.setTouchEmulationEnabled", { enabled: false });
     await send("Emulation.setDeviceMetricsOverride", {
         width: 1440,
@@ -4904,49 +4569,11 @@ try {
         dockBelowHeader: document.querySelector(".fd-kitchen-grocery-dock").getBoundingClientRect().top >= document.querySelector(".fd-kitchen-head").getBoundingClientRect().bottom,
         rowMenuVisible: document.querySelector("#fd-grocery-row-gl-milk .fd-menu").offsetParent !== null,
     })`);
-    await clickSel(
-        ".fd-kitchen-head .fd-page-header__actions [aria-label='Groceries options'][data-fd-menu-trigger]",
-    );
-    await sleep(150);
-    await clickSel('.fd-kitchen-head [data-fd-select-toggle="groceries"]');
-    await sleep(150);
-    await clickSel("#fd-grocery-row-gl-chicken .fd-item-row__face");
-    await clickSel("#fd-grocery-row-gl-oil .fd-item-row__face");
-    await sleep(100);
-    const grocDeskSel = await ev<{
-        inline: boolean;
-        phoneBar: string;
-        dock: string;
-        oneColumn: boolean;
-        buttons: string;
-        head: string;
-    }>(`({
-        inline: (() => {
-            const slot = document.querySelector(".fd-select-bar-slot--desktop");
-            return getComputedStyle(slot).display !== "none" && getComputedStyle(slot.firstElementChild).position === "static";
-        })(),
-        phoneBar: getComputedStyle(document.querySelector(".fd-select-bar-slot--phone")).display,
-        dock: getComputedStyle(document.querySelector(".fd-kitchen-grocery-dock")).display,
-        oneColumn: (() => {
-            const cols = [...document.querySelectorAll(".fd-kitchen-groceries-layout .fd-page-layout__column")].filter((c) => c.offsetParent !== null).map((c) => c.getBoundingClientRect());
-            return cols.length >= 1 && cols.every((c) => Math.abs(c.left - cols[0].left) < 2);
-        })(),
-        buttons: [...document.querySelectorAll(".fd-select-bar-slot--desktop .fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()).join("|"),
-        head: document.querySelector("[data-fd-select-head]")?.textContent.replace(/\\s+/g, " ").trim() ?? "",
-    })`);
-    await clickSel(".fd-select-bar-slot--desktop [data-fd-select-ask]");
-    await sleep(100);
-    await clickSel(
-        '.fd-select-bar-slot--desktop [data-fd-select-when="ask"][type="submit"]',
-    );
-    await sleep(600);
-    const grocDeskPosts = await asPosts();
     record(
-        "v2 groceries at 1440px: Groceries is the sidebar's current sub-link (no tab row), the filter, ⋯ and Add to list sit in the header, the first section is the left column and the rest the right, the dock is a right-aligned row under the header, and select mode shows the Selection bar inline over one list and posts both ids",
+        "v2 groceries at 1440px: Groceries is the sidebar's current sub-link (no tab row), the filter and Add to list sit in the header (no ⋯), the first section is the left column and the rest the right, and the dock is a right-aligned row under the header",
         grocDesk.current.startsWith("Groceries") &&
             grocDesk.tabs === "none" &&
-            grocDesk.actions.join("|") ===
-                "Filter by store|Groceries options|Add to list" &&
+            grocDesk.actions.join("|") === "Filter by store|Add to list" &&
             grocDesk.phoneTools === "none" &&
             grocDesk.leftHas.join("|") === "Dairy & eggs · Costco" &&
             grocDesk.rightHas.join("|") ===
@@ -4955,16 +4582,8 @@ try {
             grocDesk.dockStatic &&
             grocDesk.dockRight &&
             grocDesk.dockBelowHeader &&
-            grocDesk.rowMenuVisible &&
-            grocDeskSel.inline &&
-            grocDeskSel.phoneBar === "none" &&
-            grocDeskSel.dock === "none" &&
-            grocDeskSel.oneColumn &&
-            grocDeskSel.buttons === "Delete 2" &&
-            grocDeskSel.head === "2 selectedCancel" &&
-            grocDeskPosts.join("\n") ===
-                "/kitchen/groceries/bulk/delete return_to=/kitchen/groceries&ids[]=gl-chicken&ids[]=gl-oil",
-        { grocDesk, grocDeskSel, grocDeskPosts, ex: drain() },
+            grocDesk.rowMenuVisible,
+        { grocDesk, ex: drain() },
     );
     await goto("/");
     await setMarker();
@@ -6571,10 +6190,10 @@ try {
     );
 
     // ---- Kitchen › Usuals and Trends (phone and desktop) ----
-    // The list and its rows, the tab row's filter and ⋯, a usual's sheet (its
+    // The list and its rows, the tab row's filter, a usual's sheet (its
     // header ⋯ asks in place, every field posts the route it posted before, the
     // unit and Restock pull-downs and the product picker), Add a usual (search,
-    // Type it, the camera on and off), select mode, and Trends.
+    // Type it, the camera on and off), and Trends.
     const postFields = (line: string | undefined) => {
         const out: Record<string, string> = {};
         const [, query = ""] = (line ?? "").split(/ (.*)/s);
@@ -6645,7 +6264,7 @@ try {
             low: getComputedStyle(document.querySelector("#fd-usual-row-u-eggs .fd-item-row__subtitle")).color,
             calm: getComputedStyle(document.querySelector("#fd-usual-row-u-milk .fd-item-row__subtitle")).color,
         })`);
-        // The tab row's filter: a tick per store; the ⋯ holds Select.
+        // The tab row's filter: a tick per store; there is no ⋯.
         await ev(`${visible("[aria-label='Filter by store']")}[0].click()`);
         await sleep(200);
         const filterMenu = await ev<{
@@ -6659,14 +6278,6 @@ try {
             `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
         );
         await sleep(100);
-        await ev(`${visible("[aria-label='Usuals options']")}[0].click()`);
-        await sleep(200);
-        const moreMenu = await ev<string[]>(
-            `[...${visible("[aria-label='Usuals options'] ~ .fd-menu__panel .fd-menu__item")}].map((i) => i.textContent.trim())`,
-        );
-        await ev(
-            `document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }))`,
-        );
         // Choosing a store filters over Turbo and keeps the page.
         await ev(`${visible("[aria-label='Filter by store']")}[0].click()`);
         await sleep(150);
@@ -6685,7 +6296,7 @@ try {
             titles: [...document.querySelectorAll(".fd-kitchen-usuals-page .fd-item-row[data-fd-sheet-row] .fd-item-row__title")].map((t) => t.textContent),
             badge: document.querySelector(".fd-btn__badge")?.textContent ?? "",
         })`);
-        return { list, tone, filterMenu, moreMenu, filtered };
+        return { list, tone, filterMenu, filtered };
     };
     const usualsPhone = await usualsCase(390);
     const usualsDesk = await usualsCase(1440);
@@ -6693,9 +6304,9 @@ try {
         c.list.h1 === "Kitchen" &&
         c.list.sub === "4 usuals · restock on Sundays" &&
         c.list.noIntro &&
-        c.list.addRow &&
+        !c.list.addRow &&
         c.list.filter &&
-        c.list.more &&
+        !c.list.more &&
         // A usual that is low now leads (frame 397013).
         c.list.titles.join("|") === "Eggs|Bananas|Milk|Olive oil" &&
         c.list.metas.join("|") ===
@@ -6707,13 +6318,12 @@ try {
         c.filterMenu.items.join("|") === "Costco|Trader Joe's" &&
         c.filterMenu.reach.bad.length === 0 &&
         c.filterMenu.reach.panelInside &&
-        c.moreMenu.join("|") === "Select" &&
         c.filtered.marker === "stay" &&
         c.filtered.path === "/kitchen/usuals?store=s-costco" &&
         c.filtered.titles.join("|") === "Eggs|Milk|Olive oil" &&
         c.filtered.badge === "1";
     record(
-        "v2 usuals list: the rows read name, product beside it, then store, amount and restock (a low usual in the warning tone, an unset product as No usual product yet), no intro; the tab row has the store filter (a tick per store) and a ⋯ whose only item is Select; choosing a store filters over Turbo with the count on the button, on the phone and at 1440",
+        "v2 usuals list: the rows read name, product beside it, then store, amount and restock (a low usual in the warning tone, an unset product as No usual product yet), no intro; the tab row has the store filter (a tick per store) and no ⋯, and the list has no Add a usual row; choosing a store filters over Turbo with the count on the button, on the phone and at 1440",
         usualsListOk(usualsPhone) && usualsListOk(usualsDesk),
         { usualsPhone, usualsDesk, ex: drain() },
     );
@@ -7206,78 +6816,6 @@ try {
             usualsCameraOff.menus === 0 &&
             usualsCameraOn.menus === 0,
         { usualsCameraOff, usualsCameraOn, ex: drain() },
-    );
-
-    // Select mode: Select (the tab row's ⋯) shows the count row and the bar,
-    // rows pick without opening a sheet, Remove asks in place and posts ids.
-    const selectCase = async (width: number) => {
-        await setViewport(width);
-        await goto("/kitchen/usuals");
-        await control("reset=posts");
-        await ev(`${visible("[aria-label='Usuals options']")}[0].click()`);
-        await sleep(200);
-        await ev(`${visible("[data-fd-select-toggle='usuals']")}[0].click()`);
-        await sleep(200);
-        await clickSel("#fd-usual-row-u-oil .fd-item-row__face");
-        await clickSel("#fd-usual-row-u-bananas .fd-item-row__face");
-        await sleep(150);
-        const picking = await ev<{
-            sheetOpen: boolean;
-            count: string;
-            bars: string[];
-            addRowHidden: boolean;
-            headGap: number;
-        }>(`(() => {
-            const bar = ${visible("[data-fd-select-bar] .fd-selection-bar")}[0];
-            const head = document.querySelector("[data-fd-select-head]").getBoundingClientRect();
-            const list = document.querySelector(".fd-kitchen-usuals-layout").getBoundingClientRect();
-            return {
-                headGap: Math.round(list.top - head.bottom),
-                sheetOpen: !!document.querySelector("dialog[open]"),
-                count: document.querySelector("[data-fd-select-head] .fd-section-header__label")?.textContent ?? "",
-                bars: [...bar.querySelectorAll(".fd-btn")].filter((b) => b.offsetParent !== null).map((b) => b.textContent.trim()),
-                addRowHidden: !document.querySelector("[data-fd-usual-add-row]")?.offsetParent,
-            };
-        })()`);
-        await ev(`${visible("[data-fd-select-ask]")}[0].click()`);
-        await sleep(150);
-        const asking = await ev<string[]>(
-            `[...${visible("[data-fd-select-bar] .fd-selection-bar .fd-btn")}].map((b) => b.textContent.trim())`,
-        );
-        const noPostYet = (await asPosts()).length === 0;
-        await ev(
-            `[...${visible("[data-fd-select-bar] .fd-selection-bar .fd-btn[data-fd-select-verb]")}].find((b) => /Remove 2/.test(b.textContent)).click()`,
-        );
-        await sleep(700);
-        const posts = await asPosts();
-        return {
-            picking,
-            asking,
-            noPostYet,
-            post: posts[0]?.split(" ")[0],
-            ids: (posts[0] ?? "").match(/ids\[\]=[^&]+/g) ?? [],
-            fields: postFields(posts[0]),
-        };
-    };
-    const selectPhone = await selectCase(390);
-    const selectDesk = await selectCase(1440);
-    const selectOk = (c: Awaited<ReturnType<typeof selectCase>>) =>
-        !c.picking.sheetOpen &&
-        c.picking.count === "2 selected" &&
-        c.picking.bars.some((b) => b.startsWith("Remove")) &&
-        c.picking.addRowHidden &&
-        // The "N selected" head runs straight into the list.
-        c.picking.headGap <= 4 &&
-        c.asking.join("|").includes("Cancel") &&
-        c.asking.join("|").includes("Remove 2") &&
-        c.noPostYet &&
-        c.post === "/kitchen/usuals/bulk/remove" &&
-        c.ids.sort().join("|") === "ids[]=u-bananas|ids[]=u-oil" &&
-        c.fields.return_to === "/kitchen/usuals";
-    record(
-        "v2 usuals select mode: Select in the tab row's ⋯ shows the 2 selected row and the Selection bar, rows pick without opening a sheet, Remove asks in place (Cancel, Remove 2) and posts the picked ids to the bulk route, on the phone and at 1440",
-        selectOk(selectPhone) && selectOk(selectDesk),
-        { selectPhone, selectDesk, ex: drain() },
     );
 
     // Trends: the Page header, the range tabs (the year only from 1024), the

@@ -2410,26 +2410,15 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "kitchen-fridge-menu": fridgeDriven(
             `document.querySelector("#fd-fridge-row-i3 .fd-menu [data-fd-menu-trigger]").click()`,
         ),
-        // Select mode (frame 400622) and its Discard asking in place (401198).
-        "kitchen-fridge-select": fridgeDriven(
-            `document.querySelector('[data-fd-select-toggle="fridge"]').click();for(const id of ["i2","i1"])document.querySelector("#fd-fridge-row-"+id+" .fd-item-row__face").click()`,
-        ),
-        "kitchen-fridge-discard": fridgeDriven(
-            `document.querySelector('[data-fd-select-toggle="fridge"]').click();for(const id of ["i2","i1"])document.querySelector("#fd-fridge-row-"+id+" .fd-item-row__face").click();for(const b of document.querySelectorAll("[data-fd-select-ask]"))b.click()`,
-        ),
         // Groceries (frames 394511, 398022): rows by section, the checked
         // ones above the dock, then each state the design draws.
         grocery: groceryPage(),
-        // mcp-share-links off: no Share list in the tab row's ⋯.
+        // mcp-share-links off: the tab row is the same (no ⋯ either way).
         "grocery-share-off": groceryPage({ shareEnabled: false }),
         // The store filter pull-down (394677) with both stores ticked.
         "grocery-filter": groceryDriven(
             `[...document.querySelectorAll('[data-anchor="filter"] [data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
             { selectedStoreIds: ["s1", "s2"] },
-        ),
-        // The tab row's ⋯: Share list, Select, Clear checked.
-        "grocery-menu": groceryDriven(
-            `[...document.querySelectorAll('[aria-label="Groceries options"][data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
         ),
         // A row's ⋯: Check off, Edit, Delete.
         "grocery-row-menu": groceryDriven(
@@ -2439,10 +2428,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "grocery-add": groceryPage({ openAdd: true }),
         // A line's sheet (398664): amount, store, section, note.
         "grocery-line": groceryPage({ openLineId: "g4" }),
-        // Select mode with two rows picked.
-        "grocery-select": groceryDriven(
-            `document.querySelector('[data-fd-select-toggle="groceries"]').click();for(const id of ["g1","g4"])document.querySelector("#fd-grocery-row-"+id+" .fd-item-row__face").click()`,
-        ),
         // Put away (395390) the checked lines.
         "grocery-put-away": groceryPage({ openPutAway: true }),
         // A noted line asks how much of it came home, in its own unit.
@@ -2499,16 +2484,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "kitchen-usuals-filter": usualsDriven(
             `[...document.querySelectorAll('[data-anchor="filter"] [data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
             { selectedStoreIds: ["s-costco", "s-tj"] },
-        ),
-        // The tab row's ⋯ (Select), then picking and the Remove asking in place.
-        "kitchen-usuals-menu": usualsDriven(
-            `[...document.querySelectorAll('[aria-label="Usuals options"][data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
-        ),
-        "kitchen-usuals-select": usualsDriven(
-            `document.querySelector('[data-fd-select-toggle="usuals"]').click();for(const id of ["u-oil","u-coffee"])document.querySelector("#fd-usual-row-"+id+" .fd-item-row__face").click()`,
-        ),
-        "kitchen-usuals-remove": usualsDriven(
-            `document.querySelector('[data-fd-select-toggle="usuals"]').click();for(const id of ["u-oil","u-coffee"])document.querySelector("#fd-usual-row-"+id+" .fd-item-row__face").click();for(const b of document.querySelectorAll("[data-fd-select-ask]"))b.click()`,
         ),
         // Edit a usual (frame 395980) and the Restock sheet (397529).
         "kitchen-usual-edit": renderKitchenUsualsV2Page(

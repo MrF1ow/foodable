@@ -173,26 +173,28 @@ describe("renderKitchenFridgeV2Page", () => {
         expect(html).not.toContain("fd-kitchen-overview-head");
     });
 
-    test("the header's Actions slot holds Select and add, and so does the phone's tab row", () => {
+    test("the header's Actions slot holds only add, and so does the phone's tab row", () => {
         const html = body({
             items: [item({ id: "a", displayName: "Eggs" })],
         });
         const actions = html.match(
             /<div class="fd-page-header__actions">([\s\S]*?)<\/div><\/div><\/header>/,
         )?.[1];
-        expect(actions).toContain('aria-label="Fridge options"');
-        expect(actions).toContain('data-fd-select-toggle="fridge"');
+        expect(actions).not.toContain("fd-menu");
+        expect(actions).not.toContain("data-fd-select-toggle");
         expect(actions).toContain('aria-label="Add item"');
         expect(actions).toContain('commandfor="fd-fridge-add"');
         const top = html.match(
             /<div class="fd-kitchen-fridge-top">([\s\S]*?)<\/div>\n/,
         )?.[1];
-        expect(top).toContain('data-fd-select-toggle="fridge"');
+        expect(top).not.toContain("fd-menu");
+        expect(top).not.toContain("data-fd-select-toggle");
         expect(top).toContain('aria-label="Add item"');
     });
 
     test("an empty fridge has no Select, only add", () => {
         const html = body({ items: [] });
+        expect(html).not.toContain("fd-menu");
         expect(html).not.toContain("data-fd-select-toggle");
         expect(html).not.toContain("fd-selection-bar");
         expect(html).toContain('aria-label="Add item"');
@@ -283,7 +285,7 @@ describe("renderKitchenFridgeV2Page", () => {
         expect(row).toContain("fd-item-row__bed--delete");
         expect(row).toContain('aria-label="Ate some"');
         expect(row).toContain('aria-label="Discard"');
-        expect(row).toContain('name="ids[]" value="a"');
+        expect(row).not.toContain('name="ids[]"');
     });
 
     test("a row's menu: Eat, Add to grocery list, Edit amount or expiry, Discard confirmed in place", () => {
@@ -609,7 +611,7 @@ describe("renderKitchenFridgeV2Page", () => {
     });
 });
 
-describe("select mode on the Fridge", () => {
+describe("the Fridge has no select mode or ⋯", () => {
     const html = body({
         items: [
             item({ id: "a", displayName: "Eggs" }),
@@ -617,73 +619,22 @@ describe("select mode on the Fridge", () => {
         ],
     });
 
-    test("every row has a pick box, and the list is the select root", () => {
-        expect(html).toContain(
-            'class="fd-kitchen-fridge-page" data-fd-select="fridge"',
-        );
-        for (const [id, name] of [
-            ["a", "Eggs"],
-            ["b", "Spinach"],
-        ]) {
-            expect(html).toContain(
-                `<input type="checkbox" class="fd-item-row__select-input" data-fd-select-item name="ids[]" value="${id}" aria-label="Select ${name}">`,
-            );
-        }
-        expect(html.match(/data-fd-select-row/g)).toHaveLength(2);
+    test("no ⋯ more menu, no Select, no selection bar and no pick box", () => {
+        expect(html).not.toContain('aria-label="Fridge options"');
+        expect(html).not.toContain("data-fd-select");
+        expect(html).not.toContain("fd-selection-bar");
+        expect(html).not.toContain("fd-select-");
+        expect(html).not.toContain("/kitchen/fridge/bulk/");
+        expect(html).not.toContain('name="ids[]"');
+        expect(html).not.toContain("fd-item-row--select");
     });
 
-    test("the caps count row has Cancel, hidden until picking", () => {
-        expect(html).toContain(
-            '<div class="fd-select-head" data-fd-select-head="fridge" hidden><div class="fd-section-header"><h2 class="fd-section-header__label">0 selected</h2><button type="button" class="fd-section-header__action" data-fd-select-cancel="">Cancel</button>',
-        );
-    });
-
-    test("one Selection bar floats on the phone and one sits inline on desktop, both hidden", () => {
-        expect(html).toMatch(
-            /<div class="fd-select-bar-slot fd-select-bar-slot--phone" data-fd-select-bar="fridge" hidden><div class="fd-selection-bar fd-selection-bar--floating" role="toolbar"/,
-        );
-        expect(html).toMatch(
-            /<div class="fd-select-bar-slot fd-select-bar-slot--desktop" data-fd-select-bar="fridge" hidden><div class="fd-selection-bar fd-selection-bar--inline" role="toolbar"/,
-        );
-    });
-
-    test("the phone's bar is its buttons only; the count shows on the inline bar", () => {
-        const phone =
-            html.match(
-                /fd-select-bar-slot--phone[\s\S]*?(?=fd-select-bar-slot--desktop)/,
-            )?.[0] ?? "";
-        expect(phone).toContain('class="fd-selection-bar__count fd-sr"');
-        const desktop = html.match(/fd-select-bar-slot--desktop[\s\S]*/)?.[0];
-        expect(desktop).toContain('class="fd-selection-bar__count"');
-    });
-
-    test("Discard is in the bar, confirmed in place, and posts the bulk route with the return", () => {
-        expect(html).toContain(
-            '<form id="fd-select-fridge-discard" method="post" action="/kitchen/fridge/bulk/discard" data-fd-select-form hidden><input type="hidden" name="return_to" value="/kitchen/fridge"></form>',
-        );
-        const bar =
-            html.match(
-                /fd-select-bar-slot--phone[\s\S]*?<\/div><\/div>/,
-            )?.[0] ?? "";
-        // The bar asks first (Discard), then offers Cancel and Discard N.
-        expect(bar).toContain("data-fd-select-ask");
-        expect(bar).toContain('data-fd-select-when="idle"');
-        expect(bar).toContain("data-fd-select-unask");
-        expect(bar).toMatch(
-            /type="submit"[^>]*form="fd-select-fridge-discard"[^>]*data-fd-select-when="ask"/,
-        );
-        // No confirm sheet and no Move: main has no bulk move.
-        expect(html).not.toContain("fd-select-fridge-discard-form");
-        expect(html).not.toContain("Discard 1 item?");
-        expect(html).not.toContain(">Move<");
-        expect(html).not.toContain("fd-select-bar__count");
-    });
-
-    test("Select is an item of the ⋯ in the header and in the tab row", () => {
-        expect(html.match(/data-fd-select-toggle="fridge"/g)).toHaveLength(2);
-        expect(
-            html.match(/<span class="fd-menu__label">Select<\/span>/g),
-        ).toHaveLength(2);
+    test("the + is the only tool", () => {
+        const top = html.match(
+            /<div class="fd-kitchen-fridge-top">([\s\S]*?)<\/div>\n/,
+        )?.[1];
+        expect(top?.match(/<button/g)).toHaveLength(1);
+        expect(top).toContain('aria-label="Add item"');
     });
 });
 
@@ -834,7 +785,7 @@ describe("a usual running low shows on its fridge row", () => {
             view({ lowStock: new Map([["f-eggs", "6"]]) }),
         );
         expect(html).toContain(
-            '<li tabindex="0" class="fd-item-row fd-item-row--warning fd-item-row--swipe fd-item-row--select"',
+            '<li tabindex="0" class="fd-item-row fd-item-row--warning fd-item-row--swipe"',
         );
         expect(html).toContain(
             '<span class="fd-item-row__subtitle">Tomorrow · low, below 6</span>',

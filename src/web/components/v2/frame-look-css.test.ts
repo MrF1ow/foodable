@@ -115,17 +115,6 @@ test("the desktop week strip hides its ‹ › until the keyboard reaches one (5
     expect(hidden).toMatch(/width:\s*1px/);
 });
 
-test("fridge select mode drops the first place's header, the tick and the score pills (400622)", () => {
-    const body = rule(
-        css("kitchen.css"),
-        `.fd-kitchen-fridge-page[data-fd-selecting] .fd-kitchen-loc:first-of-type > .fd-section-header,
-         .fd-kitchen-fridge-page[data-fd-selecting] .fd-item-row__select-box > svg,
-         .fd-kitchen-fridge-page[data-fd-selecting] .fd-score-pill,
-         .fd-kitchen-fridge-page[data-fd-selecting] .fd-page-layout__column:has(> .fd-kitchen-use-soon:only-child)`,
-    );
-    expect(body).toMatch(/display:\s*none/);
-});
-
 test("the Groceries dock sizes each button to its words, so Put N away in the kitchen is not clipped (394511)", () => {
     expect(
         rule(

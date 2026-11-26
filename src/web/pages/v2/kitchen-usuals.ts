@@ -37,7 +37,6 @@ import {
     type UsualAddView,
 } from "./kitchen-usuals-add.js";
 import { kitchenTopTools, renderKitchenHead } from "./kitchen-head.js";
-import { selectionBars } from "./select-mode.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 
 export { USUAL_ADD_SHEET_ID };
@@ -408,7 +407,6 @@ function usualListRow(row: UsualProductRow, meta: KitchenUsualsRowMeta): Html {
               }
             : {}),
         trailing: { kind: "chevron" },
-        select: { name: "ids[]", value: row.food.id },
         id: `fd-usual-row-${row.food.id}`,
         focusable: true,
         data: { "fd-sheet-row": "", "sheet-id": sheetId },
@@ -837,44 +835,10 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
     const resolvedOpen = kitchenUsualsResolvedOpenFoodId(view);
     const rows = filteredRows(view);
     const returnTo = usualsReturnTo(view.selectedStoreIds);
-    const select = selectionBars({
-        scope: "usuals",
-        returnTo,
-        actions: [
-            {
-                kind: "confirm",
-                key: "remove",
-                label: "Remove",
-                action: "/kitchen/usuals/bulk/remove",
-            },
-        ],
-    });
-    const selectable = rows.length > 0;
-    // The ⋯ holds only what applies: Select with rows to pick; with none, no ⋯.
-    const more = selectable
-        ? String(
-              menu({
-                  label: "Usuals options",
-                  anchor: "more",
-                  items: [select.menuItem],
-              }),
-          )
-        : "";
-    const tools = `${storeFilter(view)}${more}`;
+    const tools = storeFilter(view);
     const add = addUsualButton();
     const head = renderUsualsHead(view, tools, add.desktop);
 
-    const addRow = listGroup({
-        label: "Add a usual",
-        data: { "fd-usual-add-row": "" },
-        rows: [
-            itemRow({
-                title: "Add a usual",
-                lead: { kind: "icon", name: "plus" },
-                opens: USUAL_ADD_SHEET_ID,
-            }),
-        ],
-    });
     const list =
         rows.length === 0
             ? String(
@@ -914,7 +878,7 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
               )}`;
     const layout = pageLayout({
         layout: "single",
-        content: raw(`${list}${String(addRow)}`),
+        content: raw(list),
         className: "fd-kitchen-usuals-layout",
     });
     const pageError =
@@ -942,10 +906,9 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
         barcodeCamera: view.chrome.flags.barcodeCamera,
     });
     return `${head}
-<div class="fd-kitchen-usuals-page"${select.rootAttrs}>
+<div class="fd-kitchen-usuals-page">
 ${kitchenTopTools(tools, add.phone)}
 ${pageError}
-${selectable ? `${String(select.bars)}${String(select.head)}` : ""}
 ${String(layout)}
 ${sheets}
 ${addSheet}

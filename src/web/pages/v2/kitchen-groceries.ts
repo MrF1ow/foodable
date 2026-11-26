@@ -34,7 +34,6 @@ import {
     kitchenTopTools,
     renderKitchenHead,
 } from "./kitchen-head.js";
-import { selectionBars } from "./select-mode.js";
 import {
     noticeSentence,
     UNKNOWN_ALLERGEN_TEXT,
@@ -397,7 +396,6 @@ export function groceryLineRowMarkup(
                     form: check,
                 },
             },
-            select: { name: "ids[]", value: line.id },
             id: `fd-grocery-row-${line.id}`,
             data: { "fd-sheet-row": "", "sheet-id": sheetId },
         }),
@@ -1015,53 +1013,6 @@ export function renderKitchenGroceriesBody(
         group.sections.flatMap((section) => section.lines),
     );
     const checkedCount = groceryCheckedCount(view);
-    const select = selectionBars({
-        scope: "groceries",
-        returnTo,
-        actions: [
-            {
-                kind: "confirm",
-                key: "delete",
-                label: "Delete",
-                action: "/kitchen/groceries/bulk/delete",
-            },
-        ],
-    });
-    const selectable = shownLines.length > 0;
-    // The ⋯ holds only what applies: Share with the flag on, Select with
-    // rows, Clear checked with something checked; with none, no ⋯.
-    const menuItems: MenuItem[] = [
-        ...(view.shareEnabled
-            ? [
-                  {
-                      kind: "opens" as const,
-                      label: "Share list",
-                      sheetId: GROCERY_SHARE_SHEET_ID,
-                  },
-              ]
-            : []),
-        ...(selectable ? [select.menuItem] : []),
-        ...(checkedCount > 0
-            ? [
-                  {
-                      kind: "destructive" as const,
-                      label: "Clear checked",
-                      action: CLEAR_CHECKED_ACTION,
-                      fields: { return_to: returnTo },
-                  },
-              ]
-            : []),
-    ];
-    const more =
-        menuItems.length > 0
-            ? String(
-                  menu({
-                      label: "Groceries options",
-                      anchor: "more",
-                      items: menuItems,
-                  }),
-              )
-            : "";
     const filter = storeFilter(view);
     // Without a store there is no add sheet, so nothing for a plus to open.
     const add =
@@ -1072,7 +1023,7 @@ export function renderKitchenGroceriesBody(
               })
             : null;
     const itemCount = groceryHeaderSubtitle(view.openLineCount);
-    const tools = [filter, more].filter(Boolean).join("");
+    const tools = filter;
     const head = renderKitchenHead({
         active: "groceries",
         phoneSubtitle: itemCount,
@@ -1080,21 +1031,8 @@ export function renderKitchenGroceriesBody(
     });
     const top =
         tools || add ? `${kitchenTopTools(tools, add?.phone ?? "")}\n` : "";
-    const addRow = add
-        ? listGroup({
-              label: "Add to list",
-              data: { "fd-grocery-add-row": "" },
-              rows: [
-                  itemRow({
-                      title: "Add to list",
-                      lead: { kind: "icon", name: "plus" },
-                      opens: FD_GROCERY_ADD_SHEET_ID,
-                  }),
-              ],
-          })
-        : raw("");
     const [first, ...rest] = blocks;
-    const left = raw(`${String(addRow)}${first ? String(first) : ""}`);
+    const left = raw(first ? String(first) : "");
     const right = raw(rest.map(String).join(""));
     const layout = pageLayout({
         layout: "two-columns",
@@ -1125,10 +1063,9 @@ export function renderKitchenGroceriesBody(
             ? `<form id="${CLEAR_FORM_ID}" method="post" action="${CLEAR_CHECKED_ACTION}" hidden>${hiddenInputs({ return_to: returnTo })}</form>`
             : "";
     return `${head}
-<div class="fd-kitchen-groceries-page"${select.rootAttrs}>
+<div class="fd-kitchen-groceries-page">
 ${top}${pageError}
 ${allergenBanner}
-${selectable ? `${String(select.bars)}${String(select.head)}` : ""}
 ${putAwayDock(view)}
 ${String(layout)}
 ${String(empty)}

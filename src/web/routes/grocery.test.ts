@@ -270,7 +270,7 @@ describe("grocery routes", () => {
         expect(html).not.toContain("grocery-store panel");
     });
 
-    test("Share is offered on Groceries only while mcp-share-links is on", async () => {
+    test("the share sheet is on Groceries only while mcp-share-links is on, and no tab-row ⋯ offers it", async () => {
         await seedGroceryLines();
         const fetchPage = async () => {
             const res = await app.request("http://x/kitchen/groceries", {
@@ -282,11 +282,12 @@ describe("grocery routes", () => {
         setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const off = await fetchPage();
         expect(off).toContain("fd-kitchen-groceries-page");
-        expect(off).not.toContain("Share list");
         expect(off).not.toContain("fd-grocery-share-sheet");
         setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         const on = await fetchPage();
-        expect(on).toContain("Share list");
+        // The ⋯ that held Share list is gone; the sheet stays for a follow-up.
+        expect(on).not.toContain("Share list");
+        expect(on).not.toContain('aria-label="Groceries options"');
         expect(on).toContain('action="/kitchen/groceries/share"');
     });
 

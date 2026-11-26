@@ -420,38 +420,71 @@ describe("renderKitchenUsualsV2Page", () => {
         );
     });
 
-    test("select mode: the tab row's ⋯ holds Select, and the Selection bars remove in place", () => {
-        const body = renderKitchenUsualsBody(baseView() as never);
-        expect(body).toContain(
-            'class="fd-kitchen-usuals-page" data-fd-select="usuals"',
-        );
-        expect(body).toContain('aria-label="Usuals options"');
-        expect(body).toContain('data-fd-select-toggle="usuals"');
-        expect(body).toMatch(
-            /<input type="checkbox" class="fd-item-row__select-input" data-fd-select-item name="ids\[\]" value="eggs"/,
-        );
-        expect(body).toContain('action="/kitchen/usuals/bulk/remove"');
-        // Asks in place: the verb arms, Cancel and "Remove N" take its place.
-        expect(body).toContain("data-fd-select-ask");
-        expect(body).toContain("data-fd-select-unask");
-        expect(body).toContain("fd-select-bar-slot--phone");
-        expect(body).toContain("fd-select-bar-slot--desktop");
-        // No confirm sheet for it any more.
-        expect(body).not.toContain("fd-sheet--confirm");
-        expect(body).not.toContain("data-fd-select-message");
+    /** The tab row and the header's Actions slot: the page's tools, not its rows. */
+    function toolsOf(body: string): string {
+        const top = body.match(
+            /<div class="fd-kitchen-fridge-top">([\s\S]*?)<\/div>\n/,
+        )?.[1];
+        const actions = body.match(
+            /<div class="fd-page-header__actions">([\s\S]*?)<\/div><\/div><\/header>/,
+        )?.[1];
+        return `${actions ?? ""}${top ?? ""}`;
+    }
+
+    test("there is no ⋯ and no select mode: no pick box, no selection bar, no bulk remove route", () => {
+        for (const view of [
+            baseView(),
+            baseView({ selectedStoreIds: ["st-costco"] }),
+            baseView({ rows: [], rowMeta: new Map(), stores: [] }),
+        ]) {
+            const body = renderKitchenUsualsBody(view as never);
+            expect(body).toContain('class="fd-kitchen-usuals-page"');
+            expect(body).not.toContain('aria-label="Usuals options"');
+            expect(toolsOf(body)).not.toContain("fd-menu--more");
+            expect(body).not.toContain("data-fd-select");
+            expect(body).not.toContain("fd-selection-bar");
+            expect(body).not.toContain("fd-select-");
+            expect(body).not.toContain("/kitchen/usuals/bulk/");
+            expect(body).not.toContain('name="ids[]"');
+            expect(body).not.toContain("fd-item-row--select");
+        }
     });
 
-    test("select mode: an empty list has no Select and no empty ⋯", () => {
-        const body = renderKitchenUsualsBody(
+    test("the plus is the only tool without a filter; with two stores the filter sits left of it", () => {
+        const one = renderKitchenUsualsBody(
+            baseView({ stores: [baseView().stores[0]] }) as never,
+        );
+        expect(toolsOf(one)).not.toContain("fd-menu");
+        expect(toolsOf(one).match(/<button/g)).toHaveLength(2);
+        const two = renderKitchenUsualsBody(baseView() as never);
+        expect(two).toMatch(
+            /<div class="fd-kitchen-fridge-top"><div class="fd-menu fd-menu--anchored fd-menu--filter"[^>]*>[\s\S]*?<\/div><button[^>]*fd-kitchen-fridge-add/,
+        );
+    });
+
+    test("the list has no in-list Add a usual row; the plus opens the add sheet", () => {
+        const body = renderKitchenUsualsBody(baseView() as never);
+        expect(body).not.toContain("data-fd-usual-add-row");
+        expect(body).not.toContain('title="Add a usual"><span');
+        // Two openers, the phone's round plus and the header's button; none in the list.
+        const openers = (body.match(/<button[^>]*>/g) ?? []).filter(
+            (tag) =>
+                tag.includes('commandfor="fd-usual-add"') &&
+                tag.includes('command="show-modal"'),
+        );
+        expect(openers).toHaveLength(2);
+        const start = body.indexOf('<ul class="fd-list-group"');
+        const listRows = body.slice(start, body.indexOf("</ul>", start));
+        expect(listRows).not.toContain('commandfor="fd-usual-add"');
+        const empty = renderKitchenUsualsBody(
             baseView({ rows: [], rowMeta: new Map(), stores: [] }) as never,
         );
-        expect(body).not.toContain("data-fd-select-toggle");
-        expect(body).not.toContain('aria-label="Usuals options"');
-        expect(body).not.toContain("fd-select-bar-slot");
-        expect(body).toContain("No usual products yet.");
+        expect(empty).not.toContain("data-fd-usual-add-row");
+        expect(empty).toContain("No usual products yet.");
+        expect(empty).toContain('commandfor="fd-usual-add"');
     });
 
-    test("escaping in names, and the add row", () => {
+    test("escaping in names", () => {
         const nasty = baseView({
             rows: [
                 {
@@ -467,8 +500,6 @@ describe("renderKitchenUsualsV2Page", () => {
             ]),
         });
         const html = renderKitchenUsualsBody(nasty as never);
-        expect(html).toContain("Add a usual");
-        expect(html).toContain("data-fd-usual-add-row");
         expect(html).not.toContain("<img");
         expect(html).toContain("&lt;img");
         expect(html).toContain('id="fd-usual-row-egg&quot;x"');
