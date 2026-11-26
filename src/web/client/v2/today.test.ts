@@ -222,6 +222,8 @@ test("undo toast action submits and auto-dismisses after six seconds", () => {
         override tagName = "FORM";
     }
     const documentStub = {
+        // toast.js listens for turbo:visit; this stub never navigates.
+        addEventListener() {},
         getElementById(id: string) {
             return id === "toast-region" ? region : null;
         },
