@@ -17,7 +17,7 @@ import { emptyState } from "../../components/v2/empty-state.js";
 import { join, raw, type Html } from "../../components/v2/html.js";
 import { itemRow } from "../../components/v2/item-row.js";
 import { listGroup } from "../../components/v2/list-group.js";
-import { menu } from "../../components/v2/menu.js";
+import { menu, menuRow } from "../../components/v2/menu.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import { renderHouseholdLayout } from "./settings-household-layout.js";
 import { settingsErrorBanner } from "./settings-shared.js";
@@ -131,23 +131,16 @@ function defaultStoreRow(view: SettingsStoresV2View): Html {
         action: `${STORES_PATH}/preferences`,
         fields: { default_store_id: value },
     });
-    return raw(
-        `<li class="fd-item-row">${menu({
-            label: title,
-            anchor: "row",
-            row: { title, value: defaultStoreName(view) },
-            items: [
-                choose("", "None", view.defaultStoreId === null),
-                ...view.stores.map((store) =>
-                    choose(
-                        store.id,
-                        store.name,
-                        store.id === view.defaultStoreId,
-                    ),
-                ),
-            ],
-        })}</li>`,
-    );
+    return menuRow({
+        label: title,
+        row: { title, value: defaultStoreName(view) },
+        items: [
+            choose("", "None", view.defaultStoreId === null),
+            ...view.stores.map((store) =>
+                choose(store.id, store.name, store.id === view.defaultStoreId),
+            ),
+        ],
+    });
 }
 
 function usualStoreRow(view: SettingsStoresV2View): Html {

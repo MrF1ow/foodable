@@ -31,7 +31,7 @@
 }
 
 /* Fridge: one column on the phone, Use soon and the places stacked; two
-   columns from 1024px (Use soon and the first place, then the rest). */
+   columns from 1024px (Use soon alone, then every place, as 629226). */
 .fd-kitchen-fridge-layout .fd-page-layout__columns,
 .fd-kitchen-groceries-layout .fd-page-layout__columns {
     flex-direction: column;
@@ -97,16 +97,18 @@
 /* The item sheet: four round actions under the amount, the pick of where it
    is kept and when it expires as chips, and the date field only on "Pick a
    date" (the CSS does it, so it works with no script). */
+/* Frame 393340: four 80 px tiles, 12 px apart, centred across the sheet. The
+   phone frames (393340, 393841) draw the tiles as rounded squares, the
+   Quick action's own shape; the desktop panel draws them as circles. */
 .fd-kitchen-item-actions {
     display: flex;
     justify-content: center;
-    gap: var(--space-xl);
+    gap: var(--space-md);
 }
-.fd-kitchen-item-actions .fd-quick-action {
-    --fd-quick-action-w: 48px;
-}
-.fd-kitchen-item-actions .fd-quick-action__box {
-    border-radius: var(--radius-pill);
+@media (min-width: 1024px) {
+    .fd-kitchen-item-actions .fd-quick-action__box {
+        border-radius: var(--radius-pill);
+    }
 }
 .fd-kitchen-item-expires__field {
     display: none;
@@ -207,6 +209,18 @@
 }
 .fd-select-bar-slot .fd-btn:disabled {
     opacity: 0.45;
+}
+/* Fridge select mode as 400622: "N selected" stands in for the first
+   place's header, the picked disc is a plain green fill, and the rows drop
+   their score pills. */
+.fd-kitchen-fridge-page[data-fd-selecting]
+    .fd-kitchen-loc:first-of-type
+    > .fd-section-header,
+.fd-kitchen-fridge-page[data-fd-selecting] .fd-item-row__select-box > svg,
+.fd-kitchen-fridge-page[data-fd-selecting] .fd-score-pill,
+.fd-kitchen-fridge-page[data-fd-selecting]
+    .fd-page-layout__column:has(> .fd-kitchen-use-soon:only-child) {
+    display: none;
 }
 /* Picking leaves the lists and nothing else on the page: no Use soon, and
    neither Select nor + (the count row has Cancel). */
@@ -313,47 +327,7 @@
     text-align: center;
 }
 
-.fd-kitchen-date-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-4);
-    font: 400 14px/20px var(--font-body);
-    color: var(--text-secondary);
-}
-
-.fd-kitchen-date-field input {
-    font: 400 16px/22px var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-kitchen-sheet-links {
-    list-style: none;
-    margin: 0;
-    padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-2);
-}
-
-.fd-kitchen-sheet-link {
-    display: block;
-    width: 100%;
-    padding: var(--fd-s-6) 0;
-    border: none;
-    background: transparent;
-    font: 400 16px/22px var(--font-body);
-    color: var(--accent-text);
-    text-align: left;
-    text-decoration: none;
-    cursor: pointer;
-}
-
-.fd-kitchen-sheet-link--danger {
-    color: var(--status-over);
-}
-
-.fd-kitchen-sheet-error,
-.fd-kitchen-sheet-readonly {
+.fd-kitchen-sheet-error {
     margin: 0 0 var(--fd-s-6);
     font: 400 14px/20px var(--font-body);
     color: var(--status-over);
@@ -387,7 +361,9 @@
     transform: translateX(-50%);
 }
 .fd-kitchen-grocery-dock .fd-btn[data-fd-btn] {
-    flex: 1 1 0;
+    /* Each button as wide as its words, the rest to the longer one: "Put 2
+       away in the kitchen" (394511) is not clipped beside Clear checked. */
+    flex: 1 1 auto;
     min-width: 0;
     height: 48px;
     border-radius: var(--radius-md);
@@ -437,15 +413,6 @@
     flex-direction: column;
     gap: var(--space-section);
     padding: 0 0 var(--fd-s-12);
-}
-
-.fd-chips--stack {
-    flex-direction: column;
-    align-items: stretch;
-}
-
-.fd-chips--stack .fd-chip--choice {
-    width: 100%;
 }
 
 @media (prefers-reduced-motion: reduce) {

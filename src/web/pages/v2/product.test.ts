@@ -136,10 +136,10 @@ describe("productNutrition per-serving and per-100 values", () => {
 });
 
 describe("the nutrition Table", () => {
-    test("a liquid with a serving: '1 serving (30 ml)' over '100 ml', serving first", () => {
+    test("a liquid with a serving: '1 serving · 30 ml' over '100 ml', serving first", () => {
         const html = page(food(HALF_AND_HALF));
         expect(nutritionTable(html).slice(0, 2)).toEqual([
-            ["", "1 serving (30 ml)", "100 ml"],
+            ["", "1 serving · 30 ml", "100 ml"],
             ["Calories", "40", "133"],
         ]);
         expect(html).not.toContain("100 g");
@@ -152,7 +152,7 @@ describe("the nutrition Table", () => {
         );
         const rows = nutritionTable(html);
         expect(rows[1]).toEqual(["Calories", "120", "120"]);
-        expect(rows[2]).toEqual(["Protein", "—", "—"]);
+        expect(rows[2]).toEqual(["Protein", "–", "–"]);
         expect(html).toContain(">no data<");
         // A real zero stays a zero.
         const zero = nutritionTable(
@@ -184,7 +184,7 @@ describe("the nutrition Table", () => {
             nutritionBasis: "100g",
         });
         const rows = nutritionTable(page(f));
-        expect(rows[0]).toEqual(["", "2 cookies (30 g)", "100 g"]);
+        expect(rows[0]).toEqual(["", "2 cookies · 30 g", "100 g"]);
         expect(rows[1]).toEqual(["Calories", "144", "480"]);
         expect(rows[2]).toEqual(["Protein", "1.8 g", "6 g"]);
     });
@@ -219,7 +219,7 @@ describe("the nutrition Table", () => {
             nutritionBasis: "100ml",
         });
         const rows = nutritionTable(page(f));
-        expect(rows[0]).toEqual(["", "1 serving (250 ml)", "100 ml"]);
+        expect(rows[0]).toEqual(["", "1 serving · 250 ml", "100 ml"]);
         expect(rows[1]).toEqual(["Calories", "150", "60"]);
     });
 
@@ -247,7 +247,7 @@ describe("the nutrition Table", () => {
             gramsPerMl: 1.03,
         });
         const rows = nutritionTable(page(f));
-        expect(rows[0]).toEqual(["", "1 serving (250 ml)", "100 g"]);
+        expect(rows[0]).toEqual(["", "1 serving · 250 ml", "100 g"]);
         expect(rows[1]).toEqual(["Calories", "103", "40"]);
     });
 
@@ -262,7 +262,7 @@ describe("the nutrition Table", () => {
     test("a gramsPerEach food with no pack serving: a derived serving beside 100 g", () => {
         const f = food({ name: "Yogurt", calories: 59, gramsPerEach: 170 });
         const rows = nutritionTable(page(f));
-        expect(rows[0]).toEqual(["", "1 serving (170 g)", "100 g"]);
+        expect(rows[0]).toEqual(["", "1 serving · 170 g", "100 g"]);
         expect(rows[1]).toEqual(["Calories", "100", "59"]);
     });
 
@@ -314,21 +314,21 @@ describe("the nutrition Table", () => {
                     }),
                 ),
             )[0]![1];
-        expect(head("1 portion (30 ml)", 30, "ml")).toBe("1 serving (30 ml)");
-        expect(head("Per serving (30g)", 30, "g")).toBe("1 serving (30 g)");
-        expect(head("30 g", 30, "g")).toBe("1 serving (30 g)");
-        expect(head("", 30, "g")).toBe("1 serving (30 g)");
-        expect(head("1 cup (8 fl oz)", 236.588, "ml")).toBe("1 cup (236.6 ml)");
+        expect(head("1 portion (30 ml)", 30, "ml")).toBe("1 serving · 30 ml");
+        expect(head("Per serving (30g)", 30, "g")).toBe("1 serving · 30 g");
+        expect(head("30 g", 30, "g")).toBe("1 serving · 30 g");
+        expect(head("", 30, "g")).toBe("1 serving · 30 g");
+        expect(head("1 cup (8 fl oz)", 236.588, "ml")).toBe("1 cup · 236.6 ml");
         expect(head("2 tbsp (1 fl oz)", 29.5735, "ml")).toBe(
-            "2 tbsp (29.6 ml)",
+            "2 tbsp · 29.6 ml",
         );
         expect(head("1 1/2 cups (360 ml)", 360, "ml")).toBe(
-            "1 1/2 cups (360 ml)",
+            "1 1/2 cups · 360 ml",
         );
-        expect(head("1/2 cup (120 ml)", 120, "ml")).toBe("1/2 cup (120 ml)");
-        expect(head("1 bottle = 500 ml", 500, "ml")).toBe("1 bottle (500 ml)");
+        expect(head("1/2 cup (120 ml)", 120, "ml")).toBe("1/2 cup · 120 ml");
+        expect(head("1 bottle = 500 ml", 500, "ml")).toBe("1 bottle · 500 ml");
         expect(head("Personal pizza (100 g)", 100, "g")).toBe(
-            "1 personal pizza (100 g)",
+            "1 personal pizza · 100 g",
         );
     });
 
@@ -505,6 +505,22 @@ describe("renderProductV2Page", () => {
         expect(none).not.toContain("In the fridge");
     });
 
+    test("a cold place leads with the snowflake, a pantry with the fridge glyph (391131)", () => {
+        const html = renderProductBody(
+            buildPreviewProductPageView(chrome, yogurt(), {
+                stock: [
+                    { locationName: "Fridge", quantityLabel: "2" },
+                    { locationName: "Pantry", quantityLabel: "1" },
+                ],
+            }),
+        );
+        const row = (title: string) =>
+            html.split("<li").find((li) => li.includes(`>${title}<`)) ?? "";
+        expect(row("In the fridge")).toContain("fd-icon--snowflake");
+        expect(row("In the pantry")).toContain("fd-icon--fridge");
+        expect(row("In the pantry")).not.toContain("fd-icon--snowflake");
+    });
+
     test("actions: Add to groceries posts to the same route, Log it opens the log pick", () => {
         const f = yogurt();
         const html = renderProductBody(buildPreviewProductPageView(chrome, f));
@@ -550,7 +566,15 @@ describe("renderProductV2Page", () => {
         const html = page(food({ name: "Spice blend" }));
         expect(html).toContain("No score yet");
         expect(html).toContain("Add nutrition to score it");
-        expect(nutritionTable(html)[1]).toEqual(["Calories", "—"]);
+        expect(nutritionTable(html)[1]).toEqual(["Calories", "–"]);
+        // Frame 392480 lists only the four basics when nothing is known.
+        expect(nutritionTable(html).map((row) => row[0])).toEqual([
+            "",
+            "Calories",
+            "Protein",
+            "Carbs",
+            "Fat",
+        ]);
         // Some figures known: the Table alone, no empty state.
         expect(page(food({ name: "Half", calories: 10 }))).not.toContain(
             "No score yet",

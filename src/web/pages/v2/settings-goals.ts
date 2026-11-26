@@ -181,6 +181,7 @@ function goalHeading(view: SettingsGoalsV2View, ctx: FieldCtx): Html {
             rows: [
                 itemRow({
                     title: "Goal name",
+                    className: "fd-goals-name-row",
                     input: {
                         ...inputOf("goal_name", ctx),
                         labelHidden: true,

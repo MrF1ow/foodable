@@ -1206,7 +1206,7 @@ try {
     const sheetButtons = () =>
         ev<{ n: number; ok: boolean; boxes: string[] }>(`(() => {
             const d = document.querySelector("dialog[open]");
-            const bs = [...(d?.querySelectorAll(".fd-sheet__actions .fd-btn, .fd-sheet-actions .fd-btn") ?? [])].filter((b) => b.getClientRects().length > 0);
+            const bs = [...(d?.querySelectorAll(".fd-sheet__actions .fd-btn") ?? [])].filter((b) => b.getClientRects().length > 0);
             const rs = bs.map((b) => b.getBoundingClientRect());
             const fits = rs.every((r, i) => r.height >= 40 && r.height <= 60 && r.width >= 64 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight && bs[i].scrollWidth <= bs[i].clientWidth + 1);
             const apart = rs.every((r, i) => rs.every((o, j) => i === j || r.right <= o.left + 1 || o.right <= r.left + 1 || r.bottom <= o.top + 1 || o.bottom <= r.top + 1));
@@ -1450,8 +1450,8 @@ try {
         const removePosts = (await stats()).posts.filter(
             (p) => p.path === "/recipes/plan/pl1/remove",
         );
-        // A failed link import (error card, shared form open) still fits.
-        await goto("/recipes?failed=1");
+        // A failed link import from the box (error card, shared form open) still fits.
+        await goto("/recipes?failed=box");
         const failed = await ev<{
             fits: boolean;
             wide: string[];
@@ -1463,6 +1463,29 @@ try {
             errorCard: !!document.querySelector("details.fd-recipes-shared[open] .fd-recipes-import-shared-error"),
             sharedOpen: !!document.querySelector("details.fd-recipes-shared[open]"),
         })`);
+        // A share link that failed from the search field answers right under
+        // the field, above the planned week, the box closed (403910); at 1440
+        // the card and the week take the left column, the list the right.
+        await goto("/recipes?failed=1");
+        const failedField = await ev<{
+            fits: boolean;
+            underField: boolean;
+            boxClosed: boolean;
+            twoColumns: boolean;
+        }>(`(() => {
+            const card = document.querySelector(".fd-recipes-import-shared-error");
+            const field = document.querySelector("#fd-recipes-search-form");
+            const week = document.querySelector(".fd-plan-planned");
+            const list = document.querySelector(".fd-recipes-all");
+            const r = (e) => e ? e.getBoundingClientRect() : null;
+            const c = r(card), f = r(field), w = r(week), l = r(list);
+            return {
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+                underField: !!(c && f && w) && !card.closest("details") && c.top >= f.bottom - 1 && c.top - f.bottom <= 40 && c.bottom <= w.top + 1,
+                boxClosed: !document.querySelector("details.fd-recipes-shared[open]"),
+                twoColumns: !!(c && l) && (${width} < 1024 ? l.top >= c.bottom : l.left >= c.right),
+            };
+        })()`);
         // The missing link opens the sheet that adds what the week lacks.
         await goto("/recipes");
         await setMarker();
@@ -1566,6 +1589,10 @@ try {
             failed.wide.length === 0 &&
             failed.errorCard &&
             failed.sharedOpen &&
+            failedField.fits &&
+            failedField.underField &&
+            failedField.boxClosed &&
+            failedField.twoColumns &&
             missingButtons.ok &&
             missingPosts.length === 1 &&
             entry(missingPosts[0], "back") === "recipes";
@@ -1596,6 +1623,7 @@ try {
             missingButtons,
             missingPosts,
             failed,
+            failedField,
         };
         recipesOk = recipesOk && ok;
     }
@@ -1653,6 +1681,7 @@ try {
             rows: number;
             rowMenus: number;
             bar: string[];
+            barHeights: number[];
             barClear: boolean;
             fits: boolean;
             steps: number;
@@ -1668,6 +1697,8 @@ try {
                 rows: document.querySelectorAll(".fd-recipe-detail .fd-page-layout .fd-item-row").length,
                 rowMenus: document.querySelectorAll(".fd-recipe-detail .fd-page-layout .fd-item-row [data-fd-menu-trigger]").length,
                 bar: [...(bar?.querySelectorAll("[data-fd-btn]") ?? [])].map((b) => b.textContent.trim()),
+                // Large on the phone's bar, Small in the desktop header (609258).
+                barHeights: [...(bar?.querySelectorAll("[data-fd-btn]") ?? [])].map((b) => Math.round(b.getBoundingClientRect().height)),
                 // On the phone the bar floats above the nav pill, on screen.
                 barClear: !!r && r.left >= 0 && r.right <= ${width} && (!phone || (!!tabs && r.bottom <= tabs.top && r.top >= 0)),
                 fits: document.documentElement.scrollWidth <= ${width} + 1,
@@ -1862,6 +1893,7 @@ try {
             page.rows === 4 &&
             page.rowMenus === 4 &&
             page.bar.join() === "Plan,Cook" &&
+            page.barHeights.every((h) => h === (width < 1024 ? 48 : 40)) &&
             page.barClear &&
             page.fits &&
             page.steps === 3 &&
@@ -3226,7 +3258,7 @@ try {
         "v2 product page: Back and a ⋯ in the Detail bar, the Table reads '1 serving' beside '100 g', the ⋯ edits in Saved foods, Log it opens the amount sheet and Add to groceries posts its route; the two actions are equal with a gap",
         productPage.back !== null &&
             productPage.title === "Greek yogurt, plain 2%" &&
-            productPage.header.join("|") === "1 serving (170 g)|100 g" &&
+            productPage.header.join("|") === "1 serving · 170 g|100 g" &&
             productPage.rows === 6 &&
             productPage.buttons.join("|") === "Add to groceries|Log it" &&
             productPage.widths.length === 2 &&
@@ -3274,7 +3306,7 @@ try {
         cards: document.querySelectorAll(".fd-kitchen-use-soon .fd-mini-card").length,
         eggs: document.querySelector("#fd-fridge-row-it-eggs .fd-item-row__subtitle")?.textContent ?? "",
         cheeseValue: document.querySelector("#fd-fridge-row-it-cheese .fd-item-row__value")?.textContent ?? "",
-        scores: document.querySelectorAll(".fd-kitchen-loc .fd-score").length,
+        scores: document.querySelectorAll(".fd-kitchen-loc .fd-score-pill").length,
         topTools: [...document.querySelectorAll(".fd-kitchen-fridge-top button[aria-label]")].map((b) => b.getAttribute("aria-label")),
         toolsLevel: (() => {
             const t = document.querySelector(".fd-kitchen-fridge-top").getBoundingClientRect();
@@ -3605,8 +3637,8 @@ try {
             fridgeDesk.tabs === "none" &&
             fridgeDesk.actions.join("|") === "Fridge options|Add item" &&
             fridgeDesk.phoneTools === "none" &&
-            fridgeDesk.leftHas.join("|") === "Use soon|Fridge" &&
-            fridgeDesk.rightHas.join("|") === "Pantry" &&
+            fridgeDesk.leftHas.join("|") === "Use soon" &&
+            fridgeDesk.rightHas.join("|") === "Fridge|Pantry" &&
             fridgeDesk.sideBySide &&
             fridgeDesk.cards === 3 &&
             fridgeDesk.cardWidths.every((w) => w === 150) &&
@@ -3896,7 +3928,7 @@ try {
         milkValue: document.querySelector("#fd-grocery-row-gl-milk .fd-item-row__value")?.textContent ?? "",
         chickenSub: document.querySelector("#fd-grocery-row-gl-chicken .fd-item-row__subtitle")?.textContent ?? "",
         chickenWarn: document.querySelector("#fd-grocery-row-gl-chicken").classList.contains("fd-item-row--warning"),
-        eggsScore: !!document.querySelector("#fd-grocery-row-gl-eggs .fd-score"),
+        eggsScore: !!document.querySelector("#fd-grocery-row-gl-eggs .fd-score-pill"),
         rings: [...document.querySelectorAll("li[id^='fd-grocery-row-'] [role='checkbox']")].map((b) => b.getAttribute("aria-checked")),
         topTools: [...document.querySelectorAll(".fd-kitchen-fridge-top button[aria-label]")].map((b) => b.getAttribute("aria-label")),
         toolsLevel: (() => {
@@ -3960,7 +3992,8 @@ try {
             grocPhone.toolsLevel <= 8 &&
             grocPhone.tabsShown &&
             grocPhone.headActions === "none" &&
-            grocPhone.dock.join("|") === "Clear checked|Put away 2" &&
+            grocPhone.dock.join("|") ===
+                "Clear checked|Put 2 away in the kitchen" &&
             grocPhone.dockFixed &&
             grocPhone.dockAboveNav &&
             grocPhone.dockWidths.every((w) => w >= 120) &&
@@ -4374,11 +4407,14 @@ try {
             ev<{
                 labels: string[];
                 boxes: { w: number; h: number }[];
+                fits: boolean;
             }>(`(() => {
                 const shown = [...document.querySelectorAll(".fd-kitchen-grocery-dock .fd-btn")].filter((b) => b.offsetParent !== null);
                 return {
                     labels: shown.map((b) => b.textContent.trim()),
                     boxes: shown.map((b) => { const r = b.getBoundingClientRect(); return { w: Math.round(r.width), h: Math.round(r.height) }; }),
+                    // No label is clipped: "Put 2 away in the kitchen" fits beside Clear checked.
+                    fits: shown.every((b) => b.scrollWidth <= b.clientWidth + 1),
                 };
             })()`);
         const idle = await dockRow();
@@ -4400,11 +4436,13 @@ try {
     const dockPhone = await dockCase(390);
     const dockDesk = await dockCase(1440);
     const dockOk = (c: Awaited<ReturnType<typeof dockCase>>) =>
-        c.idle.labels.join("|") === "Clear checked|Put away 2" &&
+        c.idle.labels.join("|") === "Clear checked|Put 2 away in the kitchen" &&
+        c.idle.fits &&
         c.armed.labels.join("|") === "Cancel|Clear 2" &&
         c.armed.boxes.every((b) => b.w >= 80 && b.h >= 44) &&
         c.armedPosts.length === 0 &&
-        c.cancelled.labels.join("|") === "Clear checked|Put away 2" &&
+        c.cancelled.labels.join("|") ===
+            "Clear checked|Put 2 away in the kitchen" &&
         c.cancelledPosts.length === 0 &&
         c.posts.join("\n") ===
             "/kitchen/groceries/clear-checked return_to=/kitchen/groceries";
@@ -4430,7 +4468,9 @@ try {
         await goto("/kitchen/groceries");
         await setMarker();
         await control("reset=posts");
-        await clickSel(".fd-kitchen-grocery-dock .fd-btn--primary");
+        await clickSel(
+            `.fd-kitchen-grocery-dock [commandfor="fd-grocery-put-away"]`,
+        );
         await sleep(400);
         const sheet = await ev<{
             open: boolean;
@@ -4480,7 +4520,9 @@ try {
         );
         await goto("/kitchen/groceries");
         await control("reset=posts");
-        await clickSel(".fd-kitchen-grocery-dock .fd-btn--primary");
+        await clickSel(
+            `.fd-kitchen-grocery-dock [commandfor="fd-grocery-put-away"]`,
+        );
         await sleep(300);
         // Clear checked in the sheet only arms: Cancel and Clear 2 take the
         // row, Cancel puts it back, and only Clear 2 posts.
@@ -4532,7 +4574,7 @@ try {
         c.clear.join("\n") ===
             "/kitchen/groceries/clear-checked return_to=/kitchen/groceries";
     record(
-        "v2 groceries put away: the dock's Put away N opens the sheet with each checked line, where it is kept, when it expires (a date field only on Pick a date) and the product; Put away posts the route's fields for each line, Clear checked only arms (Cancel and Clear 2 take the row, Cancel puts it back) and Clear 2 posts its own route, and the buttons are full-size on the phone and at 1440",
+        "v2 groceries put away: the dock's Put N away in the kitchen (unclipped) opens the sheet with each checked line, where it is kept, when it expires (a date field only on Pick a date) and the product; Put away posts the route's fields for each line, Clear checked only arms (Cancel and Clear 2 take the row, Cancel puts it back) and Clear 2 posts its own route, and the buttons are full-size on the phone and at 1440",
         putOk(putPhone) && putOk(putDesk),
         { putPhone, putDesk, ex: drain() },
     );
@@ -6600,11 +6642,12 @@ try {
         c.list.addRow &&
         c.list.filter &&
         c.list.more &&
-        c.list.titles.join("|") === "Bananas|Eggs|Milk|Olive oil" &&
+        // A usual that is low now leads (frame 397013).
+        c.list.titles.join("|") === "Eggs|Bananas|Milk|Olive oil" &&
         c.list.metas.join("|") ===
-            "No usual product yet|Vital Farms large|Kirkland 2% milk|California Olive Ranch" &&
+            "Vital Farms large|No usual product yet|Kirkland 2% milk|California Olive Ranch" &&
         c.list.subs.join("|") ===
-            "Trader Joe's · 6 · When low|Costco · 24 · Every week · low now|Costco · 64 fl oz · Every week|Costco · 1 · Paused" &&
+            "Costco · 24 · Every week · low now|Trader Joe's · 6 · When low|Costco · 64 fl oz · Every week|Costco · 1 · Paused" &&
         c.list.lowWarn.join("|") === "Eggs" &&
         c.tone.low !== c.tone.calm &&
         c.filterMenu.items.join("|") === "Costco|Trader Joe's" &&

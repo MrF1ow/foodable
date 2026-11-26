@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 
-// Drives the real sheet.js against a fake window / document / dialog, the way
-// src/app-js.test.ts drives modal.js. No DOM library: the fakes implement only
+// Drives the real sheet.js against a fake window / document / dialog. No DOM
+// library: the fakes implement only
 // what the module touches.
 
 type Listener = (e: any) => void;
@@ -103,7 +103,7 @@ class FakeDialog extends FakeEl {
         if (reopen) this.attrs.add("data-sheet-open-on-load");
         this.panel = new FakeEl("div", ["fd-sheet-panel"], this);
         this.handle = new FakeEl("div", ["fd-sheet-handle"], this.panel);
-        this.head = new FakeEl("header", ["fd-sheet-head"], this.panel);
+        this.head = new FakeEl("header", ["fd-sheet__header"], this.panel);
         this.headButton = new FakeEl("button", [], this.head);
         this.body = new FakeEl("div", ["fd-sheet-body"], this.panel);
         if (withField) this.field = new FakeEl("input", [], this.body);
@@ -188,8 +188,6 @@ class FakeForeignDialog extends FakeEl {
 
 class FakeDoc extends FakeEl {
     dialogs: FakeDialog[] = [];
-    /** Open old-style modal.js dialogs (`dialog.modal[open]`). */
-    openModals: FakeEl[] = [];
     body = new FakeEl("body");
     activeElement: FakeEl | null = null;
     constructor() {
@@ -199,7 +197,6 @@ class FakeDoc extends FakeEl {
         if (sel === "dialog.fd-sheet[open]") {
             return this.dialogs.filter((d) => d.open);
         }
-        if (sel === "dialog.modal[open]") return this.openModals;
         return sel === "dialog.fd-sheet" ? this.dialogs : [];
     }
 }
@@ -963,11 +960,11 @@ test("turbo:before-morph-element releases the lock only for an fd-sheet", () => 
     expect(r.doc.body.style.position).toBe("");
 });
 
-test("coexists with modal.js: it closes the sheet first, then ours finds nothing left", () => {
+test("a sheet closed before the swap: ours still releases the lock, once", () => {
     const r = rig();
     openIt(r.dialog);
     r.dialog.deferClose = true;
-    // modal.js's own before-render handler closes every dialog[open] first ...
+    // Something else closes the sheet first ...
     r.dialog.close();
     // ... ours then still releases the lock, and the queued close adds nothing.
     r.doc.fire("turbo:before-render");
@@ -976,7 +973,7 @@ test("coexists with modal.js: it closes the sheet first, then ours finds nothing
     expect(r.scrolls.length).toBe(1);
 });
 
-test("a lock held by modal.js is left alone: the sheet neither takes nor clears it", () => {
+test("a lock held by another module is left alone: the sheet neither takes nor clears it", () => {
     const ctx = setup();
     ctx.doc.body.style.position = "fixed";
     ctx.doc.body.style.top = "-40px";
@@ -1010,29 +1007,14 @@ test("a swap while another module owns the lock does not scroll or announce a re
     expect(ctx.doc.body.style.position).toBe("fixed");
 });
 
-test("closing keeps the styles while an old modal is still open (modal.js clears them)", () => {
-    const r = rig();
-    openIt(r.dialog);
-    expect(r.doc.body.style.position).toBe("fixed");
-    r.doc.openModals.push(new FakeEl("dialog", ["modal"]));
-    r.dialog.close();
-    expect(r.doc.body.style.position).toBe("fixed");
-    expect(r.scrolls).toEqual([]);
-    // Ownership was handed over: a later sheet open/close does not clear it either.
-    r.doc.openModals.length = 0;
-    openIt(r.dialog);
-    r.dialog.close();
-    expect(r.doc.body.style.position).toBe("fixed");
-});
-
-test("a second sheet takes the lock once modal.js has let it go", () => {
+test("a second sheet takes the lock once its other owner has let it go", () => {
     const ctx = setup();
     ctx.doc.body.style.position = "fixed";
     const first = new FakeDialog(ctx.doc);
     const second = new FakeDialog(ctx.doc);
     load(ctx);
     openIt(first);
-    // The old modal under it closes and modal.js clears the body styles.
+    // The other owner lets go and clears the body styles.
     ctx.doc.body.style.position = "";
     openIt(second);
     expect(ctx.doc.body.style.position).toBe("fixed");
@@ -1183,12 +1165,3 @@ for (const placement of ["fd-sheet--dialog", "fd-sheet--side"]) {
         expect(tab(r, r.a, true).focused).toBe(r.c);
     });
 }
-
-test("the trap leaves today's edit and confirm sheets alone", () => {
-    for (const placement of ["fd-sheet--edit", "fd-sheet--confirm"]) {
-        const r = trapRig(placement);
-        expect(tab(r, r.c).prevented).toBe(false);
-        expect(tab(r, r.a, true).prevented).toBe(false);
-        expect(focusLog.length).toBe(0);
-    }
-});

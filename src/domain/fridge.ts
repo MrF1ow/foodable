@@ -57,7 +57,7 @@ export type FridgeStore = {
     insertItem(row: FridgeItem): Promise<FridgeItem>;
     updateItem(row: FridgeItem): Promise<FridgeItem | null>;
     deleteItem(householdId: string, id: string): Promise<boolean>;
-    /** Newest-first group ordering on the Needs attention page. */
+    /** When each item last changed, in ms (`noticesFor` reports it as `subjectTimes`). */
     itemActivityMsById?(householdId: string): Promise<Map<string, number>>;
 };
 

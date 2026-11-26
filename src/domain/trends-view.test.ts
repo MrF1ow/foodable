@@ -43,9 +43,8 @@ function view(
     range: 7 | 30 | 90 | 365 = 7,
     goals = goalsResolver(baseGoals, []),
     weights: TrendsWeightInput[] = [],
-    month = { year: 2026, month: 8 },
 ) {
-    return trendsView(days, goals, weights, range, "kg", month, today);
+    return trendsView(days, goals, weights, range, "kg", today);
 }
 
 test("calorie bar: 120 kcal from goal is near, 121 is off", () => {
@@ -284,28 +283,6 @@ test("range slices last 7/30/90/365 days ending today", () => {
     expect(view(days, today, 365).bars).toHaveLength(365);
     expect(view(days, today, 7).rangeStart).toBe("2026-12-25");
     expect(view(days, today, 7).rangeEnd).toBe(today);
-});
-
-test("month grid: February 2026 starts Sunday; August 2026 starts Saturday", () => {
-    const today = "2026-08-15";
-    const days = [day("2026-02-01"), day("2026-08-01")];
-    const feb = view(days, today, 7, goalsResolver(baseGoals, []), [], {
-        year: 2026,
-        month: 2,
-    }).monthGrid;
-    expect(feb.weeks[0]![0]!.date).toBe("2026-02-01");
-    expect(feb.weeks[0]![0]!.status).not.toBe("outside-month");
-    expect(feb.weeks[0]).toHaveLength(7);
-
-    const aug = view(days, today, 7, goalsResolver(baseGoals, []), [], {
-        year: 2026,
-        month: 8,
-    }).monthGrid;
-    expect(new Date(`${aug.weeks[0]![0]!.date}T00:00:00Z`).getUTCDay()).toBe(0);
-    expect(aug.weeks[0]![0]!.status).toBe("outside-month");
-    expect(aug.weeks[0]![6]!.date).toBe("2026-08-01");
-    expect(aug.prev).toEqual({ year: 2026, month: 7 });
-    expect(aug.next).toEqual({ year: 2026, month: 9 });
 });
 
 test("weight change is null with 0 or 1 point, set with 2+", () => {

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import {
+    createHouseholdFormHtml,
+    forbiddenDashboardHtml,
+} from "../../loaders.js";
+import {
     createHouseholdGate,
     noHouseholdGate,
     notAllowedGate,
@@ -91,4 +95,11 @@ describe("notFoundGate", () => {
         expect(html).toContain("Go to Today");
         expect(html).not.toContain("/logout");
     });
+});
+
+test("a gate's one heading is the page's name for a screen reader; the Brand hero draws the name", () => {
+    for (const html of [createHouseholdFormHtml(), forbiddenDashboardHtml()]) {
+        expect(html.match(/<h1[ >]/g)).toHaveLength(1);
+        expect(html).toContain('<h1 class="fd-visually-hidden">');
+    }
 });

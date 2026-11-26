@@ -1,10 +1,11 @@
 /**
  * The design's Score badge (FigCraft 171563): a small pill with a band-coloured
- * dot and the number, padded 2 / 8 / 2 / 6 and set in weight 500. It owns the
- * look that rows currently force onto the live `.fd-score`.
+ * dot and the number, padded 2 / 8 / 2 / 6 and set in weight 500. It is the
+ * score on an Item row (the server's `itemRow` and the log sheet's results).
  *
- * Bands, rounding and the spoken name come from the live `score-badge.ts`; the
- * live badge is untouched. No finite score draws nothing.
+ * Bands, rounding and the spoken name come from `score-badge.ts`, whose
+ * `.fd-score` still draws the score on the older `fd-row` search rows. No
+ * finite score draws nothing.
  *
  * Styles: `public/app/v2/badges.css`.
  */

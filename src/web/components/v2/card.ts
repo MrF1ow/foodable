@@ -31,13 +31,17 @@ export function card(opts: CardOptions): Html {
 }
 
 /** A figure as markup: the escaped text, or a dash for an unknown one. */
-export function valueText(value: string | number | null | undefined): string {
+export function valueText(
+    value: string | number | null | undefined,
+    /** The Table sets an unknown cell as an en dash (392480); the rest an em dash. */
+    dash: "—" | "–" = "—",
+): string {
     if (
         value == null ||
         (typeof value === "string" && value.trim() === "") ||
         (typeof value === "number" && !Number.isFinite(value))
     ) {
-        return `<span aria-hidden="true">—</span>${srOnly("no data")}`;
+        return `<span aria-hidden="true">${dash}</span>${srOnly("no data")}`;
     }
     return esc(value);
 }

@@ -191,7 +191,6 @@ export function renderShareCreatedBody(view: ShareCreatedView): string {
         content: raw(
             `<div class="fd-share-made__box" data-fd-share-made data-fd-share-back="${esc(shareBackKey(view.backHref))}">${urlField}${copy}</div>
 <p class="fd-share-made__meta">${esc(shareExpiryLabel(view.expiresAt))} · shown only once</p>
-<p class="fd-share-made__meta">Anyone with the link can read this ${esc(view.what)}. Revoke it in Settings › Household.</p>
 <p class="fd-share-made__status fd-sr" role="status" aria-live="polite" data-fd-share-status></p>`,
         ),
     });

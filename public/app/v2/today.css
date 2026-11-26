@@ -125,8 +125,22 @@
         flex: 1 1 0;
         gap: var(--space-2xl);
     }
+    /* The desktop frames hide the strip's ‹ › too (594788, 612392): the
+       buttons stay in the tab order for the keyboard, out of sight until one
+       has focus. A mouse drags the strip as a finger swipes it. */
     .fd-today-week > .fd-btn {
         display: inline-flex;
+    }
+    .fd-today-week > .fd-btn:not(:focus-visible) {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip-path: inset(50%);
+        border: 0;
+        white-space: nowrap;
     }
 }
 

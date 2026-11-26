@@ -1,5 +1,4 @@
 import type { AppChromeBase } from "../attention.js";
-import { pageHeader } from "../components/ui.js";
 import { renderAppShell } from "../shell.js";
 import { bell } from "../components/v2/bell.js";
 import { button, filterButton } from "../components/v2/button.js";
@@ -76,7 +75,6 @@ import {
     statTiles,
 } from "../components/v2/stat-tiles.js";
 
-const DEV_GALLERY_EDIT_SHEET = "dev-gallery-edit-sheet";
 // Live sheets from parts: the trigger of each is on the gallery, for check:nav.
 const DEV_GALLERY_DIALOG_SHEET = "dev-gallery-dialog-sheet";
 const DEV_GALLERY_MENU_SHEET = "dev-gallery-menu-sheet";
@@ -535,53 +533,6 @@ function dotsSection(): string {
         "Colour dots",
         "Macro and status palette (sm 6px, md 8px)",
         `<div class="fd-gallery-row">${md}</div><div class="fd-gallery-row">${sm}</div>`,
-    );
-}
-
-function sheetsSection(): string {
-    const edit = sheet({
-        id: DEV_GALLERY_EDIT_SHEET,
-        kind: "edit",
-        title: "Edit amount",
-        subtitle: "Bottom sheet on phone, side panel on desktop",
-        body: stepper({
-            name: "gallery_amount",
-            label: "Amount",
-            value: 2,
-            min: 0,
-            max: 99,
-            unit: "each",
-        }),
-        actions:
-            '<button type="button" class="fd-btn" command="close" commandfor="' +
-            DEV_GALLERY_EDIT_SHEET +
-            '">Cancel</button><button type="button" class="fd-btn fd-btn--primary">Save</button>',
-    });
-    const trigger = sheetTrigger({
-        target: DEV_GALLERY_EDIT_SHEET,
-        label: "Open edit sheet",
-        className: "fd-btn fd-btn--primary",
-    });
-    const confirmSample = `<div class="fd-gallery-sheet-sample fd-sheet fd-sheet--confirm" aria-hidden="true">
-<div class="fd-sheet-panel">
-<header class="fd-sheet-head">
-<div class="fd-sheet-heading">
-<h2 class="fd-sheet-title">Remove from list?</h2>
-</div>
-</header>
-<div class="fd-sheet-body">
-<p class="fd-sheet-message">This cannot be undone.</p>
-</div>
-<div class="fd-sheet-actions">
-<button type="button" class="fd-btn" disabled>Cancel</button>
-<button type="button" class="fd-btn fd-btn--danger" disabled>Remove</button>
-</div>
-</div>
-</div>`;
-    return block(
-        "Sheet",
-        "Closed dialogs plus trigger; confirm layout shown inline (not open on load)",
-        `${trigger}${edit}${confirmSample}`,
     );
 }
 
@@ -1121,7 +1072,7 @@ const ITEM_ROW_EXAMPLES: {
     {
         name: "Member",
         id: 171804,
-        today: "manageRow with a member avatar, chevron",
+        today: "the Member row of Settings › Household",
         row: {
             title: "Sam",
             meta: "Member",
@@ -1498,32 +1449,43 @@ function menuSection(): string {
             }),
             sheet({
                 id: DEV_GALLERY_MENU_SHEET,
-                kind: "edit",
-                title: "Menu in a sheet",
-                body: menuStage(
-                    String(
-                        menu({
-                            label: "Actions for Oats",
-                            anchor: "more",
-                            items: [
-                                link("Edit amount or expiry"),
-                                {
-                                    kind: "destructive",
-                                    label: "Discard",
-                                    confirmLabel: "Discard 3",
-                                    action: "/dev/gallery-v2",
-                                    fields: { ids: "a,b,c" },
-                                },
-                            ],
-                            data: { gallery: "menu-in-sheet" },
-                        }),
+                placement: "side",
+                header: { kind: "title", title: "Menu in a sheet" },
+                body: sheetSection({
+                    kind: "custom",
+                    content: raw(
+                        menuStage(
+                            String(
+                                menu({
+                                    label: "Actions for Oats",
+                                    anchor: "more",
+                                    items: [
+                                        link("Edit amount or expiry"),
+                                        {
+                                            kind: "destructive",
+                                            label: "Discard",
+                                            confirmLabel: "Discard 3",
+                                            action: "/dev/gallery-v2",
+                                            fields: { ids: "a,b,c" },
+                                        },
+                                    ],
+                                    data: { gallery: "menu-in-sheet" },
+                                }),
+                            ),
+                            200,
+                        ),
                     ),
-                    200,
-                ),
-                actions:
-                    '<button type="button" class="fd-btn" command="close" commandfor="' +
-                    DEV_GALLERY_MENU_SHEET +
-                    '">Close</button>',
+                }),
+                actions: {
+                    kind: "single",
+                    primary: {
+                        label: "Close",
+                        attrs: {
+                            command: "close",
+                            commandfor: DEV_GALLERY_MENU_SHEET,
+                        },
+                    },
+                },
             }),
             caption(
                 "Filter pull-down, closed and live: ticks toggle, the menu stays open",
@@ -2216,7 +2178,6 @@ function devGalleryBody(): string {
     const sections = [
         ...SECTIONS.map((s) => s.render()),
         dotsSection(),
-        sheetsSection(),
         sheetPartsSection(),
         menuSection(),
         buttonSection(),
@@ -2238,7 +2199,7 @@ function devGalleryBody(): string {
         displayControlsSection(),
         iconsSection(),
     ].join("\n");
-    return `<div class="fd-gallery">${pageHeader({ title: "v2 components" })}${sections}</div>`;
+    return `<div class="fd-gallery"><h1>v2 components</h1>${sections}</div>`;
 }
 
 export function renderDevGalleryV2Page(chrome: AppChromeBase): string {

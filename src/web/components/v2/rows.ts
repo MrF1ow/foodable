@@ -92,8 +92,6 @@ type ShellOpts = RowBase & {
     /** Whole-row link. The row body becomes an `<a>`; no interactive children then. */
     href?: string;
     extraClass?: string;
-    /** Markup after the row body, still inside the `<li>` (a nested list). */
-    after?: Html | string;
 };
 
 function leadSlot(lead: RowLead | undefined): string {
@@ -163,7 +161,7 @@ function rowShell(opts: ShellOpts): Html {
             opts.select && "fd-row--selectable",
             opts.extraClass,
             opts.className,
-        )}"${id}${open}${swipeData}${swipeDataTrail}${sheetLink}${opts.select ? " data-fd-select-row" : ""}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}${opts.after ?? ""}</li>`,
+        )}"${id}${open}${swipeData}${swipeDataTrail}${sheetLink}${opts.select ? " data-fd-select-row" : ""}>${swipe?.lead ? swipeAction(swipe.lead, "lead") : ""}${bodyEl}${swipe?.trail ? swipeAction(swipe.trail, "trail") : ""}</li>`,
     );
 }
 
@@ -181,38 +179,6 @@ function metaSpan(meta: Text | undefined, className = "fd-row__meta"): string {
     return meta == null || meta === ""
         ? ""
         : `<span class="${className}">${esc(meta)}</span>`;
-}
-
-/**
- * Manage row: a one-line name that ends in "…" when it does not fit (the full
- * name stays in the markup and in the `title` attribute), an optional meta
- * line, and the row's action buttons (`actions`) at
- * the end, always on the row's own line. `after` is a nested list that belongs
- * to the row (products under a food).
- */
-export function manageRow(
-    opts: RowBase & {
-        title: Text;
-        meta?: Text;
-        actions?: Html | string;
-        after?: Html | string;
-    },
-): Html {
-    const main = join([
-        titleLine(opts.title, undefined),
-        opts.meta != null && opts.meta !== ""
-            ? `<span class="fd-row__sub">${esc(opts.meta)}</span>`
-            : "",
-    ]);
-    const actions = opts.actions
-        ? raw(`<span class="fd-row__actions">${opts.actions}</span>`)
-        : undefined;
-    return rowShell({
-        ...opts,
-        variant: "manage",
-        main,
-        trailing: actions,
-    });
 }
 
 /** Grams / counts the caller formatted ("19", 2, "–"). */

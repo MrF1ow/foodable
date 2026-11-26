@@ -9,7 +9,7 @@ import { DRINK_UNITS, type DrinkUnit } from "../../../alcohol.js";
 import { WEIGHT_UNITS, type WeightUnit } from "../../../domain/units.js";
 import { join, raw, type Html } from "../../components/v2/html.js";
 import { listGroup } from "../../components/v2/list-group.js";
-import { menu } from "../../components/v2/menu.js";
+import { menuRow } from "../../components/v2/menu.js";
 import {
     renderSettingsV2Page,
     settingsErrorBanner,
@@ -57,17 +57,14 @@ function unitRow(opts: {
         action: UNITS_PATH,
         fields: { [opts.field]: value },
     });
-    return raw(
-        `<li class="fd-item-row">${menu({
-            label: opts.title,
-            anchor: "row",
-            row: { title: opts.title, value: opts.value },
-            items: [
-                choose("", "Not set"),
-                ...opts.choices.map((c) => choose(c.value, c.label)),
-            ],
-        })}</li>`,
-    );
+    return menuRow({
+        label: opts.title,
+        row: { title: opts.title, value: opts.value },
+        items: [
+            choose("", "Not set"),
+            ...opts.choices.map((c) => choose(c.value, c.label)),
+        ],
+    });
 }
 
 export function renderSettingsUnitsV2Body(view: SettingsUnitsV2View): string {

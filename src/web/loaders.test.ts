@@ -28,6 +28,7 @@ import { addAllergen } from "../domain/rules.js";
 import { shiftLocalDate } from "../domain/tz.js";
 import type { HouseholdMember } from "../household.js";
 import { loadViewerNotices } from "./attention.js";
+import { getAppCss, getAppJs, getAppV2Css, getAppV2Js } from "../widgets.js";
 import {
     createHouseholdFormHtml,
     forbiddenDashboardHtml,
@@ -106,7 +107,8 @@ test("a gate names what is missing and where to go", () => {
     expect(notFoundHtml("Pair")).toContain("Pair not found");
 });
 
-test("gates use both stylesheets, not the deleted marketing one, and escape what they show", () => {
+test("gates load the shell's four assets, not the deleted marketing one, and escape what they show", async () => {
+    await Promise.all([getAppCss(), getAppJs(), getAppV2Css(), getAppV2Js()]);
     const html = createHouseholdFormHtml("Enter a <name>.");
     expect(html).toMatch(
         /<link rel="stylesheet" href="\/app\.css\?v=[a-f0-9]{12}" data-turbo-track="reload" \/>/,
@@ -116,6 +118,9 @@ test("gates use both stylesheets, not the deleted marketing one, and escape what
     );
     expect(html).toMatch(
         /<script src="\/app\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
+    );
+    expect(html).toMatch(
+        /<script src="\/app-v2\.js\?v=[a-f0-9]{12}" defer data-turbo-track="reload"><\/script>/,
     );
     expect(html).not.toContain("/styles.css");
     expect(html).not.toContain("<style>");

@@ -6,7 +6,6 @@ import {
     fridgeRow,
     groceryRow,
     macroLine,
-    manageRow,
     partRow,
     rowList,
     searchResultRow,
@@ -385,39 +384,9 @@ test("usualRow refuses a script href", () => {
     ).toThrow("unsafe href");
 });
 
-test("manageRow: a one-line title with the full name in `title`, a meta line and the actions in one li", () => {
-    const long =
-        "Member's Mark Colombian Single Serve Cups (100 count, Medium-Dark Roast)";
-    const html = manageRow({
-        title: long,
-        meta: "kcal unknown",
-        actions: raw(
-            `<button type="button" aria-label="Delete ${esc(long)}"></button>`,
-        ),
-    });
-    expect(html).toStartWith(`<li class="fd-row fd-row--manage">`);
-    // The whole name is in the markup (CSS ends it in "…"; nothing is cut).
-    expect(html).toContain(
-        `<span class="fd-row__title" title="${esc(long)}">${esc(long)}</span>`,
-    );
-    expect(html).toContain(`<span class="fd-row__sub">kcal unknown</span>`);
-    expect(html).toContain(`<span class="fd-row__actions">`);
-    expect(html).toContain(`aria-label="Delete `);
-});
-
-test("manageRow without actions renders no empty actions slot; `after` stays inside the li", () => {
-    const html = manageRow({
-        title: "Eggs",
-        after: `<ul class="nested"></ul>`,
-    });
-    expect(html).not.toContain("fd-row__actions");
-    expect(html).toEndWith(`<ul class="nested"></ul></li>`);
-});
-
 test("a selectable row carries a checkbox named after the item, in every selectable variant", () => {
     const select = { name: "ids[]", value: "id-1", label: "Eggs" };
     const rows = [
-        manageRow({ title: "Eggs", select }),
         fridgeRow({ title: "Eggs", select }),
         usualRow({ title: "Eggs", select }),
     ];
@@ -434,11 +403,10 @@ test("a selectable row carries a checkbox named after the item, in every selecta
     }
 });
 
-test("the checkbox is the first thing inside the row body, so a nested list never moves it", () => {
-    const html = manageRow({
+test("the checkbox is the first thing inside the row body", () => {
+    const html = usualRow({
         title: "Eggs",
         select: { name: "ids[]", value: "id-1", label: "Eggs" },
-        after: raw(`<ul><li>nested</li></ul>`),
     });
     expect(html).toContain(
         `<div class="fd-row__body"><label class="fd-row__select">`,
@@ -459,13 +427,13 @@ test("a row that is one link cannot also be selectable", () => {
 });
 
 test("a row without select has no checkbox", () => {
-    const html = manageRow({ title: "Eggs" });
+    const html = usualRow({ title: "Eggs" });
     expect(html).not.toContain("fd-row--selectable");
     expect(html).not.toContain("data-fd-select");
 });
 
 test("the select checkbox escapes its name, value and label", () => {
-    const html = manageRow({
+    const html = usualRow({
         title: "x",
         select: { name: XSS, value: XSS, label: XSS },
     });

@@ -215,24 +215,6 @@ export function subjectLabel(
     return "Item";
 }
 
-export function dismissalSubjectLabel(
-    dismissal: NoticeDismissal,
-    subjectNames: ReadonlyMap<string, string>,
-): string {
-    if (dismissal.code === "food.possible_duplicate" && dismissal.relatedKey) {
-        const sub =
-            subjectNames.get(
-                subjectNameKey(dismissal.subjectKind, dismissal.subjectId),
-            ) ?? "Removed item";
-        const rel =
-            subjectNames.get(subjectNameKey("food", dismissal.relatedKey)) ??
-            "Removed item";
-        return `${sub} · ${rel}`;
-    }
-    const key = subjectNameKey(dismissal.subjectKind, dismissal.subjectId);
-    return subjectNames.get(key) ?? "Removed item";
-}
-
 async function buildSubjectTimes(
     deps: NoticesForDeps,
     householdId: string,
@@ -250,7 +232,7 @@ async function buildSubjectTimes(
     for (const [id, ms] of recipeTimes) {
         subjectTimes.set(`recipe:${id}`, ms);
     }
-    // Subjects with no activity timestamp are sorted last (see needs-attention page).
+    // A subject with no activity timestamp has no entry.
     return subjectTimes;
 }
 
@@ -744,20 +726,4 @@ export async function dismissNotice(
         relatedKey: key.relatedKey,
         dismissedBy: userId,
     });
-}
-
-export async function undoDismissal(
-    deps: Pick<NoticesForDeps, "dismissals">,
-    householdId: string,
-    dismissalId: string,
-): Promise<void> {
-    const rows = await deps.dismissals.listForHousehold(householdId);
-    const row = rows.find((r) => r.id === dismissalId);
-    if (!row) {
-        throw new NoticeDismissError("Dismissal not found.");
-    }
-    const removed = await deps.dismissals.deleteById(householdId, dismissalId);
-    if (!removed) {
-        throw new NoticeDismissError("Dismissal not found.");
-    }
 }

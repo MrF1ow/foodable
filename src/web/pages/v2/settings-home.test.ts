@@ -10,13 +10,7 @@ import { STORES_PATH } from "./settings-stores.js";
 import {
     renderSettingsV2Page,
     SETTINGS_DESKTOP_NAV_LABELS,
-    settingsField,
-    settingsMenuIcon,
 } from "./settings-shared.js";
-import {
-    DOLLAR_PAYLOADS,
-    injectedAttributes,
-} from "../../components/v2/test-helpers.js";
 
 const chrome = {
     theme: "dark" as const,
@@ -286,41 +280,5 @@ describe("the Settings menu beside a sub page", () => {
 
     test("no Settings link, back link or menu link opts out of Turbo", () => {
         expect(page("account")).not.toContain('data-turbo="false"');
-    });
-});
-
-describe("settings shared markup", () => {
-    test("settingsField names its control by the label id, whatever the id holds", async () => {
-        for (const payload of DOLLAR_PAYLOADS) {
-            // An id built from a row's own id (a section, a rule) is data.
-            const html = String(
-                settingsField({
-                    id: payload,
-                    label: "Name",
-                    control: '<input class="x" name="name" />',
-                }),
-            );
-            expect(await injectedAttributes(html)).toEqual([]);
-            const control = html.slice(html.indexOf("<input"));
-            const names: string[] = [];
-            await new HTMLRewriter()
-                .on("input", {
-                    element(el) {
-                        for (const [name] of el.attributes) names.push(name);
-                    },
-                })
-                .transform(new Response(control))
-                .text();
-            expect(names).toEqual(["aria-labelledby", "class", "name"]);
-        }
-    });
-
-    test("settingsMenuIcon carries the class its caller styles it by", () => {
-        expect(settingsMenuIcon("user")).toContain(
-            'class="fd-icon fd-settings-menu__icon"',
-        );
-        const row = settingsMenuIcon("code", "fd-settings-ai__icon");
-        expect(row).toContain('class="fd-icon fd-settings-ai__icon"');
-        expect(row).not.toContain("fd-settings-menu__icon");
     });
 });

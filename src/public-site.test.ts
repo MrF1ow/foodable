@@ -166,11 +166,13 @@ describe("runtime surfaces that stay", () => {
         );
         expect(r.headers.get("cache-control")).toBe("no-cache");
         const js = await r.text();
-        expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(7);
+        expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(5);
         // The entrance is ended here; it is begun by the head script.
         expect(js).toContain('classList.remove("fx-enter")');
         expect(js).not.toContain('classList.add("fx")');
-        expect(js).toContain("[data-food-picker]");
+        // The old food picker and dialog.modal scripts are gone.
+        expect(js).not.toContain("[data-food-picker]");
+        expect(js).not.toContain("dialog.modal");
     });
 
     test("GET /app-v2.css and /app-v2.js serve the new shell's pair", async () => {

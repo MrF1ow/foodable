@@ -395,6 +395,31 @@ describe("renderKitchenUsualsV2Page", () => {
         expect(calm).not.toContain("low now");
     });
 
+    test("a usual that is low now leads the list, as frame 397013", () => {
+        const flour: UsualProductRow = {
+            food: food({
+                id: "flour",
+                name: "Flour",
+                usualAddedAt: "2026-11-01T00:00:00Z",
+            }),
+            products: [],
+            usual: null,
+        } as never;
+        const body = renderKitchenUsualsBody(
+            baseView({
+                rows: [flour, baseRow()],
+                rowMeta: new Map([
+                    ["flour", plainMeta()],
+                    ["eggs", { ...plainMeta(), lowNow: true }],
+                ]),
+            }) as never,
+        );
+        expect(body.indexOf('id="fd-usual-row-eggs"')).toBeGreaterThan(-1);
+        expect(body.indexOf('id="fd-usual-row-eggs"')).toBeLessThan(
+            body.indexOf('id="fd-usual-row-flour"'),
+        );
+    });
+
     test("select mode: the tab row's ⋯ holds Select, and the Selection bars remove in place", () => {
         const body = renderKitchenUsualsBody(baseView() as never);
         expect(body).toContain(
@@ -663,6 +688,10 @@ describe("edit-usual sheet", () => {
             baseView({ openFoodId: "eggs" }) as never,
         );
         expect(html).toContain('commandfor="fd-usual-eggs-product"');
+        // A side panel at 1024 px and up, as 665457 draws it.
+        expect(html).toMatch(
+            /<dialog class="fd-sheet fd-sheet--side[^"]*" id="fd-usual-eggs-product"/,
+        );
         const picker = html.slice(html.indexOf('id="fd-usual-eggs-product"'));
         expect(picker).toMatch(
             /name="product_food_id" value="kirkland" form="fd-usual-eggs-form" checked/,
@@ -800,7 +829,7 @@ describe("Add a usual sheet", () => {
     function addSheetHtml(overrides: Record<string, unknown> = {}): string {
         const html = renderKitchenUsualsBody(baseView(overrides) as never);
         const start = html.indexOf(
-            '<dialog class="fd-sheet fd-sheet--dialog fd-kitchen-sheet fd-usual-add" id="fd-usual-add"',
+            '<dialog class="fd-sheet fd-sheet--side fd-kitchen-sheet fd-usual-add" id="fd-usual-add"',
         );
         expect(start).toBeGreaterThan(-1);
         return html.slice(start, html.indexOf("</dialog>", start));
@@ -1372,7 +1401,7 @@ describe("round-two details", () => {
     function addSheet(overrides: Record<string, unknown> = {}): string {
         const html = renderKitchenUsualsBody(baseView(overrides) as never);
         const start = html.indexOf(
-            '<dialog class="fd-sheet fd-sheet--dialog fd-kitchen-sheet fd-usual-add" id="fd-usual-add"',
+            '<dialog class="fd-sheet fd-sheet--side fd-kitchen-sheet fd-usual-add" id="fd-usual-add"',
         );
         expect(start).toBeGreaterThan(-1);
         return html.slice(start, html.indexOf("</dialog>", start));

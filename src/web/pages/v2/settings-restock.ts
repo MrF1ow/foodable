@@ -12,7 +12,7 @@ import { esc, join, raw, type Html } from "../../components/v2/html.js";
 import { icon } from "../../components/v2/icon.js";
 import { itemRow } from "../../components/v2/item-row.js";
 import { listGroup } from "../../components/v2/list-group.js";
-import { menu } from "../../components/v2/menu.js";
+import { menuRow } from "../../components/v2/menu.js";
 import {
     renderSettingsV2Page,
     settingsErrorBanner,
@@ -65,10 +65,9 @@ const WEEKDAY_KEYS = WEEKDAY_NAMES.map((_name, index) => index);
 
 /** Day: the pull-down on the row; each day posts its number. */
 function dayRow(restock: RestockPreferences): Html {
-    return raw(
-        `<li class="fd-item-row fd-restock__day">${menu({
+    return menuRow(
+        {
             label: "Restock day",
-            anchor: "row",
             row: { title: "Day", value: WEEKDAY_NAMES[restock.weekday] },
             items: WEEKDAY_KEYS.map((index) => ({
                 kind: "checked" as const,
@@ -77,7 +76,8 @@ function dayRow(restock: RestockPreferences): Html {
                 action: RESTOCK_PATH,
                 fields: { restock_weekday: String(index) },
             })),
-        })}</li>`,
+        },
+        "fd-restock__day",
     );
 }
 

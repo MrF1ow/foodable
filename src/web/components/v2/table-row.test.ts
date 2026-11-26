@@ -36,9 +36,9 @@ describe("tableRow (FigCraft 381695)", () => {
         expect(html).not.toContain('role="cell"');
     });
 
-    test("an unknown cell is a dash, a zero stays zero", () => {
+    test("an unknown cell is an en dash (392480), a zero stays zero", () => {
         const html = String(tableRow({ label: "Fat", cols: [null, 0] }));
-        expect(html).toContain("—");
+        expect(html).toContain("–");
         expect(html).toContain("no data");
         expect(html).toContain('role="cell">0<');
     });

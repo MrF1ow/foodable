@@ -2186,7 +2186,7 @@ describe("a repeating plan: add, remove and move", () => {
         const html = await res.text();
         const sheet = html.slice(
             html.indexOf(
-                '<dialog class="fd-sheet fd-sheet--dialog" id="fd-recipe-plan-sheet"',
+                '<dialog class="fd-sheet fd-sheet--dialog fd-plan-sheet" id="fd-recipe-plan-sheet"',
             ),
         );
         const dialog = sheet.slice(0, sheet.indexOf("</dialog>"));

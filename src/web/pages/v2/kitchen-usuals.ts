@@ -509,7 +509,8 @@ function productPickerSheet(
     });
     return sheet({
         id: pickerId,
-        placement: "dialog",
+        // A side panel at 1024 px and up, over the usual's own (665457).
+        placement: "side",
         className: "fd-kitchen-sheet",
         header: {
             kind: "title",
@@ -893,9 +894,22 @@ export function renderKitchenUsualsBody(view: KitchenUsualsV2View): string {
               )}${String(
                   listGroup({
                       label: "Usual products",
-                      rows: rows.map((row) =>
-                          usualListRow(row, view.rowMeta.get(row.food.id)!),
-                      ),
+                      // A usual that is low now leads, as frame 397013.
+                      rows: [...rows]
+                          .sort(
+                              (a, b) =>
+                                  Number(
+                                      view.rowMeta.get(b.food.id)?.lowNow ===
+                                          true,
+                                  ) -
+                                  Number(
+                                      view.rowMeta.get(a.food.id)?.lowNow ===
+                                          true,
+                                  ),
+                          )
+                          .map((row) =>
+                              usualListRow(row, view.rowMeta.get(row.food.id)!),
+                          ),
                   }),
               )}`;
     const layout = pageLayout({

@@ -1,6 +1,6 @@
 import type { Food } from "../../../domain/foods.js";
 import type { Notice } from "../../../domain/notices.js";
-import { productMemberReasonLine } from "../../../copy/product-member-reason.js";
+import { productMemberReasonShort } from "../../../copy/product-member-reason.js";
 import { getGoalsForRange, getMealsByDate } from "../../../db/nutrition.js";
 import { getProfile } from "../../../db/profiles.js";
 import { productCheckRemainingForDay } from "../../../domain/product-check-today.js";
@@ -60,19 +60,11 @@ export type ProductScoreSection = {
     memberCards: ProductMemberCard[];
 };
 
-function formatInfoAmount(
-    kind: "sugars" | "saturated-fat",
-    g: number | null,
-): string {
+function formatInfoAmount(g: number | null): string {
     if (g == null) return "–";
+    // Frame 389805: "4 g · low", "2 g · moderate"; the level is per 100 g.
     const rounded = Math.round(g * 10) / 10;
-    const text =
-        kind === "saturated-fat"
-            ? rounded.toFixed(1)
-            : Number.isInteger(rounded)
-              ? String(rounded)
-              : rounded.toFixed(1);
-    return `${text} g per 100 g`;
+    return `${Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1)} g`;
 }
 
 function pushInfoRow(
@@ -81,7 +73,7 @@ function pushInfoRow(
     label: string,
 ) {
     if (info == null || (info.per100g == null && info.level == null)) return;
-    const amount = formatInfoAmount(info.kind, info.per100g);
+    const amount = formatInfoAmount(info.per100g);
     const level = info.level != null ? ` · ${info.level}` : "";
     rows.push(itemRow({ title: label, value: `${amount}${level}` }));
 }
@@ -146,7 +138,7 @@ export function buildProductMemberCards(
             verdict: memberProductVerdict(notices),
             // Nothing to say is nothing shown: "Good" alone says it.
             reason:
-                notices.length === 0 ? "" : productMemberReasonLine(notices),
+                notices.length === 0 ? "" : productMemberReasonShort(notices),
             ...(avatarVersions
                 ? {
                       avatar: {

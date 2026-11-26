@@ -119,10 +119,7 @@ import {
 import { RESTOCK_PATH } from "../pages/v2/settings-restock.js";
 import { READERS_PATH } from "../pages/v2/settings-readers.js";
 import type { SocialReaderId } from "../../copy/social-readers.js";
-import {
-    FOODS_MERGE_MODAL_ID,
-    savedFoodDeleteSheetId,
-} from "../pages/v2/settings-saved.js";
+import { FOODS_MERGE_MODAL_ID } from "../pages/v2/settings-saved.js";
 import {
     DUPLICATES_PATH,
     DUPLICATES_VIEW_COMPARE,
@@ -1192,11 +1189,7 @@ householdRoutes.post(
                 archived: true,
             });
         } catch (err) {
-            const page = await foodsFormError(
-                userId,
-                err,
-                savedFoodDeleteSheetId(foodId),
-            );
+            const page = await foodsFormError(userId, err);
             return c.html(page.html, page.status);
         }
         // toast: none

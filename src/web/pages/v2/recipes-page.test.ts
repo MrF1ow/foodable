@@ -11,6 +11,7 @@ import {
     renderRecipeDetailBody,
     type RecipeVersionPicker,
 } from "./recipes-page.js";
+import { trimmedExcerpt } from "./recipes-page-mentions.js";
 
 const HH = "hh-1";
 
@@ -96,6 +97,34 @@ describe("groupRecipeIngredientsByPlace", () => {
         ]);
         expect(groups[1]?.placeId).toBe(RECIPE_NOT_IN_STOCK_ID);
         expect(groups[0]?.lines[0]?.expiresOn).toBe("2026-12-01");
+    });
+
+    test("a half reads as a fraction and a count word in the plural (402619: ½ cup, 2 cloves)", () => {
+        const groups = groupRecipeIngredientsByPlace(
+            [
+                {
+                    id: "ing1",
+                    foodId: milkId,
+                    displayName: "Parmesan",
+                    quantity: { amount: 0.5, unit: "cup" } as const,
+                    note: null,
+                },
+                {
+                    id: "ing2",
+                    foodId: flourId,
+                    displayName: "Garlic",
+                    quantity: { amount: 2, unit: "clove" },
+                    note: null,
+                },
+            ],
+            [],
+            [pantry, fridge],
+            familyFoodMap,
+        );
+        expect(groups[0]?.lines.map((line) => line.amountLabel)).toEqual([
+            "½ cup",
+            "2 cloves",
+        ]);
     });
 
     test("shows soonest expiry in a location", () => {
@@ -459,7 +488,7 @@ describe("renderRecipeDetailBody", () => {
         expect(html.indexOf("Buttermilk")).toBeLessThan(
             html.indexOf(">Flour<"),
         );
-        expect(html).toContain("Pantry · expires 2026-12-01");
+        expect(html).toContain("Pantry · expires Dec 1");
         expect(html).toContain("Not in stock");
         expect(html).toContain('aria-label="Actions for Flour"');
         const menu = first(
@@ -911,6 +940,26 @@ describe("the steps-mention warnings on the recipe page", () => {
         );
         expect(html).toContain("fd-mention-card");
         expect(html).toContain("No ingredients yet.");
+    });
+
+    test("the card quotes the step from the food's clause, with a leading … (405904)", () => {
+        const html = renderRecipeDetailBody(view({ mentions: mentions() }));
+        const quote = first(
+            html,
+            /<q class="fd-mention-card__excerpt">[\s\S]*?<\/q>/,
+        );
+        expect(quote).toContain(
+            '>…pour in the lightly beaten <span class="fd-mention-mark">egg</span> and scramble.<',
+        );
+        expect(quote).not.toContain("Push them aside");
+        // A quote with no clause before the food stays whole.
+        expect(
+            trimmedExcerpt({
+                excerpt: "Add the egg, then stir.",
+                excerptStart: 8,
+                excerptEnd: 11,
+            }),
+        ).toEqual({ text: "Add the egg, then stir.", start: 8, end: 11 });
     });
 
     test("food names and excerpts are escaped", () => {

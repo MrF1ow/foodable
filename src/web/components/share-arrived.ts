@@ -1,6 +1,5 @@
 import type { ReadShareResult } from "../../domain/share.js";
 import { escapeHtml } from "../shell.js";
-import { disclosure } from "./ui.js";
 
 function fieldLine(label: string, value: string): string {
     const display =
@@ -31,9 +30,8 @@ export function shareArrivedDisclosure(
     opts: { open: boolean },
 ): string {
     const body = `${fieldLine("title", share.raw.title)}${fieldLine("text", share.raw.text)}${fieldLine("url", share.raw.url)}${detectedLine(share)}`;
-    return disclosure({
-        summary: "What arrived",
-        open: opts.open,
-        body,
-    });
+    return `<details class="more"${opts.open ? " open" : ""}>
+<summary>What arrived</summary>
+${body}
+</details>`;
 }

@@ -147,7 +147,6 @@ import {
 import { SCORE_PRESETS } from "../src/domain/product-score.js";
 import { goalsResolver } from "../src/domain/insights.js";
 import type { NutritionGoals } from "../src/db/nutrition.js";
-import { pageHeader } from "../src/web/components/ui.js";
 import { renderAppShell, viewerChromeFromProfile } from "../src/web/shell.js";
 import {
     NO_USUAL_SCHEDULE,
@@ -293,7 +292,7 @@ const PREVIEW_NAMED_GOALS: NutritionGoals = {
     ...PREVIEW_TRENDS_GOALS,
     daily_alcohol_g: 28,
     goal_name: "Recomp",
-    goal_note: "maintenance minus 5%",
+    goal_note: "Maintenance minus 5%",
     goals_set_on: "2026-10-02",
 };
 
@@ -2757,6 +2756,16 @@ for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet
                 input: "https://kitchen.example/s/q7Wm4xTz2LpR9vYb1KcN8dFhJ3sGaE5uOiXt6ZeBnVw",
             },
         }),
+        // A share link pasted in the search field that failed (403910).
+        "recipes-failed-link": recipesListV2({
+            week: previewWeekPlan(),
+            sharedImport: {
+                error: "That share link doesn't work any more",
+                reason: "Revoked, expired, or not a recipe link",
+                input: "https://kitchen.example/s/q7Wm4xTz2LpR9vYb1KcN8dFhJ3sGaE5uOiXt6ZeBnVw",
+                via: "field",
+            },
+        }),
         "recipes-plan-pick": recipesListV2({
             week: previewWeekPlan(),
             planDate: "2026-11-14",
@@ -3598,7 +3607,7 @@ async function logScannerPreview(
         ...chrome,
         title: "Nutrition",
         active: "nutrition" as const,
-        body: pageHeader({ title: "Ethan Flow" }),
+        body: "<h1>Ethan Flow</h1>",
         v2LogSheet: {
             scannerOpenOnLoad: true,
             previewScanner: true,
@@ -3628,7 +3637,7 @@ async function logSheetPreview(
         ...chrome,
         title: "Nutrition",
         active: "nutrition" as const,
-        body: pageHeader({ title: "Ethan Flow" }),
+        body: "<h1>Ethan Flow</h1>",
     };
     if (mode === "amount") {
         return renderAppShell({

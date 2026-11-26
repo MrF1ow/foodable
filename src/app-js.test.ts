@@ -68,8 +68,6 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     expect([...APP_JS_SOURCES]).toEqual([
         "./src/web/client/shell.js",
         "./src/web/client/toast.js",
-        "./src/web/client/food-picker.js",
-        "./src/web/client/modal.js",
         "./src/web/client/copy-prompt.js",
         "./src/web/client/busy-submit.js",
         "./src/web/client/sw-register.js",
@@ -77,7 +75,7 @@ test("getAppJs bundles Turbo and concatenates client IIFEs", async () => {
     const js = await getAppJs();
     expect(js).toContain("Turbo");
     expect(js).toContain("FoodableApp.onLoad");
-    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(7);
+    expect((js.match(/^\(function \(\) \{/gm) ?? []).length).toBe(5);
     expect(js).toContain("data-busy-form");
     // The old bottom nav is gone with its click handler and login guard.
     expect(js).not.toContain("nav.bottom-nav");

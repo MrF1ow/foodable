@@ -243,12 +243,15 @@ describe("renderKitchenFridgeV2Page", () => {
             ["Fridge", "1"],
             ["Pantry", "1"],
         ]);
-        // Use soon and the first place share the left column.
+        // Every place takes the right column; Use soon keeps the left (629226).
         const left = html.match(
             /<div class="fd-page-layout__column">([\s\S]*?)<\/div><div class="fd-page-layout__column">/,
         )?.[1];
-        expect(left).toContain('aria-label="Fridge"');
+        expect(left).not.toContain('aria-label="Fridge"');
         expect(left).not.toContain('aria-label="Pantry"');
+        const right = html.split('<div class="fd-page-layout__column">')[2];
+        expect(right).toContain('aria-label="Fridge"');
+        expect(right).toContain('aria-label="Pantry"');
     });
 
     test("a row: name, amount, date at the end, score, a menu and both swipe beds", () => {
@@ -271,7 +274,7 @@ describe("renderKitchenFridgeV2Page", () => {
             '<span class="fd-item-row__title" title="Cheddar">Cheddar</span>',
         );
         expect(row).toContain('<span class="fd-item-row__meta">2</span>');
-        expect(row).toContain("fd-score fd-score--");
+        expect(row).toContain("fd-score-pill fd-score-pill--");
         expect(row).toContain('<span class="fd-item-row__value">Dec 2</span>');
         expect(row).not.toContain("fd-item-row--warning");
         expect(row).toContain('data-fd-sheet-row=""');
@@ -942,4 +945,20 @@ describe("lowStockLevels", () => {
                 .size,
         ).toBe(0);
     });
+});
+
+test("a count word reads in the plural on its row (396429: Paper towels 3 rolls)", () => {
+    const html = body({
+        items: [
+            item({
+                id: "pt",
+                displayName: "Paper towels",
+                kind: "supply",
+                quantity: { amount: 3, unit: "roll" } as never,
+                expiresOn: null,
+            }),
+        ],
+    });
+    expect(html).toContain(">3 rolls<");
+    expect(html).not.toContain(">3 roll<");
 });

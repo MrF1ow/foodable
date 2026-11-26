@@ -556,14 +556,6 @@ describe("the shell", () => {
         });
 
         test("they sit directly under the page header, else first in <main>", () => {
-            const header = '<header class="dash-head"><h1>Fridge</h1></header>';
-            const withHeader = v2Html({
-                active: "fridge",
-                body: `\n  ${header}\n<p>rest</p>`,
-            });
-            expect(withHeader).toMatch(
-                /<\/header><nav class="fd-kitchen-tabs"[\s\S]*<\/nav>\n<p>rest<\/p><\/main>/,
-            );
             const bareH1 = v2Html({
                 active: "grocery",
                 body: "<h1>Groceries</h1><section>x</section>",

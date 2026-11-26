@@ -3,11 +3,11 @@ import { THEME_COLOR } from "../tokens.js";
 import {
     appScriptHref,
     appStylesheetHref,
+    appV2ScriptHref,
     appV2StylesheetHref,
 } from "../widgets.js";
 import type { MemberRole } from "../household.js";
 import type { ViewerFlags } from "../viewer-flags.js";
-import { iconLogOut } from "./components/icons.js";
 import { renderAppShellV2 } from "./shell-v2.js";
 
 export { escapeHtml };
@@ -123,11 +123,14 @@ export function themeColorMeta(
 <meta name="theme-color" content="${colors.dark}" media="(prefers-color-scheme: dark)" />`;
 }
 
+const LOG_OUT_ICON =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg>';
+
 /** The top bar of the bare pages (create-household, forbidden, not found): the
  *  logo and Log out, with no nav and no search. Log out opts out of Turbo so
  *  the login form that follows is a real page load. */
 export function appBar(): string {
-    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a><a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${iconLogOut()}</a></header>`;
+    return `<header class="app-bar"><a class="app-bar-logo" href="/"><img src="/brand/mark.svg" width="27" height="26" alt="" />Foodable</a><a class="btn-icon app-bar-action" href="/logout" data-turbo="false" aria-label="Log out" title="Log out">${LOG_OUT_ICON}</a></header>`;
 }
 
 /** Sets `html.fx` (animations on) and `html.fx-enter` (the entrance fade of
@@ -194,6 +197,9 @@ ${appBar()}
 /** Sign in's neighbours (create household, no household, not found): the
  *  design's Brand hero and one column under it, with no bar, no nav and no
  *  Log out in a corner (the gate offers its own button where one belongs).
+ *  It loads the same four tracked assets as the shell, so a gate to the app
+ *  (Go to Today, the create-household redirect) is one fetch, not a fetch and
+ *  then a reload for the assets the next page tracks.
  *  The title names the page for the tab and, unseen, for a screen reader.
  *  There is no saved theme yet, so production leaves it "system"; preview
  *  stamps light or dark. */
@@ -207,6 +213,7 @@ ${htmlOpen(theme)}
 <head>
 ${appHead(title, theme, "page")}
 <link rel="stylesheet" href="${appV2StylesheetHref()}" data-turbo-track="reload" />
+<script src="${appV2ScriptHref()}" defer data-turbo-track="reload"></script>
 </head>
 <body class="fd-body fd-auth-body">
 <main id="main" class="fd-auth native"><h1 class="fd-visually-hidden">${escapeHtml(title)}</h1>${body}</main>

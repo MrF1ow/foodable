@@ -382,9 +382,12 @@ describe("week renderers", () => {
         });
         const html = renderMissingSheet(view, "recipes");
         expect(html).toContain(`id="${PLAN_MISSING_SHEET_ID}"`);
+        // A side panel at 1024 px and up, as 616102 draws it.
+        expect(html).toContain('class="fd-sheet fd-sheet--side');
         expect(html).toContain('action="/recipes/plan/add-missing"');
         expect(html).toContain("Flour");
-        expect(html).toContain("can't tell what you have");
+        // One short line per note, as frame 386617.
+        expect(html).toContain("Pancakes · full amount<");
         // The warning dot is the only mark: no class for CSS that is gone.
         expect(html).not.toContain("fd-plan-missing-row");
         expect(html).toMatch(/Add \d+ to groceries/);

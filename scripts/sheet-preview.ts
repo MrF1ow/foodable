@@ -1,7 +1,7 @@
 /**
  * Dev-only preview of the redesign's sheet component (UI-6). Never a
  * production route: it serves a static page that loads public/app/v2/tokens.css,
- * public/app/v2/sheet.css and src/web/client/v2/sheet.js, with an "edit a food"
+ * public/app/v2/button.css, public/app/v2/sheet.css and src/web/client/v2/sheet.js, with an "edit a food"
  * sheet (bottom sheet on a phone, 480px panel at >= 1024px) and a delete
  * confirmation (bottom sheet on a phone, centred dialog at >= 1024px).
  *
@@ -12,9 +12,10 @@
  * pins the theme. --shots needs Chromium on PATH (see scripts/app-preview.ts
  * for why the PATH google-chrome wrapper is skipped).
  */
+import { raw } from "../src/web/components/v2/html.js";
 import {
-    confirmSheet,
     sheet,
+    sheetSection,
     sheetTrigger,
 } from "../src/web/components/v2/sheet.js";
 
@@ -78,9 +79,6 @@ const EDIT_BODY = `<form id="demo-edit-form" method="post" action="/preview/save
 <div class="pv-list">${row(ICON_CLOCK, "Time", "12:40")}${row(ICON_MOVE, "Move to", "Lunch")}</div>
 </form>`;
 
-const EDIT_ACTIONS = `<button type="button" class="fd-btn fd-btn--danger" command="show-modal" commandfor="demo-confirm">Delete</button>
-<button type="submit" class="fd-btn fd-btn--primary" form="demo-edit-form">Save</button>`;
-
 export function previewPage(opts: {
     open?: string | null;
     theme?: string | null;
@@ -95,20 +93,48 @@ export function previewPage(opts: {
         `</div>`,
         sheet({
             id: "demo-edit",
-            kind: "edit",
-            title: "Chicken rice bowl",
-            subtitle: "Lunch · 12:40 · from your recipe",
-            body: EDIT_BODY,
-            actions: EDIT_ACTIONS,
+            placement: "side",
+            header: {
+                kind: "title",
+                title: "Chicken rice bowl",
+                subtitle: "Lunch · 12:40 · from your recipe",
+            },
+            body: sheetSection({ kind: "custom", content: raw(EDIT_BODY) }),
+            actions: {
+                kind: "pair",
+                cancel: {
+                    label: "Delete",
+                    attrs: {
+                        command: "show-modal",
+                        commandfor: "demo-confirm",
+                    },
+                },
+                primary: {
+                    label: "Save",
+                    type: "submit",
+                    form: "demo-edit-form",
+                },
+            },
             openOnLoad: opts.open === "edit",
         }),
-        confirmSheet({
+        sheet({
             id: "demo-confirm",
-            title: "Delete Chicken rice bowl?",
-            message: "This removes it from today's log. You can't undo this.",
-            action: "/preview/delete",
-            confirmLabel: "Delete",
-            hiddenFields: { id: "meal-1" },
+            placement: "dialog",
+            header: { kind: "title", title: "Delete Chicken rice bowl?" },
+            body: sheetSection({
+                kind: "custom",
+                content: raw(
+                    `<form id="demo-confirm-form" method="post" action="/preview/delete" onsubmit="event.preventDefault()"><input type="hidden" name="id" value="meal-1"><p class="fd-sheet__text">This removes it from today's log. You can't undo this.</p></form>`,
+                ),
+            }),
+            actions: {
+                kind: "destructive",
+                danger: {
+                    label: "Delete",
+                    type: "submit",
+                    form: "demo-confirm-form",
+                },
+            },
             openOnLoad: opts.open === "confirm",
         }),
     ].join("\n");
@@ -123,6 +149,7 @@ export function previewPage(opts: {
 @font-face { font-family: "Bricolage Grotesque"; src: url("/fonts/bricolage-latin.woff2") format("woff2"); font-weight: 200 800; }
 </style>
 <link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/button.css">
 <link rel="stylesheet" href="/sheet.css">
 <style>${PREVIEW_CSS}</style>
 </head>
@@ -165,6 +192,7 @@ if (import.meta.main) {
 
     const assets: Record<string, string> = {
         "/tokens.css": "./public/app/v2/tokens.css",
+        "/button.css": "./public/app/v2/button.css",
         "/sheet.css": "./public/app/v2/sheet.css",
         "/sheet.js": "./src/web/client/v2/sheet.js",
     };

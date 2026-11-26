@@ -52,7 +52,15 @@ function placeInSheet(root, panel) {
     const height = panel.scrollHeight;
     const gap = 4;
     const left = Math.max(EDGE, Math.min(box.right - width, vw - EDGE - width));
-    const below = vh - EDGE - (box.bottom + gap);
+    // A centred dialog card ends above the screen's bottom edge: a panel that
+    // would hang past the card opens above the row instead, as the design draws
+    // it. A bottom sheet ends at the screen edge, so this changes nothing there.
+    const sheet = root.closest(".fd-sheet");
+    const sheetBottom =
+        sheet && typeof sheet.getBoundingClientRect === "function"
+            ? sheet.getBoundingClientRect().bottom
+            : vh;
+    const below = Math.min(vh, sheetBottom) - EDGE - (box.bottom + gap);
     const above = box.top - gap - EDGE;
     const under = height <= below || (height > above && below >= above);
     const room = Math.floor(under ? below : above);

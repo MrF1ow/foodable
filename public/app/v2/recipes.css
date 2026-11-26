@@ -54,6 +54,12 @@
     /* The star icon, not its 36 px button, lines up with the row's text edge. */
     margin: 0 calc(-1 * var(--space-xs)) 0 calc(-1 * var(--space-sm));
 }
+/* One line, as frame 403617: "Missing 3 · Oats, Milk, …" ends in an ellipsis. */
+.fd-recipes-row .fd-item-row__subtitle {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
 .fd-recipes-row .fd-menu {
     flex: none;
 }
@@ -290,43 +296,24 @@
     color: var(--text-secondary);
 }
 
-/* The steps: plain lines under hairlines. The public share page uses the same
-   list, with its own section head. */
+/* The steps: numbered rows with a hairline under each, as 402459/402619 draw
+   them ("1  Boil…", a 56 px row, no full stop after the number). */
 .fd-recipe-steps {
     margin: 0;
-    padding-left: 1.25em;
+    padding: 0;
+    list-style: none;
+    counter-reset: fd-step;
     font: 400 var(--text-body-size) / var(--text-body-line) var(--font-body);
     color: var(--text-primary);
 }
-.fd-recipe-steps li + li {
-    margin-top: var(--space-md);
-}
-
-.fd-recipe-section-head {
-    display: flex;
-    align-items: flex-end;
-    gap: var(--space-md);
-    margin: 0 0 var(--space-md);
-    padding: 0 0 var(--space-sm);
+.fd-recipe-steps > li {
+    counter-increment: fd-step;
+    padding: calc((var(--control-xl-height) - 1px - var(--text-body-line)) / 2)
+        0;
     border-bottom: 1px solid var(--line);
 }
-.fd-recipe-section-head__title {
-    margin: 0;
-    font: 600 var(--text-micro-size) / var(--text-micro-line) var(--font-body);
-    letter-spacing: 0.09em;
-    text-transform: uppercase;
-    color: var(--text-tertiary);
-}
-.fd-recipe-section-head__count {
-    margin-left: auto;
-    font: 400 var(--text-caption-size) / var(--text-caption-line)
-        var(--font-body);
-    color: var(--text-secondary);
-}
-.fd-recipe-meta {
-    margin: 0;
-    font: 400 13px/17px var(--font-body);
-    color: var(--text-secondary);
+.fd-recipe-steps > li::before {
+    content: counter(fd-step) "\00a0\00a0";
 }
 
 /* A draft: what is left to fix, in a card under the title. */
@@ -522,7 +509,11 @@
 }
 
 .fd-plan-stepper {
-    margin-top: var(--fd-s-2);
+    margin-top: 0;
+}
+
+.fd-plan-form .fd-month-picker {
+    padding-block: var(--space-sm) var(--space-xs);
 }
 
 .fd-plan-error {
@@ -556,10 +547,30 @@
         flex: none;
         min-width: 120px;
     }
+    /* In the header the frames draw Plan and Cook at the Small size, each as
+       wide as its word (609258, 610055); the phone's bar keeps Large. */
+    .fd-recipe-bar:not(.fd-recipe-bar--draft) > [data-fd-btn] {
+        --fd-btn-icon: var(--control-md-icon);
+        min-width: 0;
+        gap: var(--control-md-gap);
+        height: var(--control-md-height);
+        padding: 0 var(--control-md-padding);
+        border-radius: var(--control-md-radius);
+        font-size: var(--control-md-text);
+    }
     .fd-recipe-bar--draft {
         padding: var(--space-sm) var(--space-sm) var(--space-sm) var(--space-lg);
     }
     .fd-recipe-detail:has(.fd-recipe-bar) {
         padding-bottom: var(--space-4xl);
+    }
+}
+
+/* On the phone the Plan sheet stops 74px under the top of the screen (the
+ * design's frame with the month picker open), so the picker, Servings and the
+ * Plan bar all fit at 390 x 844 without scrolling. */
+@media (max-width: 1023px) {
+    .fd-plan-sheet {
+        max-height: calc(100dvh - 74px);
     }
 }

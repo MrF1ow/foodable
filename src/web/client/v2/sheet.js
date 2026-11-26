@@ -1,13 +1,13 @@
 // The redesign's sheet (dialog.fd-sheet): native showModal/close, backdrop
 // dismiss, focus on open and returned to the invoker on close, drag to
 // dismiss, page scroll lock, and reopen after a 4xx re-render.
-// Modeled on ../modal.js and independent of it (own scroll-lock counter).
+// It keeps its own scroll-lock counter.
 // Guards match shell.js: tests run this against a fake window.
 //
 // Platform notes. The `command` / `commandfor` invoker attributes (and the
 // `command` event whose `source` names the button) and the `beforetoggle`
-// event on dialogs are recent: the same browser exposure as today's
-// `modalTrigger`, so nothing here needs more than that. Native `showModal()`
+// event on dialogs are recent, and nothing here needs more than that.
+// Native `showModal()`
 // already returns focus to the previously focused element on close; the
 // invoker tracking below only exists because Safari does not focus a button on
 // click, so `document.activeElement` is the body when the sheet opens.
@@ -33,11 +33,9 @@ let openSheetCount = 0;
 let scrollLockY = 0;
 let bodyWasFixed = false; // true only while THIS module owns the body lock
 
-// modal.js may already hold the lock (it sets body position:fixed too); never
-// take over a lock another module owns, and never clear one we did not take.
-// A sheet that opened under a modal's lock takes it when the next sheet opens.
-// Stacking an old modal on top of a sheet is unsupported: modal.js would read
-// scrollY as 0 under our fixed body. The two never nest today.
+// Another module may already hold the lock (body position:fixed); never take
+// over a lock another module owns, and never clear one we did not take. A
+// sheet that opened under such a lock takes it when the next sheet opens.
 function lockPageScroll() {
     if (
         openSheetCount >= 1 &&
@@ -55,12 +53,6 @@ function lockPageScroll() {
 
 function unlockPageScroll() {
     if (openSheetCount === 0 && bodyWasFixed && document.body) {
-        if (document.querySelectorAll("dialog.modal[open]").length > 0) {
-            // A modal is still open and holds the page too: leave the styles to
-            // modal.js, which clears them when its last dialog closes.
-            bodyWasFixed = false;
-            return;
-        }
         document.body.style.position = "";
         document.body.style.top = "";
         document.body.style.width = "";
@@ -94,8 +86,7 @@ function markClosed(dialog) {
     unlockPageScroll();
 }
 
-// Turbo must never cache a locked page. modal.js also closes every open dialog
-// here; both handlers are safe to run in either order.
+// Turbo must never cache a locked page.
 function releaseScrollLockForSwap() {
     document.querySelectorAll("dialog.fd-sheet[open]").forEach((dialog) => {
         if (typeof dialog.close === "function") dialog.close();
@@ -117,7 +108,7 @@ function releaseScrollLockForSwap() {
 }
 
 document.addEventListener("turbo:before-render", releaseScrollLockForSwap);
-// Parity with modal.js. A morph would strip the server-rendered dialog's `open`
+// A morph would strip the server-rendered dialog's `open`
 // attribute anyway, and today morphs only follow the page's own form submits,
 // so this is a safety net rather than a path anything exercises yet.
 document.addEventListener("turbo:before-morph-element", (event) => {
@@ -378,7 +369,7 @@ function canTab(el) {
 
 // Tab and Shift+Tab wrap inside a dialog or side sheet, so focus never leaves
 // for the browser's own controls. Only the placements that float over the page
-// do this; the old edit and confirm sheets keep the browser's own handling.
+// do this; a bottom sheet keeps the browser's own handling.
 function trapTab(dialog, e) {
     if (e.key !== "Tab" || e.defaultPrevented) return;
     const cl = dialog.classList;
@@ -536,9 +527,7 @@ function initSheet(dialog) {
         if (!mq(MQ_COARSE) || mq(MQ_PANEL)) return;
         const t = e.target;
         if (!t || typeof t.closest !== "function") return;
-        const grip = t.closest(
-            ".fd-sheet-handle, .fd-sheet-head, .fd-sheet__header",
-        );
+        const grip = t.closest(".fd-sheet-handle, .fd-sheet__header");
         if (!grip || !dialog.contains(grip)) return;
         if (e.button !== undefined && e.button !== 0) return;
         if (t.closest("button, a, input, select, textarea, label")) return;

@@ -20,7 +20,7 @@ import { choiceGroup } from "../../components/v2/chips.js";
 import { esc, join, raw, type Html } from "../../components/v2/html.js";
 import { itemRow } from "../../components/v2/item-row.js";
 import { listGroup } from "../../components/v2/list-group.js";
-import { menu, type MenuItem } from "../../components/v2/menu.js";
+import { menu, menuRow, type MenuItem } from "../../components/v2/menu.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import { renderHouseholdLayout } from "./settings-household-layout.js";
 import { settingsErrorBanner } from "./settings-shared.js";
@@ -279,18 +279,15 @@ function weightRow(opts: {
             ];
         },
     );
-    return raw(
-        `<li class="fd-item-row">${menu({
-            label: `${label.title} weight`,
-            anchor: "row",
-            row: {
-                title: label.title,
-                subtitle: label.source,
-                value: `${opts.share}%`,
-            },
-            items,
-        })}</li>`,
-    );
+    return menuRow({
+        label: `${label.title} weight`,
+        row: {
+            title: label.title,
+            subtitle: label.source,
+            value: `${opts.share}%`,
+        },
+        items,
+    });
 }
 
 function stringWeights(weights: ScoreWeights): Record<ScorePart, string> {

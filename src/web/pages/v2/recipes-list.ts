@@ -130,11 +130,24 @@ function looksLikeLink(text: string): boolean {
     return /^https?:\/\/\S+$/i.test(text.trim());
 }
 
+/**
+ * The words the list filters by: a pasted link imports rather than searches,
+ * so it filters nothing and every recipe stays listed (402324).
+ */
+export function recipesSearchTerm(query: string): string {
+    const term = query.trim();
+    return looksLikeLink(term) ? "" : term;
+}
+
 function servingsLabel(portions: number): string {
     return portions === 1 ? "1 serving" : `${portions} servings`;
 }
 
-/** "Missing 2 · Avocado, Lime": the row's words when the kitchen falls short. */
+/**
+ * "Missing 2 · Avocado, Lime": the row's words when the kitchen falls short.
+ * It reads in the row's muted tone on one line, as frame 403617 draws it; a
+ * long list ends in an ellipsis (recipes.css) rather than wrapping.
+ */
 function missingLabel(
     flags: RecipeFilterFlags,
     names: string[],
@@ -180,7 +193,6 @@ function recipeRow(card: V2RecipeCard, view: RecipesListV2View): Html {
         title: recipe.name,
         subtitle,
         macros: rowMacros(macrosPerPortion),
-        state: missing ? ("warning" as const) : ("default" as const),
         href: `/recipes/${recipe.id}`,
         id: `recipe-${recipe.id}`,
         className: "fd-recipes-row",
@@ -490,8 +502,9 @@ function draftsSection(view: RecipesListV2View): Html {
 }
 
 function allRecipes(view: RecipesListV2View, filters: string[]): Html {
-    // Typing narrows "All recipes" to "N of M"; a filter alone keeps the heading.
-    const searching = view.query.trim() !== "";
+    // Typing narrows "All recipes" to "N of M"; a filter alone keeps the heading,
+    // and so does a pasted link, which imports rather than searches (402324).
+    const searching = view.query.trim() !== "" && !looksLikeLink(view.query);
     if (view.totalCount === 0) {
         // Picking a day with nothing to pick still offers the way out.
         if (view.planDate) {

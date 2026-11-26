@@ -52,8 +52,7 @@ export const NOTICE_ROUTES: Record<
         if (subject.kind !== "fridge_item") return null;
         return `/kitchen/fridge/items/${encodeURIComponent(subject.id)}/add-to-grocery`;
     },
-    // These notices act from the new app only; the old Needs attention
-    // page never produces them, so it has nothing to link.
+    // These notices act from the app only (`ctx.v2` is set there).
     actOnNotice: (notice, ctx) => (ctx.v2 ? noticeActPath(notice.code) : null),
     // The sheet is on the page already; the link is what a tap with no script
     // falls back to.

@@ -382,6 +382,7 @@ ${String(servings)}
             },
         },
         openOnLoad: view.open,
+        className: "fd-plan-sheet",
         focus: "panel",
     });
 }
@@ -552,16 +553,17 @@ function ingredientsMissingText(count: number): string {
 
 /**
  * "Missing for the plan": what the week needs beyond the kitchen, with the
- * button that puts it on the grocery list. An amount the kitchen could not be
- * counted against says so, and says the full amount is what gets added.
+ * button that puts it on the grocery list. Each note is one short line, as
+ * frame 386617 draws it ("Beef chili · to taste"); an amount the kitchen could
+ * not be counted against says the full amount is what gets added.
  */
 export function renderMissingSheet(view: WeekPlanView, back: PlanBack): string {
     if (view.missing.length === 0) return "";
     const rows = view.missing.map((line) => {
         const note = line.unknown
-            ? `${line.neededBy} · can't tell what you have, so the full amount is added`
+            ? `${line.neededBy} · full amount`
             : line.unmeasured
-              ? `${line.neededBy} · no amount, added as to taste`
+              ? `${line.neededBy} · to taste`
               : line.neededBy;
         return itemRow({
             title: line.name,
@@ -586,7 +588,8 @@ ${hidden("back", back)}${String(
     const count = view.missing.length;
     return sheet({
         id: PLAN_MISSING_SHEET_ID,
-        placement: "dialog",
+        // A side panel at 1024 px and up, as 616102 draws it.
+        placement: "side",
         header: {
             kind: "title",
             title: "Missing for the plan",

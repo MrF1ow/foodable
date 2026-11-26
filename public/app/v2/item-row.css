@@ -22,7 +22,6 @@
     --fd-item-row-knob: 22px;
     --fd-item-row-bed: 96px;
     --fd-item-row-line-gap: 6px;
-    --fd-item-row-score-pad: 6px;
     position: relative;
     box-sizing: border-box;
     list-style: none;
@@ -177,6 +176,12 @@ button.fd-item-row__check-btn {
     .fd-icon {
     opacity: 0;
 }
+/* The picked disc keeps the ring's own line around the fill (404903, 416488). */
+.fd-item-row__check--radio
+    .fd-item-row__check-input:checked
+    + .fd-item-row__check-box {
+    border-color: var(--text-secondary);
+}
 .fd-item-row__face--choice {
     cursor: pointer;
 }
@@ -247,15 +252,6 @@ button.fd-item-row__check-btn {
     font-weight: 400;
     line-height: 1.3077;
     white-space: nowrap;
-}
-/* The design's Score badge on a row: 20 high, 4 gap, 6 left, 8 right, medium. */
-.fd-item-row .fd-score {
-    gap: var(--space-xs);
-    padding: var(--space-2xs) var(--space-sm) var(--space-2xs)
-        var(--fd-item-row-score-pad);
-}
-.fd-item-row .fd-score__num {
-    font-weight: 500;
 }
 .fd-item-row__subtitle {
     color: var(--text-secondary);

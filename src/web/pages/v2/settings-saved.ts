@@ -37,15 +37,6 @@ export const SETTINGS_SAVED_MERGE_SHEET_ID = FOODS_MERGE_MODAL_ID;
 export const SAVED_EDIT_SHEET_ID = "fd-saved-edit";
 const SAVED_PATH = "/settings/saved";
 
-/** The id a refused delete names (Delete confirms in the menu now, so no sheet carries it). */
-export function savedFoodDeleteSheetId(foodId: string): string {
-    return `fd-settings-saved-delete-food-${foodId}`;
-}
-
-export function savedRecipeDeleteSheetId(recipeId: string): string {
-    return `fd-settings-saved-delete-recipe-${recipeId}`;
-}
-
 export type SavedFoodRow = Food & { aliases: string[] };
 
 export type SettingsSavedV2View = {

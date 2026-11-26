@@ -30,25 +30,3 @@
     border-radius: var(--radius-sheet);
     background: var(--surface-panel);
 }
-/* Confirm sheet markup sample (not a live dialog). */
-.fd-gallery-sheet-sample.fd-sheet {
-    position: static;
-    display: block;
-    width: 100%;
-    max-width: 400px;
-    margin-top: var(--space-gap);
-    border: none;
-    padding: 0;
-    background: transparent;
-    overflow: visible;
-}
-.fd-gallery-sheet-sample .fd-sheet-panel {
-    position: static;
-    max-height: none;
-    box-shadow: var(
-        --fd-sheet-shadow,
-        0 8px 32px color-mix(in srgb, var(--text-primary) 12%, transparent)
-    );
-    border: 1px solid var(--line);
-    border-radius: var(--radius-sheet);
-}

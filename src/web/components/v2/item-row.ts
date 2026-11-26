@@ -56,7 +56,7 @@ import { field } from "./field.js";
 import { icon, type IconName } from "./icon.js";
 import { memberAvatar } from "./avatar.js";
 import { macroLine, type Macros, type Text } from "./rows.js";
-import { scoreBadge } from "./score-badge.js";
+import { scorePill } from "./score-badge-pill.js";
 
 export type ItemRowLead =
     | {
@@ -629,7 +629,7 @@ export function itemRow(opts: ItemRowOptions): Html {
         present(opts.meta)
             ? `<span class="fd-item-row__meta">${esc(opts.meta)}</span>`
             : "",
-        opts.score != null ? scoreBadge(opts.score) : "",
+        opts.score != null ? scorePill(opts.score) : "",
     ]);
     // A held switch is described by the reason under the title.
     const reasonId =

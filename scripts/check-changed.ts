@@ -212,16 +212,11 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
             tests: /^src\/web\/components\/toast\.test\.ts$/,
             incidental: true,
         },
-        // ui.test.ts asserts every page module (and loaders.ts) goes through pageHeader.
+        // ui.test.ts asserts no page module imports the retired ui.ts or the old icon functions.
         {
             when: /^src\/web\/(pages\/.+|loaders)\.ts$/,
             tests: /^src\/web\/components\/ui\.test\.ts$/,
             incidental: true,
-        },
-        // shared-import.test.ts reads these page and component sources as text.
-        {
-            when: /^src\/web\/(pages\/(fridge|grocery|recipes|nutrition)|components\/(ui|page-markup))\.ts$|^src\/web\/client\/food-picker\.js$/,
-            tests: /^src\/web\/components\/shared-import\.test\.ts$/,
         },
         // shell.test.ts evaluates client/shell.js, which sits outside its import graph.
         {
@@ -269,11 +264,12 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
         // avatar-sites.test.ts reads settings.css for the Photo card,
         // notifications.test.ts reads layout.css for the inbox gaps and
         // settings-notifications.test.ts reads settings.css for the sections,
-        // kitchen-usuals.test.ts reads kitchen.css for the Add a usual grids and
+        // kitchen-usuals.test.ts reads kitchen.css for the Add a usual grids,
+        // recipes-list.test.ts reads recipes.css for the one-line Missing line and
         // trends.test.ts reads trends.css for the Calories by day bars.
         {
             when: /^public\/app\//,
-            tests: /^src\/web\/(avatar-sites|components\/field|components\/v2\/[^/]+|pages\/recipes|pages\/v2\/(select-mode|notifications|settings-notifications|kitchen-usuals|trends))\.test\.ts$/,
+            tests: /^src\/web\/(avatar-sites|components\/field|components\/v2\/[^/]+|pages\/recipes|pages\/v2\/(select-mode|notifications|settings-notifications|kitchen-usuals|recipes-list|trends))\.test\.ts$/,
         },
         // turbo-forms.test.ts reads the generated login page.
         {

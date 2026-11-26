@@ -337,24 +337,6 @@
     color: var(--text-primary);
 }
 
-/* Manage row: name, meta and the actions, one line each. */
-.fd-row--manage .fd-row__main {
-    flex: 1 1 0;
-}
-.fd-row__actions {
-    display: flex;
-    flex: none;
-    align-items: center;
-    gap: var(--fd-s-6);
-    margin-left: auto;
-}
-.fd-row--manage .fd-row__sub {
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
 /* grocery: check circle (#21946 off, #21994 on) */
 .fd-check {
     position: relative;
@@ -582,7 +564,8 @@
     padding: var(--fd-s-7) var(--fd-s-12);
     border: 1px solid var(--line);
     border-radius: var(--radius-pill);
-    background: var(--surface-bg);
+    /* State=Off draws only the line stroke, no fill (531717), on a sheet or a page. */
+    background: transparent;
     color: var(--text-primary);
     font: 400 13px/18px var(--font-body);
     text-decoration: none;
@@ -664,7 +647,7 @@
     display: flex;
     align-items: baseline;
     justify-content: center;
-    gap: var(--fd-s-6);
+    gap: var(--space-xs);
     min-width: 0;
 }
 .fd-stepper__input {
@@ -677,8 +660,8 @@
     border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-primary);
-    font: 600 36px/43px var(--font-display);
-    letter-spacing: -0.7px;
+    /* The design's Stepper (172312): the figure is 44 Bold, as stepper-control. */
+    font: 700 var(--text-figure-size) / 53px var(--font-display);
     text-align: right;
     appearance: textfield;
     -moz-appearance: textfield;

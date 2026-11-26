@@ -423,17 +423,18 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(body).not.toContain("fd-row__title--done");
     });
 
-    test("checked lines add the dock: Clear checked beside Put away N, which opens the sheet", () => {
+    test("checked lines add the dock: Clear checked beside a grey Put N away in the kitchen, which opens the sheet (394511)", () => {
         const body = renderKitchenGroceriesBody(checkedView());
         const dock = body.match(
             /<div class="fd-kitchen-grocery-dock"[\s\S]*?<\/div>/,
         )?.[0];
         expect(dock).toContain("Clear checked");
-        expect(dock).toContain("Put away 1");
+        expect(dock).toContain("Put 1 away in the kitchen");
         expect(dock).toContain(
             'command="show-modal" commandfor="fd-grocery-put-away"',
         );
-        expect(body).not.toContain("Put 1 away in the kitchen");
+        // The frame's grey button: nothing on the dock is the green primary.
+        expect(dock).not.toContain("fd-btn--primary");
         expect(renderKitchenGroceriesBody(baseView())).not.toContain(
             "fd-kitchen-grocery-dock",
         );
@@ -473,7 +474,7 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(arm!.tag).toContain("data-fd-confirm-arm");
         expect(arm!.tag).not.toContain("form=");
         expect(arm!.tag).toContain('type="button"');
-        expect(put!.label).toBe("Put away 1");
+        expect(put!.label).toBe("Put 1 away in the kitchen");
         expect(put!.tag).toContain("data-fd-confirm-idle");
         // The confirm step: hidden until armed, the verb names the count and posts the clear form.
         expect(cancel!.label).toBe("Cancel");
@@ -1024,6 +1025,35 @@ describe("renderKitchenGroceriesV2Page", () => {
         expect(body).toContain("Low, below 2");
     });
 
+    test("a usual on a schedule reads its cadence, one without its amount (394843)", () => {
+        const body = renderKitchenGroceriesBody(
+            baseView({
+                usuals: [
+                    {
+                        foodId: "f-bananas",
+                        kind: "food",
+                        name: "Bananas",
+                        subtitle: "6 each",
+                        amount: 6,
+                        unit: "each",
+                        cadence: "every week",
+                    },
+                    {
+                        foodId: "f-rice",
+                        kind: "food",
+                        name: "Rice",
+                        subtitle: "1 bag",
+                        amount: 1,
+                        unit: "bag",
+                    },
+                ],
+            }),
+        );
+        expect(body).toContain("Usual · every week");
+        expect(body).not.toContain("Usual · 6 each");
+        expect(body).toContain("Usual · 1 bag");
+    });
+
     test("the stock that is left comes out of the running-low reason", () => {
         expect(lowLeftFromReason("9 left, below 12")).toBe("9 left");
         expect(lowLeftFromReason("0.5 left, below 2")).toBe("0.5 left");
@@ -1296,7 +1326,7 @@ describe("groceryLineRowMarkup score badge", () => {
         const html = String(
             groceryLineRowMarkup(row, view, GROCERY_V2_RETURN_TO),
         );
-        expect(html).toContain("fd-score--middling");
+        expect(html).toContain("fd-score-pill--middling");
         expect(html).toContain(">41<");
 
         const plain = String(

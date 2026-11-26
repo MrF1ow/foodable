@@ -47,6 +47,13 @@ function undefinedVarRefs(css: string): string[] {
 }
 
 describe("/app-v2.css", () => {
+    test("a sheet's post-only form takes no gap in the body, as frame 403448", async () => {
+        const css = await getAppV2Css();
+        expect(css).toMatch(
+            /\.fd-sheet-body > form:not\(:has\(:not\(input\[type="hidden"\]\)\)\) \{\s*display: none;/,
+        );
+    });
+
     test("every var() without a fallback references a property defined in the bundle", async () => {
         const css = await getAppV2Css();
         expect(undefinedVarRefs(css)).toEqual([]);
@@ -99,12 +106,7 @@ describe("/app-v2.css", () => {
         // specificity). A circle that only sets width and height 32px renders
         // 32 x 44: a tall oval. Each one resets both minimums and stays square.
         const css = (await getAppV2Css()).replace(/\/\*[\s\S]*?\*\//g, "");
-        for (const selector of [
-            ".fd-sheet .fd-sheet-close",
-            ".fd-icon-btn",
-            ".fd-star",
-            ".fd-shell .modal-close",
-        ]) {
+        for (const selector of [".fd-icon-btn", ".fd-star"]) {
             const at = css.indexOf(`${selector} {`);
             expect(at, selector).toBeGreaterThanOrEqual(0);
             const block = css.slice(at, css.indexOf("}", at));
@@ -209,21 +211,12 @@ describe("/app-v2.css", () => {
                 .filter(
                     (c) =>
                         !c.startsWith("fd-") &&
-                        ![
-                            "app-main",
-                            "toast-region",
-                            "dash-head",
-                            "dash-head-title-row",
-                            "modal-close",
-                        ].includes(c) &&
+                        !["app-main", "toast-region"].includes(c) &&
                         !/^\d/.test(c),
                 ),
         );
         // app-main and toast-region belong to the old stylesheet and are
-        // restyled here; dash-head and its title row (components/ui.ts
-        // pageHeader) are kept clear of the account chip; modal-close is the
-        // old dialog's close, shown round on v2 pages. Nothing else may
-        // leak in.
+        // restyled here. Nothing else may leak in.
         expect([...foreign]).toEqual([]);
     });
 });

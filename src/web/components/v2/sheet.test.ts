@@ -1,7 +1,6 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import {
-    confirmSheet,
     sheet,
     sheetActions,
     sheetHeader,
@@ -42,123 +41,6 @@ test("the search box refuses attributes it writes itself", () => {
     }
     const ok = String(searchWith({ "data-x": "1" }));
     expect(ok.match(/aria-label="Clear"/g)?.length).toBe(1);
-});
-
-const edit = () =>
-    sheet({
-        id: "food-edit",
-        kind: "edit",
-        title: "Chicken rice bowl",
-        subtitle: "Lunch · 12:40 · from your recipe",
-        body: "<p>body</p>",
-        actions: '<button type="submit">Save</button>',
-    });
-
-test("sheet renders a native dialog labelled by its title", () => {
-    const html = edit();
-    expect(html.startsWith("<dialog ")).toBe(true);
-    expect(html).toContain('id="food-edit"');
-    expect(html).toContain('aria-labelledby="food-edit-title"');
-    expect(html).toContain('<h2 class="fd-sheet-title" id="food-edit-title">');
-    expect(html).toContain("Chicken rice bowl</h2>");
-});
-
-test("sheet pins its class names", () => {
-    const html = edit();
-    for (const cls of [
-        "fd-sheet fd-sheet--edit",
-        "fd-sheet-panel",
-        "fd-sheet-handle",
-        "fd-sheet-head",
-        "fd-sheet-heading",
-        "fd-sheet-title",
-        "fd-sheet-sub",
-        "fd-sheet-close",
-        "fd-sheet-body",
-        "fd-sheet-actions",
-    ]) {
-        expect(html).toContain(`class="${cls}"`);
-    }
-    expect(html).toContain('class="fd-sheet-handle" aria-hidden="true"');
-    const confirm = sheet({
-        id: "c",
-        kind: "confirm",
-        title: "T",
-        body: "",
-    });
-    expect(confirm).toContain('class="fd-sheet fd-sheet--confirm"');
-    expect(confirm).not.toContain("fd-sheet--edit");
-});
-
-test("aria-describedby only appears with a subtitle", () => {
-    expect(edit()).toContain('aria-describedby="food-edit-sub"');
-    expect(edit()).toContain(
-        '<p class="fd-sheet-sub" id="food-edit-sub">Lunch · 12:40 · from your recipe</p>',
-    );
-    const bare = sheet({ id: "x", kind: "edit", title: "T", body: "" });
-    expect(bare).not.toContain("aria-describedby");
-    expect(bare).not.toContain("fd-sheet-sub");
-});
-
-test("the action row only renders with actions", () => {
-    expect(edit()).toContain('<div class="fd-sheet-actions">');
-    const bare = sheet({ id: "x", kind: "edit", title: "T", body: "" });
-    expect(bare).not.toContain("fd-sheet-actions");
-});
-
-test("the close button is a native close command with an accessible name", () => {
-    const html = edit();
-    expect(html).toContain(
-        '<button type="button" class="fd-sheet-close" command="close" commandfor="food-edit" aria-label="Close">',
-    );
-    const custom = sheet({
-        id: "x",
-        kind: "edit",
-        title: "T",
-        body: "",
-        closeLabel: 'Fermer "x"',
-    });
-    expect(custom).toContain('aria-label="Fermer &quot;x&quot;"');
-});
-
-test("showClose false omits the close button", () => {
-    const html = sheet({
-        id: "no-x",
-        kind: "edit",
-        title: "T",
-        body: "",
-        showClose: false,
-    });
-    expect(html).not.toContain("fd-sheet-close");
-});
-
-test("openOnLoad adds the reopen attribute", () => {
-    expect(edit()).not.toContain("data-sheet-open-on-load");
-    const html = sheet({
-        id: "x",
-        kind: "edit",
-        title: "T",
-        body: "",
-        openOnLoad: true,
-    });
-    expect(html).toContain(" data-sheet-open-on-load>");
-});
-
-test("title, subtitle, id and close label are escaped; body is passed through", () => {
-    const html = sheet({
-        id: 'a"><script>1</script>',
-        kind: "edit",
-        title: "<script>alert(1)</script>",
-        subtitle: 'x" onclick="y',
-        body: "<b>kept</b>",
-        closeLabel: "<i>",
-    });
-    expect(html).not.toContain("<script>");
-    expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
-    expect(html).toContain("x&quot; onclick=&quot;y");
-    expect(html).toContain('id="a&quot;&gt;&lt;script&gt;1&lt;/script&gt;"');
-    expect(html).toContain("<b>kept</b>");
-    expect(html).toContain('aria-label="&lt;i&gt;"');
 });
 
 test("sheetTrigger opens the sheet with the native invoker command", () => {
@@ -205,33 +87,7 @@ test("sheetTrigger ariaLabel names a text button without touching its text", () 
     expect(icon).not.toContain('aria-label="Edit"');
 });
 
-test("sheet className and focus add escaped attributes after the id", () => {
-    const html = sheet({
-        id: "log-amount",
-        kind: "edit",
-        title: "T",
-        body: "",
-        className: "fd-log-amount-sheet",
-        focus: "panel",
-    });
-    expect(html).toContain(
-        '<dialog class="fd-sheet fd-sheet--edit fd-log-amount-sheet" id="log-amount" data-fd-sheet-focus="panel" aria-labelledby="log-amount-title">',
-    );
-    const plain = sheet({ id: "x", kind: "edit", title: "T", body: "" });
-    expect(plain).not.toContain("data-fd-sheet-focus");
-    expect(plain).toContain('<dialog class="fd-sheet fd-sheet--edit" id="x"');
-    const hostile = sheet({
-        id: "x",
-        kind: "edit",
-        title: "T",
-        body: "",
-        className: 'a" onclick="1',
-    });
-    expect(hostile).toContain('class="fd-sheet fd-sheet--edit a&quot; onclick');
-    expect(hostile).not.toContain('" onclick="1"');
-});
-
-test("sheet triggers and confirm sheets keep $-patterns in caller text inert", async () => {
+test("sheet triggers keep $-patterns in caller text inert", async () => {
     for (const payload of DOLLAR_PAYLOADS) {
         const trigger = sheetTrigger({
             target: "t",
@@ -240,77 +96,9 @@ test("sheet triggers and confirm sheets keep $-patterns in caller text inert", a
             ariaLabel: `Disconnect ${payload}`,
             data: { name: payload },
         });
-        const confirm = confirmSheet({
-            id: "c",
-            title: `Disconnect ${payload}?`,
-            message: payload,
-            action: "/x",
-            confirmLabel: "Disconnect",
-            hiddenFields: { client: payload },
-            openOnLoad: true,
-        });
-        for (const html of [trigger, confirm]) {
-            expect(await injectedAttributes(html)).toEqual([]);
-        }
+        expect(await injectedAttributes(trigger)).toEqual([]);
         expect(await buttonLabels(trigger)).toEqual([`Disconnect ${payload}`]);
     }
-});
-
-test("confirmSheet posts a form from the sticky row, with escaped hidden fields", () => {
-    const html = confirmSheet({
-        id: "del-1",
-        title: "Delete <Chicken>?",
-        message: "Gone for good & ever.",
-        action: '/foods/1/delete?x="1"',
-        confirmLabel: "Delete",
-        hiddenFields: { id: '1"><x', note: "a&b" },
-        openOnLoad: true,
-        turboFalse: true,
-    });
-    expect(html).toContain("fd-sheet--confirm");
-    expect(html).toContain("data-sheet-open-on-load");
-    expect(html).toContain(
-        '<form id="del-1-form" method="post" action="/foods/1/delete?x=&quot;1&quot;" data-turbo="false">',
-    );
-    expect(html).toContain(
-        '<input type="hidden" name="id" value="1&quot;&gt;&lt;x" />',
-    );
-    expect(html).toContain(
-        '<input type="hidden" name="note" value="a&amp;b" />',
-    );
-    expect(html).toContain(
-        '<p class="fd-sheet-message">Gone for good &amp; ever.</p>',
-    );
-    expect(html).toContain("Delete &lt;Chicken&gt;?</h2>");
-    // Cancel + danger confirm live in the action row; confirm submits the form by id.
-    expect(html).toContain(
-        '<button type="button" class="fd-btn" command="close" commandfor="del-1">Cancel</button>',
-    );
-    expect(html).toContain(
-        '<button type="submit" class="fd-btn fd-btn--danger" form="del-1-form">Delete</button>',
-    );
-    const actions = html.slice(html.indexOf("fd-sheet-actions"));
-    expect(actions).toContain("fd-btn--danger");
-    expect(html.slice(0, html.indexOf("fd-sheet-actions"))).not.toContain(
-        "fd-btn--danger",
-    );
-});
-
-test("confirmSheet's submit names the form by the exact same escaped id", () => {
-    const html = confirmSheet({
-        id: 'del"1',
-        title: "T",
-        message: "M",
-        action: "/x",
-        confirmLabel: "Delete",
-    });
-    const formId = html.match(/<form id="([^"]*)"/)?.[1];
-    const submitFor = html.match(/type="submit"[^>]*form="([^"]*)"/)?.[1];
-    expect(formId).toBe("del&quot;1-form");
-    expect(submitFor).toBe(formId);
-    // No raw quote broke out of either attribute.
-    expect(html).not.toContain('form="del"');
-    expect(html).not.toContain('id="del"');
 });
 
 // ---- the stylesheet ----
@@ -365,65 +153,7 @@ test("sheet.css honours the one breakpoint, [hidden] and reduced motion", () => 
     expect(stripped).toContain("var(--overlay-scrim)");
 });
 
-// The old signature keeps its exact markup for every caller that has not
-// moved to the parts. These strings were taken from the code before the
-// placement option was added.
-const LEGACY_OUTPUT = {
-    editFull:
-        '<dialog class="fd-sheet fd-sheet--edit x-y" id="e1" data-fd-sheet-focus="panel" aria-labelledby="e1-title" aria-describedby="e1-sub" data-sheet-open-on-load>\n<div class="fd-sheet-panel" tabindex="-1">\n<div class="fd-sheet-handle" aria-hidden="true"></div>\n<header class="fd-sheet-head">\n<div class="fd-sheet-heading">\n<h2 class="fd-sheet-title" id="e1-title">Edit &lt;b&gt;</h2>\n<p class="fd-sheet-sub" id="e1-sub">Sub &amp; more</p>\n</div>\n<button type="button" class="fd-sheet-close" command="close" commandfor="e1" aria-label="Dismiss"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>\n</header>\n<div class="fd-sheet-body">\n<p>b</p>\n</div>\n<div class="fd-sheet-actions">\n<button type="submit">Save</button>\n</div>\n</div>\n</dialog>',
-    editBare:
-        '<dialog class="fd-sheet fd-sheet--edit" id="e2" aria-labelledby="e2-title">\n<div class="fd-sheet-panel" tabindex="-1">\n<div class="fd-sheet-handle" aria-hidden="true"></div>\n<header class="fd-sheet-head">\n<div class="fd-sheet-heading">\n<h2 class="fd-sheet-title" id="e2-title">T</h2>\n</div>\n<button type="button" class="fd-sheet-close" command="close" commandfor="e2" aria-label="Close"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>\n</header>\n<div class="fd-sheet-body">\n\n</div>\n</div>\n</dialog>',
-    confirmNoClose:
-        '<dialog class="fd-sheet fd-sheet--confirm" id="c1" aria-labelledby="c1-title">\n<div class="fd-sheet-panel" tabindex="-1">\n<div class="fd-sheet-handle" aria-hidden="true"></div>\n<header class="fd-sheet-head">\n<div class="fd-sheet-heading">\n<h2 class="fd-sheet-title" id="c1-title">T</h2>\n</div>\n\n</header>\n<div class="fd-sheet-body">\n<p>m</p>\n</div>\n</div>\n</dialog>',
-    confirmSheet:
-        '<dialog class="fd-sheet fd-sheet--confirm" id="cs" aria-labelledby="cs-title" aria-describedby="cs-sub" data-sheet-open-on-load>\n<div class="fd-sheet-panel" tabindex="-1">\n<div class="fd-sheet-handle" aria-hidden="true"></div>\n<header class="fd-sheet-head">\n<div class="fd-sheet-heading">\n<h2 class="fd-sheet-title" id="cs-title">Remove?</h2>\n<p class="fd-sheet-sub" id="cs-sub">s</p>\n</div>\n<button type="button" class="fd-sheet-close" command="close" commandfor="cs" aria-label="Close"><svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="M2 2l8 8M10 2l-8 8"/></svg></button>\n</header>\n<div class="fd-sheet-body">\n<form id="cs-form" method="post" action="/x" data-turbo="false">\n<input type="hidden" name="a" value="1" />\n<p class="fd-sheet-message">Sure?</p>\n</form>\n</div>\n<div class="fd-sheet-actions">\n<button type="button" class="fd-btn" command="close" commandfor="cs">Cancel</button>\n<button type="submit" class="fd-btn fd-btn--danger" form="cs-form">Remove</button>\n</div>\n</div>\n</dialog>',
-    trigger:
-        '<button type="button" class="fd-btn" commandfor="e1" command="show-modal" aria-label="Open it" data-k="v">Open</button>',
-};
-
-test("the old sheet() signature renders exactly what it rendered before placement existed", () => {
-    expect(
-        sheet({
-            id: "e1",
-            kind: "edit",
-            title: "Edit <b>",
-            subtitle: "Sub & more",
-            body: "<p>b</p>",
-            actions: '<button type="submit">Save</button>',
-            openOnLoad: true,
-            closeLabel: "Dismiss",
-            className: "x-y",
-            focus: "panel",
-        }),
-    ).toBe(LEGACY_OUTPUT.editFull);
-    expect(sheet({ id: "e2", kind: "edit", title: "T", body: "" })).toBe(
-        LEGACY_OUTPUT.editBare,
-    );
-    expect(
-        sheet({
-            id: "c1",
-            kind: "confirm",
-            title: "T",
-            body: "<p>m</p>",
-            showClose: false,
-        }),
-    ).toBe(LEGACY_OUTPUT.confirmNoClose);
-});
-
-test("confirmSheet and sheetTrigger render exactly what they rendered before", () => {
-    expect(
-        confirmSheet({
-            id: "cs",
-            title: "Remove?",
-            subtitle: "s",
-            message: "Sure?",
-            action: "/x",
-            confirmLabel: "Remove",
-            hiddenFields: { a: "1" },
-            openOnLoad: true,
-            turboFalse: true,
-        }),
-    ).toBe(LEGACY_OUTPUT.confirmSheet);
+test("sheetTrigger renders the button the pages style", () => {
     expect(
         sheetTrigger({
             target: "e1",
@@ -432,7 +162,9 @@ test("confirmSheet and sheetTrigger render exactly what they rendered before", (
             ariaLabel: "Open it",
             data: { k: "v" },
         }),
-    ).toBe(LEGACY_OUTPUT.trigger);
+    ).toBe(
+        '<button type="button" class="fd-btn" commandfor="e1" command="show-modal" aria-label="Open it" data-k="v">Open</button>',
+    );
 });
 
 // ---- The sheet from parts ----

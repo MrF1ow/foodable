@@ -163,6 +163,14 @@
     font-size: var(--text-body-size);
     line-height: var(--text-body-line);
 }
+/* The household token is one line, clipped at the box's edge (425210); Copy
+   still takes the whole token from the element's text. */
+.fd-settings-invite-code__box code#household-token {
+    overflow: hidden;
+    overflow-wrap: normal;
+    white-space: nowrap;
+    text-overflow: clip;
+}
 .fd-settings-invite-code__copy {
     display: flex;
     flex: none;
@@ -212,6 +220,10 @@
 }
 
 @media (min-width: 1024px) {
+    /* Add member sits at the foot of its side panel (666635). */
+    #fd-household-add-member .fd-sheet-body {
+        flex: 1 1 auto;
+    }
     .fd-settings-detail {
         display: none;
     }
@@ -309,39 +321,6 @@
     outline-offset: var(--space-2xs);
 }
 
-.fd-settings-phone-top {
-    display: grid;
-    grid-template-columns: 2.25rem 1fr 2.25rem;
-    align-items: center;
-    gap: var(--fd-s-6);
-    margin: 0 calc(-1 * var(--space-gutter));
-    padding: 0 var(--space-gutter) var(--fd-s-6);
-}
-
-.fd-settings-phone-back {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 2.25rem;
-    height: 2.25rem;
-    border-radius: var(--radius-pill);
-    background: var(--surface-panel);
-    color: var(--text-secondary);
-    text-decoration: none;
-    box-shadow: 0 4px 14px var(--overlay-shadow);
-}
-
-.fd-settings-phone-title {
-    margin: 0;
-    text-align: center;
-    font: 600 1rem/1.25 var(--font-body);
-    color: var(--text-primary);
-}
-
-.fd-settings-phone-top__balance {
-    width: 2.25rem;
-}
-
 .fd-settings-main {
     min-width: 0;
 }
@@ -385,52 +364,6 @@
     text-align: center;
 }
 
-.fd-settings-form--prefs {
-    margin-top: var(--fd-s-12);
-}
-
-.fd-settings-section-title {
-    margin: 0;
-    font-size: 1rem;
-    font-weight: 600;
-    color: var(--text-primary);
-}
-
-.fd-settings-field {
-    display: flex;
-    flex-direction: column;
-    gap: var(--fd-s-4);
-}
-
-.fd-settings-field__label {
-    font-size: 0.8125rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-}
-
-.fd-settings-input,
-.fd-settings-select {
-    width: 100%;
-    padding: var(--fd-s-10) var(--fd-s-12);
-    border-radius: var(--radius-sm);
-    border: 1px solid var(--line);
-    background: var(--surface-panel);
-    color: var(--text-primary);
-    font: inherit;
-}
-
-.fd-settings-check {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-6);
-    font-size: 0.9375rem;
-    color: var(--text-primary);
-}
-
-.fd-settings-check__text {
-    flex: 1;
-}
-
 .fd-settings-submit {
     align-self: flex-start;
     padding: var(--fd-s-10) var(--fd-s-14);
@@ -459,36 +392,11 @@
     margin: 0;
 }
 
-.fd-row__actions--wrap {
-    display: flex;
-    /* The global .fd-row__actions is flex: none; a wrapping group must shrink. */
-    flex: 0 1 auto;
-    flex-wrap: wrap;
-    min-width: 0;
-    gap: var(--fd-s-6);
-    justify-content: flex-end;
-}
-
-.fd-settings-form--inline {
-    margin-top: var(--fd-s-6);
-}
-
-.fd-settings-phone-top {
-    display: grid;
-}
-
 .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
     .fd-settings-back,
 .fd-settings[data-fd-settings-page]:not([data-fd-settings-page="home"])
     .fd-settings-head--phone {
     display: none;
-}
-
-@supports (field-sizing: content) {
-    .fd-settings-goals-input {
-        field-sizing: content;
-        width: auto;
-    }
 }
 
 /* AI connections (FigCraft 416967): the address to connect a new agent is a
@@ -558,11 +466,6 @@
         padding-bottom: 0;
     }
 
-    .fd-settings-phone-top,
-    .fd-settings[data-fd-settings-page="home"] .fd-settings-phone-top {
-        display: none;
-    }
-
     .fd-settings-head--phone {
         display: none;
     }
@@ -575,23 +478,6 @@
     .fd-settings[data-fd-settings-page="home"] .fd-settings-main {
         flex: 1 1 0;
     }
-}
-
-.fd-dismissed .fd-row--dismissed .fd-row__body {
-    display: flex;
-    align-items: center;
-    gap: var(--fd-s-12);
-    padding-block: var(--fd-s-10);
-}
-
-.fd-dismissed .fd-row--dismissed .fd-row__main {
-    flex: 1 1 auto;
-    min-width: 0;
-}
-
-.fd-dismissed .fd-row--dismissed .fd-row__actions {
-    flex: none;
-    margin: 0;
 }
 
 /* ---- Settings › Notifications (src/web/pages/v2/settings-notifications.ts)
@@ -785,6 +671,20 @@
 .fd-dup-segment .fd-segmented__option {
     flex: 1 1 0;
 }
+/* On the phone the value pickers are the compact 32 px control with 12 px
+   figures (416488); desktop keeps the regular size. */
+@media (max-width: 1023px) {
+    .fd-segmented.fd-dup-segment {
+        height: var(--control-sm-height);
+        padding: var(--space-2xs);
+        border-radius: var(--control-sm-radius);
+    }
+    .fd-dup-segment .fd-segmented__option .fd-segmented__segment {
+        height: var(--fd-segmented-small-segment);
+        font-size: var(--text-caption-size);
+        line-height: var(--text-caption-line);
+    }
+}
 /* A value row nobody has picked yet shows the value of the food kept as the
    current one, and follows the Keep choice with no script. A checked pick
    always wins (it is drawn by the segmented control itself). */
@@ -798,4 +698,10 @@
     .fd-segmented__segment {
     background: var(--text-primary);
     color: var(--surface-bg);
+}
+
+/* Frame 419204: "Name this goal" reads as the row's title, not a faint hint. */
+.fd-goals-name-row .fd-autosave-input__field::placeholder {
+    color: var(--text-primary);
+    opacity: 1;
 }
