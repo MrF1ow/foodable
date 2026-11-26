@@ -54,11 +54,12 @@ describe("settings help v2", () => {
         expect(rows.map((m) => m[1])).toEqual([...HELP_GLOSSARY_IDS]);
         expect(rows[0]![2]).toBe("Food vs household item");
         expect(rows[0]![3]).toContain("Foods are things you eat");
-        // One list group, a chevron a row, no glossary heading.
+        // One list group, a down marker a row (no right chevron), no glossary heading.
         expect(
             html.match(/<ul class="fd-list-group fd-settings-help"/g),
         ).toHaveLength(1);
-        expect(html.match(/fd-item-row__chevron/g)).toHaveLength(rows.length);
+        expect(html.match(/fd-item-row__marker/g)).toHaveLength(rows.length);
+        expect(html).not.toContain("fd-item-row__chevron");
         expect(html).not.toContain("fd-settings-help-entry");
         // The row is the item row's own disclosure, with none of its own markup.
         expect(html).not.toContain("fd-settings-help__row");

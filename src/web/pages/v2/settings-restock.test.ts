@@ -59,6 +59,9 @@ describe("restock labels", () => {
         expect(edit).toMatch(
             /<form[^>]*action="\/settings\/household\/restock"[^>]*data-fd-autosave[^>]*>(?:(?!<\/form>).)*<input[^>]*type="time"[^>]*name="restock_time"/,
         );
+        // The Day pull-down and the Time field edit in place: no chevron.
+        expect(edit).not.toContain("fd-item-row__chevron");
+        expect(edit).not.toContain("fd-icon--chevron-right");
         const read = renderSettingsRestockV2Page({
             chrome,
             restock: { ...DEFAULT_RESTOCK, enabled: true },

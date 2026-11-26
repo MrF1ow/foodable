@@ -9,7 +9,6 @@ import type { AppChromeBase } from "../../attention.js";
 import type { RestockPreferences } from "../../../household.js";
 import { WEEKDAY_NAMES } from "../../../domain/weekdays.js";
 import { esc, join, raw, type Html } from "../../components/v2/html.js";
-import { icon } from "../../components/v2/icon.js";
 import { itemRow } from "../../components/v2/item-row.js";
 import { listGroup } from "../../components/v2/list-group.js";
 import { menuRow } from "../../components/v2/menu.js";
@@ -84,7 +83,7 @@ function dayRow(restock: RestockPreferences): Html {
 /** Time: a time field at the end of the row; leaving it with a new time saves. */
 function timeRow(restock: RestockPreferences): Html {
     const control = raw(
-        `<form class="fd-inline-form fd-restock__time" method="post" action="${RESTOCK_PATH}" data-fd-autosave><input class="fd-restock__time-input" type="time" name="restock_time" value="${esc(restock.time)}" required aria-label="Restock time" data-fd-autosave-input><span class="fd-item-row__chevron" aria-hidden="true">${icon("chevron-right")}</span></form>`,
+        `<form class="fd-inline-form fd-restock__time" method="post" action="${RESTOCK_PATH}" data-fd-autosave><input class="fd-restock__time-input" type="time" name="restock_time" value="${esc(restock.time)}" required aria-label="Restock time" data-fd-autosave-input></form>`,
     );
     return itemRow({
         title: "Time",

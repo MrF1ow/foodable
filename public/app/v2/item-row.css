@@ -741,15 +741,6 @@ button.fd-item-row__check-btn {
     line-height: 1.3334;
     text-align: left;
 }
-.fd-item-row--input-chevron {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-}
-.fd-item-row--input-chevron > .fd-item-row__face {
-    flex: 1;
-    min-width: 0;
-}
 /* "Not set" has no unit after it; the unit appears with the number. */
 .fd-autosave-input__field:placeholder-shown + .fd-autosave-input__unit {
     display: none;
@@ -757,8 +748,9 @@ button.fd-item-row__check-btn {
 
 /* ---- disclosure ---- */
 
-/* The row opens in place: a native <details> whose summary is the face, the
-   chevron turning to point down, and the answer beneath it. */
+/* The row opens in place: a native <details> whose summary is the face, a
+   small marker pointing down that turns over when open, and the answer beneath
+   it. The icon set has only a right chevron, so the marker turns it a quarter. */
 .fd-item-row--disclosure {
     display: block;
 }
@@ -772,8 +764,13 @@ button.fd-item-row__check-btn {
 .fd-item-row__disclosure > summary::-webkit-details-marker {
     display: none;
 }
-.fd-item-row__disclosure[open] .fd-item-row__chevron {
+.fd-item-row__marker {
+    display: inline-flex;
+    color: var(--text-secondary);
     transform: rotate(90deg);
+}
+.fd-item-row__disclosure[open] .fd-item-row__marker {
+    transform: rotate(270deg);
 }
 .fd-item-row__answer {
     padding: 0 0 var(--space-md);

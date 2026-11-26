@@ -142,6 +142,17 @@ test("a link row can carry data attributes on its link", () => {
     );
 });
 
+test("an href row keeps its chevron", () => {
+    const html = itemRow({
+        title: "Household",
+        href: "/settings/household",
+        trailing: { kind: "chevron" },
+    });
+    expect(html).toContain(
+        `<span class="fd-item-row__trail fd-item-row__chevron" aria-hidden="true">${icon("chevron-right")}</span>`,
+    );
+});
+
 test("an opens row is a button that shows the sheet", () => {
     const html = itemRow({
         title: "Name",
@@ -541,6 +552,16 @@ test("a selectable link row keeps the pick box beside the link, not inside it", 
     expect(anchor).not.toContain("<input");
 });
 
+test("the disclosure marker points down and turns over when the row is open", () => {
+    const css = readFileSync("./public/app/v2/item-row.css", "utf8");
+    expect(css).toMatch(
+        /\.fd-item-row__marker \{[^}]*transform: rotate\(90deg\)/,
+    );
+    expect(css).toMatch(
+        /\.fd-item-row__disclosure\[open\] \.fd-item-row__marker \{[^}]*transform: rotate\(270deg\)/,
+    );
+});
+
 test("the pick box is hidden until the list is in select mode", () => {
     const css = readFileSync("./public/app/v2/item-row.css", "utf8");
     expect(css).toMatch(/\.fd-item-row__select \{\s*display: none;/);
@@ -827,7 +848,7 @@ test("an input row is the title as the label of one autosaving input, with its u
     expect(html).not.toContain("fd-item-row__chevron");
 });
 
-test("an input row can end in a chevron, hide its label and show a refusal", () => {
+test("an input row can hide its label and show a refusal, and never ends in a chevron", () => {
     const html = itemRow({
         title: "Goal name",
         input: {
@@ -835,14 +856,14 @@ test("an input row can end in a chevron, hide its label and show a refusal", () 
             action: "/x",
             value: "",
             labelHidden: true,
-            chevron: true,
             error: "Too long.",
         },
     });
-    expect(html).toContain("fd-item-row--input fd-item-row--input-chevron");
+    expect(html).toContain("fd-item-row--input");
     expect(html).toContain("fd-autosave-input--bare");
     expect(html).toContain(`<span class="fd-visually-hidden">Goal name</span>`);
-    expect(html).toContain("fd-item-row__chevron");
+    expect(html).not.toContain("fd-item-row__chevron");
+    expect(html).not.toContain("fd-icon--chevron-right");
     expect(html).toContain(`aria-invalid="true"`);
     expect(html).toContain(`role="alert">Too long.</p>`);
 });
@@ -909,8 +930,10 @@ test("a disclosure row is a details whose summary is the face and whose body is 
         `<li class="fd-item-row fd-item-row--disclosure"><details class="fd-item-row__disclosure" id="put-away">`,
     );
     expect(html).toContain(
-        `<summary class="fd-item-row__face fd-item-row__face--link"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="Put away">Put away</span></span></span><span class="fd-item-row__trail fd-item-row__chevron" aria-hidden="true">`,
+        `<summary class="fd-item-row__face fd-item-row__face--link"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="Put away">Put away</span></span></span><span class="fd-item-row__trail fd-item-row__marker" aria-hidden="true">`,
     );
+    // A disclosure points down and turns over when open: no right chevron.
+    expect(html).not.toContain("fd-item-row__chevron");
     expect(html).toContain(
         `<div class="fd-item-row__answer"><p>It moves the amount.</p></div>`,
     );

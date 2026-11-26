@@ -25,7 +25,7 @@
  *             (and a unit), one autosaving form (`autosave-input.ts`), with the
  *             refusal under it
  *   disclosure the row opens in place to its answer: a native `<details>`
- *             whose summary is the face (title, chevron turning down) and
+ *             whose summary is the face (title, a marker pointing down that turns over when open) and
  *             whose body is `answer`; the row's `id` is on the `<details>`
  *   select    the pick box of a list in select mode: always in the markup of a
  *             selectable row, shown only while the list root carries
@@ -189,10 +189,7 @@ export type ItemRowEdit = {
 export type ItemRowInput = Omit<
     AutosaveInputOptions,
     "label" | "className" | "data"
-> & {
-    /** A chevron at the end: the row reads as a link into the value. */
-    chevron?: boolean;
-};
+>;
 
 /** The row as a disclosure: the face opens its answer beneath it. */
 export type ItemRowDisclosure = {
@@ -491,14 +488,13 @@ function inputRow(opts: ItemRowOptions, input: ItemRowInput): Html {
     ) {
         throw new Error("itemRow: an input row is only a title and its input");
     }
-    const { chevron, ...rest } = input;
     const face = autosaveInput({
-        ...rest,
+        ...input,
         label: String(opts.title),
         className: "fd-item-row__face",
     });
     return raw(
-        `<li class="${cls("fd-item-row fd-item-row--input", chevron && "fd-item-row--input-chevron", opts.className)}">${face}${chevron ? `<span class="fd-item-row__trail fd-item-row__chevron" aria-hidden="true">${icon("chevron-right")}</span>` : ""}</li>`,
+        `<li class="${cls("fd-item-row fd-item-row--input", opts.className)}">${face}</li>`,
     );
 }
 
@@ -529,7 +525,7 @@ function disclosureRow(
     const id = opts.id != null ? ` id="${esc(opts.id)}"` : "";
     return raw(
         `<li class="${cls("fd-item-row fd-item-row--disclosure", opts.className)}"><details class="fd-item-row__disclosure"${id}>
-<summary class="fd-item-row__face fd-item-row__face--link"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="${esc(opts.title)}">${esc(opts.title)}</span></span>${subtitle}</span>${trailingSlot({ kind: "chevron" }, false)}</summary>
+<summary class="fd-item-row__face fd-item-row__face--link"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="${esc(opts.title)}">${esc(opts.title)}</span></span>${subtitle}</span><span class="fd-item-row__trail fd-item-row__marker" aria-hidden="true">${icon("chevron-right", 16)}</span></summary>
 <div class="fd-item-row__answer">${disclosure.answer}</div>
 </details></li>`,
     );

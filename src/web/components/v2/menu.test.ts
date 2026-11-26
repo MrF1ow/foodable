@@ -432,7 +432,7 @@ test("a checked item with an action posts its fields and keeps its tick", () => 
     expect(html.match(/<form /g)?.length).toBe(2);
 });
 
-test("a row menu is a whole-row pull-down: the trigger reads title, value and a chevron", () => {
+test("a row menu is a whole-row pull-down: the trigger reads title and value, and shows no chevron", () => {
     const html = String(
         menu({
             label: "Day",
@@ -456,7 +456,9 @@ test("a row menu is a whole-row pull-down: the trigger reads title, value and a 
     );
     expect(html).toContain('<span class="fd-item-row__title"');
     expect(html).toContain('<span class="fd-item-row__value">Sunday</span>');
-    expect(html).toContain("fd-item-row__chevron");
+    // A drop-down opens in place, so it carries no chevron.
+    expect(html).not.toContain("fd-item-row__chevron");
+    expect(html).not.toContain("fd-icon--chevron-right");
     expect(html).toContain('role="menu" aria-label="Day" hidden');
 });
 
