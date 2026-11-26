@@ -115,6 +115,52 @@ describeDb(
             expect(lines.map((l) => l.displayName)).toEqual([]);
         });
 
+        test("the week's inputs carry the saved recipes and how each repeat repeats, for the edit sheet's Recipe and Repeat rows", async () => {
+            const { sql } = getCtx();
+            const stewId = crypto.randomUUID();
+            const draftId = crypto.randomUUID();
+            await sql`
+                insert into public.recipes (id, household_id, creator_id, name, yield_portions)
+                values (${stewId}, ${householdId}, ${ownerId}, ${"Stew"}, ${2})
+            `;
+            await sql`
+                insert into public.recipes (
+                    id, household_id, creator_id, name, yield_portions, verification
+                )
+                values (${draftId}, ${householdId}, ${ownerId}, ${"Draft"}, ${2}, ${"unverified"})
+            `;
+            const plans = liveRecipePlansStore();
+            await plans.addPlan({
+                householdId,
+                recipeId,
+                date: "2026-11-12",
+                slot: "lunch",
+            });
+            const rule = await plans.addRule({
+                householdId,
+                recipeId,
+                slot: "dinner",
+                startsOn: "2026-11-12",
+                repeat: "days",
+                days: [1, 4],
+            });
+            const inputs = await asUser(
+                ownerId,
+                () => loadWeekPlanInputs(householdId, "2026-11-12"),
+                householdId,
+            );
+            // Saved recipes only: the draft is not a choice.
+            expect(inputs.savedRecipes.map((r) => r.name).sort()).toEqual([
+                "Soup",
+                "Stew",
+            ]);
+            // One entry per repeat read, none for a one-off.
+            expect([...inputs.rules]).toEqual([
+                [rule!.id, { repeat: "days", days: [1, 4] }],
+            ]);
+            expect(inputs.plans.some((p) => p.ruleId === rule!.id)).toBe(true);
+        });
+
         test("a plan for a named person follows their saved portions as they change, and the servings given with them are ignored", async () => {
             const recipes = liveRecipesStore();
             const foods = liveFoodsStore();

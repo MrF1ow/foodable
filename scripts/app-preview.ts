@@ -862,9 +862,11 @@ function previewMoveError() {
     return (
         withPlanEditDraft(view, {
             planId: "pl2",
+            recipeId: "pr-chili",
             date: "2026-11-01",
             slot: "dinner",
             servings: 4,
+            repeat: "weekly",
             error: "Pick today or a later day.",
         }) ?? view
     );
@@ -973,6 +975,15 @@ function previewWeekPlan(openSheet?: "missing" | "plan") {
             { foodId: "pf-avocado", quantity: grams(150) },
         ],
         foodsById: new Map(),
+        // What a planned entry's Recipe menu offers, and how its repeat repeats.
+        savedRecipes: [
+            { id: "pr-salmon", name: "Salmon, rice & spinach" },
+            { id: "pr-chili", name: "Beef chili" },
+            { id: "pr-bowl", name: "Chicken rice bowl" },
+            { id: "pr-frittata", name: "Spinach cheddar frittata" },
+            { id: "pr-lentil", name: "Lentil soup" },
+        ],
+        rules: new Map([["rl1", { repeat: "weekly" as const, days: [] }]]),
     });
     return {
         ...view,

@@ -1062,8 +1062,9 @@ try {
         { timeBefore, timePicking, timeKept, ex: drain() },
     );
 
-    // A plan entry's edit sheet: titled with the recipe, the day and meal under
-    // it, Day and Meal as rows with pull-downs (the row's value follows the choice).
+    // A plan entry's edit sheet: titled with the day and the meal under it;
+    // Recipe, Meal and Repeat are rows with pull-downs (the row's value follows
+    // the choice), Day is a month calendar that opens under its row.
     await clickSel(".fd-plan-week [data-fd-sheet-row] [data-fd-menu-trigger]");
     await sleep(150);
     await clickSel(
@@ -1080,39 +1081,86 @@ try {
         title: string | null;
         subtitle: string | null;
         rows: string[];
-        dayChoices: number;
+        values: string[];
+        recipeChoices: number;
         valueAfter: string | null;
         fieldAfter: string | null;
+        form: boolean;
     }>(`(() => {
         const d = document.querySelector("dialog[id^='fd-plan-edit-'][open]");
         const rows = [...(d?.querySelectorAll("[data-anchor='row']") ?? [])];
         const items = [...(rows[0]?.querySelectorAll("[data-fd-menu-value]") ?? [])];
-        items[items.length - 1]?.click();
+        const values = rows.map((r) => r.querySelector(".fd-item-row__value")?.textContent ?? "");
+        // Another recipe than the one the entry is on.
+        items.find((i) => i.textContent.trim() !== values[0])?.click();
         return {
             open: !!d,
             side: d?.classList.contains("fd-sheet--side") ?? false,
             title: d?.querySelector(".fd-sheet__title")?.textContent ?? null,
             subtitle: d?.querySelector(".fd-sheet__subtitle")?.textContent ?? null,
             rows: rows.map((r) => r.querySelector(".fd-item-row__title")?.textContent ?? ""),
-            dayChoices: items.length,
+            values,
+            recipeChoices: items.length,
             valueAfter: rows[0]?.querySelector(".fd-item-row__value")?.textContent ?? null,
             fieldAfter: rows[0]?.querySelector("[data-fd-menu-field]")?.value ?? null,
+            form: !!d?.querySelector("form[data-fd-plan-form]"),
+        };
+    })()`);
+    // Day: its row opens the calendar, a day picked closes it and reads in the row.
+    const planDay = await ev<{
+        rowTitle: string | null;
+        shown: boolean;
+        inside: boolean;
+        want: string | null;
+        field: string | null;
+        value: string | null;
+        closed: boolean;
+    }>(`(() => {
+        const d = document.querySelector("dialog[id^='fd-plan-edit-'][open]");
+        const toggle = d.querySelector("[data-fd-month-toggle]");
+        toggle.click();
+        const p = d.querySelector("[data-fd-month-picker]");
+        const panel = d.querySelector(".fd-sheet-panel").getBoundingClientRect();
+        const shown = !p.hidden && p.getClientRects().length > 0;
+        const days = [...p.querySelectorAll("[data-fd-month-day]")];
+        const inside = days.every((b) => { const r = b.getBoundingClientRect(); return r.left >= panel.left - 1 && r.right <= panel.right + 1; });
+        const open = days.filter((b) => !b.disabled);
+        const pick = open[open.length - 1];
+        const want = pick?.getAttribute("data-fd-month-day") ?? null;
+        pick?.click();
+        return {
+            rowTitle: toggle.querySelector(".fd-item-row__title")?.textContent ?? null,
+            shown,
+            inside,
+            want,
+            field: d.querySelector("[data-fd-month-field]").value,
+            value: toggle.querySelector(".fd-item-row__value")?.textContent ?? null,
+            closed: p.hidden,
         };
     })()`);
     await pressEsc();
     record(
-        "v2 today: a plan entry's edit sheet is a side sheet titled with the recipe and the day and meal under it, with Day and Meal as pull-down rows whose value follows the choice",
+        "v2 today: a plan entry's edit sheet is a side sheet titled with the day and the meal under it, with Recipe, Meal and Repeat as pull-down rows whose value follows the choice, Repeat starting on how the entry repeats, and Day opening a month calendar whose pick reads in its row",
         planSheet.open &&
             planSheet.side &&
-            (planSheet.title ?? "") !== "" &&
-            /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2} · (breakfast|lunch|dinner|snack)$/.test(
-                planSheet.subtitle ?? "",
+            planSheet.form &&
+            /^[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}$/.test(
+                planSheet.title ?? "",
             ) &&
-            planSheet.rows.join("|") === "Day|Meal" &&
-            planSheet.dayChoices >= 14 &&
+            /^(Breakfast|Lunch|Dinner|Snack)$/.test(planSheet.subtitle ?? "") &&
+            planSheet.rows.join("|") === "Recipe|Meal|Repeat" &&
+            planSheet.values[2] === "Once" &&
+            planSheet.recipeChoices >= 3 &&
             planSheet.valueAfter != null &&
-            /^\d{4}-\d{2}-\d{2}$/.test(planSheet.fieldAfter ?? ""),
-        { planSheet, ex: drain() },
+            planSheet.valueAfter !== planSheet.values[0] &&
+            (planSheet.fieldAfter ?? "") !== "" &&
+            planDay.rowTitle === "Day" &&
+            planDay.shown &&
+            planDay.inside &&
+            /^\d{4}-\d{2}-\d{2}$/.test(planDay.field ?? "") &&
+            planDay.field === planDay.want &&
+            planDay.closed,
+        { planSheet, planDay, ex: drain() },
     );
 
     // A plan edit saved over Turbo morphs the week: the rows are reused under
@@ -1408,23 +1456,55 @@ try {
             };
         })()`);
         const editButtons = await sheetButtons();
-        const reach: { day: unknown; meal: unknown } = {
-            day: null,
+        const reach: { recipe: unknown; meal: unknown; repeat: unknown } = {
+            recipe: null,
             meal: null,
+            repeat: null,
         };
-        for (const [name, key] of [
-            ["Day", "day"],
-            ["Meal", "meal"],
+        for (const [key, field] of [
+            ["recipe", "recipe_id"],
+            ["meal", "slot"],
+            ["repeat", "repeat"],
         ] as const) {
             await clickSel(
-                `#fd-plan-edit-pl1 [data-anchor="row"]:has([data-fd-menu-field][name="${name === "Day" ? "date" : "slot"}"]) [data-fd-menu-trigger]`,
+                `#fd-plan-edit-pl1 [data-anchor="row"]:has([data-fd-menu-field][name="${field}"]) [data-fd-menu-trigger]`,
             );
             await sleep(250);
             reach[key] = await reachItems(
-                `#fd-plan-edit-pl1 [data-anchor="row"]:has([data-fd-menu-field][name="${name === "Day" ? "date" : "slot"}"])`,
+                `#fd-plan-edit-pl1 [data-anchor="row"]:has([data-fd-menu-field][name="${field}"])`,
             );
             await menuEsc();
         }
+        // Day is a calendar inside the sheet: every date in the panel and a
+        // real tap target, earlier days off.
+        await clickSel("#fd-plan-edit-pl1 [data-fd-month-toggle]");
+        await sleep(200);
+        const editCalendar = await ev<{
+            shown: boolean;
+            inside: boolean;
+            tap: boolean;
+            pastDisabled: boolean;
+            gapAbove: number;
+            gapBelow: number;
+        }>(`(() => {
+            const d = document.querySelector("#fd-plan-edit-pl1");
+            const p = d.querySelector("[data-fd-month-picker]");
+            const panel = d.querySelector(".fd-sheet-panel").getBoundingClientRect();
+            const days = [...p.querySelectorAll("[data-fd-month-day]")];
+            const open = days.filter((b) => !b.disabled);
+            const dayGroup = d.querySelector("[data-fd-month-toggle]").closest(".fd-list-group");
+            const mealGroup = d.querySelector('[data-fd-menu-field][name="slot"]').closest(".fd-list-group");
+            return {
+                shown: !p.hidden && p.getClientRects().length > 0,
+                inside: days.every((b) => { const r = b.getBoundingClientRect(); return r.left >= panel.left - 1 && r.right <= panel.right + 1; }),
+                tap: open.every((b) => { const r = b.getBoundingClientRect(); return r.height >= 40 && r.width >= 32; }),
+                pastDisabled: p.querySelector('[data-fd-month-day="2026-11-09"]').disabled && !p.querySelector('[data-fd-month-day="2026-11-10"]').disabled,
+                gapAbove: Math.round(p.getBoundingClientRect().top - dayGroup.getBoundingClientRect().bottom),
+                gapBelow: Math.round(mealGroup.getBoundingClientRect().top - p.getBoundingClientRect().bottom),
+            };
+        })()`);
+        await clickSel("#fd-plan-edit-pl1 [data-fd-month-toggle]");
+        await sleep(100);
         await ev(
             `[...document.querySelectorAll("#fd-plan-edit-pl1 .fd-sheet__actions .fd-btn")].find((b) => b.textContent.trim() === "Save").click()`,
         );
@@ -1576,13 +1656,24 @@ try {
             (width < 1024 || (edit.gap >= 0 && edit.gap <= 32)) &&
             editButtons.ok &&
             editButtons.n === 2 &&
-            (reach.day as { n: number; bad: string[] }).n >= 14 &&
-            (reach.day as { bad: string[] }).bad.length === 0 &&
+            (reach.recipe as { n: number }).n >= 3 &&
+            (reach.recipe as { bad: string[] }).bad.length === 0 &&
             (reach.meal as { n: number }).n === 4 &&
             (reach.meal as { bad: string[] }).bad.length === 0 &&
+            (reach.repeat as { n: number }).n === 5 &&
+            (reach.repeat as { bad: string[] }).bad.length === 0 &&
+            editCalendar.shown &&
+            editCalendar.inside &&
+            editCalendar.tap &&
+            editCalendar.pastDisabled &&
+            // Day, its calendar and Meal sit evenly apart.
+            editCalendar.gapAbove >= 8 &&
+            Math.abs(editCalendar.gapAbove - editCalendar.gapBelow) <= 1 &&
             savePosts.length === 1 &&
             entry(savePosts[0], "back") === "recipes" &&
             entry(savePosts[0], "date") != null &&
+            entry(savePosts[0], "recipe_id") != null &&
+            entry(savePosts[0], "repeat") === "once" &&
             armed.labels.join("|") === "Cancel|Remove" &&
             beforeRemove === 0 &&
             removePosts.length === 1 &&
@@ -1618,6 +1709,7 @@ try {
             edit,
             editButtons,
             reach,
+            editCalendar,
             savePosts,
             armed,
             beforeRemove,
@@ -1630,7 +1722,7 @@ try {
         recipesOk = recipesOk && ok;
     }
     record(
-        "v2 recipes at 390 and 1440: the list, the filter pull-down (a Turbo visit), a pasted link's Go posting the import, a row's ⋯ Plan into the Add to plan sheet, Today's Plan into picking a day (its filter links keep the day), a planned card's edit sheet (Day and Meal items reachable, Save, Remove asking first) and the missing link; every sheet button measured and the page never wider than the screen",
+        "v2 recipes at 390 and 1440: the list, the filter pull-down (a Turbo visit), a pasted link's Go posting the import, a row's ⋯ Plan into the Add to plan sheet, Today's Plan into picking a day (its filter links keep the day), a planned card's edit sheet (Recipe, Meal and Repeat items reachable, Day's calendar inside the sheet with even spacing, Save posting recipe and repeat, Remove asking first) and the missing link; every sheet button measured and the page never wider than the screen",
         recipesOk,
         { ...recipesRes, ex: drain() },
     );
@@ -2053,9 +2145,13 @@ try {
             tap: boolean;
             pastDisabled: boolean;
             prevDisabled: boolean;
+            gapAbove: number;
+            gapBelow: number;
         }>(`(() => {
             const d = document.querySelector("#fd-recipe-plan-sheet");
             const p = d.querySelector("[data-fd-month-picker]");
+            const startsGroup = d.querySelector("[data-fd-month-toggle]").closest(".fd-list-group");
+            const mealGroup = d.querySelector('[data-fd-menu-field][name="slot"]').closest(".fd-list-group");
             const panel = d.querySelector(".fd-sheet-panel").getBoundingClientRect();
             const days = [...p.querySelectorAll("[data-fd-month-day]")];
             const open = days.filter((b) => !b.disabled);
@@ -2068,6 +2164,8 @@ try {
                 tap: open.every((b) => { const r = b.getBoundingClientRect(); return r.height >= 40 && r.width >= 32; }),
                 pastDisabled: p.querySelector('[data-fd-month-day="2026-11-09"]').disabled && !p.querySelector('[data-fd-month-day="2026-11-10"]').disabled,
                 prevDisabled: p.querySelector("[data-fd-month-prev]").disabled,
+                gapAbove: Math.round(p.getBoundingClientRect().top - startsGroup.getBoundingClientRect().bottom),
+                gapBelow: Math.round(mealGroup.getBoundingClientRect().top - p.getBoundingClientRect().bottom),
             };
         })()`);
         await clickSel("#fd-recipe-plan-sheet [data-fd-month-next]");
@@ -2212,6 +2310,9 @@ try {
             picker.tap &&
             picker.pastDisabled &&
             picker.prevDisabled &&
+            // Starts, the open calendar and Meal sit evenly apart.
+            picker.gapAbove >= 8 &&
+            Math.abs(picker.gapAbove - picker.gapBelow) <= 1 &&
             nextMonth.label === "December 2026" &&
             nextMonth.days === 31 &&
             !nextMonth.prevDisabled &&
@@ -2271,7 +2372,7 @@ try {
         planSheetOk = planSheetOk && ok;
     }
     record(
-        "v2 plan sheet at 390 and 1440: Plan <recipe> with Starts opening a month picker (dates inside the sheet, earlier days off, months move, a pick reads in the row), Meal and Repeat pull-downs with every item reachable, Pick days showing the weekday chips that post their days, another repeat posting none; its button measured and the page never wider than the screen",
+        "v2 plan sheet at 390 and 1440: Plan <recipe> with Starts opening a month picker (dates inside the sheet, evenly spaced between Starts and Meal, earlier days off, months move, a pick reads in the row), Meal and Repeat pull-downs with every item reachable, Pick days showing the weekday chips that post their days, another repeat posting none; its button measured and the page never wider than the screen",
         planSheetOk,
         { ...planSheetRes, ex: drain() },
     );

@@ -810,13 +810,54 @@ describe("This week on Today", () => {
         expect(listed[0]).toContain(">Wed<");
         expect(listed[0]).toContain('data-sheet-id="fd-plan-edit-p1"');
         // Only the days with something planned are listed.
-        expect(html).not.toContain("fd-plan-day");
+        expect(html).not.toMatch(/class="fd-plan-day[ "]/);
         expect(html).toContain("1 ingredient missing");
         // The sheets its rows and link open are on the page once each.
         expect(html.match(/ id="fd-plan-edit-p1"/g)).toHaveLength(1);
         expect(html.match(/ id="fd-plan-missing-sheet"/g)).toHaveLength(1);
         expect(html).toContain('name="back" value="today"');
         expect(html).toContain("Add 1 to groceries");
+    });
+
+    test("a planned dinner's sheet is titled with its day and meal and has Recipe, Day as a calendar, Meal, Repeat and Servings", () => {
+        const html = body(
+            buildWeekPlanView({
+                today,
+                plans: [plan("p1", "2026-11-11", "dinner", "rule-1")],
+                recipes: [
+                    {
+                        id: "r1",
+                        name: "Beef chili",
+                        yieldPortions: 2,
+                        ingredients: [],
+                    },
+                ],
+                stock: [],
+                foodsById: new Map(),
+                savedRecipes: [
+                    { id: "r1", name: "Beef chili" },
+                    { id: "r2", name: "Burrito bowls" },
+                ],
+                rules: new Map([["rule-1", { repeat: "weekly", days: [] }]]),
+            }),
+        );
+        const sheet = html.match(
+            /<dialog[^>]*id="fd-plan-edit-p1"[\s\S]*?<\/dialog>/,
+        )![0];
+        expect(sheet).toContain(">Wed 11 Nov<");
+        expect(sheet).toContain(
+            'fd-sheet__subtitle" id="fd-plan-edit-p1-sub">Dinner<',
+        );
+        for (const title of ["Recipe", "Day", "Meal", "Repeat"]) {
+            expect(sheet).toContain(`fd-item-row__title" title="${title}"`);
+        }
+        expect(sheet).toContain('fd-item-row__value">Beef chili<');
+        expect(sheet).toContain('name="repeat" value="weekly"');
+        expect(sheet).toContain("data-fd-month-picker");
+        expect(sheet).toContain('name="servings"');
+        expect(sheet).toContain('action="/recipes/plan/p1/move"');
+        // The form the page script drives (the calendar, the Repeat row, the weekday chips).
+        expect(sheet).toContain("data-fd-plan-form");
     });
 
     test("Plan picks a recipe for the first day with nothing planned", () => {

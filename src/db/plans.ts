@@ -7,6 +7,7 @@ import {
     checkPlanMembers,
     checkPlanRepeat,
     checkPlanServings,
+    checkPlanSkippedDays,
     checkPlanSlot,
     expandRules,
     isPlanRepeat,
@@ -596,6 +597,11 @@ export function liveRecipePlansStore(): PlansStore {
             const repeat = checkPlanRepeat(rule.repeat);
             const days = repeat === "days" ? checkPlanDays(rule.days) : [];
             const memberIds = checkPlanMembers(rule.memberIds);
+            // A repeat that carries on from an earlier one keeps its skipped
+            // days and its last day.
+            const skippedOn = checkPlanSkippedDays(rule.skippedOn);
+            const endsOn =
+                rule.endsOn == null ? null : checkPlanDate(rule.endsOn);
             if (!UUID_RE.test(rule.recipeId)) return null;
             return run(async (tx) => {
                 try {
@@ -605,10 +611,10 @@ export function liveRecipePlansStore(): PlansStore {
                     // shows on a day this one would.
                     const candidate = {
                         startsOn,
-                        endsOn: null,
+                        endsOn,
                         repeat,
                         days,
-                        skippedOn: [],
+                        skippedOn,
                     };
                     const others = await rows<Record<string, unknown>>(
                         tx,
@@ -635,7 +641,8 @@ export function liveRecipePlansStore(): PlansStore {
                             sp`
                             insert into ${sp.unsafe(PLAN_RULES)} (
                                 id, household_id, recipe_id, meal, servings,
-                                starts_on, rule, days, member_ids, created_by
+                                starts_on, rule, days, member_ids, created_by,
+                                ends_on, skipped_on
                             )
                             select
                                 ${rule.id ?? crypto.randomUUID()}::uuid,
@@ -647,7 +654,9 @@ export function liveRecipePlansStore(): PlansStore {
                                 ${repeat}::text,
                                 ${days}::int[]::smallint[],
                                 ${sp.array(memberIds, "uuid")},
-                                ${rule.createdBy ?? null}::uuid
+                                ${rule.createdBy ?? null}::uuid,
+                                ${endsOn}::date,
+                                ${skippedOn}::text[]::date[]
                             from ${sp.unsafe(RECIPES)} r
                             where r.id = ${rule.recipeId}::uuid
                               and r.household_id = ${rule.householdId}::uuid
@@ -704,6 +713,26 @@ export function liveRecipePlansStore(): PlansStore {
                     return data.map(planRuleFromRow);
                 } catch (err) {
                     throw pgError("list plan rules", err);
+                }
+            });
+        },
+        async removeRule(householdId, ruleId) {
+            if (!UUID_RE.test(ruleId)) return false;
+            return run(async (tx) => {
+                try {
+                    await lockHouseholdPlans(tx, householdId);
+                    const removed = await rows(
+                        tx,
+                        tx`
+                            delete from ${tx.unsafe(PLAN_RULES)}
+                            where household_id = ${householdId}
+                              and id = ${ruleId}::uuid
+                            returning id
+                        `,
+                    );
+                    return removed.length > 0;
+                } catch (err) {
+                    throw pgError("remove plan rule", err);
                 }
             });
         },

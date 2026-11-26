@@ -1122,6 +1122,19 @@ describe("autosave.js whole forms", () => {
     });
 });
 
+describe("the plan sheets' rows", () => {
+    test("the open calendar adds no padding of its own, so Starts, the calendar and Meal sit evenly 12px apart", async () => {
+        const css = (await getAppV2Css()).replace(/\/\*[\s\S]*?\*\//g, "");
+        expect(css).toMatch(
+            /\.fd-plan-form \.fd-month-picker\s*\{\s*padding-block:\s*0;\s*\}/,
+        );
+        // The section's own gap is the shared 12px between its blocks.
+        expect(css).toMatch(
+            /\.fd-sheet__content\s*\{[^}]*gap:\s*var\(--space-md\)/,
+        );
+    });
+});
+
 describe("app-wide rules (app-rules.css, the last partial)", () => {
     const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
     const rules = readFileSync("./public/app/v2/app-rules.css", "utf8");

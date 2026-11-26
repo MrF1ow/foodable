@@ -28,7 +28,9 @@ import {
     planWeekStart,
     rulesShareDay,
     movePlannedRecipe,
+    ruleEntryId,
     unplanRecipe,
+    updatePlannedRecipe,
     type PlanRule,
     type PlansStore,
     type RecipePlan,
@@ -1903,5 +1905,1080 @@ describe("expandRules", () => {
             if (previous === undefined) delete process.env.TZ;
             else process.env.TZ = previous;
         }
+    });
+});
+
+describe("updatePlannedRecipe", () => {
+    const HH = "hh-1";
+    const TODAY = "2026-11-12"; // a Thursday
+
+    async function setup() {
+        const recipes = createMemoryRecipesStore();
+        const chili = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: "u-1",
+            name: "Beef chili",
+            yieldPortions: 4,
+        });
+        const bowls = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: "u-1",
+            name: "Burrito bowls",
+            yieldPortions: 2,
+        });
+        const plans = createMemoryPlansStore();
+        const plan = async (over: Record<string, unknown> = {}) => {
+            const out = await planRecipe(plans, {
+                householdId: HH,
+                recipeId: chili.id,
+                recipeName: chili.name,
+                recipeYield: 4,
+                date: TODAY,
+                slot: "dinner",
+                servings: 2,
+                repeat: "once",
+                today: TODAY,
+                createdBy: "u-1",
+                ...over,
+            });
+            return out!.plan;
+        };
+        const update = (
+            planId: string,
+            patch: Parameters<typeof updatePlannedRecipe>[3],
+            extra: Partial<Parameters<typeof updatePlannedRecipe>[4]> = {},
+        ) =>
+            updatePlannedRecipe(plans, HH, planId, patch, {
+                recipes,
+                today: TODAY,
+                ...extra,
+            });
+        const all = () => plans.listPlans(HH, "2026-11-01", "2027-01-31");
+        const days = async (recipeId?: string) =>
+            (await all())
+                .filter(
+                    (p) => recipeId === undefined || p.recipeId === recipeId,
+                )
+                .map((p) => `${p.date} ${p.slot}`);
+        return { recipes, chili, bowls, plans, plan, update, all, days };
+    }
+
+    // A weekly series from Thursday 12 Nov: 11-12, 11-19, 11-26, 12-03, ...
+    async function weekly() {
+        const t = await setup();
+        const first = await t.plan({ repeat: "weekly" });
+        const ruleId = first.ruleId!;
+        return {
+            ...t,
+            ruleId,
+            day: (date: string) => ruleEntryId(ruleId, date),
+        };
+    }
+
+    test("a one-off changes day, meal and servings in place and keeps its id", async () => {
+        const { plan, update, all, plans } = await setup();
+        const one = await plan({ date: "2026-11-13" });
+        const out = await update(one.id, {
+            date: "2026-11-14",
+            slot: "lunch",
+            servings: 3,
+        });
+        expect(out?.unchanged).toBe(false);
+        expect(out?.plan).toMatchObject({
+            id: one.id,
+            date: "2026-11-14",
+            slot: "lunch",
+            servings: 3,
+        });
+        expect(out?.repeat).toBe("once");
+        expect(out?.created).toEqual({ planId: null, ruleId: null });
+        expect((await all()).map((p) => p.id)).toEqual([one.id]);
+        expect(await plans.listRules(HH)).toEqual([]);
+    });
+
+    test("a one-off edited twice stays one entry: a new recipe, then a new day on the id that came back", async () => {
+        const { plan, update, all, chili, bowls } = await setup();
+        const one = await plan({ date: "2026-11-13" });
+        const first = await update(one.id, { recipeId: bowls.id });
+        expect(first?.plan).toMatchObject({
+            recipeId: bowls.id,
+            date: "2026-11-13",
+            slot: "dinner",
+            servings: 2,
+        });
+        expect(first?.created.planId).toBe(first?.plan.id);
+        const second = await update(first!.plan.id, { date: "2026-11-15" });
+        expect(second?.plan).toMatchObject({
+            id: first!.plan.id,
+            recipeId: bowls.id,
+            date: "2026-11-15",
+        });
+        const left = await all();
+        expect(left).toHaveLength(1);
+        expect(left[0]?.recipeId).toBe(bowls.id);
+        expect(left.some((p) => p.recipeId === chili.id)).toBe(false);
+    });
+
+    test("one day of a series changes that day only: the day leaves its series and the series is otherwise as it was", async () => {
+        const { ruleId, day, update, all, plans } = await weekly();
+        const before = await plans.getRule(HH, ruleId);
+        const out = await update(day("2026-11-26"), {
+            slot: "lunch",
+            servings: 5,
+        });
+        expect(out?.unchanged).toBe(false);
+        expect(out?.plan).toMatchObject({
+            date: "2026-11-26",
+            slot: "lunch",
+            servings: 5,
+        });
+        expect(out?.plan.ruleId).toBeUndefined();
+        expect(out?.repeat).toBe("once");
+        expect(out?.created.planId).toBe(out?.plan.id);
+        const after = await plans.getRule(HH, ruleId);
+        expect(after).toMatchObject({
+            id: ruleId,
+            endsOn: null,
+            repeat: "weekly",
+            skippedOn: ["2026-11-26"],
+        });
+        expect(after?.startsOn).toBe(before?.startsOn);
+        const week = await all();
+        expect(
+            week.filter((p) => p.slot === "dinner").map((p) => p.date),
+        ).toContain("2026-12-03");
+        expect(
+            week.filter((p) => p.slot === "dinner").map((p) => p.date),
+        ).not.toContain("2026-11-26");
+        // a servings-only change detaches the day as well
+        const lone = await update(day("2026-12-03"), { servings: 6 });
+        expect(lone?.plan).toMatchObject({ date: "2026-12-03", servings: 6 });
+        expect(lone?.plan.ruleId).toBeUndefined();
+        expect((await plans.getRule(HH, ruleId))?.skippedOn).toEqual([
+            "2026-11-26",
+            "2026-12-03",
+        ]);
+    });
+
+    test("one day of a series with a new recipe is a one-off of that recipe, and the series keeps its recipe", async () => {
+        const { ruleId, day, update, all, plans, bowls, chili } =
+            await weekly();
+        const out = await update(day("2026-11-19"), { recipeId: bowls.id });
+        expect(out?.plan).toMatchObject({
+            recipeId: bowls.id,
+            date: "2026-11-19",
+            slot: "dinner",
+            servings: 2,
+        });
+        expect(out?.plan.ruleId).toBeUndefined();
+        expect((await plans.getRule(HH, ruleId))?.recipeId).toBe(chili.id);
+        const on = (await all()).filter((p) => p.date === "2026-11-19");
+        expect(on.map((p) => p.recipeId)).toEqual([bowls.id]);
+    });
+
+    test("a save with nothing changed writes nothing: the series keeps its ids, skips and end day", async () => {
+        const { ruleId, day, update, all, plans } = await weekly();
+        await plans.removePlan(HH, day("2026-11-19"));
+        await plans.endRuleBefore(HH, ruleId, "2026-12-11");
+        const ruleBefore = await plans.getRule(HH, ruleId);
+        const weekBefore = await all();
+        const entry = (await all()).find((p) => p.date === "2026-11-26")!;
+        const out = await update(entry.id, {
+            recipeId: entry.recipeId,
+            date: "2026-11-26",
+            slot: "dinner",
+            servings: entry.servings,
+            repeat: "weekly",
+        });
+        expect(out?.unchanged).toBe(true);
+        expect(out?.plan).toEqual(entry);
+        expect(out?.created).toEqual({ planId: null, ruleId: null });
+        expect(await plans.getRule(HH, ruleId)).toEqual(ruleBefore);
+        expect(await all()).toEqual(weekBefore);
+        expect(ruleBefore).toMatchObject({
+            endsOn: "2026-12-10",
+            skippedOn: ["2026-11-19"],
+        });
+        // and nothing at all in the patch is no change either
+        expect((await update(entry.id, {}))?.unchanged).toBe(true);
+        // a one-off saved as it is
+        const one = await (await setup()).plan({ date: "2026-11-14" });
+        expect(one.servings).toBe(2);
+    });
+
+    test("a repeat changed on a series day ends the old series before that day and starts the new one there", async () => {
+        const { ruleId, day, update, all, plans, chili } = await weekly();
+        const out = await update(day("2026-11-26"), { repeat: "daily" });
+        expect(out?.unchanged).toBe(false);
+        expect(out?.repeat).toBe("daily");
+        expect(out?.plan).toMatchObject({
+            date: "2026-11-26",
+            recipeId: chili.id,
+            slot: "dinner",
+            servings: 2,
+        });
+        expect(out?.plan.ruleId).toBeDefined();
+        expect(out?.plan.ruleId).not.toBe(ruleId);
+        expect(out?.created).toEqual({
+            planId: null,
+            ruleId: out?.plan.ruleId ?? null,
+        });
+        // Past days are the old series, untouched; the old series ends the day before
+        expect((await plans.getRule(HH, ruleId))?.endsOn).toBe("2026-11-25");
+        const dates = (await all()).map((p) => p.date);
+        expect(dates.slice(0, 3)).toEqual([
+            "2026-11-12",
+            "2026-11-19",
+            "2026-11-26",
+        ]);
+        expect(dates).toContain("2026-11-27");
+        expect(dates).toContain("2026-11-28");
+        expect(dates.filter((d) => d === "2026-11-26")).toHaveLength(1);
+        const old = (await all()).filter((p) => p.ruleId === ruleId);
+        expect(old.map((p) => p.date)).toEqual(["2026-11-12", "2026-11-19"]);
+    });
+
+    test("a new recipe and a new repeat in one save start the new series with that recipe", async () => {
+        const { ruleId, day, update, all, plans, bowls, chili } =
+            await weekly();
+        const out = await update(day("2026-11-26"), {
+            recipeId: bowls.id,
+            repeat: "weekdays",
+        });
+        expect(out?.plan).toMatchObject({
+            recipeId: bowls.id,
+            date: "2026-11-26",
+        });
+        expect(out?.repeat).toBe("weekdays");
+        const week = await all();
+        expect(
+            week
+                .filter((p) => p.recipeId === bowls.id)
+                .map((p) => p.date)
+                .slice(0, 4),
+        ).toEqual(["2026-11-26", "2026-11-27", "2026-11-30", "2026-12-01"]);
+        expect(
+            week.filter((p) => p.recipeId === chili.id).map((p) => p.date),
+        ).toEqual(["2026-11-12", "2026-11-19"]);
+        expect((await plans.getRule(HH, ruleId))?.endsOn).toBe("2026-11-25");
+    });
+
+    test("a day moved earlier with a new repeat ends the old series before the new day, keeps the days before it, and does not clash", async () => {
+        const { ruleId, day, update, all, plans } = await weekly();
+        // the series is Thursdays; Day moves from Thu 26 Nov back to Mon 16 Nov
+        const out = await update(day("2026-11-26"), {
+            date: "2026-11-16",
+            repeat: "weekdays",
+        });
+        expect(out?.plan).toMatchObject({ date: "2026-11-16" });
+        expect(out?.repeat).toBe("weekdays");
+        expect((await plans.getRule(HH, ruleId))?.endsOn).toBe("2026-11-15");
+        const dates = (await all()).map((p) => p.date);
+        // 12 Nov, the one day before the new start, is still the old series
+        expect(dates[0]).toBe("2026-11-12");
+        expect(dates.slice(1, 4)).toEqual([
+            "2026-11-16",
+            "2026-11-17",
+            "2026-11-18",
+        ]);
+        // the old series' 19 Nov is gone from it: the new series shows it once
+        expect(dates.filter((d) => d === "2026-11-19")).toHaveLength(1);
+        expect(
+            (await all()).find((p) => p.date === "2026-11-19")?.ruleId,
+        ).not.toBe(ruleId);
+    });
+
+    test("a repeat changed on a day of an ended series keeps the series' end day", async () => {
+        const { ruleId, day, update, all, plans } = await weekly();
+        await plans.endRuleBefore(HH, ruleId, "2026-12-15"); // last day 14 Dec
+        const out = await update(day("2026-12-03"), { repeat: "daily" });
+        expect(out?.plan.date).toBe("2026-12-03");
+        const newRuleId = out!.plan.ruleId!;
+        expect((await plans.getRule(HH, newRuleId))?.endsOn).toBe("2026-12-14");
+        const last = (await all()).filter((p) => p.ruleId === newRuleId).pop();
+        expect(last?.date).toBe("2026-12-14");
+        expect((await all()).some((p) => p.date === "2026-12-15")).toBe(false);
+    });
+
+    test("a series day moved past its series' last day while its repeat changes is refused, and nothing is written", async () => {
+        const { ruleId, day, update, plans, all } = await weekly();
+        await plans.endRuleBefore(HH, ruleId, "2026-12-15");
+        const before = await all();
+        await expect(
+            update(day("2026-12-03"), { date: "2026-12-20", repeat: "daily" }),
+        ).rejects.toThrow(PlanInputError);
+        expect(await all()).toEqual(before);
+    });
+
+    test("a series day set to Once ends the series before it and leaves a one-off and no repeat from that day on", async () => {
+        const { ruleId, day, update, all, plans, chili } = await weekly();
+        const out = await update(day("2026-11-26"), { repeat: "once" });
+        expect(out?.repeat).toBe("once");
+        expect(out?.plan).toMatchObject({
+            recipeId: chili.id,
+            date: "2026-11-26",
+            slot: "dinner",
+            servings: 2,
+        });
+        expect(out?.plan.ruleId).toBeUndefined();
+        expect(out?.created).toEqual({ planId: out!.plan.id, ruleId: null });
+        expect(await plans.listRules(HH)).toEqual([]);
+        expect((await plans.getRule(HH, ruleId))?.endsOn).toBe("2026-11-25");
+        expect((await all()).map((p) => [p.date, p.ruleId ?? null])).toEqual([
+            ["2026-11-12", ruleId],
+            ["2026-11-19", ruleId],
+            ["2026-11-26", null],
+        ]);
+    });
+
+    test("a repeat changed mid-series keeps a skipped day and a moved day, and never rewrites the days before it", async () => {
+        const { ruleId, day, update, all, plans, bowls } = await weekly();
+        // Skip 3 Dec, and move 17 Dec to Fri 18 Dec (it leaves the series, a one-off appears)
+        await plans.removePlan(HH, day("2026-12-03"));
+        await plans.movePlan(HH, day("2026-12-17"), "2026-12-18", "dinner");
+        const out = await update(day("2026-11-26"), {
+            recipeId: bowls.id,
+            repeat: "daily",
+        });
+        expect(out?.plan.date).toBe("2026-11-26");
+        const rule = (await plans.getRule(HH, out!.plan.ruleId!))!;
+        expect(rule.skippedOn).toEqual(["2026-12-03", "2026-12-17"]);
+        const week = await all();
+        const dates = week
+            .filter((p) => p.recipeId === bowls.id)
+            .map((p) => p.date);
+        expect(dates).not.toContain("2026-12-03");
+        expect(dates).not.toContain("2026-12-17");
+        expect(dates).toContain("2026-12-02");
+        expect(dates).toContain("2026-12-04");
+        // the moved day's one-off is still a one-off, of the old recipe
+        const moved = week.find((p) => p.date === "2026-12-18" && !p.ruleId);
+        expect(moved?.recipeId).not.toBe(bowls.id);
+        // the old series' earlier days are as they were
+        expect(
+            week.filter((p) => p.ruleId === ruleId).map((p) => p.date),
+        ).toEqual(["2026-11-12", "2026-11-19"]);
+        expect((await plans.getRule(HH, ruleId))?.skippedOn).toContain(
+            "2026-12-03",
+        );
+    });
+
+    describe("the Day picked with a repeat change is a day the old series skips", () => {
+        test("the new series starts there and shows that day: the skip is not copied onto its own start day", async () => {
+            const { ruleId, day, update, all, plans, chili } = await weekly();
+            // Thu 26 Nov was taken off the weekly series; a later skip stays off
+            await plans.removePlan(HH, day("2026-11-26"));
+            await plans.removePlan(HH, day("2026-12-03"));
+            const out = await update(day("2026-11-19"), {
+                date: "2026-11-26",
+                repeat: "daily",
+            });
+            expect(out?.plan).toMatchObject({
+                date: "2026-11-26",
+                slot: "dinner",
+                recipeId: chili.id,
+            });
+            const rule = (await plans.getRule(HH, out!.created.ruleId!))!;
+            expect(rule.startsOn).toBe("2026-11-26");
+            expect(rule.skippedOn).toEqual(["2026-12-03"]);
+            const dates = (await all()).map((p) => p.date);
+            expect(dates).toContain("2026-11-26");
+            expect(dates).not.toContain("2026-12-03");
+            // the old series ends before the edited day, its days before stay
+            expect((await plans.getRule(HH, ruleId))?.endsOn).toBe(
+                "2026-11-18",
+            );
+            expect(dates.filter((d) => d === "2026-11-26")).toHaveLength(1);
+        });
+
+        test("a pick-days repeat that names the skipped day's weekday shows that day too", async () => {
+            const { day, update, all, plans } = await weekly();
+            await plans.removePlan(HH, day("2026-11-26"));
+            const out = await update(day("2026-11-19"), {
+                date: "2026-11-26",
+                repeat: "days",
+                days: [4, 5],
+            });
+            expect(out?.plan.date).toBe("2026-11-26");
+            expect(out?.repeat).toBe("days");
+            const dates = (await all())
+                .filter((p) => p.date >= "2026-11-19" && p.date <= "2026-11-30")
+                .map((p) => p.date);
+            expect(dates).toEqual(["2026-11-26", "2026-11-27"]);
+        });
+
+        test("a Day moved earlier onto a skipped day is planned there", async () => {
+            const { day, update, all, plans } = await weekly();
+            await plans.removePlan(HH, day("2026-11-19"));
+            const out = await update(day("2026-11-26"), {
+                date: "2026-11-19",
+                repeat: "daily",
+            });
+            expect(out?.plan.date).toBe("2026-11-19");
+            const rule = (await plans.getRule(HH, out!.created.ruleId!))!;
+            expect(rule.startsOn).toBe("2026-11-19");
+            expect(rule.skippedOn).toEqual([]);
+            expect(
+                (await all()).filter((p) => p.date === "2026-11-19"),
+            ).toHaveLength(1);
+        });
+
+        test("an old series that also ends on the picked day is not refused: the day is planned", async () => {
+            const { ruleId, day, update, all, plans } = await weekly();
+            await plans.removePlan(HH, day("2026-11-26"));
+            // the old series' last day is the skipped Thu 26 Nov
+            await plans.endRuleBefore(HH, ruleId, "2026-11-27");
+            expect((await plans.getRule(HH, ruleId))?.endsOn).toBe(
+                "2026-11-26",
+            );
+            const out = await update(day("2026-11-19"), {
+                date: "2026-11-26",
+                repeat: "daily",
+            });
+            expect(out?.plan.date).toBe("2026-11-26");
+            const rule = (await plans.getRule(HH, out!.created.ruleId!))!;
+            expect(rule.endsOn).toBe("2026-11-26");
+            expect(rule.skippedOn).toEqual([]);
+            expect(
+                (await all())
+                    .filter((p) => p.date >= "2026-11-19")
+                    .map((p) => p.date),
+            ).toEqual(["2026-11-26"]);
+        });
+
+        test("a day that already holds a one-off of the same recipe and meal (a moved day) is not planned twice — passes before: the one-off already held the day", async () => {
+            const { ruleId, day, update, all, plans, chili } = await weekly();
+            // 26 Nov taken off, then 19 Nov moved onto it: a one-off now stands there
+            await plans.removePlan(HH, day("2026-11-26"));
+            await plans.movePlan(HH, day("2026-11-19"), "2026-11-26", "dinner");
+            const out = await update(day("2026-11-12"), {
+                date: "2026-11-26",
+                repeat: "daily",
+            });
+            expect(out?.plan).toMatchObject({
+                date: "2026-11-26",
+                slot: "dinner",
+                recipeId: chili.id,
+            });
+            expect(out?.plan.ruleId).toBeUndefined();
+            const there = (await all()).filter(
+                (p) => p.date === "2026-11-26" && p.recipeId === chili.id,
+            );
+            expect(there).toHaveLength(1);
+            expect(there[0]?.ruleId).toBeUndefined();
+            // the series carries on after it
+            expect(
+                (await all()).some(
+                    (p) =>
+                        p.date === "2026-11-27" &&
+                        p.ruleId === out!.created.ruleId,
+                ),
+            ).toBe(true);
+            expect(await plans.getRule(HH, ruleId)).toBeNull();
+        });
+    });
+
+    // A daily series that began Thu 5 Nov, a week before TODAY: its first
+    // days (5 to 11 Nov) are past.
+    async function pastDaily() {
+        const t = await setup();
+        const first = await t.plan({
+            date: "2026-11-05",
+            today: "2026-11-05",
+            repeat: "daily",
+        });
+        const ruleId = first.ruleId!;
+        return {
+            ...t,
+            ruleId,
+            day: (date: string) => ruleEntryId(ruleId, date),
+        };
+    }
+
+    test("a repeat changed from a day that has passed is refused with its reason, and nothing is written, kept or told", async () => {
+        const { ruleId, day, update, all, plans } = await pastDaily();
+        const before = await all();
+        const rule = await plans.getRule(HH, ruleId);
+        const touched: unknown[] = [];
+        const told: unknown[] = [];
+        for (const patch of [
+            { repeat: "weekly" },
+            { date: TODAY, repeat: "weekly" },
+            { date: "2026-11-14", repeat: "weekdays" },
+            { repeat: "days", days: [1, 3] },
+        ] as const) {
+            await expect(
+                update(day("2026-11-08"), patch, {
+                    beforeWrite: async (touch) => {
+                        touched.push(touch);
+                    },
+                    notify: async (event) => {
+                        told.push(event);
+                    },
+                }),
+            ).rejects.toThrow(
+                "That day has passed. Change the repeat from today or a later day.",
+            );
+        }
+        expect(touched).toEqual([]);
+        expect(told).toEqual([]);
+        expect(await all()).toEqual(before);
+        expect(await plans.getRule(HH, ruleId)).toEqual(rule);
+        expect((await plans.listRules(HH)).map((r) => r.id)).toEqual([ruleId]);
+    });
+
+    test("a series day that has passed set to Once is refused too: the series and its past days stay", async () => {
+        const { ruleId, day, update, all, plans } = await pastDaily();
+        const before = await all();
+        const rule = await plans.getRule(HH, ruleId);
+        for (const patch of [
+            { repeat: "once" },
+            { date: TODAY, repeat: "once" },
+            { date: "2026-11-20", slot: "lunch", repeat: "once" },
+        ] as const) {
+            await expect(update(day("2026-11-05"), patch)).rejects.toThrow(
+                PlanInputError,
+            );
+            await expect(update(day("2026-11-05"), patch)).rejects.toThrow(
+                "That day has passed.",
+            );
+        }
+        expect(await all()).toEqual(before);
+        expect(await plans.getRule(HH, ruleId)).toEqual(rule);
+        // the days before today are all still there
+        expect(
+            (await all()).filter((p) => p.date < TODAY).map((p) => p.date),
+        ).toEqual([
+            "2026-11-05",
+            "2026-11-06",
+            "2026-11-07",
+            "2026-11-08",
+            "2026-11-09",
+            "2026-11-10",
+            "2026-11-11",
+        ]);
+    });
+
+    test("a one-off on a day that has passed is not given a repeat: it is refused and stays", async () => {
+        const { plans, update, all, chili } = await setup();
+        const old = await plans.addPlan({
+            householdId: HH,
+            recipeId: chili.id,
+            date: "2026-11-09",
+            slot: "dinner",
+            servings: 2,
+            memberIds: [],
+            createdBy: "u-1",
+        });
+        const before = await all();
+        await expect(
+            update(old!.id, { date: TODAY, repeat: "daily" }),
+        ).rejects.toThrow("That day has passed.");
+        await expect(update(old!.id, { repeat: "weekly" })).rejects.toThrow(
+            "That day has passed.",
+        );
+        expect(await all()).toEqual(before);
+        expect(await plans.listRules(HH)).toEqual([]);
+    });
+
+    test("a day that has passed saved as it is is no change, and today's day of that series still takes a new repeat while the days before it stay", async () => {
+        const { ruleId, day, update, all, plans } = await pastDaily();
+        const before = await all();
+        // as it is, with the repeat it already has: nothing, not a refusal
+        expect((await update(day("2026-11-08"), {}))?.unchanged).toBe(true);
+        expect(
+            (await update(day("2026-11-08"), { repeat: "daily" }))?.unchanged,
+        ).toBe(true);
+        expect(await all()).toEqual(before);
+        // today is not past: the series from today on changes, 5 to 11 Nov stay
+        const out = await update(day(TODAY), { repeat: "weekly" });
+        expect(out?.unchanged).toBe(false);
+        expect(out?.plan).toMatchObject({ date: TODAY });
+        expect((await plans.getRule(HH, ruleId))?.endsOn).toBe("2026-11-11");
+        expect(
+            (await all()).filter((p) => p.date < TODAY).map((p) => p.date),
+        ).toEqual(before.filter((p) => p.date < TODAY).map((p) => p.date));
+        expect(
+            (await all())
+                .filter((p) => p.date < TODAY)
+                .every((p) => p.ruleId === ruleId),
+        ).toBe(true);
+    });
+
+    test("a one-off given a repeat is deleted and its day becomes a day of the new series, keeping servings and people", async () => {
+        const { plan, update, all, plans } = await setup();
+        const one = await plan({
+            date: "2026-11-13",
+            servings: undefined,
+            memberIds: ["u-2"],
+            memberPortions: { "u-2": 3 },
+        });
+        expect(one.servings).toBe(3);
+        const out = await update(one.id, { repeat: "weekly" });
+        expect(out?.repeat).toBe("weekly");
+        expect(out?.plan.id).toBe(ruleEntryId(out!.plan.ruleId!, "2026-11-13"));
+        expect(out?.plan).toMatchObject({ servings: 3, memberIds: ["u-2"] });
+        expect(out?.created).toEqual({
+            planId: null,
+            ruleId: out!.plan.ruleId!,
+        });
+        expect(await plans.getPlan(HH, one.id)).toBeNull();
+        expect((await all()).map((p) => p.date).slice(0, 2)).toEqual([
+            "2026-11-13",
+            "2026-11-20",
+        ]);
+        // edited again: the day is a series day now, and one day detaches without a clash
+        const again = await update(out!.plan.id, { slot: "lunch" });
+        expect(again?.plan).toMatchObject({ date: "2026-11-13" });
+        expect(again?.plan.ruleId).toBeUndefined();
+        // and a repeat change from the series works too
+        const third = await update(
+            ruleEntryId(out!.plan.ruleId!, "2026-11-20"),
+            {
+                repeat: "daily",
+            },
+        );
+        expect(third?.repeat).toBe("daily");
+    });
+
+    test("pick days: a repeat of days needs weekdays, other repeats refuse them, and an unchanged days list is no change", async () => {
+        const { day, update } = await weekly();
+        await expect(
+            update(day("2026-11-26"), { repeat: "days" }),
+        ).rejects.toThrow(PlanInputError);
+        await expect(
+            update(day("2026-11-26"), { repeat: "daily", days: [1] }),
+        ).rejects.toThrow("Weekdays go with a repeat of days only.");
+        const picked = await update(day("2026-11-26"), {
+            repeat: "days",
+            days: [4, 1],
+        });
+        expect(picked?.repeat).toBe("days");
+        expect(picked?.days).toEqual([1, 4]);
+        const same = await update(picked!.plan.id, {
+            repeat: "days",
+            days: [1, 4],
+        });
+        expect(same?.unchanged).toBe(true);
+        const other = await update(picked!.plan.id, {
+            repeat: "days",
+            days: [1, 4, 6],
+        });
+        expect(other?.unchanged).toBe(false);
+        expect(other?.days).toEqual([1, 4, 6]);
+    });
+
+    test("moving onto a day that already holds the recipe writes nothing and says so", async () => {
+        const { plan, update, all } = await setup();
+        const a = await plan({ date: "2026-11-13" });
+        const b = await plan({ date: "2026-11-14" });
+        const before = await all();
+        const out = await update(a.id, { date: "2026-11-14" });
+        expect(out?.alreadyPlanned).toBe(true);
+        expect(out?.plan.id).toBe(b.id);
+        expect(await all()).toEqual(before);
+    });
+
+    test("a recipe that is not the household's, a draft, a past day and servings on named people are refused", async () => {
+        const { plan, update, recipes, all } = await setup();
+        const one = await plan({ date: "2026-11-13" });
+        const draft = await createRecipe(recipes, {
+            householdId: HH,
+            creatorId: "u-1",
+            name: "Draft",
+            yieldPortions: 2,
+            verification: "unverified",
+        });
+        const before = await all();
+        await expect(
+            update(one.id, { recipeId: crypto.randomUUID() }),
+        ).rejects.toThrow(PlanInputError);
+        await expect(update(one.id, { recipeId: draft.id })).rejects.toThrow(
+            PlanInputError,
+        );
+        await expect(update(one.id, { date: "2026-11-10" })).rejects.toThrow(
+            "Pick today or a later day.",
+        );
+        await expect(update(one.id, { slot: "brunch" })).rejects.toThrow(
+            PlanInputError,
+        );
+        await expect(update(one.id, { servings: 0 })).rejects.toThrow(
+            PlanInputError,
+        );
+        await expect(update(one.id, { repeat: "monthly" })).rejects.toThrow(
+            PlanInputError,
+        );
+        const named = await plan({
+            date: "2026-11-15",
+            memberIds: ["u-2"],
+            memberPortions: { "u-2": 2 },
+        });
+        const withNamed = await all();
+        await expect(update(named.id, { servings: 5 })).rejects.toThrow(
+            "named people",
+        );
+        // the same number it already has is no edit
+        expect(
+            (await update(named.id, { servings: named.servings }))?.unchanged,
+        ).toBe(true);
+        expect(withNamed).toHaveLength(before.length + 1);
+        expect(await all()).toEqual(withNamed);
+    });
+
+    test("an id that names no plan is null", async () => {
+        const { update } = await setup();
+        expect(await update(crypto.randomUUID(), { servings: 2 })).toBeNull();
+        expect(
+            await update(ruleEntryId(crypto.randomUUID(), "2026-11-13"), {
+                servings: 2,
+            }),
+        ).toBeNull();
+    });
+
+    test("the household is told what changed: a move, a swap, a new repeat, and nothing for servings or no change", async () => {
+        const t = await setup();
+        const events: {
+            change: unknown;
+            recipeName: unknown;
+            scope?: unknown;
+            repeat?: unknown;
+            fromDate?: unknown;
+        }[] = [];
+        const notify = async (e: { payload: Record<string, unknown> }) => {
+            events.push({
+                change: e.payload.change,
+                recipeName: e.payload.recipeName,
+                scope: e.payload.scope,
+                repeat: e.payload.repeat,
+                fromDate: e.payload.fromDate,
+            });
+        };
+        const one = await t.plan({ date: "2026-11-13" });
+        await t.update(one.id, { servings: 4 }, { notify });
+        await t.update(one.id, {}, { notify });
+        expect(events).toEqual([]);
+        await t.update(one.id, { date: "2026-11-14" }, { notify });
+        expect(events).toEqual([
+            expect.objectContaining({
+                change: "moved",
+                recipeName: "Beef chili",
+                fromDate: "2026-11-13",
+            }),
+        ]);
+        events.length = 0;
+        await t.update(one.id, { recipeId: t.bowls.id }, { notify });
+        expect(events.map((e) => [e.change, e.recipeName])).toEqual([
+            ["unplanned", "Beef chili"],
+            ["planned", "Burrito bowls"],
+        ]);
+        events.length = 0;
+        const series = await t.plan({ date: "2026-11-16", repeat: "weekly" });
+        await t.update(series.id, { repeat: "daily" }, { notify });
+        expect(
+            events.map((e) => [e.change, e.scope ?? null, e.repeat ?? null]),
+        ).toEqual([
+            ["unplanned", "series", null],
+            ["planned", null, "daily"],
+        ]);
+    });
+
+    test("when the new series clashes, the error names the recipe", async () => {
+        const { day, update, plan, bowls } = await weekly();
+        // bowls already repeat on Thursdays at dinner
+        await plan({
+            recipeId: bowls.id,
+            recipeName: bowls.name,
+            repeat: "weekly",
+            date: "2026-11-12",
+        });
+        await expect(
+            update(day("2026-11-26"), { recipeId: bowls.id, repeat: "daily" }),
+        ).rejects.toThrow(/Burrito bowls/);
+    });
+
+    // A daily series from Thu 12 Nov: every day is a day of it.
+    async function daily() {
+        const t = await setup();
+        const first = await t.plan({ repeat: "daily" });
+        const ruleId = first.ruleId!;
+        return {
+            ...t,
+            ruleId,
+            day: (date: string) => ruleEntryId(ruleId, date),
+        };
+    }
+
+    test("a series day set to Once on an earlier day ends the series before the edited day, so the days between stay", async () => {
+        const { ruleId, day, update, all, plans, chili } = await daily();
+        // Fri 13 Nov is a day of the series; the edit is on Sun 15 Nov
+        const out = await update(day("2026-11-15"), {
+            date: "2026-11-13",
+            slot: "lunch",
+            repeat: "once",
+        });
+        expect(out?.repeat).toBe("once");
+        expect(out?.plan).toMatchObject({
+            recipeId: chili.id,
+            date: "2026-11-13",
+            slot: "lunch",
+        });
+        expect(out?.plan.ruleId).toBeUndefined();
+        // ended before the edited day, never before the new one
+        expect((await plans.getRule(HH, ruleId))?.endsOn).toBe("2026-11-14");
+        expect(
+            (await all())
+                .filter((p) => p.date <= "2026-11-16")
+                .map(
+                    (p) =>
+                        `${p.date} ${p.slot} ${p.ruleId ? "series" : "one-off"}`,
+                ),
+        ).toEqual([
+            "2026-11-12 dinner series",
+            "2026-11-13 lunch one-off",
+            "2026-11-13 dinner series",
+            "2026-11-14 dinner series",
+        ]);
+    });
+
+    test("a series day set to Once on a day an earlier series day already holds changes nothing", async () => {
+        const { ruleId, day, update, all, plans } = await daily();
+        const before = await all();
+        const ruleBefore = await plans.getRule(HH, ruleId);
+        // the series stays on 13 Nov, so the recipe is already planned there
+        const out = await update(day("2026-11-15"), {
+            date: "2026-11-13",
+            repeat: "once",
+        });
+        expect(out).toMatchObject({
+            unchanged: true,
+            alreadyPlanned: true,
+            created: { planId: null, ruleId: null },
+        });
+        expect(out?.plan).toMatchObject({ date: "2026-11-13", ruleId });
+        expect(await all()).toEqual(before);
+        expect(await plans.getRule(HH, ruleId)).toEqual(ruleBefore);
+    });
+
+    describe("when nothing of the old series is left before the change", () => {
+        test("a repeat changed on the series' first day removes the old series instead of ending it before it began", async () => {
+            const { ruleId, day, update, all, plans } = await weekly();
+            const out = await update(day("2026-11-12"), { repeat: "daily" });
+            expect(out?.repeat).toBe("daily");
+            expect(await plans.getRule(HH, ruleId)).toBeNull();
+            expect((await plans.listRules(HH)).map((r) => r.id)).toEqual([
+                out!.plan.ruleId!,
+            ]);
+            expect((await all()).map((p) => p.date).slice(0, 3)).toEqual([
+                "2026-11-12",
+                "2026-11-13",
+                "2026-11-14",
+            ]);
+        });
+
+        test("a series day set to Once on the first day removes the old series and leaves one one-off", async () => {
+            const { ruleId, day, update, all, plans } = await weekly();
+            const out = await update(day("2026-11-12"), { repeat: "once" });
+            expect(out?.repeat).toBe("once");
+            expect(await plans.getRule(HH, ruleId)).toBeNull();
+            expect(await plans.listRules(HH)).toEqual([]);
+            expect(
+                (await all()).map((p) => [p.date, p.ruleId ?? null]),
+            ).toEqual([["2026-11-12", null]]);
+        });
+
+        test("the old series is removed when the days before the change are all off it: a weekday that is not a pick, a skipped day, a moved day", async () => {
+            const t = await setup();
+            // Thursdays are not picked: the series starts 12 Nov and first shows Mon 16 Nov
+            const mondays = await t.plan({ repeat: "days", days: [1] });
+            expect(mondays.date).toBe("2026-11-16");
+            const out = await t.update(mondays.id, { repeat: "daily" });
+            expect(await t.plans.getRule(HH, mondays.ruleId!)).toBeNull();
+            expect(out?.plan.ruleId).not.toBe(mondays.ruleId);
+
+            // a weekly series whose first day was taken off, then changed on the next
+            const u = await weekly();
+            await u.plans.removePlan(HH, u.day("2026-11-12"));
+            await u.update(u.day("2026-11-19"), { repeat: "daily" });
+            expect(await u.plans.getRule(HH, u.ruleId)).toBeNull();
+
+            // a weekly series whose first day was moved (a one-off now), then changed on the next
+            const v = await weekly();
+            await v.plans.movePlan(
+                HH,
+                v.day("2026-11-12"),
+                "2026-11-14",
+                "dinner",
+            );
+            await v.update(v.day("2026-11-19"), { repeat: "daily" });
+            expect(await v.plans.getRule(HH, v.ruleId)).toBeNull();
+            // the moved day is still there, as a one-off
+            expect(
+                (await v.all()).find((p) => p.date === "2026-11-14")?.ruleId,
+            ).toBeUndefined();
+        });
+
+        test("a series with a day before the change is ended, not removed", async () => {
+            const { ruleId, day, update, plans } = await weekly();
+            await update(day("2026-11-19"), { repeat: "daily" });
+            expect(await plans.getRule(HH, ruleId)).toMatchObject({
+                endsOn: "2026-11-18",
+            });
+        });
+    });
+
+    describe("what the change touches is told before it is written", () => {
+        type Touch = Parameters<
+            NonNullable<
+                Parameters<typeof updatePlannedRecipe>[4]["beforeWrite"]
+            >
+        >[0];
+
+        test("a one-off edited in place, replaced by a new recipe, or given a repeat", async () => {
+            const { plan, update, bowls, plans } = await setup();
+            const touches: Touch[] = [];
+            const beforeWrite = async (touch: Touch) =>
+                void touches.push(touch);
+            const one = await plan({ date: "2026-11-13" });
+            await update(one.id, { slot: "lunch" }, { beforeWrite });
+            expect(touches).toEqual([
+                { rule: null, plan: { id: one.id, change: "updated" } },
+            ]);
+            touches.length = 0;
+            const swapped = await update(
+                one.id,
+                { recipeId: bowls.id },
+                { beforeWrite },
+            );
+            expect(touches).toEqual([
+                { rule: null, plan: { id: one.id, change: "deleted" } },
+            ]);
+            touches.length = 0;
+            await update(
+                swapped!.plan.id,
+                { repeat: "weekly" },
+                { beforeWrite },
+            );
+            expect(touches).toEqual([
+                {
+                    rule: null,
+                    plan: { id: swapped!.plan.id, change: "deleted" },
+                },
+            ]);
+            expect(await plans.listRules(HH)).toHaveLength(1);
+        });
+
+        test("a day of a series, a repeat ended before a day, a repeat removed, and nothing when nothing changes or the day is held", async () => {
+            const { ruleId, day, update, plans, plan, bowls } = await weekly();
+            const touches: Touch[] = [];
+            // the rule is still as it was when it is told about
+            const seen: (string | null | undefined)[] = [];
+            const beforeWrite = async (touch: Touch) => {
+                touches.push(touch);
+                seen.push((await plans.getRule(HH, ruleId))?.endsOn);
+            };
+            await update(day("2026-11-19"), { servings: 3 }, { beforeWrite });
+            expect(touches).toEqual([
+                { rule: { id: ruleId, change: "updated" }, plan: null },
+            ]);
+            touches.length = 0;
+            await update(
+                day("2026-11-26"),
+                { repeat: "daily" },
+                { beforeWrite },
+            );
+            expect(touches).toEqual([
+                { rule: { id: ruleId, change: "updated" }, plan: null },
+            ]);
+            expect(seen.at(-1)).toBeNull();
+            touches.length = 0;
+            // the first day: nothing is left of the series, so it is removed
+            await update(
+                day("2026-11-12"),
+                { repeat: "once" },
+                { beforeWrite },
+            );
+            expect(touches).toEqual([
+                { rule: { id: ruleId, change: "deleted" }, plan: null },
+            ]);
+            touches.length = 0;
+            // nothing changed, and a day already held by the recipe: told nothing
+            const one = await plan({ recipeId: bowls.id, date: "2026-11-14" });
+            await update(one.id, {}, { beforeWrite });
+            await plan({
+                recipeId: bowls.id,
+                date: "2026-11-15",
+                slot: "lunch",
+            });
+            await update(
+                one.id,
+                { date: "2026-11-15", slot: "lunch" },
+                { beforeWrite },
+            );
+            expect(touches).toEqual([]);
+        });
+    });
+
+    test("the old recipe's name is never read inside the transaction: read before it, or taken from the caller", async () => {
+        const t = await setup();
+        const one = await t.plan({ date: "2026-11-13" });
+        let inside = false;
+        const transaction = async <T>(fn: () => Promise<T>): Promise<T> => {
+            inside = true;
+            try {
+                return await fn();
+            } finally {
+                inside = false;
+            }
+        };
+        const reads: { id: string; inside: boolean }[] = [];
+        const recipes = {
+            getRecipe: async (householdId: string, id: string) => {
+                reads.push({ id, inside });
+                return t.recipes.getRecipe(householdId, id);
+            },
+        };
+        const names: unknown[] = [];
+        const notify = async (e: { payload: Record<string, unknown> }) => {
+            names.push(e.payload.recipeName);
+        };
+        await updatePlannedRecipe(
+            t.plans,
+            HH,
+            one.id,
+            { date: "2026-11-14" },
+            { recipes, today: TODAY, notify, transaction },
+        );
+        expect(reads).toEqual([{ id: t.chili.id, inside: false }]);
+        expect(names).toEqual(["Beef chili"]);
+        // a name the caller has is used as it is: no read of the old recipe
+        reads.length = 0;
+        names.length = 0;
+        await updatePlannedRecipe(
+            t.plans,
+            HH,
+            one.id,
+            { date: "2026-11-15" },
+            {
+                recipes,
+                today: TODAY,
+                notify,
+                transaction,
+                recipeName: "Chili from the caller",
+            },
+        );
+        expect(reads).toEqual([]);
+        expect(names).toEqual(["Chili from the caller"]);
+        // a swap reads the new recipe inside (it has to check it), the old one never
+        reads.length = 0;
+        await updatePlannedRecipe(
+            t.plans,
+            HH,
+            one.id,
+            { recipeId: t.bowls.id },
+            { recipes, today: TODAY, notify, transaction },
+        );
+        expect(
+            reads.filter((r) => r.id === t.chili.id).map((r) => r.inside),
+        ).toEqual([false]);
     });
 });

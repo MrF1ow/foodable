@@ -507,8 +507,11 @@
     margin-top: 0;
 }
 
+/* The rows section stacks Starts (Day), the calendar and Meal 12px apart
+ * (.fd-sheet__content); the open calendar adds no padding of its own, so the
+ * three sit evenly and a closed calendar leaves the same 12px. */
 .fd-plan-form .fd-month-picker {
-    padding-block: var(--space-sm) var(--space-xs);
+    padding-block: 0;
 }
 
 .fd-plan-error {

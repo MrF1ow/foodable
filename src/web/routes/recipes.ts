@@ -102,15 +102,13 @@ import {
     type PlanEditDraft,
 } from "../pages/v2/recipes-plan.js";
 import {
-    checkPlanDay,
     checkPlanServingsCapped,
-    checkPlanSlot,
     defaultPlanServings,
     planRecipe,
     PlanInputError,
-    movePlannedRecipe,
     parseRuleEntryId,
     unplanRecipe,
+    updatePlannedRecipe,
 } from "../../domain/plan.js";
 import {
     addMissingToGroceries,
@@ -1071,15 +1069,17 @@ recipesRoutes.post("/recipes/:id/plan", requireMember, async (c) => {
 });
 
 /**
- * Move a plan to another day or meal (and change its servings), from the edit
- * sheet on Today or Recipes. Nothing is written until the whole form checks; a
- * form that does not check re-renders the page it came from with that plan's
- * sheet open, the typed values kept and the reason shown.
+ * Change a planned entry from the edit sheet on Today or Recipes: its recipe,
+ * day, meal, servings and repeat (`updatePlannedRecipe`). Recipe, Day, Meal
+ * and Servings change that one day; Repeat changes the series from that day
+ * on. Nothing is written until the whole form checks; a form that does not
+ * check re-renders the page it came from with that plan's sheet open, the
+ * typed values kept and the reason shown.
  */
 recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
     const userId = c.get("userId");
     const member = siteMember(c);
-    const body = await c.req.parseBody();
+    const body = await c.req.parseBody({ all: true });
     const backKind = parsePlanBack(formText(body, "back"));
     const back = planBackPath(backKind);
     const planId = c.req.param("planId");
@@ -1096,36 +1096,49 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
     const dateInput = formText(body, "date").trim();
     const slotInput = formText(body, "slot");
     const servingsInput = formOptionalNumber(body, "servings");
+    // A form from before the Recipe and Repeat rows posts neither: no change.
+    const recipeInput = formText(body, "recipe_id").trim();
+    const repeatInput = formText(body, "repeat").trim();
+    const daysInput = formNumberList(body, "days");
     try {
-        const date = checkPlanDay(
-            dateInput,
-            await householdToday(member.householdId),
-        );
-        const slot = checkPlanSlot(slotInput);
+        if (recipeInput !== "" && !UUID_SHAPE.test(recipeInput)) {
+            throw new PlanInputError("Pick a recipe from the list.");
+        }
+        const today = await householdToday(member.householdId);
         // A plan for named people has no servings of its own. The sheet
         // posts the number it showed, so an unchanged one is no edit; any
-        // other is refused by `movePlannedRecipe`.
+        // other is refused by `updatePlannedRecipe`.
         const named = (existing.memberIds?.length ?? 0) > 0;
         const servings =
-            named &&
-            (servingsInput === undefined || servingsInput === existing.servings)
+            servingsInput === undefined ||
+            (named && servingsInput === existing.servings)
                 ? undefined
-                : checkPlanServingsCapped(servingsInput ?? existing.servings);
+                : checkPlanServingsCapped(servingsInput);
         // The same recipe already on that day and meal is "already planned":
         // nothing moves and nothing is added to it.
-        const moved = await movePlannedRecipe(
+        const updated = await updatePlannedRecipe(
             plans,
             member.householdId,
-            existing,
-            { date, slot, servings },
+            planId,
+            {
+                recipeId: recipeInput === "" ? undefined : recipeInput,
+                date: dateInput,
+                slot: slotInput,
+                servings,
+                repeat: repeatInput === "" ? undefined : repeatInput,
+                // Weekdays go with a repeat of days only.
+                days: repeatInput === "days" ? daysInput : undefined,
+            },
             {
                 recipes: liveRecipesStore(),
+                today,
                 notify: liveNotifier(member.householdId, member.userId),
+                transaction: planTransaction("plan-recipe", member.householdId),
             },
         );
-        if (moved?.alreadyPlanned) {
+        if (updated?.alreadyPlanned) {
             return redirectWithToast(c, back, "plan.already", {
-                when: planWhen(moved.plan.date, moved.plan.slot),
+                when: planWhen(updated.plan.date, updated.plan.slot),
             });
         }
         // toast: none — the week shows where the plan landed (or that it is gone)
@@ -1134,9 +1147,12 @@ recipesRoutes.post("/recipes/plan/:planId/move", requireMember, async (c) => {
         if (!(err instanceof PlanInputError)) throw err;
         const draft: PlanEditDraft = {
             planId,
+            recipeId: recipeInput === "" ? undefined : recipeInput,
             date: dateInput,
             slot: slotInput,
             servings: servingsInput,
+            repeat: repeatInput === "" ? undefined : repeatInput,
+            days: daysInput,
             error: err.message,
         };
         // Only a plan in the week has a sheet to re-open; any other (a

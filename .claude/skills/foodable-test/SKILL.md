@@ -21,12 +21,12 @@ watches:
 ## Rules first
 
 - Bun loads `.env` itself and a real one can hold production secrets. Pass every variable the process needs on the command line (it beats `.env`) and start the server with `bun --no-env-file`. `bun --no-env-file run <script>` does **not** reach the inner `bun`: use it only on `bun <file>` or `bun test`.
-- `bun run db:dev` defaults to the user's own dev database (data dir ~/.local/share/foodable/pg, port 54330, run by `foodable-db.service`). `db:dev stop` would stop it and `init` would migrate it, with no force flag to guard either. **Always** set `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` first (below), or run only `status` or `url`. `db:dev` reads only those two (plus `PG_BIN`), never `DATABASE_URL`, so is safe under `bun run`.
+- `bun run db:dev` defaults to the user's own dev database (~/.local/share/foodable/pg, port 54330, run by `foodable-db.service`). `db:dev stop` would stop it and `init` would migrate it, with no force flag guarding either. **Always** set `FOODABLE_PG_DIR` and `FOODABLE_PG_PORT` first (below), or run only `status` or `url`. `db:dev` reads only those two (plus `PG_BIN`), never `DATABASE_URL`, so safe under `bun run`.
 - Never use port 8080 or 54330: the user's dev server and database live there.
 
 ## Isolated stack
 
-Shell variables do not survive tool calls: begin **every** block with `STACK=<path from the first block>; . "$STACK/env"`. `init` makes the cluster and its database, starts it and migrates.
+Shell variables do not survive tool calls: begin **every** block with `STACK=<path from the first block>; . "$STACK/env"`. `init` makes the cluster and database, starts and migrates it.
 
 ```bash
 free_port() { bun -e 'const s=Bun.listen({hostname:"127.0.0.1",port:0,socket:{open(){},data(){}}});console.log(s.port);s.stop(true)'; }
@@ -58,7 +58,7 @@ It binds `0.0.0.0` (LAN): keep runs short. The first sign-up on an empty databas
 
 Not `bun run dev`/`start`: `dev` runs `gen:all` (rewrites tracked files) and `--watch`; its inner `bun` loads `.env`. Run `gen:all` only in a fresh worktree or after login/token changes.
 
-Stop everything:
+Stop:
 
 ```bash
 kill "$(cat "$STACK/server.pid")"
@@ -69,8 +69,8 @@ bun run db:dev status   # "stopped", exit 1
 ## Which tool fits which change
 
 - **Domain / pure logic:** `bun --no-env-file test <file>`.
-- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated-template copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off). Page loads sync `notifications`; db-less route tests log `sync failed`.
-- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs `CHROME_BIN`. Ports :4791, :9223 ("harness crashed" = port held). No DB: `scripts/nav-check-fixture.ts` keys pages by path, query, flags on, POSTs 303 back. Recipe: `?member=base|u-mia`, `?role=member`; draft: `/recipes/r-draft`, `?imported=1` after import. Public: `/login-test?state=invite|connect|error`, `/create-household`, `/gate-*`, `/s/{recipe,list}-test` (`?share=off`: 404). Swipe, Saved's select mode, Top bar focus: touch.
+- **SQL, db adapters:** `bun --no-env-file test <file>` (`describeDb`). One Postgres a run, in `~/.cache/foodable/pg-test` (`FOODABLE_PG_TEST_DIR`), not `db:dev`; each file gets a migrated copy as `foodable_app`. Needs `initdb` (PATH or `PG_BIN`), else skipped. Fixtures: `seedHousehold` (owner agent switch On), `seedMember` (Off). Page loads sync `notifications`; db-less route tests log `sync failed`.
+- **Web pages, nav, Turbo, theme chrome:** `bun run check:nav`. Needs `CHROME_BIN`. Ports :4791, :9223 ("harness crashed" = port held). No DB: `scripts/nav-check-fixture.ts` keys pages by path, query, flags on, POSTs 303 back. Recipe: `?member=base|u-mia`, `?role=member`; draft: `/recipes/r-draft`, `?imported=1` after import; plan edit sheet: `pl1`, `pl2`. Public: `/login-test?state=invite|connect|error`, `/create-household`, `/gate-*`, `/s/{recipe,list}-test` (`?share=off`: 404). Swipe, Saved's select mode, Top bar focus: touch.
 - **Flicker:** `bun scripts/flicker-check.ts --base http://<tailscale ip -4>:$APP_PORT` on an isolated stack: remote browserless Chromium, 390 px, both themes.
 - **App look:** `bun run preview:app --shots [--only=<name prefix>]`: `-390.png`/`-1440.png` per page in tmp/app-preview. Without it: serves :4787 (`PREVIEW_PORT`), pages `/<name>-<light|dark>.html`; clock, caret pinned.
 - **No visual change:** `flock ~/.cache/foodable/shots.lock nice -n 10 bun scripts/preview-diff.ts` (`--base`, `--reuse-base`, `--no-cache`); exit 1 on diff. Cache: `~/.cache/foodable/preview-diff` (`rm -rf` old); magick spill: `~/.cache/foodable/magick-tmp`.
@@ -85,7 +85,7 @@ bun run db:dev status   # "stopped", exit 1
 - **Flag rollout:** `bun run flags:apply --dry-run` only (applying mutates Railway).
 - **Types, lint, format:** `bun run typecheck`, `lint`, `format:check` (`format` fixes). `bun fmt` needs Bun ≥ 1.4.4: put `$(mise where bun@1.4.4)/bin` first on PATH.
 
-`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback): **set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if that is the user's server, stop and ask. The scenarios need two household members: sign up the owner, create the household, add a member in Settings › Household, sign Grok in. Snapshots need `pg_dump`, `psql` (`PG_BIN`).
+`e2e:agent` drives the Grok CLI against a live server and snapshots, then **restores over**, the database. It refuses to run without `E2E_DB_URL` (no `.env` fallback): **set `E2E_DB_URL=<isolated URL>` and `E2E_SERVER=http://127.0.0.1:$APP_PORT`** (default: the user's `:8080`). Grok must be signed into an MCP server named `foodable` (`E2E_MCP_NAME`) at that URL; if that is the user's server, stop and ask. The scenarios need two members: sign up the owner, create the household, add a member in Settings › Household, sign Grok in. Snapshots need `pg_dump`, `psql` (`PG_BIN`).
 
 ## Never touch
 

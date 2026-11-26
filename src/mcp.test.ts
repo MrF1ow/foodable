@@ -172,6 +172,7 @@ import {
     ADD_PLAN_MISSING_OUTPUT_SCHEMA,
     PLAN_RECIPE_OUTPUT_SCHEMA,
     UNPLAN_RECIPE_OUTPUT_SCHEMA,
+    UPDATE_PLAN_OUTPUT_SCHEMA,
     WEEK_PLAN_OUTPUT_SCHEMA,
 } from "./mcp/tools/plan.js";
 import { HOUSEHOLD_DIGEST_OUTPUT_SCHEMA } from "./mcp/tools/household-digest.js";
@@ -4843,8 +4844,11 @@ describe("household config tools", () => {
         // until a person saves them), and `draft`, `ready_to_save` and
         // `draft_expires_at` on the recipe outputs, with no field
         // descriptions and the tool descriptions cut to one line each.
-        const TOOLS_LIST_MAX_CHARS = 235217;
-        const TOOLS_LIST_MAX_COUNT = 106;
+        // +1775: update_plan (change one planned entry: its recipe, day, meal,
+        // servings and repeat), with a description cut to what an agent needs
+        // and an output that reuses plan_recipe's plan object.
+        const TOOLS_LIST_MAX_CHARS = 236992;
+        const TOOLS_LIST_MAX_COUNT = 107;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
             const snapshot = (await Bun.file(
@@ -10206,6 +10210,25 @@ describe("/mcp destructive tools are guarded", () => {
                 summary: "Removed Soup from the plan for",
             };
         },
+        update_plan: async (call) => {
+            const recipe = await call("create_recipe", {
+                name: "Soup",
+                yield_portions: 2,
+            });
+            const planned = await call("plan_recipe", {
+                recipe_id: recipe.structuredContent?.id,
+                date: addUtcDaysForDestructive(2),
+                slot: "dinner",
+            });
+            expect(planned.isError).toBeFalsy();
+            const plan = planned.structuredContent?.plan as { plan_id: string };
+            return {
+                tool: "update_plan",
+                args: { plan_id: plan.plan_id, slot: "lunch" },
+                summary: "Changed the plan for Soup on",
+                text: "Updated: Soup",
+            };
+        },
         merge_foods: async (call) => {
             const keep = await call("upsert_food", { name: "Eggs" });
             const drop = await call("upsert_food", {
@@ -10244,6 +10267,7 @@ describe("/mcp destructive tools are guarded", () => {
                 "merge_foods",
                 "remove_recipe_ingredient",
                 "unplan_recipe",
+                "update_plan",
             ].sort(),
         );
     });
@@ -14229,6 +14253,7 @@ describe("plan tools over HTTP", () => {
         "get_week_plan",
         "plan_recipe",
         "unplan_recipe",
+        "update_plan",
         "add_plan_missing_to_groceries",
     ];
 
@@ -14492,6 +14517,203 @@ describe("plan tools over HTTP", () => {
                     scope: "series",
                 });
                 expect(refused.isError).toBe(true);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "update_plan changes one planned entry: a one-off in place, one day of a series alone, and the series only through repeat (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({}));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId } = await seedBread(call);
+                const today = utcTodayFromDate();
+                const day = (n: number) => addUtcDays(today, n);
+                const week = async () =>
+                    WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                        (await call("get_week_plan")).structuredContent,
+                    ).days.flatMap((d) =>
+                        d.plans.map((p) => `${d.date} ${p.slot} ${p.servings}`),
+                    );
+
+                // A one-off changes where it is and keeps its id.
+                const one = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("plan_recipe", {
+                            recipe_id: recipeId,
+                            date: day(2),
+                            slot: "dinner",
+                            servings: 2,
+                        })
+                    ).structuredContent,
+                );
+                const moved = await call("update_plan", {
+                    plan_id: one.plan.plan_id,
+                    date: day(3),
+                    slot: "lunch",
+                    servings: 4,
+                });
+                expect(moved.isError).toBeFalsy();
+                const movedOut = UPDATE_PLAN_OUTPUT_SCHEMA.parse(
+                    moved.structuredContent,
+                );
+                expect(movedOut).toMatchObject({
+                    changed: true,
+                    already_planned: false,
+                    repeat: "once",
+                    plan: {
+                        plan_id: one.plan.plan_id,
+                        date: day(3),
+                        slot: "lunch",
+                        servings: 4,
+                    },
+                });
+                // The text names the resulting plan and its recipe, and how to undo.
+                expect(textOf(moved)).toStartWith("Updated: Bread");
+                expect(textOf(moved)).toContain(
+                    `[plan_id: ${one.plan.plan_id}]`,
+                );
+                expect(textOf(moved)).toContain(`[recipe_id: ${recipeId}]`);
+                // The guard recorded it (these memory stores seed no rows, so
+                // the sentence says it can't be undone here; the undo itself
+                // is tested against Postgres).
+                expect(textOf(moved)).toContain("Settings › AI connections");
+                expect(await week()).toEqual([`${day(3)} lunch 4`]);
+
+                // The same values again: nothing written, no undo promised.
+                const same = await call("update_plan", {
+                    plan_id: one.plan.plan_id,
+                    date: day(3),
+                    slot: "lunch",
+                    servings: 4,
+                    recipe_id: recipeId,
+                    repeat: "once",
+                });
+                expect(same.isError).toBeFalsy();
+                expect(textOf(same)).toStartWith("Nothing changed: Bread");
+                expect(textOf(same)).not.toContain("Settings › AI connections");
+                expect(
+                    UPDATE_PLAN_OUTPUT_SCHEMA.parse(same.structuredContent),
+                ).toMatchObject({ changed: false });
+
+                // A repeat: one day changes that day only (its id changes) ...
+                const series = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("plan_recipe", {
+                            recipe_id: recipeId,
+                            date: day(0),
+                            slot: "snack",
+                            repeat: "daily",
+                            servings: 1,
+                        })
+                    ).structuredContent,
+                );
+                const ruleId = series.plan.plan_id.split(":")[1];
+                const detached = UPDATE_PLAN_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("update_plan", {
+                            plan_id: `rule:${ruleId}:${day(2)}`,
+                            servings: 3,
+                        })
+                    ).structuredContent,
+                );
+                expect(detached.plan.plan_id).not.toContain("rule:");
+                expect(detached.plan.repeats).toBeUndefined();
+                expect(
+                    (await week()).filter((l) => l.includes("snack")),
+                ).toEqual(
+                    [0, 1, 2, 3, 4, 5, 6].map(
+                        (n) => `${day(n)} snack ${n === 2 ? 3 : 1}`,
+                    ),
+                );
+                // ... and a repeat change is the series from that day on.
+                const changed = await call("update_plan", {
+                    plan_id: `rule:${ruleId}:${day(4)}`,
+                    repeat: "weekly",
+                });
+                expect(changed.isError).toBeFalsy();
+                const changedOut = UPDATE_PLAN_OUTPUT_SCHEMA.parse(
+                    changed.structuredContent,
+                );
+                expect(changedOut.repeat).toBe("weekly");
+                expect(changedOut.plan.repeats).toBe(true);
+                expect(changedOut.plan.plan_id).toMatch(/^rule:/);
+                expect(changedOut.plan.plan_id).not.toContain(ruleId!);
+                expect(textOf(changed)).toContain(
+                    `[plan_id: ${changedOut.plan.plan_id}]`,
+                );
+                expect(textOf(changed)).toContain("Repeats every week on");
+                expect(
+                    (await week()).filter((l) => l.includes("snack")),
+                ).toEqual(
+                    [0, 1, 2, 3, 4].map(
+                        (n) => `${day(n)} snack ${n === 2 ? 3 : 1}`,
+                    ),
+                );
+
+                // Refusals: no such plan, a bad recipe, a past day, a bad weekday.
+                expect(
+                    await refusal(call, "update_plan", {
+                        plan_id: crypto.randomUUID(),
+                        servings: 2,
+                    }),
+                ).toContain("Plan not found.");
+                expect(
+                    await refusal(call, "update_plan", {
+                        plan_id: one.plan.plan_id,
+                        recipe_id: "nope",
+                    }),
+                ).toContain("Recipe not found.");
+                expect(
+                    await refusal(call, "update_plan", {
+                        plan_id: one.plan.plan_id,
+                        date: addUtcDays(today, -1),
+                    }),
+                ).toContain("Pick today or a later day.");
+                expect(
+                    await refusal(call, "update_plan", {
+                        plan_id: one.plan.plan_id,
+                        repeat: "days",
+                        days: [9],
+                    }),
+                ).toContain("weekday");
+
+                // A repeat or Once from a day that has passed would cut the
+                // series there and erase the days up to today: refused, with
+                // the days before today as they were.
+                const began = await db.plansStore.addRule({
+                    householdId: "hh-1",
+                    recipeId,
+                    slot: "lunch",
+                    servings: 1,
+                    startsOn: day(-6),
+                    repeat: "daily",
+                });
+                const pastDays = async () =>
+                    (await db.plansStore.listPlans("hh-1", day(-6), day(-1)))
+                        .length;
+                expect(await pastDays()).toBe(6);
+                for (const args of [
+                    { repeat: "weekly" },
+                    { date: day(2), repeat: "weekly" },
+                    { repeat: "once" },
+                    { date: day(2), repeat: "once" },
+                ]) {
+                    expect(
+                        await refusal(call, "update_plan", {
+                            plan_id: `rule:${began!.id}:${day(-4)}`,
+                            ...args,
+                        }),
+                    ).toContain(
+                        "That day has passed. Change the repeat from today or a later day.",
+                    );
+                    expect(await pastDays()).toBe(6);
+                    expect(
+                        (await db.plansStore.getRule("hh-1", began!.id))
+                            ?.endsOn,
+                    ).toBeNull();
+                }
             });
         },
     );

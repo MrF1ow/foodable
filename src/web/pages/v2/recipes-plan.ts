@@ -17,6 +17,7 @@ import type { FoodQuantityFactors } from "../../../domain/food-quantity.js";
 import type { LinkedNeed } from "../../../domain/linking.js";
 import {
     PLAN_SLOTS,
+    type PlanRepeat,
     type PlanSlot,
     type RecipePlan,
 } from "../../../domain/plan.js";
@@ -84,6 +85,10 @@ export type WeekPlanEntry = {
     named: boolean;
     /** The one repeat this entry is a day of; absent on a one-off plan. */
     ruleId?: string;
+    /** How the entry repeats (`once` for a one-off): what the edit sheet's Repeat row starts on. */
+    repeat?: PlanRepeat;
+    /** The weekdays of a "pick days" repeat, 0 = Sunday. */
+    days?: number[];
 };
 
 export type WeekPlanDayView = {
@@ -111,9 +116,12 @@ export type WeekMissingLine = {
 /** What a failed move re-renders its edit sheet with: the typed values and the reason. */
 export type PlanEditDraft = {
     planId: string;
+    recipeId?: string;
     date: string;
     slot: string;
     servings?: number;
+    repeat?: string;
+    days?: readonly number[];
     error: string;
 };
 
@@ -122,6 +130,8 @@ export type WeekPlanView = {
     days: WeekPlanDayView[];
     plannedCount: number;
     missing: WeekMissingLine[];
+    /** The household's saved recipes: what a planned entry's Recipe menu offers. */
+    recipeChoices?: { id: string; name: string }[];
     /** The id of the sheet (the missing list or a plan's) to open on load. */
     openSheet?: string;
     /** A move that did not pass its checks: that plan's sheet shows these, open. */
@@ -180,6 +190,10 @@ export function buildWeekPlanView(input: {
     recipes: readonly PlanRecipe[];
     stock: readonly LinkedNeed[];
     foodsById: ReadonlyMap<string, FoodQuantityFactors>;
+    /** The household's saved recipes; without them the Recipe menu lists the planned ones. */
+    savedRecipes?: readonly { id: string; name: string }[];
+    /** How each repeat repeats, by its id; an entry on one not listed reads as a one-off. */
+    rules?: ReadonlyMap<string, { repeat: PlanRepeat; days: number[] }>;
 }): WeekPlanView {
     const recipeById = new Map(input.recipes.map((r) => [r.id, r]));
     const days = weekPlan(input.plans, input.today, WEEK_PLAN_DAYS).map(
@@ -202,6 +216,14 @@ export function buildWeekPlanView(input: {
                         date: p.date,
                         named: (p.memberIds?.length ?? 0) > 0,
                         ruleId: p.ruleId,
+                        repeat:
+                            (p.ruleId && input.rules?.get(p.ruleId)?.repeat) ||
+                            "once",
+                        days: [
+                            ...((p.ruleId &&
+                                input.rules?.get(p.ruleId)?.days) ||
+                                []),
+                        ],
                     },
                 ];
             }),
@@ -228,7 +250,13 @@ export function buildWeekPlanView(input: {
                 ", ",
             ),
         }));
-    return { today: input.today, days, plannedCount, missing };
+    const recipeChoices = (
+        input.savedRecipes ??
+        input.recipes.map((r) => ({ id: r.id, name: r.name }))
+    )
+        .map((r) => ({ id: r.id, name: r.name }))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    return { today: input.today, days, plannedCount, missing, recipeChoices };
 }
 
 /* ---- Markup ---- */
@@ -287,6 +315,54 @@ const WEEKDAY_NAMES = [
 ] as const;
 
 /**
+ * The Repeat row and the weekday chips a repeat of "Pick days" shows under it,
+ * as the Plan sheet and a planned entry's edit sheet both draw them.
+ * `client/v2/recipes.js` shows the chips for "days" and keeps the form's one
+ * `days` field per picked weekday in step with them.
+ */
+function repeatControls(
+    value: string | undefined,
+    pickedDays: readonly number[] | undefined,
+): { row: Html; pickDays: Html } {
+    const repeat = REPEAT_CHOICES.some((c) => c.value === value)
+        ? value!
+        : "once";
+    const days = (pickedDays ?? []).filter(
+        (d) => Number.isInteger(d) && d >= 0 && d <= 6,
+    );
+    const row = pickRow({
+        title: "Repeat",
+        name: "repeat",
+        options: REPEAT_CHOICES,
+        // "Pick days" stays the row's word while the weekday chips are showing
+        // (frame 409279); the chips hold the days.
+        selected: repeat,
+    });
+    const chips = chipGroup({
+        label: "Repeat on",
+        select: "multiple",
+        className: "fd-plan-days__chips",
+        chips: WEEKDAY_NAMES.map((name, day) => ({
+            label: name.slice(0, 1),
+            ariaLabel: name,
+            value: String(day),
+            selected: days.includes(day),
+        })),
+    });
+    // One hidden `days` per picked weekday: the chips are buttons, so the
+    // script keeps these in step with them.
+    const fields = days
+        .map((d) => `<input type="hidden" name="days" value="${d}">`)
+        .join("");
+    return {
+        row,
+        pickDays: raw(
+            `<div class="fd-plan-days" data-fd-plan-days${repeat === "days" ? "" : " hidden"}>${chips}<span data-fd-plan-days-fields>${repeat === "days" ? fields : ""}</span></div>`,
+        ),
+    };
+}
+
+/**
  * The recipe page's "Plan <recipe>" sheet: Starts (a row that opens a month
  * picker), Meal and Repeat (pull-downs; "Pick days" shows a row of weekday
  * chips), then the servings, and Plan. The form posts the day (`date`), `slot`,
@@ -297,12 +373,6 @@ export function renderPlanSheet(view: PlanSheetView): string {
     const err = view.error
         ? `<p class="fd-plan-error" role="alert">${esc(view.error)}</p>`
         : "";
-    const repeat = REPEAT_CHOICES.some((c) => c.value === view.repeat)
-        ? view.repeat!
-        : "once";
-    const days = (view.days ?? []).filter(
-        (d) => Number.isInteger(d) && d >= 0 && d <= 6,
-    );
     const starts = monthPicker({
         id: "fd-recipe-plan-starts",
         name: "date",
@@ -317,37 +387,15 @@ export function renderPlanSheet(view: PlanSheetView): string {
         options: MEAL_CHOICES,
         selected: view.slot,
     });
-    const repeatRow = pickRow({
-        title: "Repeat",
-        name: "repeat",
-        options: REPEAT_CHOICES,
-        // "Pick days" stays the row's word while the weekday chips are showing
-        // (frame 409279); the chips hold the days.
-        selected: repeat,
-    });
-    const dayChips = chipGroup({
-        label: "Repeat on",
-        select: "multiple",
-        className: "fd-plan-days__chips",
-        chips: WEEKDAY_NAMES.map((name, day) => ({
-            label: name.slice(0, 1),
-            ariaLabel: name,
-            value: String(day),
-            selected: days.includes(day),
-        })),
-    });
-    // One hidden `days` per picked weekday: the chips are buttons, so the
-    // script keeps these in step with them.
-    const dayFields = days
-        .map((d) => `<input type="hidden" name="days" value="${d}">`)
-        .join("");
+    const repeating = repeatControls(view.repeat, view.days);
     const when = join([
         listGroup({ rows: [starts.row], label: "Starts" }),
         starts.picker,
-        listGroup({ rows: [mealRow, repeatRow], label: "Meal and repeat" }),
-        raw(
-            `<div class="fd-plan-days" data-fd-plan-days${repeat === "days" ? "" : " hidden"}>${dayChips}<span data-fd-plan-days-fields>${repeat === "days" ? dayFields : ""}</span></div>`,
-        ),
+        listGroup({
+            rows: [mealRow, repeating.row],
+            label: "Meal and repeat",
+        }),
+        repeating.pickDays,
     ]);
     const servings = sheetSection({
         kind: "amount",
@@ -387,26 +435,9 @@ ${String(servings)}
     });
 }
 
-/** How many days ahead the Day pull-down reaches. */
-const DAY_CHOICES = 14;
-
-function dayChoiceLabel(date: string): string {
-    return /^\d{4}-\d{2}-\d{2}$/.test(date) &&
-        !Number.isNaN(new Date(`${date}T00:00:00Z`).getTime())
-        ? planDayLabel(date)
-        : date;
-}
-
-/** `date` moved by `days` calendar days. */
-function dayAfter(date: string, days: number): string {
-    const at = new Date(`${date}T00:00:00Z`);
-    at.setUTCDate(at.getUTCDate() + days);
-    return at.toISOString().slice(0, 10);
-}
-
 /**
- * A row whose value is a pull-down (Day, Meal): an Item row with its title,
- * value and chevron that opens the choices, the form's own hidden field
+ * A row whose value is a pull-down (Recipe, Meal, Repeat): an Item row with its
+ * title and value that opens the choices, the form's own hidden field
  * carrying the pick as `name`. `client/v2/menu.js` writes the chosen label
  * into the row.
  */
@@ -434,9 +465,11 @@ function pickRow(opts: {
 }
 
 /**
- * One sheet per planned recipe in the week, titled with its recipe and the day
- * and meal under it: Day and Meal are rows with pull-downs, Servings a
- * stepper, Remove beside Save. Save posts the day, meal and servings to the
+ * One sheet per planned recipe in the week, titled with its day and the meal
+ * under it. Rows: Recipe (the household's saved recipes) and Day (a month
+ * calendar), Meal and Repeat (pull-downs; "Pick days" shows the weekday chips),
+ * then Servings (a stepper), with Remove beside Save. Save posts `recipe_id`,
+ * `date`, `slot`, `repeat`, one `days` per picked weekday and `servings` to the
  * move route, Remove to the remove route. Rendered on every page that lists
  * the week, so the rows' buttons and cards have something to open.
  */
@@ -455,6 +488,9 @@ export function renderPlanEditSheets(
             const draftServings = draft?.servings;
             const date = draft ? draft.date : plan.date;
             const slot = draft ? draft.slot : plan.slot;
+            const recipeId = draft?.recipeId || plan.recipeId;
+            const repeat = draft?.repeat ?? plan.repeat;
+            const days = draft?.days ?? plan.days;
             const servings =
                 draftServings != null && Number.isFinite(draftServings)
                     ? draftServings
@@ -462,22 +498,28 @@ export function renderPlanEditSheets(
             const err = draft
                 ? `<p class="fd-plan-error" role="alert">${esc(draft.error)}</p>`
                 : "";
-            // Today on, two weeks of days; a day outside them (the plan's own,
-            // or one a failed save typed) stays a choice so nothing is lost.
-            const days = Array.from({ length: DAY_CHOICES }, (_, i) =>
-                dayAfter(view.today, i),
-            );
-            if (!days.includes(date)) days.push(date);
-            const dayRowHtml = pickRow({
-                title: "Day",
-                name: "date",
-                options: days.map((d) => ({
-                    value: d,
-                    label: dayChoiceLabel(d),
-                })),
-                selected: date,
+            // Every saved recipe, by name; the entry's own stays a choice
+            // even if the list does not hold it.
+            const recipes = [...(view.recipeChoices ?? [])];
+            if (!recipes.some((r) => r.id === plan.recipeId)) {
+                recipes.push({ id: plan.recipeId, name: plan.recipeName });
+            }
+            recipes.sort((a, b) => a.name.localeCompare(b.name));
+            const recipeRow = pickRow({
+                title: "Recipe",
+                name: "recipe_id",
+                options: recipes.map((r) => ({ value: r.id, label: r.name })),
+                selected: recipeId,
             });
-            const mealRowHtml = pickRow({
+            const dayPicker = monthPicker({
+                id: `${id}-day`,
+                name: "date",
+                title: "Day",
+                value: date,
+                today: view.today,
+                min: view.today,
+            });
+            const mealRow = pickRow({
                 title: "Meal",
                 name: "slot",
                 options: PLAN_SLOTS.map((value) => ({
@@ -486,6 +528,7 @@ export function renderPlanEditSheets(
                 })),
                 selected: slot,
             });
+            const repeating = repeatControls(repeat, days);
             const servingsSection = plan.named
                 ? sheetSection({
                       kind: "message",
@@ -507,16 +550,20 @@ export function renderPlanEditSheets(
                           className: "fd-plan-stepper",
                       }),
                   });
-            const body = `<form id="${esc(moveId)}" class="fd-plan-form" method="post" action="/recipes/plan/${esc(plan.id)}/move">
-${hidden("back", back)}${err}${String(
-                sheetSection({
-                    kind: "rows",
-                    content: listGroup({
-                        rows: [dayRowHtml, mealRowHtml],
-                        label: "When",
-                    }),
+            const when = join([
+                listGroup({
+                    rows: [recipeRow, dayPicker.row],
+                    label: "Recipe and day",
                 }),
-            )}
+                dayPicker.picker,
+                listGroup({
+                    rows: [mealRow, repeating.row],
+                    label: "Meal and repeat",
+                }),
+                repeating.pickDays,
+            ]);
+            const body = `<form id="${esc(moveId)}" class="fd-plan-form" method="post" action="/recipes/plan/${esc(plan.id)}/move" data-fd-plan-form>
+${hidden("back", back)}${err}${String(sheetSection({ kind: "rows", content: when }))}
 ${String(servingsSection)}
 </form>
 <form id="${esc(removeId)}" method="post" action="/recipes/plan/${esc(plan.id)}/remove">${hidden("back", back)}</form>`;
@@ -526,8 +573,8 @@ ${String(servingsSection)}
                 className: "fd-plan-edit-sheet",
                 header: {
                     kind: "title",
-                    title: plan.recipeName,
-                    subtitle: `${planDayLabel(plan.date)} · ${PLAN_SLOT_LABEL[plan.slot].toLowerCase()}`,
+                    title: planDayLabel(plan.date),
+                    subtitle: PLAN_SLOT_LABEL[plan.slot],
                 },
                 body: raw(body),
                 actions: {

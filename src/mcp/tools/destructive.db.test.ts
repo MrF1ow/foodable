@@ -16,6 +16,7 @@ import { liveAgentActionDeps } from "../../db/agent-actions.js";
 import { liveFoodsStore } from "../../db/foods.js";
 import * as groceryDb from "../../db/grocery.js";
 import { liveFridgeStore } from "../../db/fridge.js";
+import { liveRecipePlansStore } from "../../db/plans.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { liveSettingsStore } from "../../db/settings.js";
 import { liveStockStore } from "../../db/stock.js";
@@ -710,6 +711,43 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 },
             };
         },
+        update_plan: async () => {
+            const soup = await recipe();
+            await call("plan_recipe", {
+                recipe_id: soup.id,
+                date: "2099-01-02",
+                slot: "dinner",
+                servings: 2,
+            });
+            const [plan] = await rows(
+                "select id, servings::float as servings from public.recipe_plans",
+            );
+            return {
+                tool: "update_plan",
+                args: { plan_id: plan!.id, slot: "lunch", servings: 5 },
+                summary: "Changed the plan for Soup on 2099-01-02 (dinner)",
+                changed: async () => {
+                    const [now] = await rows(
+                        "select id, slot, servings::float as servings from public.recipe_plans",
+                    );
+                    expect(now).toEqual({
+                        id: plan!.id,
+                        slot: "lunch",
+                        servings: 5,
+                    });
+                },
+                restored: async () => {
+                    const [back] = await rows(
+                        "select id, slot, servings::float as servings from public.recipe_plans",
+                    );
+                    expect(back).toEqual({
+                        id: plan!.id,
+                        slot: "dinner",
+                        servings: 2,
+                    });
+                },
+            };
+        },
         delete_water: async () => {
             await call("log_water", { amount_ml: 250 });
             const [entry] = await rows("select * from public.water_log");
@@ -897,6 +935,7 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
                 "remove_recipe_ingredient",
                 "set_nutrition_goals",
                 "unplan_recipe",
+                "update_plan",
                 "clear_recipe_variant",
             ].sort(),
         );
@@ -958,6 +997,406 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             expect(await actions()).toEqual([]);
         });
     }
+
+    /**
+     * Another save of a plan is mid-flight: it holds the household's planning
+     * lock and has set the plan's servings to 7. `during` runs the tool call
+     * that has to wait for it; the save then lands (commits) and the call
+     * goes on. Returns what the call answered.
+     */
+    async function whileAnotherSaveLands(
+        planId: string,
+        during: () => Promise<Result>,
+    ): Promise<Result> {
+        const url = getCtx().pg.url;
+        const appUrl = new URL(url);
+        appUrl.username = "foodable_app";
+        const wide = new SQL(url, { prepare: false, max: 4 });
+        const wideApp = new SQL(appUrl.toString(), {
+            prepare: false,
+            max: 4,
+        });
+        const other = new SQL(url, { prepare: false, max: 1 });
+        pairAppSqlForTests(wide, wideApp);
+        setSqlForTests(wide);
+        try {
+            let finish: () => void = () => {};
+            const finished = new Promise<void>((r) => (finish = r));
+            let started: () => void = () => {};
+            const hasChanged = new Promise<void>((r) => (started = r));
+            const saving = other.begin(async (tx) => {
+                await tx`select pg_advisory_xact_lock(hashtextextended(${`plan-recipe:${householdId}`}, 0))`;
+                await tx`update public.recipe_plans set servings = 7 where id = ${planId}::uuid`;
+                started();
+                await finished;
+            });
+            await hasChanged;
+            const calling = during();
+            await waitForLockWaiters(getCtx().sql, 1);
+            finish();
+            await saving;
+            return await calling;
+        } finally {
+            setSqlForTests(getCtx().sql);
+            await other.close();
+            await wide.close();
+            await wideApp.close();
+        }
+    }
+
+    // ---------- update_plan on a repeating plan and a one-off ----------
+
+    describe("update_plan", () => {
+        const START = "2099-01-02";
+
+        async function repeating(): Promise<{
+            ruleId: string;
+            recipeId: string;
+        }> {
+            const soup = await recipe();
+            await call("plan_recipe", {
+                recipe_id: soup.id,
+                date: START,
+                slot: "dinner",
+                repeat: "daily",
+                servings: 2,
+            });
+            const [rule] = await rows("select id from public.plan_rules");
+            return { ruleId: rule!.id as string, recipeId: soup.id };
+        }
+
+        const ruleRows = () =>
+            rows(
+                `select repeat_rule, starts_on::text as starts_on, ends_on::text as ends_on,
+                        skipped_on::text[] as skipped_on, servings::float as servings
+                 from (select rule as repeat_rule, * from public.plan_rules) r
+                 order by starts_on`,
+            );
+
+        test("a repeat change records the old repeat as updated and the new one as created, and undo puts the old series back whole", async () => {
+            const { ruleId } = await repeating();
+            const before = await fingerprint();
+            const result = await call("update_plan", {
+                plan_id: `rule:${ruleId}:2099-01-05`,
+                repeat: "weekly",
+            });
+            expect(result.isError).toBeFalsy();
+            const text = result.content.map((c) => c.text).join("\n");
+            expect(text).toContain(UNDO_SENTENCE);
+            const out = result.structuredContent as {
+                plan: { plan_id: string };
+                repeat: string;
+            };
+            expect(out.repeat).toBe("weekly");
+            const now = await ruleRows();
+            expect(
+                now.map((r) => [r.repeat_rule, r.starts_on, r.ends_on]),
+            ).toEqual([
+                ["daily", START, "2099-01-04"],
+                ["weekly", "2099-01-05", null],
+            ]);
+            const [created] = await rows(
+                "select id from public.plan_rules where rule = 'weekly'",
+            );
+            expect(out.plan.plan_id).toBe(`rule:${created!.id}:2099-01-05`);
+            expect(text).toContain(`[plan_id: ${out.plan.plan_id}]`);
+
+            const [entry] = await actions();
+            expect(entry).toMatchObject({
+                tool: "update_plan",
+                destructive: true,
+                undoable: true,
+            });
+            expect(entry!.summary).toContain(
+                "Changed the plan for Soup on 2099-01-05 (dinner)",
+            );
+            expect(
+                JSON.stringify(entry!.snapshot.changes).includes("plan_rules"),
+            ).toBe(true);
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await fingerprint()).toBe(before);
+        });
+
+        test("one day of a series is recorded as an update of the repeat plus the one-off it made, and undo removes the one-off and puts the day back", async () => {
+            const { ruleId } = await repeating();
+            const before = await fingerprint();
+            const result = await call("update_plan", {
+                plan_id: `rule:${ruleId}:2099-01-05`,
+                servings: 6,
+            });
+            expect(result.isError).toBeFalsy();
+            expect(await count("recipe_plans")).toBe(1);
+            const [rule] = await ruleRows();
+            expect(rule).toMatchObject({
+                ends_on: null,
+                skipped_on: ["2099-01-05"],
+            });
+            const [entry] = await actions();
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await fingerprint()).toBe(before);
+        });
+
+        test("a one-off given a repeat is recorded as deleted and the repeat as created, and undo brings the one-off back and removes the repeat", async () => {
+            const soup = await recipe();
+            await call("plan_recipe", {
+                recipe_id: soup.id,
+                date: START,
+                slot: "dinner",
+                servings: 3,
+            });
+            const before = await fingerprint();
+            const result = await call("update_plan", {
+                plan_id: (await rows("select id from public.recipe_plans"))[0]!
+                    .id,
+                repeat: "weekly",
+            });
+            expect(result.isError).toBeFalsy();
+            expect(await count("recipe_plans")).toBe(0);
+            const [rule] = await ruleRows();
+            expect(rule).toMatchObject({
+                repeat_rule: "weekly",
+                starts_on: START,
+                servings: 3,
+            });
+            const [entry] = await actions();
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await fingerprint()).toBe(before);
+        });
+
+        test("a new recipe on a one-off is recorded as the old row deleted and the new one created", async () => {
+            const soup = await recipe();
+            await call("plan_recipe", {
+                recipe_id: soup.id,
+                date: START,
+                slot: "dinner",
+            });
+            const stew = await call("create_recipe", {
+                name: "Stew",
+                yield_portions: 2,
+            });
+            const before = await fingerprint();
+            const result = await call("update_plan", {
+                plan_id: (await rows("select id from public.recipe_plans"))[0]!
+                    .id,
+                recipe_id: stew.structuredContent!.id,
+            });
+            expect(result.isError).toBeFalsy();
+            const [now] = await rows(
+                "select recipe_id from public.recipe_plans",
+            );
+            expect(now!.recipe_id).toBe(stew.structuredContent!.id);
+            const [entry] = await actions();
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await fingerprint()).toBe(before);
+        });
+
+        test("a save with nothing changed records nothing and promises no undo", async () => {
+            const { ruleId, recipeId } = await repeating();
+            const before = await fingerprint();
+            const result = await call("update_plan", {
+                plan_id: `rule:${ruleId}:2099-01-05`,
+                recipe_id: recipeId,
+                date: "2099-01-05",
+                slot: "dinner",
+                servings: 2,
+                repeat: "daily",
+            });
+            expect(result.isError).toBeFalsy();
+            const text = result.content.map((c) => c.text).join("\n");
+            expect(text).toStartWith("Nothing changed: Soup");
+            expect(text).not.toContain(UNDO_SENTENCE);
+            expect(await fingerprint()).toBe(before);
+            expect(await actions()).toEqual([]);
+        });
+
+        test("a repeat that clashes is refused whole: the old series is not left ended", async () => {
+            const { ruleId } = await repeating();
+            // Soup also repeats at lunch; moving the dinner series to lunch clashes with it.
+            const [soup] = await rows("select id from public.recipes");
+            await call("plan_recipe", {
+                recipe_id: soup!.id,
+                date: START,
+                slot: "lunch",
+                repeat: "daily",
+            });
+            const before = await fingerprint();
+            const result = await call("update_plan", {
+                plan_id: `rule:${ruleId}:2099-01-05`,
+                slot: "lunch",
+                repeat: "weekly",
+            });
+            expect(result.isError).toBe(true);
+            expect(result.content.map((c) => c.text).join("\n")).toContain(
+                "Soup is already planned at lunch",
+            );
+            expect(await fingerprint()).toBe(before);
+            expect(await actions()).toEqual([]);
+        });
+
+        test("a repeat changed on the series' first day removes the old repeat, and undo brings it back and removes the new one", async () => {
+            const soup = await recipe();
+            await call("plan_recipe", {
+                recipe_id: soup.id,
+                date: START,
+                slot: "dinner",
+                repeat: "weekly",
+                servings: 2,
+            });
+            const [old] = await rows("select id from public.plan_rules");
+            const before = await fingerprint();
+            const result = await call("update_plan", {
+                plan_id: `rule:${old!.id}:${START}`,
+                repeat: "daily",
+            });
+            expect(result.isError).toBeFalsy();
+            // nothing is left that can never show a day: the old row is gone
+            const now = await ruleRows();
+            expect(
+                now.map((r) => [r.repeat_rule, r.starts_on, r.ends_on]),
+            ).toEqual([["daily", START, null]]);
+            expect(
+                (
+                    await rows(
+                        "select id from public.plan_rules where id = $1",
+                        old!.id,
+                    )
+                ).length,
+            ).toBe(0);
+            const [entry] = await actions();
+            const changes = entry!.snapshot.changes as {
+                table: string;
+                op: string;
+            }[];
+            expect(
+                changes
+                    .filter((c) => c.table === "plan_rules")
+                    .map((c) => c.op)
+                    .sort(),
+            ).toEqual(["deleted", "inserted"]);
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await fingerprint()).toBe(before);
+        });
+
+        test("a series day set to Once on the first day removes the repeat, and undo brings it back and removes the one-off", async () => {
+            const soup = await recipe();
+            await call("plan_recipe", {
+                recipe_id: soup.id,
+                date: START,
+                slot: "dinner",
+                repeat: "weekly",
+                servings: 2,
+            });
+            const [old] = await rows("select id from public.plan_rules");
+            const before = await fingerprint();
+            const result = await call("update_plan", {
+                plan_id: `rule:${old!.id}:${START}`,
+                repeat: "once",
+            });
+            expect(result.isError).toBeFalsy();
+            expect(await count("plan_rules")).toBe(0);
+            expect(await count("recipe_plans")).toBe(1);
+            const [entry] = await actions();
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(await fingerprint()).toBe(before);
+        });
+
+        test("a repeat or Once from a day that has passed is refused with its reason: nothing is changed, recorded or told, and the days before today stay", async () => {
+            const soup = await recipe();
+            const began = await asUser(
+                ownerId,
+                () =>
+                    liveRecipePlansStore().addRule({
+                        householdId,
+                        recipeId: soup.id,
+                        slot: "dinner",
+                        servings: 2,
+                        startsOn: "2020-01-01",
+                        repeat: "daily",
+                    }),
+                householdId,
+            );
+            const before = await fingerprint();
+            for (const args of [
+                { repeat: "weekly" },
+                { date: START, repeat: "weekly" },
+                { repeat: "once" },
+                { date: START, repeat: "once" },
+            ]) {
+                for (const era of ERAS) {
+                    const result = await call(
+                        "update_plan",
+                        { plan_id: `rule:${began!.id}:2020-01-05`, ...args },
+                        era,
+                    );
+                    expect(result.isError, JSON.stringify(args)).toBe(true);
+                    expect(
+                        result.content.map((c) => c.text).join("\n"),
+                    ).toContain(
+                        "That day has passed. Change the repeat from today or a later day.",
+                    );
+                }
+            }
+            expect(await fingerprint()).toBe(before);
+            expect(await actions()).toEqual([]);
+            const [rule] = await rows(
+                "select ends_on::text as ends_on, skipped_on::text[] as skipped_on from public.plan_rules where id = $1",
+                began!.id,
+            );
+            expect(rule).toEqual({ ends_on: null, skipped_on: [] });
+        });
+
+        test("it waits its turn before it records anything: undo keeps a save that landed first", async () => {
+            const soup = await recipe();
+            await call("plan_recipe", {
+                recipe_id: soup.id,
+                date: START,
+                slot: "dinner",
+                servings: 2,
+            });
+            const [plan] = await rows("select id from public.recipe_plans");
+            const done = await whileAnotherSaveLands(plan!.id, () =>
+                call("update_plan", { plan_id: plan!.id, slot: "lunch" }),
+            );
+            expect(done.isError).toBeFalsy();
+            expect(
+                await rows(
+                    "select slot, servings::float as servings from public.recipe_plans",
+                ),
+            ).toEqual([{ slot: "lunch", servings: 7 }]);
+            const [entry] = await actions();
+            expect((await undo(entry!.id)).status).toBe("undone");
+            // the slot is back; the servings the other save set stay
+            expect(
+                await rows(
+                    "select slot, servings::float as servings from public.recipe_plans",
+                ),
+            ).toEqual([{ slot: "dinner", servings: 7 }]);
+        });
+
+        test("it is refused while agents may not make destructive changes, and changes nothing", async () => {
+            const { ruleId } = await repeating();
+            await asUser(
+                ownerId,
+                () =>
+                    liveSettingsStore().setAgentDestructiveAllowed(
+                        householdId,
+                        false,
+                    ),
+                householdId,
+            );
+            const before = await fingerprint();
+            const result = await call("update_plan", {
+                plan_id: `rule:${ruleId}:2099-01-05`,
+                repeat: "weekly",
+            });
+            expect(result.isError).toBe(true);
+            expect(result.content.map((c) => c.text).join("\n")).toContain(
+                REFUSAL,
+            );
+            expect(await fingerprint()).toBe(before);
+            expect(await actions()).toEqual([]);
+        });
+    });
 
     // ---------- unplan_recipe on a repeating plan ----------
 
@@ -1072,6 +1511,29 @@ describeDb(pgAvailable !== null, "destructive agent tools (db)", (getCtx) => {
             const [entry] = await actions();
             expect((await undo(entry!.id)).status).toBe("undone");
             expect(await fingerprint()).toBe(before);
+        });
+
+        test("a one-off is recorded after waiting for a save that landed first, so undo brings back what that save left", async () => {
+            const soup = await recipe();
+            await call("plan_recipe", {
+                recipe_id: soup.id,
+                date: START,
+                slot: "dinner",
+                servings: 2,
+            });
+            const [plan] = await rows("select id from public.recipe_plans");
+            const done = await whileAnotherSaveLands(plan!.id, () =>
+                call("unplan_recipe", { plan_id: plan!.id }),
+            );
+            expect(done.isError).toBeFalsy();
+            expect(await count("recipe_plans")).toBe(0);
+            const [entry] = await actions();
+            expect((await undo(entry!.id)).status).toBe("undone");
+            expect(
+                await rows(
+                    "select slot, servings::float as servings from public.recipe_plans",
+                ),
+            ).toEqual([{ slot: "dinner", servings: 7 }]);
         });
 
         for (const scope of ["day", "series"] as const) {

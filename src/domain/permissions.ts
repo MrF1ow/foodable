@@ -207,6 +207,7 @@ export const TOOL_ACTIONS = {
     snooze_notice: "notification.snooze_everyone",
     unplan_recipe: "recipe.edit",
     update_grocery_line: "grocery.edit",
+    update_plan: "recipe.edit",
     update_store: "stores.manage",
 } as const satisfies Record<string, Action>;
 
