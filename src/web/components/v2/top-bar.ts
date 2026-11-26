@@ -22,6 +22,11 @@ export type TopBarOptions = {
         /** The shortcut hint; default "⌘K", `false` leaves it out. */
         shortcut?: string | false;
         name?: string;
+        /**
+         * `fd-open-sheet` wires the field to the log search sheet, the one the
+         * page script's Command/Control+K opens. Only a wired field with the
+         * shortcut announces it (`aria-keyshortcuts`), whatever hint it shows.
+         */
         data?: Readonly<Record<string, string>>;
     };
     /** The bell; omit for a bell with nothing new, `false` for none. */
@@ -43,11 +48,11 @@ export function topBar(opts: TopBarOptions): Html {
         placeholder: search.placeholder ?? SEARCH_TEXT,
         shortcut:
             search.shortcut === false ? undefined : (search.shortcut ?? "⌘K"),
-        // The hint is the Command/Control+K shortcut the page script binds.
+        // The keys the page script binds, announced only where it handles them.
         keyShortcuts:
-            search.shortcut === false || search.shortcut != null
-                ? undefined
-                : "Control+K Meta+K",
+            search.shortcut !== false && search.data?.["fd-open-sheet"]
+                ? "Control+K Meta+K"
+                : undefined,
         name: search.name,
         data: search.data,
         style: "boxed",

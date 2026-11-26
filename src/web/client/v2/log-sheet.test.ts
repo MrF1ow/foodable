@@ -85,6 +85,12 @@ type LogKeyboardApi = {
         form: { id?: string; querySelector: (sel: string) => unknown } | null,
         dialog: { querySelector: (sel: string) => unknown } | null,
     ) => unknown;
+    createTriggerHandover: (open: (input: unknown, query: string) => void) => {
+        input: (event: unknown) => void;
+        compositionstart: (event: unknown) => void;
+        compositionend: (event: unknown) => void;
+    };
+    focusTargetAfterClose: (back: unknown, coarse: boolean) => unknown;
 };
 
 const docListeners: Array<{ type: string; capture: boolean }> = [];
@@ -975,5 +981,105 @@ describe("?log=meal:<id>", () => {
         const out = await run("?date=2026-11-10", async () => ({ ok: false }));
         expect(out.fetched).toEqual([]);
         expect(out.replaced).toEqual([]);
+    });
+});
+
+describe("the Top bar's search field", () => {
+    // Stands in for the field's text input and its wrapper.
+    class Wrapper extends (g.HTMLElement as typeof HTMLElement) {
+        attrs = new Map<string, string>();
+        hasAttribute(name: string) {
+            return this.attrs.has(name);
+        }
+        setAttribute(name: string, value: string) {
+            this.attrs.set(name, value);
+        }
+    }
+    function field() {
+        const wrapper = new Wrapper();
+        class FieldInput extends (g.HTMLElement as typeof HTMLElement) {
+            value = "";
+            override closest(): null {
+                return wrapper as unknown as null;
+            }
+        }
+        const input = new FieldInput();
+        return { wrapper, input };
+    }
+    function withInputClass<T>(input: object, body: () => T): T {
+        const global = globalThis as Record<string, unknown>;
+        const saved = global.HTMLInputElement;
+        global.HTMLInputElement = input.constructor;
+        try {
+            return body();
+        } finally {
+            global.HTMLInputElement = saved;
+        }
+    }
+
+    test("plain typing moves the text into the sheet at once", () => {
+        const { input } = field();
+        const opened: [unknown, string][] = [];
+        withInputClass(input, () => {
+            const h = keyboard.createTriggerHandover((i, q) =>
+                opened.push([i, q]),
+            );
+            input.value = "n";
+            h.input({ target: input, isComposing: false });
+        });
+        expect(opened).toEqual([[input, "n"]]);
+        expect(input.value).toBe("");
+    });
+
+    test("an IME composition reaches the sheet once, whole", () => {
+        const { input } = field();
+        const opened: string[] = [];
+        withInputClass(input, () => {
+            const h = keyboard.createTriggerHandover((_i, q) => opened.push(q));
+            h.compositionstart({ target: input });
+            input.value = "n";
+            h.input({ target: input, isComposing: true });
+            input.value = "日本";
+            h.input({ target: input, isComposing: true });
+            expect(opened).toEqual([]);
+            expect(input.value).toBe("日本");
+            h.compositionend({ target: input });
+            // Safari's input after compositionend finds the field empty.
+            h.input({ target: input, isComposing: false });
+        });
+        expect(opened).toEqual(["日本"]);
+        expect(input.value).toBe("");
+    });
+
+    test("typing after a composition hands over as before", () => {
+        const { input } = field();
+        const opened: string[] = [];
+        withInputClass(input, () => {
+            const h = keyboard.createTriggerHandover((_i, q) => opened.push(q));
+            h.compositionstart({ target: input });
+            input.value = "日";
+            h.compositionend({ target: input });
+            input.value = "a";
+            h.input({ target: input, isComposing: false });
+        });
+        expect(opened).toEqual(["日", "a"]);
+    });
+
+    test("a touch screen returns focus to the wrapper, a fine pointer to the input", () => {
+        const { wrapper, input } = field();
+        withInputClass(input, () => {
+            expect(keyboard.focusTargetAfterClose(input, false)).toBe(input);
+            expect(wrapper.attrs.has("tabindex")).toBe(false);
+            expect(keyboard.focusTargetAfterClose(input, true)).toBe(wrapper);
+            expect(wrapper.attrs.get("tabindex")).toBe("-1");
+        });
+    });
+
+    test("a trigger that is not the text input keeps focus on a touch screen too", () => {
+        const { input } = field();
+        const link = new (g.HTMLElement as typeof HTMLElement)();
+        withInputClass(input, () => {
+            expect(keyboard.focusTargetAfterClose(link, true)).toBe(link);
+        });
     });
 });

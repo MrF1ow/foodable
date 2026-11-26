@@ -22,9 +22,32 @@ test("the search is the boxed Search field with the placeholder and a ⌘K hint"
     expect(html).toContain(">⌘K</kbd>");
 });
 
-test("the field's input carries the shortcut its hint names", () => {
-    expect(topBar(BASE)).toContain('aria-keyshortcuts="Control+K Meta+K"');
-    expect(topBar({ ...BASE, search: { shortcut: false } })).not.toContain(
+const WIRED = { data: { "fd-open-sheet": "fd-log-search" } };
+
+test("the wired field announces the keys the app handles, whatever hint it shows", () => {
+    const keys = 'aria-keyshortcuts="Control+K Meta+K"';
+    // No hint given: the default ⌘K.
+    expect(topBar({ ...BASE, search: WIRED })).toContain(keys);
+    // The default hint named outright.
+    expect(topBar({ ...BASE, search: { ...WIRED, shortcut: "⌘K" } })).toContain(
+        keys,
+    );
+    // A custom hint still names the real keys.
+    const custom = topBar({
+        ...BASE,
+        search: { ...WIRED, shortcut: "Ctrl K" },
+    });
+    expect(custom).toContain(">Ctrl K</kbd>");
+    expect(custom).toContain(keys);
+});
+
+test("no shortcut, or nothing that handles it, announces no keys", () => {
+    expect(
+        topBar({ ...BASE, search: { ...WIRED, shortcut: false } }),
+    ).not.toContain("aria-keyshortcuts");
+    // A top bar not wired to the log sheet (the gallery's) has no shortcut to name.
+    expect(topBar(BASE)).not.toContain("aria-keyshortcuts");
+    expect(topBar({ ...BASE, search: { shortcut: "⌘K" } })).not.toContain(
         "aria-keyshortcuts",
     );
 });
