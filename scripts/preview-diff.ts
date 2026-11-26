@@ -860,6 +860,12 @@ async function main(options: Options) {
         try {
             console.log(`installing in ${wt} ...`);
             await Bun.$`bun install --frozen-lockfile`.cwd(wt).quiet();
+            // The login page is generated and git-ignored, so a fresh checkout
+            // has none, and the preview renders the sign-in screens from it.
+            // --no-env-file: the generator needs no secrets.
+            await Bun.$`${process.execPath} --no-env-file scripts/gen-login.ts`
+                .cwd(wt)
+                .quiet();
             for (const [n, s] of [
                 ["1 of 2", src.base1],
                 ["2 of 2", src.base2],
