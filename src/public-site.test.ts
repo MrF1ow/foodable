@@ -1,6 +1,12 @@
 import { test, expect, describe } from "bun:test";
 import { signExportToken } from "./domain/export-link.js";
 import { SITE_COOKIE } from "./site-session.js";
+import {
+    createMemoryAuthStore,
+    MIN_PASSWORD_LENGTH,
+    signIn,
+    signUp,
+} from "./domain/auth.js";
 
 // index.ts calls createOAuthRouter() at module scope, which throws without
 // OAuth env. Same dance as src/index.test.ts: set defaults before the
@@ -292,7 +298,7 @@ describe("runtime surfaces that stay", () => {
         expect(body).toContain('href="/brand/icon.svg" type="image/svg+xml"');
         expect(body).toContain('rel="apple-touch-icon"');
         expect(body).toContain('rel="manifest" href="/manifest.webmanifest"');
-        expect(body).toContain('class="auth-mark" src="/brand/mark.svg"');
+        expect(body).toContain('class="fd-brand-hero__mark"');
         expect(body).not.toContain("🍏");
     });
 
@@ -431,6 +437,85 @@ describe("runtime surfaces that stay", () => {
         expect(r.headers.get("content-security-policy") ?? "").toContain(
             "manifest-src 'self'",
         );
+    });
+});
+
+describe("the sign-in form", () => {
+    /** The whole `<input …>` tag that carries `needle`, found by position. */
+    function inputWith(html: string, needle: string): string {
+        const at = html.indexOf(needle);
+        expect(at, needle).toBeGreaterThan(-1);
+        return html.slice(
+            html.lastIndexOf("<input", at),
+            html.indexOf(">", at) + 1,
+        );
+    }
+
+    async function loginHtml(): Promise<string> {
+        const r = await app.request("http://x/");
+        expect(r.status).toBe(200);
+        return r.text();
+    }
+
+    test("posts the same route, method, fields and autocomplete values", async () => {
+        const html = await loginHtml();
+        expect(html).toContain(
+            '<form method="POST" action="/approve" class="auth-form fd-auth__form" data-turbo="false">',
+        );
+        expect(inputWith(html, 'name="session_id"')).toMatch(
+            /^<input type="hidden" name="session_id" value="[^"]+" \/>$/,
+        );
+        const email = inputWith(html, 'id="email"');
+        expect(email).toContain('name="email"');
+        expect(email).toContain('type="text"');
+        expect(email).toContain('autocomplete="username"');
+        expect(email).toContain('autocapitalize="none"');
+        expect(email).toContain("required");
+        const password = inputWith(html, 'id="password"');
+        expect(password).toContain('name="password"');
+        expect(password).toContain('type="password"');
+        expect(password).toContain('autocomplete="current-password"');
+        expect(password).toContain("required");
+        expect(html).toContain('name="action" value="login"');
+    });
+
+    test("the password box never blocks a password the server would accept", async () => {
+        // Sign in takes any password that matches, however short: an account
+        // made before the household's 12 character minimum still gets in.
+        const store = createMemoryAuthStore();
+        const short = "x".repeat(MIN_PASSWORD_LENGTH - 6);
+        await store.insertUser({
+            email: "old@example.com",
+            passwordHash: await Bun.password.hash(short, "bcrypt"),
+        });
+        expect(await signIn(store, "old@example.com", short)).toBeString();
+        const password = inputWith(await loginHtml(), 'id="password"');
+        expect(password).not.toContain("minlength");
+        expect(password).not.toContain("maxlength");
+    });
+
+    test("a new account's password still has the household minimum, answered in place", async () => {
+        const store = createMemoryAuthStore();
+        await expect(
+            signUp(
+                store,
+                "new@example.com",
+                "x".repeat(MIN_PASSWORD_LENGTH - 1),
+            ),
+        ).rejects.toThrow(`at least ${MIN_PASSWORD_LENGTH} characters`);
+    });
+
+    test("is the Brand hero, two fields and one button, with the legal line under it", async () => {
+        const html = await loginHtml();
+        expect(html).toContain("fd-brand-hero__title");
+        expect(html).toContain("Your household's kitchen, in one place.");
+        expect(html.match(/class="fd-field"/g)?.length).toBe(2);
+        expect(html.match(/<button /g)?.length).toBe(1);
+        expect(html).toContain(
+            "By continuing you confirm you're 16 or older and agree to the Terms and Privacy Policy.",
+        );
+        expect(html).not.toContain("auth-card");
+        expect(html).not.toContain("error-banner");
     });
 });
 

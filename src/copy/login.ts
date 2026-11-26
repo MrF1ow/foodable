@@ -5,24 +5,25 @@
 // redirect_uri/state/client_id, and has zero SEO surface.
 
 export interface LoginDoc {
+    /** The name in the Brand hero. */
     title: string;
-    subtitle: string;
+    /** The page's heading for screen readers; the hero draws the name. */
+    heading: string;
+    /** The line under the name. */
+    tagline: string;
+    /** Each box is named by its placeholder and by a label no one sees. */
     emailLabel: string;
     passwordLabel: string;
     inviteCodeLabel: string;
-    inviteCodeHint: string;
     continueButton: string;
     /** "By continuing you confirm..." — {terms}/{privacy} become the
-     * localized names as plain text. Legal HTML is gone, so do not turn
-     * these into anchors. */
+     * names as plain text. Legal HTML is gone, so do not turn these into
+     * anchors. */
     consentNote: string;
     termsLinkText: string;
     privacyLinkText: string;
-    newHereNote: string;
-    afterConnectNote: string;
-    /** One line under the card. */
-    footerNote: string;
-    /** MCP OAuth login: "Signing in to connect" before the redirect hostname. */
+    /** MCP OAuth login: "Sign in to connect" before the redirect hostname,
+     * in place of the tagline. */
     signingInToConnect: string;
 }
 
@@ -44,24 +45,17 @@ export interface LoginErrors {
 
 export const LOGIN: LoginDoc = {
     title: "Foodable",
-    subtitle: "Sign in to connect",
+    heading: "Sign in",
+    tagline: "Your household's kitchen, in one place.",
     emailLabel: "Email or username",
     passwordLabel: "Password",
     inviteCodeLabel: "Invite code",
-    inviteCodeHint:
-        "New to this household? Enter the single-use code the owner sent you.",
     continueButton: "Continue",
     consentNote:
-        "By continuing you confirm you're at least 16 and agree to the {terms} and {privacy}.",
-    termsLinkText: "Terms of Service",
+        "By continuing you confirm you're 16 or older and agree to the {terms} and {privacy}.",
+    termsLinkText: "Terms",
     privacyLinkText: "Privacy Policy",
-    newHereNote:
-        "Sign in with the email or username and password the household owner gave you.",
-    afterConnectNote:
-        "After successful connection in your client, save your password somewhere and close this browser tab.",
-    footerNote:
-        "Free and open source. Nutrition figures are estimates, not medical advice.",
-    signingInToConnect: "Signing in to connect",
+    signingInToConnect: "Sign in to connect",
 };
 
 export const LOGIN_ERRORS: LoginErrors = {

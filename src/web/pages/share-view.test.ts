@@ -55,8 +55,25 @@ describe("renderShareViewPage: recipe", () => {
         expect(html).toContain("vegan");
     });
 
-    test("an ingredient with no amount still shows by name", () => {
-        expect(html).toContain("Salt");
+    test("an ingredient with no amount still shows by name, as To taste", () => {
+        const salt = html.indexOf("Salt");
+        expect(salt).toBeGreaterThan(-1);
+        expect(html.indexOf("To taste", salt)).toBeGreaterThan(salt);
+    });
+
+    test("is the design's parts: kind, title, servings, tags, Ingredients and Method rows", () => {
+        expect(html).toContain('<p class="fd-share-brand">Foodable</p>');
+        expect(html).toContain("Shared recipe");
+        expect(html).toContain(
+            '<ul class="fd-pill-chip-group fd-pill-chip-group--static" aria-label="Tags">',
+        );
+        expect(html).toContain("fd-section-header__label");
+        expect(html).toContain("1. Rinse the lentils.");
+        expect(html).toContain("2. Simmer for 25 minutes.");
+        // The steps are sentences: their rows wrap.
+        expect(html).toContain("fd-item-row--wrap");
+        // The tags are labels, not toggles.
+        expect(html).not.toContain("aria-pressed");
     });
 
     test("the title is the recipe name", () => {
@@ -77,9 +94,26 @@ describe("renderShareViewPage: grocery list", () => {
         expect(html.indexOf("Leeks")).toBeGreaterThan(market);
     });
 
-    test("marks a checked line", () => {
-        expect(html).toMatch(/Eggs/);
-        expect(html).toContain("fd-share-line--checked");
+    test("a checked line has its ring filled and an open one is an empty ring, neither pressable", () => {
+        const eggs = html.indexOf("Eggs");
+        const eggsRow = html.slice(html.lastIndexOf("<li", eggs), eggs);
+        expect(eggsRow).toContain("fd-item-row__done");
+        expect(eggsRow).toContain('aria-label="Checked off"');
+        const milk = html.indexOf("Milk");
+        const milkRow = html.slice(html.lastIndexOf("<li", milk), milk);
+        expect(milkRow).toContain("fd-item-row__ring");
+        expect(milkRow).toContain('aria-label="Not checked off"');
+        for (const row of [eggsRow, milkRow]) {
+            expect(row).not.toContain("<input");
+            expect(row).not.toContain("<button");
+            expect(row).not.toContain("<form");
+        }
+    });
+
+    test("counts the items and ends on Read-only", () => {
+        expect(html).toContain("3 items");
+        expect(html).toContain('<p class="fd-share-foot">Read-only</p>');
+        expect(html).toContain("Shared list");
     });
 
     test("an empty list says so", () => {

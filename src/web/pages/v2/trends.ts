@@ -164,15 +164,15 @@ export async function resolveTrendsSubject(
     if (requestedMember?.trim()) {
         const requested = await getHouseholdMembership(requestedMember.trim());
         if (requested == null || requested.householdId !== viewer.householdId) {
-            const { forbiddenDashboardHtml } = await import("../../loaders.js");
-            return { ok: false, status: 403, html: forbiddenDashboardHtml() };
+            const { notAllowedHtml } = await import("../../loaders.js");
+            return { ok: false, status: 403, html: notAllowedHtml() };
         }
         subject = requested;
     }
     const access = dashboardAccess(viewer, subject);
     if (!access.ok) {
-        const { forbiddenDashboardHtml } = await import("../../loaders.js");
-        return { ok: false, status: 403, html: forbiddenDashboardHtml() };
+        const { notAllowedHtml } = await import("../../loaders.js");
+        return { ok: false, status: 403, html: notAllowedHtml() };
     }
     const viewerProfile = await getProfile(viewer.userId);
     const { viewerChromeWithAttention } = await import("../../attention.js");

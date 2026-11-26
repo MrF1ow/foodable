@@ -146,7 +146,7 @@ import { getProfile } from "../../db/profiles.js";
 import { viewerChromeWithAttention } from "../attention.js";
 import { settingsBackHref } from "../settings-back.js";
 import { getBaseUrl } from "../../url.js";
-import { forbiddenDashboardHtml } from "../loaders.js";
+import { forbiddenDashboardHtml, notAllowedHtml } from "../loaders.js";
 
 // TOAST_KEYS: "household.fetch-refusal.cleared", "household.fetch-refusals.cleared-all", "household.restock.saved", "household.timezone.saved"
 
@@ -1552,7 +1552,7 @@ async function renderInvitesRoute(
         return { status: 403 as const, html: forbiddenDashboardHtml() };
     }
     if (!can(member, "member.manage").ok) {
-        return { status: 403 as const, html: forbiddenDashboardHtml() };
+        return { status: 403 as const, html: notAllowedHtml() };
     }
     const profile = await getProfile(userId);
     const [chrome, invites, flags, clock] = await Promise.all([

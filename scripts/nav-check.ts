@@ -385,6 +385,256 @@ try {
         { approveAfter, loginAfterExpired, ex: drain() },
     );
 
+    // ---- Sign in, the gates and the public share pages, at 390 and 1440 ----
+    // Each is the Brand hero and one column (or the share page's own), never
+    // wider than the screen, and the sign-in form keeps its fields.
+    await control("session=app&theme=dark&reset=posts&post=ok");
+    const authFacts = (width: number) =>
+        ev<{
+            fits: boolean;
+            hero: boolean;
+            tagline: string | null;
+            fields: string[];
+            boxes: { h: number; w: number; fitsScreen: boolean }[];
+            button: { h: number; w: number; text: string | null } | null;
+            btns: { h: number; w: number }[];
+            errorBetween: boolean;
+            errors: number;
+            action: string | null;
+            hidden: string | null;
+            complete: string[];
+            minlength: number;
+            bar: boolean;
+            h1: string[];
+        }>(`(() => {
+            const form = document.querySelector("form.auth-form") ?? document.querySelector(".fd-auth__form");
+            const btn = document.querySelector(".fd-auth .fd-btn--primary");
+            const err = document.querySelector(".fd-auth__error");
+            const last = [...document.querySelectorAll(".fd-field")].pop();
+            const rect = (e) => e.getBoundingClientRect();
+            return {
+                fits: document.documentElement.scrollWidth <= ${width} + 1,
+                hero: !!document.querySelector(".fd-auth > .fd-brand-hero"),
+                tagline: document.querySelector(".fd-brand-hero__tagline")?.textContent ?? null,
+                fields: [...document.querySelectorAll(".fd-field__input")].map((i) => i.name),
+                boxes: [...document.querySelectorAll(".fd-field__box")].map((b) => ({ h: Math.round(rect(b).height), w: Math.round(rect(b).width), fitsScreen: rect(b).left >= 0 && rect(b).right <= ${width} })),
+                button: btn ? { h: Math.round(rect(btn).height), w: Math.round(rect(btn).width), text: btn.textContent.trim() } : null,
+                btns: [...document.querySelectorAll(".fd-auth .fd-btn")].map((b) => ({ h: Math.round(rect(b).height), w: Math.round(rect(b).width) })),
+                errorBetween: !!err && !!last && !!btn && !!(last.compareDocumentPosition(err) & Node.DOCUMENT_POSITION_FOLLOWING) && !!(err.compareDocumentPosition(btn) & Node.DOCUMENT_POSITION_FOLLOWING),
+                errors: document.querySelectorAll(".fd-auth__error").length,
+                action: form?.getAttribute("action") ?? null,
+                hidden: form?.querySelector("input[type=hidden][name=session_id]")?.value ?? null,
+                complete: [...document.querySelectorAll(".fd-auth__form input:not([type=hidden])")].map((i) => i.getAttribute("autocomplete")),
+                minlength: document.querySelectorAll("input[minlength]").length,
+                bar: !!document.querySelector(".app-bar, .fd-tabs, .fd-sidebar, .fd-bell"),
+                h1: [...document.querySelectorAll("h1")].map((h) => h.textContent),
+            };
+        })()`);
+    for (const width of [390, 1440]) {
+        await send("Emulation.setDeviceMetricsOverride", {
+            width,
+            height: width < 600 ? 844 : 960,
+            deviceScaleFactor: 1,
+            mobile: false,
+        });
+        const column = Math.min(350, width - 40);
+        const signIn = [] as Awaited<ReturnType<typeof authFacts>>[];
+        for (const state of ["default", "invite", "connect", "error"]) {
+            await goto(`/login-test?state=${state}`);
+            await sleep(300);
+            signIn.push(await authFacts(width));
+        }
+        const [plain, invite, connect, wrong] = signIn as [
+            (typeof signIn)[number],
+            (typeof signIn)[number],
+            (typeof signIn)[number],
+            (typeof signIn)[number],
+        ];
+        const everyBoxFits = (f: typeof plain) =>
+            f.boxes.every((b) => b.h === 48 && b.w === column && b.fitsScreen);
+        record(
+            `sign in at ${width}: the Brand hero, an email and a password box and Continue, the invite state adds a code box, the connect state names who signs in, a wrong password is said in place; never wider than the screen`,
+            signIn.every((f) => f.fits && f.hero && !f.bar) &&
+                signIn.every(
+                    (f) =>
+                        f.action === "/approve" &&
+                        f.hidden === "sess-p8" &&
+                        f.minlength === 0,
+                ) &&
+                signIn.every(everyBoxFits) &&
+                signIn.every(
+                    (f) =>
+                        f.button?.h === 48 &&
+                        f.button.w === column &&
+                        f.button.text === "Continue",
+                ) &&
+                plain.fields.join() === "email,password" &&
+                plain.complete.join() === "username,current-password" &&
+                plain.tagline === "Your household's kitchen, in one place." &&
+                plain.errors === 0 &&
+                invite.fields.join() === "email,password,invite_code" &&
+                invite.complete.join() === "username,current-password,off" &&
+                connect.tagline === "Sign in to connect claude.ai" &&
+                connect.errors === 0 &&
+                wrong.errors === 1 &&
+                wrong.errorBetween &&
+                wrong.fields.join() === "email,password" &&
+                signIn.every((f) => f.h1.join() === "Sign in"),
+            { width, signIn, ex: drain() },
+        );
+
+        const gates = [] as {
+            path: string;
+            facts: Awaited<ReturnType<typeof authFacts>>;
+            links: string[];
+            texts: string[];
+        }[];
+        for (const path of [
+            "/create-household",
+            "/gate-forbidden",
+            "/gate-not-allowed",
+            "/gate-not-found",
+        ]) {
+            await goto(path);
+            await sleep(300);
+            gates.push({
+                path,
+                facts: await authFacts(width),
+                links: await ev<string[]>(
+                    `[...document.querySelectorAll(".fd-auth a.fd-btn")].map((a) => a.getAttribute("href") + (a.dataset.turbo ? ":turbo=" + a.dataset.turbo : ""))`,
+                ),
+                texts: await ev<string[]>(
+                    `[...document.querySelectorAll(".fd-brand-hero__tagline, .fd-auth__caption")].map((e) => e.textContent)`,
+                ),
+            });
+        }
+        const [create, forbidden, refused, missing] = gates as [
+            (typeof gates)[number],
+            (typeof gates)[number],
+            (typeof gates)[number],
+            (typeof gates)[number],
+        ];
+        record(
+            `gates at ${width}: create household, no household, not allowed and not found are the Brand hero and one column, Log out for someone with no household (and under Create household), Go to Today for a refusal or a missing page; never wider than the screen`,
+            gates.every((g) => g.facts.fits && g.facts.hero && !g.facts.bar) &&
+                gates.every((g) =>
+                    g.facts.boxes.every((b) => b.h === 48 && b.w === column),
+                ) &&
+                gates.every((g) =>
+                    g.facts.btns.every((b) => b.h === 48 && b.w === column),
+                ) &&
+                create.facts.fields.join() === "household_name,display_name" &&
+                create.facts.button?.w === column &&
+                create.links.join() === "/logout:turbo=false" &&
+                create.texts.join("|") === "Name your household" &&
+                forbidden.links.join() === "/logout:turbo=false" &&
+                forbidden.texts.join("|") ===
+                    "No household yet|Ask the owner for an invite code" &&
+                refused.links.join() === "/" &&
+                refused.texts.join("|") ===
+                    "Not allowed|You don't have access to this page." &&
+                missing.links.join() === "/" &&
+                missing.texts.join("|") ===
+                    "Page not found|It may have moved or been deleted",
+            { width, gates, ex: drain() },
+        );
+
+        const shares = [] as {
+            path: string;
+            fits: boolean;
+            rows: number;
+            sections: string[];
+            tags: number;
+            pressable: number;
+            chrome: boolean;
+            menus: number;
+            title: string | null;
+            kicker: string | null;
+        }[];
+        for (const path of ["/s/recipe-test", "/s/list-test"]) {
+            await goto(path);
+            await sleep(300);
+            shares.push(
+                await ev(`({
+                    path: location.pathname,
+                    fits: document.documentElement.scrollWidth <= ${width} + 1,
+                    rows: document.querySelectorAll(".fd-share .fd-item-row").length,
+                    sections: [...document.querySelectorAll(".fd-section-header__label")].map((e) => e.textContent),
+                    tags: document.querySelectorAll(".fd-pill-chip-group--static .fd-pill-chip").length,
+                    pressable: document.querySelectorAll(".fd-share button, .fd-share input, .fd-share a, .fd-share form").length,
+                    chrome: !!document.querySelector(".app-bar, .fd-tabs, .fd-sidebar, .fd-bell, script, #toast-region"),
+                    menus: document.querySelectorAll(".fd-menu").length,
+                    title: document.querySelector(".fd-share-title")?.textContent ?? null,
+                    kicker: document.querySelector(".fd-share-kicker")?.textContent ?? null,
+                    column: Math.round(document.querySelector(".fd-page-layout__content").getBoundingClientRect().width),
+                })`),
+            );
+        }
+        // `mcp-share-links` off: the route's one plain 404, no page.
+        await goto("/s/recipe-test?share=off");
+        const off = await ev<{ text: string; page: boolean }>(`({
+            text: document.body.textContent.trim(),
+            page: !!document.querySelector(".fd-share"),
+        })`);
+        const share = width === 1440 ? 680 : 350;
+        record(
+            `public share pages at ${width}: a recipe and a grocery list in the design's rows, nothing to press or sign out of, never wider than the screen, and with mcp-share-links off the route's plain 404`,
+            shares.every((p) => p.fits && !p.chrome && p.menus === 0) &&
+                shares.every(
+                    (p) =>
+                        (p as unknown as { column: number }).column === share,
+                ) &&
+                shares.every((p) => p.pressable === 0) &&
+                shares[0]!.title === "Smoky red lentil soup" &&
+                shares[0]!.kicker === "Shared recipe" &&
+                shares[0]!.sections.join() === "Ingredients,Method" &&
+                shares[0]!.tags === 3 &&
+                shares[0]!.rows === 6 &&
+                shares[1]!.title === "Grocery list" &&
+                shares[1]!.kicker === "Shared list" &&
+                shares[1]!.sections.join() === "Corner Shop" &&
+                shares[1]!.rows === 2 &&
+                off.text === "Not found" &&
+                !off.page,
+            { width, shares, off, ex: drain() },
+        );
+    }
+    // Create household posts its two names to the same route.
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 390,
+        height: 844,
+        deviceScaleFactor: 1,
+        mobile: false,
+    });
+    await goto("/create-household");
+    await control("reset=posts");
+    await ev(`(() => {
+        document.querySelector("input[name='household_name']").value = "Home";
+        document.querySelector("input[name='display_name']").value = "Ethan";
+    })()`);
+    await clickSel(".fd-auth__form button[type='submit']");
+    await sleep(500);
+    const createPosts = (await stats()).posts.filter(
+        (p) => p.path === "/create-household",
+    );
+    record(
+        "create household: the form posts household_name and display_name to /create-household",
+        createPosts.length === 1 &&
+            createPosts[0]!.entries.some(
+                ([k, v]) => k === "household_name" && v === "Home",
+            ) &&
+            createPosts[0]!.entries.some(
+                ([k, v]) => k === "display_name" && v === "Ethan",
+            ),
+        { createPosts, ex: drain() },
+    );
+    await send("Emulation.setDeviceMetricsOverride", {
+        width: 430,
+        height: 800,
+        deviceScaleFactor: 1,
+        mobile: true,
+    });
+
     // ---- The shell: phone nav, desktop chrome, Turbo ----
     await control("session=app&theme=dark&reset=posts&post=ok");
     const v2Snap = () =>

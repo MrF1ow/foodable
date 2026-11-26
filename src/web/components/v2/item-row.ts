@@ -86,6 +86,11 @@ export type ItemRowLead =
           label: string;
       }
     | {
+          /** The empty ring, and nothing to press (a line on a list nobody can tick). */
+          kind: "ring";
+          label: string;
+      }
+    | {
           /** One of a group of choices: a ring that fills when picked, and the
            *  whole row is the label, so tapping the title picks it too. */
           kind: "radio";
@@ -299,6 +304,10 @@ function leadSlot(lead: ItemRowLead, disabled: boolean): Html {
         case "done":
             return raw(
                 `<span class="fd-item-row__lead fd-item-row__check fd-item-row__done" role="img" aria-label="${esc(lead.label)}"><span class="fd-item-row__check-box" aria-hidden="true">${icon("check")}</span></span>`,
+            );
+        case "ring":
+            return raw(
+                `<span class="fd-item-row__lead fd-item-row__check fd-item-row__ring" role="img" aria-label="${esc(lead.label)}"><span class="fd-item-row__check-box" aria-hidden="true">${icon("check")}</span></span>`,
             );
         case "radio": {
             const attrs = [

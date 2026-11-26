@@ -1069,6 +1069,21 @@ test("a done lead is the filled ring with nothing to press", () => {
     expect(html).not.toContain("<input");
 });
 
+test("a ring lead is an empty ring with nothing to press", () => {
+    const html = String(
+        itemRow({
+            title: "Milk",
+            lead: { kind: "ring", label: "Not checked off" },
+        }),
+    );
+    expect(html).toContain(
+        `<span class="fd-item-row__lead fd-item-row__check fd-item-row__ring" role="img" aria-label="Not checked off">`,
+    );
+    expect(html).not.toContain("<button");
+    expect(html).not.toContain("<input");
+    expect(html).not.toContain("fd-item-row__done");
+});
+
 test("a radio lead can belong to a form outside its row", () => {
     const html = itemRow({
         title: "Any brand",

@@ -1,0 +1,64 @@
+/* The pages a person meets outside the app shell: sign in (the OAuth login
+ * template), create household, no household and not found. The Brand hero on
+ * top, then one 350 px column of fields and buttons (Field, Button) and a
+ * caption under them. The page is flat on the surface colour; the glow is the
+ * hero's own. */
+
+body.fd-auth-body {
+    min-height: 100dvh;
+}
+
+.fd-auth {
+    --fd-auth-column: 350px;
+    /* The hero is 370 high and the design starts the first field 30 below it. */
+    --fd-auth-lead: 30px;
+    box-sizing: border-box;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+}
+
+.fd-auth__content {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    width: 100%;
+    max-width: calc(var(--fd-auth-column) + 2 * var(--space-xl));
+    padding: var(--fd-auth-lead)
+        max(var(--space-xl), env(safe-area-inset-right, 0px))
+        calc(var(--space-4xl) + env(safe-area-inset-bottom, 0px))
+        max(var(--space-xl), env(safe-area-inset-left, 0px));
+}
+.fd-auth__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+    margin: 0;
+    min-width: 0;
+}
+
+/* The one line under a field or a button: the wrong password, the legal
+   sentence, the way out of a page. */
+.fd-auth__caption,
+.fd-auth__error {
+    margin: 0;
+    font-size: var(--text-caption-size);
+    line-height: var(--text-caption-line);
+    overflow-wrap: anywhere;
+}
+.fd-auth__caption {
+    color: var(--text-secondary);
+    text-align: center;
+}
+.fd-auth__error {
+    color: var(--status-over);
+}
+
+/* A button that is a link (Go to Today, Log out) fills the column. */
+.fd-auth .fd-btn {
+    width: 100%;
+}

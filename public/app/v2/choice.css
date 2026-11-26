@@ -11,6 +11,15 @@
     align-items: center;
     gap: var(--control-sm-gap);
 }
+/* A read-only list of labels: a <ul> of pills, nothing to press. */
+.fd-pill-chip-group--static {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.fd-pill-chip-group--static .fd-pill-chip {
+    cursor: default;
+}
 .fd-pill-chip {
     appearance: none;
     box-sizing: border-box;

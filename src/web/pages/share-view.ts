@@ -9,8 +9,13 @@ import type { ShareView } from "../../domain/sharing.js";
 import { recipeSteps } from "../../domain/recipes.js";
 import { appStylesheetHref, appV2StylesheetHref } from "../../widgets.js";
 import { formatQuantityDisplayParts } from "../display-quantity.js";
-import { esc } from "../components/v2/html.js";
-import { pageHeader } from "../components/ui.js";
+import { chipGroup } from "../components/v2/chip.js";
+import { emptyState } from "../components/v2/empty-state.js";
+import { esc, join, raw, type Html } from "../components/v2/html.js";
+import { itemRow } from "../components/v2/item-row.js";
+import { listGroup } from "../components/v2/list-group.js";
+import { pageLayout } from "../components/v2/page-layout.js";
+import { sectionHeader } from "../components/v2/section-header.js";
 import { htmlOpen, themeColorMeta, type ThemePref } from "../shell.js";
 
 function servingsLabel(portions: number): string {
@@ -18,89 +23,135 @@ function servingsLabel(portions: number): string {
 }
 
 function amountLabel(amount: number | null, unit: string | null): string {
-    if (amount === null || unit === null) return "to taste";
+    if (amount === null || unit === null) return "To taste";
     return formatQuantityDisplayParts(amount, unit);
 }
 
-function sectionHead(title: string, count?: number): string {
-    const tail =
-        count === undefined
-            ? ""
-            : `<span class="fd-recipe-section-head__count">${esc(count)}</span>`;
-    return `<div class="fd-recipe-section-head"><h2 class="fd-recipe-section-head__title">${esc(title)}</h2>${tail}</div>`;
+/** The wordmark, the kind of page and its title and one line under it. */
+function head(kicker: string, title: string, meta: string): Html {
+    return raw(
+        `<p class="fd-share-brand">Foodable</p><p class="fd-share-kicker">${esc(kicker)}</p><h1 class="fd-share-title">${esc(title)}</h1><p class="fd-share-meta">${esc(meta)}</p>`,
+    );
 }
 
 function recipeBody(view: Extract<ShareView, { kind: "recipe" }>): {
     title: string;
-    body: string;
+    head: Html;
+    content: Html;
 } {
     const { recipe } = view;
     const tags =
         recipe.tags.length > 0
-            ? `<ul class="fd-share-tags" aria-label="Tags">${recipe.tags.map((tag) => `<li class="fd-share-tag">${esc(tag)}</li>`).join("")}</ul>`
+            ? chipGroup({
+                  label: "Tags",
+                  select: "static",
+                  chips: recipe.tags.map((tag) => ({ label: tag })),
+              })
             : "";
     const ingredients =
         recipe.ingredients.length === 0
-            ? `<p class="fd-recipe-empty">No ingredients listed.</p>`
-            : `<ul class="fd-share-rows">${recipe.ingredients
-                  .map((ingredient) => {
-                      const note = ingredient.note?.trim();
-                      return `<li class="fd-share-row"><span class="fd-share-row__body"><span class="fd-share-row__name">${esc(ingredient.name)}</span>${note ? `<span class="fd-share-row__note">${esc(note)}</span>` : ""}</span><span class="fd-share-row__amount">${esc(amountLabel(ingredient.amount, ingredient.unit))}</span></li>`;
-                  })
-                  .join("")}</ul>`;
+            ? emptyState({ title: "No ingredients listed." })
+            : listGroup({
+                  label: "Ingredients",
+                  rows: recipe.ingredients.map((ingredient) =>
+                      itemRow({
+                          title: ingredient.name,
+                          subtitle: ingredient.note?.trim() || undefined,
+                          value: amountLabel(
+                              ingredient.amount,
+                              ingredient.unit,
+                          ),
+                      }),
+                  ),
+              });
     const steps = recipeSteps(recipe.instructions);
     const method =
         steps.length === 0
-            ? `<p class="fd-recipe-empty">No steps yet.</p>`
-            : `<ol class="fd-recipe-steps">${steps.map((step) => `<li>${esc(step)}</li>`).join("")}</ol>`;
+            ? emptyState({ title: "No steps yet." })
+            : listGroup({
+                  label: "Method",
+                  rows: steps.map((step, i) =>
+                      itemRow({
+                          title: `${i + 1}. ${step}`,
+                          className: "fd-item-row--wrap",
+                      }),
+                  ),
+              });
     return {
         title: recipe.name,
-        body: `<div class="fd-share-head">
-<p class="fd-share-kicker">Shared recipe</p>
-${pageHeader({ title: recipe.name, sub: `<p class="fd-recipe-meta">${esc(servingsLabel(recipe.portions))}</p>${tags}` })}
-</div>
-<section class="fd-share-section" aria-label="Ingredients">
-${sectionHead("Ingredients", recipe.ingredients.length)}
-${ingredients}
-</section>
-<section class="fd-share-section" aria-label="Method">
-${sectionHead("Method")}
-${method}
-</section>`,
+        head: head(
+            "Shared recipe",
+            recipe.name,
+            servingsLabel(recipe.portions),
+        ),
+        content: raw(
+            join([
+                tags,
+                sectionHeader({
+                    label: "Ingredients",
+                    count: recipe.ingredients.length,
+                    rule: false,
+                }),
+                ingredients,
+                sectionHeader({ label: "Method", rule: false }),
+                method,
+            ]),
+        ),
     };
 }
 
 function groceryBody(view: Extract<ShareView, { kind: "grocery_list" }>): {
     title: string;
-    body: string;
+    head: Html;
+    content: Html;
 } {
     const stores = view.list.stores;
     const lineCount = stores.reduce((n, store) => n + store.lines.length, 0);
     const groups =
         stores.length === 0
-            ? `<p class="fd-recipe-empty">Nothing on the list.</p>`
-            : stores
-                  .map(
-                      (
-                          store,
-                      ) => `<section class="fd-share-section" aria-label="${esc(store.name)}">
-${sectionHead(store.name, store.lines.length)}
-<ul class="fd-share-rows">${store.lines
-                          .map(
-                              (line) =>
-                                  `<li class="fd-share-row${line.checked ? " fd-share-line--checked" : ""}"><span class="fd-share-row__body"><span class="fd-share-row__name">${esc(line.name)}</span></span><span class="fd-share-row__amount">${esc(formatQuantityDisplayParts(line.amount, line.unit))}</span></li>`,
-                          )
-                          .join("")}</ul>
-</section>`,
-                  )
-                  .join("\n");
+            ? emptyState({ title: "Nothing on the list." })
+            : raw(
+                  join(
+                      stores.map((store) =>
+                          join([
+                              sectionHeader({
+                                  label: store.name,
+                                  count: store.lines.length,
+                                  rule: false,
+                              }),
+                              listGroup({
+                                  label: store.name,
+                                  rows: store.lines.map((line) =>
+                                      itemRow({
+                                          title: line.name,
+                                          value: formatQuantityDisplayParts(
+                                              line.amount,
+                                              line.unit,
+                                          ),
+                                          lead: line.checked
+                                              ? {
+                                                    kind: "done",
+                                                    label: "Checked off",
+                                                }
+                                              : {
+                                                    kind: "ring",
+                                                    label: "Not checked off",
+                                                },
+                                      }),
+                                  ),
+                              }),
+                          ]),
+                      ),
+                  ),
+              );
     return {
         title: "Grocery list",
-        body: `<div class="fd-share-head">
-<p class="fd-share-kicker">Shared list</p>
-${pageHeader({ title: "Grocery list", sub: `<p class="fd-recipe-meta">${esc(lineCount === 1 ? "1 item" : `${lineCount} items`)}</p>` })}
-</div>
-${groups}`,
+        head: head(
+            "Shared list",
+            "Grocery list",
+            lineCount === 1 ? "1 item" : `${lineCount} items`,
+        ),
+        content: raw(join([groups, `<p class="fd-share-foot">Read-only</p>`])),
     };
 }
 
@@ -112,7 +163,7 @@ export function renderShareViewPage(
     view: ShareView,
     theme: ThemePref = "system",
 ): string {
-    const { title, body } =
+    const { title, head, content } =
         view.kind === "recipe" ? recipeBody(view) : groceryBody(view);
     return `<!doctype html>
 ${htmlOpen(theme)}
@@ -131,11 +182,7 @@ ${themeColorMeta(theme, "page")}
 </head>
 <body class="fd-body fd-share-body">
 <main class="fd-share native">
-<p class="fd-share-brand"><img src="/brand/mark.svg" width="22" height="21" alt="" /><span>Foodable</span></p>
-<article class="fd-share-card">
-${body}
-</article>
-<p class="fd-share-foot">A read-only copy, shared with you from a Foodable household.</p>
+${pageLayout({ layout: "single", header: head, content, className: "fd-share-layout" })}
 </main>
 </body>
 </html>`;

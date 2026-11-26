@@ -33,7 +33,7 @@ export type ChipOptions = {
     submit?: boolean;
 };
 
-type Role = "toggle" | "radio" | "link";
+type Role = "toggle" | "radio" | "link" | "static";
 
 function chipMarkup(opts: ChipOptions, role: Role, tabStop: boolean): string {
     const classes = cls(
@@ -49,6 +49,9 @@ function chipMarkup(opts: ChipOptions, role: Role, tabStop: boolean): string {
     const value = opts.value != null ? ` data-value="${esc(opts.value)}"` : "";
     const data = dataAttrs(opts.data);
     const name = opts.ariaLabel ? ` aria-label="${esc(opts.ariaLabel)}"` : "";
+    if (role === "static") {
+        return `<span class="${classes}"${name}${value}${data}>${inner}</span>`;
+    }
     if (role === "link") {
         return `<a class="${classes}" href="${safeHref(opts.href ?? "#")}"${opts.selected ? ' aria-current="true"' : ""}${name}${value}${data}>${inner}</a>`;
     }
@@ -67,7 +70,11 @@ export function chip(opts: ChipOptions): Html {
 export type ChipGroupOptions = {
     /** Accessible name of the group ("Meals"). */
     label: string;
-    select: "single" | "multiple" | "links";
+    /**
+     * `static` is a read-only list of labels (a recipe's tags on a page nobody
+     * is signed in to): outlined pills that do nothing when pressed.
+     */
+    select: "single" | "multiple" | "links" | "static";
     chips: readonly ChipOptions[];
     className?: string;
     data?: Readonly<Record<string, string>>;
@@ -77,6 +84,11 @@ export function chipGroup(opts: ChipGroupOptions): Html {
     const classes = cls("fd-pill-chip-group", opts.className);
     const data = dataAttrs(opts.data);
     const name = `aria-label="${esc(opts.label)}"`;
+    if (opts.select === "static") {
+        return raw(
+            `<ul class="${cls(classes, "fd-pill-chip-group--static")}" ${name}${data}>${opts.chips.map((c) => `<li>${chipMarkup(c, "static", false)}</li>`).join("")}</ul>`,
+        );
+    }
     if (opts.select === "links") {
         return raw(
             `<nav class="${classes}" ${name}${data}>${opts.chips.map((c) => chipMarkup(c, "link", true)).join("")}</nav>`,

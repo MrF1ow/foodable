@@ -8,7 +8,8 @@ import {
 } from "../pages/v2/settings-account.js";
 import {
     createHouseholdFormHtml,
-    forbiddenDashboardHtml,
+    notAllowedHtml,
+    refusalHtml,
     renderSettingsAccountPage,
     renderSettingsAiV2Route,
     renderSettingsAccountV2Route,
@@ -372,8 +373,7 @@ const explainManagerOnly = createMiddleware(async (c, next) => {
     const member = c.get("siteMembership");
     if (member != null && !canManageHousehold(member)) {
         return c.html(
-            forbiddenDashboardHtml(
-                "system",
+            notAllowedHtml(
                 "Only an owner or admin can change the household default.",
             ),
             403,
@@ -828,14 +828,15 @@ settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
         );
     }
     const policy = signupPolicyForRoutes(getSignupPolicy());
+    const caller = await getHouseholdMembership(userId);
     const createHousehold = canSignUp(policy, {
         userCount: await authUserCount(),
         householdExists: await householdExists(),
         mode: "create-household",
-        callerHasHousehold: (await getHouseholdMembership(userId)) != null,
+        callerHasHousehold: caller != null,
     });
     if (!createHousehold.ok) {
-        return c.html(forbiddenDashboardHtml(), 403);
+        return c.html(refusalHtml(caller), 403);
     }
     try {
         await createHouseholdForCaller(userId, name, displayName, {
@@ -843,7 +844,7 @@ settingsRoutes.post("/create-household", requireSiteUser, async (c) => {
         });
     } catch (err) {
         if (err instanceof HouseholdAlreadyExistsError) {
-            return c.html(forbiddenDashboardHtml(), 403);
+            return c.html(refusalHtml(caller), 403);
         }
         const message =
             err instanceof Error

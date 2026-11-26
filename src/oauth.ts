@@ -29,6 +29,7 @@ import { escapeHtml } from "./html.js";
 import { getBaseUrl } from "./url.js";
 import { rateLimitAuth } from "./middleware.js";
 import { LOGIN, LOGIN_ERRORS } from "./copy/login.js";
+import { field } from "./web/components/v2/field.js";
 import { mintSiteSession, siteCookieHeader } from "./site-session.js";
 import { authEmailForSignIn } from "./household.js";
 import {
@@ -39,6 +40,7 @@ import {
 import {
     appScriptHref,
     appStylesheetHref,
+    appV2StylesheetHref,
     getAppCss,
     getAppJs,
     getAppV2Css,
@@ -83,24 +85,35 @@ export async function renderLoginPage(
     await getAppV2Css();
     await getAppV2Js();
     const template = await Bun.file("./public/login.html").text();
+    // The error sits in place, between the fields and the button.
     const errorHtml = error
-        ? `<div class="error-banner">${escapeHtml(error)}</div>`
+        ? `<p class="fd-auth__error" role="alert">${escapeHtml(error)}</p>`
         : "";
-    let connectHint = "";
+    // {{CONNECT_HINT}} is the line under the name in the Brand hero: the
+    // tagline, or who the agent is signing in to connect.
+    let connectHint = escapeHtml(LOGIN.tagline);
     if (session.purpose === "mcp") {
         try {
             const host = new URL(session.redirectUri).hostname;
-            connectHint = `<p class="auth-note">${escapeHtml(LOGIN.signingInToConnect)} <strong>${escapeHtml(host)}</strong></p>`;
+            connectHint = `${escapeHtml(LOGIN.signingInToConnect)} ${escapeHtml(host)}`;
         } catch {
-            connectHint = "";
+            connectHint = escapeHtml(LOGIN.tagline);
         }
     }
     const policy = getSignupPolicy();
     const inviteFields =
         policy === "invite"
-            ? `<label for="invite_code">${escapeHtml(LOGIN.inviteCodeLabel)}</label>
-                    <input type="text" id="invite_code" name="invite_code" autocomplete="off" autocapitalize="none" spellcheck="false" />
-                    <p class="auth-note">${escapeHtml(LOGIN.inviteCodeHint)}</p>`
+            ? field({
+                  id: "invite_code",
+                  name: "invite_code",
+                  label: LOGIN.inviteCodeLabel,
+                  labelHidden: true,
+                  placeholder: LOGIN.inviteCodeLabel,
+                  type: "text",
+                  autocomplete: "off",
+                  autocapitalize: "none",
+                  spellcheck: false,
+              })
             : "";
     return template
         .replaceAll("{{SESSION_ID}}", () => escapeHtml(sessionId))
@@ -108,6 +121,7 @@ export async function renderLoginPage(
         .replaceAll("{{CONNECT_HINT}}", () => connectHint)
         .replaceAll("{{INVITE_FIELDS}}", () => inviteFields)
         .replaceAll("{{APP_CSS_HREF}}", () => appStylesheetHref())
+        .replaceAll("{{APP_V2_CSS_HREF}}", () => appV2StylesheetHref())
         .replaceAll("{{APP_JS_HREF}}", () => appScriptHref());
 }
 

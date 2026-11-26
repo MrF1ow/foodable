@@ -162,22 +162,29 @@ test("no page module contains a raw <h1", () => {
     // dev-gallery, share-view and loaders.ts.
     expect(files.length).toBeGreaterThan(2);
     for (const file of files) {
+        // The public share page draws its title as the design does, plain
+        // text, with no Page header (that is the signed-in app's).
+        if (file.endsWith("share-view.ts")) continue;
         const src = readFileSync(file, "utf8");
         expect(src, file).not.toContain("<h1");
-        expect(src, file).toContain("pageHeader");
+        // loaders.ts only loads: its pages come from pages/.
+        if (!file.endsWith("loaders.ts"))
+            expect(src, file).toContain("pageHeader");
     }
 });
 
 test("every page's h1 comes from pageHeader once", () => {
-    const pages: Array<[string, string]> = [
-        ["create-household", createHouseholdFormHtml()],
-        ["app-shell", shellPage()],
-    ];
+    const pages: Array<[string, string]> = [["app-shell", shellPage()]];
     for (const [name, html] of pages) {
         const headings = html.match(/<h1>.*?<\/h1>/g) ?? [];
         expect(headings, name).toHaveLength(1);
         expect(html, name).toContain(headings[0]!);
         assertNoNestedForms(html);
     }
-    expect(forbiddenDashboardHtml()).not.toContain("<h1");
+    // A gate's one heading is the page's name for a screen reader; the Brand
+    // hero draws the name.
+    for (const html of [createHouseholdFormHtml(), forbiddenDashboardHtml()]) {
+        expect(html.match(/<h1[ >]/g)).toHaveLength(1);
+        expect(html).toContain('<h1 class="fd-visually-hidden">');
+    }
 });
