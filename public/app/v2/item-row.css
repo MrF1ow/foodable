@@ -52,12 +52,6 @@ button.fd-item-row__face {
     text-align: left;
     cursor: pointer;
 }
-button.fd-item-row__face:focus-visible,
-a.fd-item-row__face:focus-visible,
-.fd-item-row__anchor:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* A link row that also picks: the pick box sits beside the link, not in it. */
 .fd-item-row__anchor {
@@ -129,11 +123,6 @@ a.fd-item-row__face:focus-visible,
 .fd-item-row__check-input:disabled + .fd-item-row__check-box {
     opacity: 0.4;
 }
-.fd-item-row__check-input:focus-visible + .fd-item-row__check-box,
-.fd-item-row__select-input:focus-visible + .fd-item-row__select-box {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* A check lead that is a button (a grocery line's check-off): the same ring,
    a plain filled disc while `aria-checked` as the design draws it, with the
@@ -158,10 +147,6 @@ button.fd-item-row__check-btn {
 .fd-item-row__ring {
     cursor: default;
 }
-.fd-item-row__check-btn:focus-visible .fd-item-row__check-box {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* A radio lead is the same ring; picked, it is a plain filled disc (no tick),
    and the row (a label) is the whole hit area. */
@@ -185,11 +170,6 @@ button.fd-item-row__check-btn {
 .fd-item-row__face--choice {
     cursor: pointer;
 }
-.fd-item-row__face--choice:has(.fd-item-row__check-input:focus-visible) {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
-
 .fd-item-row__avatar {
     display: grid;
     place-items: center;
@@ -337,13 +317,6 @@ button.fd-item-row__check-btn {
                 var(--space-xs)
         )
     );
-}
-.fd-item-row__more:focus-visible,
-.fd-item-row__add:focus-visible,
-.fd-item-row__toggle:focus-visible,
-.fd-item-row__bed-btn:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
 }
 
 /* ---- states ---- */
@@ -567,10 +540,6 @@ button.fd-item-row__check-btn {
     text-decoration: none;
     cursor: pointer;
 }
-.fd-section-header__action:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* ---- reorder row (Settings › Stores, reorder mode) ---- */
 
@@ -627,10 +596,6 @@ button.fd-item-row__check-btn {
 .fd-item-row__move--down .fd-icon {
     transform: rotate(90deg);
 }
-.fd-item-row__move:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* ---- edit row (a rename in place) ---- */
 
@@ -655,10 +620,6 @@ button.fd-item-row__check-btn {
     color: var(--text-secondary);
     cursor: pointer;
 }
-.fd-item-row__edit-btn:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* ---- add row ("+ Add a store": opens a field in place) ---- */
 
@@ -671,10 +632,6 @@ button.fd-item-row__check-btn {
 }
 .fd-add-row__summary .fd-item-row__title {
     color: var(--text-primary);
-}
-.fd-add-row__summary:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
 }
 .fd-add-row__form {
     display: flex;
@@ -753,11 +710,6 @@ button.fd-item-row__check-btn {
 .fd-autosave-input__field::placeholder {
     color: var(--text-secondary);
     opacity: 1;
-}
-.fd-autosave-input__field:focus-visible {
-    outline: none;
-    border-bottom-color: var(--accent-fill);
-    color: var(--text-primary);
 }
 .fd-autosave-input__field[aria-invalid="true"] {
     border-bottom-color: var(--status-over);

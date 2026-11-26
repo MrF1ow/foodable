@@ -124,18 +124,6 @@
     cursor: pointer;
 }
 
-.fd-icon-btn:focus-visible,
-.fd-check:focus-visible,
-.fd-stepper__btn:focus-visible,
-.fd-swipe-btn:focus-visible,
-.fd-row__body--link:focus-visible,
-.fd-chip:focus-visible,
-.fd-chip__input:focus-visible + .fd-chip__face,
-.fd-stepper__input:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
-
 /* ---- section header (#21941) ---- */
 
 .fd-section-head {

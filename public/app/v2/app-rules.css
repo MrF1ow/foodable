@@ -1,0 +1,71 @@
+/* App-wide rules, the last partial of /app-v2.css (the household app and the
+ * login page, never a chat widget: widgets do not load this file). It comes
+ * last so it wins ties with every earlier partial and with /app.css, which
+ * loads before /app-v2.css.
+ *
+ * 1. No scroll bar shows anywhere. Everything still scrolls by touch, wheel and
+ *    keys; a fade or a cut-off card is the cue that a list goes on.
+ * 2. No focus ring, focus border or focus tint on any control, after a tap, a
+ *    click or Tab alike. Hover and pressed states stay; the partials draw no
+ *    focus style of their own, so what is left below is the legacy form rules
+ *    from /app.css (form.css, seg.css, app.css) and the browser's default
+ *    outline.
+ * 3. No grey flash on a tap in WebKit. */
+
+/* 1. Scroll bars. `scrollbar-width` is not inherited, so it names every
+ * element; the pseudo-element rule is for WebKit browsers without it. */
+* {
+    scrollbar-width: none;
+}
+
+*::-webkit-scrollbar {
+    display: none;
+}
+
+/* 3. Tap highlight (inherited, so one rule on the root covers the page). */
+html {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* 2. Focus. The outline goes on any element that holds or contains focus; the
+ * element keeps whatever outline it had when focus is elsewhere (none do). */
+:focus,
+:focus-visible,
+:focus-within {
+    outline: none !important;
+}
+
+/* The legacy form ring (form.css, seg.css): a 3 px accent shadow and an accent
+ * border. The selectors are those rules' own, plus the state they name, so
+ * this one wins by coming later at the same or higher specificity. Its
+ * specificity also beats an fd- component's own class, so a button that draws
+ * its resting outline with a box-shadow (`.fd-pill-chip`) is left out of the
+ * `.native button` selector: the legacy ring (0,1,0) already loses to that
+ * component's class, which loads later. */
+:is(
+    .input,
+    .select,
+    .btn,
+    .drop,
+    .seg-btn,
+    .native :is(input, select, textarea, button:not(.fd-pill-chip))
+):is(:focus, :focus-visible),
+details.more > summary:is(:focus, :focus-visible),
+.native input[type="checkbox"][role="switch"]:is(:focus, :focus-visible) {
+    box-shadow: none;
+}
+
+/* The border goes back to the control's resting colour, except on an fd-
+ * component, whose own partial owns its border. `--panel-border` is /app.css's,
+ * which the legacy controls rest on; `--line` is the bundle's own. */
+:is(
+        .input,
+        .select,
+        .btn,
+        .drop,
+        .seg-btn,
+        .native :is(input, select, textarea, button)
+    ):not([class*="fd-"]):is(:focus, :focus-visible),
+details.more > summary:is(:focus, :focus-visible) {
+    border-color: var(--panel-border, var(--line));
+}

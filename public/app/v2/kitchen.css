@@ -68,11 +68,6 @@
     cursor: pointer;
 }
 :is(.fd-kitchen-loc, .fd-kitchen-grocery-section)
-    [data-fd-sheet-row]:focus-visible {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: calc(var(--space-2xs) * -1);
-}
-:is(.fd-kitchen-loc, .fd-kitchen-grocery-section)
     [data-fd-sheet-row]
     :is(button, a, summary) {
     cursor: pointer;

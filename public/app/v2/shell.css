@@ -236,18 +236,6 @@ body.fd-body .toast-region {
     bottom: calc(94px + env(safe-area-inset-bottom, 0px));
 }
 
-/* Keyboard focus on every fd- control. */
-:is(
-    .fd-account-chip,
-    .fd-kitchen-tab,
-    .fd-utab,
-    .fd-tab,
-    .fd-log
-):focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
 @media (hover: hover) and (pointer: fine) {
     .fd-tab:not([aria-current="page"]):hover {
         color: var(--text-primary);

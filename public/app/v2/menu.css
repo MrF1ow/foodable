@@ -23,11 +23,6 @@
     display: none;
 }
 
-.fd-menu__trigger:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
-
 .fd-menu[open] > .fd-menu__trigger {
     background: var(--surface-raised);
     color: var(--text-primary);
@@ -55,6 +50,10 @@
     border-radius: var(--radius-md);
     background: var(--surface-raised);
     box-shadow: 0 12px 32px var(--overlay-scrim);
+    /* menu.js caps the height to the room on screen inside a sheet; a longer
+     * list scrolls inside the panel. */
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .fd-menu__form {
@@ -81,10 +80,8 @@
     cursor: pointer;
 }
 
-.fd-menu__item:hover,
-.fd-menu__item:focus-visible {
+.fd-menu__item:hover {
     background: var(--surface-track);
-    outline: none;
 }
 
 .fd-menu__item--danger {
@@ -134,8 +131,10 @@
 }
 
 /* Inside a sheet the panel is fixed to the screen, so the sheet's clipping and
- * its scrolling body cannot cut it; menu.js sets its top, left and height. */
-.fd-menu--anchored .fd-menu__panel[data-fixed] {
+ * its scrolling body cannot cut it; menu.js sets its top, left and height, from
+ * the part of the screen above the keyboard. Both menu forms, the anchored one
+ * and the `<details>` one, take it. */
+.fd-menu__panel[data-fixed] {
     position: fixed;
     right: auto;
     bottom: auto;

@@ -79,10 +79,6 @@
     width: var(--control-lg-icon);
     height: var(--control-lg-icon);
 }
-.fd-field__box:focus-within {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: var(--space-2xs);
-}
 .fd-field--invalid .fd-field__box {
     box-shadow: inset 0 0 0 1px var(--status-over);
 }
