@@ -470,6 +470,25 @@ let lastLogOpener = null;
 // focus returns to the input, not to the wrapper.
 const LOG_TRIGGER_FIELD = ".fd-top-bar .fd-search-field[data-fd-open-sheet]";
 
+function isCoarsePointer() {
+    return (
+        typeof window.matchMedia === "function" &&
+        window.matchMedia("(pointer: coarse)").matches
+    );
+}
+
+// Where focus goes when the search sheet closes. A touch screen never gets a
+// text field focused by script (the keyboard would rise), so the Top bar's
+// input hands it to its field's wrapper; a fine pointer keeps the input.
+function focusTargetAfterClose(back, coarse) {
+    if (!coarse || !isLogTriggerInput(back)) return back;
+    const wrapper = back.closest(LOG_TRIGGER_FIELD);
+    if (!(wrapper instanceof HTMLElement)) return back;
+    if (!wrapper.hasAttribute("tabindex"))
+        wrapper.setAttribute("tabindex", "-1");
+    return wrapper;
+}
+
 function focusableOpener(opener) {
     if (opener instanceof HTMLElement && opener.matches?.(LOG_TRIGGER_FIELD))
         return opener.querySelector(".fd-search-field__input") ?? opener;
@@ -503,10 +522,7 @@ function focusLogSearchInput(dialog, query) {
         input.value = query;
         input.dispatchEvent(new Event("input", { bubbles: true }));
     }
-    const touch =
-        typeof window.matchMedia === "function" &&
-        window.matchMedia("(pointer: coarse)").matches;
-    if (!touch) input.focus();
+    if (!isCoarsePointer()) input.focus();
 }
 
 function visibleLogOpener() {
@@ -838,7 +854,8 @@ function bindSearchSheet(root) {
         syncActiveRow();
         const back =
             lastLogOpener instanceof HTMLElement ? lastLogOpener : null;
-        if (back?.isConnected) back.focus();
+        if (back?.isConnected)
+            focusTargetAfterClose(back, isCoarsePointer()).focus();
     });
 
     input?.addEventListener("keydown", (event) => {
@@ -1134,6 +1151,35 @@ function pickItem(item) {
     openSheet(AMOUNT_ID);
 }
 
+// What was typed into the Top bar's search field moves into the sheet's own
+// search through `open(input, query)`. While an IME composes, the field holds
+// a fragment, so the hand-over waits for compositionend (and the plain input
+// after it carries nothing, the field being empty again).
+function createTriggerHandover(open) {
+    let composing = false;
+    function handOver(input) {
+        const query = input.value;
+        if (query === "") return;
+        input.value = "";
+        open(input, query);
+    }
+    return {
+        input(event) {
+            if (!isLogTriggerInput(event.target)) return;
+            if (composing || event.isComposing) return;
+            handOver(event.target);
+        },
+        compositionstart(event) {
+            if (isLogTriggerInput(event.target)) composing = true;
+        },
+        compositionend(event) {
+            if (!isLogTriggerInput(event.target)) return;
+            composing = false;
+            handOver(event.target);
+        },
+    };
+}
+
 function bindOpeners() {
     if (openersBound) return;
     openersBound = true;
@@ -1218,13 +1264,12 @@ function bindOpeners() {
     );
     // The Top bar's search field is a trigger: typing into it (reached by Tab)
     // moves what was typed into the sheet's search and opens it.
-    document.addEventListener("input", (event) => {
-        const input = event.target;
-        if (!isLogTriggerInput(input)) return;
-        const query = input.value;
-        input.value = "";
-        openLogSearchSheet(input, query);
-    });
+    // A composition (an IME) is handed over whole when it ends, never as the
+    // first keystroke's fragment.
+    const handover = createTriggerHandover(openLogSearchSheet);
+    document.addEventListener("input", handover.input);
+    document.addEventListener("compositionstart", handover.compositionstart);
+    document.addEventListener("compositionend", handover.compositionend);
     // Enter and ArrowDown on the focused field open the sheet, as they did on
     // the link this field replaced.
     document.addEventListener("keydown", (event) => {
@@ -1357,5 +1402,7 @@ if (typeof window !== "undefined" && window.FOODABLE_EXPOSE_LOG_KEYBOARD) {
         nextSearchRowIndex,
         shouldAmountEnterSubmit,
         amountFormSubmitButton,
+        createTriggerHandover,
+        focusTargetAfterClose,
     });
 }

@@ -3101,6 +3101,49 @@ try {
         },
     );
 
+    // On a touch screen at 1024 px or wider the Top bar's field is still the
+    // opener, but closing the sheet must not focus its text input (the
+    // keyboard would rise): focus goes to the field's wrapper.
+    await send("Emulation.setTouchEmulationEnabled", {
+        enabled: true,
+        maxTouchPoints: 1,
+    });
+    await goto("/");
+    const touchField = await ev<{ coarse: boolean; wide: boolean }>(`({
+        coarse: matchMedia("(pointer: coarse)").matches,
+        wide: innerWidth >= 1024 && getComputedStyle(document.querySelector(".fd-top-bar")).display !== "none",
+    })`);
+    await focusField();
+    await tap("Enter", "Enter", 13);
+    const touchOpen = await fieldState();
+    await tap("Escape", "Escape", 27);
+    const touchClosed = await ev<{
+        open: number;
+        tag: string;
+        onInput: boolean;
+        onWrapper: boolean;
+    }>(`(() => {
+        const a = document.activeElement;
+        return {
+            open: document.querySelectorAll("dialog[open]").length,
+            tag: a ? a.tagName : "none",
+            onInput: a instanceof HTMLInputElement || a instanceof HTMLTextAreaElement,
+            onWrapper: a === document.querySelector(".fd-top-bar .fd-search-field"),
+        };
+    })()`);
+    await send("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await goto("/");
+    record(
+        "v2 top bar search field on a touch screen at 1024 px or wider: closing the sheet returns focus to the field's wrapper, never its text input",
+        touchField.coarse &&
+            touchField.wide &&
+            touchOpen.open.includes("fd-log-search") &&
+            touchClosed.open === 0 &&
+            !touchClosed.onInput &&
+            touchClosed.onWrapper,
+        { touchField, touchOpen, touchClosed, ex: drain() },
+    );
+
     // ---- The log sheets: a result row opens its thing, its plus logs it ----
     // The rows are the Item row: the face is a link with a chevron that opens
     // the food or recipe, the plus beside it opens the amount sheet and Add
@@ -5135,12 +5178,21 @@ try {
     const kitchenAfter = await kitchenMark();
     const groupRow = (rows: string[]) =>
         rows.find((r) => r.startsWith("Kitchen|"));
+    // The rows are the sidebar's real labels, so a label that stops matching
+    // the filter fails the case instead of passing it for want of a row.
+    const kitchenLabels = (rows: string[]) =>
+        rows.map((r) => (r.split("|")[0] ?? "").replace(/ · \d+$/, ""));
+    const kitchenRows = ["Kitchen", "Fridge", "Groceries", "Usuals"];
     record(
         "v2 sidebar: clicking a Kitchen section keeps the Kitchen group current",
-        groupRow(kitchenBefore) === "Kitchen|true|cur" &&
+        kitchenLabels(kitchenBefore).join() === kitchenRows.join() &&
+            kitchenLabels(kitchenAfter).join() === kitchenRows.join() &&
+            groupRow(kitchenBefore) === "Kitchen|true|cur" &&
             groupRow(kitchenAfter) === "Kitchen|true|cur" &&
+            kitchenBefore.includes("Fridge|page|cur") &&
             kitchenAfter.some((r) => /^Groceries[^|]*\|page\|cur/.test(r)) &&
-            !kitchenAfter.some((r) => r.startsWith("Fridge|page")),
+            kitchenAfter.includes("Fridge|-|") &&
+            kitchenAfter.includes("Usuals|-|"),
         { kitchenBefore, kitchenAfter, ex: drain() },
     );
 
