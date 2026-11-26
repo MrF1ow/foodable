@@ -7,6 +7,7 @@
 import { spawn } from "bun";
 import { join } from "node:path";
 import { THEME_COLOR } from "../src/tokens.js";
+import { LEAN_CHROMIUM_FLAGS } from "./app-preview-shots.js";
 
 const CDP_PORT = 9223;
 const BASE = "http://127.0.0.1:4791";
@@ -63,6 +64,7 @@ const chrome = spawn(
         "--no-sandbox",
         "--disable-gpu",
         "--disable-dev-shm-usage",
+        ...LEAN_CHROMIUM_FLAGS,
         `--remote-debugging-port=${CDP_PORT}`,
         "--remote-allow-origins=*",
         "--user-data-dir=/tmp/foodable-nav-check-chrome",

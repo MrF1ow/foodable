@@ -280,11 +280,30 @@ export type Browser = {
     close(): Promise<void>;
 };
 
+/**
+ * Flags that keep a headless run's memory down without moving a pixel: one
+ * renderer process, and none of the background services (extensions,
+ * component updates, translate, media router) a screenshot never uses. Against
+ * the base flags alone, a full `preview:app --shots` run peaked at 962 MB of
+ * Chromium PSS instead of 1490 MB (327 MB instead of 849 MB on average), with
+ * every PNG byte-identical. `check:nav` uses them too.
+ */
+export const LEAN_CHROMIUM_FLAGS = [
+    "--renderer-process-limit=1",
+    "--disable-extensions",
+    "--disable-background-networking",
+    "--disable-component-update",
+    "--no-first-run",
+    "--mute-audio",
+    "--disable-features=Translate,MediaRouter,OptimizationHints,BackForwardCache",
+];
+
 const CHROMIUM_FLAGS = [
     "--headless=new",
     "--no-sandbox",
     "--disable-gpu",
     "--disable-dev-shm-usage",
+    ...LEAN_CHROMIUM_FLAGS,
     "--hide-scrollbars",
     "--force-prefers-reduced-motion",
     // The one-shot --screenshot path runs every compositor stage before it

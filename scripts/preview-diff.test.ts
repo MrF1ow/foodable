@@ -215,6 +215,16 @@ describe("differs", () => {
         expect(await differs(a, b)).toBe(true);
     });
 
+    test("byte-identical files are the same without decoding them", async () => {
+        // A bare header: magick cannot decode it, so only the byte check can
+        // call the pair the same.
+        const a = join(dir, "bytes-a.png");
+        const b = join(dir, "bytes-b.png");
+        writeFileSync(a, pngHeader(390, 844));
+        writeFileSync(b, pngHeader(390, 844));
+        expect(await differs(a, b)).toBe(false);
+    });
+
     const hasMagick = Bun.which("magick") !== null;
     const pixelTest = hasMagick ? test : test.skip;
     if (!hasMagick) {
