@@ -429,6 +429,31 @@ const CALLS: Record<string, CallRow | CallSpec> = {
         servings: 2,
         member_ids: [s.owner, s.member],
     }),
+    // Its answer names the entry it leaves, which is a new id when the day leaves
+    // its series or the repeat changes, so it is a normal row, not noIds. The
+    // recipe id is not one the caller passed in, so the text carries it too.
+    update_plan: async (s, make) => {
+        const made = await make("plan_recipe", {
+            recipe_id: s.recipe,
+            date: new Date(Date.now() + 4 * 86_400_000)
+                .toISOString()
+                .slice(0, 10),
+            slot: "lunch",
+            servings: 2,
+        });
+        return { plan_id: made.plan.plan_id, slot: "dinner", servings: 3 };
+    },
+    "update_plan#repeat": async (s, make) => {
+        const made = await make("plan_recipe", {
+            recipe_id: s.recipe,
+            date: new Date(Date.now() + 5 * 86_400_000)
+                .toISOString()
+                .slice(0, 10),
+            slot: "lunch",
+            servings: 2,
+        });
+        return { plan_id: made.plan.plan_id, repeat: "weekly" };
+    },
     add_plan_missing_to_groceries: () => ({}),
     add_recipe_to_grocery: noIds("returns counts, no row ids", (s) => ({
         recipe_id: s.recipe,
@@ -846,18 +871,25 @@ const isNested = (tool: string, path: string) =>
 
 /**
  * Whether the text carries the id as a tag, `[label: <uuid>]`, the label being
- * the name of an input property some tool takes. A bare occurrence does not
- * count (a note that repeats the id in prose would hide a tag that was
- * removed), and neither does a label no tool has.
+ * the name of an input property some tool takes. A day of a repeating plan is
+ * tagged by its own id, `rule:<repeat id>:<day>` (that is the plan_id a tool
+ * takes), which carries the repeat's uuid. A bare occurrence does not count (a
+ * note that repeats the id in prose would hide a tag that was removed), and
+ * neither does a label no tool has.
  */
 const tagged = (
     lowerText: string,
     id: string,
     inputNames: ReadonlySet<string>,
 ) =>
-    [...lowerText.matchAll(new RegExp(`\\[([a-z_]+): ${id}\\]`, "g"))].some(
-        (match) => inputNames.has(match[1]!),
-    );
+    [
+        ...lowerText.matchAll(
+            new RegExp(
+                `\\[([a-z_]+): (?:rule:)?${id}(?::\\d{4}-\\d{2}-\\d{2})?\\]`,
+                "g",
+            ),
+        ),
+    ].some((match) => inputNames.has(match[1]!));
 
 /** Every uuid anywhere in a value, lower-cased. */
 const uuidsIn = (value: unknown): string[] =>

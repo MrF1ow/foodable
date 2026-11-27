@@ -35,6 +35,8 @@ function baseView(
         householdName: "Home",
         members: [alice, bob],
         storeCount: 3,
+        placeCount: 2,
+        pluralsSameFood: false,
         location: "Denver, CO",
         householdTimezone: "America/Denver",
         effectiveTimezone: "America/Denver",
@@ -281,9 +283,11 @@ describe("settings household v2", () => {
             "Location",
             "Time zone",
             "Stores",
+            "Fridge places",
             "Restock day",
             "Invite codes",
             "Recipe link readers",
+            "Plurals are the same food",
         ]);
         expect(html).toContain('fd-item-row__value">Denver, CO<');
         expect(html).toContain('fd-item-row__value">America/Denver<');
@@ -296,6 +300,7 @@ describe("settings household v2", () => {
         expect(html).not.toContain("recipe-settings");
         expect(html).not.toContain("unverified_recipe_expiry_days");
         expect(html).toContain('href="/settings/household/stores"');
+        expect(html).toContain('href="/settings/household/places"');
         expect(html).toContain('href="/settings/household/restock"');
         expect(html).toContain('href="/settings/household/invites"');
         expect(html).toContain('href="/settings/household/readers"');
@@ -305,6 +310,53 @@ describe("settings household v2", () => {
             "Rotate household token",
         );
         expect(html).not.toContain("/settings/household/dismissed");
+    });
+
+    test("the Fridge places row counts the places and links to their page", () => {
+        const html = renderSettingsHouseholdV2Page(baseView({ placeCount: 4 }));
+        expect(html).toMatch(
+            /title="Fridge places">Fridge places<\/span><\/span><\/span><span class="fd-item-row__value">4</,
+        );
+        const row = html.slice(
+            html.indexOf('href="/settings/household/places"'),
+        );
+        expect(row.slice(0, row.indexOf("</li>"))).toContain(
+            "fd-item-row__chevron",
+        );
+    });
+
+    test("the Plurals are the same food switch posts the opposite value, and draws no chevron", () => {
+        const off = renderSettingsHouseholdV2Page(baseView());
+        const row = (html: string) => {
+            const at = html.indexOf("Plurals are the same food");
+            const start = html.lastIndexOf("<li", at);
+            return html.slice(start, html.indexOf("</li>", at));
+        };
+        expect(row(off)).toContain(
+            'action="/settings/household/plurals-same-food"',
+        );
+        expect(row(off)).toContain('name="plurals_same_food" value="true"');
+        expect(row(off)).toContain('aria-checked="false"');
+        expect(row(off)).not.toContain("fd-item-row__chevron");
+        const on = renderSettingsHouseholdV2Page(
+            baseView({ pluralsSameFood: true }),
+        );
+        expect(row(on)).toContain('name="plurals_same_food" value="false"');
+        expect(row(on)).toContain('aria-checked="true"');
+    });
+
+    test("a member sees the Plurals setting as On or Off, with no form", () => {
+        const member = renderSettingsHouseholdV2Page({
+            ...asMember(),
+            pluralsSameFood: true,
+        });
+        expect(member).not.toContain("/settings/household/plurals-same-food");
+        const at = member.indexOf("Plurals are the same food");
+        const row = member.slice(
+            member.lastIndexOf("<li", at),
+            member.indexOf("</li>", at),
+        );
+        expect(row).toContain('fd-item-row__value">On<');
     });
 
     test("an admin edits the rows but has no Invite codes (the owner's); a member sees values only", () => {
@@ -321,8 +373,10 @@ describe("settings household v2", () => {
             "Location",
             "Time zone",
             "Stores",
+            "Fridge places",
             "Restock day",
             "Recipe link readers",
+            "Plurals are the same food",
         ]);
         // The rows still show their values, without a form or a sheet.
         expect(member).toContain("Denver, CO");
@@ -387,11 +441,12 @@ describe("settings household v2", () => {
         expect(html).not.toContain("fd-settings-token");
     });
 
-    test("the store list, plurals block and readers section are gone", () => {
+    test("the store list, the old plurals block and the readers section are gone", () => {
         const html = renderSettingsHouseholdV2Page(baseView());
         expect(html).not.toContain(">Grocery stores</");
         expect(html).not.toContain("Manage stores");
-        expect(html).not.toContain("plurals-same-food");
+        // Only the one switch row posts to the plurals route: no block, no sheet.
+        expect(html.split("plurals-same-food")).toHaveLength(2);
         expect(html).not.toContain(">Social post readers</");
         expect(html).not.toContain("/settings/household/social-readers");
         expect(html).not.toContain("Dismissed notices");
@@ -415,10 +470,12 @@ describe("settings household v2", () => {
             "Location",
             "Time zone",
             "Stores",
+            "Fridge places",
             "Restock day",
             "Invite codes",
             "Shared links",
             "Recipe link readers",
+            "Plurals are the same food",
         ]);
         expect(on).toContain('href="/settings/household/shared-links"');
         expect(on).toMatch(

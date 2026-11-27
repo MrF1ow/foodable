@@ -34,19 +34,34 @@ function resetConfirms(root) {
     });
 }
 
+// The part of the screen a person can see, in the coordinates of a fixed
+// panel. The visual viewport is shorter while the keyboard is up and shifts when
+// the page is panned to a focused field; innerHeight does neither on iOS, so a
+// panel placed by it ends up behind the keyboard. Without a visual viewport
+// (older browsers) the window is all there is.
+function visibleArea() {
+    const vv = window.visualViewport;
+    if (vv && vv.height > 0) {
+        return { top: vv.offsetTop, bottom: vv.offsetTop + vv.height };
+    }
+    return { top: 0, bottom: window.innerHeight };
+}
+
 // A sheet clips what hangs out of it (its own overflow, and its scrolling
 // body), so a panel inside one is placed on the screen instead: fixed, under
 // the trigger when the room below fits it, else above, else on the side with
-// more room, scrolling inside itself.
+// more room, scrolling inside itself. The room is what is visible above the
+// keyboard, and menu.js places it again when that changes.
 function placeInSheet(root, panel) {
     delete panel.dataset.align;
     delete panel.dataset.side;
     panel.dataset.fixed = "";
     panel.style.maxHeight = "";
+    panel.style.overflowY = "auto";
     panel.style.left = "0px";
     panel.style.top = "0px";
     const vw = document.documentElement.clientWidth;
-    const vh = window.innerHeight;
+    const view = visibleArea();
     const box = root.getBoundingClientRect();
     const width = panel.offsetWidth;
     const height = panel.scrollHeight;
@@ -59,15 +74,19 @@ function placeInSheet(root, panel) {
     const sheetBottom =
         sheet && typeof sheet.getBoundingClientRect === "function"
             ? sheet.getBoundingClientRect().bottom
-            : vh;
-    const below = Math.min(vh, sheetBottom) - EDGE - (box.bottom + gap);
-    const above = box.top - gap - EDGE;
+            : view.bottom;
+    const below =
+        Math.min(view.bottom, sheetBottom) - EDGE - (box.bottom + gap);
+    // The panel ends above the trigger, but never below the visible area: a
+    // trigger scrolled behind the keyboard still keeps its panel on screen.
+    const aboveEnd = Math.min(box.top - gap, view.bottom - EDGE);
+    const above = aboveEnd - Math.max(view.top, 0) - EDGE;
     const under = height <= below || (height > above && below >= above);
-    const room = Math.floor(under ? below : above);
+    const room = Math.max(0, Math.floor(under ? below : above));
     const used = Math.min(height, room);
     if (height > room) panel.style.maxHeight = room + "px";
     panel.style.left = left + "px";
-    panel.style.top = (under ? box.bottom + gap : box.top - gap - used) + "px";
+    panel.style.top = (under ? box.bottom + gap : aboveEnd - used) + "px";
 }
 
 // Right-aligned under the trigger; flipped to start when that fits the screen
@@ -389,6 +408,49 @@ function bindMenu(root) {
     });
 }
 
+// The `<details>` menu has no script of its own. Inside a sheet it is placed
+// the same way as an anchored one, when it opens and again on every
+// visual-viewport change, and it goes back to its CSS place when it closes.
+function placeDetails(details) {
+    const panel = details.querySelector(".fd-menu__panel");
+    if (!panel) return;
+    if (details.open) {
+        placeInSheet(details, panel);
+    } else {
+        delete panel.dataset.fixed;
+        panel.style.maxHeight = "";
+        panel.style.overflowY = "";
+        panel.style.left = "";
+        panel.style.top = "";
+    }
+}
+
+const sheetDetails = (el) =>
+    el instanceof Element &&
+    el.tagName === "DETAILS" &&
+    el.classList.contains("fd-menu") &&
+    !el.hasAttribute("data-fd-menu") &&
+    !!el.closest(".fd-sheet");
+
+// Every open panel that sits on the screen (inside a sheet) is placed again:
+// the sheet's body scrolled under it, or the keyboard came or went.
+function replaceOpen(scrolled) {
+    document.querySelectorAll("[data-fd-menu]").forEach((root) => {
+        const panel = panelOf(root);
+        if (
+            isOpen(root) &&
+            panel &&
+            panel.dataset.fixed !== undefined &&
+            !(scrolled && panel.contains(scrolled))
+        ) {
+            place(root);
+        }
+    });
+    document.querySelectorAll("details.fd-menu[open]").forEach((details) => {
+        if (sheetDetails(details)) placeDetails(details);
+    });
+}
+
 function bindDocument() {
     if (documentBound) return;
     documentBound = true;
@@ -396,20 +458,24 @@ function bindDocument() {
     // scrolls under it.
     document.addEventListener(
         "scroll",
+        (event) =>
+            replaceOpen(event.target instanceof Element ? event.target : null),
+        true,
+    );
+    // The keyboard opening or closing resizes the visual viewport, and panning
+    // to a focused field shifts it; without one the window's own size is it.
+    const vv = window.visualViewport;
+    if (vv && typeof vv.addEventListener === "function") {
+        vv.addEventListener("resize", () => replaceOpen(null));
+        vv.addEventListener("scroll", () => replaceOpen(null));
+    } else if (typeof window.addEventListener === "function") {
+        window.addEventListener("resize", () => replaceOpen(null));
+    }
+    // `toggle` does not bubble: caught on the way down.
+    document.addEventListener(
+        "toggle",
         (event) => {
-            const target =
-                event.target instanceof Element ? event.target : null;
-            document.querySelectorAll("[data-fd-menu]").forEach((root) => {
-                const panel = panelOf(root);
-                if (
-                    isOpen(root) &&
-                    panel &&
-                    panel.dataset.fixed !== undefined &&
-                    !(target && panel.contains(target))
-                ) {
-                    place(root);
-                }
-            });
+            if (sheetDetails(event.target)) placeDetails(event.target);
         },
         true,
     );

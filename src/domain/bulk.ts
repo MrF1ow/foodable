@@ -1,8 +1,7 @@
 /**
  * Select several rows, act once: the bulk twins of the single-row actions on
- * the Fridge, Groceries, Usuals and Saved foods & recipes lists. Each one
- * calls the same domain function the one-row action does, once per selected
- * row, so a bulk and a row-by-row run end in the same state.
+ * the Saved foods & recipes list. Each one calls the same domain function the
+ * one-row action does, once per selected row, so a bulk and a row-by-row run end in the same state.
  *
  * A batch is all or nothing. Every id is checked before the first write, and
  * the live adapter (`src/db/bulk.ts`) runs the whole batch in one transaction,
@@ -20,19 +19,12 @@ import {
     type Notify,
 } from "./foods.js";
 import { removeUsual } from "./usual-add.js";
-import { type FridgeStore } from "./fridge.js";
-import { type GroceryListStore } from "./grocery.js";
 import {
     assertCanDeleteRecipe,
     deleteRecipe,
     type Recipe,
     type RecipesStore,
 } from "./recipes.js";
-import {
-    discardFridgeItem,
-    StockInputError,
-    type StockStore,
-} from "./stock.js";
 
 /** More rows than a person selects by hand; a bigger post is a mistake or abuse. */
 export const BULK_MAX_IDS = 200;
@@ -110,72 +102,6 @@ function settle<I, T>(
     if (todo.length === 0) return null;
     if (unknown > 0) throw new BulkSelectionError(STALE_MESSAGE);
     return todo;
-}
-
-/**
- * Throw away several fridge items, each as a `discard` movement through
- * `applyMovement`, so the stock ledger still adds up for every one.
- */
-export async function discardFridgeItems(
-    fridge: FridgeStore,
-    stock: StockStore,
-    foods: FoodsStore,
-    input: {
-        householdId: string;
-        itemIds: readonly string[];
-        actorUserId?: string | null;
-    },
-): Promise<BulkResult> {
-    const items = new Map(
-        (await fridge.listItems(input.householdId)).map((i) => [i.id, i]),
-    );
-    const todo = settle(input.itemIds, (id) => {
-        const item = items.get(id);
-        return item ? { kind: "todo", item } : null;
-    });
-    if (!todo) return ALREADY;
-    // Every item must be discardable before the first one is.
-    for (const item of todo) {
-        if (!item.foodId) {
-            throw new StockInputError(
-                `${item.displayName} is not linked to a food.`,
-            );
-        }
-    }
-    for (const item of todo) {
-        await discardFridgeItem(fridge, stock, foods, {
-            householdId: input.householdId,
-            itemId: item.id,
-            actorUserId: input.actorUserId,
-        });
-    }
-    return { status: "applied", count: todo.length };
-}
-
-/**
- * Delete several grocery lines, each as `delete_grocery_line` does. An id that
- * is no line of the household refuses the batch when others are still there;
- * when every id is gone it is a double submit. The live adapter runs it in one
- * transaction, so a delete that throws part way leaves every line in place.
- */
-export async function deleteGroceryLines(
-    grocery: GroceryListStore,
-    input: { householdId: string; lineIds: readonly string[] },
-): Promise<BulkResult> {
-    const have = new Set(
-        (await grocery.listLines(input.householdId)).map((line) => line.id),
-    );
-    const todo = settle(input.lineIds, (id) =>
-        have.has(id) ? { kind: "todo", item: id } : null,
-    );
-    if (!todo) return ALREADY;
-    for (const id of todo) {
-        // Exactly the lines read above: one that went away since is refused.
-        if (!(await grocery.deleteLine(input.householdId, id))) {
-            throw new BulkSelectionError(STALE_MESSAGE);
-        }
-    }
-    return { status: "applied", count: todo.length };
 }
 
 /**

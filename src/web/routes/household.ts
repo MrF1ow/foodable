@@ -131,6 +131,7 @@ import {
     type FetchMemoryStore,
 } from "../../domain/fetch-memory.js";
 import { recipeFetchMemory } from "../../db/fetch-memory.js";
+import { householdPlacesRoutes } from "./household-places.js";
 import { householdStoresRoutes } from "./household-stores.js";
 import {
     createHouseholdInvite,
@@ -154,6 +155,7 @@ householdRoutes.route("/", usualAddRoutes);
 
 // Settings › Household › Stores in the new app (own file: ten routes of its own).
 householdRoutes.route("/", householdStoresRoutes);
+householdRoutes.route("/", householdPlacesRoutes);
 
 async function householdFormError(
     userId: string,
@@ -672,7 +674,7 @@ householdRoutes.post("/settings/household", requireManager, async (c) => {
                 userId,
                 added.userId,
                 new Error(
-                    `${parsed.value.displayName} was added as a member, but making them an admin didn't work. Use Make admin in their ⋯ menu to try again.`,
+                    `${parsed.value.displayName} was added as a member, but making them an admin didn't work. Open their page and set Role to Admin to try again.`,
                 ),
             );
             return c.html(page.html, page.status);
@@ -861,7 +863,7 @@ householdRoutes.post(
                 userId,
                 targetId,
                 new Error(
-                    `Confirm removing ${check.target.displayName} from the menu.`,
+                    `Confirm removing ${check.target.displayName} in the sheet.`,
                 ),
             );
             return c.html(page.html, page.status);

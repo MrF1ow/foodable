@@ -52,6 +52,7 @@ import {
 } from "../src/web/pages/v2/recipes-page.js";
 import type { CookSheetView } from "../src/web/pages/v2/recipes-page-cook.js";
 import { renderRecipeCompareV2Page } from "../src/web/pages/v2/recipes-page-compare.js";
+import { gapFromNotice } from "../src/domain/recipes.js";
 import type { VersionsCompare } from "../src/domain/recipe-variants.js";
 import {
     renderNotificationsPage,
@@ -123,12 +124,20 @@ import {
     HOUSEHOLD_ROTATE_TOKEN_SHEET_ID,
     renderHouseholdTokenPage,
 } from "../src/web/pages/v2/settings-household-token.js";
-import { MEMBER_MAKE_OWNER_SHEET_ID } from "../src/web/pages/v2/settings-member.js";
+import {
+    MEMBER_MAKE_OWNER_SHEET_ID,
+    MEMBER_REMOVE_SHEET_ID,
+} from "../src/web/pages/v2/settings-member.js";
 import { renderShareCreatedPage } from "../src/web/pages/v2/share-sheet.js";
 import { renderSettingsMemberV2Page } from "../src/web/pages/v2/settings-member.js";
 import { renderSettingsGoalsV2Page } from "../src/web/pages/v2/settings-goals.js";
 import { goalsDraftFrom } from "../src/web/pages/v2/settings-goals-form.js";
 import { renderSettingsSavedV2Page } from "../src/web/pages/v2/settings-saved.js";
+import {
+    PLACES_ADD_ID,
+    placeRemoveSheetId,
+    renderSettingsPlacesV2Page,
+} from "../src/web/pages/v2/settings-places.js";
 import {
     renderSettingsStoresV2Page,
     STORES_ADD_ID,
@@ -219,6 +228,12 @@ const PREVIEW_STORE_SUMMARIES = [
     { id: "s-costco", name: "Costco", sectionCount: 6, lineCount: 5 },
     { id: "s-trader", name: "Trader Joe's", sectionCount: 5, lineCount: 3 },
     { id: "s-market", name: "Farmers market", sectionCount: 0, lineCount: 0 },
+];
+// Fridge places: the three places of the preview fridge, one holding a dozen items.
+const PREVIEW_PLACE_SUMMARIES = [
+    { id: "p-fridge", name: "Fridge", itemCount: 12 },
+    { id: "p-freezer", name: "Freezer", itemCount: 1 },
+    { id: "p-pantry", name: "Pantry", itemCount: 0 },
 ];
 const PREVIEW_COSTCO_SECTIONS = [
     ["Produce", 0],
@@ -862,9 +877,11 @@ function previewMoveError() {
     return (
         withPlanEditDraft(view, {
             planId: "pl2",
+            recipeId: "pr-chili",
             date: "2026-11-01",
             slot: "dinner",
             servings: 4,
+            repeat: "weekly",
             error: "Pick today or a later day.",
         }) ?? view
     );
@@ -973,6 +990,15 @@ function previewWeekPlan(openSheet?: "missing" | "plan") {
             { foodId: "pf-avocado", quantity: grams(150) },
         ],
         foodsById: new Map(),
+        // What a planned entry's Recipe menu offers, and how its repeat repeats.
+        savedRecipes: [
+            { id: "pr-salmon", name: "Salmon, rice & spinach" },
+            { id: "pr-chili", name: "Beef chili" },
+            { id: "pr-bowl", name: "Chicken rice bowl" },
+            { id: "pr-frittata", name: "Spinach cheddar frittata" },
+            { id: "pr-lentil", name: "Lentil soup" },
+        ],
+        rules: new Map([["rl1", { repeat: "weekly" as const, days: [] }]]),
     });
     return {
         ...view,
@@ -984,6 +1010,20 @@ function previewWeekPlan(openSheet?: "missing" | "plan") {
                   : undefined,
     };
 }
+
+/** Two import lines the parser could not read, as the draft's check names them. */
+const UNREADABLE_LINES = [
+    {
+        message: '"a splash of fish sauce" couldn\'t be read as an ingredient.',
+        ingredientId: null,
+        line: "a splash of fish sauce",
+    },
+    {
+        message: '"1 lime, in wedges" couldn\'t be read as an ingredient.',
+        ingredientId: null,
+        line: "1 lime, in wedges",
+    },
+];
 
 const RECIPE = {
     id: "r1",
@@ -1640,6 +1680,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 recipeId: "r1",
                 foodId: "f-eggs",
                 displayName: "Eggs · Kirkland Large Eggs",
+                // The food's own name: the title carries its usual product, the edit sheet's Food field does not.
+                foodName: "Eggs",
                 quantity: { amount: 3, unit: "each" },
                 note: null,
                 sortOrder: 0,
@@ -1754,6 +1796,8 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
             householdName: "The Flow household",
             members: [ME, SAM, JORDAN, RILEY, ALEX] as never,
             storeCount: PREVIEW_STORES.length,
+            placeCount: 3,
+            pluralsSameFood: false,
             isOwner: true,
             canManage: true,
             canInvite: true,
@@ -1852,7 +1896,11 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 ),
             ),
             macrosPerPortion: MACROS as never,
-            gapReasons: [],
+            // Buttermilk has no nutrition: a warning icon on its row.
+            gaps: recipeView.notices.map((notice) =>
+                gapFromNotice(notice as never),
+            ),
+            editable: true,
             favourite: true,
             cook,
             plan: {
@@ -1948,7 +1996,21 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                       incomplete: true,
                   } as never)
                 : ({ ...MACROS, incomplete: false } as never),
-            gapReasons: draft ? ["Counts 1 of 10 ingredients"] : [],
+            gaps: draft
+                ? [
+                      {
+                          ingredientId: "pse9",
+                          displayName: "Vegetable oil",
+                          foodId: "f-pse9",
+                          reason: "no_nutrition" as const,
+                          missingNutrients: [],
+                          usualProduct: null,
+                          message:
+                              "Vegetable oil: no nutrition — add it, or pick a usual product",
+                      },
+                  ]
+                : [],
+            editable: true,
             ...(draft ? { draft } : {}),
             ...(error ? { error } : {}),
             mentions: findMissingMentions({
@@ -2050,7 +2112,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
                 fat_g: 31,
                 incomplete: true,
             } as never,
-            gapReasons: ["Counts 5 of 6 ingredients"],
             favourite: false,
             cook: { ...cookSheet, recipeName: "Chicken alfredo" },
             plan: {
@@ -2410,26 +2471,15 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "kitchen-fridge-menu": fridgeDriven(
             `document.querySelector("#fd-fridge-row-i3 .fd-menu [data-fd-menu-trigger]").click()`,
         ),
-        // Select mode (frame 400622) and its Discard asking in place (401198).
-        "kitchen-fridge-select": fridgeDriven(
-            `document.querySelector('[data-fd-select-toggle="fridge"]').click();for(const id of ["i2","i1"])document.querySelector("#fd-fridge-row-"+id+" .fd-item-row__face").click()`,
-        ),
-        "kitchen-fridge-discard": fridgeDriven(
-            `document.querySelector('[data-fd-select-toggle="fridge"]').click();for(const id of ["i2","i1"])document.querySelector("#fd-fridge-row-"+id+" .fd-item-row__face").click();for(const b of document.querySelectorAll("[data-fd-select-ask]"))b.click()`,
-        ),
         // Groceries (frames 394511, 398022): rows by section, the checked
         // ones above the dock, then each state the design draws.
         grocery: groceryPage(),
-        // mcp-share-links off: no Share list in the tab row's ⋯.
+        // mcp-share-links off: the tab row is the same (no ⋯ either way).
         "grocery-share-off": groceryPage({ shareEnabled: false }),
         // The store filter pull-down (394677) with both stores ticked.
         "grocery-filter": groceryDriven(
             `[...document.querySelectorAll('[data-anchor="filter"] [data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
             { selectedStoreIds: ["s1", "s2"] },
-        ),
-        // The tab row's ⋯: Share list, Select, Clear checked.
-        "grocery-menu": groceryDriven(
-            `[...document.querySelectorAll('[aria-label="Groceries options"][data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
         ),
         // A row's ⋯: Check off, Edit, Delete.
         "grocery-row-menu": groceryDriven(
@@ -2439,10 +2489,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "grocery-add": groceryPage({ openAdd: true }),
         // A line's sheet (398664): amount, store, section, note.
         "grocery-line": groceryPage({ openLineId: "g4" }),
-        // Select mode with two rows picked.
-        "grocery-select": groceryDriven(
-            `document.querySelector('[data-fd-select-toggle="groceries"]').click();for(const id of ["g1","g4"])document.querySelector("#fd-grocery-row-"+id+" .fd-item-row__face").click()`,
-        ),
         // Put away (395390) the checked lines.
         "grocery-put-away": groceryPage({ openPutAway: true }),
         // A noted line asks how much of it came home, in its own unit.
@@ -2499,16 +2545,6 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "kitchen-usuals-filter": usualsDriven(
             `[...document.querySelectorAll('[data-anchor="filter"] [data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
             { selectedStoreIds: ["s-costco", "s-tj"] },
-        ),
-        // The tab row's ⋯ (Select), then picking and the Remove asking in place.
-        "kitchen-usuals-menu": usualsDriven(
-            `[...document.querySelectorAll('[aria-label="Usuals options"][data-fd-menu-trigger]')].find((b)=>b.offsetParent).click()`,
-        ),
-        "kitchen-usuals-select": usualsDriven(
-            `document.querySelector('[data-fd-select-toggle="usuals"]').click();for(const id of ["u-oil","u-coffee"])document.querySelector("#fd-usual-row-"+id+" .fd-item-row__face").click()`,
-        ),
-        "kitchen-usuals-remove": usualsDriven(
-            `document.querySelector('[data-fd-select-toggle="usuals"]').click();for(const id of ["u-oil","u-coffee"])document.querySelector("#fd-usual-row-"+id+" .fd-item-row__face").click();for(const b of document.querySelectorAll("[data-fd-select-ask]"))b.click()`,
         ),
         // Edit a usual (frame 395980) and the Restock sheet (397529).
         "kitchen-usual-edit": renderKitchenUsualsV2Page(
@@ -2673,7 +2709,10 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         "recipe-mentions": padSeeEw(),
         // The draft bar: Save and what is left, in place of Cook and Plan.
         "recipe-draft": padSeeEw({
-            problems: ["Resolve every ingredient line.", "Add the steps."],
+            problems: [
+                ...UNREADABLE_LINES,
+                { message: "Add the steps.", ingredientId: null, line: null },
+            ],
             expiresOn: "2026-12-01",
             canSave: true,
             canDiscard: true,
@@ -2682,7 +2721,14 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         // The leave guard, on the importer's first landing: a link out asks Discard this recipe?
         "recipe-draft-leave": driven(
             padSeeEw({
-                problems: ["Resolve every ingredient line.", "Add the steps."],
+                problems: [
+                    ...UNREADABLE_LINES,
+                    {
+                        message: "Add the steps.",
+                        ingredientId: null,
+                        line: null,
+                    },
+                ],
                 expiresOn: "2026-12-01",
                 canSave: true,
                 canDiscard: true,
@@ -2692,13 +2738,44 @@ async function pages(theme: "light" | "dark"): Promise<Record<string, string>> {
         ),
         "recipe-draft-refused": padSeeEw(
             {
-                problems: ["Add the steps."],
+                problems: [
+                    {
+                        message: "Add the steps.",
+                        ingredientId: null,
+                        line: null,
+                    },
+                ],
                 expiresOn: "2026-12-01",
                 canSave: true,
                 canDiscard: true,
                 leaveGuard: false,
             },
             "Not saved yet. Fix what is listed below, then save it again.",
+        ),
+        // Tapping an ingredient opens its edit sheet; Add ingredient opens its own.
+        "recipe-ingredient": driven(
+            recipeV2(cookSheet),
+            `document.querySelector('[data-fd-open-item^="fd-recipe-ing-"]').click()`,
+        ),
+        "recipe-ingredient-add": driven(
+            recipeV2(cookSheet),
+            `document.querySelector('.fd-section-header__action[data-fd-open-item]').click()`,
+        ),
+        // The warning icon on Buttermilk opens what is wrong and where to fix it.
+        "recipe-ingredient-warning": driven(
+            recipeV2(cookSheet),
+            `document.querySelector(".fd-recipe-warn button").click()`,
+        ),
+        // An unreadable line: Resolve opens its sheet.
+        "recipe-draft-resolve": driven(
+            padSeeEw({
+                problems: [...UNREADABLE_LINES],
+                expiresOn: "2026-12-01",
+                canSave: true,
+                canDiscard: true,
+                leaveGuard: false,
+            }),
+            `document.querySelector('.fd-recipe-line [command="show-modal"]').click()`,
         ),
         // `mcp-share-links` off: no Share item in the Detail bar's ⋯.
         "recipe-no-share": recipeV2(cookSheet, false, false, false),
@@ -2884,6 +2961,9 @@ for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet
         "settings-household-v2-member": settingsMemberV2(),
         "settings-household-v2-member-owner": settingsMemberV2(
             MEMBER_MAKE_OWNER_SHEET_ID,
+        ),
+        "settings-household-v2-member-remove": settingsMemberV2(
+            MEMBER_REMOVE_SHEET_ID,
         ),
         "settings-household-v2-member-menu":
             withEveryMenuOpen(settingsMemberV2()),
@@ -3149,6 +3229,28 @@ for (const day of ["1", "3", "5"]) document.querySelector('#fd-recipe-plan-sheet
             socialReaders: { tiktok: true, facebook: false },
             blockedCount: 0,
             isOwner: false,
+            canManage: false,
+        }),
+        "settings-places": renderSettingsPlacesV2Page({
+            chrome,
+            places: PREVIEW_PLACE_SUMMARIES,
+            canManage: true,
+        }),
+        "settings-places-add": renderSettingsPlacesV2Page({
+            chrome,
+            places: PREVIEW_PLACE_SUMMARIES,
+            canManage: true,
+            open: PLACES_ADD_ID,
+        }),
+        "settings-places-remove": renderSettingsPlacesV2Page({
+            chrome,
+            places: PREVIEW_PLACE_SUMMARIES,
+            canManage: true,
+            open: placeRemoveSheetId("p-fridge"),
+        }),
+        "settings-places-member": renderSettingsPlacesV2Page({
+            chrome,
+            places: PREVIEW_PLACE_SUMMARIES,
             canManage: false,
         }),
         "settings-stores": renderSettingsStoresV2Page({

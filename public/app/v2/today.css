@@ -90,10 +90,6 @@
 .fd-today-section [data-fd-sheet-row] {
     cursor: pointer;
 }
-.fd-today-section [data-fd-sheet-row]:focus-visible {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: calc(var(--space-2xs) * -1);
-}
 /* A row's own controls keep their pointer. */
 .fd-today-section [data-fd-sheet-row] :is(button, a, summary) {
     cursor: pointer;

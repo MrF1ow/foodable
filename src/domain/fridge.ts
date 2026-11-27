@@ -264,7 +264,8 @@ export async function addLocation(
     const trimmed = name.trim();
     if (!trimmed) throw new FridgeInputError("Enter a location name.");
     const existing = await store.listLocations(householdId);
-    if (existing.some((loc) => loc.name === trimmed)) {
+    const key = trimmed.toLowerCase();
+    if (existing.some((loc) => loc.name.trim().toLowerCase() === key)) {
         throw new FridgeInputError("That location already exists.");
     }
     const sortOrder =

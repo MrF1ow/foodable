@@ -19,7 +19,9 @@ import {
     PLAN_REPEATS,
     PLAN_SLOTS,
     planRecipe,
+    repeatPatternWords,
     unplanRecipe,
+    updatePlannedRecipe,
     type RecipePlan,
 } from "../../domain/plan.js";
 import {
@@ -27,6 +29,7 @@ import {
     addPlanDays,
     countedServings,
     missingForPlan,
+    pickMissingLines,
     WEEK_PLAN_DAYS,
     weekPlan,
     type PlanMissingLine,
@@ -143,6 +146,15 @@ export const UNPLAN_RECIPE_OUTPUT_SCHEMA = z.object({
     plan_id: z.string(),
 });
 
+export const UPDATE_PLAN_OUTPUT_SCHEMA = z.object({
+    /** The entry as it is now; its plan_id changes when the day leaves its series or the repeat changes. */
+    plan: PLAN_RECIPE_OUTPUT_SCHEMA.shape.plan,
+    repeat: z.enum(PLAN_REPEATS),
+    /** False when nothing was written. */
+    changed: z.boolean(),
+    already_planned: z.boolean(),
+});
+
 const GROCERY_LINE_REF = z.object({
     food_id: z.string().nullable(),
     display_name: z.string(),
@@ -176,6 +188,17 @@ export const ADD_PLAN_MISSING_OUTPUT_SCHEMA = z.object({
         }),
     ),
 });
+
+/**
+ * Takes the household's planning lock (the one every plan write takes) for the
+ * rest of the transaction the caller is in, which is the guard's in a
+ * destructive tool. Taken before the tool reads or records anything, so what
+ * the guard captures is what the write then finds: a save that lands first is
+ * waited for, not undone by this call's undo.
+ */
+function holdPlanning(householdId: string): Promise<void> {
+    return planTransaction("plan-recipe", householdId)(async () => undefined);
+}
 
 function weekdayName(date: string): string {
     return WEEKDAY_NAMES[new Date(`${date}T00:00:00Z`).getUTCDay()] ?? "";
@@ -587,6 +610,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     const run = await runDestructive(
                         "unplan_recipe",
                         async (rec, householdId, notify) => {
+                            await holdPlanning(householdId);
                             const plans = liveRecipePlansStore();
                             const plan = await plans.getPlan(
                                 householdId,
@@ -671,11 +695,207 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
     );
 
     server.registerTool(
+        "update_plan",
+        {
+            title: "Update Plan",
+            description:
+                "Change one week-plan entry by plan_id: `recipe_id`, `date` (YYYY-MM-DD, today or later), `slot`, `servings`, `repeat`, `days` (0 = Sunday). Only fields that differ change. On a repeating plan's day, recipe, date, slot and servings change that day only; `repeat` or `days` change the series from that day on. The plan_id in the answer is the entry's now: it can differ from the one you passed.",
+            annotations: {
+                readOnlyHint: false,
+                destructiveHint: true,
+                idempotentHint: false,
+                openWorldHint: false,
+            },
+            inputSchema: z.object({
+                plan_id: z.string(),
+                recipe_id: z.string().optional(),
+                date: z.string().optional(),
+                slot: z.enum(PLAN_SLOTS).optional(),
+                servings: z.coerce.number().optional(),
+                repeat: z.enum(PLAN_REPEATS).optional(),
+                // A blank, null or true/false weekday is refused, not read as
+                // Sunday (or Monday) by the number coercion.
+                days: z
+                    .array(
+                        z.preprocess(
+                            (v) =>
+                                v === null ||
+                                typeof v === "boolean" ||
+                                (typeof v === "string" && v.trim() === "")
+                                    ? Number.NaN
+                                    : v,
+                            z.coerce.number(),
+                        ),
+                    )
+                    .optional(),
+            }),
+            outputSchema: UPDATE_PLAN_OUTPUT_SCHEMA,
+        },
+        async (args) =>
+            withAnalytics(
+                "update_plan",
+                async () => {
+                    const run = await runDestructive(
+                        "update_plan",
+                        async (rec, householdId, notify) => {
+                            // The household's planning lock comes first: what
+                            // is recorded below is then what the change finds
+                            // when it writes, so two saves of one plan at once
+                            // cannot undo each other.
+                            await holdPlanning(householdId);
+                            const plans = liveRecipePlansStore();
+                            const entry = await plans.getPlan(
+                                householdId,
+                                args.plan_id,
+                            );
+                            if (!entry) throw new Error("Plan not found.");
+                            if (
+                                args.recipe_id !== undefined &&
+                                !UUID_RE.test(args.recipe_id.trim())
+                            ) {
+                                throw new Error("Recipe not found.");
+                            }
+                            const recipes = liveRecipesStore();
+                            // Read here, as unplan_recipe does: a read that
+                            // failed inside the guard's transaction would
+                            // abort it.
+                            const was = await recipes.getRecipe(
+                                householdId,
+                                entry.recipeId,
+                            );
+                            const out = await updatePlannedRecipe(
+                                plans,
+                                householdId,
+                                args.plan_id,
+                                {
+                                    recipeId: args.recipe_id,
+                                    date: args.date?.trim(),
+                                    slot: args.slot,
+                                    servings: args.servings,
+                                    repeat: args.repeat,
+                                    days: args.days,
+                                },
+                                {
+                                    recipes,
+                                    today: await householdToday(householdId),
+                                    notify,
+                                    transaction: planTransaction(
+                                        "plan-recipe",
+                                        householdId,
+                                    ),
+                                    recipeName: was?.name ?? null,
+                                    // What the change touches, recorded
+                                    // before it writes: the domain says which
+                                    // rows it ends, removes, skips a day of,
+                                    // edits or replaces.
+                                    beforeWrite: async ({ rule, plan }) => {
+                                        if (rule) {
+                                            await rec.captureByIds(
+                                                "plan_rules",
+                                                [rule.id],
+                                                rule.change,
+                                            );
+                                        }
+                                        if (plan) {
+                                            await rec.captureByIds(
+                                                "recipe_plans",
+                                                [plan.id],
+                                                plan.change,
+                                            );
+                                        }
+                                    },
+                                },
+                            );
+                            if (!out) throw new Error("Plan not found.");
+                            if (out.created.planId) {
+                                rec.inserted("recipe_plans", [
+                                    out.created.planId,
+                                ]);
+                            }
+                            if (out.created.ruleId) {
+                                rec.inserted("plan_rules", [
+                                    out.created.ruleId,
+                                ]);
+                            }
+                            const recipe = await recipes.getRecipe(
+                                householdId,
+                                out.plan.recipeId,
+                            );
+                            // A plan for named people counts their portions as
+                            // saved now, as everywhere else.
+                            const portionsOf: Record<string, number> = {};
+                            for (const userId of out.plan.memberIds ?? []) {
+                                const saved = await recipes.getPortion(
+                                    householdId,
+                                    out.plan.recipeId,
+                                    userId,
+                                );
+                                if (saved) {
+                                    portionsOf[userId] = saved.portionCount;
+                                }
+                            }
+                            const name = recipe?.name ?? "a recipe";
+                            return {
+                                value: {
+                                    out,
+                                    wire: planWire(
+                                        out.plan,
+                                        name,
+                                        countedServings(out.plan, {
+                                            portions: portionsOf,
+                                        }),
+                                    ),
+                                },
+                                summary: `Changed the plan for ${name} on ${entry.date} (${entry.slot})`,
+                                changed: !out.unchanged,
+                            };
+                        },
+                    );
+                    if (run.refused) return run.result;
+                    const { out, wire } = run.value;
+                    const lead = out.alreadyPlanned
+                        ? "Already planned there, nothing changed"
+                        : out.unchanged
+                          ? "Nothing changed"
+                          : "Updated";
+                    const repeats =
+                        out.repeat === "once"
+                            ? ""
+                            : ` Repeats ${repeatPatternWords({
+                                  repeat: out.repeat,
+                                  days: out.days,
+                                  startsOn: wire.date,
+                              })}.`;
+                    return {
+                        content: [
+                            {
+                                type: "text" as const,
+                                text: withUndo(
+                                    `${lead}: ${planLine(wire)}${idTag(wire.plan_id, "plan_id")}${idTag(wire.recipe_id, "recipe_id")}${repeats}`,
+                                    run.undo,
+                                ),
+                            },
+                        ],
+                        structuredContent: {
+                            plan: wire,
+                            repeat: out.repeat,
+                            changed: !out.unchanged,
+                            already_planned: out.alreadyPlanned,
+                        },
+                    };
+                },
+                analytics,
+                undefined,
+                { outcome: destructiveOutcome },
+            ),
+    );
+
+    server.registerTool(
         "add_plan_missing_to_groceries",
         {
             title: "Add Plan Missing To Groceries",
             description:
-                "Put what the week plan still needs, and the kitchen does not hold, on the grocery list: the same lines get_week_plan lists under `missing` for the seven days from `from` (default the household's today; a day before today is refused). A food the list already covers is not added again, so calling it twice adds nothing new; a food whose stock could not be counted is added at the recipe's full amount and listed under `unknown`. Needs at least one store. Prefer this to add_grocery_line per missing line, which would skip those checks.",
+                "Put what the week plan still needs, and the kitchen does not hold, on the grocery list: the same lines get_week_plan lists under `missing` for the seven days from `from` (default the household's today; a day before today is refused). A food the list already covers is not added again, so calling it twice adds nothing new; a food whose stock could not be counted is added at the recipe's full amount and listed under `unknown`. Needs at least one store. Pass food_ids to add only those missing foods (the food_id of each `missing` line in get_week_plan); an id that is not missing is ignored, and an empty list adds nothing. Without food_ids every missing line is added. Prefer this to add_grocery_line per missing line, which would skip those checks.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -688,6 +908,12 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     .optional()
                     .describe(
                         "First day of the seven, YYYY-MM-DD, today or later. Defaults to the household's today.",
+                    ),
+                food_ids: z
+                    .array(z.string())
+                    .optional()
+                    .describe(
+                        "Only these missing foods go on the list (the food_id of a `missing` line). Omit it to add every missing line; an empty list adds nothing.",
                     ),
             }),
             outputSchema: ADD_PLAN_MISSING_OUTPUT_SCHEMA,
@@ -706,7 +932,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             ? today
                             : checkPlanDay(args.from.trim(), today);
                     const inputs = await loadWeekPlanInputs(householdId, from);
-                    const lines = missingForPlan(
+                    const missing = missingForPlan(
                         inputs.plans,
                         inputs.recipes,
                         inputs.stock,
@@ -715,6 +941,12 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             days: WEEK_PLAN_DAYS,
                             foodsById: inputs.foodsById,
                         },
+                    );
+                    // Omitted: every line. Given: exactly those foods, found
+                    // in what is missing now (an unknown id adds nothing).
+                    const lines = pickMissingLines(
+                        missing,
+                        args.food_ids ?? null,
                     );
                     const structured = {
                         added: [] as z.infer<
@@ -735,7 +967,12 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text" as const,
-                                    text: "Nothing is missing for the plan.",
+                                    text:
+                                        missing.length === 0
+                                            ? "Nothing is missing for the plan."
+                                            : args.food_ids?.length === 0
+                                              ? "No foods were chosen, so nothing was added."
+                                              : "None of those foods is missing for the plan, so nothing was added.",
                                 },
                             ],
                             structuredContent: structured,

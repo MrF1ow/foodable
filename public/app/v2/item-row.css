@@ -52,12 +52,6 @@ button.fd-item-row__face {
     text-align: left;
     cursor: pointer;
 }
-button.fd-item-row__face:focus-visible,
-a.fd-item-row__face:focus-visible,
-.fd-item-row__anchor:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* A link row that also picks: the pick box sits beside the link, not in it. */
 .fd-item-row__anchor {
@@ -129,11 +123,6 @@ a.fd-item-row__face:focus-visible,
 .fd-item-row__check-input:disabled + .fd-item-row__check-box {
     opacity: 0.4;
 }
-.fd-item-row__check-input:focus-visible + .fd-item-row__check-box,
-.fd-item-row__select-input:focus-visible + .fd-item-row__select-box {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* A check lead that is a button (a grocery line's check-off): the same ring,
    a plain filled disc while `aria-checked` as the design draws it, with the
@@ -158,10 +147,6 @@ button.fd-item-row__check-btn {
 .fd-item-row__ring {
     cursor: default;
 }
-.fd-item-row__check-btn:focus-visible .fd-item-row__check-box {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* A radio lead is the same ring; picked, it is a plain filled disc (no tick),
    and the row (a label) is the whole hit area. */
@@ -185,11 +170,6 @@ button.fd-item-row__check-btn {
 .fd-item-row__face--choice {
     cursor: pointer;
 }
-.fd-item-row__face--choice:has(.fd-item-row__check-input:focus-visible) {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
-
 .fd-item-row__avatar {
     display: grid;
     place-items: center;
@@ -337,13 +317,6 @@ button.fd-item-row__check-btn {
                 var(--space-xs)
         )
     );
-}
-.fd-item-row__more:focus-visible,
-.fd-item-row__add:focus-visible,
-.fd-item-row__toggle:focus-visible,
-.fd-item-row__bed-btn:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
 }
 
 /* ---- states ---- */
@@ -567,10 +540,6 @@ button.fd-item-row__check-btn {
     text-decoration: none;
     cursor: pointer;
 }
-.fd-section-header__action:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* ---- reorder row (Settings › Stores, reorder mode) ---- */
 
@@ -627,10 +596,6 @@ button.fd-item-row__check-btn {
 .fd-item-row__move--down .fd-icon {
     transform: rotate(90deg);
 }
-.fd-item-row__move:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* ---- edit row (a rename in place) ---- */
 
@@ -655,10 +620,6 @@ button.fd-item-row__check-btn {
     color: var(--text-secondary);
     cursor: pointer;
 }
-.fd-item-row__edit-btn:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* ---- add row ("+ Add a store": opens a field in place) ---- */
 
@@ -671,10 +632,6 @@ button.fd-item-row__check-btn {
 }
 .fd-add-row__summary .fd-item-row__title {
     color: var(--text-primary);
-}
-.fd-add-row__summary:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
 }
 .fd-add-row__form {
     display: flex;
@@ -739,9 +696,16 @@ button.fd-item-row__check-btn {
     min-width: 0;
     min-height: 0;
     margin: 0;
-    padding: var(--space-2xs) 0;
+    /* Roomier, but nothing on the right: the unit follows the value at the
+       entry's own 4px gap (FigCraft 414420: one space). */
+    padding: var(--space-xs) 0 var(--space-xs) var(--space-sm);
     border: 0;
     border-bottom: 1px solid transparent;
+    /* A small corner, set here to beat the legacy `:where(.native input)` 12px
+       pill look of /app.css, which has no specificity of its own. Only the top
+       corners round: the field's one line is its bottom border, which stays
+       straight under the value instead of curling up into the unit. */
+    border-radius: var(--radius-xs) var(--radius-xs) 0 0;
     background: transparent;
     color: var(--text-secondary);
     font: inherit;
@@ -753,11 +717,6 @@ button.fd-item-row__check-btn {
 .fd-autosave-input__field::placeholder {
     color: var(--text-secondary);
     opacity: 1;
-}
-.fd-autosave-input__field:focus-visible {
-    outline: none;
-    border-bottom-color: var(--accent-fill);
-    color: var(--text-primary);
 }
 .fd-autosave-input__field[aria-invalid="true"] {
     border-bottom-color: var(--status-over);
@@ -781,6 +740,10 @@ button.fd-item-row__check-btn {
     min-width: 0;
 }
 .fd-autosave-input--bare .fd-autosave-input__field {
+    box-sizing: border-box;
+    /* A bare field (the Goals card's name and note) is text on the card's own
+       column, so it takes no side padding. */
+    padding-inline: 0;
     flex: 1;
     width: 100%;
     min-width: 0;
@@ -789,15 +752,6 @@ button.fd-item-row__check-btn {
     line-height: 1.3334;
     text-align: left;
 }
-.fd-item-row--input-chevron {
-    display: flex;
-    align-items: center;
-    gap: var(--space-md);
-}
-.fd-item-row--input-chevron > .fd-item-row__face {
-    flex: 1;
-    min-width: 0;
-}
 /* "Not set" has no unit after it; the unit appears with the number. */
 .fd-autosave-input__field:placeholder-shown + .fd-autosave-input__unit {
     display: none;
@@ -805,8 +759,9 @@ button.fd-item-row__check-btn {
 
 /* ---- disclosure ---- */
 
-/* The row opens in place: a native <details> whose summary is the face, the
-   chevron turning to point down, and the answer beneath it. */
+/* The row opens in place: a native <details> whose summary is the face, a
+   small marker pointing down that turns over when open, and the answer beneath
+   it. The icon set has only a right chevron, so the marker turns it a quarter. */
 .fd-item-row--disclosure {
     display: block;
 }
@@ -820,8 +775,13 @@ button.fd-item-row__check-btn {
 .fd-item-row__disclosure > summary::-webkit-details-marker {
     display: none;
 }
-.fd-item-row__disclosure[open] .fd-item-row__chevron {
+.fd-item-row__marker {
+    display: inline-flex;
+    color: var(--text-secondary);
     transform: rotate(90deg);
+}
+.fd-item-row__disclosure[open] .fd-item-row__marker {
+    transform: rotate(270deg);
 }
 .fd-item-row__answer {
     padding: 0 0 var(--space-md);

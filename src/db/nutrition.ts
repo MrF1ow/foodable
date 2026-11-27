@@ -115,6 +115,11 @@ export interface Meal {
     // all stated in mg, so the unit rides in the name at every layer.
     // Contributes no energy: never feed this into a kcal derivation.
     caffeine_mg: number | null;
+    // What a quick or free-text meal was last saved at in the edit sheet. The
+    // totals above already include it, so one serving is totals / servings.
+    // Null reads as 1. Optional in the type so hand-built meals need not name
+    // it; every row read from the database carries it.
+    servings?: number | null;
     notes: string | null;
     idempotency_key: string | null;
     items?: MealItem[];
@@ -181,6 +186,10 @@ export interface MealInput {
     idempotency_key?: string;
     items?: MealItemWrite[];
     item_digest?: string;
+    // The web edit sheet (updateMeal) and Again on a quick or free-text meal
+    // (insertMeal, items-free only) write it; see Meal.servings. Left out, a
+    // write that sets the totals directly clears the stored servings.
+    servings?: number | null;
 }
 
 export interface MealInsertResult {
@@ -353,6 +362,13 @@ export async function insertMeal(
             sugar_g: meal.sugar_g ?? null,
             alcohol_g: meal.alcohol_g ?? null,
             caffeine_mg: meal.caffeine_mg ?? null,
+            // A copy of a quick or free-text meal keeps its multiplier so its
+            // sheet reopens where the source did; an item-backed meal's totals
+            // come from its items, so it never stores one.
+            servings:
+                meal.servings != null && !(input.items?.length ?? 0)
+                    ? Math.round(meal.servings * 100) / 100
+                    : null,
             logged_at: loggedAt,
             notes:
                 meal.notes != null ? decodeEscapeSequences(meal.notes) : null,
@@ -1047,6 +1063,19 @@ export async function deleteMeal(userId: string, id: string): Promise<boolean> {
     });
 }
 
+// The meal columns that hold totals; writing one directly makes a stored
+// servings wrong (see updateMeal).
+const MEAL_TOTAL_FIELDS = [
+    "calories",
+    "protein_g",
+    "carbs_g",
+    "fat_g",
+    "fiber_g",
+    "sugar_g",
+    "alcohol_g",
+    "caffeine_mg",
+] as const satisfies readonly (keyof MealInput)[];
+
 export async function updateMeal(
     userId: string,
     id: string,
@@ -1094,6 +1123,22 @@ export async function updateMeal(
                 fields.notes != null
                     ? decodeEscapeSequences(fields.notes)
                     : fields.notes;
+        // Servings explain the totals, so a write that sets the totals itself
+        // (any nutrient, or the items) leaves them stale and clears them;
+        // time, description, notes and meal type leave the totals alone and
+        // keep them. A caller that rescales the totals passes the servings.
+        if (fields.servings !== undefined) {
+            update.servings =
+                fields.servings == null
+                    ? null
+                    : Math.round(fields.servings * 100) / 100;
+        } else if (
+            existing.servings != null &&
+            (fields.items !== undefined ||
+                MEAL_TOTAL_FIELDS.some((key) => fields[key] !== undefined))
+        ) {
+            update.servings = null;
+        }
 
         const newKey = updatedMealIdempotencyKey(userId, existing, fields);
         if (newKey !== null) update.idempotency_key = newKey;

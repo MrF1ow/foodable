@@ -262,8 +262,61 @@
     align-items: center;
     gap: var(--space-sm);
 }
-.fd-recipe-caption--warn {
+/* An ingredient's warning: the design's Icon button, small and in the warning
+   tone, beside its row (or beside the ⋯ of a row that does not open a sheet). */
+.fd-recipe-warn {
+    display: inline-flex;
+    flex: none;
+    align-items: center;
+}
+.fd-recipe-warn .fd-btn {
+    width: 32px;
+    height: 32px;
+    background: transparent;
     color: var(--status-warn);
+}
+.fd-recipe-warn .fd-btn .fd-icon {
+    width: 20px;
+    height: 20px;
+}
+/* A row with a warning draws the icon before the chevron, so every row's
+   chevron ends the row. The link keeps its own box (so it stays one focusable,
+   tappable link in every browser): its words leave room at the end, and the
+   icon, its own control, sits over that room just before the chevron. */
+.fd-recipe-ing--warn .fd-item-row__face {
+    position: relative;
+}
+.fd-recipe-ing--warn .fd-item-row__main {
+    padding-inline-end: calc(32px + var(--space-xs));
+}
+.fd-recipe-ing--warn .fd-recipe-warn {
+    position: absolute;
+    inset-inline-end: calc(24px + var(--space-md));
+    top: 50%;
+    z-index: 1;
+    transform: translateY(-50%);
+}
+.fd-recipe-row-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+}
+
+/* An unreadable import line: its words, then Resolve and Drop. */
+.fd-recipe-draft__lines .fd-item-row__subtitle {
+    color: var(--text-secondary);
+}
+.fd-recipe-line-actions {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+/* A refusal inside an ingredient sheet. */
+.fd-recipe-sheet-error {
+    margin: 0 0 var(--space-md);
+    font: 400 14px/20px var(--font-body);
+    color: var(--status-over);
 }
 
 .fd-recipe-macros {
@@ -479,11 +532,6 @@
     color: var(--accent-text);
 }
 
-.fd-star:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
-}
-
 @media (hover: hover) and (pointer: fine) {
     .fd-star:not(.fd-star--on):hover {
         color: var(--text-primary);
@@ -512,8 +560,11 @@
     margin-top: 0;
 }
 
+/* The rows section stacks Starts (Day), the calendar and Meal 12px apart
+ * (.fd-sheet__content); the open calendar adds no padding of its own, so the
+ * three sit evenly and a closed calendar leaves the same 12px. */
 .fd-plan-form .fd-month-picker {
-    padding-block: var(--space-sm) var(--space-xs);
+    padding-block: 0;
 }
 
 .fd-plan-error {

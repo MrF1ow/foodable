@@ -102,7 +102,3 @@
     color: var(--text-tertiary);
     cursor: default;
 }
-.fd-month-picker__day:focus-visible {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: calc(var(--space-2xs) * -1);
-}

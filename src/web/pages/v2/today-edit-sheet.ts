@@ -4,6 +4,7 @@ import {
     editItemQuantity,
     itemMacrosAtAmount,
     mealLocalTimeValue,
+    mealServings,
     scaleMealTotals,
     sumMacroTiles,
     todayEditSheetId,
@@ -153,12 +154,12 @@ function itemSteppers(meal: Meal): string {
         .join("\n");
 }
 
-function freeTextStepper(mealId: string): string {
+function freeTextStepper(mealId: string, servings: number): string {
     const control = `<div class="fd-today-edit-item" data-fd-edit-servings>${String(
         stepper({
             name: "servings",
             label: "Servings",
-            value: 1,
+            value: servings,
             min: 0.25,
             step: 0.25,
             inputStep: "any",
@@ -234,7 +235,7 @@ export function renderTodayEditSheet(
         : "";
     // Free text has no items: its one stepper scales the meal's own totals,
     // which the script reads off the host.
-    const servings = freeTextStepper(meal.id).replace(
+    const servings = freeTextStepper(meal.id, mealServings(meal)).replace(
         "data-fd-edit-servings",
         () =>
             `data-fd-edit-servings data-fd-calories="${esc(String(meal.calories ?? ""))}" data-fd-protein="${esc(String(meal.protein_g ?? ""))}" data-fd-carbs="${esc(String(meal.carbs_g ?? ""))}" data-fd-fat="${esc(String(meal.fat_g ?? ""))}"`,

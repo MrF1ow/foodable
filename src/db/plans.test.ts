@@ -1175,6 +1175,120 @@ function runRepeatsContract(
             ).toBeNull();
         });
 
+        test("removing a repeat deletes it and the days it shows, and keeps one-offs and other repeats", async () => {
+            await reset();
+            const c = ctx();
+            const h = createHarness();
+            const { recipeId, rule } = await weeklyDinner(h, c);
+            const { rule: kept } = await weeklyDinner(h, c);
+            // a day moved off the repeat is a one-off now, and stays
+            await h.store.movePlan(
+                c.householdId,
+                `rule:${rule.id}:2026-11-09`,
+                "2026-11-10",
+                "dinner",
+            );
+            const oneOff = await h.store.addPlan({
+                householdId: c.householdId,
+                recipeId,
+                date: "2026-11-12",
+                slot: "lunch",
+            });
+            expect(await h.store.removeRule(c.householdId, rule.id)).toBe(true);
+            expect(await h.store.getRule(c.householdId, rule.id)).toBeNull();
+            expect(
+                await h.store.getPlan(
+                    c.householdId,
+                    `rule:${rule.id}:2026-11-16`,
+                ),
+            ).toBeNull();
+            expect(
+                (await h.store.listRules(c.householdId)).map((r) => r.id),
+            ).toEqual([kept.id]);
+            const left = await listAll(h, c);
+            expect(left.filter((p) => p.ruleId === rule.id)).toEqual([]);
+            expect(left.filter((p) => p.ruleId === kept.id)).not.toEqual([]);
+            expect(left.map((p) => p.id)).toEqual(
+                expect.arrayContaining([oneOff!.id]),
+            );
+            expect(left.some((p) => p.date === "2026-11-10" && !p.ruleId)).toBe(
+                true,
+            );
+            // gone is gone: a second removal, an unknown id and another household find nothing
+            expect(await h.store.removeRule(c.householdId, rule.id)).toBe(
+                false,
+            );
+            expect(
+                await h.store.removeRule(c.householdId, crypto.randomUUID()),
+            ).toBe(false);
+            expect(await h.store.removeRule(c.otherHouseholdId, kept.id)).toBe(
+                false,
+            );
+            expect(await h.store.getRule(c.householdId, kept.id)).toEqual(kept);
+        });
+
+        test("a repeat can start with days already taken off and a last day, and both are kept as given", async () => {
+            await reset();
+            const c = ctx();
+            const h = createHarness();
+            const { rule } = await weeklyDinner(h, c, {
+                // out of order and twice: stored once each, in order
+                skippedOn: ["2026-11-16", "2026-11-09", "2026-11-16"],
+                endsOn: "2026-11-30",
+            });
+            expect(rule.skippedOn).toEqual(["2026-11-09", "2026-11-16"]);
+            expect(rule.endsOn).toBe("2026-11-30");
+            expect(await h.store.getRule(c.householdId, rule.id)).toEqual(rule);
+            expect((await listAll(h, c)).map((p) => p.date)).toEqual([
+                "2026-11-02",
+                "2026-11-23",
+                "2026-11-30",
+            ]);
+            // a repeat made without them has none, and goes on
+            const { rule: plain } = await weeklyDinner(h, c, {
+                startsOn: "2026-12-07",
+            });
+            expect(plain.skippedOn).toEqual([]);
+            expect(plain.endsOn).toBeNull();
+            // a day that is not a day is refused and nothing is stored
+            await expect(
+                weeklyDinner(h, c, { skippedOn: ["2026-02-30"] }),
+            ).rejects.toThrow(PlanInputError);
+            await expect(
+                weeklyDinner(h, c, { endsOn: "soon" }),
+            ).rejects.toThrow(PlanInputError);
+        });
+
+        test("a repeat's last day counts when it is checked against the others: it may start after another ends, not before", async () => {
+            await reset();
+            const c = ctx();
+            const h = createHarness();
+            const { recipeId, rule } = await weeklyDinner(h, c);
+            await h.store.endRuleBefore(c.householdId, rule.id, "2026-11-16");
+            const next = (startsOn: string, endsOn?: string) =>
+                h.store.addRule({
+                    householdId: c.householdId,
+                    recipeId,
+                    slot: "dinner",
+                    startsOn,
+                    repeat: "weekly",
+                    endsOn,
+                });
+            // the old one still holds Mon 9 Nov
+            await expect(next("2026-11-09", "2026-11-15")).rejects.toThrow(
+                PlanRepeatOverlapError,
+            );
+            // from the 16th on is free, with or without a last day
+            expect(await next("2026-11-16", "2026-12-14")).not.toBeNull();
+            expect((await listAll(h, c)).map((p) => p.date)).toEqual([
+                "2026-11-02",
+                "2026-11-09",
+                "2026-11-16",
+                "2026-11-23",
+                "2026-11-30",
+            ]);
+        });
+
         test("moving one day skips it and makes a one-off on the new day", async () => {
             await reset();
             const c = ctx();

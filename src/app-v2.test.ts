@@ -299,7 +299,8 @@ describe("/app-v2.js", () => {
         // +~1.4 KB Usuals: Weeks between shows for Every N weeks only, and Type it hides the tiles; Calories by day opens on the newest day.
         // +~8.8 KB Plan sheet: the Starts row's month picker (a month at a time, the pick written into the row and its field), the Repeat pull-down showing the weekday chips for Pick days, and a draft's page asking "Discard this recipe?" before a link leaves it.
         // +~2.7 KB The leave guard also holds a Turbo visit and a form that would leave the importer's landing, and a discard clears Turbo's cache.
-        expect(js.length).toBeLessThan(237_000);
+        // +~2.5 KB Menu: a panel inside a sheet is placed in the part of the screen above the keyboard (visual viewport, else the window), again whenever that changes, and the `<details>` menu is placed the same way inside a sheet.
+        expect(js.length).toBeLessThan(240_000);
         expect(js).not.toContain("readBarcodes");
         expect(js).not.toContain("prepareZXingModule");
     });
@@ -1118,6 +1119,151 @@ describe("autosave.js whole forms", () => {
             detail: { newElement: {} },
         });
         expect(ok).toBe(true);
+    });
+});
+
+describe("the plan sheets' rows", () => {
+    test("the open calendar adds no padding of its own, so Starts, the calendar and Meal sit evenly 12px apart", async () => {
+        const css = (await getAppV2Css()).replace(/\/\*[\s\S]*?\*\//g, "");
+        expect(css).toMatch(
+            /\.fd-plan-form \.fd-month-picker\s*\{\s*padding-block:\s*0;\s*\}/,
+        );
+        // The section's own gap is the shared 12px between its blocks.
+        expect(css).toMatch(
+            /\.fd-sheet__content\s*\{[^}]*gap:\s*var\(--space-md\)/,
+        );
+    });
+});
+
+describe("app-wide rules (app-rules.css, the last partial)", () => {
+    const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
+    const rules = readFileSync("./public/app/v2/app-rules.css", "utf8");
+    const V2_DIR = "./public/app/v2";
+
+    test("is the last partial of the bundle, after every other one", async () => {
+        const css = await getAppV2Css();
+        const at = css.indexOf(rules.trim());
+        expect(at).toBeGreaterThan(0);
+        expect(css.slice(at).trim()).toBe(rules.trim());
+        // Every other partial comes before it, so it wins every tie.
+        for (const name of readdirSync(V2_DIR)) {
+            if (!name.endsWith(".css") || name === "app-rules.css") continue;
+            if (name === "app-v2.css") continue;
+            const text = readFileSync(`${V2_DIR}/${name}`, "utf8").trim();
+            expect(css.indexOf(text), name).toBeGreaterThanOrEqual(0);
+            expect(css.indexOf(text), name).toBeLessThan(at);
+        }
+    });
+
+    test("hides the scroll bar on every element, in Chromium and in WebKit, and keeps scrolling", async () => {
+        const css = strip(await getAppV2Css());
+        const tail = css.slice(css.indexOf(strip(rules).trim()));
+        expect(tail).toMatch(/(?:^|\n)\*\s*\{\s*scrollbar-width:\s*none;\s*\}/);
+        expect(tail).toMatch(
+            /\*::-webkit-scrollbar\s*\{\s*display:\s*none;\s*\}/,
+        );
+        // Nothing here stops an element scrolling.
+        expect(tail).not.toMatch(/overflow[a-z-]*:\s*hidden/);
+    });
+
+    test("clears the tap highlight on the root", async () => {
+        const css = strip(await getAppV2Css());
+        expect(css).toMatch(
+            /html\s*\{\s*-webkit-tap-highlight-color:\s*transparent;\s*\}/,
+        );
+    });
+
+    test("takes the outline off anything that has or contains focus, whatever draws it", async () => {
+        const css = strip(await getAppV2Css());
+        expect(css).toMatch(
+            /:focus,\s*:focus-visible,\s*:focus-within\s*\{\s*outline:\s*none\s*!important;\s*\}/,
+        );
+    });
+
+    test("beats the legacy form ring (form.css, seg.css, app.css) with the same selectors, later", async () => {
+        const css = strip(await getAppV2Css());
+        const tail = css.slice(css.indexOf(strip(rules).trim()));
+        // The legacy rules draw a 3 px accent shadow and an accent border on
+        // :focus-visible for these selectors; each is named again here, later.
+        const legacy = [
+            ".input",
+            ".select",
+            ".btn",
+            ".drop",
+            ".seg-btn",
+            ".native :is(input, select, textarea, button:not(.fd-pill-chip))",
+            "details.more > summary",
+            '.native input[type="checkbox"][role="switch"]',
+        ];
+        const shadow = tail.slice(0, tail.indexOf("border-color"));
+        for (const sel of legacy) expect(shadow, sel).toContain(sel);
+        expect(shadow).toMatch(/box-shadow:\s*none;/);
+        expect(tail).toMatch(
+            /border-color:\s*var\(--panel-border,\s*var\(--line\)\);/,
+        );
+        const base = await Bun.file("./public/app/form.css").text();
+        expect(base).toContain(
+            ":where(.native :is(input, select, textarea, button)):focus-visible",
+        );
+    });
+
+    test("the box-shadow reset leaves an fd- control's resting outline alone (.fd-pill-chip)", async () => {
+        const css = strip(await getAppV2Css());
+        const tail = css.slice(css.indexOf(strip(rules).trim()));
+        const reset = tail.slice(
+            tail.indexOf(":is(\n"),
+            tail.indexOf("box-shadow: none;"),
+        );
+        // The chip draws its outline as a resting box-shadow (choice.css), so
+        // the reset must not match it: a focused chip keeps the outline.
+        expect(reset).toContain("button:not(.fd-pill-chip)");
+        const choice = strip(
+            await Bun.file("./public/app/v2/choice.css").text(),
+        );
+        expect(choice).toMatch(
+            /\.fd-pill-chip\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px var\(--line\)/,
+        );
+        // Every fd- class that draws a resting box-shadow on a form control is
+        // named in the exclusion; today the chip is the only such button.
+        const ringed = [
+            ...choice.matchAll(
+                /(\.fd-[\w-]+)\s*\{[^}]*box-shadow:\s*inset 0 0 0 1px/g,
+            ),
+        ].map((m) => m[1]);
+        expect(ringed).toContain(".fd-pill-chip");
+    });
+
+    test("no partial draws a focus ring, a focus border or a focus tint of its own", () => {
+        // Hover and pressed states stay; a :focus, :focus-visible or
+        // :focus-within rule that paints anything is a regression (the user
+        // switched all of them off, keyboard included). A rule that only
+        // reveals something (a hidden control a key reaches, a swipe row's
+        // actions) is not paint and is left out.
+        const paint =
+            /(?:^|[\s;])(?:outline(?!:\s*(?:none|0)\s*(?:!important)?\s*(?:;|$))|outline-(?:color|style|width|offset)|box-shadow|border[a-z-]*color|background(?:-color)?|color)\s*:/m;
+        const offenders: string[] = [];
+        for (const name of readdirSync(V2_DIR)) {
+            if (!name.endsWith(".css") || name === "app-rules.css") continue;
+            const text = strip(readFileSync(`${V2_DIR}/${name}`, "utf8"));
+            for (const m of text.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+                const selector = m[1]!;
+                const body = m[2]!;
+                const focusSelectors = selector.split(",").filter(
+                    (part) =>
+                        /:focus(?:-visible|-within)?\b/.test(part) &&
+                        !/:not\([^)]*:focus/.test(part) &&
+                        !/:has\(/.test(part) &&
+                        !/:hover/.test(part.replace(/:focus[\w-]*/g, "")) &&
+                        // A swipe row's actions, and the reorder arrows,
+                        // appear on focus within: layout, not paint.
+                        !/--fd-swipe|swipe|reorder/.test(part),
+                );
+                if (focusSelectors.length > 0 && paint.test(body)) {
+                    offenders.push(`${name}: ${selector.trim()}`);
+                }
+            }
+        }
+        expect(offenders).toEqual([]);
     });
 });
 

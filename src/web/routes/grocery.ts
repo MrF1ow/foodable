@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { groceryAllergenMembers, renderGroceryListPage } from "../loaders.js";
 
-import { formAmount, formOptionalNumber, formText } from "../form.js";
+import { formOptionalNumber, formText } from "../form.js";
 import { safeReturnPath } from "../usual-products-path.js";
 import type { PutAwayDraft } from "../pages/v2/kitchen-groceries.js";
 import { requireMember, requireSiteUser, siteMember } from "../middleware.js";
@@ -146,7 +146,11 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
     const sectionId = storeId
         ? formText(body, "section_id") || undefined
         : undefined;
-    const amount = formAmount(body, "qty_amount");
+    const amount = formOptionalNumber(body, "qty_amount");
+    // The by-hand form always posts a unit (a hidden "each"). With no amount
+    // the unit says nothing the person chose, and a unit that differs from the
+    // usual's would make the usual's amount lose: post none, so it applies.
+    const unit = amount === undefined ? undefined : formText(body, "qty_unit");
     const grocery = liveGroceryStore();
     const settings = liveSettingsStore();
     const foods = liveFoodsStore();
@@ -160,7 +164,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
                 sectionId,
                 name: formText(body, "name"),
                 amount,
-                unit: formText(body, "qty_unit"),
+                unit,
                 foodId: formText(body, "food_id") || undefined,
             });
         } else {
@@ -219,7 +223,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
                     sectionId,
                     foodId,
                     amount,
-                    unit: formText(body, "qty_unit"),
+                    unit,
                 });
                 await rememberAliasIfRequested(
                     foods,
@@ -241,7 +245,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
                     sectionId,
                     foodId: food.id,
                     amount,
-                    unit: formText(body, "qty_unit"),
+                    unit,
                 });
             } else {
                 await addGroceryManualFood(grocery, settings, foods, {
@@ -250,7 +254,7 @@ groceryRoutes.post("/kitchen/groceries/lines", requireMember, async (c) => {
                     sectionId,
                     name: formText(body, "food_name"),
                     amount,
-                    unit: formText(body, "qty_unit"),
+                    unit,
                     onSimilar: manualOnSimilar(body),
                 });
             }

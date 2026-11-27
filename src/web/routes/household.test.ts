@@ -3932,9 +3932,11 @@ describe("household settings sub-pages", () => {
                 "Location",
                 "Time zone",
                 "Stores",
+                "Fridge places",
                 "Restock day",
                 "Invite codes",
                 "Recipe link readers",
+                "Plurals are the same food",
             ]);
             expect(items(html)).toEqual([
                 "Rename household",
@@ -3944,7 +3946,8 @@ describe("household settings sub-pages", () => {
             ]);
             expect(html).toContain('action="/settings/household/rotate-token"');
             expect(html).not.toContain("Dismissed notices");
-            expect(html).not.toContain("plurals-same-food");
+            // One switch row posts to the plurals route; no block, no sheet.
+            expect(html.split("plurals-same-food")).toHaveLength(2);
             expect(html).not.toContain("Social post readers");
         });
 
@@ -3986,28 +3989,28 @@ describe("household settings sub-pages", () => {
             expect(html).toContain("Not set");
         });
 
-        test("the owner's page for another person has role, ownership and removal; for themselves, nothing", async () => {
+        test("the owner's page for another person has a Role drop-down and a red Remove row; for themselves, nothing", async () => {
             const other = await (
                 await get(`/settings/household/members/${BOB}`, ALICE)
             ).text();
-            expect(items(other).slice(0, 3)).toEqual([
-                "Make admin",
-                "Make owner",
-                "Remove Bob",
-            ]);
+            expect(items(other)).toEqual(["Member", "Admin", "Owner"]);
             expect(other).toContain(
                 `action="/settings/household/members/${BOB}/role"`,
             );
             expect(other).toContain("fd-member-make-owner");
+            expect(other).toContain('commandfor="fd-member-remove"');
+            expect(other).toContain("fd-item-row--danger");
             const admin = await (
                 await get(`/settings/household/members/${ADMIN}`, ALICE)
             ).text();
-            expect(items(admin)[0]).toBe("Make member");
+            expect(items(admin)).toEqual(["Member", "Admin", "Owner"]);
+            expect(admin).toContain('name="role" value="member"');
             const self = await (
                 await get(`/settings/household/members/${ALICE}`, ALICE)
             ).text();
             expect(self).not.toContain("data-fd-menu");
             expect(self).not.toContain("fd-member-make-owner");
+            expect(self).not.toContain("fd-item-row--danger");
         });
 
         test("an admin and a member see a person's page without any menu", async () => {
@@ -4056,7 +4059,7 @@ describe("household settings sub-pages", () => {
                 await get(`/settings/household/members/${BOB}`, ALICE)
             ).text();
             expect(page).toContain('fd-item-row__value">Admin<');
-            expect(items(page)[0]).toBe("Make member");
+            expect(page).toContain('name="role" value="member"');
             const down = await post(
                 `/settings/household/members/${BOB}/role`,
                 ALICE,

@@ -74,12 +74,6 @@
     color: var(--text-primary);
     font-weight: 500;
 }
-.fd-side-link:focus-visible,
-.fd-sidebar__household:focus-visible,
-.fd-sidebar__account:focus-visible {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: var(--space-2xs);
-}
 @media (hover: hover) and (pointer: fine) {
     .fd-side-link:not(.fd-side-link--current):hover {
         background: var(--surface-raised);

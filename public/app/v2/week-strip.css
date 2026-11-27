@@ -63,7 +63,3 @@
 .fd-week-day__dot--on {
     background: var(--macro-calories);
 }
-.fd-week-day:focus-visible {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: calc(var(--space-2xs) * -1);
-}

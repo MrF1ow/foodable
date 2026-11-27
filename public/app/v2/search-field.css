@@ -61,11 +61,6 @@
     color: var(--text-secondary);
     opacity: 1;
 }
-/* The input draws no ring of its own, so the field shows where focus is. */
-.fd-search-field:focus-within {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: var(--space-2xs);
-}
 /* The chip is a `.fd-keyboard-hint` (layout.css, which loads after this file);
    the extra class outranks it so the chip keeps the row's own font family. */
 .fd-search-field__shortcut.fd-keyboard-hint {
@@ -87,10 +82,6 @@
     color: var(--text-secondary);
     cursor: pointer;
     text-decoration: none;
-}
-.fd-search-field__action:focus-visible {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: var(--space-2xs);
 }
 
 /* A field that detects a pasted link as it is typed draws both lead icons and

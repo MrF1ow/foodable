@@ -55,24 +55,6 @@ function messageFor(root, el, n) {
           );
 }
 
-// A bar whose destructive action confirms in place (`data-fd-select-ask`)
-// shows Cancel and the verb with the count in place of the action; the bar
-// carries `data-fd-select-asking` while it does.
-function setAsking(root, on) {
-    root.querySelectorAll("[data-fd-select-bar]").forEach((bar) => {
-        if (on) bar.setAttribute("data-fd-select-asking", "");
-        else bar.removeAttribute("data-fd-select-asking");
-    });
-}
-
-// Move focus to a button of the same bar as `from`: the bar swaps its buttons
-// when it asks or stops asking, and the one that was focused is hidden.
-function focusIn(from, selector) {
-    const bar = from.closest("[data-fd-select-bar]");
-    const next = bar && bar.querySelector(selector);
-    if (next) next.focus();
-}
-
 function sync(root) {
     const n = picked(root).length;
     root.querySelectorAll("[data-fd-select-count]").forEach((el) => {
@@ -92,7 +74,6 @@ function sync(root) {
     root.querySelectorAll("[data-fd-select-action]").forEach((el) => {
         el.disabled = n === 0;
     });
-    if (n === 0) setAsking(root, false);
     root.querySelectorAll("[data-fd-select-message]").forEach((el) => {
         el.textContent = messageFor(root, el, n);
     });
@@ -147,7 +128,6 @@ function setSelecting(root, on) {
     ).forEach((el) => {
         el.hidden = !on;
     });
-    if (!on) setAsking(root, false);
     togglesFor(root.getAttribute("data-fd-select")).forEach((el) =>
         setToggle(el, on),
     );
@@ -180,25 +160,6 @@ document.addEventListener(
             setSelecting(root, true);
             const first = boxes(root).find((box) => !box.disabled);
             if (first) first.focus();
-            return;
-        }
-        const ask = target.closest("[data-fd-select-ask]");
-        if (ask) {
-            const root = ask.closest(ROOT);
-            if (root && picked(root).length > 0) {
-                setAsking(root, true);
-                // The button that had focus is hidden now: the question has it.
-                focusIn(ask, "[data-fd-select-unask]");
-            }
-            return;
-        }
-        const unask = target.closest("[data-fd-select-unask]");
-        if (unask) {
-            const root = unask.closest(ROOT);
-            if (root) {
-                setAsking(root, false);
-                focusIn(unask, "[data-fd-select-ask]");
-            }
             return;
         }
         const cancel = target.closest("[data-fd-select-cancel]");

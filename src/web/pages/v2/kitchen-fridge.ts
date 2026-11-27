@@ -33,10 +33,10 @@ import { searchField } from "../../components/v2/search-field.js";
 import { sectionHeader } from "../../components/v2/section-header.js";
 import { sheet, sheetSection } from "../../components/v2/sheet.js";
 import { stepperControl } from "../../components/v2/stepper-control.js";
+import { APP_PATHS } from "../../route-map.js";
 import { renderAppShell } from "../../shell.js";
 import { formatExpiryWhen } from "./expiry-format.js";
 import { renderKitchenHead, kitchenTopTools } from "./kitchen-head.js";
-import { selectionBars } from "./select-mode.js";
 import { settingsErrorBanner } from "./settings-shared.js";
 
 export const FD_FRIDGE_ADD_SHEET_ID = "fd-fridge-add";
@@ -319,7 +319,6 @@ function fridgeItemRow(item: FridgeItem, view: KitchenFridgeV2View): Html {
                     form: eat,
                 },
             },
-            select: { name: "ids[]", value: item.id },
             id: `fd-fridge-row-${item.id}`,
             data: { "fd-sheet-row": "", "sheet-id": sheetId },
         }),
@@ -701,35 +700,11 @@ function addButton(): string {
     );
 }
 
-function tabMenu(select: ReturnType<typeof selectionBars>): string {
-    return String(
-        menu({
-            label: "Fridge options",
-            anchor: "more",
-            items: [select.menuItem],
-        }),
-    );
-}
-
 export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
-    const select = selectionBars({
-        scope: "fridge",
-        returnTo: FRIDGE_RETURN_TO,
-        actions: [
-            {
-                kind: "confirm",
-                key: "discard",
-                label: "Discard",
-                action: "/kitchen/fridge/bulk/discard",
-            },
-        ],
-    });
-    const selectable = view.items.length > 0;
-    const tools = selectable ? tabMenu(select) : "";
     const head = renderKitchenHead({
         active: "fridge",
         phoneSubtitle: kitchenFridgeItemCountLabel(view.items.length),
-        desktopTools: `${tools}${addButton()}`,
+        desktopTools: addButton(),
     });
     const sections = renderFridgeLocationSections(view);
     const useSoon = useSoonStrip(view);
@@ -741,7 +716,12 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
         view.locations.length === 0
             ? emptyState({
                   title: "No places yet",
-                  body: "Add a location, then add items with the button above.",
+                  body: "Add a place in Settings, then add items with the button above.",
+                  action: button({
+                      label: "Fridge places",
+                      variant: "secondary",
+                      href: APP_PATHS.settingsPlaces,
+                  }),
               })
             : view.items.length === 0
               ? emptyState({ title: "Nothing in the fridge yet" })
@@ -753,10 +733,9 @@ export function renderKitchenFridgeBody(view: KitchenFridgeV2View): string {
         className: "fd-kitchen-fridge-layout",
     });
     return `${head}
-<div class="fd-kitchen-fridge-page"${select.rootAttrs}>
-${kitchenTopTools(tools, addButton())}
+<div class="fd-kitchen-fridge-page">
+${kitchenTopTools(addButton())}
 ${view.error && !view.openItemId && !view.openAdd ? String(settingsErrorBanner(view.error)) : ""}
-${selectable ? `${String(select.bars)}${String(select.head)}` : ""}
 ${String(layout)}
 ${String(empty)}
 ${view.items.map((item) => itemSheet(item, view)).join("")}

@@ -58,10 +58,6 @@
     background: var(--accent-on);
     transform: translateX(calc(var(--fd-toggle-w) - var(--fd-toggle-h)));
 }
-.fd-toggle__input:focus-visible + .fd-toggle__track {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: var(--space-2xs);
-}
 .fd-toggle--disabled {
     cursor: default;
     opacity: 0.5;

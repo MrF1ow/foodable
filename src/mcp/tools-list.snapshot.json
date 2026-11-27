@@ -80,6 +80,7 @@
     "get_week_plan",
     "plan_recipe",
     "unplan_recipe",
+    "update_plan",
     "add_plan_missing_to_groceries",
     "get_household_rules",
     "set_household_rules",

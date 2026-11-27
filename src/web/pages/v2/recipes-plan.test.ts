@@ -15,6 +15,7 @@ import {
     renderPlannedWeek,
     withPlanEditDraft,
     type PlanSheetView,
+    type WeekPlanView,
 } from "./recipes-plan.js";
 
 const HH = "hh-1";
@@ -225,32 +226,48 @@ describe("week renderers", () => {
         expect(sheet).toContain("fd-sheet--side fd-plan-edit-sheet");
     });
 
-    test("the edit sheet is a side sheet titled with the recipe, the day and meal under it, with Day and Meal as pull-down rows (FigCraft 405435)", () => {
+    test("the edit sheet is a side sheet titled with the day and the meal under it, with Recipe, Day, Meal, Repeat and Servings", () => {
         const html = renderPlanEditSheets(sampleView(), "today");
         const sheet = html.match(
             /<dialog[^>]*id="fd-plan-edit-p2"[\s\S]*?<\/dialog>/,
         )![0];
         expect(sheet).toContain("fd-sheet--side fd-plan-edit-sheet");
-        expect(sheet).toContain(">Pancakes<");
-        expect(sheet).toContain(">Sat 14 Nov · lunch<");
-        // Day and Meal: an Item row each that opens a pull-down; the pick rides in the form.
+        expect(sheet).toContain(
+            'fd-sheet__title" id="fd-plan-edit-p2-title">Sat 14 Nov<',
+        );
+        expect(sheet).toContain(
+            'fd-sheet__subtitle" id="fd-plan-edit-p2-sub">Lunch<',
+        );
+        // The form is the Plan sheet's kind: the page script drives its calendar and Repeat row.
+        expect(sheet).toContain('class="fd-plan-form"');
+        expect(sheet).toContain("data-fd-plan-form");
+        // Recipe, Meal and Repeat: an Item row each that opens a pull-down; the pick rides in the form.
         const rows = [
             ...sheet.matchAll(
                 /<li class="fd-item-row"><div class="fd-menu[^"]*"[\s\S]*?<\/li>/g,
             ),
         ].map((m) => m[0]);
-        expect(rows).toHaveLength(2);
-        expect(rows[0]).toContain('fd-item-row__title" title="Day"');
-        expect(rows[0]).toContain('fd-item-row__value">Sat 14 Nov<');
-        expect(rows[0]).toContain('name="date" value="2026-11-14"');
-        expect(rows[0]).toContain('data-fd-menu-value="2026-11-12"');
-        expect(rows[0]).toContain("Thu 12 Nov");
+        expect(rows).toHaveLength(3);
+        expect(rows[0]).toContain('fd-item-row__title" title="Recipe"');
+        expect(rows[0]).toContain('fd-item-row__value">Pancakes<');
+        expect(rows[0]).toContain('name="recipe_id" value="r-pancakes"');
         expect(rows[1]).toContain('fd-item-row__title" title="Meal"');
         expect(rows[1]).toContain('name="slot" value="lunch"');
         expect(rows[1]).toContain('data-fd-menu-value="dinner"');
-        // The same fields go to the same routes: Save moves, Remove removes.
-        expect(sheet).toContain('name="date"');
-        expect(sheet).toContain('name="slot"');
+        expect(rows[2]).toContain('fd-item-row__title" title="Repeat"');
+        expect(rows[2]).toContain('name="repeat" value="once"');
+        expect(rows[2]).toContain('fd-item-row__value">Once<');
+        // Day is the month calendar: a row that opens it, the pick in a hidden field, not a pull-down.
+        expect(sheet).toContain('fd-item-row__title" title="Day"');
+        expect(sheet).toContain("data-fd-month-toggle");
+        expect(sheet).toContain('name="date" value="2026-11-14"');
+        expect(sheet).toContain('fd-item-row__value">Sat 14 Nov<');
+        expect(sheet).toContain('id="fd-plan-edit-p2-day-picker"');
+        expect(sheet).toContain('data-fd-month-day="2026-11-14"');
+        expect(sheet).not.toContain('data-fd-menu-value="2026-11-12"');
+        // Days before today cannot be picked.
+        expect(sheet).toMatch(/data-fd-month-day="2026-11-11"[^>]* disabled/);
+        // The same fields go to the same routes: Save changes the entry, Remove removes it.
         expect(sheet).toContain('name="servings"');
         expect(sheet).toMatch(/<button[^>]*form="fd-plan-edit-p2-move"/);
         // Remove asks in place: it arms, then Cancel and Remove take the row.
@@ -258,9 +275,136 @@ describe("week renderers", () => {
             /<button[^>]*data-fd-confirm-arm[^>]*>[\s\S]*?Remove/,
         );
         expect(sheet).toMatch(/<button[^>]*form="fd-plan-edit-p2-remove"/);
-        // The recipe cannot be changed by the route, so it has no row.
-        expect(sheet).not.toContain('title="Recipe"');
         expect(sheet).not.toContain('type="date"');
+    });
+
+    test("the Recipe menu lists the household's saved recipes by name and keeps the entry's own", () => {
+        const view = buildWeekPlanView({
+            today: TODAY,
+            plans: [plan({ id: "p1", date: TODAY })],
+            recipes: [pancakes],
+            stock: [],
+            foodsById: new Map(),
+            savedRecipes: [
+                { id: "r-waffles", name: "Waffles" },
+                { id: "r-chili", name: "Beef chili" },
+            ],
+        });
+        // The planned recipe is not in the list given: it stays a choice.
+        expect(view.recipeChoices?.map((r) => r.name)).toEqual([
+            "Beef chili",
+            "Waffles",
+        ]);
+        const html = renderPlanEditSheets(view, "today");
+        const menu = html.match(
+            /<li class="fd-item-row"><div class="fd-menu[^"]*"[\s\S]*?title="Recipe"[\s\S]*?<\/li>/,
+        )![0];
+        const names = [
+            ...menu.matchAll(
+                /data-fd-menu-value="([^"]+)"[^>]*>[\s\S]*?fd-menu__label">([^<]+)</g,
+            ),
+        ].map((m) => [m[1], m[2]]);
+        expect(names).toEqual([
+            ["r-chili", "Beef chili"],
+            ["r-pancakes", "Pancakes"],
+            ["r-waffles", "Waffles"],
+        ]);
+        expect(menu).toContain('name="recipe_id" value="r-pancakes"');
+        // Without a saved list the planned recipes are the choices.
+        const bare = buildWeekPlanView({
+            today: TODAY,
+            plans: [plan({ id: "p1", date: TODAY })],
+            recipes: [pancakes],
+            stock: [],
+            foodsById: new Map(),
+        });
+        expect(bare.recipeChoices).toEqual([
+            { id: "r-pancakes", name: "Pancakes" },
+        ]);
+    });
+
+    test("the Repeat row starts on how the entry repeats, and pick days shows its weekdays", () => {
+        const view = buildWeekPlanView({
+            today: TODAY,
+            plans: [
+                plan({ id: "once", date: TODAY, slot: "lunch" }),
+                plan({
+                    id: "wk",
+                    date: TODAY,
+                    slot: "dinner",
+                    ruleId: "rule-1",
+                }),
+                plan({ id: "pick", date: "2026-11-13", ruleId: "rule-2" }),
+            ],
+            recipes: [pancakes],
+            stock: [],
+            foodsById: new Map(),
+            rules: new Map([
+                ["rule-1", { repeat: "weekly", days: [] }],
+                ["rule-2", { repeat: "days", days: [1, 4] }],
+            ]),
+        });
+        expect(
+            view.days
+                .flatMap((d) => d.plans)
+                .map((p) => [p.id, p.repeat, p.days]),
+        ).toEqual([
+            ["once", "once", []],
+            ["wk", "weekly", []],
+            ["pick", "days", [1, 4]],
+        ]);
+        const html = renderPlanEditSheets(view, "today");
+        const sheetOf = (id: string) =>
+            html.match(
+                new RegExp(
+                    `<dialog[^>]*id="fd-plan-edit-${id}"[\\s\\S]*?</dialog>`,
+                ),
+            )![0];
+        expect(sheetOf("once")).toContain('name="repeat" value="once"');
+        expect(sheetOf("wk")).toContain('name="repeat" value="weekly"');
+        expect(sheetOf("wk")).toContain('fd-item-row__value">Every week<');
+        expect(sheetOf("wk")).toContain("data-fd-plan-days hidden");
+        const pick = sheetOf("pick");
+        expect(pick).toContain('name="repeat" value="days"');
+        expect(pick).toContain('fd-item-row__value">Pick days<');
+        expect(pick).not.toContain("data-fd-plan-days hidden");
+        expect(pick).toContain('<input type="hidden" name="days" value="1">');
+        expect(pick).toContain('<input type="hidden" name="days" value="4">');
+        expect(pick.match(/name="days"/g)).toHaveLength(2);
+        expect(pick).toMatch(/fd-pill-chip--on[^>]*data-value="1"/);
+    });
+
+    test("a save that did not check re-opens the sheet with the typed recipe, day, repeat and weekdays and the reason", () => {
+        const view = {
+            ...sampleView(),
+            editDraft: {
+                planId: "p1",
+                recipeId: "r-pancakes",
+                date: "2026-11-20",
+                slot: "snack",
+                servings: 5,
+                repeat: "days",
+                days: [2, 3],
+                error: "Pick today or a later day.",
+            },
+            openSheet: planEditSheetId("p1"),
+        };
+        const sheet = renderPlanEditSheets(view, "today").match(
+            /<dialog[^>]*id="fd-plan-edit-p1"[\s\S]*?<\/dialog>/,
+        )![0];
+        expect(sheet).toContain("fd-plan-error");
+        expect(sheet).toContain("Pick today or a later day.");
+        expect(sheet).toContain('name="date" value="2026-11-20"');
+        expect(sheet).toContain('name="slot" value="snack"');
+        expect(sheet).toContain('name="repeat" value="days"');
+        expect(sheet).toContain('name="servings"');
+        expect(sheet).toContain('value="5"');
+        expect(sheet.match(/name="days"/g)).toHaveLength(2);
+        // The header stays the entry's own day and meal, whatever was typed.
+        expect(sheet).toContain(
+            'fd-sheet__title" id="fd-plan-edit-p1-title">Thu 12 Nov<',
+        );
+        expect(sheet).toContain(">Dinner<");
     });
 
     test("a plan for named people shows their portions as saved now and offers no servings to edit", () => {
@@ -392,6 +536,104 @@ describe("week renderers", () => {
         expect(html).not.toContain("fd-plan-missing-row");
         expect(html).toMatch(/Add \d+ to groceries/);
         expect(html).toContain("next 7 days");
+    });
+
+    test("the missing sheet's rows are ticked checkboxes that post food_ids[], and the form marks itself", () => {
+        const view = buildWeekPlanView({
+            today: TODAY,
+            plans: [plan({ id: "p1", date: TODAY, servings: 2 })],
+            recipes: [pancakes],
+            stock: [],
+            foodsById: new Map(),
+        });
+        expect(view.missing.length).toBeGreaterThan(1);
+        const html = renderMissingSheet(view, "recipes");
+        const boxes = html.match(/<input type="checkbox"[^>]*>/g) ?? [];
+        expect(boxes).toHaveLength(view.missing.length);
+        for (const [i, box] of boxes.entries()) {
+            expect(box).toContain('name="food_ids[]"');
+            expect(box).toContain(`value="${view.missing[i]!.foodId}"`);
+            expect(box).toContain(" checked");
+        }
+        expect(html).toContain('name="food_ids_sent" value="1"');
+        expect(html).not.toContain("Will be added");
+        expect(html).toContain(`Add ${view.missing.length} to groceries`);
+        expect(html).toContain("data-fd-plan-missing-add");
+        expect(html).toContain("data-fd-plan-missing>");
+    });
+
+    test("a line with no food gets no checkbox and is not counted in the button", () => {
+        const view: WeekPlanView = {
+            today: TODAY,
+            days: [],
+            plannedCount: 1,
+            recipeChoices: [],
+            missing: [
+                {
+                    foodId: "f-flour",
+                    name: "Flour",
+                    amount: "500 g",
+                    unknown: false,
+                    unmeasured: false,
+                    neededBy: "Pancakes",
+                },
+                {
+                    foodId: null,
+                    name: "Mystery",
+                    amount: null,
+                    unknown: false,
+                    unmeasured: false,
+                    neededBy: "Pancakes",
+                },
+            ],
+        };
+        const html = renderMissingSheet(view, "recipes");
+        expect(html.match(/<input type="checkbox"/g) ?? []).toHaveLength(1);
+        expect(html).toContain("Mystery");
+        expect(html).toContain("Add 1 to groceries");
+        expect(html).toContain("2 ingredients");
+    });
+});
+
+describe("missing sheet, one food on two lines", () => {
+    const line = (amount: string, neededBy: string) => ({
+        foodId: "f-flour",
+        name: "Flour",
+        amount,
+        unknown: false,
+        unmeasured: false,
+        neededBy,
+    });
+    const view: WeekPlanView = {
+        today: TODAY,
+        days: [],
+        plannedCount: 2,
+        recipeChoices: [],
+        missing: [
+            line("200 g", "Bread"),
+            line("1 cup", "Cake"),
+            {
+                foodId: "f-eggs",
+                name: "Eggs",
+                amount: "2",
+                unknown: false,
+                unmeasured: false,
+                neededBy: "Cake",
+            },
+        ],
+    };
+
+    test("a food listed twice has one checkbox, on its first row, and counts once in the button", () => {
+        const html = renderMissingSheet(view, "recipes");
+        const boxes = html.match(/<input type="checkbox"[^>]*>/g) ?? [];
+        expect(boxes).toHaveLength(2);
+        expect(boxes[0]).toContain('value="f-flour"');
+        expect(boxes[1]).toContain('value="f-eggs"');
+        // Both flour rows are still listed, and the sheet still counts rows.
+        expect(html).toContain("200 g");
+        expect(html).toContain("1 cup");
+        expect(html).toContain("3 ingredients");
+        expect(html).toContain("Add 2 to groceries");
     });
 });
 

@@ -42,7 +42,7 @@ const GLOSSARY_COPY: GlossaryCopy[] = [
     {
         id: "locations",
         title: "Locations",
-        body: "A location is a place you keep things, such as Fridge, Freezer or Pantry. Ask your AI assistant to add one (it uses add_fridge_location); each gets its own panel. Putting groceries away and adding an item both go into one location.",
+        body: "A location is a place you keep things, such as Fridge, Freezer or Pantry. Add one in Settings › Household › Fridge places, or ask your AI assistant (it uses add_fridge_location); each gets its own panel. Putting groceries away and adding an item both go into one location.",
     },
     {
         id: "stores-and-sections",

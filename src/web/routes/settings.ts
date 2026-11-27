@@ -608,8 +608,12 @@ settingsRoutes.post(
 );
 
 settingsRoutes.get("/settings/saved", requireSiteUser, async (c) => {
+    const food = c.req.query("food")?.trim();
     const page = await renderSettingsSavedV2Route(c.get("userId"), {
         q: c.req.query("q"),
+        // A link from a warning (a recipe's ingredient) opens that food's edit
+        // sheet on load; an id the household has no food for opens none.
+        openModalId: food ? `food-edit-${food}` : undefined,
     });
     return c.html(page.html, page.status);
 });

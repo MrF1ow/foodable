@@ -102,10 +102,10 @@ describe("the add button", () => {
         usuals: "Add a usual",
     };
 
-    test("fridge: the round plus is the last tool in the tab row, after the Select menu", () => {
+    test("fridge: the round plus is the only tool in the tab row", () => {
         const html = pages.fridge;
         expect(html).toMatch(
-            /<div class="fd-kitchen-fridge-page"[^>]*>\n<div class="fd-kitchen-fridge-top">[\s\S]*?data-fd-select-toggle="fridge"[\s\S]*?<button[^>]*aria-label="Add item"[^>]*commandfor="fd-fridge-add"/,
+            /<div class="fd-kitchen-fridge-page">\n<div class="fd-kitchen-fridge-top"><button[^>]*aria-label="Add item"[^>]*commandfor="fd-fridge-add"[^>]*>[\s\S]*?<\/button><\/div>/,
         );
         // The same plus rides in the header's Actions slot.
         expect(html).toMatch(
@@ -149,6 +149,23 @@ describe("the add button", () => {
         expect(
             new Set(["groceries", "usuals"].map((t) => plus(t as never))).size,
         ).toBe(1);
+    });
+
+    test("no Kitchen tab has a ⋯, a select mode or an add row in its list", () => {
+        for (const html of Object.values(pages)) {
+            const tools = `${html.match(/<div class="fd-page-header__actions">[\s\S]*?<\/div><\/div><\/header>/)?.[0] ?? ""}${html.match(/<div class="fd-kitchen-fridge-top">[\s\S]*?<\/div>\n/)?.[0] ?? ""}`;
+            expect(tools).toContain("commandfor=");
+            expect(tools).not.toContain("fd-menu");
+            expect(html).not.toContain('aria-label="Fridge options"');
+            expect(html).not.toContain('aria-label="Groceries options"');
+            expect(html).not.toContain('aria-label="Usuals options"');
+            expect(html).not.toContain("data-fd-select");
+            expect(html).not.toContain("fd-selection-bar");
+            expect(html).not.toContain("fd-select-");
+            expect(html).not.toContain("data-fd-grocery-add-row");
+            expect(html).not.toContain("data-fd-usual-add-row");
+            expect(html).not.toContain("/bulk/");
+        }
     });
 
     test("the plus opens each tab's own sheet", () => {

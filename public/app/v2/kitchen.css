@@ -68,11 +68,6 @@
     cursor: pointer;
 }
 :is(.fd-kitchen-loc, .fd-kitchen-grocery-section)
-    [data-fd-sheet-row]:focus-visible {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: calc(var(--space-2xs) * -1);
-}
-:is(.fd-kitchen-loc, .fd-kitchen-grocery-section)
     [data-fd-sheet-row]
     :is(button, a, summary) {
     cursor: pointer;
@@ -156,93 +151,6 @@
 .fd-sheet .fd-kitchen-hand__form > .fd-btn[data-fd-btn] {
     flex: none;
     width: 100%;
-}
-
-/* Select mode on the Fridge: the Selection bar floats over the phone page
-   and sits flat above the list from 1024px; one slot per placement. */
-.fd-select-bar-slot--desktop {
-    display: none;
-}
-.fd-select-bar-slot--phone {
-    position: fixed;
-    bottom: calc(94px + env(safe-area-inset-bottom, 0px));
-    left: 50%;
-    z-index: 45;
-    width: min(calc(100vw - 2 * var(--space-gutter)), 350px);
-    transform: translateX(-50%);
-}
-/* The phone's bar is its buttons only: one or two full-width, 48px high. */
-.fd-select-bar-slot--phone .fd-selection-bar {
-    width: 100%;
-    padding: 0;
-    border: 0;
-    background: transparent;
-    box-shadow: none;
-}
-.fd-select-bar-slot--phone .fd-selection-bar__actions {
-    flex: 1;
-    min-width: 0;
-}
-.fd-select-bar-slot--phone .fd-selection-bar__actions .fd-btn[data-fd-btn] {
-    flex: 1 1 0;
-    min-width: 0;
-    height: 48px;
-    border-radius: var(--radius-md);
-    background: var(--surface-raised);
-}
-.fd-select-head {
-    margin: 0;
-}
-/* Picking on Usuals: the "N selected" head runs straight into the list, with
-   no page gap and no section-header padding between them. */
-.fd-kitchen-usuals-page[data-fd-selecting] {
-    gap: 0;
-}
-.fd-kitchen-usuals-page[data-fd-selecting]
-    .fd-kitchen-usuals-layout
-    .fd-section-header:first-child {
-    padding-top: 0;
-}
-.fd-select-bar-slot:not([data-fd-select-asking]) [data-fd-select-when="ask"],
-.fd-select-bar-slot[data-fd-select-asking] [data-fd-select-when="idle"] {
-    display: none;
-}
-.fd-select-bar-slot .fd-btn:disabled {
-    opacity: 0.45;
-}
-/* Fridge select mode as 400622: "N selected" stands in for the first
-   place's header, the picked disc is a plain green fill, and the rows drop
-   their score pills. */
-.fd-kitchen-fridge-page[data-fd-selecting]
-    .fd-kitchen-loc:first-of-type
-    > .fd-section-header,
-.fd-kitchen-fridge-page[data-fd-selecting] .fd-item-row__select-box > svg,
-.fd-kitchen-fridge-page[data-fd-selecting] .fd-score-pill,
-.fd-kitchen-fridge-page[data-fd-selecting]
-    .fd-page-layout__column:has(> .fd-kitchen-use-soon:only-child) {
-    display: none;
-}
-/* Picking leaves the lists and nothing else on the page: no Use soon, and
-   neither Select nor + (the count row has Cancel). */
-.fd-kitchen-fridge-page[data-fd-selecting] .fd-kitchen-use-soon,
-.fd-kitchen-fridge-page[data-fd-selecting] .fd-kitchen-fridge-top,
-.fd-kitchen-groceries-page[data-fd-selecting] .fd-kitchen-fridge-top,
-.fd-kitchen-usuals-page[data-fd-selecting] .fd-kitchen-fridge-top,
-.fd-kitchen-usuals-page[data-fd-selecting]
-    .fd-list-group[data-fd-usual-add-row],
-.fd-kitchen-groceries-page[data-fd-selecting] .fd-kitchen-grocery-dock,
-.fd-kitchen-groceries-page[data-fd-selecting]
-    .fd-list-group[data-fd-grocery-add-row],
-.fd-main:has(
-        :is(
-            .fd-kitchen-fridge-page,
-            .fd-kitchen-groceries-page,
-            .fd-kitchen-usuals-page
-        )[data-fd-selecting]
-    )
-    .fd-kitchen-head
-    .fd-page-header__actions {
-    display: none;
 }
 
 /* Centred on the tab row: the row's 18px centre line is 34px above the page
@@ -340,11 +248,6 @@
     flex-direction: column;
     gap: var(--space-section);
     padding: 0 0 var(--fd-s-12);
-}
-
-/* While picking, the pick box is the row's only ring. */
-.fd-kitchen-groceries-page[data-fd-selecting] .fd-item-row__check-btn {
-    display: none;
 }
 
 /* The checked lines' dock: Clear checked and Put away N, floating over the
@@ -468,37 +371,6 @@
     .fd-kitchen-sheet.fd-sheet--side .fd-sheet-body {
         flex: 1 1 auto;
     }
-    /* Picking turns the page into one 720 wide list. */
-    :is(.fd-kitchen-fridge-page, .fd-kitchen-groceries-page)[data-fd-selecting]
-        .fd-page-layout__columns {
-        flex-direction: column;
-        align-items: stretch;
-        width: 100%;
-        max-width: 720px;
-        margin-inline: auto;
-        gap: var(--space-xl);
-    }
-    :is(.fd-kitchen-fridge-page, .fd-kitchen-groceries-page)[data-fd-selecting]
-        .fd-page-layout__column {
-        flex: none;
-        width: 100%;
-    }
-    :is(
-            .fd-kitchen-fridge-page,
-            .fd-kitchen-groceries-page,
-            .fd-kitchen-usuals-page
-        )[data-fd-selecting]
-        :is(.fd-select-head, .fd-select-bar-slot--desktop) {
-        width: 100%;
-        max-width: 720px;
-        margin-inline: auto;
-    }
-    .fd-select-bar-slot--phone {
-        display: none;
-    }
-    .fd-select-bar-slot--desktop:not([hidden]) {
-        display: block;
-    }
 
     .fd-kitchen-overview-add {
         display: inline-flex;
@@ -568,15 +440,12 @@
     }
 }
 
-/* Kitchen · Usuals: one list of usuals and the add row under it. A usual's
+/* Kitchen · Usuals: one list of usuals. A usual's
    product rides beside its name; the line under it is store, amount, restock. */
 .fd-kitchen-usuals-layout .fd-page-layout__content {
     display: flex;
     flex-direction: column;
     gap: var(--space-xs);
-}
-.fd-kitchen-usuals-layout .fd-list-group[data-fd-usual-add-row] {
-    margin-top: 0;
 }
 .fd-kitchen-weight {
     display: grid;

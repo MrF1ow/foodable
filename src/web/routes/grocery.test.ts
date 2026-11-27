@@ -270,7 +270,7 @@ describe("grocery routes", () => {
         expect(html).not.toContain("grocery-store panel");
     });
 
-    test("Share is offered on Groceries only while mcp-share-links is on", async () => {
+    test("the share sheet is on Groceries only while mcp-share-links is on, and no tab-row ⋯ offers it", async () => {
         await seedGroceryLines();
         const fetchPage = async () => {
             const res = await app.request("http://x/kitchen/groceries", {
@@ -282,11 +282,12 @@ describe("grocery routes", () => {
         setFlagsForTests(createMemoryFlags({ "mcp-share-links": false }));
         const off = await fetchPage();
         expect(off).toContain("fd-kitchen-groceries-page");
-        expect(off).not.toContain("Share list");
         expect(off).not.toContain("fd-grocery-share-sheet");
         setFlagsForTests(createMemoryFlags({ "mcp-share-links": true }));
         const on = await fetchPage();
-        expect(on).toContain("Share list");
+        // The ⋯ that held Share list is gone; the sheet stays for a follow-up.
+        expect(on).not.toContain("Share list");
+        expect(on).not.toContain('aria-label="Groceries options"');
         expect(on).toContain('action="/kitchen/groceries/share"');
     });
 
@@ -632,6 +633,115 @@ describe("grocery line routes", () => {
                 (row) => row.foodId === rice.id,
             )?.storeId,
         ).toBe(store.id);
+    });
+
+    test("POST add of a usual with a blank amount uses the usual's amount", async () => {
+        await seedTwoStores();
+        const flour = await findOrCreateManualFood(
+            foodsStore,
+            HH,
+            "food",
+            "Flour",
+        );
+        await updateFood(
+            foodsStore,
+            HH,
+            flour.id,
+            { usualAmount: { amount: 2.5, unit: "kg" } },
+            { stores: settingsStore },
+        );
+        const res = await post("/kitchen/groceries/lines", {
+            kind: "food",
+            food_id: flour.id,
+            qty_amount: "",
+            qty_unit: "",
+            return_to: "/kitchen/groceries",
+        });
+        expect(res.status).toBe(303);
+        const added = (await groceryStore.listLines(HH)).find(
+            (row) => row.foodId === flour.id,
+        );
+        expect(added?.quantity).toEqual({ amount: 2.5, unit: "kg" });
+    });
+
+    test("POST add with a blank amount and the by-hand form's hidden each unit uses the usual's amount, by name and by id", async () => {
+        await seedTwoStores();
+        const flour = await findOrCreateManualFood(
+            foodsStore,
+            HH,
+            "food",
+            "Flour",
+        );
+        await updateFood(
+            foodsStore,
+            HH,
+            flour.id,
+            { usualAmount: { amount: 2.5, unit: "kg" } },
+            { stores: settingsStore },
+        );
+        const byName = await post("/kitchen/groceries/lines", {
+            kind: "food",
+            food_name: "Flour",
+            qty_amount: "",
+            qty_unit: "each",
+            return_to: "/kitchen/groceries",
+        });
+        expect(byName.status).toBe(303);
+        expect(
+            (await groceryStore.listLines(HH)).find(
+                (row) => row.foodId === flour.id,
+            )?.quantity,
+        ).toEqual({ amount: 2.5, unit: "kg" });
+        for (const line of await groceryStore.listLines(HH)) {
+            await groceryStore.deleteLine(HH, line.id);
+        }
+        const byId = await post("/kitchen/groceries/lines", {
+            kind: "food",
+            food_id: flour.id,
+            qty_amount: "",
+            qty_unit: "each",
+            return_to: "/kitchen/groceries",
+        });
+        expect(byId.status).toBe(303);
+        expect(
+            (await groceryStore.listLines(HH)).find(
+                (row) => row.foodId === flour.id,
+            )?.quantity,
+        ).toEqual({ amount: 2.5, unit: "kg" });
+    });
+
+    test("POST add with a blank amount and no usual amount keeps the fallback, by name and by id", async () => {
+        await seedTwoStores();
+        const salt = await findOrCreateManualFood(
+            foodsStore,
+            HH,
+            "food",
+            "Salt",
+        );
+        const byName = await post("/kitchen/groceries/lines", {
+            kind: "food",
+            food_name: "Pepper",
+            qty_amount: "",
+            qty_unit: "each",
+            return_to: "/kitchen/groceries",
+        });
+        expect(byName.status).toBe(303);
+        const byId = await post("/kitchen/groceries/lines", {
+            kind: "food",
+            food_id: salt.id,
+            qty_amount: "",
+            qty_unit: "each",
+            return_to: "/kitchen/groceries",
+        });
+        expect(byId.status).toBe(303);
+        const lines = await groceryStore.listLines(HH);
+        expect(
+            lines.find((row) => row.displayName === "Pepper")?.quantity,
+        ).toEqual({ amount: 1, unit: "each" });
+        expect(lines.find((row) => row.foodId === salt.id)?.quantity).toEqual({
+            amount: 1,
+            unit: "each",
+        });
     });
 
     test("POST add by hand with no store files it under a store, not an error", async () => {

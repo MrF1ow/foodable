@@ -4,29 +4,19 @@
  *
  * Every batch first takes a transaction advisory lock named for the household
  * and the action. A second submit of the same batch (a double tap, a retry)
- * waits for the first to commit, then reads the state it left: for discard,
- * remove and delete the rows are gone, and the domain answers `already`
+ * waits for the first to commit, then reads the state it left: for Saved
+ * foods & recipes the rows are gone, and the domain answers `already`
  * instead of acting twice. Batches of different actions do not wait for each
  * other.
  */
-import {
-    deleteGroceryLines,
-    deleteSavedItems,
-    discardFridgeItems,
-    removeUsuals,
-    type BulkResult,
-} from "../domain/bulk.js";
+import { deleteSavedItems, type BulkResult } from "../domain/bulk.js";
 import type { Notify } from "../domain/foods.js";
 import { liveFoodsStore } from "./foods.js";
-import { liveFridgeStore } from "./fridge.js";
-import { liveGroceryStore } from "./grocery.js";
 import { createNotifyQueue, liveNotifier } from "./notify.js";
 import { liveRecipesStore } from "./recipes.js";
 import { run } from "./sql.js";
-import { liveStockStore } from "./stock.js";
 
-export type BulkAction =
-    "fridge-discard" | "grocery-delete" | "usuals-remove" | "saved-delete";
+export type BulkAction = "saved-delete";
 
 /** The advisory-lock name of one household's batches of one action. */
 export function bulkLockKey(householdId: string, action: BulkAction): string {
@@ -61,39 +51,6 @@ export async function inBulkTransaction<T>(
     // and the queue is dropped with it.
     await queue.flush();
     return result;
-}
-
-export function bulkDiscardFridgeItems(input: {
-    householdId: string;
-    itemIds: readonly string[];
-    actorUserId?: string | null;
-}): Promise<BulkResult> {
-    return inBulkTransaction(input.householdId, "fridge-discard", () =>
-        discardFridgeItems(
-            liveFridgeStore(),
-            liveStockStore(),
-            liveFoodsStore(),
-            input,
-        ),
-    );
-}
-
-export function bulkDeleteGroceryLines(input: {
-    householdId: string;
-    lineIds: readonly string[];
-}): Promise<BulkResult> {
-    return inBulkTransaction(input.householdId, "grocery-delete", () =>
-        deleteGroceryLines(liveGroceryStore(), input),
-    );
-}
-
-export function bulkRemoveUsuals(input: {
-    householdId: string;
-    foodIds: readonly string[];
-}): Promise<BulkResult> {
-    return inBulkTransaction(input.householdId, "usuals-remove", () =>
-        removeUsuals(liveFoodsStore(), input),
-    );
 }
 
 export function bulkDeleteSavedItems(input: {

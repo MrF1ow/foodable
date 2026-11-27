@@ -424,9 +424,37 @@ function guardLeaving() {
     });
 }
 
+// Missing for the plan: the button counts the ticked foods, and is off at none.
+const boundMissing = new WeakSet();
+
+function bindMissing(form) {
+    if (boundMissing.has(form)) return;
+    boundMissing.add(form);
+    const add = document.querySelector(
+        '[data-fd-plan-missing-add][form="' + form.id + '"]',
+    );
+    function sync() {
+        if (!add) return;
+        // Per food: a food on two rows is one box, and counts once.
+        const foods = new Set();
+        for (const box of form.querySelectorAll('input[name="food_ids[]"]')) {
+            if (box.checked) foods.add(box.value);
+        }
+        const n = foods.size;
+        const text = add.querySelector(".fd-btn__label") || add;
+        text.textContent = "Add " + n + " to groceries";
+        add.disabled = n === 0;
+    }
+    form.addEventListener("change", sync);
+    sync();
+}
+
 FoodableApp.onLoad((root) => {
     for (const form of root.querySelectorAll("[data-fd-recipes-search]")) {
         bindSearch(form);
+    }
+    for (const form of root.querySelectorAll("[data-fd-plan-missing]")) {
+        bindMissing(form);
     }
     for (const form of root.querySelectorAll("[data-fd-plan-form]")) {
         bindPlan(form);

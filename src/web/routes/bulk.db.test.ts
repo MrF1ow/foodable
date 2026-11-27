@@ -2,11 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { Hono } from "hono";
 import type { SQL } from "bun";
 import { resetFlagsForTests } from "../../flags.js";
-import { createProduct } from "../../domain/foods.js";
-import { addUsualByHand } from "../../domain/usual-add.js";
-import { liveSettingsStore } from "../../db/settings.js";
 import { createRecipe } from "../../domain/recipes.js";
-import { liveFoodsStore } from "../../db/foods.js";
 import { liveRecipesStore } from "../../db/recipes.js";
 import { setSqlForTests } from "../../db/sql.js";
 import { describeDb } from "../../db/testing/pg.js";
@@ -70,37 +66,6 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
         );
     }
 
-    const ids = (list: string[]): [string, string][] =>
-        list.map((id) => ["ids[]", id]);
-
-    async function seedLines(names: string[]): Promise<string[]> {
-        const storeId = await seedGroceryStore(sql, householdId);
-        const sectionId = await seedGrocerySection(sql, householdId, storeId);
-        const out: string[] = [];
-        for (const name of names) {
-            const foodId = await seedFood(sql, householdId, { name });
-            const id = crypto.randomUUID();
-            await sql`
-                insert into public.grocery_lines (
-                    id, household_id, store_id, section_id, kind,
-                    display_name, amount, unit, food_id, checked
-                )
-                values (
-                    ${id}, ${householdId}, ${storeId}, ${sectionId}, ${"food"},
-                    ${name}, ${2}, ${"each"}, ${foodId}, ${false}
-                )
-            `;
-            out.push(id);
-        }
-        return out;
-    }
-
-    const lines = async () =>
-        (await sql`
-            select display_name, checked from public.grocery_lines
-            where household_id = ${householdId} order by display_name
-        `) as { display_name: string; checked: boolean }[];
-
     const toastKey = (res: Response): string | null => {
         const cookie = res.headers
             .getSetCookie()
@@ -114,232 +79,57 @@ describeDb(pgAvailable !== null, "bulk routes db", (getCtx) => {
         ).k;
     };
 
-    describe("groceries", () => {
-        // Ticking a line already does what Select did there, so the list has
-        // no bulk actions: a post to the old paths is not routed.
-        test("the old check-off and delete posts are gone and change nothing", async () => {
-            const [milk, eggs] = await seedLines(["Milk", "Eggs"]);
-            for (const path of [
-                "/kitchen/groceries/bulk/check",
-                "/kitchen/groceries/bulk/remove",
-            ]) {
+    describe("the Kitchen tabs have no bulk routes", () => {
+        test("posts to the old Kitchen bulk paths are not routed and change nothing", async () => {
+            const foodId = await seedFood(sql, householdId, { name: "Milk" });
+            const id = crypto.randomUUID();
+            const storeId = await seedGroceryStore(sql, householdId);
+            const sectionId = await seedGrocerySection(
+                sql,
+                householdId,
+                storeId,
+            );
+            await sql`
+                insert into public.grocery_lines (
+                    id, household_id, store_id, section_id, kind,
+                    display_name, amount, unit, food_id, checked
+                )
+                values (
+                    ${id}, ${householdId}, ${storeId}, ${sectionId}, ${"food"},
+                    ${"Milk"}, ${2}, ${"each"}, ${foodId}, ${false}
+                )
+            `;
+            const locationId = await seedFridgeLocation(sql, householdId);
+            const itemId = await seedFridgeItem(
+                sql,
+                householdId,
+                locationId,
+                foodId,
+                { displayName: "Milk", amount: 3, unit: "each" },
+            );
+            for (const [path, picked] of [
+                ["/kitchen/groceries/bulk/delete", id],
+                ["/kitchen/groceries/bulk/check", id],
+                ["/kitchen/groceries/bulk/remove", id],
+                ["/kitchen/fridge/bulk/discard", itemId],
+                ["/kitchen/usuals/bulk/remove", foodId],
+            ] as const) {
                 const res = await post(path, [
-                    ...ids([milk!, eggs!]),
-                    ["return_to", "/kitchen/groceries"],
+                    ["ids[]", picked],
+                    ["return_to", "/kitchen"],
                 ]);
                 expect(res.status).toBe(404);
             }
-            expect(await lines()).toEqual([
-                { display_name: "Eggs", checked: false },
-                { display_name: "Milk", checked: false },
-            ]);
-        });
-
-        test("delete removes every picked line, lands where it was told, and leaves the rest", async () => {
-            const [milk, eggs] = await seedLines(["Milk", "Eggs", "Salt"]);
-            const res = await post("/kitchen/groceries/bulk/delete", [
-                ...ids([milk!, eggs!]),
-                ["return_to", "/kitchen/groceries?store=a&store=b"],
-            ]);
-            expect(res.status).toBe(303);
-            expect(res.headers.get("location")).toBe(
-                "/kitchen/groceries?store=a&store=b",
-            );
-            expect(toastKey(res)).toBeNull();
-            expect(await lines()).toEqual([
-                { display_name: "Salt", checked: false },
-            ]);
-            // Everything already gone is a double submit: the same answer.
-            const again = await post("/kitchen/groceries/bulk/delete", [
-                ...ids([milk!, eggs!]),
-            ]);
-            expect(again.status).toBe(303);
-        });
-
-        test("delete with one line gone answers 400 in place and deletes none", async () => {
-            const [milk] = await seedLines(["Milk", "Eggs"]);
-            const res = await post("/kitchen/groceries/bulk/delete", [
-                ...ids([milk!, crypto.randomUUID()]),
-            ]);
-            expect(res.status).toBe(400);
-            expect(await res.text()).toContain("no longer there");
-            expect(await lines()).toHaveLength(2);
-        });
-
-        test("delete with nothing picked or a bad id answers 400", async () => {
-            await seedLines(["Milk"]);
-            const none = await post("/kitchen/groceries/bulk/delete", []);
-            expect(none.status).toBe(400);
-            const bad = await post("/kitchen/groceries/bulk/delete", [
-                ["ids[]", "not-a-uuid"],
-            ]);
-            expect(bad.status).toBe(400);
-            expect(await lines()).toHaveLength(1);
-        });
-
-        test("a delete that fails part way answers 400 and leaves every line in place", async () => {
-            const picked = await seedLines(["Eggs", "Milk", "Salt"]);
-            // The database refuses the second line's delete, as a dropped
-            // connection or a lock timeout would part way through a batch.
-            await sql.unsafe(`
-                create or replace function public.test_refuse_milk_delete()
-                returns trigger language plpgsql as $$
-                begin
-                    if old.display_name = 'Milk' then
-                        raise exception 'refused for the test';
-                    end if;
-                    return old;
-                end $$
-            `);
-            await sql.unsafe(`
-                create trigger test_refuse_milk_delete
-                before delete on public.grocery_lines
-                for each row execute function public.test_refuse_milk_delete()
-            `);
-            try {
-                const res = await post("/kitchen/groceries/bulk/delete", [
-                    ...ids(picked),
-                ]);
-                expect(res.status).toBe(400);
-                expect(await lines()).toEqual([
-                    { display_name: "Eggs", checked: false },
-                    { display_name: "Milk", checked: false },
-                    { display_name: "Salt", checked: false },
-                ]);
-            } finally {
-                await sql.unsafe(
-                    "drop trigger test_refuse_milk_delete on public.grocery_lines",
-                );
-                await sql.unsafe(
-                    "drop function public.test_refuse_milk_delete()",
-                );
-            }
-        });
-    });
-
-    describe("fridge", () => {
-        async function seedFridge(names: string[]): Promise<string[]> {
-            const locationId = await seedFridgeLocation(sql, householdId);
-            const out: string[] = [];
-            for (const name of names) {
-                const foodId = await seedFood(sql, householdId, { name });
-                out.push(
-                    await seedFridgeItem(sql, householdId, locationId, foodId, {
-                        displayName: name,
-                        amount: 3,
-                        unit: "each",
-                    }),
-                );
-            }
-            return out;
-        }
-
-        test("discard writes a discard movement per item as the member", async () => {
-            const [yogurt, spinach, cheese] = await seedFridge([
-                "Yogurt",
-                "Spinach",
-                "Cheese",
-            ]);
-            const res = await post("/kitchen/fridge/bulk/discard", [
-                ...ids([yogurt!, spinach!]),
-                ["return_to", "/kitchen/fridge"],
-            ]);
-            expect(res.status).toBe(303);
-            expect(toastKey(res)).toBeNull();
-            const left = await sql`
-                select id from public.fridge_items where household_id = ${householdId}
+            const [lineRow] = await sql`
+                select count(*)::int as n from public.grocery_lines
+                where household_id = ${householdId}
             `;
-            expect(left.map((r: { id: string }) => r.id)).toEqual([cheese!]);
-            const moves = await sql`
-                select actor_user_id from public.stock_movements
-                where household_id = ${householdId} and reason = 'discard'
-            `;
-            expect(moves).toHaveLength(2);
-            expect(
-                moves.every(
-                    (m: { actor_user_id: string }) =>
-                        m.actor_user_id === userId,
-                ),
-            ).toBe(true);
-        });
-
-        test("one item gone answers 400 and discards none", async () => {
-            const [yogurt] = await seedFridge(["Yogurt"]);
-            const res = await post(
-                "/kitchen/fridge/bulk/discard",
-                ids([yogurt!, crypto.randomUUID()]),
-            );
-            expect(res.status).toBe(400);
-            expect(await res.text()).toContain("select again");
-            const [row] = await sql`
+            expect(lineRow.n).toBe(1);
+            const [itemRow] = await sql`
                 select count(*)::int as n from public.fridge_items
                 where household_id = ${householdId}
             `;
-            expect(row.n).toBe(1);
-        });
-    });
-
-    describe("usuals", () => {
-        test("remove unlinks the products of the selected usuals", async () => {
-            const plainId = await seedFood(sql, householdId, { name: "Milk" });
-            const product = await createProduct(
-                liveFoodsStore(),
-                householdId,
-                plainId,
-                { name: "Milk (store brand)", makeUsual: true },
-            );
-            const res = await post("/kitchen/usuals/bulk/remove", [
-                ...ids([plainId]),
-                ["return_to", "/kitchen/usuals"],
-            ]);
-            expect(res.status).toBe(303);
-            expect(toastKey(res)).toBeNull();
-            const [row] = await sql`
-                select generic_food_id from public.foods where id = ${product.id}
-            `;
-            expect(row.generic_food_id).toBeNull();
-        });
-
-        test("remove takes a typed usual, which has no product, off the list", async () => {
-            const typed = await addUsualByHand(liveFoodsStore(), householdId, {
-                name: "Oat milk",
-                basis: "per_100ml",
-                calories: "45",
-                proteinG: "1",
-                carbsG: "6.5",
-                fatG: "1.5",
-                stores: liveSettingsStore(),
-            });
-            const res = await post("/kitchen/usuals/bulk/remove", [
-                ...ids([typed.id]),
-                ["return_to", "/kitchen/usuals"],
-            ]);
-            expect(res.status).toBe(303);
-            expect(toastKey(res)).toBeNull();
-            const [row] = await sql`
-                select usual_added_at from public.foods where id = ${typed.id}
-            `;
-            expect(row.usual_added_at).toBeNull();
-        });
-
-        test("a food that is not a usual, picked with a usual, answers 400 and removes nothing", async () => {
-            const plainId = await seedFood(sql, householdId, { name: "Milk" });
-            const product = await createProduct(
-                liveFoodsStore(),
-                householdId,
-                plainId,
-                { name: "Milk (store brand)", makeUsual: true },
-            );
-            const salt = await seedFood(sql, householdId, { name: "Salt" });
-            const res = await post(
-                "/kitchen/usuals/bulk/remove",
-                ids([plainId, salt]),
-            );
-            expect(res.status).toBe(400);
-            const [row] = await sql`
-                select generic_food_id from public.foods where id = ${product.id}
-            `;
-            expect(row.generic_food_id).toBe(plainId);
+            expect(itemRow.n).toBe(1);
         });
     });
 

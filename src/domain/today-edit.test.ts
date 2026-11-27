@@ -9,6 +9,7 @@ import {
     mealLocalTimeValue,
     mealLoggedAtFromLocalTime,
     recoverLoggingSpecsFromMeal,
+    mealServings,
     scaleMealTotals,
     submittedItemAmountsUnchanged,
 } from "./today-edit.js";
@@ -47,6 +48,62 @@ test("scaleMealTotals doubles free-text meal", () => {
     );
     expect(scaled.calories).toBe(800);
     expect(scaled.protein_g).toBe(60);
+});
+
+test("scaleMealTotals rescales from one serving, never from the last save", () => {
+    const saved = {
+        calories: 600,
+        protein_g: 40,
+        carbs_g: 80,
+        fat_g: 20,
+        fiber_g: 6,
+        sugar_g: null,
+        alcohol_g: null,
+        caffeine_mg: null,
+        servings: 2,
+    };
+    // 2 servings saved as 600 kcal: one serving is 300, three are 900.
+    const three = scaleMealTotals(saved, 3);
+    expect(three.calories).toBe(900);
+    expect(three.protein_g).toBe(60);
+    expect(three.fiber_g).toBe(9);
+    expect(three.sugar_g).toBeNull();
+    // Saving the sheet at the servings it opened with changes nothing.
+    expect(scaleMealTotals(saved, 2).calories).toBe(600);
+    // Back to one serving.
+    expect(scaleMealTotals(saved, 1).calories).toBe(300);
+    // A meal saved before servings existed reads as one serving.
+    expect(scaleMealTotals({ ...saved, servings: null }, 2).calories).toBe(
+        1200,
+    );
+    expect(scaleMealTotals({ ...saved, servings: undefined }, 2).calories).toBe(
+        1200,
+    );
+});
+
+test("scaleMealTotals keeps grams tidy and refuses absurd servings", () => {
+    const odd = {
+        calories: 301,
+        protein_g: 20.2,
+        carbs_g: null,
+        fat_g: null,
+        fiber_g: null,
+        sugar_g: null,
+        alcohol_g: null,
+        caffeine_mg: null,
+        servings: 3,
+    };
+    expect(scaleMealTotals(odd, 1).protein_g).toBe(6.73);
+    expect(scaleMealTotals(odd, 2).protein_g).toBe(13.47);
+    expect(() => scaleMealTotals(odd, 0)).toThrow("greater than zero");
+    expect(() => scaleMealTotals(odd, 1000)).toThrow("999");
+});
+
+test("mealServings reads null and bad values as one serving", () => {
+    expect(mealServings({ servings: 2.5 })).toBe(2.5);
+    expect(mealServings({ servings: null })).toBe(1);
+    expect(mealServings({})).toBe(1);
+    expect(mealServings({ servings: 0 })).toBe(1);
 });
 
 test("editItemQuantity uses portions for recipe rows", () => {

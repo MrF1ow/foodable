@@ -135,27 +135,20 @@
     line-height: 1;
 }
 
-/* Disabled and focus are the two states the app's own `.native` form rules
- * also style, at one pseudo-class of specificity: `:where(.native button)
- * :disabled` (cursor, opacity) and `:where(.native :is(…, button))
- * :focus-visible` (outline none, accent box-shadow). So these two keep their
- * state pseudo-class outside `:where`: `:is(a, button)` plus the pseudo-class
- * is one type and one pseudo-class, which beats those and gives a `<button>`
- * and an `<a>` the same ring and cursor on every app page. That is still below
- * any rule that names a class of its own (`.fd-sheet .fd-btn:disabled`, ...),
- * so a context keeps winning here too. */
+/* Disabled is a state the app's own `.native` form rules also style, at one
+ * pseudo-class of specificity: `:where(.native button):disabled` (cursor,
+ * opacity). So this keeps its state pseudo-class outside `:where`: `:is(a,
+ * button)` plus the pseudo-class is one type and one pseudo-class, which beats
+ * that and gives a `<button>` and an `<a>` the same cursor on every app page.
+ * That is still below any rule that names a class of its own (`.fd-sheet
+ * .fd-btn:disabled`, ...), so a context keeps winning here too. The app draws
+ * no focus ring at all; app-rules.css, the last partial, switches off the form
+ * rule's. */
 :is(a, button):where(.fd-btn[data-fd-btn]):disabled,
 :is(a, button):where(.fd-btn[data-fd-btn])[aria-disabled="true"] {
     opacity: 0.5;
     cursor: default;
     pointer-events: none;
-}
-
-:is(a, button):where(.fd-btn[data-fd-btn]):focus-visible {
-    border-color: transparent;
-    box-shadow: none;
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: var(--space-2xs);
 }
 
 /* A hidden button stays hidden: the button's own display would show it. */

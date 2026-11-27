@@ -13,6 +13,7 @@ import {
     mealEditPatchFromItemAmounts,
     mealLocalTimeValue,
     mealLoggedAtFromLocalTime,
+    mealServings,
     recoverLoggingSpecsFromMeal,
     scaleMealTotals,
     submittedItemAmountsUnchanged,
@@ -164,19 +165,28 @@ todayMealsRoutes.post("/meals/:id/edit", requireMember, async (c) => {
                 patch.item_digest = itemListDigest(digestSpecs);
             }
         } else {
-            const servings = formAmount(body, "servings") ?? 1;
-            const scaled = scaleMealTotals(meal, servings);
-            patch = {
-                ...patch,
-                calories: scaled.calories ?? undefined,
-                protein_g: scaled.protein_g ?? undefined,
-                carbs_g: scaled.carbs_g ?? undefined,
-                fat_g: scaled.fat_g ?? undefined,
-                fiber_g: scaled.fiber_g ?? undefined,
-                sugar_g: scaled.sugar_g ?? undefined,
-                alcohol_g: scaled.alcohol_g ?? undefined,
-                caffeine_mg: scaled.caffeine_mg ?? undefined,
-            };
+            const current = mealServings(meal);
+            // The column keeps two decimals; scale by what it will hold.
+            const typed = formAmount(body, "servings");
+            const servings =
+                typed == null ? current : Math.round(typed * 100) / 100;
+            // Saved at the servings it opened with: the totals stay as they
+            // are, down to the digit (no rounding, no stored servings).
+            if (servings !== current) {
+                const scaled = scaleMealTotals(meal, servings);
+                patch = {
+                    ...patch,
+                    calories: scaled.calories ?? undefined,
+                    protein_g: scaled.protein_g ?? undefined,
+                    carbs_g: scaled.carbs_g ?? undefined,
+                    fat_g: scaled.fat_g ?? undefined,
+                    fiber_g: scaled.fiber_g ?? undefined,
+                    sugar_g: scaled.sugar_g ?? undefined,
+                    alcohol_g: scaled.alcohol_g ?? undefined,
+                    caffeine_mg: scaled.caffeine_mg ?? undefined,
+                    servings,
+                };
+            }
         }
         await updateMeal(userId, id, patch);
         // toast: none

@@ -36,6 +36,7 @@ import {
 } from "../src/web/pages/v2/settings-household-shared-links.js";
 import { renderHouseholdTokenPage } from "../src/web/pages/v2/settings-household-token.js";
 import { renderSettingsRestockV2Page } from "../src/web/pages/v2/settings-restock.js";
+import { renderSettingsPlacesV2Page } from "../src/web/pages/v2/settings-places.js";
 import { renderSettingsStoresV2Page } from "../src/web/pages/v2/settings-stores.js";
 import { renderSettingsStoreV2Page } from "../src/web/pages/v2/settings-stores-detail.js";
 import { renderSettingsReadersV2Page } from "../src/web/pages/v2/settings-readers.js";
@@ -325,6 +326,12 @@ function storesFixture(
     });
 }
 
+const FIXTURE_PLACES = [
+    { id: "p-fridge", name: "Fridge", itemCount: 12 },
+    { id: "p-freezer", name: "Freezer", itemCount: 1 },
+    { id: "p-pantry", name: "Pantry", itemCount: 0 },
+];
+
 const COSTCO_SECTIONS = [
     ["sec-produce", "Produce"],
     ["sec-meat", "Meat"],
@@ -524,6 +531,8 @@ function householdPage(chrome: ReturnType<typeof fixtureChrome>) {
         householdName: "The Flow household",
         members: [ME, SAM, RILEY],
         storeCount: 0,
+        placeCount: 3,
+        pluralsSameFood: false,
         location: null,
         householdTimezone: null,
         effectiveTimezone: "UTC",
@@ -1417,7 +1426,25 @@ function fixtureRecipePage(
                   ),
         ingredientGroups,
         macrosPerPortion: macros,
-        gapReasons: draft && !opts.saved ? ["Counts 1 of 11 ingredients"] : [],
+        // The draft's Wide rice noodles have no nutrition: a warning icon on
+        // that row. The versions' lines carry changes of their own, so only a
+        // draft, a saved draft and the base's own lines are editable.
+        gaps:
+            draft && !opts.saved
+                ? [
+                      {
+                          ingredientId: "i1",
+                          displayName: "Wide rice noodles",
+                          foodId: "f-noodles",
+                          reason: "no_nutrition" as const,
+                          missingNutrients: [],
+                          usualProduct: null,
+                          message:
+                              "Wide rice noodles: no nutrition — add it, or pick a usual product",
+                      },
+                  ]
+                : [],
+        editable: draft || opts.version === "base",
         favourite: false,
         error: opts.error,
         ...(opts.share === false ? {} : { share: { open: false } }),
@@ -1451,7 +1478,15 @@ function fixtureRecipePage(
     };
     if (draft && !opts.saved) {
         view.draft = {
-            problems: ["Add the steps."],
+            problems: [
+                { message: "Add the steps.", ingredientId: null, line: null },
+                {
+                    message:
+                        '"a splash of fish sauce" couldn\'t be read as an ingredient.',
+                    ingredientId: null,
+                    line: "a splash of fish sauce",
+                },
+            ],
             expiresOn: "2026-12-01",
             canSave: true,
             canDiscard: true,
@@ -1791,6 +1826,11 @@ async function pages(
             restock: FIXTURE_RESTOCK,
             canManage: true,
         }),
+        "household-places": renderSettingsPlacesV2Page({
+            chrome: chrome as never,
+            places: FIXTURE_PLACES,
+            canManage: true,
+        }),
         "household-stores": storesFixture(chrome),
         "household-stores-reorder": storesFixture(chrome, { reorder: true }),
         "household-store": storeFixture(chrome),
@@ -1989,6 +2029,7 @@ const ROUTE_BASE: Record<string, string> = {
     [`/settings/household/members/${SAM.userId}`]: "household-member",
     "/settings/household/invites": "household-invites",
     "/settings/household/restock": "household-restock",
+    "/settings/household/places": "household-places",
     "/settings/household/stores": "household-stores",
     "/settings/household/stores?reorder=1": "household-stores-reorder",
     "/settings/household/stores/s-costco": "household-store",

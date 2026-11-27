@@ -53,6 +53,20 @@ test("add location Pantry then lists it", async () => {
     expect(listed.items).toEqual([]);
 });
 
+test("add location refuses a name that differs only by case or spacing, whether through the page or MCP", async () => {
+    const store = createMemoryFridgeStore();
+    await addLocation(store, HH, "Garage");
+    await expect(addLocation(store, HH, "garage")).rejects.toThrow(
+        "That location already exists.",
+    );
+    await expect(addLocation(store, HH, "  GARAGE ")).rejects.toThrow(
+        "That location already exists.",
+    );
+    expect((await listFridge(store, HH)).locations.map((l) => l.name)).toEqual([
+        "Garage",
+    ]);
+});
+
 test("defaultFreezeExpiry adds three months with month-end clamp", () => {
     expect(defaultFreezeExpiry("2026-01-31")).toBe("2026-04-30");
     expect(defaultFreezeExpiry("2026-05-15")).toBe("2026-08-15");

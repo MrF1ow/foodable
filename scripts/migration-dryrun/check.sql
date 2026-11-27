@@ -1112,6 +1112,19 @@ begin
         raise exception 'a member took agents_can_delete true from a household whose switch was off';
     end if;
 
+    -- A meal's servings: one nullable column, and no meal took a value.
+    if not exists (
+        select 1 from information_schema.columns
+        where table_schema = 'public' and table_name = 'meals'
+          and column_name = 'servings' and is_nullable = 'YES'
+          and data_type = 'numeric'
+    ) then
+        raise exception 'meals.servings is missing or not a nullable numeric';
+    end if;
+    if exists (select 1 from public.meals where servings is not null) then
+        raise exception 'a meal took a servings value nothing wrote';
+    end if;
+
     -- A person's own data: foodable_app reaches it through policies on the
     -- user and the household's members, never without one.
     declare

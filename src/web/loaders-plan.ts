@@ -12,7 +12,11 @@ import {
 
 export { loadWeekPlanInputs, type WeekPlanInputs } from "../db/plan-week.js";
 
-/** This week for Today and Recipes: seven days, the plans on them, what is missing. */
+/**
+ * This week for Today and Recipes: seven days, the plans on them, what is
+ * missing, and what a planned entry's edit sheet needs (the saved recipes for
+ * its Recipe menu, how each repeat repeats for its Repeat row).
+ */
 export async function loadWeekPlanView(
     householdId: string,
     today?: string,

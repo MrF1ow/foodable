@@ -181,24 +181,22 @@ test("a count is shown only when it is a whole number above zero", () => {
     expect(badge(Number.POSITIVE_INFINITY)).not.toContain("fd-btn__badge");
 });
 
-test("focus and disabled rules outrank the app's .native form rules but not a context's own class", async () => {
+test("the disabled rule outranks the app's .native form rules but not a context's own class, and the button draws no focus ring", async () => {
     const css = await Bun.file("public/app/v2/button.css").text();
     // The state pseudo-class sits outside :where, so each selector is one type
     // plus one pseudo-class (0,1,1): above `:where(.native button):disabled`
-    // and `:where(.native :is(…button)):focus-visible` (0,1,0), below any rule
-    // that names a class (0,2,0 and up).
-    expect(css).toContain(
-        `:is(a, button):where(.fd-btn[data-fd-btn]):focus-visible {`,
-    );
+    // (0,1,0), below any rule that names a class (0,2,0 and up).
     expect(css).toContain(
         `:is(a, button):where(.fd-btn[data-fd-btn]):disabled,`,
     );
     expect(css).toContain(
         `:is(a, button):where(.fd-btn[data-fd-btn])[aria-disabled="true"] {`,
     );
-    // It also undoes the form rule's ring, which would otherwise stack.
-    const focus = css.slice(css.indexOf(":focus-visible {"));
-    expect(focus).toContain("box-shadow: none");
-    expect(focus).toContain("border-color: transparent");
     expect(css).not.toMatch(/:where\([^)]*:(focus-visible|disabled)/);
+    // No focus ring (the user switched them all off): the partial has no focus
+    // rule, and the form rule's ring is switched off in app-rules.css.
+    expect(css).not.toContain(":focus");
+    const rules = await Bun.file("public/app/v2/app-rules.css").text();
+    expect(rules).toContain(".native :is(input, select, textarea, button)");
+    expect(rules).toMatch(/box-shadow:\s*none/);
 });

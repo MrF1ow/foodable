@@ -259,6 +259,9 @@ describe("renderTrendsV2Page", () => {
         expect(form).toContain("data-fd-trends-goto");
         expect(form).toContain("Go to a day");
         expect(form).toContain("Sat 15 Aug");
+        // The row is a date field, not a link into another page: no chevron.
+        expect(form).not.toContain("fd-item-row__chevron");
+        expect(form).not.toContain("fd-icon--chevron-right");
     });
 
     test("member subject label is shown when set", () => {

@@ -185,7 +185,6 @@ function goalHeading(view: SettingsGoalsV2View, ctx: FieldCtx): Html {
                     input: {
                         ...inputOf("goal_name", ctx),
                         labelHidden: true,
-                        chevron: true,
                         placeholder: "Name this goal",
                         maxlength: GOAL_NAME_MAX,
                     },

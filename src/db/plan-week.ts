@@ -5,7 +5,7 @@
  */
 import { effectiveFoodsByIds, type EffectiveFood } from "../domain/foods.js";
 import { listFridge } from "../domain/fridge.js";
-import type { RecipePlan } from "../domain/plan.js";
+import type { PlanRepeat, RecipePlan } from "../domain/plan.js";
 import {
     addPlanDays,
     loadPlanVersionSources,
@@ -34,6 +34,10 @@ export type WeekPlanInputs = {
     foodsById: Map<string, EffectiveFood>;
     /** The ingredient rows of the planned recipes, for work (macros) that needs more than `recipes`. */
     plannedIngredients: RecipeIngredient[];
+    /** The household's saved recipes: what a planned entry's Recipe menu offers. */
+    savedRecipes: { id: string; name: string }[];
+    /** How each repeat in `plans` repeats, by its id: what the Repeat row starts on. */
+    rules: Map<string, { repeat: PlanRepeat; days: number[] }>;
 };
 
 /**
@@ -59,6 +63,8 @@ export async function loadWeekPlanInputs(
             stock: [],
             foodsById: new Map(),
             plannedIngredients: [],
+            savedRecipes: [],
+            rules: new Map(),
         };
     }
     const recipesStore = liveRecipesStore();
@@ -76,6 +82,16 @@ export async function loadWeekPlanInputs(
         allIngredients,
     );
     const recipes = planRecipesOf(plans, allRecipes, allIngredients, versions);
+    const plansStore = liveRecipePlansStore();
+    const rules = new Map<string, { repeat: PlanRepeat; days: number[] }>();
+    const ruleIds = [
+        ...new Set(plans.flatMap((p) => (p.ruleId ? [p.ruleId] : []))),
+    ];
+    for (const rule of await Promise.all(
+        ruleIds.map((id) => plansStore.getRule(householdId, id)),
+    )) {
+        if (rule) rules.set(rule.id, { repeat: rule.repeat, days: rule.days });
+    }
     const planned = new Set(plans.map((p) => p.recipeId));
     const plannedIngredients = allIngredients.filter((row) =>
         planned.has(row.recipeId),
@@ -95,5 +111,10 @@ export async function loadWeekPlanInputs(
         })),
         foodsById,
         plannedIngredients,
+        savedRecipes: allRecipes.map((recipe) => ({
+            id: recipe.id,
+            name: recipe.name,
+        })),
+        rules,
     };
 }

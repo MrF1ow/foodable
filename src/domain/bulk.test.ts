@@ -2,19 +2,11 @@ import { expect, spyOn, test } from "bun:test";
 import {
     BULK_MAX_IDS,
     BulkSelectionError,
-    deleteGroceryLines,
     deleteSavedItems,
-    discardFridgeItems,
     parseBulkIds,
     removeUsuals,
 } from "./bulk.js";
 import { isUsualFood } from "./restock.js";
-import {
-    addLocation,
-    createMemoryFridgeStore,
-    listFridge,
-    type FridgeStore,
-} from "./fridge.js";
 import {
     createMemoryFoodsStore,
     createProduct,
@@ -22,47 +14,12 @@ import {
     NO_USUAL_SCHEDULE,
     setUsualSchedule,
     updateFood,
-    type FoodsStore,
 } from "./foods.js";
-import {
-    addGroceryManualFood,
-    createMemoryGroceryStore,
-    type GroceryListStore,
-} from "./grocery.js";
 import { RecipeForbiddenError } from "./recipes.js";
 import { createMemoryRecipesStore, createRecipe } from "./recipes.js";
-import { createGroceryStore, createMemorySettingsStore } from "./settings.js";
-import {
-    addFridgeItemAdjust,
-    createMemoryStockStore,
-    ledgerMatchesStock,
-    type StockStore,
-} from "./stock.js";
 
 const HH = "hh-1";
 const TODAY = "2026-11-13";
-
-async function fridgeWith(names: string[]) {
-    const fridge = createMemoryFridgeStore();
-    const stock = createMemoryStockStore();
-    const foods = createMemoryFoodsStore();
-    const loc = await addLocation(fridge, HH, "Fridge");
-    const items = [];
-    const made = [];
-    for (const name of names) {
-        const food = await findOrCreateManualFood(foods, HH, "food", name);
-        made.push(food);
-        const added = await addFridgeItemAdjust(fridge, stock, foods, {
-            householdId: HH,
-            foodId: food.id,
-            amount: 3,
-            unit: "each",
-            locationId: loc.id,
-        });
-        items.push(added.item!);
-    }
-    return { fridge, stock, foods, items, made };
-}
 
 test("parseBulkIds keeps each uuid once and refuses anything else", () => {
     const a = crypto.randomUUID();
@@ -82,96 +39,6 @@ test("parseBulkIds keeps each uuid once and refuses anything else", () => {
     expect(parseBulkIds(many.slice(0, BULK_MAX_IDS))).toHaveLength(
         BULK_MAX_IDS,
     );
-});
-
-async function ledgerOk(
-    fridge: FridgeStore,
-    stock: StockStore,
-    foods: FoodsStore,
-    foodId: string,
-) {
-    const items = (await listFridge(fridge, HH)).items;
-    const food = (await foods.getFood(HH, foodId))!;
-    return ledgerMatchesStock(
-        items,
-        await stock.listMovements(HH, foodId),
-        food,
-    );
-}
-
-test("discardFridgeItems writes a discard movement per item and the ledger matches", async () => {
-    const { fridge, stock, foods, items, made } = await fridgeWith([
-        "Yogurt",
-        "Spinach",
-        "Cheese",
-    ]);
-    const result = await discardFridgeItems(fridge, stock, foods, {
-        householdId: HH,
-        itemIds: [items[0]!.id, items[1]!.id],
-        actorUserId: "u1",
-    });
-    expect(result).toEqual({ status: "applied", count: 2 });
-    const left = (await listFridge(fridge, HH)).items;
-    expect(left.map((i) => i.displayName)).toEqual(["Cheese"]);
-    const movements = await stock.listMovements(HH);
-    const discards = movements.filter((m) => m.reason === "discard");
-    expect(discards).toHaveLength(2);
-    expect(
-        discards.every((m) => m.delta === -3 && m.actorUserId === "u1"),
-    ).toBe(true);
-    for (const food of made) {
-        expect(await ledgerOk(fridge, stock, foods, food.id)).toBe(true);
-    }
-});
-
-test("discardFridgeItems writes nothing when one item is gone or unlinked", async () => {
-    const { fridge, stock, foods, items } = await fridgeWith([
-        "Yogurt",
-        "Spinach",
-    ]);
-    await expect(
-        discardFridgeItems(fridge, stock, foods, {
-            householdId: HH,
-            itemIds: [items[0]!.id, crypto.randomUUID()],
-        }),
-    ).rejects.toBeInstanceOf(BulkSelectionError);
-    expect((await listFridge(fridge, HH)).items).toHaveLength(2);
-    const before = (await stock.listMovements(HH)).length;
-
-    const orphan = await fridge.insertItem({
-        id: crypto.randomUUID(),
-        householdId: HH,
-        locationId: items[0]!.locationId,
-        kind: "food",
-        displayName: "Mystery jar",
-        quantity: { amount: 1, unit: "each" },
-        foodId: null,
-        expiresOn: null,
-    });
-    await expect(
-        discardFridgeItems(fridge, stock, foods, {
-            householdId: HH,
-            itemIds: [items[0]!.id, orphan.id],
-        }),
-    ).rejects.toThrow("Mystery jar");
-    expect((await listFridge(fridge, HH)).items).toHaveLength(3);
-    expect((await stock.listMovements(HH)).length).toBe(before);
-});
-
-test("discardFridgeItems answers a repeat as already done", async () => {
-    const { fridge, stock, foods, items } = await fridgeWith(["Yogurt"]);
-    const input = {
-        householdId: HH,
-        itemIds: [items[0]!.id],
-        actorUserId: "u1",
-    };
-    await discardFridgeItems(fridge, stock, foods, input);
-    const movements = (await stock.listMovements(HH)).length;
-    expect(await discardFridgeItems(fridge, stock, foods, input)).toEqual({
-        status: "already",
-        count: 0,
-    });
-    expect((await stock.listMovements(HH)).length).toBe(movements);
 });
 
 async function usualsWith(names: string[]) {
@@ -359,74 +226,4 @@ test("deleteSavedItems takes an already archived food as done", async () => {
     });
     expect(result).toEqual({ status: "applied", count: 1 });
     expect((await foods.getFood(HH, rice.id))?.archivedAt).not.toBeNull();
-});
-
-async function groceryWith(names: string[]) {
-    const grocery = createMemoryGroceryStore();
-    const settings = createMemorySettingsStore();
-    const foods = createMemoryFoodsStore();
-    const store = await createGroceryStore(settings, HH, "Shop");
-    const lines = [];
-    for (const name of names) {
-        lines.push(
-            await addGroceryManualFood(grocery, settings, foods, {
-                householdId: HH,
-                storeId: store.id,
-                name,
-                amount: 1,
-                unit: "each",
-            }),
-        );
-    }
-    return { grocery, lines };
-}
-
-test("deleteGroceryLines deletes every picked line and no other", async () => {
-    const { grocery, lines } = await groceryWith(["Oats", "Oil", "Salt"]);
-    const result = await deleteGroceryLines(grocery, {
-        householdId: HH,
-        lineIds: [lines[0]!.id, lines[1]!.id],
-    });
-    expect(result).toEqual({ status: "applied", count: 2 });
-    expect((await grocery.listLines(HH)).map((line) => line.id)).toEqual([
-        lines[2]!.id,
-    ]);
-});
-
-test("deleteGroceryLines refuses a line that is gone when others are there, and deletes nothing", async () => {
-    const { grocery, lines } = await groceryWith(["Oats", "Oil"]);
-    await expect(
-        deleteGroceryLines(grocery, {
-            householdId: HH,
-            lineIds: [lines[0]!.id, "3f2b1c4e-0000-4000-8000-000000000000"],
-        }),
-    ).rejects.toBeInstanceOf(BulkSelectionError);
-    expect(await grocery.listLines(HH)).toHaveLength(2);
-});
-
-test("deleteGroceryLines answers a repeat as already done", async () => {
-    const { grocery, lines } = await groceryWith(["Oats"]);
-    const input = { householdId: HH, lineIds: [lines[0]!.id] };
-    await deleteGroceryLines(grocery, input);
-    expect(await deleteGroceryLines(grocery, input)).toEqual({
-        status: "already",
-        count: 0,
-    });
-});
-
-test("deleteGroceryLines refuses a line that went away between the read and the delete", async () => {
-    const { grocery, lines } = await groceryWith(["Oats", "Oil"]);
-    const racing: GroceryListStore = {
-        ...grocery,
-        async deleteLine(householdId, id) {
-            if (id === lines[1]!.id) return false;
-            return grocery.deleteLine(householdId, id);
-        },
-    };
-    await expect(
-        deleteGroceryLines(racing, {
-            householdId: HH,
-            lineIds: lines.map((line) => line.id),
-        }),
-    ).rejects.toBeInstanceOf(BulkSelectionError);
 });

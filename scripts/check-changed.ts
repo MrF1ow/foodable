@@ -265,11 +265,12 @@ export const TEST_RULES: { when: RegExp; tests: RegExp; incidental?: true }[] =
         // notifications.test.ts reads layout.css for the inbox gaps and
         // settings-notifications.test.ts reads settings.css for the sections,
         // kitchen-usuals.test.ts reads kitchen.css for the Add a usual grids,
-        // recipes-list.test.ts reads recipes.css for the one-line Missing line and
-        // trends.test.ts reads trends.css for the Calories by day bars.
+        // recipes-list.test.ts reads recipes.css for the one-line Missing line,
+        // recipes-page-ingredients.test.ts reads recipes.css for the warning icon
+        // and trends.test.ts reads trends.css for the Calories by day bars.
         {
             when: /^public\/app\//,
-            tests: /^src\/web\/(avatar-sites|components\/field|components\/v2\/[^/]+|pages\/recipes|pages\/v2\/(select-mode|notifications|settings-notifications|kitchen-usuals|recipes-list|trends))\.test\.ts$/,
+            tests: /^src\/web\/(avatar-sites|components\/field|components\/v2\/[^/]+|pages\/recipes|pages\/v2\/(select-mode|notifications|settings-notifications|kitchen-usuals|recipes-list|recipes-page-ingredients|trends))\.test\.ts$/,
         },
         // turbo-forms.test.ts reads the generated login page.
         {

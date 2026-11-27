@@ -73,6 +73,23 @@ describe("settings saved v2", () => {
         );
     });
 
+    test("a divider sits between Possible duplicates and the search", () => {
+        const html = renderSettingsSavedV2Page({
+            chrome,
+            foods: [],
+            recipes: [],
+            searchQuery: "",
+        });
+        const duplicates = html.indexOf('href="/settings/saved/duplicates"');
+        const divider = html.indexOf('<hr class="fd-settings-divider">');
+        const search = html.indexOf(
+            '<form method="get" action="/settings/saved" role="search">',
+        );
+        expect(duplicates).toBeGreaterThan(-1);
+        expect(divider).toBeGreaterThan(duplicates);
+        expect(search).toBeGreaterThan(divider);
+    });
+
     test("the page is the Settings layout with a ⋯ in the Detail bar that has Select", () => {
         const html = renderSettingsSavedV2Page({
             chrome,

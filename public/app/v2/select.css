@@ -34,11 +34,6 @@
     font: 600 14px/18px var(--font-body);
     cursor: pointer;
 }
-.fd-select-toggle:focus-visible,
-.fd-select-bar .fd-btn:focus-visible {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
-}
 
 /* ---- a row's box: out of sight until the list is in select mode ---- */
 
@@ -99,10 +94,6 @@
 }
 .fd-row__select-input:checked + .fd-row__select-box .fd-icon {
     opacity: 1;
-}
-.fd-row__select-input:focus-visible + .fd-row__select-box {
-    outline: 2px solid var(--accent-fill);
-    outline-offset: 2px;
 }
 
 /* In select mode a row only picks: its own actions step aside for the box. */

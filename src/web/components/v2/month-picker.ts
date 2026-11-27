@@ -3,7 +3,7 @@
  * "pick a start day").
  *
  * `monthPicker` is two parts that go in different places of a sheet: the
- * `row` (an Item row: its title, the day it holds and a chevron) and the
+ * `row` (an Item row: its title, the day it holds) and the
  * `picker` (a month label with previous and next buttons, the weekday
  * letters and a grid of round dates) that the row opens beneath itself. The
  * picked day rides in a hidden input of the row, so the form posts it with no
@@ -137,7 +137,6 @@ export function monthPicker(opts: MonthPickerOptions): {
     const row = itemRow({
         title: opts.title,
         value: label0,
-        trailing: { kind: "chevron" },
         toggles: {
             controls: pickerId,
             expanded: opts.open === true,

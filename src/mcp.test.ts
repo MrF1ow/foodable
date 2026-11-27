@@ -172,6 +172,7 @@ import {
     ADD_PLAN_MISSING_OUTPUT_SCHEMA,
     PLAN_RECIPE_OUTPUT_SCHEMA,
     UNPLAN_RECIPE_OUTPUT_SCHEMA,
+    UPDATE_PLAN_OUTPUT_SCHEMA,
     WEEK_PLAN_OUTPUT_SCHEMA,
 } from "./mcp/tools/plan.js";
 import { HOUSEHOLD_DIGEST_OUTPUT_SCHEMA } from "./mcp/tools/household-digest.js";
@@ -4843,8 +4844,17 @@ describe("household config tools", () => {
         // until a person saves them), and `draft`, `ready_to_save` and
         // `draft_expires_at` on the recipe outputs, with no field
         // descriptions and the tool descriptions cut to one line each.
-        const TOOLS_LIST_MAX_CHARS = 235217;
-        const TOOLS_LIST_MAX_COUNT = 106;
+        // +1775: update_plan (change one planned entry: its recipe, day, meal,
+        // servings and repeat), with a description cut to what an agent needs
+        // and an output that reuses plan_recipe's plan object.
+        // +423: the optional `food_ids` input on add_plan_missing_to_groceries
+        // (add only the ticked foods of Missing for the plan), with a
+        // sentence of its description.
+        // +124: the optional `food_id` input on update_recipe_ingredient (swap
+        // which food a line is, as the app's ingredient sheet does), with a
+        // clause of its description.
+        const TOOLS_LIST_MAX_CHARS = 237539;
+        const TOOLS_LIST_MAX_COUNT = 107;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
             const snapshot = (await Bun.file(
@@ -10206,6 +10216,25 @@ describe("/mcp destructive tools are guarded", () => {
                 summary: "Removed Soup from the plan for",
             };
         },
+        update_plan: async (call) => {
+            const recipe = await call("create_recipe", {
+                name: "Soup",
+                yield_portions: 2,
+            });
+            const planned = await call("plan_recipe", {
+                recipe_id: recipe.structuredContent?.id,
+                date: addUtcDaysForDestructive(2),
+                slot: "dinner",
+            });
+            expect(planned.isError).toBeFalsy();
+            const plan = planned.structuredContent?.plan as { plan_id: string };
+            return {
+                tool: "update_plan",
+                args: { plan_id: plan.plan_id, slot: "lunch" },
+                summary: "Changed the plan for Soup on",
+                text: "Updated: Soup",
+            };
+        },
         merge_foods: async (call) => {
             const keep = await call("upsert_food", { name: "Eggs" });
             const drop = await call("upsert_food", {
@@ -10244,6 +10273,7 @@ describe("/mcp destructive tools are guarded", () => {
                 "merge_foods",
                 "remove_recipe_ingredient",
                 "unplan_recipe",
+                "update_plan",
             ].sort(),
         );
     });
@@ -12824,6 +12854,161 @@ describe("get_recipe carries the cook preview over HTTP", () => {
     );
 });
 
+describe("update_recipe_ingredient changes which food a line is, over HTTP", () => {
+    type Call = (
+        name: string,
+        args?: Record<string, unknown>,
+    ) => Promise<ToolResult>;
+
+    // A saved recipe of two lines: Onion 100 g (diced) then Rice 50 g, and a
+    // second food to swap in.
+    async function setup(call: Call) {
+        const food = async (name: string) =>
+            (await call("upsert_food", { name })).structuredContent
+                ?.id as string;
+        const onion = await food("Onion");
+        const shallot = await food("Shallot");
+        const rice = await food("Rice");
+        const recipe = await call("create_recipe", {
+            name: "Soup",
+            yield_portions: 2,
+            instructions: "1. Simmer",
+        });
+        const recipeId = recipe.structuredContent?.id as string;
+        await call("add_recipe_ingredient", {
+            recipe_id: recipeId,
+            food_id: onion,
+            amount: 100,
+            unit: "g",
+        });
+        await call("add_recipe_ingredient", {
+            recipe_id: recipeId,
+            food_id: rice,
+            amount: 50,
+            unit: "g",
+        });
+        const lines = async () =>
+            GET_RECIPE_OUTPUT_SCHEMA.parse(
+                (await call("get_recipe", { id: recipeId })).structuredContent,
+            ).ingredients;
+        await call("update_recipe_ingredient", {
+            recipe_id: recipeId,
+            ingredient_id: (await lines())[0]!.id,
+            note: "diced",
+        });
+        return { onion, shallot, recipeId, lines };
+    }
+
+    test.each(ERAS)(
+        "food_id moves the line to that food and keeps its place and note; amount and unit stay unless sent (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { shallot, recipeId, lines } = await setup(call);
+                const [first] = await lines();
+                const kept = await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: first!.id,
+                    food_id: shallot,
+                });
+                expect(kept.isError).toBeFalsy();
+                expect(textOf(kept)).toContain("Updated Shallot 100 g");
+                expect((await lines()).slice(0, 2)).toMatchObject([
+                    {
+                        id: first!.id,
+                        food_id: shallot,
+                        display_name: "Shallot",
+                        amount: 100,
+                        unit: "g",
+                        note: "diced",
+                    },
+                    { display_name: "Rice" },
+                ]);
+                // A new amount and unit go in with the swap.
+                const leek = (await call("upsert_food", { name: "Leek" }))
+                    .structuredContent?.id as string;
+                await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: first!.id,
+                    food_id: leek,
+                    amount: 2,
+                    unit: "oz",
+                    note: null,
+                });
+                expect((await lines())[0]).toMatchObject({
+                    display_name: "Leek",
+                    amount: 2,
+                    unit: "oz",
+                    note: null,
+                });
+                // Without food_id it is the same update it always was.
+                await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: first!.id,
+                    amount: 3,
+                });
+                expect((await lines())[0]).toMatchObject({
+                    display_name: "Leek",
+                    amount: 3,
+                    unit: "oz",
+                });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "a swap that would break the saved recipe is refused and the line stays; an unknown food is refused too (%p)",
+        async (era) => {
+            await withHttpClient("u1", era, async (client) => {
+                const call: Call = async (name, args = {}) =>
+                    (await client.callTool({
+                        name,
+                        arguments: args,
+                    })) as ToolResult;
+                const { shallot, recipeId, lines } = await setup(call);
+                const before = await lines();
+                // No amount and a note that does not say "to taste": the check fails.
+                const refused = await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: before[0]!.id,
+                    food_id: shallot,
+                    amount: null,
+                });
+                expect(refused.isError).toBe(true);
+                expect(textOf(refused)).toContain(
+                    "That change would break this saved recipe",
+                );
+                expect(await lines()).toEqual(before);
+                const unknown = await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: before[0]!.id,
+                    food_id: "no-such-food",
+                });
+                expect(unknown.isError).toBe(true);
+                expect(await lines()).toEqual(before);
+                // To taste with the words that say so goes through.
+                const taste = await call("update_recipe_ingredient", {
+                    recipe_id: recipeId,
+                    ingredient_id: before[0]!.id,
+                    food_id: shallot,
+                    amount: null,
+                    note: "diced, to taste",
+                });
+                expect(taste.isError).toBeFalsy();
+                expect((await lines())[0]).toMatchObject({
+                    display_name: "Shallot",
+                    amount: null,
+                    note: "diced, to taste",
+                });
+            });
+        },
+    );
+});
+
 describe("a person's own version of a recipe over HTTP", () => {
     const REFUSAL =
         "An agent can only add, change or delete the entries of the person it acts for. Nothing was changed. Ask U2 to do it, or their agent.";
@@ -14229,6 +14414,7 @@ describe("plan tools over HTTP", () => {
         "get_week_plan",
         "plan_recipe",
         "unplan_recipe",
+        "update_plan",
         "add_plan_missing_to_groceries",
     ];
 
@@ -14492,6 +14678,203 @@ describe("plan tools over HTTP", () => {
                     scope: "series",
                 });
                 expect(refused.isError).toBe(true);
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "update_plan changes one planned entry: a one-off in place, one day of a series alone, and the series only through repeat (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({}));
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId } = await seedBread(call);
+                const today = utcTodayFromDate();
+                const day = (n: number) => addUtcDays(today, n);
+                const week = async () =>
+                    WEEK_PLAN_OUTPUT_SCHEMA.parse(
+                        (await call("get_week_plan")).structuredContent,
+                    ).days.flatMap((d) =>
+                        d.plans.map((p) => `${d.date} ${p.slot} ${p.servings}`),
+                    );
+
+                // A one-off changes where it is and keeps its id.
+                const one = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("plan_recipe", {
+                            recipe_id: recipeId,
+                            date: day(2),
+                            slot: "dinner",
+                            servings: 2,
+                        })
+                    ).structuredContent,
+                );
+                const moved = await call("update_plan", {
+                    plan_id: one.plan.plan_id,
+                    date: day(3),
+                    slot: "lunch",
+                    servings: 4,
+                });
+                expect(moved.isError).toBeFalsy();
+                const movedOut = UPDATE_PLAN_OUTPUT_SCHEMA.parse(
+                    moved.structuredContent,
+                );
+                expect(movedOut).toMatchObject({
+                    changed: true,
+                    already_planned: false,
+                    repeat: "once",
+                    plan: {
+                        plan_id: one.plan.plan_id,
+                        date: day(3),
+                        slot: "lunch",
+                        servings: 4,
+                    },
+                });
+                // The text names the resulting plan and its recipe, and how to undo.
+                expect(textOf(moved)).toStartWith("Updated: Bread");
+                expect(textOf(moved)).toContain(
+                    `[plan_id: ${one.plan.plan_id}]`,
+                );
+                expect(textOf(moved)).toContain(`[recipe_id: ${recipeId}]`);
+                // The guard recorded it (these memory stores seed no rows, so
+                // the sentence says it can't be undone here; the undo itself
+                // is tested against Postgres).
+                expect(textOf(moved)).toContain("Settings › AI connections");
+                expect(await week()).toEqual([`${day(3)} lunch 4`]);
+
+                // The same values again: nothing written, no undo promised.
+                const same = await call("update_plan", {
+                    plan_id: one.plan.plan_id,
+                    date: day(3),
+                    slot: "lunch",
+                    servings: 4,
+                    recipe_id: recipeId,
+                    repeat: "once",
+                });
+                expect(same.isError).toBeFalsy();
+                expect(textOf(same)).toStartWith("Nothing changed: Bread");
+                expect(textOf(same)).not.toContain("Settings › AI connections");
+                expect(
+                    UPDATE_PLAN_OUTPUT_SCHEMA.parse(same.structuredContent),
+                ).toMatchObject({ changed: false });
+
+                // A repeat: one day changes that day only (its id changes) ...
+                const series = PLAN_RECIPE_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("plan_recipe", {
+                            recipe_id: recipeId,
+                            date: day(0),
+                            slot: "snack",
+                            repeat: "daily",
+                            servings: 1,
+                        })
+                    ).structuredContent,
+                );
+                const ruleId = series.plan.plan_id.split(":")[1];
+                const detached = UPDATE_PLAN_OUTPUT_SCHEMA.parse(
+                    (
+                        await call("update_plan", {
+                            plan_id: `rule:${ruleId}:${day(2)}`,
+                            servings: 3,
+                        })
+                    ).structuredContent,
+                );
+                expect(detached.plan.plan_id).not.toContain("rule:");
+                expect(detached.plan.repeats).toBeUndefined();
+                expect(
+                    (await week()).filter((l) => l.includes("snack")),
+                ).toEqual(
+                    [0, 1, 2, 3, 4, 5, 6].map(
+                        (n) => `${day(n)} snack ${n === 2 ? 3 : 1}`,
+                    ),
+                );
+                // ... and a repeat change is the series from that day on.
+                const changed = await call("update_plan", {
+                    plan_id: `rule:${ruleId}:${day(4)}`,
+                    repeat: "weekly",
+                });
+                expect(changed.isError).toBeFalsy();
+                const changedOut = UPDATE_PLAN_OUTPUT_SCHEMA.parse(
+                    changed.structuredContent,
+                );
+                expect(changedOut.repeat).toBe("weekly");
+                expect(changedOut.plan.repeats).toBe(true);
+                expect(changedOut.plan.plan_id).toMatch(/^rule:/);
+                expect(changedOut.plan.plan_id).not.toContain(ruleId!);
+                expect(textOf(changed)).toContain(
+                    `[plan_id: ${changedOut.plan.plan_id}]`,
+                );
+                expect(textOf(changed)).toContain("Repeats every week on");
+                expect(
+                    (await week()).filter((l) => l.includes("snack")),
+                ).toEqual(
+                    [0, 1, 2, 3, 4].map(
+                        (n) => `${day(n)} snack ${n === 2 ? 3 : 1}`,
+                    ),
+                );
+
+                // Refusals: no such plan, a bad recipe, a past day, a bad weekday.
+                expect(
+                    await refusal(call, "update_plan", {
+                        plan_id: crypto.randomUUID(),
+                        servings: 2,
+                    }),
+                ).toContain("Plan not found.");
+                expect(
+                    await refusal(call, "update_plan", {
+                        plan_id: one.plan.plan_id,
+                        recipe_id: "nope",
+                    }),
+                ).toContain("Recipe not found.");
+                expect(
+                    await refusal(call, "update_plan", {
+                        plan_id: one.plan.plan_id,
+                        date: addUtcDays(today, -1),
+                    }),
+                ).toContain("Pick today or a later day.");
+                expect(
+                    await refusal(call, "update_plan", {
+                        plan_id: one.plan.plan_id,
+                        repeat: "days",
+                        days: [9],
+                    }),
+                ).toContain("weekday");
+
+                // A repeat or Once from a day that has passed would cut the
+                // series there and erase the days up to today: refused, with
+                // the days before today as they were.
+                const began = await db.plansStore.addRule({
+                    householdId: "hh-1",
+                    recipeId,
+                    slot: "lunch",
+                    servings: 1,
+                    startsOn: day(-6),
+                    repeat: "daily",
+                });
+                const pastDays = async () =>
+                    (await db.plansStore.listPlans("hh-1", day(-6), day(-1)))
+                        .length;
+                expect(await pastDays()).toBe(6);
+                for (const args of [
+                    { repeat: "weekly" },
+                    { date: day(2), repeat: "weekly" },
+                    { repeat: "once" },
+                    { date: day(2), repeat: "once" },
+                ]) {
+                    expect(
+                        await refusal(call, "update_plan", {
+                            plan_id: `rule:${began!.id}:${day(-4)}`,
+                            ...args,
+                        }),
+                    ).toContain(
+                        "That day has passed. Change the repeat from today or a later day.",
+                    );
+                    expect(await pastDays()).toBe(6);
+                    expect(
+                        (await db.plansStore.getRule("hh-1", began!.id))
+                            ?.endsOn,
+                    ).toBeNull();
+                }
             });
         },
     );
@@ -14946,7 +15329,7 @@ describe("plan tools over HTTP", () => {
                 )!;
                 expect(
                     Object.keys(listed.inputSchema.properties ?? {}),
-                ).toEqual(["from"]);
+                ).toEqual(["from", "food_ids"]);
                 const { recipeId, flourId } = await seedBread(call);
                 const today = utcTodayFromDate();
                 const yesterday = addUtcDays(today, -1);
@@ -14999,6 +15382,54 @@ describe("plan tools over HTTP", () => {
                     food_id: flourId,
                     display_name: "Flour",
                 });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries with food_ids adds only those foods: an empty list or an id that is not missing adds nothing (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({}));
+            await addStore();
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId, flourId } = await seedBread(call);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "dinner",
+                });
+                const none = async (food_ids: string[]) =>
+                    ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                        (
+                            await call("add_plan_missing_to_groceries", {
+                                food_ids,
+                            })
+                        ).structuredContent,
+                    );
+                const textOf = async (food_ids: string[]) =>
+                    JSON.stringify(
+                        (
+                            await call("add_plan_missing_to_groceries", {
+                                food_ids,
+                            })
+                        ).content,
+                    );
+                expect((await none([])).added).toEqual([]);
+                expect((await none(["not-a-missing-food"])).added).toEqual([]);
+                // An empty list is no choice; an id that is not missing is a
+                // choice that matched nothing: each says which.
+                expect(await textOf([])).toContain(
+                    "No foods were chosen, so nothing was added.",
+                );
+                expect(await textOf(["not-a-missing-food"])).toContain(
+                    "None of those foods is missing for the plan",
+                );
+                expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
+                const out = await none([flourId]);
+                expect(out.added).toHaveLength(1);
+                expect(out.added[0]).toMatchObject({ food_id: flourId });
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(1);
             });
         },
     );
@@ -17301,7 +17732,7 @@ describe("authenticated dashboard HTTP", () => {
             alice,
         );
         expect(r.status).toBe(400);
-        expect(await r.text()).toContain("Confirm removing Bob from the menu.");
+        expect(await r.text()).toContain("Confirm removing Bob in the sheet.");
         expect(db.wipedUsers).toEqual([]);
     });
 
@@ -17420,7 +17851,7 @@ describe("authenticated dashboard HTTP", () => {
             '<a class="fd-kitchen-tab" href="/kitchen/fridge" aria-current="page">Fridge</a>',
         );
         expect(html).toContain(
-            "Add a location, then add items with the button above.",
+            "Add a place in Settings, then add items with the button above.",
         );
         expect(html).not.toContain("Coming soon.");
         expect(html).not.toContain('class="facts"');
@@ -18054,8 +18485,11 @@ describe("authenticated dashboard HTTP", () => {
         const html = await detail.text();
         expect(html).toContain("Pasta");
         expect(html).toContain("400 g");
-        // No figures for it yet: dashes, and why, in the warning tone.
-        expect(html).toContain("fd-recipe-caption--warn");
+        // No figures for it yet: dashes, and the why is a warning icon on the
+        // ingredient (no list of reasons under the tiles).
+        expect(html).not.toContain("fd-recipe-caption--warn");
+        expect(html).toContain("fd-icon--warning");
+        expect(html).toContain("no nutrition");
 
         const refuse = await siteApp.request(
             `http://x/recipes/${recipeId}/delete`,
@@ -18126,7 +18560,8 @@ describe("authenticated dashboard HTTP", () => {
             "/recipes",
             `/recipes/${recipeId}`,
             `/recipes/${recipeId}/instructions`,
-            `/recipes/${recipeId}/ingredients`,
+            // `/recipes/:id/ingredients` is the Add ingredient sheet's route
+            // now; an id that is no ingredient's is still not found.
             `/recipes/${recipeId}/ingredients/ing-1`,
             `/recipes/${recipeId}/ingredients/ing-1/delete`,
             `/recipes/${recipeId}/ingredients/ing-1/move`,

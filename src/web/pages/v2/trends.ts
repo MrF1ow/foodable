@@ -385,7 +385,6 @@ function goToDayMarkup(data: TrendsPageData): Html {
         title: "Go to a day",
         value: dayLine(data.today),
         lead: { kind: "icon", name: "calendar" },
-        trailing: { kind: "chevron" },
         overlay: raw(
             `<input class="fd-trends-goto__input" type="date" name="date" max="${esc(data.today)}" value="${esc(data.today)}" aria-label="Go to a day" data-fd-trends-goto>`,
         ),

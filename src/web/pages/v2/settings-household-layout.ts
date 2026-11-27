@@ -10,7 +10,7 @@ import { settingsMenu, type SettingsV2Section } from "./settings-shared.js";
  * The frame the Household pages share: the Settings page layout (menu beside
  * a 640 column from 1024 px) with the one thing the plain Settings layout has
  * no slot for, a round control at the end of the bar: the ⋯ menu on the
- * household and a member, the + that creates an invite. On the phone it ends
+ * household page, the + that creates an invite. On the phone it ends
  * the Detail bar; on desktop it ends the page header, in line with the title.
  * The control is drawn twice and CSS shows one, so each copy is a complete
  * form or menu.

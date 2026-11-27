@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import * as nutrition from "./nutrition.js";
+import { buildMealsCsv } from "../domain/export.js";
 import {
     countMealItems,
     countMeals,
@@ -7,6 +8,7 @@ import {
     existingIdempotencyKeys,
     existingMealIds,
     getAllMealItems,
+    getMealById,
     getMealsByDate,
     getMealLoggedLocalDatesInRange,
     getMealsInRange,
@@ -78,6 +80,7 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
             sugar_g: 1,
             alcohol_g: null,
             caffeine_mg: 95,
+            servings: null,
             notes: "with berries",
             idempotency_key: "client:race-1",
         });
@@ -578,5 +581,137 @@ describeDb(pgAvailable !== null, "nutrition meals db", (getCtx) => {
         } finally {
             countSpy.mockRestore();
         }
+    });
+
+    describe("servings", () => {
+        async function twoServingMeal() {
+            const { meal } = await insertMeal(userId, {
+                description: "Pasta plate",
+                meal_type: "dinner",
+                calories: 600,
+                protein_g: 40,
+                logged_at: "2026-03-01T18:00:00.000Z",
+                idempotency_key: "client:servings-1",
+            });
+            return updateMeal(userId, meal.id, { servings: 2 });
+        }
+
+        test("a new meal has no servings and updateMeal stores them to two decimals", async () => {
+            const { meal } = await insertMeal(userId, {
+                description: "Soup",
+                meal_type: "lunch",
+                calories: 200,
+                idempotency_key: "client:servings-2",
+            });
+            expect(meal.servings).toBeNull();
+            const saved = await updateMeal(userId, meal.id, {
+                servings: 1.456,
+            });
+            expect(saved.servings).toBe(1.46);
+            expect((await getMealById(userId, meal.id))!.servings).toBe(1.46);
+        });
+
+        test("a description, time, notes or meal type edit keeps the servings", async () => {
+            const meal = await twoServingMeal();
+            const edited = await updateMeal(userId, meal.id, {
+                description: "Big pasta plate",
+                meal_type: "lunch",
+                notes: "late",
+                logged_at: "2026-03-01T19:00:00.000Z",
+            });
+            expect(edited.servings).toBe(2);
+            expect(edited.calories).toBe(600);
+        });
+
+        test("setting any total clears the servings", async () => {
+            for (const fields of [
+                { calories: 500 },
+                { protein_g: 30 },
+                { carbs_g: 10 },
+                { fat_g: 10 },
+                { fiber_g: 3 },
+                { sugar_g: 3 },
+                { alcohol_g: 3 },
+                { caffeine_mg: 90 },
+            ]) {
+                const meal = await twoServingMeal();
+                const edited = await updateMeal(userId, meal.id, fields);
+                expect(edited.servings).toBeNull();
+                await deleteMeal(userId, meal.id);
+            }
+        });
+
+        test("setting the items clears the servings", async () => {
+            const meal = await twoServingMeal();
+            const edited = await updateMeal(userId, meal.id, {
+                items: [
+                    {
+                        household_id: householdId,
+                        food_id: null,
+                        recipe_id: null,
+                        label: "Rice",
+                        amount: 1,
+                        unit: "cup",
+                        grams: null,
+                        portions: null,
+                        calories: 200,
+                        protein_g: 4,
+                        carbs_g: 44,
+                        fat_g: 0,
+                        fiber_g: null,
+                        sugar_g: null,
+                        alcohol_g: null,
+                        caffeine_mg: null,
+                        sort_order: 0,
+                    },
+                ],
+            });
+            expect(edited.servings).toBeNull();
+        });
+
+        test("totals sent together with servings keep the servings, and null clears them", async () => {
+            const meal = await twoServingMeal();
+            const rescaled = await updateMeal(userId, meal.id, {
+                calories: 900,
+                servings: 3,
+            });
+            expect(rescaled.servings).toBe(3);
+            expect(rescaled.calories).toBe(900);
+            const cleared = await updateMeal(userId, meal.id, {
+                servings: null,
+            });
+            expect(cleared.servings).toBeNull();
+        });
+    });
+});
+
+describe("meals.csv and servings", () => {
+    test("a meal's servings is not exported: its totals are, so a re-import reads 1 serving", () => {
+        const csv = buildMealsCsv(
+            [
+                {
+                    id: "m1",
+                    user_id: "u1",
+                    logged_at: "2026-03-01T12:00:00.000Z",
+                    meal_type: "lunch",
+                    description: "Soup",
+                    calories: 600,
+                    protein_g: 20,
+                    carbs_g: null,
+                    fat_g: null,
+                    fiber_g: null,
+                    sugar_g: null,
+                    alcohol_g: null,
+                    caffeine_mg: null,
+                    servings: 2,
+                    notes: null,
+                    idempotency_key: null,
+                },
+            ],
+            "UTC",
+        );
+        const [header, row] = csv.split("\n");
+        expect(header).not.toContain("servings");
+        expect(row).toContain("600");
     });
 });

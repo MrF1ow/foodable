@@ -1856,6 +1856,58 @@ export async function deleteFridgeItemAdjust(
     return true;
 }
 
+export type RemoveFridgeLocationResult = {
+    /** False when the place was already gone. */
+    removed: boolean;
+    /** How many items went with it. */
+    items: number;
+};
+
+/**
+ * Remove a fridge place and the items filed under it. Each item goes through
+ * {@link deleteFridgeItemAdjust}, so the stock ledger keeps one adjust movement
+ * per item and `ledgerMatchesStock` still holds; only then is the place
+ * deleted. `transaction` wraps the whole removal (the web route passes the
+ * database's); with none it runs as it is, which memory stores need.
+ */
+export async function removeFridgeLocation(
+    fridge: FridgeStore,
+    stock: StockStore,
+    foods: FoodsStore,
+    input: {
+        householdId: string;
+        locationId: string;
+        actorUserId?: string | null;
+        transaction?: <T>(fn: () => Promise<T>) => Promise<T>;
+    },
+): Promise<RemoveFridgeLocationResult> {
+    const transaction =
+        input.transaction ?? (<T>(fn: () => Promise<T>) => fn());
+    return transaction(async () => {
+        const locations = await fridge.listLocations(input.householdId);
+        if (!locations.some((row) => row.id === input.locationId)) {
+            return { removed: false, items: 0 };
+        }
+        const filed = (await fridge.listItems(input.householdId)).filter(
+            (item) => item.locationId === input.locationId,
+        );
+        let items = 0;
+        for (const item of filed) {
+            const deleted = await deleteFridgeItemAdjust(fridge, stock, foods, {
+                householdId: input.householdId,
+                itemId: item.id,
+                actorUserId: input.actorUserId,
+            });
+            if (deleted) items += 1;
+        }
+        const removed = await fridge.deleteLocation(
+            input.householdId,
+            input.locationId,
+        );
+        return { removed, items };
+    });
+}
+
 export async function discardFridgeItem(
     fridge: FridgeStore,
     stock: StockStore,

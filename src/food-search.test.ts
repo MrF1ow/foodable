@@ -1,4 +1,13 @@
-import { test, expect, mock, beforeEach, afterEach, describe } from "bun:test";
+import {
+    test,
+    expect,
+    mock,
+    beforeAll,
+    beforeEach,
+    afterAll,
+    afterEach,
+    describe,
+} from "bun:test";
 import { searchFoodsByName } from "./food-search.js";
 import {
     createMemoryFlags,
@@ -46,8 +55,21 @@ function food(
     };
 }
 
+let realUserAgent: string | undefined;
+
+beforeAll(() => {
+    realUserAgent = process.env.OFF_USER_AGENT;
+});
+
 beforeEach(() => {
     process.env.OFF_USER_AGENT = "foodable-test (test@example.com)";
+});
+
+// Later test files in the same run must not see this file's user agent, or
+// their searches would reach Open Food Facts for real.
+afterAll(() => {
+    if (realUserAgent === undefined) delete process.env.OFF_USER_AGENT;
+    else process.env.OFF_USER_AGENT = realUserAgent;
 });
 
 afterEach(() => {

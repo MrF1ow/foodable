@@ -206,7 +206,7 @@ function anchoredItem(item: MenuItem, checks: boolean): string {
     }
 }
 
-/** The trigger of a row menu: the face of an Item row, reading title, value and a chevron. */
+/** The trigger of a row menu: the face of an Item row, reading title and value (a drop-down shows no chevron: it opens in place). */
 function rowTrigger(row: {
     title: string;
     value: string;
@@ -215,7 +215,7 @@ function rowTrigger(row: {
     const subtitle = row.subtitle
         ? `<span class="fd-item-row__subtitle">${esc(row.subtitle)}</span>`
         : "";
-    return `<button type="button" class="fd-item-row__face fd-item-row__face--link fd-menu__row" data-fd-menu-trigger aria-haspopup="menu" aria-expanded="false"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="${esc(row.title)}">${esc(row.title)}</span></span>${subtitle}</span><span class="fd-item-row__value">${esc(row.value)}</span><span class="fd-item-row__trail fd-item-row__chevron" aria-hidden="true">${icon("chevron-right")}</span></button>`;
+    return `<button type="button" class="fd-item-row__face fd-item-row__face--link fd-menu__row" data-fd-menu-trigger aria-haspopup="menu" aria-expanded="false"><span class="fd-item-row__main"><span class="fd-item-row__line"><span class="fd-item-row__title" title="${esc(row.title)}">${esc(row.title)}</span></span>${subtitle}</span><span class="fd-item-row__value">${esc(row.value)}</span></button>`;
 }
 
 /**

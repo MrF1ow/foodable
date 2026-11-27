@@ -5,7 +5,7 @@
 import type { Notify } from "./foods.js";
 import type { NotificationEvent } from "./notifications.js";
 import type { RecipesStore } from "./recipes.js";
-import { RECIPE_DRAFT_REFUSAL } from "./recipe-import.js";
+import { RECIPE_DRAFT_REFUSAL, isRecipeDraft } from "./recipe-import.js";
 
 export const PLAN_SLOTS = ["breakfast", "lunch", "dinner", "snack"] as const;
 export type PlanSlot = (typeof PLAN_SLOTS)[number];
@@ -89,6 +89,13 @@ export type NewPlanRule = {
     /** The people eating it; default none. */
     memberIds?: readonly string[];
     createdBy?: string | null;
+    /**
+     * Days already taken off the series (a repeat that carries on from an
+     * earlier one keeps what the person set on its days); default none.
+     */
+    skippedOn?: readonly string[];
+    /** The series' last day; default none, the series goes on. */
+    endsOn?: string | null;
 };
 
 export type NewRecipePlan = {
@@ -180,6 +187,11 @@ export type PlansStore = {
         ruleId: string,
         date: string,
     ): Promise<PlanRule | null>;
+    /**
+     * Deletes a repeat, with the days it holds and the ones taken off it. False
+     * when the household has no such repeat. One-offs stay as they are.
+     */
+    removeRule(householdId: string, ruleId: string): Promise<boolean>;
 };
 
 /** What a move did: the plan, and whether the move was refused as already planned. */
@@ -414,6 +426,14 @@ export const PLAN_NAMED_SERVINGS_REFUSAL =
     "This plan is for named people; change their portions instead.";
 
 /**
+ * What changing the repeat of an entry on a day that has passed is refused
+ * with: a repeat change cuts the series where the entry is, so from a past day
+ * it would erase the days between that day and today.
+ */
+export const PLAN_PAST_REPEAT_REFUSAL =
+    "That day has passed. Change the repeat from today or a later day.";
+
+/**
  * The servings a plan holds when none are given: the recipe's yield, or when
  * people are named the sum of their saved portions (a person with none counts
  * one), so no servings are left over to count at the base recipe.
@@ -461,6 +481,13 @@ export function checkPlanDays(value: unknown): number[] {
         );
     }
     return [...new Set(value as number[])].sort((a, b) => a - b);
+}
+
+/** The days taken off a series: real days, once each, in order; none when nothing is given. */
+export function checkPlanSkippedDays(
+    value: readonly string[] | null | undefined,
+): string[] {
+    return [...new Set((value ?? []).map(checkPlanDate))].sort();
 }
 
 const MS_PER_DAY = 86_400_000;
@@ -1013,13 +1040,545 @@ function planEvent(
     change: "planned" | "unplanned" | "moved",
     plan: Pick<RecipePlan, "recipeId" | "date" | "slot">,
     recipeName: string | null,
+    more: Record<string, unknown> = {},
 ): NotificationEvent {
     return {
         kind: "week_plan_changes",
         subjectKind: "recipe",
         subjectId: plan.recipeId,
-        payload: { recipeName, date: plan.date, slot: plan.slot, change },
+        payload: {
+            recipeName,
+            date: plan.date,
+            slot: plan.slot,
+            change,
+            ...more,
+        },
     };
+}
+
+/**
+ * Whether a repeat still shows a day before `cut`: a start day on or after it,
+ * days all taken off, or weekdays none of which fall before it show none.
+ */
+function showsDayBefore(rule: PlanRule, cut: string): boolean {
+    if (cut <= rule.startsOn) return false;
+    return (
+        expandRules([rule], rule.startsOn, shiftPlanDate(cut, -1)).length > 0
+    );
+}
+
+/** What a person or an agent may change on one planned entry. */
+export type PlanPatch = {
+    recipeId?: string;
+    date?: string;
+    slot?: string;
+    servings?: number;
+    repeat?: string;
+    /** The weekdays of `repeat: "days"`, 0 = Sunday. */
+    days?: readonly number[];
+};
+
+/**
+ * The stored rows a change is about to write to, told before the first write:
+ * the repeat it ends (`updated`), removes when nothing of it is left before
+ * the change (`deleted`) or takes a day off (`updated`), and the one-off it
+ * edits in place (`updated`) or replaces (`deleted`). Rows the change adds are
+ * in `PlanUpdate.created`.
+ */
+export type PlanTouch = {
+    rule: { id: string; change: "updated" | "deleted" } | null;
+    plan: { id: string; change: "updated" | "deleted" } | null;
+};
+
+/** What `updatePlannedRecipe` did, and what the entry is now. */
+export type PlanUpdate = {
+    /** The entry as the week shows it now; as it was when nothing was written. */
+    plan: RecipePlan;
+    /** How the entry repeats now: `once` for a one-off. */
+    repeat: PlanRepeat;
+    days: number[];
+    /** Nothing was written: no field differed, or the day already held the recipe. */
+    unchanged: boolean;
+    /** The recipe is already planned on the day and meal asked for. */
+    alreadyPlanned: boolean;
+    /** The rows this call made, for an undo record. */
+    created: { planId: string | null; ruleId: string | null };
+};
+
+/**
+ * Changes one planned entry: its recipe, day, meal, servings and repeat. Each
+ * field is compared with the entry's own value and only the ones that differ
+ * are acted on, so a save with nothing changed writes nothing.
+ *
+ * Repeat and weekdays as they are: a change of recipe, day, meal or servings is
+ * for that day only. A day of a repeat leaves its series (as `movePlan` does,
+ * servings included) and a one-off is changed in place, or replaced when the
+ * recipe changes.
+ *
+ * Repeat or weekdays changed: the series from that day on changes, and the days
+ * before it are never touched. On a day of a repeat the old series ends before
+ * the earlier of the entry's day and the new day, and a new series starts on
+ * the new day with the recipe, meal, servings and people asked for, carrying
+ * the old one's skipped days from then on (but not the new day itself: a day
+ * asked for is planned) and its last day. A repeat set to
+ * once ends the old series before the entry's own day (a day moved earlier
+ * does not cut the days between) and plans the new day as a one-off. A series
+ * that shows no day before where it ends is removed instead of ended, so no
+ * repeat is left that can never show a day. A one-off given a repeat is
+ * deleted and its day becomes a day of the new series. From an entry on a
+ * day that has passed a repeat change is refused (`PLAN_PAST_REPEAT_REFUSAL`),
+ * never clamped: past days are not rewritten.
+ *
+ * Everything runs in `deps.transaction`: a refusal part-way (a clash with
+ * another repeat) rolls the writes before it back. The household is told once
+ * the transaction has finished. Null when the household has no such entry.
+ */
+export async function updatePlannedRecipe(
+    store: PlansStore,
+    householdId: string,
+    planId: string,
+    patch: PlanPatch,
+    deps: {
+        recipes: Pick<RecipesStore, "getRecipe">;
+        /** The household's today: a day the entry moves or starts on may not be before it. */
+        today: string;
+        notify?: Notify;
+        transaction?: PlanTransaction;
+        /**
+         * The entry's recipe's name when the caller already has it: no read
+         * then. A caller already inside a database transaction passes it, as
+         * a read that fails there would abort that transaction.
+         */
+        recipeName?: string | null;
+        /**
+         * Told what the change is about to write to, before its first write
+         * and with nothing written yet: for a caller that records what it
+         * changes. Not called for a save that changes nothing or is refused
+         * as already planned.
+         */
+        beforeWrite?: (touch: PlanTouch) => Promise<void>;
+    },
+): Promise<PlanUpdate | null> {
+    const runTx: PlanTransaction = deps.transaction ?? ((fn) => fn());
+    const events: NotificationEvent[] = [];
+    // The old recipe's name is read before the transaction, never inside it:
+    // on Postgres a statement that fails aborts the whole transaction, so a
+    // failed read could not be shrugged off there. It is used only when the
+    // entry still has that recipe once the transaction has it locked.
+    let peeked: { recipeId: string; name: string | null } | null = null;
+    if (deps.notify && deps.recipeName === undefined) {
+        const early = await store
+            .getPlan(householdId, planId)
+            .catch(() => null);
+        if (early) {
+            peeked = {
+                recipeId: early.recipeId,
+                name: await deps.recipes
+                    .getRecipe(householdId, early.recipeId)
+                    .then((recipe) => recipe?.name ?? null)
+                    .catch(() => null),
+            };
+        }
+    }
+    const outcome = await runTx(async (): Promise<PlanUpdate | null> => {
+        events.length = 0;
+        const entry = await store.getPlan(householdId, planId);
+        if (!entry) return null;
+        const rule = entry.ruleId
+            ? await store.getRule(householdId, entry.ruleId)
+            : null;
+        if (entry.ruleId && !rule) return null;
+        const current = {
+            repeat: rule?.repeat ?? ("once" as PlanRepeat),
+            days: rule?.days ?? [],
+        };
+        const people = [...(entry.memberIds ?? [])];
+
+        // What was asked for, checked before anything is written.
+        const date =
+            patch.date === undefined ? entry.date : checkPlanDate(patch.date);
+        const slot =
+            patch.slot === undefined ? entry.slot : checkPlanSlot(patch.slot);
+        let servings =
+            patch.servings === undefined
+                ? undefined
+                : checkPlanServingsCapped(patch.servings);
+        if (servings !== undefined && people.length > 0) {
+            if (servings !== entry.servings) {
+                throw new PlanInputError(PLAN_NAMED_SERVINGS_REFUSAL);
+            }
+            servings = undefined;
+        }
+        let nextRepeat = current.repeat;
+        let nextDays = current.days;
+        if (patch.repeat !== undefined || patch.days !== undefined) {
+            nextRepeat =
+                patch.repeat === undefined
+                    ? current.repeat
+                    : checkPlanRepeat(patch.repeat);
+            if (nextRepeat === "days") {
+                nextDays = checkPlanDays(patch.days ?? current.days);
+            } else {
+                if (patch.days && patch.days.length > 0) {
+                    throw new PlanInputError(
+                        "Weekdays go with a repeat of days only.",
+                    );
+                }
+                nextDays = [];
+            }
+        }
+        const recipeChanged =
+            patch.recipeId !== undefined &&
+            patch.recipeId.trim().toLowerCase() !==
+                entry.recipeId.toLowerCase();
+        const dateChanged = date !== entry.date;
+        const slotChanged = slot !== entry.slot;
+        const servingsChanged =
+            servings !== undefined && servings !== entry.servings;
+        const repeatChanged =
+            nextRepeat !== current.repeat ||
+            nextDays.join(",") !== [...current.days].join(",");
+        if (
+            !recipeChanged &&
+            !dateChanged &&
+            !slotChanged &&
+            !servingsChanged &&
+            !repeatChanged
+        ) {
+            return {
+                plan: entry,
+                repeat: current.repeat,
+                days: [...current.days],
+                unchanged: true,
+                alreadyPlanned: false,
+                created: { planId: null, ruleId: null },
+            };
+        }
+        // A repeat change cuts the series where this entry is: from a day
+        // that has passed it would take that day and every day after it up to
+        // today, which are never rewritten. Today and later days are fine.
+        if (repeatChanged && entry.date < deps.today) {
+            throw new PlanInputError(PLAN_PAST_REPEAT_REFUSAL);
+        }
+        if (dateChanged || repeatChanged) checkPlanDay(date, deps.today);
+        let nextRecipeId = entry.recipeId;
+        let nextRecipeName: string | null = null;
+        if (recipeChanged) {
+            nextRecipeId = patch.recipeId!.trim();
+            const recipe = await deps.recipes.getRecipe(
+                householdId,
+                nextRecipeId,
+            );
+            if (!recipe) {
+                throw new PlanInputError(
+                    "That recipe is not in the household.",
+                );
+            }
+            if (isRecipeDraft(recipe)) {
+                throw new PlanInputError(RECIPE_DRAFT_REFUSAL);
+            }
+            nextRecipeName = recipe.name;
+        }
+        const keptServings = servings ?? entry.servings;
+        const oldRecipeName =
+            deps.recipeName !== undefined
+                ? deps.recipeName
+                : peeked &&
+                    peeked.recipeId.toLowerCase() ===
+                        entry.recipeId.toLowerCase()
+                  ? peeked.name
+                  : null;
+        const newName = recipeChanged ? nextRecipeName : oldRecipeName;
+        const touching = (touch: PlanTouch) => deps.beforeWrite?.(touch);
+        // What already stands on a day for a recipe and meal, other than this
+        // entry; with a repeat changing, the old series' own days from the cut
+        // on are about to go, so they do not count (the ones before it stay).
+        const heldOn = async (
+            on: string,
+            recipeId: string,
+            where: PlanSlot,
+            cutAt: string | null = null,
+        ): Promise<RecipePlan | undefined> =>
+            (await store.listPlans(householdId, on, on)).find(
+                (p) =>
+                    p.recipeId.toLowerCase() === recipeId.toLowerCase() &&
+                    p.slot === where &&
+                    p.id !== entry.id &&
+                    !(
+                        repeatChanged &&
+                        rule &&
+                        p.ruleId === rule.id &&
+                        (cutAt === null || p.date >= cutAt)
+                    ),
+            );
+        const refused = async (there: RecipePlan): Promise<PlanUpdate> => {
+            const where = there.ruleId
+                ? await store.getRule(householdId, there.ruleId)
+                : null;
+            return {
+                plan: there,
+                repeat: where?.repeat ?? "once",
+                days: where ? [...where.days] : [],
+                unchanged: true,
+                alreadyPlanned: true,
+                created: { planId: null, ruleId: null },
+            };
+        };
+        const noRecipe = () =>
+            new PlanInputError("That recipe is not in the household.");
+
+        if (!repeatChanged) {
+            // One day: a one-off is changed in place, a day of a series leaves it.
+            if (!recipeChanged) {
+                if (dateChanged || slotChanged) {
+                    const there = await heldOn(date, entry.recipeId, slot);
+                    if (there) return refused(there);
+                }
+                await touching({
+                    rule: entry.ruleId
+                        ? { id: entry.ruleId, change: "updated" }
+                        : null,
+                    plan: entry.ruleId
+                        ? null
+                        : { id: entry.id, change: "updated" },
+                });
+                const moved = await store.movePlan(
+                    householdId,
+                    entry.id,
+                    date,
+                    slot,
+                    servingsChanged ? servings : undefined,
+                );
+                if (!moved) return null;
+                if (moved.alreadyPlanned) return refused(moved.plan);
+                if (dateChanged || slotChanged) {
+                    events.push(
+                        planEvent("moved", moved.plan, oldRecipeName, {
+                            fromDate: entry.date,
+                            fromSlot: entry.slot,
+                        }),
+                    );
+                }
+                return {
+                    plan: moved.plan,
+                    repeat: "once",
+                    days: [],
+                    unchanged: false,
+                    alreadyPlanned: false,
+                    created: {
+                        planId:
+                            moved.plan.id !== entry.id ? moved.plan.id : null,
+                        ruleId: null,
+                    },
+                };
+            }
+            const there = await heldOn(date, nextRecipeId, slot);
+            if (there) return refused(there);
+            await touching({
+                rule: entry.ruleId
+                    ? { id: entry.ruleId, change: "updated" }
+                    : null,
+                plan: entry.ruleId ? null : { id: entry.id, change: "deleted" },
+            });
+            await store.removePlan(householdId, entry.id);
+            const added = await store.addPlan({
+                householdId,
+                recipeId: nextRecipeId,
+                date,
+                slot,
+                servings: keptServings,
+                memberIds: people,
+                createdBy: entry.createdBy,
+            });
+            if (!added) throw noRecipe();
+            events.push(planEvent("unplanned", entry, oldRecipeName));
+            events.push(planEvent("planned", added, newName));
+            return {
+                plan: added,
+                repeat: "once",
+                days: [],
+                unchanged: false,
+                alreadyPlanned: false,
+                created: { planId: added.id, ruleId: null },
+            };
+        }
+
+        // The series from this day on. A new series starts on the new day, so
+        // the old one ends before the earlier of that and the entry's day. A
+        // one-off takes the days of the old series from the entry's day on
+        // only: the ones before it stay, whatever day the one-off is on.
+        const cut = rule ? (date < entry.date ? date : entry.date) : null;
+        // An old series that shows nothing before the cut is removed: ended
+        // there it would be a row that can never show a day.
+        const endSeries = async (series: PlanRule, before: string) => {
+            if (showsDayBefore(series, before)) {
+                await store.endRuleBefore(householdId, series.id, before);
+            } else {
+                await store.removeRule(householdId, series.id);
+            }
+        };
+        if (nextRepeat === "once") {
+            if (!rule) return null;
+            const there = await heldOn(date, nextRecipeId, slot, entry.date);
+            if (there) return refused(there);
+            await touching({
+                rule: {
+                    id: rule.id,
+                    change: showsDayBefore(rule, entry.date)
+                        ? "updated"
+                        : "deleted",
+                },
+                plan: null,
+            });
+            await endSeries(rule, entry.date);
+            const added = await store.addPlan({
+                householdId,
+                recipeId: nextRecipeId,
+                date,
+                slot,
+                servings: keptServings,
+                memberIds: people,
+                createdBy: entry.createdBy,
+            });
+            if (!added) throw noRecipe();
+            events.push(
+                planEvent("unplanned", entry, oldRecipeName, {
+                    scope: "series",
+                }),
+            );
+            events.push(planEvent("planned", added, newName));
+            return {
+                plan: added,
+                repeat: "once",
+                days: [],
+                unchanged: false,
+                alreadyPlanned: false,
+                created: { planId: added.id, ruleId: null },
+            };
+        }
+        // The old series' skipped days from the cut on carry over, except the
+        // day asked for: it is where the new series starts, and a day the
+        // person picked is a day they want planned, even if the old series
+        // had taken it off. A one-off of this recipe and meal already standing
+        // there (a moved day) still holds the day: the store skips a day such
+        // a one-off holds, so nothing is planned twice.
+        const skippedOn = rule
+            ? rule.skippedOn.filter(
+                  (day) => cut !== null && day >= cut && day !== date,
+              )
+            : [];
+        const endsOn = rule ? rule.endsOn : null;
+        if (endsOn !== null && endsOn < date) {
+            throw new PlanInputError(
+                `That series ends on ${overlapDayText(endsOn)}. Pick a day on or before it.`,
+            );
+        }
+        const reaches = firstRuleEntry({
+            id: "",
+            householdId,
+            recipeId: nextRecipeId,
+            slot,
+            servings: keptServings,
+            startsOn: date,
+            repeat: nextRepeat,
+            days: nextDays,
+            endsOn,
+            skippedOn,
+            memberIds: people,
+            createdBy: entry.createdBy,
+            createdAt: "",
+        });
+        if (!reaches) {
+            throw new PlanInputError(
+                "That repeat has no day left. Pick an earlier start or other days.",
+            );
+        }
+        if (rule && cut !== null) {
+            await touching({
+                rule: {
+                    id: rule.id,
+                    change: showsDayBefore(rule, cut) ? "updated" : "deleted",
+                },
+                plan: null,
+            });
+            await endSeries(rule, cut);
+        } else {
+            // A one-off becomes a day of the series: it goes, so it cannot clash.
+            await touching({
+                rule: null,
+                plan: { id: entry.id, change: "deleted" },
+            });
+            await store.removePlan(householdId, entry.id);
+        }
+        let added: PlanRule | null;
+        try {
+            added = await store.addRule({
+                householdId,
+                recipeId: nextRecipeId,
+                slot,
+                servings: keptServings,
+                startsOn: date,
+                repeat: nextRepeat,
+                days: nextDays,
+                memberIds: people,
+                createdBy: entry.createdBy,
+                skippedOn,
+                endsOn,
+            });
+        } catch (err) {
+            // The store knows the clash, this function knows the name.
+            if (err instanceof PlanRepeatOverlapError) {
+                throw new PlanRepeatOverlapError(
+                    slot,
+                    newName,
+                    err.endedOn,
+                    err.clash,
+                );
+            }
+            throw err;
+        }
+        if (!added) throw noRecipe();
+        const standing = async (day: string): Promise<RecipePlan | null> =>
+            (await store.listPlans(householdId, day, day)).find(
+                (p) => p.recipeId === added!.recipeId && p.slot === added!.slot,
+            ) ?? null;
+        // The day asked for, or the first day the repeat reaches: where the
+        // one-off stands on every day it covers, that one-off.
+        const shown = (await standing(date)) ?? (await standing(reaches.date));
+        if (!shown) {
+            throw new PlanInputError(
+                "That repeat has no day left. Pick an earlier start or other days.",
+            );
+        }
+        if (recipeChanged || rule || dateChanged || slotChanged) {
+            events.push(
+                planEvent(
+                    "unplanned",
+                    entry,
+                    oldRecipeName,
+                    rule ? { scope: "series" } : {},
+                ),
+            );
+        }
+        events.push(
+            planEvent("planned", shown, newName, {
+                repeat: nextRepeat,
+                ...(nextRepeat === "days" ? { days: nextDays } : {}),
+            }),
+        );
+        return {
+            plan: shown,
+            repeat: nextRepeat,
+            days: [...nextDays],
+            unchanged: false,
+            alreadyPlanned: false,
+            created: { planId: null, ruleId: added.id },
+        };
+    });
+    if (outcome && !outcome.unchanged && deps.notify) {
+        for (const event of events) await deps.notify(event);
+    }
+    return outcome;
 }
 
 /** Position of a slot within the day, for ordering. */
@@ -1283,12 +1842,15 @@ export function createMemoryPlansStore(
             ) {
                 return null;
             }
+            const skippedOn = checkPlanSkippedDays(input.skippedOn);
+            const endsOn =
+                input.endsOn == null ? null : checkPlanDate(input.endsOn);
             const candidate = {
                 startsOn,
-                endsOn: null,
+                endsOn,
                 repeat,
                 days,
-                skippedOn: [],
+                skippedOn,
             };
             const clashing = householdRules(input.householdId).filter(
                 (r) =>
@@ -1308,8 +1870,8 @@ export function createMemoryPlansStore(
                 startsOn,
                 repeat,
                 days,
-                endsOn: null,
-                skippedOn: [],
+                endsOn,
+                skippedOn,
                 memberIds: checkPlanMembers(input.memberIds),
                 createdBy: input.createdBy ?? null,
                 createdAt: new Date().toISOString().replace("Z", "+00:00"),
@@ -1338,6 +1900,14 @@ export function createMemoryPlansStore(
             return householdRules(householdId)
                 .filter((r) => r.endsOn === null)
                 .map(copyRule);
+        },
+        async removeRule(householdId, ruleId) {
+            const at = rules.findIndex(
+                (r) => r.householdId === householdId && r.id === ruleId,
+            );
+            if (at < 0) return false;
+            rules.splice(at, 1);
+            return true;
         },
         async endRuleBefore(householdId, ruleId, date) {
             const lastDay = shiftPlanDate(date, -1);

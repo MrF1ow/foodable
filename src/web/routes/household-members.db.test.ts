@@ -424,7 +424,9 @@ describeDb(
                     expect(html).toContain(
                         "Kit was added as a member, but making them an admin didn't work.",
                     );
-                    expect(html).toContain("Make admin");
+                    expect(html).toContain(
+                        "Open their page and set Role to Admin to try again.",
+                    );
                     // Not the database's own words.
                     expect(html).not.toContain("boom from the database");
                     expect(html).not.toContain("Failed to change role");
@@ -515,28 +517,30 @@ describeDb(
                     (m) => m[1],
                 );
 
-            test("the owner's menu for another person has role, ownership and removal; for themselves none", async () => {
+            test("the owner's page for another person has a Role drop-down (Member, Admin, Owner) and a red Remove row, no ⋯; for themselves neither", async () => {
                 const html = await (
                     await request(
                         owner,
                         `/settings/household/members/${member}`,
                     )
                 ).text();
-                expect(items(html).slice(0, 3)).toEqual([
-                    "Make admin",
-                    "Make owner",
-                    "Remove Bob",
-                ]);
+                expect(items(html)).toEqual(["Member", "Admin", "Owner"]);
+                expect(html.match(/data-fd-menu-trigger/g)).toHaveLength(1);
                 expect(html).toContain("fd-member-make-owner");
+                expect(html).toContain('commandfor="fd-member-remove"');
+                expect(html).toContain("fd-item-row--danger");
                 expect(html).toContain("Last active");
                 const self = await (
                     await request(owner, `/settings/household/members/${owner}`)
                 ).text();
                 expect(self).not.toContain("data-fd-menu");
+                expect(self).not.toContain("fd-item-row--danger");
                 const adminPage = await (
                     await request(owner, `/settings/household/members/${admin}`)
                 ).text();
-                expect(items(adminPage)[0]).toBe("Make member");
+                expect(items(adminPage)).toEqual(["Member", "Admin", "Owner"]);
+                expect(adminPage).toContain('name="role" value="member"');
+                expect(adminPage).not.toContain('name="role" value="admin"');
             });
 
             test("an admin and a member see a person's page with no menu", async () => {
@@ -550,10 +554,12 @@ describeDb(
                     expect(html).toContain('data-fd-settings-page="household"');
                     expect(html).not.toContain("data-fd-menu");
                     expect(html).not.toContain("Make owner");
+                    expect(html).not.toContain("fd-item-row--danger");
+                    expect(html).toContain('fd-item-row__value">Owner<');
                 }
             });
 
-            test("a role change lands on that person's page with no toast; Make member undoes it", async () => {
+            test("a role change lands on that person's page with no toast; choosing Member undoes it", async () => {
                 const up = await request(
                     owner,
                     `/settings/household/members/${member}/role`,
@@ -576,7 +582,7 @@ describeDb(
                     )
                 ).text();
                 expect(page).toContain('fd-item-row__value">Admin<');
-                expect(items(page)[0]).toBe("Make member");
+                expect(page).toContain('name="role" value="member"');
                 const down = await request(
                     owner,
                     `/settings/household/members/${member}/role`,
@@ -641,7 +647,7 @@ describeDb(
                 );
                 expect(noTick.status).toBe(400);
                 expect(await noTick.text()).toContain(
-                    "Confirm removing Bob from the menu.",
+                    "Confirm removing Bob in the sheet.",
                 );
                 expect(await getHouseholdMembership(member)).not.toBeNull();
             });

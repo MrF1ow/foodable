@@ -2,7 +2,16 @@
 const TOAST_CATALOG = null;
 
 const TOAST_MAX_VISIBLE = 3;
-const TOAST_AUTO_DISMISS_MS = 4000;
+// A toast leaves 3 s after it shows, on a tap, or on the next navigation,
+// whichever comes first. Hover and focus never pause it: iPhone Safari fires
+// mouseenter on a tap and never a mouseleave, so a pause there never ended.
+const TOAST_AUTO_DISMISS_MS = 3000;
+const TOAST_OUT_MS = 220;
+
+// The live toasts and the timer each one waits on.
+const toastTimers = new Map();
+// Toasts already on their way out, so a tap after the timer (or the reverse) is one exit.
+const toastLeaving = new WeakSet();
 const TOAST_ICONS = {
     success: "\u2713",
     info: "i",
@@ -63,13 +72,34 @@ function stackToasts(region) {
     }
 }
 
+function cancelToastTimer(el) {
+    const timer = toastTimers.get(el);
+    if (timer != null) window.clearTimeout(timer);
+    toastTimers.delete(el);
+}
+
 function dismissToast(el, region) {
     if (!el || !el.isConnected) return;
+    if (toastLeaving.has(el)) return;
+    toastLeaving.add(el);
+    cancelToastTimer(el);
     el.classList.add("toast-item--out");
     window.setTimeout(function () {
         if (el.parentNode === region) region.removeChild(el);
         stackToasts(region);
-    }, 220);
+    }, TOAST_OUT_MS);
+}
+
+// A navigation takes every toast with it, at once and without the exit motion.
+// A toast meant for the page a POST redirects to is seeded on turbo:load, after
+// this runs, so it still shows.
+function clearToasts() {
+    const region = getToastRegion();
+    toastTimers.forEach(function (_timer, el) {
+        cancelToastTimer(el);
+    });
+    if (!region) return;
+    while (region.firstChild) region.removeChild(region.firstChild);
 }
 
 function showToastMessage(opts) {
@@ -114,50 +144,23 @@ function showToastMessage(opts) {
     stackToasts(region);
 
     while (region.children.length > TOAST_MAX_VISIBLE) {
+        cancelToastTimer(region.lastChild);
         region.removeChild(region.lastChild);
     }
 
-    let timer = null;
-    let paused = false;
+    // A tap anywhere on the toast closes it. An action button runs first: its
+    // form submits after this click handler, and the toast leaves after its exit
+    // motion, so the form is still there to submit.
+    el.addEventListener("click", function () {
+        dismissToast(el, region);
+    });
 
-    function clearTimer() {
-        if (timer != null) {
-            window.clearTimeout(timer);
-            timer = null;
-        }
-    }
-
-    function scheduleDismiss() {
-        clearTimer();
-        if (paused) return;
-        timer = window.setTimeout(function () {
+    toastTimers.set(
+        el,
+        window.setTimeout(function () {
             dismissToast(el, region);
-        }, dismissMs);
-    }
-
-    function pause() {
-        paused = true;
-        clearTimer();
-        el.classList.add("toast-item--paused");
-    }
-
-    function resume() {
-        paused = false;
-        el.classList.remove("toast-item--paused");
-        scheduleDismiss();
-    }
-
-    el.addEventListener("mouseenter", pause);
-    el.addEventListener("mouseleave", resume);
-    el.addEventListener("focusin", pause);
-    el.addEventListener("focusout", resume);
-    if (!hasAction) {
-        el.addEventListener("click", function () {
-            dismissToast(el, region);
-        });
-    }
-
-    scheduleDismiss();
+        }, dismissMs),
+    );
 }
 
 function consumeToastSeed(root) {
@@ -190,6 +193,8 @@ function toastByKey(key, params) {
 
 window.FoodableApp.toast = toastByKey;
 window.FoodableApp.toast.show = showToastMessage;
+
+document.addEventListener("turbo:visit", clearToasts);
 
 window.FoodableApp.onLoad(function (root) {
     consumeToastSeed(root);

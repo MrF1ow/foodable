@@ -24,7 +24,7 @@ function tagWith(html: string, needle: string): string {
 }
 
 describe("monthPicker (FigCraft Month picker)", () => {
-    test("the row is an Item row: its title, the day it holds, a chevron and the field the day posts as", () => {
+    test("the row is an Item row: its title, the day it holds and the field the day posts as, with no chevron", () => {
         const { row } = monthPicker(base);
         expect(row).toContain('<li class="fd-item-row');
         expect(row).toContain(
@@ -32,7 +32,8 @@ describe("monthPicker (FigCraft Month picker)", () => {
         );
         expect(row).toContain('fd-item-row__title" title="Starts">Starts<');
         expect(row).toContain('fd-item-row__value">Today<');
-        expect(row).toContain("fd-icon--chevron-right");
+        expect(row).not.toContain("fd-item-row__chevron");
+        expect(row).not.toContain("fd-icon--chevron-right");
         const toggle = tagWith(row, "data-fd-month-toggle");
         expect(toggle).toContain('aria-controls="starts-picker"');
         expect(toggle).toContain('aria-expanded="false"');
@@ -45,7 +46,6 @@ describe("monthPicker (FigCraft Month picker)", () => {
                 itemRow({
                     title: "Starts",
                     value: "Today",
-                    trailing: { kind: "chevron" },
                     toggles: {
                         controls: "starts-picker",
                         expanded: false,

@@ -49,7 +49,7 @@ Setting `SESSION_SECRET` on an existing deploy logs everyone out of the web app 
 - [ ] Grok CLI: point the `foodable` MCP server at `https://<domain>/mcp` and sign in again (`/mcps` → foodable → `i`). The local session on `http://localhost:8080/mcp` does not carry over.
 - [ ] A username member signs in by typing just the username.
 - [ ] As a member (not the owner), adding a person and rotating the token in Settings › Household are both refused.
-- [ ] Optional: as the owner, hand ownership to a member and back (Settings › Household → the person → ⋯ → Make owner, then confirm "Make … the owner?").
+- [ ] Optional: as the owner, hand ownership to a member and back (Settings › Household → the person → Role → Owner, then confirm "Make … the owner?").
 - [ ] As the owner, make a member an admin: they can add a person but cannot rotate the token, and you stay the owner. As a plain member, add and remove one of your own rules.
 - [ ] Bots: Settings › Household → Rotate household token, copy the token once, then configure
       `Authorization: Bearer nt_hh_…` against `https://<domain>/mcp`. The bot passes `user_id` for the person it acts for.

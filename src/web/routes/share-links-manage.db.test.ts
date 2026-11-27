@@ -512,7 +512,8 @@ describeDb(pgAvailable !== null, "share links from the app", (getCtx) => {
         );
         const groceriesOn = await page("/kitchen/groceries");
         expect(groceriesOn).toContain('id="fd-grocery-share-sheet"');
-        expect(groceriesOn).toContain("Share list");
+        // The Groceries ⋯ that opened it is gone, so no row says Share list.
+        expect(groceriesOn).not.toContain("Share list");
         expect(await page("/settings/household")).toContain(
             'href="/settings/household/shared-links"',
         );

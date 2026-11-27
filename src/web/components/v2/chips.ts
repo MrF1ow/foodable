@@ -61,7 +61,7 @@ export type ChoiceOption = {
  * (`legend`). The legend is visually hidden unless `showLegend` (the "ADD TO"
  * label above the meal chips). Each chip is
  * `<label class="fd-chip fd-chip--choice"><input type="radio" class="fd-chip__input">…</label>`;
- * `:checked` drives the selected look and `:focus-visible` the ring. The same
+ * `:checked` drives the selected look; the app draws no focus ring. The same
  * `name` must not be reused by another group in the form.
  */
 export function choiceGroup(opts: {

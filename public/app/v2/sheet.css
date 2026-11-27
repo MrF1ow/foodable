@@ -91,7 +91,8 @@
     /* Sized by its content (the actions follow it); scrolls when it overflows. */
     flex: 0 1 auto;
     min-height: 0;
-    /* Room for a field's focus ring, which overflow would otherwise clip. */
+    /* The negative margin and padding cancel out: kept so the body's layout
+       (and a field's edge) does not shift. No ring needs the room any more. */
     margin: -4px;
     padding: 4px;
     overflow-y: auto;
@@ -130,11 +131,6 @@
 .fd-sheet .fd-btn:disabled {
     opacity: 0.5;
     cursor: default;
-}
-
-.fd-sheet .fd-btn:focus-visible {
-    outline: 2px solid var(--accent-text);
-    outline-offset: 2px;
 }
 
 @media (min-width: 1024px) {
@@ -291,11 +287,6 @@
     color: var(--text-secondary);
 }
 
-.fd-sheet__search:focus-within {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: var(--space-2xs);
-}
-
 .fd-sheet__search-icon,
 .fd-sheet__search-action {
     display: grid;
@@ -314,11 +305,6 @@
 
 .fd-sheet__search-action {
     cursor: pointer;
-}
-
-.fd-sheet__search-action:focus-visible {
-    outline: var(--space-2xs) solid var(--accent-text);
-    outline-offset: var(--space-2xs);
 }
 
 .fd-sheet__search-input {

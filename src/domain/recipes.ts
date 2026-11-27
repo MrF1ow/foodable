@@ -12,6 +12,7 @@ import {
     findOrCreateManualFood,
     findOrCreateManualFoodForRecipeImport,
     FoodsInputError,
+    normalizeFoodName,
     similarFoodsForNames,
     SimilarFoodsError,
     type OnSimilar,
@@ -23,6 +24,7 @@ import {
 import { familyIdOf } from "./food-quantity.js";
 import { applyFilters, matchesRecipeQuery } from "./recipe-filters.js";
 import { canonicalUnitText } from "./quantity.js";
+import { isNotMeasuredNote } from "./not-measured.js";
 import {
     missingGramsGap,
     placeholderAmountUnit,
@@ -51,6 +53,7 @@ import {
 } from "./notice-dismissals.js";
 import {
     recheckRecipe,
+    resolveUnresolvedLines,
     type RecipeImport,
     type RecipeProblem,
     type RecipeVerification,
@@ -477,6 +480,29 @@ export function noteForUnmeasuredIngredient(
 ): string | null {
     if (quantity != null) return note;
     return note?.trim() ? note : "to taste";
+}
+
+/**
+ * The note a line keeps when the person sets it to no amount ("0 is to
+ * taste"): their words, with "to taste" after them unless they already say the
+ * line is not measured (`isNotMeasuredNote`), so a prep note such as "finely
+ * chopped" still leaves a line the check accepts. No note is "to taste".
+ */
+export function toTasteNote(note: string | null | undefined): string {
+    const text = note?.trim() ?? "";
+    if (text === "") return "to taste";
+    return isNotMeasuredNote(text) ? text : `${text}, to taste`;
+}
+
+/**
+ * The note an ingredient keeps once it is given an amount again: the "to
+ * taste" `toTasteNote` added comes off (alone, or after the person's words),
+ * so a measured line does not still say it is not measured. Null when nothing
+ * is left.
+ */
+export function measuredNote(note: string | null | undefined): string | null {
+    const text = (note?.trim() ?? "").replace(/(^|,\s*)to taste$/i, "").trim();
+    return text === "" ? null : text;
 }
 
 function parseYield(yieldPortions: number): number {
@@ -1781,6 +1807,8 @@ export async function swapRecipeIngredientFood(
         foodId: string;
         amount?: number | null;
         unit?: string;
+        /** The line's note after the swap; absent keeps the line's own. */
+        note?: string | null;
     },
 ): Promise<RecipeIngredient> {
     await requireIngredient(
@@ -1811,12 +1839,16 @@ export async function swapRecipeIngredientFood(
                 recipe.id,
                 input.ingredientId,
             );
+            const note =
+                input.note === undefined
+                    ? ingredient.note
+                    : parseOptionalText(input.note, "Ingredient note", 500);
             const proposed: RecipeIngredient = {
                 ...ingredient,
                 foodId: food.id,
                 displayName: food.name,
                 quantity,
-                note: noteForUnmeasuredIngredient(quantity, ingredient.note),
+                note: noteForUnmeasuredIngredient(quantity, note),
             };
             await guardBaseEdit(store, recipe, (ingredients) => ({
                 ingredients: ingredients.map((row) =>
@@ -1889,6 +1921,157 @@ export async function addRecipeManualIngredient(
         wrapFoodsError(err);
     }
     return appendIngredientUnderLock(store, input, food, quantity, null);
+}
+
+/**
+ * Which food a line should be: a catalog food by id (a pick), or a name the
+ * person typed, resolved as an agent's `name` is (an exact food, else the
+ * similar-foods question unless `onSimilar` is "create").
+ */
+export type RecipeLineFood =
+    { foodId: string } | { name: string; onSimilar?: OnSimilar };
+
+/**
+ * The edit sheet's Save and the agent's `update_recipe_ingredient`: the line's
+ * amount, unit and note, and its food when another is named. A new food, the
+ * amount and the note go in as one write (`swapRecipeIngredientFood`), so a
+ * saved recipe that the change would break is refused and the line stays as it
+ * was. A name or id that is the line's own food (or none) changes only amount,
+ * unit and note. `amount` null is "to taste"; absent keeps the line's amount
+ * (and, on a swap, its unit unless one is given).
+ */
+export async function editRecipeIngredient(
+    store: RecipesStore,
+    foods: FoodsStore,
+    input: {
+        householdId: string;
+        recipeId: string;
+        ingredientId: string;
+        amount?: number | null;
+        unit?: string;
+        note?: string | null;
+        food?: RecipeLineFood;
+    },
+): Promise<RecipeIngredient> {
+    const { householdId, recipeId, ingredientId } = input;
+    return store.withRecipeLock(householdId, recipeId, async () => {
+        const ingredient = await requireIngredient(
+            store,
+            householdId,
+            recipeId,
+            ingredientId,
+        );
+        let food: Food | null = null;
+        if (input.food) {
+            try {
+                if ("foodId" in input.food) {
+                    food = await findFoodById(
+                        foods,
+                        householdId,
+                        input.food.foodId,
+                    );
+                } else if (input.food.name.trim()) {
+                    const current = ingredient.foodId
+                        ? await foods.getFood(householdId, ingredient.foodId)
+                        : null;
+                    const same =
+                        current != null &&
+                        normalizeFoodName(current.name) ===
+                            normalizeFoodName(input.food.name);
+                    if (!same) {
+                        food = await findOrCreateManualFood(
+                            foods,
+                            householdId,
+                            "food",
+                            input.food.name,
+                            { onSimilar: input.food.onSimilar },
+                        );
+                    }
+                }
+            } catch (err) {
+                wrapFoodsError(err);
+            }
+        }
+        if (food && food.id !== ingredient.foodId) {
+            const keepAmount = input.amount === undefined;
+            return swapRecipeIngredientFood(store, foods, {
+                householdId,
+                recipeId,
+                ingredientId,
+                foodId: food.id,
+                amount: keepAmount
+                    ? (ingredient.quantity?.amount ?? null)
+                    : input.amount,
+                unit: input.unit?.trim()
+                    ? input.unit
+                    : keepAmount
+                      ? ingredient.quantity?.unit
+                      : undefined,
+                note: input.note,
+            });
+        }
+        return updateRecipeIngredient(
+            store,
+            householdId,
+            recipeId,
+            ingredientId,
+            { amount: input.amount, unit: input.unit, note: input.note },
+            foods,
+        );
+    });
+}
+
+/**
+ * An unreadable import line becomes an ingredient: the line is added as the
+ * food the person names (`addRecipeIngredientById`, or
+ * `addRecipeManualIngredient` for a name, which may answer with the
+ * similar-foods question and writes nothing), then dropped from the import's
+ * unresolved lines and the check run again. One lock holds both; a line that
+ * is no longer unresolved is refused before anything is written.
+ */
+export async function resolveLineAsIngredient(
+    store: RecipesStore,
+    foods: FoodsStore,
+    input: {
+        householdId: string;
+        recipeId: string;
+        line: string;
+        food: RecipeLineFood;
+        amount?: number | null;
+        unit?: string;
+    },
+): Promise<RecipeIngredient> {
+    const { householdId, recipeId } = input;
+    const line = input.line.trim();
+    return store.withRecipeLock(householdId, recipeId, async () => {
+        await requireRecipe(store, householdId, recipeId);
+        const importRow = await store.getImport(householdId, recipeId);
+        if (
+            !line ||
+            !importRow?.unresolvedLines.some((l) => l.trim() === line)
+        ) {
+            throw new RecipeInputError("That line is already handled.");
+        }
+        const ingredient =
+            "foodId" in input.food
+                ? await addRecipeIngredientById(store, foods, {
+                      householdId,
+                      recipeId,
+                      foodId: input.food.foodId,
+                      amount: input.amount,
+                      unit: input.unit,
+                  })
+                : await addRecipeManualIngredient(store, foods, {
+                      householdId,
+                      recipeId,
+                      name: input.food.name,
+                      amount: input.amount,
+                      unit: input.unit,
+                      onSimilar: input.food.onSimilar,
+                  });
+        await resolveUnresolvedLines(store, householdId, recipeId, [line]);
+        return ingredient;
+    });
 }
 
 export async function setPersonPortion(
