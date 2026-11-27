@@ -1008,12 +1008,12 @@ export function renderKitchenGroceriesBody(
         ),
     );
     // Only the lines the list shows: a filtered-out store has no rows to open
-    // a sheet or to pick.
+    // a sheet.
     const shownLines = groups.flatMap((group) =>
         group.sections.flatMap((section) => section.lines),
     );
     const checkedCount = groceryCheckedCount(view);
-    const filter = storeFilter(view);
+    const tools = storeFilter(view);
     // Without a store there is no add sheet, so nothing for a plus to open.
     const add =
         view.stores.length > 0
@@ -1023,7 +1023,6 @@ export function renderKitchenGroceriesBody(
               })
             : null;
     const itemCount = groceryHeaderSubtitle(view.openLineCount);
-    const tools = filter;
     const head = renderKitchenHead({
         active: "groceries",
         phoneSubtitle: itemCount,

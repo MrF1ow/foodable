@@ -1,4 +1,13 @@
-import { afterEach, beforeEach, describe, expect, mock, test } from "bun:test";
+import {
+    afterAll,
+    afterEach,
+    beforeAll,
+    beforeEach,
+    describe,
+    expect,
+    mock,
+    test,
+} from "bun:test";
 import { fetchProductFromOFF, type FoodResult } from "../foods.js";
 import { formatLogMacroKcal } from "./log-macro-format.js";
 import { buildMealFromItems } from "./meals.js";
@@ -61,8 +70,21 @@ function mockFetch(body: unknown) {
     ) as unknown as typeof fetch;
 }
 
+let realUserAgent: string | undefined;
+
+beforeAll(() => {
+    realUserAgent = process.env.OFF_USER_AGENT;
+});
+
 beforeEach(() => {
     process.env.OFF_USER_AGENT = "foodable-test (test@example.com)";
+});
+
+// Later test files in the same run must not see this file's user agent, or
+// their searches would reach Open Food Facts for real.
+afterAll(() => {
+    if (realUserAgent === undefined) delete process.env.OFF_USER_AGENT;
+    else process.env.OFF_USER_AGENT = realUserAgent;
 });
 afterEach(() => {
     globalThis.fetch = realFetch;
