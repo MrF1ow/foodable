@@ -1048,7 +1048,10 @@ const TOOLS_BASE: ToolIdentity[] = [
         name: "add_plan_missing_to_groceries",
         category: "recipes",
         badges: ["edit"],
-        params: [{ name: "from", required: false }],
+        params: [
+            { name: "from", required: false },
+            { name: "food_ids", required: false },
+        ],
         hasPhotoHint: false,
     },
     {

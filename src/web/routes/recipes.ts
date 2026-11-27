@@ -114,6 +114,7 @@ import {
     addMissingToGroceries,
     addPlanDays,
     missingForPlan,
+    pickMissingLines,
     WEEK_PLAN_DAYS,
 } from "../../domain/plan-week.js";
 import { householdToday } from "../../db/restock.js";
@@ -1522,16 +1523,28 @@ recipesRoutes.post("/recipes/:id/versions/reset", requireMember, async (c) => {
  */
 recipesRoutes.post("/recipes/plan/add-missing", requireMember, async (c) => {
     const member = siteMember(c);
-    const body = await c.req.parseBody();
+    const body = await c.req.parseBody({ all: true });
     const back = planBackPath(parsePlanBack(formText(body, "back")));
     const inputs = await loadWeekPlanInputs(member.householdId);
-    const lines = missingForPlan(inputs.plans, inputs.recipes, inputs.stock, {
+    const missing = missingForPlan(inputs.plans, inputs.recipes, inputs.stock, {
         from: inputs.today,
         days: WEEK_PLAN_DAYS,
         foodsById: inputs.foodsById,
     });
-    if (lines.length === 0) {
+    if (missing.length === 0) {
         return redirectWithToast(c, back, "plan.missing.none");
+    }
+    // The sheet posts `food_ids_sent` with its ticked boxes: exactly those
+    // foods (found in what is missing now) go on, and none ticked adds
+    // nothing. A form without the marker (an old page) adds every line.
+    const sent = formText(body, "food_ids_sent") === "1";
+    const lines = pickMissingLines(
+        missing,
+        sent ? formTextList(body, "food_ids[]") : null,
+    );
+    if (lines.length === 0) {
+        // toast: none — nothing was ticked, so nothing changes
+        return c.redirect(back, 303);
     }
     const grocery = liveGroceryStore();
     try {

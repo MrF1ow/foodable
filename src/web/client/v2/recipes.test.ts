@@ -533,3 +533,96 @@ test("a discard clears Turbo's cache once the next page has loaded, on any draft
     listener(t, "turbo:load")({});
     expect(turbo.cleared).toBe(1);
 });
+
+/** The Missing for the plan sheet: a form of ticked boxes and its Add button. */
+function setupMissing(ticks: boolean[], values: string[] = []) {
+    const label = new El("Add 3 to groceries");
+    const add = new El();
+    add.children[".fd-btn__label"] = label;
+    const boxes = ticks.map((checked, i) => {
+        const box = new El();
+        (box as any).checked = checked;
+        (box as any).value = values[i] ?? "food-" + i;
+        return box;
+    });
+    const form = new El();
+    form.attrs.set("id", "fd-plan-missing-form");
+    (form as any).id = "fd-plan-missing-form";
+    form.children['input[name="food_ids[]"]'] = boxes;
+    const document = {
+        querySelector: (sel: string) =>
+            sel === '[data-fd-plan-missing-add][form="fd-plan-missing-form"]'
+                ? add
+                : null,
+        querySelectorAll: () => [],
+        getElementById: () => null,
+        addEventListener: () => {},
+    };
+    const load: ((root: any) => void)[] = [];
+    const root = {
+        querySelectorAll: (sel: string) =>
+            sel === "[data-fd-plan-missing]" ? [form] : [],
+    };
+    const src = readFileSync("./src/web/client/v2/recipes.js", "utf8");
+    new Function(
+        "document",
+        "HTMLInputElement",
+        "Element",
+        "FoodableApp",
+        "WeakSet",
+        "location",
+        "Turbo",
+        src,
+    )(
+        document,
+        FakeInput,
+        FakeElement,
+        { onLoad: (fn: (root: any) => void) => load.push(fn) },
+        WeakSet,
+        { pathname: "/recipes", href: "http://x/" },
+        undefined,
+    );
+    for (const fn of load) fn(root);
+    return {
+        add,
+        label,
+        boxes,
+        change: (i: number, checked: boolean) => {
+            (boxes[i] as any).checked = checked;
+            form.listeners.change?.({ target: boxes[i] });
+        },
+    };
+}
+
+test("the Missing sheet's button counts the ticked foods and follows each tick", () => {
+    const t = setupMissing([true, true, true]);
+    expect(t.label.textContent).toBe("Add 3 to groceries");
+    expect(t.add.disabled).toBe(false);
+    t.change(1, false);
+    expect(t.label.textContent).toBe("Add 2 to groceries");
+    expect(t.add.disabled).toBe(false);
+    t.change(1, true);
+    expect(t.label.textContent).toBe("Add 3 to groceries");
+});
+
+test("the Missing sheet's button is disabled with nothing ticked and live again after a tick", () => {
+    const t = setupMissing([true, true]);
+    t.change(0, false);
+    t.change(1, false);
+    expect(t.label.textContent).toBe("Add 0 to groceries");
+    expect(t.add.disabled).toBe(true);
+    t.change(0, true);
+    expect(t.label.textContent).toBe("Add 1 to groceries");
+    expect(t.add.disabled).toBe(false);
+});
+
+test("the Missing sheet's button counts distinct foods: two boxes of one food are one", () => {
+    const t = setupMissing([true, true, true], ["flour", "flour", "eggs"]);
+    expect(t.label.textContent).toBe("Add 2 to groceries");
+    t.change(0, false);
+    // The other flour box is still ticked, so flour still counts.
+    expect(t.label.textContent).toBe("Add 2 to groceries");
+    t.change(1, false);
+    expect(t.label.textContent).toBe("Add 1 to groceries");
+    expect(t.add.disabled).toBe(false);
+});

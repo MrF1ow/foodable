@@ -533,6 +533,76 @@ describeDb(pgAvailable !== null, "week plan tools (db)", (getCtx) => {
     );
 
     test.each(ERAS)(
+        "add_plan_missing_to_groceries with food_ids adds only those missing foods, and without it adds all (%p)",
+        async (era) => {
+            const { sql } = getCtx();
+            const storeId = await seedGroceryStore(sql, householdId);
+            await sql`
+                insert into public.grocery_sections (
+                    id, household_id, store_id, name, sort_order, hidden, is_other
+                )
+                values (
+                    ${crypto.randomUUID()}, ${householdId}, ${storeId},
+                    ${"Other"}, ${0}, ${false}, ${true}
+                )
+            `;
+            await withClient(ownerId, era, async (call) => {
+                const ids: string[] = [];
+                for (const name of ["Flour", "Rice", "Beans", "Oats", "Salt"]) {
+                    const food = await call("upsert_food", { name });
+                    const id = food.structuredContent!.id as string;
+                    ids.push(id);
+                    await call("add_recipe_ingredient", {
+                        recipe_id: recipeId,
+                        food_id: id,
+                        amount: 200,
+                        unit: "g",
+                    });
+                }
+                const today = (await call("get_week_plan")).structuredContent!
+                    .today;
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: today,
+                    slot: "lunch",
+                });
+                const listed = async () =>
+                    (
+                        await sql`
+                            select food_id from public.grocery_lines
+                            where household_id = ${householdId}
+                        `
+                    )
+                        .map((r: { food_id: string }) => r.food_id)
+                        .sort();
+
+                // An empty list and an id that is not missing add nothing.
+                for (const food_ids of [[], [crypto.randomUUID()]]) {
+                    const none = await call("add_plan_missing_to_groceries", {
+                        food_ids,
+                    });
+                    expect(none.isError).toBeFalsy();
+                    expect(none.structuredContent!.added).toEqual([]);
+                }
+                expect(await listed()).toEqual([]);
+
+                // Two of the five.
+                const two = await call("add_plan_missing_to_groceries", {
+                    food_ids: [ids[1], ids[3]],
+                });
+                expect(two.structuredContent!.added).toHaveLength(2);
+                expect(await listed()).toEqual([ids[1]!, ids[3]!].sort());
+
+                // Without food_ids the rest go on; the two stay single.
+                const rest = await call("add_plan_missing_to_groceries");
+                expect(rest.structuredContent!.added).toHaveLength(3);
+                expect(rest.structuredContent!.on_list).toHaveLength(2);
+                expect(await listed()).toEqual([...ids].sort());
+            });
+        },
+    );
+
+    test.each(ERAS)(
         "a notice action racing add_plan_missing_to_groceries adds each food once (%p)",
         async (era) => {
             const { sql } = getCtx();

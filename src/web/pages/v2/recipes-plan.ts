@@ -103,6 +103,8 @@ export type WeekPlanDayView = {
 };
 
 export type WeekMissingLine = {
+    /** The food the line adds; null for a line that names none (no checkbox). */
+    foodId: string | null;
     name: string;
     /** "150 g"; null for an ingredient the recipe gives no amount for. */
     amount: string | null;
@@ -237,6 +239,7 @@ export function buildWeekPlanView(input: {
     })
         .filter((line) => line.foodId != null)
         .map((line): WeekMissingLine => ({
+            foodId: line.foodId,
             name: line.displayName,
             amount: line.missing
                 ? formatQuantityDisplayParts(
@@ -606,22 +609,38 @@ function ingredientsMissingText(count: number): string {
  */
 export function renderMissingSheet(view: WeekPlanView, back: PlanBack): string {
     if (view.missing.length === 0) return "";
+    // One checkbox per food: `missingForPlan` can list a food on several lines
+    // (one per unit it cannot convert), and the add is per food. The first line
+    // of a food carries the box; the others follow it with no lead of their own.
+    const boxed = new Set<string>();
     const rows = view.missing.map((line) => {
         const note = line.unknown
             ? `${line.neededBy} · full amount`
             : line.unmeasured
               ? `${line.neededBy} · to taste`
               : line.neededBy;
-        return itemRow({
+        const row = itemRow({
             title: line.name,
             meta: line.amount ?? undefined,
             subtitle: note,
-            // The design marks each line with the filled ring: all of it is added.
-            lead: { kind: "done", label: "Will be added" },
+            // Every food starts ticked; only the ticked foods are added. A line
+            // with no food has nothing to tick: the server skips it.
+            lead:
+                line.foodId != null && !boxed.has(line.foodId)
+                    ? {
+                          kind: "checkbox",
+                          label: `Add ${line.name}`,
+                          name: "food_ids[]",
+                          value: line.foodId,
+                          checked: true,
+                      }
+                    : undefined,
         });
+        if (line.foodId != null) boxed.add(line.foodId);
+        return row;
     });
-    const body = `<form id="${MISSING_FORM_ID}" method="post" action="/recipes/plan/add-missing">
-${hidden("back", back)}${String(
+    const body = `<form id="${MISSING_FORM_ID}" method="post" action="/recipes/plan/add-missing" data-fd-plan-missing>
+${hidden("back", back)}${hidden("food_ids_sent", "1")}${String(
         sheetSection({
             kind: "rows",
             content: listGroup({
@@ -633,6 +652,7 @@ ${hidden("back", back)}${String(
     )}
 </form>`;
     const count = view.missing.length;
+    const ticked = boxed.size;
     return sheet({
         id: PLAN_MISSING_SHEET_ID,
         // A side panel at 1024 px and up, as 616102 draws it.
@@ -646,9 +666,11 @@ ${hidden("back", back)}${String(
         actions: {
             kind: "single",
             primary: {
-                label: `Add ${count} to groceries`,
+                // The count follows the ticks (client/v2/recipes.js).
+                label: `Add ${ticked} to groceries`,
                 type: "submit",
                 form: MISSING_FORM_ID,
+                attrs: { "data-fd-plan-missing-add": "" },
             },
         },
         openOnLoad: view.openSheet === PLAN_MISSING_SHEET_ID,

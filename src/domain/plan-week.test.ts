@@ -12,6 +12,7 @@ import {
     addPlanDays,
     countedServings,
     missingForPlan,
+    pickMissingLines,
     planRecipesOf,
     plansOfSavedRecipes,
     unknownMissingNotice,
@@ -498,6 +499,45 @@ describe("missingForPlan", () => {
             "Eggs",
             "Flour",
         ]);
+    });
+});
+
+describe("pickMissingLines", () => {
+    const line = (foodId: string | null) =>
+        ({
+            foodId,
+            displayName: foodId ?? "Nothing",
+            need: null,
+            have: null,
+            missing: null,
+            unknown: false,
+            unmeasured: false,
+            neededBy: [],
+        }) as Parameters<typeof pickMissingLines>[0][number];
+    const lines = [line("a"), line("b"), line(null), line("c")];
+
+    test("no choice picks every line", () => {
+        expect(pickMissingLines(lines, null)).toEqual(lines);
+    });
+
+    test("a choice keeps those foods in the lines' order and ignores unknown ids", () => {
+        expect(
+            pickMissingLines(lines, ["c", "nope", "a"]).map((l) => l.foodId),
+        ).toEqual(["a", "c"]);
+    });
+
+    test("a food on two lines is picked as a whole: both lines follow its id", () => {
+        const two = [line("flour"), line("eggs"), line("flour")];
+        expect(pickMissingLines(two, ["flour"]).map((l) => l.foodId)).toEqual([
+            "flour",
+            "flour",
+        ]);
+        expect(pickMissingLines(two, ["eggs"])).toHaveLength(1);
+    });
+
+    test("an empty choice picks nothing, and a line with no food is never picked", () => {
+        expect(pickMissingLines(lines, [])).toEqual([]);
+        expect(pickMissingLines(lines, ["a", "b", "c"])).toHaveLength(3);
     });
 });
 

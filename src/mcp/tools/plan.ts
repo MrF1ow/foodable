@@ -29,6 +29,7 @@ import {
     addPlanDays,
     countedServings,
     missingForPlan,
+    pickMissingLines,
     WEEK_PLAN_DAYS,
     weekPlan,
     type PlanMissingLine,
@@ -894,7 +895,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
         {
             title: "Add Plan Missing To Groceries",
             description:
-                "Put what the week plan still needs, and the kitchen does not hold, on the grocery list: the same lines get_week_plan lists under `missing` for the seven days from `from` (default the household's today; a day before today is refused). A food the list already covers is not added again, so calling it twice adds nothing new; a food whose stock could not be counted is added at the recipe's full amount and listed under `unknown`. Needs at least one store. Prefer this to add_grocery_line per missing line, which would skip those checks.",
+                "Put what the week plan still needs, and the kitchen does not hold, on the grocery list: the same lines get_week_plan lists under `missing` for the seven days from `from` (default the household's today; a day before today is refused). A food the list already covers is not added again, so calling it twice adds nothing new; a food whose stock could not be counted is added at the recipe's full amount and listed under `unknown`. Needs at least one store. Pass food_ids to add only those missing foods (the food_id of each `missing` line in get_week_plan); an id that is not missing is ignored, and an empty list adds nothing. Without food_ids every missing line is added. Prefer this to add_grocery_line per missing line, which would skip those checks.",
             annotations: {
                 readOnlyHint: false,
                 destructiveHint: false,
@@ -907,6 +908,12 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                     .optional()
                     .describe(
                         "First day of the seven, YYYY-MM-DD, today or later. Defaults to the household's today.",
+                    ),
+                food_ids: z
+                    .array(z.string())
+                    .optional()
+                    .describe(
+                        "Only these missing foods go on the list (the food_id of a `missing` line). Omit it to add every missing line; an empty list adds nothing.",
                     ),
             }),
             outputSchema: ADD_PLAN_MISSING_OUTPUT_SCHEMA,
@@ -925,7 +932,7 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             ? today
                             : checkPlanDay(args.from.trim(), today);
                     const inputs = await loadWeekPlanInputs(householdId, from);
-                    const lines = missingForPlan(
+                    const missing = missingForPlan(
                         inputs.plans,
                         inputs.recipes,
                         inputs.stock,
@@ -934,6 +941,12 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             days: WEEK_PLAN_DAYS,
                             foodsById: inputs.foodsById,
                         },
+                    );
+                    // Omitted: every line. Given: exactly those foods, found
+                    // in what is missing now (an unknown id adds nothing).
+                    const lines = pickMissingLines(
+                        missing,
+                        args.food_ids ?? null,
                     );
                     const structured = {
                         added: [] as z.infer<
@@ -954,7 +967,12 @@ export function registerPlanTools(server: McpServer, ctx: ToolContext) {
                             content: [
                                 {
                                     type: "text" as const,
-                                    text: "Nothing is missing for the plan.",
+                                    text:
+                                        missing.length === 0
+                                            ? "Nothing is missing for the plan."
+                                            : args.food_ids?.length === 0
+                                              ? "No foods were chosen, so nothing was added."
+                                              : "None of those foods is missing for the plan, so nothing was added.",
                                 },
                             ],
                             structuredContent: structured,

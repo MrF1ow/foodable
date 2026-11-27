@@ -15,6 +15,7 @@ import {
     renderPlannedWeek,
     withPlanEditDraft,
     type PlanSheetView,
+    type WeekPlanView,
 } from "./recipes-plan.js";
 
 const HH = "hh-1";
@@ -535,6 +536,104 @@ describe("week renderers", () => {
         expect(html).not.toContain("fd-plan-missing-row");
         expect(html).toMatch(/Add \d+ to groceries/);
         expect(html).toContain("next 7 days");
+    });
+
+    test("the missing sheet's rows are ticked checkboxes that post food_ids[], and the form marks itself", () => {
+        const view = buildWeekPlanView({
+            today: TODAY,
+            plans: [plan({ id: "p1", date: TODAY, servings: 2 })],
+            recipes: [pancakes],
+            stock: [],
+            foodsById: new Map(),
+        });
+        expect(view.missing.length).toBeGreaterThan(1);
+        const html = renderMissingSheet(view, "recipes");
+        const boxes = html.match(/<input type="checkbox"[^>]*>/g) ?? [];
+        expect(boxes).toHaveLength(view.missing.length);
+        for (const [i, box] of boxes.entries()) {
+            expect(box).toContain('name="food_ids[]"');
+            expect(box).toContain(`value="${view.missing[i]!.foodId}"`);
+            expect(box).toContain(" checked");
+        }
+        expect(html).toContain('name="food_ids_sent" value="1"');
+        expect(html).not.toContain("Will be added");
+        expect(html).toContain(`Add ${view.missing.length} to groceries`);
+        expect(html).toContain("data-fd-plan-missing-add");
+        expect(html).toContain("data-fd-plan-missing>");
+    });
+
+    test("a line with no food gets no checkbox and is not counted in the button", () => {
+        const view: WeekPlanView = {
+            today: TODAY,
+            days: [],
+            plannedCount: 1,
+            recipeChoices: [],
+            missing: [
+                {
+                    foodId: "f-flour",
+                    name: "Flour",
+                    amount: "500 g",
+                    unknown: false,
+                    unmeasured: false,
+                    neededBy: "Pancakes",
+                },
+                {
+                    foodId: null,
+                    name: "Mystery",
+                    amount: null,
+                    unknown: false,
+                    unmeasured: false,
+                    neededBy: "Pancakes",
+                },
+            ],
+        };
+        const html = renderMissingSheet(view, "recipes");
+        expect(html.match(/<input type="checkbox"/g) ?? []).toHaveLength(1);
+        expect(html).toContain("Mystery");
+        expect(html).toContain("Add 1 to groceries");
+        expect(html).toContain("2 ingredients");
+    });
+});
+
+describe("missing sheet, one food on two lines", () => {
+    const line = (amount: string, neededBy: string) => ({
+        foodId: "f-flour",
+        name: "Flour",
+        amount,
+        unknown: false,
+        unmeasured: false,
+        neededBy,
+    });
+    const view: WeekPlanView = {
+        today: TODAY,
+        days: [],
+        plannedCount: 2,
+        recipeChoices: [],
+        missing: [
+            line("200 g", "Bread"),
+            line("1 cup", "Cake"),
+            {
+                foodId: "f-eggs",
+                name: "Eggs",
+                amount: "2",
+                unknown: false,
+                unmeasured: false,
+                neededBy: "Cake",
+            },
+        ],
+    };
+
+    test("a food listed twice has one checkbox, on its first row, and counts once in the button", () => {
+        const html = renderMissingSheet(view, "recipes");
+        const boxes = html.match(/<input type="checkbox"[^>]*>/g) ?? [];
+        expect(boxes).toHaveLength(2);
+        expect(boxes[0]).toContain('value="f-flour"');
+        expect(boxes[1]).toContain('value="f-eggs"');
+        // Both flour rows are still listed, and the sheet still counts rows.
+        expect(html).toContain("200 g");
+        expect(html).toContain("1 cup");
+        expect(html).toContain("3 ingredients");
+        expect(html).toContain("Add 2 to groceries");
     });
 });
 

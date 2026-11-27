@@ -702,6 +702,23 @@ export type AddMissingToGroceriesResult = {
 };
 
 /**
+ * The lines of `missingForPlan` a caller chose. `foodIds` null means no choice
+ * was made: every line. A list keeps only the lines of those foods, in the
+ * lines' own order; an id that is not among the lines is ignored, so a stale
+ * or invented id never adds anything, and an empty list picks nothing.
+ */
+export function pickMissingLines(
+    lines: readonly PlanMissingLine[],
+    foodIds: readonly string[] | null,
+): PlanMissingLine[] {
+    if (foodIds === null) return [...lines];
+    const wanted = new Set(foodIds);
+    return lines.filter(
+        (line) => line.foodId != null && wanted.has(line.foodId),
+    );
+}
+
+/**
  * Puts `lines` (from `missingForPlan`) on the grocery list with source `plan`.
  *
  * A food already on the list is not doubled. An unmeasured ingredient is left

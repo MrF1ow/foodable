@@ -1577,6 +1577,32 @@ try {
         );
         await sleep(350);
         const missingButtons = await sheetButtons();
+        // Every food starts ticked and the button counts them; unticking one
+        // takes one off the count (and off at none), and the ticked ones are
+        // what is posted.
+        const missingState = `(() => {
+            const boxes = [...document.querySelectorAll('#fd-plan-missing-sheet input[name="food_ids[]"]')];
+            const add = [...document.querySelectorAll("#fd-plan-missing-sheet .fd-sheet__actions .fd-btn")].find((b) => /^Add \\d+ to groceries$/.test(b.textContent.trim()));
+            return { boxes: boxes.length, ticked: boxes.filter((b) => b.checked).length, label: add?.textContent.trim() ?? null, disabled: !!add?.disabled };
+        })()`;
+        const missingTicks = await ev<{
+            boxes: number;
+            ticked: number;
+            label: string | null;
+            disabled: boolean;
+        }>(missingState);
+        await ev(
+            `document.querySelector('#fd-plan-missing-sheet input[name="food_ids[]"]').click()`,
+        );
+        const missingUnticked = await ev<{
+            boxes: number;
+            ticked: number;
+            label: string | null;
+            disabled: boolean;
+        }>(missingState);
+        await ev(
+            `document.querySelector('#fd-plan-missing-sheet input[name="food_ids[]"]').click()`,
+        );
         await ev(
             `[...document.querySelectorAll("#fd-plan-missing-sheet .fd-sheet__actions .fd-btn")].find((b) => /^Add \\d+ to groceries$/.test(b.textContent.trim())).click()`,
         );
@@ -1687,8 +1713,19 @@ try {
             failedField.boxClosed &&
             failedField.twoColumns &&
             missingButtons.ok &&
+            missingTicks.boxes >= 1 &&
+            missingTicks.ticked === missingTicks.boxes &&
+            missingTicks.label === `Add ${missingTicks.boxes} to groceries` &&
+            !missingTicks.disabled &&
+            missingUnticked.ticked === missingTicks.boxes - 1 &&
+            missingUnticked.label ===
+                `Add ${missingTicks.boxes - 1} to groceries` &&
+            missingUnticked.disabled === (missingTicks.boxes === 1) &&
             missingPosts.length === 1 &&
-            entry(missingPosts[0], "back") === "recipes";
+            entry(missingPosts[0], "back") === "recipes" &&
+            entry(missingPosts[0], "food_ids_sent") === "1" &&
+            missingPosts[0]!.entries.filter(([key]) => key === "food_ids[]")
+                .length === missingTicks.boxes;
         recipesRes[String(width)] = {
             page,
             open,
@@ -1715,6 +1752,8 @@ try {
             beforeRemove,
             removePosts,
             missingButtons,
+            missingTicks,
+            missingUnticked,
             missingPosts,
             failed,
             failedField,

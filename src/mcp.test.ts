@@ -4847,7 +4847,10 @@ describe("household config tools", () => {
         // +1775: update_plan (change one planned entry: its recipe, day, meal,
         // servings and repeat), with a description cut to what an agent needs
         // and an output that reuses plan_recipe's plan object.
-        const TOOLS_LIST_MAX_CHARS = 236992;
+        // +423: the optional `food_ids` input on add_plan_missing_to_groceries
+        // (add only the ticked foods of Missing for the plan), with a
+        // sentence of its description.
+        const TOOLS_LIST_MAX_CHARS = 237415;
         const TOOLS_LIST_MAX_COUNT = 107;
 
         test("all-flags-on tools/list stays within the size budget", async () => {
@@ -15168,7 +15171,7 @@ describe("plan tools over HTTP", () => {
                 )!;
                 expect(
                     Object.keys(listed.inputSchema.properties ?? {}),
-                ).toEqual(["from"]);
+                ).toEqual(["from", "food_ids"]);
                 const { recipeId, flourId } = await seedBread(call);
                 const today = utcTodayFromDate();
                 const yesterday = addUtcDays(today, -1);
@@ -15221,6 +15224,54 @@ describe("plan tools over HTTP", () => {
                     food_id: flourId,
                     display_name: "Flour",
                 });
+            });
+        },
+    );
+
+    test.each(ERAS)(
+        "add_plan_missing_to_groceries with food_ids adds only those foods: an empty list or an id that is not missing adds nothing (%p)",
+        async (era) => {
+            setFlagsForTests(createMemoryFlags({}));
+            await addStore();
+            await withHttpClient("u1", era, async (client) => {
+                const call = callerOf(client);
+                const { recipeId, flourId } = await seedBread(call);
+                await call("plan_recipe", {
+                    recipe_id: recipeId,
+                    date: utcTodayFromDate(),
+                    slot: "dinner",
+                });
+                const none = async (food_ids: string[]) =>
+                    ADD_PLAN_MISSING_OUTPUT_SCHEMA.parse(
+                        (
+                            await call("add_plan_missing_to_groceries", {
+                                food_ids,
+                            })
+                        ).structuredContent,
+                    );
+                const textOf = async (food_ids: string[]) =>
+                    JSON.stringify(
+                        (
+                            await call("add_plan_missing_to_groceries", {
+                                food_ids,
+                            })
+                        ).content,
+                    );
+                expect((await none([])).added).toEqual([]);
+                expect((await none(["not-a-missing-food"])).added).toEqual([]);
+                // An empty list is no choice; an id that is not missing is a
+                // choice that matched nothing: each says which.
+                expect(await textOf([])).toContain(
+                    "No foods were chosen, so nothing was added.",
+                );
+                expect(await textOf(["not-a-missing-food"])).toContain(
+                    "None of those foods is missing for the plan",
+                );
+                expect(await db.groceryStore.listLines("hh-1")).toEqual([]);
+                const out = await none([flourId]);
+                expect(out.added).toHaveLength(1);
+                expect(out.added[0]).toMatchObject({ food_id: flourId });
+                expect(await db.groceryStore.listLines("hh-1")).toHaveLength(1);
             });
         },
     );
